@@ -123,7 +123,7 @@ describe("a member's catch-up answer goes a slice at a time", { timeout: 120_000
     expect(run.mostWaiting).toBeLessThanOrEqual(2 * GROUP_LIMITS.catchUpSlice);
   });
 
-  it("each slice goes once the member's app handled the last; a newer answer takes the place of the rest", async () => {
+  it("each slice goes once the member's app handled the last; a newer answer goes after the rest, without the frames still queued or on their way", async () => {
     const { alice, bob, sync } = await busyGroup(30);
     // The answer as it went before: all at once.
     const whole: GroupEdgeFrame[] = [];
@@ -146,18 +146,50 @@ describe("a member's catch-up answer goes a slice at a time", { timeout: 120_000
     waits.shift()!();
     await vi.waitFor(() => expect(sent).toHaveLength(3 * slice));
     expect(sent).toEqual(whole.slice(0, 3 * slice));
-    // Bob's sync again (its edge opened again): the new answer takes the place of what is left of the first.
+    // Bob's sync again (its edge opened again): the new answer goes after what is left of the first, without the
+    // frames still queued there, nor the second and third slices, which Bob's app has not handled yet; the first slice,
+    // handled, goes again.
     await sender.handle(bob.myKey, sync);
     expect(sent).toHaveLength(3 * slice);
-    while (sent.length < 3 * slice + whole.length) {
+    const again = whole.slice(0, slice);
+    while (sent.length < whole.length + again.length) {
       await vi.waitFor(() => expect(waits.length).toBeGreaterThan(0));
       waits.shift()!();
       await sleep(0);
     }
-    expect(sent).toEqual([...whole.slice(0, 3 * slice), ...whole]);
-    // Nothing is asked after the last slice: the one before it is the only question left.
+    expect(sent).toEqual([...whole, ...again]);
+    // The last two slices' questions are what is left, and once answered nothing more is asked.
     await sleep(20);
-    expect(waits.length).toBeLessThanOrEqual(1);
+    expect(waits.length).toBeLessThanOrEqual(2);
+    for (const done of waits.splice(0)) done();
+    await sleep(20);
+    expect(waits).toHaveLength(0);
+  });
+
+  it("a member that asks again while my answer still waits in its app is not sent those messages again; once handled, still missing ones go again", async () => {
+    // Bob's app handles a frame a second (a phone with a long history) and asks again every 10 s: each answer went to
+    // the queue behind the last, and 200 missed messages went to it 1,009 times.
+    const { alice, bob, sync } = await busyGroup(4);
+    const sent: GroupEdgeFrame[] = [];
+    const waits: ((told: boolean | "late") => void)[] = [];
+    const sender = new GroupSession(clone(alice.state), {
+      save: async () => {}, message: () => {}, changed: () => {},
+      send: (_to, frame) => { sent.push(frame); },
+      handled: () => new Promise<boolean | "late">(resolve => waits.push(resolve)),
+    });
+    await sender.handle(bob.myKey, sync);
+    const first = sent.splice(0);
+    expect(first.filter(f => f.t === "group-msg")).toHaveLength(17);
+    // Asked again, the answer still in Bob's app (its pong late): none of those messages again.
+    waits.shift()!("late");
+    await sleep(0);
+    await sender.handle(bob.myKey, sync);
+    expect(sent.filter(f => f.t === "group-msg")).toHaveLength(0);
+    // Bob's app handled them and still lacks them (lost on the way): the next sync has them again.
+    for (const done of waits.splice(0)) done(true);
+    await sleep(0);
+    await sender.handle(bob.myKey, sync);
+    expect(sent.filter(f => f.t === "group-msg")).toEqual(first.filter(f => f.t === "group-msg"));
   });
 
   it("an app that cannot say waits a pause between slices; an edge that takes no frame ends the answer", async () => {

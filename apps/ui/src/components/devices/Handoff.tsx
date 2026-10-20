@@ -1,5 +1,5 @@
-import { useEffect, useId, useState } from "react";
-import { FAILURES, dayText, handoffErrorKey, handoffErrorWallet, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { FAILURES, dayText, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { meteredConnection } from "@ghostly/browser/devices/handoffHost";
@@ -11,7 +11,7 @@ import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
-import { said, nextOf } from "../../lib/notices";
+import { nextOf } from "../../lib/notices";
 
 /*
  * The handoff's screens (WISP 06 § User experience, "Handoff progress", "Failures"): Use here with the password on a
@@ -29,14 +29,21 @@ const STEP_OF: Partial<Record<HandoffView["step"], Step>> = {
 /**
  * Where a move stands (WISP 06 § Handoff progress): the steps, the one running now in words (with the bytes and a bar
  * while files are copied), Cancel while nothing has changed yet, and what went wrong when it failed. The settle wait
- * says why it waits behind its ⓘ; on a phone, "Keep Ghostly open".
+ * says why it waits behind its ⓘ; on a phone, "Keep Ghostly open". What the engine refused of Cancel is said under it.
  */
-export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCancel?: () => void }) {
+export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCancel?: () => unknown }) {
   const { t, language } = useI18n();
   const phone = useIsMobile();
   const [why, setWhy] = useState(false);
   const whyId = useId();
   const device = view.device || t("devices.join.otherDevice");
+  const [cancelling, setCancelling] = useState(false);
+  const [refused, setRefused] = useState<Problem | null>(null);
+  const cancel = () => {
+    if (cancelling || !onCancel) return;
+    setCancelling(true); setRefused(null);
+    void Promise.resolve().then(onCancel).catch((cause: unknown) => setRefused(handoffProblem(cause, t, { device }) ?? problemText(cause, t))).finally(() => setCancelling(false));
+  };
   const failed = view.step === "failed";
   const done = view.step === "done";
   const percent = view.total > 0 ? Math.min(100, Math.floor((view.bytes / view.total) * 100)) : 0;
@@ -57,6 +64,15 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
   // Beside the line and not in it: the line is read aloud when it changes, and the bytes change at every read of the copy.
   const amount = view.step === "copying" ? t("devices.handoff.step.copyAmount", { done: sizeText(view.bytes, t), total: sizeText(view.total, t) }) : undefined;
   const cancellable = !failed && ["connecting", "authorizing", "copying", "paused", "ready", "rest", "checking"].includes(view.step);
+  // Cancel goes once the move stopped (or went past the point where it could): the keyboard focus that was on it goes to
+  // the move's words, not to the page.
+  const root = useRef<HTMLDivElement>(null);
+  const focusOnCancel = useRef(false);
+  useLayoutEffect(() => {
+    if (cancellable || !focusOnCancel.current) return;
+    focusOnCancel.current = false;
+    if (!document.activeElement || document.activeElement === document.body) root.current?.focus();
+  }, [cancellable]);
   const current = STEP_OF[view.step];
   const at = current ? STEPS.indexOf(current) : done ? STEPS.length : -1;
   const short: Record<Step, string> = {
@@ -64,7 +80,7 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
     rest: t("devices.handoff.step.rest"), checking: t("devices.handoff.step.checking"), switching: t("devices.handoff.step.switching"), settling: t("devices.handoff.step.settle"),
   };
   return (
-    <div data-testid="handoff-progress" data-step={view.step} data-role={view.role} data-failure={view.failure} data-woken={view.woken ? "true" : undefined} className="space-y-3 text-start">
+    <div ref={root} tabIndex={-1} data-testid="handoff-progress" data-step={view.step} data-role={view.role} data-failure={view.failure} data-woken={view.woken ? "true" : undefined} className="space-y-3 text-start focus:outline-none">
       <p className="font-semibold text-text-primary">{t("devices.handoff.title")}</p>
       {failed || done || !current ? (
         failed ? <Notice testId="handoff-line" tone="error" className="" title={line} next={nextOf(FAILURES[view.failure ?? "failed"], t, { device, wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" })} />
@@ -115,8 +131,11 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
       ))}
       {cancellable && onCancel && (
         <div className="space-y-1.5 pt-1">
-          <button type="button" data-testid="handoff-cancel" onClick={onCancel} className={quietButton}>{t("devices.handoff.cancel")}</button>
+          {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}
+          <button type="button" data-testid="handoff-cancel" aria-disabled={cancelling || undefined} aria-busy={cancelling || undefined} onClick={cancel}
+            onFocus={() => { focusOnCancel.current = true; }} onBlur={(event) => { if (event.relatedTarget) focusOnCancel.current = false; }} className={quietButton}>{t("devices.handoff.cancel")}</button>
           <p className="text-center text-xs text-text-muted">{t("devices.handoff.cancelHint")}</p>
+          {refused && <Notice problem={refused} testId="handoff-cancel-error" className="" />}
         </div>
       )}
     </div>
@@ -134,7 +153,7 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const submit = async () => {
     setBusy(true); setError(null);
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
-    catch (cause) { const key = handoffErrorKey(cause); setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t)); }
+    catch (cause) { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); }
     finally { setBusy(false); }
   };
   return (
@@ -164,7 +183,7 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
   // The engine refuses when the offer is gone or the copy has nowhere to go: said under the buttons, as Use here's dialog does.
   const act = (work: () => Promise<unknown>) => {
     setBusy(true); setError(null);
-    void work().catch((cause: unknown) => { const key = handoffErrorKey(cause); setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t)); })
+    void work().catch((cause: unknown) => { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); })
       .finally(() => setBusy(false));
   };
   return (
@@ -190,15 +209,14 @@ export function MoveDialog({ device, deviceKey, onClose }: { device: string; dev
   const view = useHandoffView(started);
   useEffect(() => {
     void engine.call("deviceHandoffPush", { key: deviceKey }).then(() => setStarted(true), (cause: unknown) => {
-      const key = handoffErrorKey(cause);
-      setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t));
+      setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t));
     });
   }, [deviceKey, device, t]);
   return (
     <DeviceDialog title={t("devices.handoff.moveTo", { device })} onClose={onClose} testId="handoff-move-dialog">
       {error && <Notice problem={error} testId="handoff-move-error" className="" />}
       {!error && !view && <p role="status" className="text-text-secondary">{t("devices.handoff.waitingOffer", { device })}</p>}
-      {view && <HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} />}
+      {view && <HandoffProgress view={view} onCancel={() => engine.call("deviceHandoffCancel")} />}
       {error && <button type="button" onClick={onClose} className={quietButton}>{t("common.close")}</button>}
     </DeviceDialog>
   );

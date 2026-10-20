@@ -20,6 +20,12 @@
     "sendFailed": "Impossibile inviare",
     "shareHint": "Condividi il link del gruppo",
     "shareLink": "Condividi link",
+    "takenBack": "{{contact}} ha ritirato l'invito a {{name}}",
+    "takenBackNext": "Chiedi a {{contact}} un nuovo invito o il link del gruppo.",
+    "takenBackNextUnknown": "Chiedi all'admin del gruppo un nuovo invito o il link del gruppo.",
+    "takenBackNoName": "{{contact}} ha ritirato l'invito al gruppo",
+    "takenBackUnknown": "L'invito a {{name}} è stato ritirato",
+    "takenBackUnknownNoName": "L'invito al gruppo è stato ritirato",
     "unnamed": "Un gruppo"
   },
   "connection": {
@@ -27,6 +33,7 @@
     "communityConnecting": "Connessione al gruppo…",
     "communityNote": "La tua app si collega a un hub del gruppo (l'app di un membro che inoltra), e gli hub passano ogni messaggio a tutti. Chi era assente riceve ciò che ha perso quando torna.",
     "connecting": "Connessione ai membri…",
+    "hubsNote": "Oltre 16 membri, la tua app si collega solo ad alcuni: l'admin e gli hub del gruppo, app di membri che inoltrano i messaggi agli altri. Un hub vede chi parla e quando, non cosa viene detto. I collegamenti di gruppo usano WebRTC, e Iroh o HyperDHT con un membro la cui app non ha WebRTC (Ghostly Desktop su Linux). Un membro non raggiungibile riceve ciò che ha perso quando torna.",
     "label": "Connessione del gruppo",
     "labelWith": "Connessione del gruppo: {{state}}",
     "noWebrtc": "I gruppi non si connettono ancora da questa app",
@@ -50,7 +57,7 @@
     "hint": "Ricevi un link da condividere: chi lo apre entra. Tutti nel gruppo leggono tutto ciò che viene inviato mentre ne fanno parte.",
     "kind": "Tipo di gruppo",
     "private": "Privato",
-    "privateHint": "Fino a 32 persone, dai tuoi contatti o dal tuo link, che funziona mentre la tua app è aperta. Tutti si collegano con tutti.",
+    "privateHint": "Fino a 32 persone, dai tuoi contatti o dal tuo link, che funziona mentre la tua app è aperta. Fino a 16 si collegano direttamente tra loro; oltre, le app dei membri che restano accese (hub) inoltrano i messaggi.",
     "title": "Nuovo gruppo"
   },
   "error": {
@@ -63,6 +70,7 @@
     "forked": "La cronologia dei membri si è biforcata",
     "gone": "{{name}} non è più un membro",
     "joined": "{{name}} è entrato",
+    "left": "{{name}} è uscito",
     "pictureChanged": "{{name}} ha cambiato la foto del gruppo",
     "pictureChangedNoName": "La foto del gruppo è stata cambiata",
     "pictureChangedYou": "Hai cambiato la foto del gruppo",
@@ -79,9 +87,12 @@
   },
   "forget": {
     "invitation": "L'invito viene eliminato da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationKept": "L'invito e la cronologia del gruppo vengono eliminati da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationKeptUnknown": "L'invito e la cronologia del gruppo vengono eliminati da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
     "invitationUnknown": "L'invito viene eliminato da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
     "joining": "Smetti di chiedere di entrare, e il gruppo viene eliminato da questo dispositivo.",
-    "kept": "Il gruppo e la sua cronologia vengono eliminati da questo dispositivo."
+    "kept": "Il gruppo e la sua cronologia vengono eliminati da questo dispositivo.",
+    "takenBack": "L'invito viene eliminato da questo dispositivo. È stato ritirato, quindi nessuno viene avvisato."
   },
   "hubs": {
     "auto": "Hub se sempre acceso",
@@ -122,6 +133,8 @@
   "leave": {
     "blocked": "Nessuno è online per diventare admin",
     "blockedCommunity": "Nessuno è online per registrare la tua uscita",
+    "blockedCommunityAdminForgetNext": "Aspetta che un membro sia online, oppure rimuovi prima i membri, oppure rendi admin uno di loro.",
+    "blockedCommunityAdminNext": "Aspetta che un membro sia online, oppure rimuovi prima i membri.",
     "blockedCommunityNext": "Riprova tra un momento.",
     "blockedNext": "Nomina un admin o aspetta un membro.",
     "body": "Il gruppo e la sua cronologia spariscono da questo dispositivo. Non leggerai ciò che verrà detto dopo, e per tornare qualcuno dovrà farti entrare di nuovo.",
@@ -144,6 +157,7 @@
     "disableTitle": "Disattivare il link?",
     "enable": "Attiva il link",
     "enableFailed": "Impossibile attivare il link",
+    "endsOnHandover": "Il link condiviso finora smette di funzionare. {{name}} può condividerne uno nuovo.",
     "full": "Il gruppo è pieno ({{count}} su {{count}}). Nessuno entra finché qualcuno non esce.",
     "fullShort": "Il gruppo è pieno",
     "hideQr": "Nascondi QR",
@@ -210,7 +224,7 @@
     "members": "Membri…",
     "rotate": "Rinnova chiavi"
   },
-  "readNote": "Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte. Chi viene rimosso conserva ciò che ha già ricevuto e non può leggere ciò che segue; chi entra dopo non può leggere ciò che c'era prima. I messaggi vanno direttamente a ogni membro; chi era assente riceve ciò che ha perso da qualsiasi membro che lo abbia (gli ultimi {{count}} messaggi del gruppo) quando si ritrovano.",
+  "readNote": "Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte. Chi viene rimosso conserva ciò che ha già ricevuto e non può leggere ciò che segue; chi entra dopo non può leggere ciò che c'era prima. I messaggi vanno a ogni membro; chi era assente riceve ciò che ha perso da qualsiasi membro che lo abbia (gli ultimi {{count}} messaggi del gruppo) quando si ritrovano.",
   "readNoteCommunity": "Chiunque abbia il link del gruppo può entrare, e qualsiasi membro può far entrare altre persone. Tutti nel gruppo possono leggere tutto ciò che viene inviato mentre ne fanno parte; chi viene rimosso non può leggere ciò che segue, chi entra dopo non può leggere ciò che c'era prima. I membri che erano assenti ricevono gli ultimi {{count}} messaggi da chi c'è quando tornano.",
   "remove": {
     "body": "Non riceverà più i nuovi messaggi del gruppo.",

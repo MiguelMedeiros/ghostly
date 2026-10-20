@@ -3,9 +3,14 @@ import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const desktop = (path: string) => resolve(here, "../../apps/ui/src", path);
-const platform = (path: string) => resolve(here, "src/platform", path);
-const sdk = (path: string) => resolve(here, "../sdk/src", path);
+/**
+ * A module as Vite names it: with `/` on every system (its `normalizePath`), where `node:path` writes `\` on Windows.
+ * The Windows app is built on Windows, and a list keyed by `node:path` paths matched nothing there (ghostly#1864).
+ */
+const viteId = (path: string) => path.replace(/\\/g, "/");
+const desktop = (path: string) => viteId(resolve(here, "../../apps/ui/src", path));
+const platform = (path: string) => viteId(resolve(here, "src/platform", path));
+const sdk = (path: string) => viteId(resolve(here, "../sdk/src", path));
 
 /** One `.env` for every client. */
 export const repositoryRoot = resolve(here, "../..");
@@ -29,7 +34,7 @@ const SDK_MODULES = new Map([
 export function bundledPluginModules(env = process.env.GHOSTLY_PLUGINS): string[] {
   return (env ?? "").split(/[,\n]/).map((entry) => entry.trim()).filter(Boolean).map((entry) => resolve(repositoryRoot, entry));
 }
-const BUNDLED = resolve(here, "src/plugins/bundled.ts");
+const BUNDLED = viteId(resolve(here, "src/plugins/bundled.ts"));
 const VIRTUAL_BUNDLED = "\0ghostly-bundled-plugins";
 
 /**
@@ -61,11 +66,12 @@ export function ghostlyPlatformModules(): Plugin {
     async resolveId(source, importer, options) {
       const sdkModule = SDK_MODULES.get(source) ?? BROWSER_PACKAGES.get(source);
       if (sdkModule) return sdkModule;
-      if (!importer || importer.startsWith(platform(""))) return null;
+      if (!importer || viteId(importer).startsWith(platform(""))) return null;
       const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
       if (!resolved) return null;
-      if (resolved.id === BUNDLED && bundledPluginModules().length) return VIRTUAL_BUNDLED;
-      return PLATFORM_MODULES.get(resolved.id) ?? null;
+      const id = viteId(resolved.id);
+      if (id === BUNDLED && bundledPluginModules().length) return VIRTUAL_BUNDLED;
+      return PLATFORM_MODULES.get(id) ?? null;
     },
     load(id) {
       if (id !== VIRTUAL_BUNDLED) return null;

@@ -1,4 +1,5 @@
 import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
+import { CliError } from "../errors";
 import { type Command, here, reply } from "./shared";
 
 /** Files: one entry per command, in alphabetical order (test/commands.test.ts checks). */
@@ -18,10 +19,17 @@ export const commands: Record<string, Command> = {
       dir: { type: "string", description: "Into this folder, under its own name" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" },
       wait: { type: "boolean", description: "Wait for the transfer to finish first" }, timeout: { type: "number", description: "Seconds --wait waits (default 300)" },
     },
-    params: ({ options }, a) => ({
-      chat: a.chat, file: a.file, dir: here(options.dir ?? "."), path: options.path === undefined ? undefined : here(options.path), force: options.force === true,
-      wait: options.wait === true ? true : undefined, timeout: options.timeout,
-    }),
+    params: ({ options }, a) => {
+      // Empty (an unset variable in a script), it was the current folder: --path "" asked to replace it.
+      if (options.path === "") throw new CliError("usage", "--path needs a file");
+      if (options.dir === "") throw new CliError("usage", "--dir needs a folder");
+      if (options.dir !== undefined && options.path !== undefined) throw new CliError("usage", "--path names the file: not with --dir");
+      if (options.timeout !== undefined && options.wait !== true) throw new CliError("usage", "--timeout is how long --wait waits: not without --wait");
+      return {
+        chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: here(options.path), force: options.force === true,
+        wait: options.wait === true ? true : undefined, timeout: options.timeout,
+      };
+    },
   },
   "file send": {
     method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,

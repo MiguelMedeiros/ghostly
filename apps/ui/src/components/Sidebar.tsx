@@ -25,12 +25,12 @@ import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
 import { OfflineBanner } from "./OfflineBanner";
+import { StorageFullBanner } from "./StorageFullBanner";
 import { LimitedBanner } from "./devices/LimitedStart";
 import { InstallHint } from "./InstallApp";
 import { StorageKeeper } from "./StorageKeeper";
 import { UpdateBanner } from "./UpdateBanner";
 import {
-  listSessions,
   isSessionPinned,
   setSessionPinned,
   deleteSession,
@@ -38,27 +38,25 @@ import {
   markSessionAsRead,
   ensureSession,
   getInviteCode,
-  type SessionCache,
+  listShownSessions,
 } from "../lib/storage";
 import { createPairedChat } from "../lib/pairedChat";
-import { chatPath } from "../lib/url";
+import { chatPath, decodePart } from "../lib/url";
+import { stopPlayingFrom } from "../lib/nowPlaying";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
+import { usePinMoveNote } from "../hooks/usePinMoveNote";
+import { PinMoveNote } from "./chat/PinOrder";
 import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
+import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
-
-/**
- * The sessions as the list last read them: it reads them all on every `session-updated` and every 3 s, and a long chat's
- * session is parsed again only when what is stored for it changed. The list never changes one in place.
- */
-const listCache: SessionCache = new Map();
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 600;
@@ -68,6 +66,21 @@ const MIN_PAGE_WIDTH = 320;
 
 /** Search folds case and accents, as the in-chat search does: "jose" finds "José". `q` is folded already. */
 const found = (text: string | undefined, q: string) => !!text && foldText(text).includes(q);
+
+/**
+ * A chat's message texts folded for search, once per list of messages: the page's one cache keeps that list while the
+ * chat is unchanged (`listShownSessions`). Folded at every draw, a search over 100k messages took ~100 ms of each
+ * engine state, which draws the list again with nothing in a message changed.
+ */
+const foldedTexts = new WeakMap<ChatSession["messages"], string[]>();
+function messagesFound(messages: ChatSession["messages"], q: string): boolean {
+  let texts = foldedTexts.get(messages);
+  if (!texts) {
+    texts = messages.flatMap((m) => (m.text ? [foldText(m.text)] : []));
+    foldedTexts.set(messages, texts);
+  }
+  return texts.some((text) => text.includes(q));
+}
 
 /** The groups whose name has the search in it; all of them with no search. (Outside the component: the React Compiler keeps its memoization then.) */
 function groupsFound<G extends { name: string }>(groups: G[], search: string): G[] {
@@ -102,6 +115,10 @@ export function Sidebar() {
   // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
   const workingByPeer = useWorkingByPeer();
   const groups = engineState?.groups ?? [];
+  // The chats are in the page's storage at once, the groups come with the engine's state after every chat's history
+  // is read: drawn alone, the chats were pushed down under the groups a second later, and a click aimed at a chat
+  // opened a group. The list waits for the groups, and draws everything at once.
+  const listReady = !!engineState?.groupsLoaded;
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -140,7 +157,7 @@ export function Sidebar() {
 
   const activeSessionId = (() => {
     if (!currentChatPath) return null;
-    const id = decodeURIComponent(currentChatPath.replace("/chat/", ""));
+    const id = decodePart(currentChatPath.replace("/chat/", ""));
     return id && !id.includes("/") ? id : null;
   })();
 
@@ -148,7 +165,8 @@ export function Sidebar() {
   const { syncingSessions } = useBackgroundPoller(activeSessionId);
 
   const refreshSessions = useCallback(() => {
-    const updated = listSessions(listCache);
+    // Read through the page's one cache: a long chat whose stored text changed is parsed once for every reader (`listShownSessions`).
+    const updated = listShownSessions();
 
     setSessions(updated);
     // A chat deleted elsewhere takes its pending "Delete?" with it.
@@ -201,13 +219,21 @@ export function Sidebar() {
   // The identity a contact is shown as (identities/contactFace.ts): its name in the row, and found by search.
   const faceOf = useContactFaces();
   const query = foldText(search);
+  // A search reads every chat's messages: their whole histories, where the engine sent this page only their newest page
+  // (the extension's pages), are asked for while it lasts.
+  const searching = !!search;
+  useEffect(() => {
+    if (!searching) return;
+    const releases = (engine.state?.links ?? []).map((link) => engine.keepWhole(link.id));
+    return () => releases.forEach((release) => release());
+  }, [searching]);
   const filtered = sessions.filter((s) => {
     if (!search) return true;
     if (found(s.label, query)) return true;
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return s.messages.some((m) => found(m.text, query));
+    return messagesFound(s.messages, query);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
@@ -239,13 +265,18 @@ export function Sidebar() {
   const besideRow = (id: string) => parts.find(part => part.includes(id)) ?? [];
   const partOf = (chat: string) => (filed(chat) ? folderOf(chat) : undefined);
   const movable = byFolders ? parts.flat() : [];
-  /** A row let go at `index` among the rows of its part: that part keeps the order it now has. */
+  /** A row let go at `index` among the rows of its part: that part keeps the order it now has. Its new place there. */
   const moveInPart = (id: string, index: number) => {
     const rows = besideRow(id).filter(key => key !== id);
-    rows.splice(Math.max(0, Math.min(rows.length, index)), 0, id);
+    const to = Math.max(0, Math.min(rows.length, index));
+    rows.splice(to, 0, id);
     setSectionOrder(partOf(id), rows);
+    return { index: to, count: rows.length };
   };
-  const reorder = useRowReorder({ ids: parts.flat(), beside: besideRow, enabled: !search, onMove: byFolders ? moveInPart : movePinnedBeside,
+  // Dragged or moved with Alt+↑/↓, the new place is read out.
+  const [moveNote, announceMove] = usePinMoveNote();
+  const reorder = useRowReorder({ ids: parts.flat(), beside: besideRow, enabled: !search,
+    onMove: (id, index) => announceMove(byFolders ? moveInPart(id, index) : movePinnedBeside(id, index), byFolders),
     folders: { rows: movable, of: partOf, onDrop: setChatFolder } });
   /** A part of the list a dragged row would go to is marked while the row is over it. */
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
@@ -305,19 +336,20 @@ export function Sidebar() {
       className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : "sidebar-desktop border-e border-border shrink-0"}`}
       style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
+      <PinMoveNote text={moveNote} />
       {/* Header */}
       <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
         <div ref={actionsRef} className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={() => void createPairedChat().then(id => nav.conversation(chatPath(id)))} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+            <button onClick={() => void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {})} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
             <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
             <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef}>
-              <MenuItem onClick={() => { closeNewMenu(); void createPairedChat().then(id => nav.conversation(chatPath(id))); }} hint={t("sidebar.newMenu.chatHint")}
+              <MenuItem onClick={() => { closeNewMenu(); void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {}); }} hint={t("sidebar.newMenu.chatHint")}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
                 {t("sidebar.newMenu.chat")}
               </MenuItem>
@@ -335,12 +367,13 @@ export function Sidebar() {
       </div>
       <UpdateBanner />
       <OfflineBanner />
+      <StorageFullBanner />
       <LimitedBanner />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
       <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
       {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
       {showNewFolder && <FolderNameDialog returnFocus={newMoreRef} onClose={() => setShowNewFolder(false)} onSave={name => { createFolder(name); setShowNewFolder(false); setSearch(""); }} />}
-      {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {setShowNewChat(false); nav.conversation(chatPath(ensureSession(keys))); refreshSessions();}}
+      {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {const id = ensureSession(keys); setShowNewChat(false); nav.conversation(chatPath(id)); refreshSessions();}}
         onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
         onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
 
@@ -370,9 +403,11 @@ export function Sidebar() {
       </div>
 
       <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
+      <SidebarSaved active={location.pathname === "/saved"} onOpen={() => (location.pathname === "/saved" ? nav.home() : nav.place("/saved"))} />
 
       {/* Chat List */}
-      <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="">
+      <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
+        {listReady && <>
         {shownFolders.map((folder, index) => {
           const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
           const itsChats = filtered.filter(s => folderOf(s.id) === folder.id);
@@ -435,12 +470,13 @@ export function Sidebar() {
             <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
           </div>
         )}
+        </>}
       </div>
 
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
-        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar />}
 
       {/* Resize Handle */}

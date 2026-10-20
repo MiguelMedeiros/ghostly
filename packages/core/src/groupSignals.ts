@@ -89,6 +89,12 @@ export interface CarriedHooks {
   direct?(payload: Uint8Array): boolean;
   /** `CARRIED_DEFER_MS`, for tests. */
   deferMs?: number;
+  /**
+   * The date of the last packet an earlier transport of this edge signed (`lastDated`), before the edge started again:
+   * mine are dated past it. Dated by the clock alone, the first packet of an edge started again in the same millisecond
+   * (its WebRTC gave up, `edgeWithoutRtc`) was no newer than the last one, and a relay refused it (409).
+   */
+  after?: bigint;
 }
 
 /**
@@ -99,6 +105,8 @@ export class CarriedTransport implements PkarrTransport {
   /** My last packet while the edge is down: what a member that just became reachable is handed. */
   private mine: Uint8Array | null = null;
   private lastTimestamp = 0n;
+  /** The date each packet `stamp` signed carries: the relays' transport takes it rather than check the signature again. */
+  private readonly dated = new WeakMap<Uint8Array, bigint>();
   /** My newest packet, wherever it went: what the edge hands the member over itself once it is ready (`linkReady`). */
   private newest: Uint8Array | null = null;
   /** The newest packet of the member's that came through a carrier, and the timestamp of the one a read last returned. */
@@ -124,6 +132,7 @@ export class CarriedTransport implements PkarrTransport {
   readonly configure?: PkarrTransport["configure"];
 
   constructor(private readonly inner: PkarrTransport, private readonly myKey: string, private readonly peerKey: string, private readonly hooks: CarriedHooks) {
+    this.lastTimestamp = hooks.after ?? 0n;
     if (inner.publishPayload) this.publishPayload = (key, payload, options) => inner.publishPayload!(key, payload, options);
     if (inner.discovery) this.discovery = () => inner.discovery!();
     if (inner.subscribe) this.subscribe = listener => inner.subscribe!(listener);
@@ -158,12 +167,20 @@ export class CarriedTransport implements PkarrTransport {
     this.pending = { identity, records, payload, options, heardBefore: this.heard, ended, end, timer: setTimeout(() => this.flush(), this.hooks.deferMs ?? CARRIED_DEFER_MS) };
   }
 
-  /** My next packet for this edge, signed and dated: each newer than the last, as the relays' copy keeps them. */
-  private stamp(identity: Identity, records: GhostRecord[]): Uint8Array {
-    const now = BigInt(Date.now()) * 1000n;
-    this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1n;
-    return createRelayPayload(identity, records, this.lastTimestamp);
+  /**
+   * My next packet for this edge, signed and dated: each newer than the last, as the relays' copy keeps them, and past
+   * `after` (what a relay that refused one holds).
+   */
+  private stamp(identity: Identity, records: GhostRecord[], after = 0n): Uint8Array {
+    const now = BigInt(Date.now()) * 1000n, floor = after > this.lastTimestamp ? after : this.lastTimestamp;
+    this.lastTimestamp = now > floor ? now : floor + 1n;
+    const payload = createRelayPayload(identity, records, this.lastTimestamp);
+    this.dated.set(payload, this.lastTimestamp);
+    return payload;
   }
+
+  /** The date of the last packet this transport signed (0 for none): an edge started again dates its own past it. */
+  lastDated(): bigint { return this.lastTimestamp; }
 
   /**
    * The relays get the very packet members carried or the edge itself handed over, byte for byte, where the transport
@@ -174,8 +191,22 @@ export class CarriedTransport implements PkarrTransport {
    */
   // `publishPayload` does not move `RelayTransport.nextTimestamp` for this key: a packet the relays' transport dates
   // later (the goodbye after `stop()`) is dated by its own clock, past this one unless both fall in one millisecond.
+  // Signed here, it says its date (`signedAt`): about 200 ms a minute of a hub's CPU went to checking its own packets.
+  // A relay holding a copy dated at or after it (409) gets the same records signed again past that copy (`redate`),
+  // while this is still my newest packet.
   private toRelays(identity: Identity, records: GhostRecord[], payload: Uint8Array, options?: PkarrRequestOptions): Promise<void> {
-    return this.inner.publishPayload ? this.inner.publishPayload(identity.pubKeyZ32, payload, options) : this.inner.publish(identity, records, options);
+    const signedAt = this.dated.get(payload);
+    let current = payload;
+    const redate = (after: bigint) => {
+      if (this.newest !== current) return null;
+      const again = this.stamp(identity, records, after);
+      if (this.mine === current) this.mine = again;
+      this.newest = current = again;
+      return { payload: again, signedAt: this.lastTimestamp };
+    };
+    return this.inner.publishPayload
+      ? this.inner.publishPayload(identity.pubKeyZ32, payload, signedAt === undefined ? options : { ...options, signedAt, redate })
+      : this.inner.publish(identity, records, options);
   }
 
   /**

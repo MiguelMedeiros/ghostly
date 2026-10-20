@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
 import { APP_URL, NO_INTERNET, PERMISSIONS, VIEWS, apps, clientLabel } from "@/content/apps";
+import { ICON_DRAWN } from "@/lib/appIcon";
 import type { StoreApp } from "@/lib/storeRead";
 import { AppIcon } from "./AppIcon";
 import "@/app/apps.css";
@@ -14,8 +15,8 @@ const ExternalLink = ({ href }: { href: string }) => (
 /** /apps/<slug>: one app of the store, as the build verified it, and how to install it in Ghostly. */
 export function AppPage({ app, store }: { app: StoreApp; store: string }) {
   const t = apps.app;
-  // The internet last, as the install screen puts it: the line that says who can learn about the person.
-  const permissions = [PERMISSIONS.storage, ...(["chat", "name", "internet"] as const).filter((p) => app.permissions.includes(p)).map((p) => PERMISSIONS[p])];
+  // Every permission it asks for, in the order the reader keeps them (lib/storeRead.ts: the internet last).
+  const permissions = [PERMISSIONS.storage, ...app.permissions.map((p) => PERMISSIONS[p])];
   const meta = [
     app.developer && { label: t.by, value: app.developer },
     { label: t.version, value: app.version },
@@ -31,7 +32,7 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
             ← {t.back}
           </Link>
           <div className="ap-head">
-            <AppIcon app={app} size={96} />
+            <AppIcon app={app} size={ICON_DRAWN.page} />
             <div className="ap-head-copy">
               <h1 className="h-section ap-app-title">{app.title}</h1>
               <p className="lead">{app.tagline}</p>
@@ -88,7 +89,7 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
               {t.install.title}
             </h2>
             <ol className="ap-steps">
-              {t.install.steps(app.title, app.fingerprint).map((step) => (
+              {t.install.steps(app.title, app.fingerprint, app.release).map((step) => (
                 <li key={step}>{step}</li>
               ))}
             </ol>

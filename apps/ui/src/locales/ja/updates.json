@@ -14,6 +14,7 @@
   "later": "後で",
   "manualHint": "ダウンロードして、このインストールを置き換えてください。",
   "reload": "再読み込み",
+  "replaced": "Ghostly {{version}} の新しいビルドが公開されました",
   "restart": "更新して再起動",
   "title": "更新",
   "upToDate": "Ghostly は最新です",

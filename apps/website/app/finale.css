@@ -17,6 +17,8 @@
 .fin-inner {
   position: relative;
   display: grid;
+  /* One column as wide as the wrap: the download rows never widen it past the screen. */
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   text-align: center;
   gap: 0;
@@ -454,6 +456,8 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
     margin-top: 8px;
     width: 100%;
     max-width: 420px;
+    padding-inline: 12px;
+    white-space: normal;
   }
   .fin-panel {
     order: 6;
@@ -504,6 +508,11 @@ html.js .fin[data-state="done"][data-poof="true"] .fin-actor--boo {
     border-bottom: 1px solid var(--line);
     border-radius: 0;
     background: none;
+    /* On the narrowest phones the name wraps; the file type stays whole at the row's end. */
+    white-space: normal;
+  }
+  .fin-dl-ext {
+    white-space: nowrap;
   }
   .fin-dls .fin-dl:first-child,
   .fin-card--wide > .fin-dl {

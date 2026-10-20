@@ -26,6 +26,7 @@ export function engineApps(runnerUrl: string, netRunnerUrl?: string, runnerServe
     entry: (ref, runAnyway) => engine.call("appEntry", { ref, ...(runAnyway ? { runAnyway } : {}) }),
     running: (of) => engineApps(runnerUrl, netRunnerUrl, runnerServed, of),
     file: (ref, path) => engine.call("appFile", { ref, path, ...runs }),
+    fileAt: (ref, path) => engine.call("appFileAt", { ref, path, ...runs }),
     storage: {
       get: async (ref, scope, key) => {
         const found = await engine.call("appStorageGet", { ref, scope, key, ...runs });
@@ -41,6 +42,13 @@ export function engineApps(runnerUrl: string, netRunnerUrl?: string, runnerServe
       send: async (linkId, ref, data) => (await engine.call("appSend", { linkId, ref, data, ...runs })).error,
       onFrame: (listener: (linkId: string, frame: AppFrameEvent) => void) => engine.onAppFrame(listener),
       peer: (linkId, app) => peers.get(peerKey(linkId, app)) ?? null,
+    },
+    ranges: {
+      serve: (linkId, ref, file) => engine.call("appServe", { linkId, ref, file }),
+      unserve: (linkId, serve) => engine.call("appUnserve", { linkId, serve }),
+      read: (linkId, ref, serve, offset, length) => engine.call("appRemoteRead", { linkId, ref, serve, offset, length }),
+      onAsk: (listener) => engine.onAppRange(listener),
+      answer: (linkId, answer) => engine.call("appRangeAnswer", { linkId, ...answer }),
     },
   };
 }

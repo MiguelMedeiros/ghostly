@@ -1,0 +1,1 @@
+An invitee keeps an invitation its inviter took back for a week, marked as taken back, so the list says so: nothing to answer, no accept said for it, no `group-decline` owed when it goes, and any contact's invitation to the group takes its place. Before, it was dropped with no word.

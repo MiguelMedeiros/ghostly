@@ -1,4 +1,4 @@
-import { identityFromSeedB64, type GhostRecord } from "@ghostly/core";
+import { DiscoveryBudgetError, identityFromSeedB64, type GhostRecord } from "@ghostly/core";
 import { Groups, meshEdgeScale, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { COMMUNITY_TIMINGS, type CommunityTimings } from "../src/engine/community";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
@@ -82,6 +82,50 @@ export interface Peer {
   host: GroupsHost;
 }
 
+/** Numbers in [0, 1) from a seed (xorshift32): the same ones every run. */
+export function seededRandom(seed: number): () => number {
+  let x = Math.imul(seed, 2654435761) >>> 0 || 1;
+  return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 2 ** 32; };
+}
+
+/**
+ * A world that runs the same way every time, from `seed`: the keys, nonces and ids its engines draw
+ * (`crypto.getRandomValues`, `crypto.randomUUID`) come from the seed, and the wall clock reads the world's clock, as
+ * an app's engine and its device's clock agree. Give the world `seededRandom` too (its engines' own random waits).
+ * A run under a relays' budget is chaotic: which edge gets a minute's requests first, a hub entry a second staler than
+ * another. With random keys and waits, a test of one went a different way each run, and failed one run in three in
+ * ways no run could repeat (bug hunt, 2026-10-17). Call before adding peers; returns what puts the globals back.
+ */
+export function sameRun(world: CommunityWorld, seed: number, start = Date.UTC(2026, 9, 1)): () => void {
+  const next = seededRandom(seed ^ 0x5bd1e995), byte = () => Math.floor(next() * 256);
+  const cr = globalThis.crypto, now = Date.now;
+  const own = (["getRandomValues", "randomUUID"] as const).map(key => [key, Object.getOwnPropertyDescriptor(cr, key)] as const);
+  const random = cr.getRandomValues.bind(cr);
+  cr.getRandomValues = (<T extends ArrayBufferView | null>(array: T): T => {
+    // The curves' scalar blinding draws as many bytes as a key derivation or a signature does, and its products do not
+    // depend on them: from the seed, a public key the process derived before (`identityFromSeed` keeps them) left the
+    // next keys and nonces in other bytes, and a test run twice in one process went two ways.
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 6;
+    const blinding = new Error().stack?.includes("@noble/");
+    Error.stackTraceLimit = limit;
+    if (blinding) return random(array);
+    const bytes = new Uint8Array(array!.buffer, array!.byteOffset, array!.byteLength);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = byte();
+    return array;
+  }) as typeof cr.getRandomValues;
+  cr.randomUUID = (() => {
+    const hex = Array.from({ length: 16 }, byte).map((b, i) => (i === 6 ? 0x40 | (b & 15) : i === 8 ? 0x80 | (b & 63) : b).toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }) as typeof cr.randomUUID;
+  world.now = start;
+  Date.now = () => world.now;
+  return () => {
+    for (const [key, descriptor] of own) if (descriptor) Object.defineProperty(cr, key, descriptor); else delete (cr as unknown as Record<string, unknown>)[key];
+    Date.now = now;
+  };
+}
+
 function memoryStore(messages: StoredMessage[]): GroupStore {
   const groups = new Map<string, StoredGroup>();
   return {
@@ -113,6 +157,11 @@ export class CommunityWorld {
   entryWinner: Peer | null = null;
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
+  /**
+   * Refuses every background request of an app (a test says whose): the relays' budget while its links signal and the
+   * looks of its other chats take every request a minute frees, ahead of a community's looks.
+   */
+  holdBackground: ((peer: Peer) => boolean) | null = null;
   /**
    * Reads of these keys answer what the record held at the start of the step: what apps that read and write in the same
    * second see (each read is done before any of their writes lands). Writes land at once, as before.
@@ -166,6 +215,7 @@ export class CommunityWorld {
   add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number; clock?: number } = {}): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
+    const places = new Map<number, string>();
     const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, host: null as unknown as GroupsHost, ...app };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
@@ -220,6 +270,7 @@ export class CommunityWorld {
       publish: async (identity, records, background, door) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background, !!door);
+        if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
         if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) throw new Error("Discovery request budget reached; retry shortly");
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
       },
@@ -227,11 +278,19 @@ export class CommunityWorld {
         this.pkarrOps++;
         this.onPkarr?.(peer, "resolve", key, !!background, !!door);
         if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
+        if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
         if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
         const store = this.readsFromStepStart?.(key) ? this.stepStart : this.pkarr;
         return peer.online ? structuredClone(store.get(key) ?? null) : null;
       },
-      storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
+      // A row given a place above another goes just before it; any other, to the end.
+      storeMessage: async (message, _live, place) => {
+        if (messages.some(m => m.id === message.id)) return false;
+        const at = place === undefined ? -1 : messages.findIndex(m => m.id === places.get(place));
+        if (at >= 0) messages.splice(at, 0, message);
+        else messages.push(message);
+        return true;
+      },
       forgetFrame: async (linkId, id) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) delete row.frame; },
       keepFrame: async (linkId, id, frame) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) row.frame = frame; },
       // The history is the order rows came in: these go to its end, in this order.
@@ -240,6 +299,12 @@ export class CommunityWorld {
           const i = messages.findIndex(m => m.linkId === linkId && m.id === id);
           if (i >= 0) messages.push(...messages.splice(i, 1));
         }
+      },
+      // The history has room above every row: the place names the row.
+      placeAbove: async (linkId, id) => {
+        if (!messages.some(m => m.linkId === linkId && m.id === id)) return undefined;
+        places.set(places.size + 1, id);
+        return places.size;
       },
       emit: () => {},
       myNick: () => peer.nick,

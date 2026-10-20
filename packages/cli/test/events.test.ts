@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
-import { EventHub, type GhostlyEvent } from "../src/events";
+import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
@@ -315,6 +315,174 @@ describe("the event stream", () => {
     expect(again.replay(2).map((e) => e.type)).toEqual(["events.gap", "x", "x"]);
     expect(again.replay(2)[0]).toMatchObject({ from: 3, to: 4 });
     void h;
+  });
+
+  it("a journal past the longest string still opens, replays and is cut to its bound in bytes", async () => {
+    const path = join(dir, "huge.jsonl");
+    // 600 MiB, more characters than a string can hold, mostly a hole on disk; then whole events.
+    truncateSync((writeFileSync(path, ""), path), 600 * 1024 * 1024);
+    appendFileSync(path, "\n" + [7, 8, 9].map((seq) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 })).join("\n") + "\n");
+    const h = new EventHub(path, () => 1000, "huge");
+    await h.open();
+    expect(h.lastSeq).toBe(9);
+    expect(statSync(path).size).toBeLessThanOrEqual(JOURNAL_KEEP_BYTES);
+    expect(h.replay(7).map((e) => e.seq)).toEqual([8, 9]);
+    const heard: number[] = [];
+    h.onEvent((e) => heard.push(e.seq));
+    h.emit("daemon.started", "daemon.started:1");
+    expect(heard).toEqual([10]);
+  }, 30_000);
+
+  it("opening learns the last seq and the line count without making the journal into text", async () => {
+    const path = join(dir, "open.jsonl");
+    const text = "é".repeat(1_000);
+    writeFileSync(path, Array.from({ length: 1_000 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1, text }) + "\n").join("") + '{"seq":1001,"id":"x:10');
+    const decode = vi.spyOn(Buffer.prototype, "toString");
+    const h = new EventHub(path, () => 1000, "open");
+    await h.open();
+    const longest = Math.max(0, ...decode.mock.results.map((r) => (typeof r.value === "string" ? r.value.length : 0)));
+    decode.mockRestore();
+    // A torn last line: the seq is the last whole one's.
+    expect(h.lastSeq).toBe(1_000);
+    expect(longest).toBeLessThan(10_000);
+    // The torn line counts as one, as the trim counts it.
+    const many = join(dir, "many.jsonl");
+    writeFileSync(many, Array.from({ length: 20_000 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1 }) + "\n").join("") + "torn");
+    const full = new EventHub(many, () => 1000, "many");
+    await full.open();
+    expect(full.lastSeq).toBe(20_000);
+    expect(readFileSync(many, "utf8").trim().split("\n")).toHaveLength(10_000);
+  });
+
+  it("keeps the journal within its bytes however long the events, and still replays its end", async () => {
+    const { h, events } = await hub("long.jsonl");
+    // Quotes take twice their length in JSON: each event is about 256 KiB of journal.
+    const text = '"'.repeat(128 * 1024);
+    for (let i = 0; i < 300; i++) {
+      h.emit("x", `x:${i}`, { text });
+      expect(statSync(join(dir, "long.jsonl")).size).toBeLessThanOrEqual(JOURNAL_MAX_BYTES);
+    }
+    expect(events).toHaveLength(300);
+    const replayed = h.replay(0);
+    expect(replayed[0].type).toBe("events.gap");
+    expect(replayed.at(-1)!.seq).toBe(300);
+    expect(replayed.slice(1).map((e) => e.seq)).toEqual(Array.from({ length: replayed.length - 1 }, (_, i) => 302 - replayed.length + i));
+  }, 60_000);
+
+  it("a message deleted, a chat removed or a group left takes its texts out of the journal, and the journal set aside", async () => {
+    const path = join(dir, "gone.jsonl");
+    writeFileSync(path + ".unreadable", JSON.stringify({ seq: 1, type: "message.received", message: { text: "SECRET-OLD" } }));
+    const { h } = await hub("gone.jsonl");
+    const group = { id: "g1", status: "active", members: [{ key: "ana" }] };
+    h.baseline(state([link("c1"), link("c2")], [group]), new Map());
+    const journal = () => readFileSync(path, "utf8") + JSON.stringify(h.replay(0));
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m1", { text: "SECRET-ONE" }), message("c1", "m2", { text: "kept" })], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m1", { text: "SECRET-ONE, edited", edit: { seq: 1, at: 2 } } as never)], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c2", messages: [message("c2", "m3", { text: "SECRET-TWO" })], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "m4", { text: "SECRET-THREE", member: "ana" })], deleted: [] });
+    expect(journal()).toContain("SECRET-ONE");
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m1"] });
+    expect(journal()).not.toContain("SECRET-ONE");
+    expect(journal()).not.toContain("SECRET-OLD");
+    expect(h.replay(0).map((e) => e.id)).toContain("message.deleted:c1:m1");
+    expect(journal()).toContain("kept");
+    h.sink.post({ kind: "state", state: state([link("c1")], [group]) });
+    expect(journal()).not.toContain("SECRET-TWO");
+    expect(h.replay(0).map((e) => e.id)).toContain("chat.removed:c2");
+    h.sink.post({ kind: "state", state: state([link("c1")]) });
+    expect(journal()).not.toContain("SECRET-THREE");
+    expect(h.replay(0).map((e) => e.id)).toContain("group.removed:g1");
+    expect(journal()).toContain("kept");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // The seq goes on from where it was.
+    expect(h.emit("x", "x:1").seq).toBe(h.replay(0).at(-2)!.seq + 1);
+  });
+
+  /**
+   * A reply keeps its own events, but not the text of an original deleted since, here or for everyone by its author:
+   * the journal says what history says ("Original message deleted"). Before, `listen --since` and `events` gave the
+   * deleted text again inside each reply that quoted it, also as an agent turn's `untrusted.replyTo.snippet`.
+   */
+  it("a message deleted takes its text out of the replies that quoted it, in a chat and a group", async () => {
+    const path = join(dir, "quoted.jsonl");
+    const { h } = await hub("quoted.jsonl");
+    h.baseline(state([link("c1")], [{ id: "g1", status: "active", members: [{ key: "ana" }] }]), new Map());
+    const quote = (messageId: string, snippet: string) => ({ replyTo: { id: "wire-" + messageId, snippet, from: "me" as const, messageId } });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "me_1", { sender: "me", text: "SECRET-QUOTED" }), message("c1", "p1", { text: "an answer", ...quote("me_1", "SECRET-QUOTED") }), message("c1", "p2", { text: "another", ...quote("me_2", "kept quote") })], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "p1", { text: "an answer, edited", edit: { seq: 1, at: 2 }, ...quote("me_1", "SECRET-QUOTED") } as never)], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "mine:1:0", { sender: "me", text: "SECRET-GROUP" }), message("group:g1", "ana:1:0", { member: "ana", text: "seen", ...quote("mine:1:0", "SECRET-GROUP") })], deleted: [] });
+    const journal = () => readFileSync(path, "utf8") + JSON.stringify(h.replay(0));
+    expect(journal()).toContain("SECRET-QUOTED");
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["me_1"] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [], deleted: ["mine:1:0"] });
+    expect(journal()).not.toContain("SECRET-QUOTED");
+    expect(journal()).not.toContain("SECRET-GROUP");
+    // The replies stay, each saying its original is deleted, as history does; a quote of one still here is untouched.
+    const replay = h.replay(0);
+    const replyOf = (id: string) => replay.filter((e) => (e.message as { id?: string } | undefined)?.id === id).map((e) => [e.type, (e.message as { replyTo: unknown }).replyTo]);
+    expect(replyOf("p1")).toEqual([
+      ["message.received", { id: "me_1", snippet: "", from: "me", found: false, deleted: true }],
+      ["message.edited", { id: "me_1", snippet: "", from: "me", found: false, deleted: true }],
+    ]);
+    expect(replyOf("ana:1:0")).toEqual([["group.message", { id: "mine:1:0", snippet: "", from: "me", found: false, deleted: true }]]);
+    expect(replyOf("p2")).toEqual([["message.received", { id: "me_2", snippet: "kept quote", from: "me", found: true }]]);
+    expect(toTurn(replay.find((e) => e.type === "message.received" && (e.message as { id: string }).id === "p1")!)!.untrusted.replyTo).toEqual({ id: "me_1", snippet: "" });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  /**
+   * A deletion is synchronous work on the daemon's one thread: each read the whole journal as text and tried every id
+   * on every line (25 ms a message at 10,000 events, 12 s for 2,000 ids in one change), a contact's delete for everyone
+   * included. Counted here as the journal's bytes made into text, and as the time of one long change.
+   */
+  describe("what a deletion reads of the journal", () => {
+    const text = "x".repeat(300);
+    async function filled(journal: string, count: number) {
+      const { h } = await hub(journal);
+      h.baseline(state([link("c1")]), new Map());
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: Array.from({ length: count }, (_, i) => message("c1", `m${i}`, { text: `${text} ${i}` })), deleted: [] });
+      return { h, path: join(dir, journal) };
+    }
+    function decoded(work: () => void): number {
+      const toString = Buffer.prototype.toString;
+      let bytes = 0;
+      const spy = vi.spyOn(Buffer.prototype, "toString").mockImplementation(function (this: Buffer, ...args: unknown[]) {
+        const [, start = 0, end = this.length] = args as [string?, number?, number?];
+        bytes += Math.max(0, Math.min(end, this.length) - start);
+        return toString.apply(this, args as never);
+      });
+      try { work(); } finally { spy.mockRestore(); }
+      return bytes;
+    }
+
+    it("a recent message reads the journal from its events on; one the journal no longer names reads none as text", async () => {
+      const { h, path } = await filled("reads.jsonl", 2_000);
+      const size = statSync(path).size;
+      expect(decoded(() => h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m1999"] }))).toBeLessThan(size / 50);
+      expect(readFileSync(path, "utf8")).not.toContain(`${text} 1999"`);
+      expect(readFileSync(path, "utf8")).toContain(`${text} 1998"`);
+      // Known here, its events gone from the journal (trimmed, as a long one is): only its deletion's own line is read
+      // as text, and nothing is written but that line.
+      writeFileSync(path, readFileSync(path, "utf8").split("\n").filter((line) => !line.includes('"m5"')).join("\n"));
+      const before = readFileSync(path, "utf8");
+      expect(decoded(() => h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m5"] }))).toBeLessThan(200);
+      expect(readFileSync(path, "utf8").slice(before.length)).toMatch(/^\{[^\n]*"message\.deleted:c1:m5"[^\n]*\}\n$/);
+      // What the journal holds still holds: it replays, and goes on.
+      expect(h.replay(0).filter((e) => e.type === "message.received")).toHaveLength(1_998);
+      expect(h.replay(0).map((e) => e.id)).toContain("message.deleted:c1:m1999");
+      expect(h.emit("x", "x:2").seq).toBe(h.replay(0).at(-2)!.seq + 1);
+    });
+
+    it("a change that deletes thousands of messages reads each line once", async () => {
+      const { h, path } = await filled("many.jsonl", 5_000);
+      const ids = Array.from({ length: 4_000 }, (_, i) => `m${i}`);
+      const start = performance.now();
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ids });
+      expect(performance.now() - start).toBeLessThan(1_500);
+      const left = h.replay(0).filter((e) => e.type === "message.received").map((e) => (e.message as { id: string }).id);
+      expect(left).toEqual(Array.from({ length: 1_000 }, (_, i) => `m${4_000 + i}`));
+      expect(readFileSync(path, "utf8")).not.toContain(`${text} 3999"`);
+    }, 60_000);
   });
 
   it("a first run learns the history without reporting it; a later one reports what came meanwhile", async () => {

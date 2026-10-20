@@ -9,8 +9,12 @@ afterEach(() => forgetRunnerCheck());
 it("takes the runner's own policy, and nothing looser", () => {
   expect(isRunnerPolicy(RUNNER_CSP)).toBe(true);
   expect(isRunnerPolicy("")).toBe(false);
-  expect(isRunnerPolicy(RUNNER_CSP.replace("sandbox allow-scripts", "sandbox allow-scripts allow-same-origin"))).toBe(false);
-  expect(isRunnerPolicy(RUNNER_CSP.replace("sandbox allow-scripts; ", ""))).toBe(false);
+  expect(isRunnerPolicy(RUNNER_CSP.replace("sandbox allow-scripts allow-pointer-lock", "sandbox allow-scripts allow-same-origin"))).toBe(false);
+  expect(isRunnerPolicy(RUNNER_CSP.replace("allow-pointer-lock", "allow-pointer-lock allow-same-origin"))).toBe(false);
+  expect(isRunnerPolicy(RUNNER_CSP.replace("allow-pointer-lock", "allow-popups"))).toBe(false);
+  expect(isRunnerPolicy(RUNNER_CSP.replace("sandbox allow-scripts allow-pointer-lock; ", ""))).toBe(false);
+  // A server that still sends the policy from before pointer lock: apps run there, without mouse look.
+  expect(isRunnerPolicy(RUNNER_CSP.replace("sandbox allow-scripts allow-pointer-lock", "sandbox allow-scripts"))).toBe(true);
   expect(isRunnerPolicy(RUNNER_CSP.replace("connect-src 'none'", "connect-src 'self'"))).toBe(false);
   expect(isRunnerPolicy(RUNNER_CSP.replace("frame-ancestors 'self'", "frame-ancestors *"))).toBe(false);
   // The page's own policy, as a server that sent nginx-headers.conf everywhere would.

@@ -33,6 +33,8 @@ export type DiscoveryChange = "tripped" | "recovered";
  * fast for a while, on the hub left and on its members alike: on CLI daemons the hub left got 2 of 24 beacon writes
  * through in 90 s (its entry went stale, and members it should have carried became hubs), and the members' requests
  * in its lobby went out 40 s after they asked (2026-10-03).
+ * A hub's reads say `door` only while someone is coming in (`Communities.doorBusy`): otherwise they give way like any
+ * background read, and an app that was a hub of several communities left its edges' signaling the share (2026-10-13).
  *
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
  * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,
@@ -51,6 +53,29 @@ export interface PkarrRequestOptions {
    * restarts publishes its offer then. A few may go over the relay's minute (`DEPARTED_READS` in relay.ts).
    */
   departed?: boolean;
+  /**
+   * A read of a contact that was live when this app last ran, made before any read of it this run was answered
+   * (`LinkSessionOptions.resumed`): the link's offer waits on it. A group edge's goes on the edges' floor
+   * (`GROUP_SIGNALING_ALLOWANCE_SHARE` in relay.ts).
+   */
+  resume?: boolean;
+  /**
+   * A community member's way back to its group while it has no edge up there (`Communities.wayBack`): its readings of the
+   * beacon and its request in a hub's lobby. Its own small allowance past the relay's minute (`WAY_BACK_SHARE` in
+   * relay.ts), not the edges' signaling's.
+   */
+  back?: boolean;
+  /**
+   * `publishPayload` only: the payload was signed in this process, dated so (a group edge's, `CarriedTransport`). Its
+   * signature is not checked again on the way to the relays, as `RelayTransport.putSigned`'s is not.
+   */
+  signedAt?: bigint;
+  /**
+   * `publishPayload` only, with `signedAt`: the same records signed again, dated past `after` (what a relay that answered
+   * 409 holds under the key); null when a newer packet of the key took over. The relays' transport puts that one at
+   * once rather than leave the relay's copy in place until the next publish (`RelayTransport.publishPayload`).
+   */
+  redate?: (after: bigint) => { payload: Uint8Array; signedAt: bigint } | null;
 }
 
 /**

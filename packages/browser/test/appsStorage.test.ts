@@ -21,6 +21,9 @@ beforeEach(async () => {
   net = new FakeNet();
 });
 
+/** The apps' own rows: each scope's kept count left out. */
+const ownRows = async () => (await storageRows() as { ref: string; scope: string; key: string }[]).filter((r) => r.key !== "");
+
 /** What a key and a value of `valueBytes` take of a scope's 5 MiB. */
 const cost = (key: string, valueBytes: number) => APP_STORAGE_LIMITS.rowBytes + APP_STORAGE_LIMITS.keyTimes * key.length + valueBytes;
 
@@ -106,7 +109,7 @@ describe("storage", () => {
     const fit = Math.floor(APP_STORAGE_LIMITS.scopeBytes / cost("k000", APP_STORAGE_LIMITS.valueBytes));
     expect(results.filter((r) => r === "ok")).toHaveLength(fit);
     expect(results.filter((r) => r === "full")).toHaveLength(90 - fit);
-    const total = (await storageRows() as { key: string; size: number }[]).reduce((sum, r) => sum + cost(r.key, r.size - r.key.length), 0);
+    const total = (await storageRows() as { key: string; size: number }[]).filter((r) => r.key).reduce((sum, r) => sum + cost(r.key, r.size - r.key.length), 0);
     expect(total).toBeLessThanOrEqual(APP_STORAGE_LIMITS.scopeBytes);
   });
 
@@ -168,6 +171,59 @@ describe("storage", () => {
     await store.storageSet({ ref, scope: "chat-1", key: longKey(fit), value: 1 });
   });
 
+  it("the first write after a start reads no value: the scope's count is kept beside its rows", async () => {
+    const { app } = await installed();
+    const { ref } = app;
+    // 10,000 rows from before the count was kept: the first write counts them once, from their values.
+    await seed(ref, "chat-1", { big: 0, small: 10_000 });
+    const first = apps(net);
+    await first.storageSet({ ref, scope: "chat-1", key: "a", value: 1 });
+    const reads = [vi.spyOn(IDBObjectStore.prototype, "getAll"), vi.spyOn(IDBIndex.prototype, "getAll"), vi.spyOn(IDBObjectStore.prototype, "openCursor"), vi.spyOn(IDBIndex.prototype, "openCursor")];
+    /** Reads of many app storage rows at once (the installed apps' own store is read by other calls). */
+    const storageReads = (spy: (typeof reads)[number]) => spy.mock.contexts.filter((c) => ((c as IDBObjectStore).name ?? (c as IDBIndex).objectStore.name) === STORES.appStorage).length;
+    try {
+      // A fresh engine takes the kept count: a write, a rewrite and a delete read no other row.
+      const again = apps(net);
+      await again.storageSet({ ref, scope: "chat-1", key: "b", value: 2 });
+      await again.storageSet({ ref, scope: "chat-1", key: "a", value: [1, 2, 3] });
+      await again.storageDelete({ ref, scope: "chat-1", key: "k0000" });
+      expect(reads.map(storageReads)).toEqual([0, 0, 0, 0]);
+    } finally {
+      for (const r of reads) r.mockRestore();
+    }
+    // The kept count is the one the rows make.
+    const rows = await storageRows() as { key: string; value: string; size: number }[];
+    const own = rows.filter((r) => r.key);
+    expect(JSON.parse(rows.find((r) => !r.key)!.value)).toEqual({ rows: 10_001, keyBytes: own.reduce((n, r) => n + r.key.length, 0), size: own.reduce((n, r) => n + r.size, 0) });
+  }, 30_000); // 10,000 rows seeded and counted in fake-indexeddb: about 3 s on an idle host, over 5 s on a loaded runner.
+
+  it("a kept count that disagrees with the rows (an older client wrote some) is counted again", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    await store.storageSet({ ref, scope: "chat-1", key: "a", value: 1 });
+    // Rows an older client put there, the kept count not told.
+    await seed(ref, "chat-1", { big: 79 });
+    const again = apps(net);
+    const left = APP_STORAGE_LIMITS.scopeBytes - cost("a", 1) - 79 * cost("b00", APP_STORAGE_LIMITS.valueBytes);
+    const fit = Math.floor(left / cost("k0000", 1));
+    for (let i = 0; i < fit; i++) await again.storageSet({ ref, scope: "chat-1", key: `k${String(i).padStart(4, "0")}`, value: 1 });
+    await expect(again.storageSet({ ref, scope: "chat-1", key: "k9999", value: 1 })).rejects.toThrow(/^full/);
+  });
+
+  it("the kept count is never one of the app's keys, and goes with the scope's last key", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    await store.storageSet({ ref, scope: "chat-1", key: "a", value: 1 });
+    await store.storageSet({ ref, scope: "chat-1", key: "b", value: 2 });
+    expect(await store.storageKeys({ ref, scope: "chat-1" })).toEqual(["a", "b"]);
+    expect(await store.exportData({ ref })).toEqual([{ ghostlyAppData: 1, app: ref, scope: "chat-1", entries: { a: 1, b: 2 } }]);
+    expect(await store.exportDataText({ ref })).toEqual([{ app: ref, scope: "chat-1", entries: [["a", "1"], ["b", "2"]] }]);
+    expect((await storageRows() as { key: string }[]).map((r) => r.key)).toEqual(["", "a", "b"]);
+    await store.storageDelete({ ref, scope: "chat-1", key: "a" });
+    await store.storageDelete({ ref, scope: "chat-1", key: "b" });
+    expect(await storageRows()).toEqual([]);
+  });
+
   it("a scope filled under an older count takes no new key, and still rewrites and deletes the ones it has", async () => {
     const { app } = await installed();
     const { ref } = app;
@@ -187,6 +243,26 @@ describe("storage", () => {
     await store.storageSet({ ref, scope: "chat-1", key: "new", value: 1 });
   });
 
+  it("keys calls made at once on a scope of many keys read the database once at a time, and each sees the writes done before it", async () => {
+    const { store, app } = await installed();
+    const { ref } = app;
+    await seed(ref, "chat-1", { big: 0, small: 5000 });
+    const reads = vi.spyOn(IDBObjectStore.prototype, "getAllKeys");
+    try {
+      const calls = Array.from({ length: 49 }, () => store.storageKeys({ ref, scope: "chat-1" }));
+      const answers = await Promise.all(calls);
+      expect(answers.every((keys) => keys.length === 5000)).toBe(true);
+      expect(reads.mock.calls.length, "one read running and one shared by every call made meanwhile").toBeLessThanOrEqual(2);
+      reads.mockClear();
+      const before = store.storageKeys({ ref, scope: "chat-1" });
+      await store.storageSet({ ref, scope: "chat-1", key: "late", value: 1 });
+      const after = await store.storageKeys({ ref, scope: "chat-1" });
+      expect(after, "a call made after a write sees it").toContain("late");
+      expect((await before).length).toBeGreaterThanOrEqual(5000);
+      expect(await store.storageKeys({ ref, scope: APP_SCOPE_ALONE }), "another scope reads its own").toEqual([]);
+    } finally { reads.mockRestore(); }
+  });
+
   it("exports every scope as the WISP's file", async () => {
     const { store, app } = await installed();
     await store.storageSet({ ref: app.ref, scope: "chat-1", key: "a", value: [1, 2] });
@@ -195,6 +271,31 @@ describe("storage", () => {
       { ghostlyAppData: 1, app: app.ref, scope: APP_SCOPE_ALONE, entries: { b: { c: true } } },
       { ghostlyAppData: 1, app: app.ref, scope: "chat-1", entries: { a: [1, 2] } },
     ]);
+  });
+
+  it("exports every scope with each value as the JSON text it is kept as, a scope at a time", async () => {
+    const { store, app } = await installed();
+    const other = await bundle({ name: "go" });
+    net.put("https://raw.githubusercontent.com/ana/go/HEAD/app.ghostlyapp", other.bytes);
+    await store.preview({ url: "https://github.com/ana/go" });
+    await store.install({ digest: other.digest, grant: ["chat"] });
+    await store.storageSet({ ref: app.ref, scope: "chat-2", key: "z", value: { b: 1, "2": [true, null] } });
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "__proto__", value: "p" });
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "a", value: [1, 2] });
+    await store.storageSet({ ref: app.ref, scope: APP_SCOPE_ALONE, key: "b", value: 0.5 });
+    await store.storageSet({ ref: other.ref, scope: "chat-1", key: "a", value: "another app's" });
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    expect(await store.exportDataText({ ref: app.ref })).toEqual([
+      { app: app.ref, scope: APP_SCOPE_ALONE, entries: [["b", "0.5"]] },
+      { app: app.ref, scope: "chat-1", entries: [["__proto__", "\"p\""], ["a", "[1,2]"]] },
+      { app: app.ref, scope: "chat-2", entries: [["z", '{"2":[true,null],"b":1}']] },
+    ]);
+    // The thread is let go between scopes.
+    expect(timers.mock.calls.filter(([, ms]) => ms === 0).length).toBeGreaterThanOrEqual(2);
+    timers.mockRestore();
+    // The parsed export is the same data.
+    expect((await store.exportData({ ref: app.ref })).map((file) => file.entries)).toEqual([{ b: 0.5 }, JSON.parse('{"__proto__":"p","a":[1,2]}'), { z: { b: 1, 2: [true, null] } }]);
+    expect(await store.exportDataText({ ref: other.ref })).toEqual([{ app: other.ref, scope: "chat-1", entries: [["a", "\"another app's\""]] }]);
   });
 
   it("exports a key named __proto__ like any other", async () => {
@@ -226,7 +327,7 @@ describe("uninstall", () => {
     await store.uninstall({ ref: app.ref });
     expect((await appRows() as { ref: string }[]).map((a) => a.ref)).toEqual([go.ref]);
     expect((await storageRows() as { ref: string }[]).every((r) => r.ref === go.ref)).toBe(true);
-    expect(await storageRows()).toHaveLength(3);
+    expect(await ownRows()).toHaveLength(3);
     expect(await bundleIds()).toEqual([`app-${go.digest}`]);
     await expect(store.entry({ ref: app.ref })).rejects.toThrow(/^not-installed/);
     // Installed again, it starts empty.
@@ -253,7 +354,29 @@ describe("uninstall", () => {
     await store.storageSet({ ref: app.ref, scope: "chat-1", key: "k", value: 1 });
     await store.storageSet({ ref: app.ref, scope: "chat-2", key: "k", value: 2 });
     await db.deleteLink("chat-1");
-    expect((await storageRows() as { scope: string }[]).map((r) => r.scope)).toEqual(["chat-2"]);
+    expect((await ownRows()).map((r) => r.scope)).toEqual(["chat-2"]);
+  });
+
+  it("an app uninstalled while it is writing keeps none of its rows: a write still waiting is refused, a reinstall starts empty", async () => {
+    for (const burst of [5, 20, 50]) {
+      await emptyProfile();
+      const { store, app } = await installed();
+      const { ref } = app;
+      await store.storageSet({ ref, scope: "chat-1", key: "before", value: 1 });
+      const writes = Array.from({ length: burst }, (_, i) => store.storageSet({ ref, scope: "chat-1", key: `k${i}`, value: i }).then(() => "ok", (e: Error) => e.message.split(":")[0]));
+      await writes[0];
+      await store.uninstall({ ref });
+      const results = await Promise.all(writes);
+      expect(await storageRows(), `burst of ${burst}`).toEqual([]);
+      expect(results[0]).toBe("ok");
+      expect(results.at(-1), `burst of ${burst}: the last write waited past the uninstall`).toBe("not-installed");
+      expect(new Set(results)).toEqual(new Set(["ok", "not-installed"]));
+      await store.preview({ url: BUNDLE_URL });
+      await store.install({ digest: app.digest, grant: ["chat"] });
+      expect(await store.storageKeys({ ref, scope: "chat-1" }), `burst of ${burst}`).toEqual([]);
+      // The count starts again with the new install: a full 64 KiB value fits.
+      await store.storageSet({ ref, scope: "chat-1", key: "big", value: "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2) });
+    }
   });
 
   it("a chat deleted while its app is writing keeps none of that app's rows: a write still waiting is refused", async () => {
@@ -275,7 +398,7 @@ describe("uninstall", () => {
       const deleted = db.deleteLink("chat-1");
       const results = await Promise.all(writes);
       await deleted;
-      expect((await storageRows() as { scope: string }[]).map((r) => r.scope), `burst of ${burst}`).toEqual(["chat-2"]);
+      expect((await ownRows()).map((r) => r.scope), `burst of ${burst}`).toEqual(["chat-2"]);
       expect(await store.exportData({ ref }), `burst of ${burst}`).toEqual([{ ghostlyAppData: 1, app: ref, scope: "chat-2", entries: { other: 2 } }]);
       expect(results[0]).toBe("ok");
       expect(results.at(-1), `burst of ${burst}: the last write waited past the delete`).toBe("bad-scope");
@@ -307,7 +430,7 @@ describe("uninstall", () => {
     expect((await db.getMessages("chat-1"))).toEqual([]);
     expect((await db.getMessages("chat-2"))).toHaveLength(300);
     expect(new Set((await storageRows() as { scope: string }[]).map((r) => r.scope))).toEqual(new Set(["chat-2"]));
-    expect(await storageRows()).toHaveLength(300);
+    expect(await ownRows()).toHaveLength(300);
   });
 
   it("Clear all data empties the apps' stores", async () => {
@@ -357,7 +480,8 @@ describe("the database", () => {
     const rowsOf = (name: string) => snapshot.stores.find((s) => s.name === name)!.values;
     expect(rowsOf("apps")).toMatchObject([{ ref: app.ref, digest: app.digest, sequence: 1, permissions: ["chat"] }]);
     expect(rowsOf("appStores")).toHaveLength(1);
-    expect(rowsOf("appStorage")).toMatchObject([{ ref: app.ref, scope: "chat-1", key: "game", value: "7" }]);
+    // The scope's kept count goes with its rows.
+    expect(rowsOf("appStorage")).toMatchObject([{ ref: app.ref, scope: "chat-1", key: "", value: JSON.stringify({ rows: 1, keyBytes: 4, size: 5 }) }, { ref: app.ref, scope: "chat-1", key: "game", value: "7" }]);
     expect(rowsOf("fileChunks")).toEqual([]);
     // A bundle has no `files` row, so no file of the backup carries it.
     expect(rowsOf("files")).toEqual([]);

@@ -41,6 +41,7 @@ export const shell = {
         releases: "Releases",
         security: "Security",
         contributing: "Contributing",
+        brand: "Brand",
       },
       haunt: "Haunting the internet with",
       made: "Made by",

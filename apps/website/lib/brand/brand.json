@@ -1,0 +1,192 @@
+{
+  "$comment": "Ghostly's brand, in one place. The /brand page (app/brand), the press kit (scripts/brand-kit.mjs, built into public/brand/ by prebuild and predev) and scripts/brand.test.mjs read this file. The test fails when the site's tokens (app/globals.css, app/site.css), the lockup (components/site/Brand.tsx, apps/ui/src/components/AppBrand.tsx, public/favicon.svg) or the app's themes (apps/ui/src/index.css) say something else, and when a contrast pair misses the level its use needs. Change a colour here and in the CSS together. The wordmark's outline is Inter 4.001 Bold, GHOSTLY, tracking -0.025em, at 100 units to the em, made once with opentype.js (see logo.wordmark.source).",
+  "name": "Ghostly",
+  "url": "https://ghostly.tools/brand",
+  "foundation": {
+    "oneLine": "Ghostly is a free, open source messenger that connects you straight to the people you invite, with no account and no server holding your messages.",
+    "promise": "Your conversations go from your device to theirs. Nobody in between keeps them, reads them or sells them.",
+    "tagline": "Find each other. Talk peer to peer.",
+    "taglineShort": "Talk peer to peer.",
+    "traits": [
+      { "name": "Private by build", "text": "Privacy comes from how Ghostly works, not from a promise. We say what the network sees, plainly." },
+      { "name": "Friendly", "text": "A ghost that waves, not one that haunts. Warm, a little playful, never spooky or edgy." },
+      { "name": "Plain-spoken", "text": "Short words, short labels, the truth about limits. Details wait behind an ⓘ." },
+      { "name": "Open", "text": "Open source, open protocol (the WISPs), built in public. Anyone can read the code and build a client." }
+    ],
+    "isNot": [
+      "Not a crypto token or a coin. Ghostly can send sats and other money, but it sells nothing.",
+      "Not a social network. There is no feed, no public profile to grow, no follower count.",
+      "Not anonymous by default. A direct connection shows your IP address to the contact you talk to.",
+      "Not a company's cloud. There is no Ghostly server that holds your account, because there is no account.",
+      "Not a horror brand. No skulls, blood, cobwebs or dark-web looks."
+    ],
+    "boilerplate": {
+      "short": "Ghostly is a free, open source, peer-to-peer messenger: chat, call, and send files and sats straight to the people you invite, with no account and no server holding your data.",
+      "long": "Ghostly is a free and open source messenger that connects people directly. Two people find each other through a private invitation and a small rendezvous on the public Mainline DHT, then talk device to device over WebRTC, Iroh or HyperDHT, end to end encrypted. There is no account to create, no phone number, and no server that stores messages, contacts or keys. Ghostly runs in the browser, as a desktop app for macOS, Windows and Linux, as a Chrome extension and as a command line tool. It does one-to-one and group chats, voice and video calls, large files, payments in Bitcoin and other money, shared apps and services, and verified identities. Its wire protocol is written down in public specifications, the WISPs, so anyone can build a compatible client. Ghostly is made by Miguel Medeiros and contributors and is released under the MIT License."
+    }
+  },
+  "logo": {
+    "iconPath": "M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z",
+    "eyes": [
+      { "cx": 13, "cy": 20, "r": 3 },
+      { "cx": 27, "cy": 20, "r": 3 }
+    ],
+    "bodyBox": { "x": 2, "y": 4, "width": 32, "height": 38 },
+    "appBox": { "viewBox": "0 0 64 64", "translate": [12, 8] },
+    "unit": "E, the diameter of one of the ghost's eyes: 6 of the icon's 64 units, or about 9% of the icon's width",
+    "wordmark": {
+      "text": "GHOSTLY",
+      "font": "Inter Bold (700), uppercase, tracking -0.025em",
+      "source": "Inter 4.001 (@fontsource/inter 5.3.0, inter-latin-700-normal.woff), outlined with opentype.js 1.3.4, kerning on, at 100 units to the em",
+      "screenFont": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif",
+      "capHeight": 72.75,
+      "width": 466.69,
+      "height": 74.8,
+      "d": "M34.23 74.71L34.23 74.71Q24.02 74.71 16.33 70.19Q8.64 65.67 4.32 57.30Q0 48.93 0 37.45L0 37.45Q0 25.63 4.49 17.26Q8.98 8.89 16.65 4.44Q24.32 0 33.89 0L33.89 0Q40.04 0 45.34 1.78Q50.63 3.56 54.76 6.84Q58.89 10.11 61.50 14.58Q64.11 19.04 64.89 24.46L64.89 24.46L49.76 24.46Q48.97 21.83 47.58 19.75Q46.19 17.68 44.21 16.21Q42.24 14.75 39.70 13.99Q37.16 13.23 34.13 13.23L34.13 13.23Q28.52 13.23 24.22 16.04Q19.92 18.85 17.53 24.22Q15.14 29.59 15.14 37.30Q15.14 45.02 17.50 50.42Q19.87 55.81 24.17 58.64Q28.47 61.47 34.33 61.47L34.33 61.47Q39.60 61.47 43.36 59.57Q47.12 57.67 49.17 54.10L49.17 54.10Q51.07 50.73 51.17 46.29L51.17 46.29L35.35 46.29L35.35 34.96L65.63 34.96L65.63 44.04Q65.63 53.61 61.57 60.47Q57.52 67.33 50.44 71.02Q43.36 74.71 34.23 74.71ZM89.44 73.73L74.55 73.73L74.55 0.98L89.44 0.98L89.44 30.37L121.13 30.37L121.13 0.98L136.07 0.98L136.07 73.73L121.13 73.73L121.13 42.72L89.44 42.72L89.44 73.73ZM178.69 74.71L178.69 74.71Q169.07 74.71 161.38 70.31Q153.69 65.92 149.22 57.57Q144.76 49.22 144.76 37.40L144.76 37.40Q144.76 25.54 149.22 17.16Q153.69 8.79 161.38 4.39Q169.07 0 178.69 0L178.69 0Q188.36 0 196.03 4.39Q203.69 8.79 208.16 17.16Q212.63 25.54 212.63 37.40L212.63 37.40Q212.63 49.22 208.16 57.57Q203.69 65.92 196.03 70.31Q188.36 74.71 178.69 74.71ZM178.69 61.47L178.69 61.47Q184.36 61.47 188.58 58.72Q192.80 55.96 195.15 50.56Q197.49 45.17 197.49 37.40L197.49 37.40Q197.49 29.54 195.15 24.15Q192.80 18.75 188.58 15.99Q184.36 13.23 178.69 13.23L178.69 13.23Q173.08 13.23 168.83 16.02Q164.58 18.80 162.24 24.19Q159.89 29.59 159.89 37.40L159.89 37.40Q159.89 45.17 162.24 50.54Q164.58 55.91 168.83 58.69Q173.08 61.47 178.69 61.47ZM247.97 74.80L247.97 74.80Q239.23 74.80 232.76 72.12Q226.29 69.43 222.68 64.16Q219.06 58.89 218.87 51.17L218.87 51.17L233.37 51.17Q233.66 54.83 235.57 57.30Q237.47 59.77 240.64 60.99Q243.82 62.21 247.82 62.21L247.82 62.21Q251.83 62.21 254.78 61.06Q257.73 59.91 259.39 57.81Q261.05 55.71 261.05 52.93L261.05 52.93Q261.05 50.44 259.57 48.75Q258.08 47.07 255.29 45.85Q252.51 44.63 248.51 43.70L248.51 43.70L240.50 41.70Q231.27 39.45 226.04 34.64Q220.82 29.83 220.82 21.92L220.82 21.92Q220.82 15.33 224.36 10.40Q227.90 5.47 234.08 2.73Q240.25 0 248.16 0L248.16 0Q256.22 0 262.23 2.76Q268.23 5.52 271.60 10.42Q274.97 15.33 275.07 21.73L275.07 21.73L260.66 21.73Q260.27 17.33 256.93 14.94Q253.58 12.55 248.02 12.55L248.02 12.55Q244.26 12.55 241.57 13.62Q238.89 14.70 237.50 16.60Q236.10 18.51 236.10 20.95L236.10 20.95Q236.10 23.63 237.71 25.42Q239.33 27.20 242.01 28.30Q244.70 29.39 247.72 30.13L247.72 30.13L254.32 31.74Q258.91 32.76 262.86 34.52Q266.82 36.28 269.79 38.84Q272.77 41.41 274.41 44.92Q276.04 48.44 276.04 53.03L276.04 53.03Q276.04 59.62 272.72 64.53Q269.40 69.43 263.11 72.12Q256.81 74.80 247.97 74.80ZM303.62 13.33L281.36 13.33L281.36 0.98L340.78 0.98L340.78 13.33L318.56 13.33L318.56 73.73L303.62 73.73L303.62 13.33ZM394.82 73.73L348.54 73.73L348.54 0.98L363.43 0.98L363.43 61.38L394.82 61.38L394.82 73.73ZM440.18 73.73L425.33 73.73L425.33 46.39L398.38 0.98L415.81 0.98L428.12 23.63Q430.02 27.05 431.48 30.42L431.48 30.42Q432.17 31.98 432.85 33.79L432.85 33.79Q433.54 31.93 434.17 30.37L434.17 30.37Q435.59 27 437.39 23.63L437.39 23.63L449.31 0.98L466.69 0.98L440.18 46.39L440.18 73.73Z"
+    },
+    "lockup": { "gapE": 3.5, "capHeightE": 3.5 },
+    "clearSpaceE": 4,
+    "tile": { "background": "#0f172a", "radius": 12, "ghostOpacity": 0.9, "highlight": "#ffffff", "highlights": [{ "cx": 14, "cy": 18.5, "r": 1.2 }, { "cx": 28, "cy": 18.5, "r": 1.2 }] },
+    "minimum": [
+      { "variant": "lockup", "px": 96, "mm": 25, "note": "Width. Below it, use the icon." },
+      { "variant": "icon", "px": 16, "mm": 5, "note": "Width of the ghost. The favicon is the smallest use." },
+      { "variant": "wordmark", "px": 64, "mm": 18, "note": "Width. Only where the ghost already shows nearby." }
+    ],
+    "colorways": [
+      { "id": "cyan", "name": "Ghost cyan", "fill": "#22d3ee", "on": "#060a10", "use": "The default. On Night and every dark surface." },
+      { "id": "deep", "name": "Ghost deep", "fill": "#0b6680", "on": "#ffffff", "use": "On white and light greys: the README on a light page, documents, light themes." },
+      { "id": "navy", "name": "Night", "fill": "#060a10", "on": "#22d3ee", "use": "On Ghost cyan, and in one-colour dark print." },
+      { "id": "white", "name": "White", "fill": "#ffffff", "on": "#0d1117", "use": "On dark photos and colours that are not ours, where cyan would clash." },
+      { "id": "black", "name": "Black", "fill": "#000000", "on": "#ffffff", "use": "One-colour print, stamps, engraving." }
+    ],
+    "donts": [
+      { "id": "stretch", "text": "Don't stretch or squash it." },
+      { "id": "recolor", "text": "Don't recolour it outside the four colourways." },
+      { "id": "rotate", "text": "Don't rotate or tilt it." },
+      { "id": "effects", "text": "Don't add shadows, glows, gradients or bevels." },
+      { "id": "outline", "text": "Don't draw it as an outline." },
+      { "id": "busy", "text": "Don't place it on a busy picture without a calm area." }
+    ]
+  },
+  "colors": {
+    "core": [
+      { "id": "night", "name": "Night", "hex": "#060a10", "role": "The background of every page. The dark the ghost glows on.", "share": 60, "site": "--bg", "theme": "--color-background" },
+      { "id": "shade", "name": "Shade", "hex": "#0d1117", "role": "Cards, panels and code blocks on Night.", "share": 14, "site": "--surface", "theme": "--color-surface" },
+      { "id": "line", "name": "Line", "hex": "#1e293b", "role": "Borders and dividers.", "share": 4, "site": "--line", "theme": "--color-border" },
+      { "id": "mist", "name": "Mist", "hex": "#e8edf5", "role": "Headings and body text.", "share": 12, "site": "--text", "theme": "--color-foreground" },
+      { "id": "haze", "name": "Haze", "hex": "#a3b0c2", "role": "Secondary text, leads and captions.", "share": 4, "site": "--muted" },
+      { "id": "cyan", "name": "Ghost cyan", "hex": "#22d3ee", "role": "The logo, links, focus rings and the one main action of a view.", "share": 5, "site": "--cyan", "theme": "--color-cyan" },
+      { "id": "green", "name": "Signal green", "hex": "#00a884", "role": "The app's default accent (Classic theme) and the end of the main button's gradient.", "share": 1, "site": "--green", "theme": "--color-green" }
+    ],
+    "extended": [
+      { "id": "night-2", "name": "Night 2", "hex": "#08101a", "role": "A second background for alternating bands.", "site": "--bg-2" },
+      { "id": "shade-2", "name": "Shade 2", "hex": "#111a25", "role": "The top of a card's gradient.", "site": "--surface-2" },
+      { "id": "shade-3", "name": "Shade 3", "hex": "#172231", "role": "Raised elements inside a card.", "site": "--surface-3" },
+      { "id": "shade-light", "name": "Shade light", "hex": "#161b22", "role": "Hover on Shade.", "theme": "--color-surface-light" },
+      { "id": "line-2", "name": "Line 2", "hex": "#2b3b52", "role": "Borders of buttons and chips.", "site": "--line-2" },
+      { "id": "dim", "name": "Dim", "hex": "#7a8aa6", "role": "Notes and the quietest text, on Night and the Shades only.", "site": "--dim" },
+      { "id": "tile", "name": "Tile", "hex": "#0f172a", "role": "The rounded square behind the icon (favicon, app icons)." },
+      { "id": "deep", "name": "Ghost deep", "hex": "#0b6680", "role": "The logo and the accent on light pages (the app's Cyan light accent, the README's light logo)." },
+      { "id": "cyan-dim", "name": "Cyan deep", "hex": "#0e7490", "role": "Cyan on light pages, and pressed states.", "theme": "--color-cyan-dim" },
+      { "id": "green-dim", "name": "Green deep", "hex": "#005c4b", "role": "The app's sent bubble (Classic, dark).", "theme": "--color-green-dim" },
+      { "id": "mint", "name": "Casper mint", "hex": "#4ade80", "role": "Casper, the second ghost, and Available badges.", "site": "--mint", "ghost": "casper" },
+      { "id": "slate", "name": "Shade ghost", "hex": "#94a3b8", "role": "A third, quiet ghost in a crowd, and Research badges.", "ghost": "shade" },
+      { "id": "amber", "name": "Amber", "hex": "#fbbf24", "role": "Highlights in diagrams. Not for warnings in the app.", "site": "--amber" },
+      { "id": "violet", "name": "Violet", "hex": "#a78bfa", "role": "Diagrams and charts only.", "site": "--violet" },
+      { "id": "sky", "name": "Sky", "hex": "#60a5fa", "role": "Planned badges, diagrams and charts.", "site": "--sky" },
+      { "id": "rose", "name": "Rose", "hex": "#f472b6", "role": "A ghost's cheeks, diagrams and charts.", "site": "--rose" }
+    ],
+    "white": "#ffffff",
+    "buttonInk": "#031018",
+    "app": {
+      "note": "The app has four colour themes, each light and dark. Classic is the default. Values come from apps/ui/src/index.css; a theme that leaves a token out takes Classic's.",
+      "tokens": ["sidebar-bg", "chat-bg", "surface-alt", "text-primary", "text-secondary", "accent", "on-accent", "sent-bg", "received-bg", "link"],
+      "themes": [
+        { "id": "classic", "mode": "dark", "name": "Classic dark", "default": true, "values": { "sidebar-bg": "#111b21", "chat-bg": "#0b141a", "surface-alt": "#202c33", "text-primary": "#e9edef", "text-secondary": "#8696a0", "accent": "#00a884", "on-accent": "#111b21", "sent-bg": "#005c4b", "received-bg": "#202c33", "link": "#8ad3f6" } },
+        { "id": "classic", "mode": "light", "name": "Classic light", "values": { "sidebar-bg": "#ffffff", "chat-bg": "#efeae2", "surface-alt": "#f5f6f6", "text-primary": "#111b21", "text-secondary": "#54656f", "accent": "#00a884", "on-accent": "#111b21", "sent-bg": "#d9fdd3", "received-bg": "#ffffff", "link": "#026aa0" } },
+        { "id": "cyan", "mode": "dark", "name": "Cyan dark", "values": { "sidebar-bg": "#071018", "chat-bg": "#050d14", "surface-alt": "#0c1929", "text-primary": "#e0f4ff", "text-secondary": "#7eb8d8", "accent": "#22d3ee", "on-accent": "#111b21", "sent-bg": "#0e4d5a", "received-bg": "#0c1929", "link": "#8ad3f6" } },
+        { "id": "cyan", "mode": "light", "name": "Cyan light", "values": { "sidebar-bg": "#ffffff", "chat-bg": "#f0fdff", "surface-alt": "#ecfeff", "text-primary": "#083344", "text-secondary": "#155e75", "accent": "#0b6680", "on-accent": "#ffffff", "sent-bg": "#cffafe", "received-bg": "#ffffff", "link": "#026aa0" } }
+      ]
+    },
+    "contrast": [
+      { "fg": "#e8edf5", "bg": "#060a10", "label": "Mist on Night", "use": "text" },
+      { "fg": "#e8edf5", "bg": "#0d1117", "label": "Mist on Shade", "use": "text" },
+      { "fg": "#a3b0c2", "bg": "#060a10", "label": "Haze on Night", "use": "text" },
+      { "fg": "#a3b0c2", "bg": "#0d1117", "label": "Haze on Shade", "use": "text" },
+      { "fg": "#7a8aa6", "bg": "#060a10", "label": "Dim on Night", "use": "text" },
+      { "fg": "#7a8aa6", "bg": "#172231", "label": "Dim on Shade 3", "use": "text" },
+      { "fg": "#22d3ee", "bg": "#060a10", "label": "Ghost cyan on Night", "use": "text" },
+      { "fg": "#22d3ee", "bg": "#0d1117", "label": "Ghost cyan on Shade", "use": "text" },
+      { "fg": "#4ade80", "bg": "#060a10", "label": "Casper mint on Night", "use": "text" },
+      { "fg": "#00a884", "bg": "#060a10", "label": "Signal green on Night", "use": "text" },
+      { "fg": "#031018", "bg": "#22d3ee", "label": "Button ink on Ghost cyan", "use": "text" },
+      { "fg": "#031018", "bg": "#00a884", "label": "Button ink on Signal green", "use": "text" },
+      { "fg": "#060a10", "bg": "#22d3ee", "label": "Night logo on Ghost cyan", "use": "graphic" },
+      { "fg": "#0b6680", "bg": "#ffffff", "label": "Ghost deep logo on white", "use": "graphic" },
+      { "fg": "#060a10", "bg": "#ffffff", "label": "Night on white", "use": "text" },
+      { "fg": "#0e7490", "bg": "#ffffff", "label": "Cyan deep on white", "use": "text" },
+      { "fg": "#22d3ee", "bg": "#ffffff", "label": "Ghost cyan on white", "use": "avoid" },
+      { "fg": "#e9edef", "bg": "#005c4b", "label": "App: text on a sent bubble (Classic dark)", "use": "text" },
+      { "fg": "#e9edef", "bg": "#202c33", "label": "App: text on a received bubble (Classic dark)", "use": "text" },
+      { "fg": "#8696a0", "bg": "#111b21", "label": "App: secondary text on the list (Classic dark)", "use": "text" },
+      { "fg": "#111b21", "bg": "#00a884", "label": "App: on-accent on the accent (Classic)", "use": "text" },
+      { "fg": "#111b21", "bg": "#d9fdd3", "label": "App: text on a sent bubble (Classic light)", "use": "text" },
+      { "fg": "#54656f", "bg": "#ffffff", "label": "App: secondary text on the list (Classic light)", "use": "text" },
+      { "fg": "#026aa0", "bg": "#ffffff", "label": "App: link on a received bubble (light)", "use": "text" },
+      { "fg": "#111b21", "bg": "#22d3ee", "label": "App: on-accent on the accent (Cyan dark)", "use": "text" },
+      { "fg": "#ffffff", "bg": "#0b6680", "label": "App: on-accent on the accent (Cyan light)", "use": "text" }
+    ]
+  },
+  "type": {
+    "families": [
+      { "id": "inter", "name": "Inter", "role": "Every word on the website, the press kit and slides: headings, body, buttons.", "weights": [400, 500, 600, 650, 700], "fallback": "Inter, system-ui, sans-serif", "license": "SIL Open Font License 1.1", "links": [{ "label": "rsms.me/inter", "href": "https://rsms.me/inter/" }, { "label": "Google Fonts", "href": "https://fonts.google.com/specimen/Inter" }] },
+      { "id": "mono", "name": "JetBrains Mono", "role": "Eyebrows, captions, chips, keys, commands and code. Never a whole paragraph.", "weights": [400, 500, 700], "fallback": "\"JetBrains Mono\", ui-monospace, monospace", "license": "SIL Open Font License 1.1", "links": [{ "label": "jetbrains.com/lp/mono", "href": "https://www.jetbrains.com/lp/mono/" }, { "label": "Google Fonts", "href": "https://fonts.google.com/specimen/JetBrains+Mono" }] },
+      { "id": "system", "name": "System UI", "role": "The app itself and the wordmark on screen: the device's own font, so Ghostly feels native on every platform.", "weights": [400, 500, 600, 700], "fallback": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif", "license": "The platform's", "links": [] }
+    ],
+    "scale": [
+      { "token": "--t-display", "name": "Display", "size": "clamp(56px, 9.5vw, 148px)", "sample": 64, "lineHeight": 0.95, "tracking": "-0.04em", "weight": 700, "family": "inter", "use": "One per page, the hero." },
+      { "token": "--t-section", "name": "Section", "size": "clamp(40px, 5.4vw, 72px)", "sample": 44, "lineHeight": 1, "tracking": "-0.03em", "weight": 700, "family": "inter", "use": "A section's title." },
+      { "token": "--t-scene", "name": "Scene", "size": "clamp(34px, 4.2vw, 60px)", "sample": 34, "lineHeight": 1.02, "tracking": "-0.03em", "weight": 700, "family": "inter", "use": "A step or scene inside a section." },
+      { "token": "--t-card", "name": "Card", "size": "26px", "sample": 26, "lineHeight": 1.15, "tracking": "-0.015em", "weight": 650, "family": "inter", "use": "A card's title." },
+      { "token": "--t-lead", "name": "Lead", "size": "clamp(18px, 1.6vw, 21px)", "sample": 20, "lineHeight": 1.5, "tracking": "0", "weight": 400, "family": "inter", "use": "The paragraph under a title, in Haze." },
+      { "token": "--t-body", "name": "Body", "size": "17px", "sample": 17, "lineHeight": 1.6, "tracking": "0", "weight": 400, "family": "inter", "use": "Running text, at most 34em wide." },
+      { "token": "--t-note", "name": "Note", "size": "15px", "sample": 15, "lineHeight": 1.55, "tracking": "0", "weight": 400, "family": "inter", "use": "Limits and asides, in Dim." },
+      { "token": "--t-micro", "name": "Micro", "size": "13px", "sample": 13, "lineHeight": 1.5, "tracking": "0", "weight": 500, "family": "inter", "use": "Table cells and dense UI." },
+      { "token": "--t-caption", "name": "Caption", "size": "12px", "sample": 12, "lineHeight": 1.5, "tracking": "0.06em", "weight": 400, "family": "mono", "use": "Captions, eyebrows (uppercase, 0.16em) and chips." }
+    ]
+  },
+  "motion": {
+    "durations": [
+      { "token": "--dur-fast", "ms": 140, "name": "Fast", "use": "Hover, press, focus: feedback." },
+      { "token": "--dur-base", "ms": 280, "name": "Base", "use": "A small change: a chip, a caption, a card." },
+      { "token": "--dur-slow", "ms": 560, "name": "Slow", "use": "A large element or a whole scene arriving." },
+      { "token": "--dur-beat", "ms": 1800, "name": "Beat", "use": "One story beat played in full. The longest anything runs unless the reader scrolls it." }
+    ],
+    "easings": [
+      { "token": "--ease-enter", "name": "Enter", "curve": [0.22, 1, 0.36, 1], "use": "Arriving: a fast start, a long soft landing." },
+      { "token": "--ease-exit", "name": "Exit", "curve": [0.55, 0, 1, 0.45], "use": "Leaving: a quiet start, gone quickly." },
+      { "token": "--ease-move", "name": "Move", "curve": [0.65, 0, 0.35, 1], "use": "Travelling on screen from A to B." },
+      { "token": "--ease-burst", "name": "Burst", "curve": [0.2, 0.8, 0.3, 1], "use": "A ring bursting out once, when two ghosts connect." },
+      { "token": "--ease-hop", "name": "Hop", "curve": [0.3, 1.6, 0.5, 1], "use": "A small hop that overshoots and lands: a check popping in." }
+    ],
+    "staggerMs": 60
+  },
+  "voice": {
+    "languages": [
+      { "code": "en", "name": "English", "native": "English" },
+      { "code": "pt", "name": "Portuguese", "native": "Português" },
+      { "code": "es", "name": "Spanish", "native": "Español" },
+      { "code": "fr", "name": "French", "native": "Français" },
+      { "code": "it", "name": "Italian", "native": "Italiano" },
+      { "code": "zh", "name": "Chinese", "native": "中文" },
+      { "code": "ja", "name": "Japanese", "native": "日本語" },
+      { "code": "ar", "name": "Arabic", "native": "العربية", "dir": "rtl" }
+    ]
+  },
+  "press": {
+    "contact": "ghostly@miguelmedeiros.com.br",
+    "maker": { "name": "Miguel Medeiros", "url": "https://miguelmedeiros.dev" },
+    "repo": "https://github.com/MiguelMedeiros/ghostly",
+    "license": "MIT"
+  }
+}

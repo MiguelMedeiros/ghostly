@@ -11,6 +11,17 @@ export interface IntentRepository {
 /** Persist-before-spend; a submitted/unknown operation can only be reconciled, never re-executed. */
 export class PaymentCoordinator {
   private active = new Map<string, Promise<PaymentReview>>();
+  /**
+   * The reviews still pending (an Approve may send them), by id: what `dropStale` looks at, so that its minute's sweep
+   * does not read every review ever made. `null` until the store was read once. An id leaves when the sweep finds its
+   * review no longer pending, or gone.
+   */
+  private pending: Set<string> | null = null;
+  /** Reviews read from the store past the coordinator (`refreshWallet`'s list): the pending ones are swept too. */
+  notePending(reviews: readonly PaymentReview[]): void {
+    const pending = this.pending ??= new Set();
+    for (const review of reviews) if (review.state === "pending") pending.add(review.id);
+  }
   constructor(private repository: IntentRepository, private adapters: PaymentAdapter[], private changed: (review: PaymentReview) => void = () => {}) {}
   async prepare(target: PaymentTarget, amount: number, feeCap: number, context: { payee: string; linkId?: string; requestId?: string; memo?: string }): Promise<PaymentReview> {
     const validated = validatePaymentTarget(target);
@@ -24,7 +35,7 @@ export class PaymentCoordinator {
     const {fee,prepared,evm} = await adapter.prepare(validated,amount,feeCap);
     if (!Number.isSafeInteger(fee) || fee < 0 || fee > feeCap) throw engineError("feeAboveLimit");
     const review: PaymentReview = {...validated,...context,id:crypto.randomUUID(),amount,fee,feeCap,...(evm ? {evm} : {}),createdAt:Date.now(),state:"pending"};
-    await this.repository.put({review,prepared}); this.changed(review); return review;
+    await this.repository.put({review,prepared}); this.pending?.add(review.id); this.changed(review); return review;
   }
   approve(id: string): Promise<PaymentReview> { return this.once(id,async () => {
     const saved = await this.require(id);
@@ -67,11 +78,17 @@ export class PaymentCoordinator {
    */
   async dropStale(now: number = Date.now(), unpayable: (review: PaymentReview) => boolean = () => false): Promise<PaymentReview[]> {
     const dropped: PaymentReview[] = [];
-    for (const { review } of await this.repository.list()) {
-      if (review.state !== "pending" || (review.expiresAt > now && !unpayable(review))) continue;
+    // The whole store once, when nothing has read it yet; after that, the pending reviews alone.
+    if (!this.pending) this.notePending((await this.repository.list()).map(({ review }) => review));
+    const pending = this.pending!;
+    for (const id of [...pending]) {
+      const review = (await this.repository.get(id))?.review;
+      if (!review || review.state !== "pending") { pending.delete(id); continue; }
+      if (review.expiresAt > now && !unpayable(review)) continue;
       // Approved meanwhile, or cancelled elsewhere: the store refuses (or the approval under way answers), and that
       // one is left as it is.
       try { const cancelled = await this.cancel(review.id); if (cancelled.state === "cancelled") dropped.push(cancelled); } catch { /* not pending any more */ }
+      pending.delete(id);
     }
     return dropped;
   }

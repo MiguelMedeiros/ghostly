@@ -1,9 +1,20 @@
 import { FILE_BYTES_STEP, fileBytesOf, type FileBytes } from "./fileBytes";
 import { fileStore, type StoredFile } from "./idb";
+import type { FileTransferView } from "./types";
 
 /** The bytes a file holds: its metadata says, and a file stored before that says it with its Blob. */
 export function storedSize(file: StoredFile): number {
   return file.metadata?.size ?? file.blob?.size ?? 0;
+}
+
+/**
+ * A group's file (WISP 503) that is not here, read from its record: when the engine shows no transfer for it, it waits
+ * for its person's Download. The engine keeps no view of such a file in the states it builds (one for every file a
+ * group ever had would go into each of them), so the app's bubble and the CLI read it here. Null for any other file.
+ */
+export function waitingGroupFile(file: StoredFile | undefined): FileTransferView | null {
+  if (!file?.group || file.direction !== "in" || file.transfer?.state !== "transferring") return null;
+  return { state: "transferring", stage: "asking", transferred: 0, size: file.metadata?.size ?? file.transfer.size, direction: "in" };
 }
 
 async function backend(file: StoredFile): Promise<FileBytes | null> {

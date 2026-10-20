@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64, type Identity } from "../src/identity";
-import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RelayTransport } from "../src/relay";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RELAY_REQUESTS_PER_MINUTE, RelayTransport } from "../src/relay";
 import { fromBase64Url } from "../src/bytes";
 import { buildLinkRecords, emptyLinkRecords } from "../src/records";
 import { createLink, type LinkParams } from "../src/invite";
@@ -17,6 +17,8 @@ import {
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
+  UNUSED_INVITE_WAIT_MAX_MS,
+  countUnusedInvite,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -287,8 +289,9 @@ describe("LinkSession presence and signals", () => {
 
   it("republishes presence in the background while the data link is up, and as a chat's write otherwise or with something new", async () => {
     // A profile's live chats must not take the relays' requests its groups need (a daemon with 30 live chats, 2026-10-08).
-    const { a } = pair({ getServices: () => [] });
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
     a.s.start();
+    b.s.start();
     await settle();
     const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
     a.s.setDataLinkOpen(true);
@@ -309,6 +312,49 @@ describe("LinkSession presence and signals", () => {
     a.s.setDataLinkOpen(false);
     await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
     expect(lastPublish()).toBeUndefined();
+    // An offer goes as a signal; taking it back (the session opened, or the attempt ended) is upkeep.
+    await a.s.setRtcSignal('{"t":"o"}');
+    expect(lastPublish()).toEqual({ signal: true });
+    await a.s.setRtcSignal(null);
+    expect(lastPublish()).toEqual({ background: true });
+    // The contact went away (its last packet says so): nobody waits on the heartbeat, it is upkeep again.
+    await b.s.stop(true);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(a.s.peerPresence.online).toBe(false);
+    expect(lastPublish()).toEqual({ background: true });
+    // Something new for it is not.
+    await a.s.sendMessage("for later");
+    expect(lastPublish()).toBeUndefined();
+    await a.s.stop(false);
+  });
+
+  it("a background write the budget holds back for a while goes again when its share frees, not every 4 s; a chat's write keeps its turn", async () => {
+    // An idle admin's daemon built and signed 1,041 packets in 9 minutes that the budget refused again (bug hunt, 2026-10-19).
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
+    a.s.start();
+    b.s.start();
+    await settle();
+    const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    a.s.setDataLinkOpen(true);
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(lastPublish()).toEqual({ background: true });
+    const held = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held);
+    // Its share frees: it goes.
+    a.transport.failPublish = null;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held + 1);
+    expect(lastPublish()).toEqual({ background: true });
+    // A chat's write held back the same way tries again within 4 s, which keeps it first in line (`WRITE_FIRST_MS`).
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    expect(await a.s.sendMessage("held")).toBeNull();
+    expect(lastPublish()).toBeUndefined();
+    const chat = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(a.transport.publish.mock.calls.length).toBeGreaterThan(chat);
+    a.transport.failPublish = null;
     await a.s.stop(false);
   });
 
@@ -625,6 +671,26 @@ describe("LinkSession poll pacing", () => {
     await a.s.stop(false);
   });
 
+  it("reads an invite nobody used less often once no longer awaited, and at the background pace once its contact shows", async () => {
+    const { a, b } = pair({ invite: () => true }, { getServices: () => [{ id: "atlas", type: "http" }] });
+    // Among enough other unused invites of the app that their count asks for the longest wait.
+    for (let i = 0; i < 29; i++) countUnusedInvite(a.transport, {}, true);
+    a.s.start();
+    await settle();
+    vi.setSystemTime(NOW + 3 * AWAITING_PEER_MS);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(UNUSED_INVITE_WAIT_MAX_MS);
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.lastPacketAt).toBeGreaterThan(0);
+    expect(lastPoll(a.ev)).toBe(I.background);
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
   it("counts that wait from when the chat was made: a saved chat reads in the background from its first read of a start", async () => {
     // Made a month ago, its contact away since (no packet at the relays): no invite just sent.
     const old = pair({ awaitingSince: NOW - 30 * 86_400_000 });
@@ -671,9 +737,10 @@ describe("LinkSession poll pacing", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const reads = requests.filter((r) => r.method === "GET").length;
     await expect(relays.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
-    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual([15_000, 15_000]);
-    // The chats' reads took the background share of each relay's minute, not the minute.
-    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE);
+    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual(DEFAULT_RELAYS.map(() => 15_000));
+    // The chats' reads took the background share of each relay's minute, not the minute: 20 on a relay of 30 or 60,
+    // two thirds of pkarr.miguelmedeiros.dev's 5, so its write still went out there.
+    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE + Math.ceil(RELAY_REQUESTS_PER_MINUTE["https://pkarr.miguelmedeiros.dev"] * 2 / 3));
     for (const chat of chats) await chat.stop(false);
   });
 
@@ -811,6 +878,41 @@ describe("LinkSession poll pacing", () => {
     a.s.pollNow();
     await settle();
     expect(last()?.departed).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  it("says its reads are a resume's back after a restart, until one is answered (a group edge's go on the relays' floor)", async () => {
+    const { a, b } = pair({ resumed: true, firstPublish: "after-first-poll" }, { getServices: () => [] });
+    b.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { resume?: boolean } | undefined;
+    // The relays' budget holds the first read back: the next one still waits on it.
+    a.transport.failResolve = new DiscoveryBudgetError(1_000);
+    a.s.start();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    a.transport.failResolve = null;
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    expect(a.s.peerPresence.online).toBe(true);
+    // Answered: from then on a read is the contact's like any other.
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  it("never says so when it was not live when the app last ran", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    b.s.start();
+    a.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.transport.resolve.mock.calls.every((call) => !((call as unknown[])[1] as { resume?: boolean } | undefined)?.resume)).toBe(true);
     await a.s.stop(false);
     await b.s.stop(false);
   });

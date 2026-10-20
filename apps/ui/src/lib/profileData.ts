@@ -5,10 +5,11 @@ import { deviceStateOf, forgetDevice } from "@ghostly/browser/devices/store";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
-import { unreadUnder } from "./storage";
+import { retryUnsaved, unreadUnder } from "./storage";
 import { peekFresh } from "./profilePeek";
 import { verifyPassword } from "./settings";
 import { pushPlatform } from "./wakePush";
+import { linkedFilesDatabase } from "./apps/webFiles";
 
 /**
  * What deleting a profile would take away, read from its own storage without starting it. `wallets`: the kinds of
@@ -238,6 +239,8 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
   const own = await walletStorage(dbName);
   if (await databaseExists(dbName)) await drop(dbName);
+  // The folders and files its apps were given (linked files: handles, never copies).
+  if (await databaseExists(linkedFilesDatabase(dbName))) await drop(linkedFilesDatabase(dbName)).catch(() => {});
   await dropFileSpace(dbName).catch(() => {});
   for (const name of new Set(own.databases)) if (!usedElsewhere.has(name)) await drop(name);
   for (const name of new Set(own.files)) if (!usedElsewhere.has(name)) await dropFile(name).catch(() => {});
@@ -245,6 +248,8 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   await dropBreezDatabasesOf(dbName).catch(() => {});
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
+  // The room its keys made may fit what the open profile's page held (the storage-full notice).
+  retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.

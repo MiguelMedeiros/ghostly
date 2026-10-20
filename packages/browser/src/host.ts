@@ -1,5 +1,5 @@
 import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
-import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
+import type { ClientMessage, EngineEvent, RpcResponse } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
@@ -11,7 +11,8 @@ import type { CallMedia } from "@ghostly/core";
  * the web app runs it in the page. Everything else is shared.
  */
 export interface EngineConnection {
-  send(request: RpcRequest): void;
+  /** An engine call, or an ask for a chat's whole history (`HistoryRequest`). */
+  send(request: ClientMessage): void;
 }
 
 /**
@@ -27,6 +28,11 @@ export interface UpdateSource {
   check(): Promise<FoundUpdate | null>;
   /** Never called for `apply: "manual"`. `onProgress` is used where the platform reports it. */
   install(update: FoundUpdate, onProgress?: (fraction: number) => void): Promise<void>;
+  /**
+   * Calls `listener` when a file of this build is gone from the server (the web app's worker got a 404 for one), so
+   * the app checks at once. Returns what stops listening. Left out where the host cannot tell.
+   */
+  onBuildGone?(listener: () => void): () => void;
 }
 
 export interface BrowserHost {
@@ -71,7 +77,8 @@ export interface BrowserHost {
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
   /** The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach). */
   forgetLocalAccess?(origin: string): Promise<void>;
-  openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
+  /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
+  openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
   /**
    * Opens a `lightning:` or `bitcoin:` link in a wallet on this device. Left out where a plain link
    * already does it (a web page); the desktop app and the extension have to hand it to the system.

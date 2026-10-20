@@ -35,7 +35,10 @@ function bobsEngine(relay: TestNostrRelay, options: { settings?: Partial<NostrSo
 
 describe("the Nostr social layer in the engine", () => {
   const relay = new TestNostrRelay();
+  // Alice's profile names a picture on a public image host: answered here, so no test waits on the outside network.
+  const pictures = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response(null, { status: 404 }));
   beforeAll(async () => {
+    vi.stubGlobal("fetch", pictures);
     await relay.listen();
     relay.add({ kind: 0, tags: [], content: JSON.stringify({ name: "alice", display_name: "Alice", about: "hi", picture: "https://image.nostr.build/alice.png", nip05: "alice@example.com" }), created_at: now - 100 }, alice);
     relay.add({ kind: 3, tags: [["p", B], ["p", C]], content: "", created_at: now - 90 }, alice);
@@ -43,7 +46,10 @@ describe("the Nostr social layer in the engine", () => {
     relay.add({ kind: 3, tags: [["p", A], ["p", C]], content: "", created_at: now - 80 }, bob);
     relay.add({ kind: 10000, tags: [["word", "casino"], ["p", C]], content: "", created_at: now - 70 }, bob);
   });
-  afterAll(() => relay.close());
+  afterAll(async () => {
+    vi.unstubAllGlobals();
+    await relay.close();
+  });
 
   it("defaults: the public relays, nothing automatic, no publication", () => {
     expect(effectiveNostrSettings(undefined)).toEqual({ relays: ["wss://relay.damus.io", "wss://nos.lol"], autoLoadProfiles: false, publish: false });
@@ -70,7 +76,8 @@ describe("the Nostr social layer in the engine", () => {
     await engine.loadContact({ linkId: "chat", subject: A, what: "profile" });
     const view = engine.linkView("chat")![0];
     expect(view.profile).toMatchObject({ found: true, stale: false, relays: [relay.url], profile: { name: "Alice", handle: "alice", about: "hi", nip05: "alice@example.com", hasPicture: true } });
-    expect(view.profile!.profile!.avatar).toBeUndefined(); // no image decoding in Node: name stays usable
+    expect(pictures).toHaveBeenCalledWith("https://image.nostr.build/alice.png", expect.objectContaining({ credentials: "omit" }));
+    expect(view.profile!.profile!.avatar).toBeUndefined(); // the picture host had nothing: the name stays usable
     expect(contacts.chat[A].profile!.profile!.picture).toBe("https://image.nostr.build/alice.png");
     expect(displays).toEqual([{ linkId: "chat", subject: A, display: { name: "Alice", source: "Nostr profile (kind 0, signed by this key, self-described)", fetchedAt: expect.any(Number) } }]);
     clock.t += 25 * 3600_000;

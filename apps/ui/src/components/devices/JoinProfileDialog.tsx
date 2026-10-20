@@ -6,8 +6,9 @@ import { askPersistentStorage, isIosBrowserTab } from "@ghostly/browser/devices/
 import { readDeviceInvite } from "@ghostly/core";
 import { useI18n, type TranslationKey } from "../../contexts/I18nContext";
 import {
-  defaultDeviceName, deviceNoun, enrollErrorKey, enrollInUse, enrollLoading, failureKey, joinInNewProfile, readDeviceLink, reloadIntoGate, type JoinRequest,
+  defaultDeviceName, deviceNoun, enrollErrorKey, enrollInUse, enrollLoading, failureKey, fitsDeviceName, joinInNewProfile, readDeviceLink, reloadIntoGate, type JoinRequest,
 } from "../../lib/devices";
+import { useFittedNameField } from "../../hooks/useGroupNameField";
 import { isDesktopApp } from "../../lib/externalLink";
 import { nameStepDone } from "../../lib/nameStep";
 import { servicesPlatform } from "../../lib/platform";
@@ -16,6 +17,7 @@ import { Notice } from "../wallet/ui";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
 import { problemText, type Problem } from "../../lib/problemText";
 import { said } from "../../lib/notices";
+import { keepFocusIn } from "../../lib/focus";
 
 /** How long a profile whose wallets are still loading is asked again before the join gives up and says why. */
 const LOADING_WAIT_MS = 60_000;
@@ -57,6 +59,8 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const [code, setCode] = useState(request.code);
   const [profile, setProfile] = useState(request.profile);
   const [name, setName] = useState(() => request.name ?? defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined));
+  // What the set keeps of a name, 16 bytes, not 16 characters: the name typed is the name every device shows.
+  const nameField = useFittedNameField(name, setName, fitsDeviceName);
   const [place, setPlace] = useState<Place | null>(null);
   const [view, setView] = useState<EnrollView | null>(null);
   const [kept, setKept] = useState<boolean | null>(null);
@@ -70,6 +74,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const started = useRef(false);
   // The scanner opened from the first step goes back there; opened by itself, it closes the dialog.
   const fromChoose = useRef(false);
+  const body = useRef<HTMLDivElement>(null);
   const noun = deviceNoun(isDesktopApp() ? { userAgent: "" } : undefined);
 
   useEffect(() => { closed.current = false; return () => { closed.current = true; }; }, []);
@@ -98,6 +103,8 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
     return () => clearInterval(timer);
   }, [step, view]);
   useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
+  // Add, or Scan again, went away with its step: the focus stays in the dialog.
+  useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, failure]);
 
   // Done: the standby screen opens by itself, unless the browser may clear the data, which the person reads first.
   // The profile is now one added from another device: a first start's "What should people call you?" is not asked.
@@ -191,14 +198,15 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
         <form className="space-y-3" data-testid="device-join-confirm" data-place={place ?? undefined} data-profile={profile || undefined} onSubmit={(event) => { event.preventDefault(); add(); }}>
           <label className="block space-y-1">
             <span className="text-text-secondary">{t("devices.join.name")}</span>
-            <input data-testid="device-join-name" maxLength={16} value={name} onChange={(event) => setName(event.target.value)} className={field} />
+            <input data-testid="device-join-name" {...nameField} value={name} className={field} />
           </label>
           {place === "new" && <InfoLine testId="device-join-new-profile" info={t("devices.join.newProfileInfo")}>{t("devices.join.newProfile")}</InfoLine>}
           {error && <Notice problem={error} testId="device-join-error" />}
           <button type="submit" autoFocus data-testid="device-join-next" disabled={!name.trim() || busy} className={primaryButton}>{t("devices.join.add")}</button>
         </form>
       )}
-      {step === "enroll" && <>
+      {/* What the enroll step shows; it takes the focus when Add goes away under it. */}
+      {step === "enroll" && <div ref={body} tabIndex={-1} className="space-y-3 focus:outline-none">
         {!view && !failure && <Status testId="device-join-connecting" step={preparing ? "preparing" : "connecting"}>{preparing ? t("devices.join.preparing") : t("devices.join.connecting")}</Status>}
         {failure && <>
           <Notice problem={failure} testId="device-join-error" />
@@ -224,7 +232,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
             <button type="button" data-testid="device-join-scan-again" onClick={scanAgain} className={primaryButton}>{t("devices.join.scanAgain")}</button>
           </>}
         </>}
-      </>}
+      </div>}
     </DeviceDialog>
   );
 }

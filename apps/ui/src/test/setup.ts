@@ -3,15 +3,19 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { resetGifSearch } from "../lib/gifSearch";
 import { resetUnseenSats } from "../hooks/useUnseenSats";
+import { forgetPictures } from "../lib/pictureReads";
 import { fakeEngine, installFakeEngine } from "./fakeEngine";
 import type { Language } from "../lib/settings";
 import { loadLocale } from "../locales";
+import { loadIdentityProviders } from "@ghostly/browser/proofs/load";
 
 // Every language, as an app reading in it has loaded its own: a test renders in any of them at once. The list is
 // written out (test/i18n/locales.ts reads each of the settings' languages from here, so one missing fails there): importing lib/settings here would load lib/profiles
 // before a test file's mocks of what it imports are in place.
 const LANGUAGES: Language[] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
 await Promise.all(LANGUAGES.map(loadLocale));
+// The identity proof providers, as an app that has drawn something about identities has loaded them.
+await loadIdentityProviders();
 
 // The web app's session sync (started by the sidebar) keeps localStorage and the peer in step on every state push:
 // it would call the fake engine behind the test's back for the rest of the file. A test about it can unmock it.
@@ -44,14 +48,19 @@ beforeEach(() => {
   resetGifSearch();
   // What the wallet icon marks as new is kept for the app session, like the GIF answers.
   resetUnseenSats();
+  // So are the pictures a chat read.
+  forgetPictures();
   delete document.documentElement.dataset.reduceMotion;
   document.documentElement.removeAttribute("lang");
   document.documentElement.removeAttribute("dir");
   fakeEngine.reset();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // A voice message left playing as its bubble went is held by the app, and each message keeps where it stopped: not
+  // into the next test. Imported here, after the test file's mocks are in place.
+  (await import("../lib/nowPlaying")).resetNowPlaying();
   const asked = archiveAsked.splice(0);
   expect(asked, "requests that would have reached the Internet Archive").toEqual([]);
 });

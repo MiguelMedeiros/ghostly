@@ -71,8 +71,8 @@ describe("a Mainnet Bark wallet", () => {
     expect(address).toMatch(/^ark1p/);
 
     await expect(node.preparePayment({ target: barkTarget(address), amount: 1_000, feeCap: 100, payee: address, network: "testnet" })).rejects.toThrow(/Testnet|Mainnet/);
-    await expect(node.preparePayment({ target: barkTarget("tark1psrvtestx1"), amount: 1_000, feeCap: 100, payee: "x" })).rejects.toThrow("test network Bark address");
-    await expect(node.preparePayment({ target: barkTarget(address, { network: "signet", provider: TESTNET_BARK.provider }), amount: 1_000, feeCap: 100, payee: address })).rejects.toThrow("Mainnet Bark address");
+    await expect(node.preparePayment({ target: barkTarget("tark1psrvtestx1"), amount: 1_000, feeCap: 100, payee: "x" })).rejects.toThrow("That is not an Ark address on Bitcoin");
+    await expect(node.preparePayment({ target: barkTarget(address, { network: "signet", provider: TESTNET_BARK.provider }), amount: 1_000, feeCap: 100, payee: address })).rejects.toThrow("That is not an Ark address on signet");
 
     const review = await node.preparePayment({ target: barkTarget(address), amount: 1_000, feeCap: 100, payee: address });
     await expect(node.approvePayment({ id: review.id })).rejects.toThrow(REAL_MONEY_UNCONFIRMED);

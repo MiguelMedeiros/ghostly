@@ -5,6 +5,7 @@ import { ETHEREUM_USDT, EVM_TEST_CHAINS, SEPOLIA_TEST_USDT, USDT_PUBLIC_RPC, typ
 import type { WalletMode } from '../../shared/mints';
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from './modeGate';
 import { walletKey } from './walletNetworks';
+import { viewNews } from './viewNews';
 import { STORES, store, transact, wrap } from '../../shared/idb';
 import type { UsdtAdapter, UsdtConfig } from './usdt';
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
@@ -42,7 +43,8 @@ export class UsdtWallet {
   private gate=new ModeGate();
   adapter?:UsdtAdapter;
   view:UsdtWalletView={configured:false,locked:true,balance:'0',gasBalance:'0'};
-  constructor(readonly network:WalletNetwork,private changed:()=>void) {this.key=walletKey('usdtWallet',network);}
+  /** `changed(false)`: a balance read that found nothing new; the receipts are checked, the wallet view stays. */
+  constructor(readonly network:WalletNetwork,private changed:(viewChanged?:boolean)=>void) {this.key=walletKey('usdtWallet',network);}
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run:()=>Promise<T>):Promise<T> {const next=this.queue.then(run,run);this.queue=next.catch(()=>{});return next;}
   async start() {this.saved=await wrap<SavedWallet|undefined>((await store(STORES.settings,'readonly')).get(this.key));this.view={...this.view,configured:!!this.saved,automatic:!!this.saved?.deviceKey,...this.saved?.config,locked:true};}
@@ -127,9 +129,11 @@ export class UsdtWallet {
   /** Stopping ends it where it is: a wallet shutting down needs no balance. */
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
+    const before=this.view;
     try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,read:true,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
     catch(error) {if(error instanceof ModeChanged||adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};}
-    this.changed();if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),8000);
+    // Every 8 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
+    this.changed(viewNews(before,this.view));if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),8000);
   }
   /** Testnet on Sepolia: 1,000 TEST-USDT from Aave's faucet, paid with this wallet's own test ETH. */
   async getTestTokens():Promise<string> {const hash=await this.require().mintTestTokens();void this.refresh();return hash;}

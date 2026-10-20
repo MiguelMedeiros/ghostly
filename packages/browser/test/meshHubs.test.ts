@@ -66,6 +66,9 @@ describe("hubs in a private group past 16 members", () => {
     expect(others[4].sent.frames - before).toBe(2);
     // Each exactly once, though two hubs passed it on.
     for (const p of peers) expect(world.texts(p, id).filter(t => t === "through the hubs")).toHaveLength(1);
+    // Its author's name came with it: here no edge says one, and most members hold none with the author anyway.
+    const author = keyOf(b, others[4]);
+    for (const p of peers.filter(p => p !== others[4])) expect(view(b, p).members.find(m => m.key === author)?.nick).toBe(others[4].name);
   }, 180_000);
 
   it("a reaction, signed by its member, reaches everyone through a hub; an older app never takes it as the hub's", async () => {
@@ -233,6 +236,25 @@ describe("hubs in a private group past 16 members", () => {
     await peers[14].groups.send(id, "pinned hub");
     await world.run(2_000);
     for (const p of peers) expect(world.texts(p, id)).toContain("pinned hub");
+  }, 300_000);
+
+  it("a member removed during a short absence hears it within seconds of coming back, though its hubs dropped it", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, admin, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const gone = peers[13], goneKey = keyOf(b, gone);
+    expect(edgesOf(b, gone).some(e => e.peer === keyOf(b, admin))).toBe(false);
+    gone.online = false;
+    await world.run(5_000);
+    await admin.groups.remove(id, goneKey);
+    // Back well within the hubs' grace (about 3 min): the hubs it counts on took it out of their rosters.
+    await world.run(60_000);
+    gone.online = true;
+    // The admin keeps an edge for it (`StoredGroup.farewells`): seconds, not the grace.
+    await world.until(() => view(b, gone).status === "removed", 30_000, 1000,
+      () => `${view(b, gone).status}; edges ${edgesOf(b, gone).map(e => e.peer === keyOf(b, admin) ? "admin" : "other").join(",")}`);
+    expect(view(b, gone).canSend).toBe(false);
   }, 300_000);
 
   it("a member leaves through its hubs when it has no edge with the admin", async () => {

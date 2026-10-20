@@ -150,6 +150,17 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(within(why[3]).getByTestId("group-connection-member-problem-details")).toHaveTextContent(phone);
   });
 
+  it("draws a member's red cause in danger's ink, which reads on the member's row in a dark theme (danger's own red was 3.8:1 there)", async () => {
+    await open(active([me, alice({ state: "error", error: "ICE failed", cause: "other" }), bob({ state: "error", error: "Session receive queue full", cause: "session" })]));
+    const [failed, waiting] = screen.getAllByTestId("group-connection-member-problem");
+    expect(failed).toHaveAttribute("data-tone", "error");
+    expect(failed).toHaveClass("text-danger-ink");
+    expect(failed).not.toHaveClass("text-danger");
+    // A wait stays grey: never red, in either ink.
+    expect(waiting).toHaveAttribute("data-tone", "wait");
+    expect(waiting).not.toHaveClass("text-danger-ink");
+  });
+
   it("follows the group it is handed: a member coming back turns reachable, one going away turns the header partial", async () => {
     const view = await open(active([me, alice(), bob({ state: "waiting", lastSeenAt: 0 })]));
     expect(header().kind).toBe("partial");
@@ -190,6 +201,14 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     // Only Alice, who is really down, can be reconnected.
     expect(screen.getAllByTestId("group-connection-reconnect")).toHaveLength(1);
     expect(within(screen.getAllByTestId("group-connection-member")[0]).getByTestId("group-connection-reconnect")).toBeInTheDocument();
+  });
+
+  it("a private group on hubs says the app links to the admin and the hubs, never that each member is a direct link", async () => {
+    await open({ ...active([me, alice(), bob(), member({ key: CAROL, nick: "Carol", online: true, viaHub: true })]), hubs: { hub: false } });
+    const note = screen.getByTestId("group-connection-note");
+    expect(note).toHaveTextContent("your app links to a few members only: the admin and the group's hubs");
+    expect(note).toHaveTextContent("A hub sees who talks when, not what is said.");
+    expect(note).not.toHaveTextContent("direct");
   });
 
   it("a member this device has no free native connection for says it waits for one", async () => {

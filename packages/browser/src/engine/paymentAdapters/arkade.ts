@@ -5,7 +5,7 @@ import {
   isRecoverable, canRecoverOnchain, type StorageConfig,
 } from "@arkade-os/sdk";
 import { tapLeafHash } from "@scure/btc-signer/payment.js";
-import { assertWholeSats, validatePaymentTarget, type PaymentAdapter, type PaymentReview, type PaymentTarget } from "@ghostly/core";
+import { assertWholeSats, arkAddressPrefix, validatePaymentTarget, type PaymentAdapter, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 
 export interface ArkConfig { network: "bitcoin" | "regtest" | "signet" | "mutinynet"; provider: string; explorer: string; serverKey: string; walletId: string }
 export interface ArkPrepared { signedTx: string; checkpoints: string[]; txid: string; address: string; amount: number; fee: number; finalCheckpoints?: string[] }
@@ -35,8 +35,8 @@ export class ArkadeAdapter implements PaymentAdapter<ArkPrepared> {
   private constructor(readonly config: ArkConfig, private identity: MnemonicIdentity, private wallet: Wallet, private preview: PreviewProvider, private provider: RestArkProvider, private indexer: RestIndexerProvider,private repository:NonNullable<StorageConfig["walletRepository"]>) {}
   static async connect(config: ArkConfig, mnemonic: string, storage?: StorageConfig): Promise<ArkadeAdapter> {
     if (!ARK_NETWORKS.includes(config.network)) throw new Error("Unsupported Ark network");
-    validatePaymentTarget({method:"arkade",network:config.network,provider:config.provider,asset:"BTC",unit:"sat",address:"configuration",expiresAt:Date.now()+60000});
-    validatePaymentTarget({method:"arkade",network:config.network,provider:config.explorer,asset:"BTC",unit:"sat",address:"configuration",expiresAt:Date.now()+60000});
+    validatePaymentTarget({method:"arkade",network:config.network,provider:config.provider,asset:"BTC",unit:"sat",address:`${arkAddressPrefix(config.network)}configuration`,expiresAt:Date.now()+60000});
+    validatePaymentTarget({method:"arkade",network:config.network,provider:config.explorer,asset:"BTC",unit:"sat",address:`${arkAddressPrefix(config.network)}configuration`,expiresAt:Date.now()+60000});
     const provider=new RestArkProvider(config.provider);
     const info=await provider.getInfo();
     if(info.network!==config.network || info.signerPubkey!==config.serverKey) throw new Error("Ark provider network or signing key changed. Review the wallet configuration.");

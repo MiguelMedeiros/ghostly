@@ -145,3 +145,53 @@ it("keeps a spare invite warmed, hands it out, and makes the next one", async ()
     expect(node.takeInvite().inviteCode).not.toBe(taken.inviteCode);
   } finally { vi.useRealTimers(); await node.shutdown(); vi.unstubAllGlobals(); }
 }, 20_000);
+
+it("an app open for an hour hands out a warmed invite, and warms no spare too old to hand out", async () => {
+  // The spare was warmed again every 4 min for good, but handed out only while under 15 min old: past that every warm-up
+  // went to keys nobody would use, and the next invite went out on cold keys.
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const puts: { key: string; at: number }[] = [];
+  const timed = { ...transport, publish: async (...args: Parameters<typeof transport.publish>) => { puts.push({ key: args[0].pubKeyZ32, at: Date.now() }); await transport.publish(...args); } };
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: timed, automaticWallets: false, nativeTransports: {} });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  try {
+    await node.start();
+    for (let i = 0; i < 60; i++) await vi.advanceTimersByTimeAsync(60_000);
+    // Not in the seconds a new spare settles (`SPARE_INVITE_MIN_AGE_MS`), which fall on whole quarters of an hour here.
+    await vi.advanceTimersByTimeAsync(30_000);
+    const firstPut = new Map<string, number>();
+    for (const { key, at } of puts) if (!firstPut.has(key)) firstPut.set(key, at);
+    expect(puts.filter(({ key, at }) => at - firstPut.get(key)! >= 15 * 60_000), "warm-ups of a spare past its age").toEqual([]);
+    // The person makes an invite now: both its keys were warmed a moment ago.
+    const taken = node.takeInvite();
+    const mine = identityFromSeedB64(taken.mine.seedB64).pubKeyZ32, contact = identityFromSeedB64(decodeInviteCode(taken.inviteCode)!.seedB64).pubKeyZ32;
+    const warmedLately = new Set(puts.filter(p => Date.now() - p.at <= 4 * 60_000).map(p => p.key));
+    expect([mine, contact].filter(k => warmedLately.has(k)), "the invite handed out is a warmed one").toEqual([mine, contact]);
+  } finally { vi.useRealTimers(); await node.shutdown(); vi.unstubAllGlobals(); }
+}, 60_000);
+
+it("rotates the spare at the end of its 15 min though the last timer fires a moment early by the clock", async () => {
+  // Node times a timer from the loop's cached clock, so one set right after the warm's signing fires a few ms before its
+  // age by `Date.now()`: the engine took the spare for young, warmed the keys it was about to drop once more, and set
+  // the next timer below 0 (a TimeoutNegativeWarning in every daemon's log).
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const puts: string[] = [];
+  let signing = 0;
+  // Each put's signing takes the clock 2 ms on, until the loop turns.
+  const slow = { ...transport, publish: async (...args: Parameters<typeof transport.publish>) => { signing = 2; queueMicrotask(() => { signing = 0; }); puts.push(args[0].pubKeyZ32); await transport.publish(...args); } };
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: slow, automaticWallets: false, nativeTransports: {} });
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  const loopNow = Date.now.bind(Date);
+  vi.spyOn(Date, "now").mockImplementation(() => loopNow() + signing);
+  try {
+    await node.start();
+    for (let i = 0; i < 40; i++) await vi.advanceTimersByTimeAsync(60_000);
+    const perKey = new Map<string, number>();
+    for (const key of puts) perKey.set(key, (perKey.get(key) ?? 0) + 1);
+    // Warmed at 0, 4, 8 and 12 min of its age, then dropped: never a fifth time.
+    expect(perKey.size, "spares made").toBeGreaterThanOrEqual(4);
+    expect([...perKey.values()].filter(n => n > 4), "keys warmed past their last 4 min").toEqual([]);
+  } finally { vi.useRealTimers(); vi.restoreAllMocks(); await node.shutdown(); vi.unstubAllGlobals(); }
+}, 60_000);

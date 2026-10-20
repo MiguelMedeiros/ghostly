@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
+import { FRESH_READ_MS, GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Mainline, RelaysAndDht } from "../src/runtime/mainline";
@@ -69,7 +69,10 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     const dht = await peer(bootstrap);
     const a = new RelaysAndDht(dht, { relays: RELAYS, fetch: relays(store), log: () => {} });
     const me = createIdentity();
+    const dated = vi.spyOn(a.relays, "publishDated");
     await a.publish(me, [{ label: "_x", value: "both" }]);
+    // With the DHT, a packet is signed whatever the relays' budgets say (`elsewhere`): it goes there anyway.
+    expect(dated.mock.calls[0]![5]).toBe(true);
     expect((await a.resolve(me.pubKeyZ32))?.records[0].value).toBe("both");
     expect(a.discovery().path).toMatchObject({ via: "relay" });
     // The DHT has it as well: an app that reads only the DHT (the Desktop) finds it.
@@ -77,6 +80,63 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     let onDht = null;
     while (!onDht && Date.now() < deadline) { onDht = await (await peer(bootstrap)).get(me.pubKeyZ32).catch(() => null); if (!onDht) await new Promise((r) => setTimeout(r, 200)); }
     expect(onDht?.records[0].value).toBe("both");
+  });
+
+  it("a relay that takes requests and never answers holds neither a publish nor a read for its 10 s timeout", async () => {
+    // Each request ends only when the client drops it (a blackholed or stuck relay).
+    const hung = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    })) as typeof fetch;
+    const a = new RelaysAndDht(await peer(bootstrap), { relays: [RELAYS[0]!], fetch: hung, log: () => {} });
+    const b = new RelaysAndDht(await peer(bootstrap), { relays: [RELAYS[0]!], fetch: hung, log: () => {} });
+    const me = createIdentity();
+    let started = Date.now();
+    await a.publish(me, [{ label: "_x", value: "hello" }]);
+    const publishMs = Date.now() - started;
+    started = Date.now();
+    const found = await b.resolve(me.pubKeyZ32);
+    const readMs = Date.now() - started;
+    // A key nobody published, read by a CLI whose relay has not failed yet: the DHT's "none" is the answer once a
+    // slow relay would have had its say.
+    const c = new RelaysAndDht(await peer(bootstrap), { relays: [RELAYS[0]!], fetch: hung, log: () => {} });
+    started = Date.now();
+    expect(await c.resolve(createIdentity().pubKeyZ32)).toBeNull();
+    const missingMs = Date.now() - started;
+    console.log(`MAINLINE hung relay: publish ${publishMs} ms, read ${readMs} ms, read of a missing key ${missingMs} ms`);
+    expect(found?.records[0]?.value).toBe("hello");
+    expect(b.discovery().path).toEqual({ via: "dht" });
+    expect(publishMs).toBeLessThan(1_500);
+    expect(readMs).toBeLessThan(3_000);
+    expect(missingMs).toBeLessThan(4_500);
+  });
+
+  for (const how of ["500", "refused"] as const) it(`relays that answered, then fail (${how}): a read takes the DHT's newer packet at once, not their last copy`, async () => {
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const answer = relays(store);
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (store.down && how === "refused") throw new TypeError("fetch failed");
+      return answer(input, init);
+    }) as typeof fetch;
+    const a = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS.slice(0, 1), fetch: fetchFn, log: () => {} });
+    const b = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS.slice(0, 1), fetch: fetchFn, log: () => {} });
+    const me = createIdentity();
+    await a.publish(me, [{ label: "_x", value: "old" }]);
+    expect((await b.resolve(me.pubKeyZ32))?.records[0].value).toBe("old");
+    // The relay fails for everyone; the newer packet goes out on the DHT only.
+    store.down = true;
+    await a.publish(me, [{ label: "_x", value: "new" }]).catch(() => {});
+    let onDht = null;
+    for (let i = 0; i < 20 && onDht?.records[0].value !== "new"; i++) onDht = await (await peer(bootstrap)).get(me.pubKeyZ32).catch(() => null);
+    expect(onDht?.records[0].value).toBe("new");
+    // Past the relay's answer of just now (`FRESH_READ_MS`): that one stands without asking anyone.
+    await new Promise((r) => setTimeout(r, FRESH_READ_MS + 100));
+    // The read the relay fails, and the next one while it cools down (it is not asked): both from the DHT. Until its
+    // breaker opened (three failures, 20 s apart), they handed back the relay's last copy for about 40 s.
+    for (let read = 0; read < 2; read++) {
+      expect((await b.resolve(me.pubKeyZ32))?.records[0].value).toBe("new");
+      expect(b.discovery().path).toEqual({ via: "dht" });
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
   });
 
   it("a group's edge goes live while every relay answers 500, through the DHT, without a restart", async () => {
@@ -131,11 +191,13 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
     expect((await a.resolve(me.pubKeyZ32))?.records[0].value).toBe("private");
     // A packet signed here goes to the relays with its date, its signature not checked again (`putSigned`): only a
     // payload signed elsewhere goes through `publishPayload`, which checks it to read its date.
-    const checked = vi.spyOn(a.relays, "publishPayload"), signed = vi.spyOn(a.relays, "putSigned");
+    const checked = vi.spyOn(a.relays, "publishPayload"), signed = vi.spyOn(a.relays, "putSigned"), dated = vi.spyOn(a.relays, "publishDated");
     await a.publish(me, [{ label: "_hello", value: "again" }]);
     expect(checked).not.toHaveBeenCalled();
     expect(signed).toHaveBeenCalledTimes(1);
     expect(signed.mock.calls[0]![2]).toBe((await a.resolve(me.pubKeyZ32))!.timestampMicros);
+    // Relays only: a publish none of them takes now is not signed (the budget is asked first).
+    expect(dated.mock.calls[0]![5]).toBe(false);
     // Not pinned: the setting replaces them, as before.
     const b = new RelaysAndDht(null, { relays: RELAYS, fetch: relays(store), log: () => {} });
     b.configure({ relays: ["https://pkarr.example.org"], readRelays: false });

@@ -193,6 +193,16 @@ describe("BOLT 12 offers", () => {
     expect(decodeBolt12Offer(text)).toBeNull();
   });
 
+  // Its amount was read as millisats when the code could not be read: 1,000,000 units of a currency showed "1,000 sats".
+  it.each([
+    ["empty", new Uint8Array()],
+    ["not UTF-8", Uint8Array.of(0xff, 0x53, 0x44)],
+    ["not three letters", "US"],
+    ["not an ISO 4217 code's letters", "u$d"],
+  ])("refuses an offer whose offer_currency is %s, never reading its amount as sats", (_, currency) => {
+    expect(decodeBolt12Offer(bolt12Offer({ currency, amountMsat: 1_000_000, description: "Dinner" }))).toBeNull();
+  });
+
   it("finds an offer in a message, bare or with lightning:", () => {
     const offer = bolt12Offer({ chains: ["regtest"], description: "tip jar" });
     expect(findMoney(`my tip jar: lightning:${offer} thanks`)).toMatchObject({ type: "bolt12", offer: { offer, network: "testnet" }, rest: "my tip jar:  thanks" });
@@ -253,6 +263,21 @@ describe("USDT addresses", () => {
     // A bad checksum is nobody's address.
     expect(findMoney(`my USDT address is ${EVM_BAD_CASE}`)).toBeNull();
   });
+
+  it("a transfer of another token is never read as USDT, whatever the message says", () => {
+    const WBTC = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
+    // Where the chain's USDT is known, another contract is not a USDT card: the message stays text.
+    expect(findMoney(`pay me the USDT: ethereum:${WBTC}@1/transfer?address=${EVM}&uint256=100000000`)).toBeNull();
+    expect(findMoney(`USDT please ethereum:${SEPOLIA_USDC}@11155111/transfer?address=${EVM}&uint256=2500000`)).toBeNull();
+    // Where it is not known, the contract cannot be checked: no amount read with USDT's decimals, and the QR is
+    // the recipient's address, never that contract's transfer.
+    for (const chain of ["", "@137", "@31337"]) {
+      const request = findUsdtAddress(`USDT: ethereum:${WBTC}${chain}/transfer?address=${EVM}&uint256=100000000`)?.request;
+      expect(request?.recipient).toBe(EVM);
+      expect(request?.amount).toBeUndefined();
+      expect(request?.uri).toBeUndefined();
+    }
+  });
 });
 
 describe("false positives: ordinary text stays text", () => {
@@ -289,5 +314,14 @@ describe("the chat list's line", () => {
     expect(previewText(bolt12Offer({ chains: ["regtest"], amountMsat: 5_000_000 }))).toBe("⚡ Lightning offer · Test money · 5,000 test sats");
     expect(previewText(BARK_TESTNET)).toBe("Ark address · Test money");
     expect(previewText(`USDT: ${EVM}`)).toBe("USDT address");
+  });
+
+  // Before, a Lightning invoice said only "⚡ Lightning invoice · 250,000 sats", whatever its chain.
+  it("says whether a Lightning invoice is test or real money, as the other formats do", () => {
+    const words = bech32.decode(REGTEST_INVOICE as `${string}1${string}`, false).words;
+    expect(previewText(REGTEST_INVOICE)).toBe("⚡ Lightning invoice · Test money · 250,000 test sats");
+    expect(previewText(bech32.encode("lntbs2500u", words, false))).toBe("⚡ Lightning invoice · Test money · 250,000 test sats");
+    expect(previewText(bech32.encode("lnbcrt", words, false))).toBe("⚡ Lightning invoice · Test money");
+    expect(previewText(INVOICE)).toBe("⚡ Lightning invoice · Real money · 2,100 sats");
   });
 });

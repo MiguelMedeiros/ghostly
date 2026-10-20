@@ -102,8 +102,9 @@ export function GroupConnection({ group }: { group: GroupView }) {
               </div>
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) stays out of the list. */}
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) only behind the ⓘ. */}
+              {/* In danger's ink: danger's own red read at 3.8:1 on the row's surface-hover in the default dark theme. */}
               {m.edge?.state === "error" && m.edge.error && <div data-testid="group-connection-member-why" data-cause={m.edge.cause ?? "other"} className="mt-0.5">
-                <Notice problem={memberProblem(m.edge, t)} testId="group-connection-member-problem" className="text-[11px] leading-4" />
+                <Notice problem={memberProblem(m.edge, t)} testId="group-connection-member-problem" className="text-[11px] leading-4" ink />
               </div>}
             </li>;
           })}
@@ -111,7 +112,8 @@ export function GroupConnection({ group }: { group: GroupView }) {
         </ul>
         {error && <Notice problem={problemText(error, t, "connect")} testId="group-connection-error" className="mt-2" />}
         <p className="mt-3 border-t border-border pt-2 text-[11px]" data-testid="group-connection-note">
-          {community ? t("group.connection.communityNote") : t("group.connection.note")}
+          {/* Past 16 members a private group runs on hubs: no longer one direct link per member. */}
+          {community ? t("group.connection.communityNote") : group.hubs ? t("group.connection.hubsNote") : t("group.connection.note")}
         </p>
       </div>}
     <span role="tooltip" id={`${id}-tip`} data-testid="group-connection-tooltip" className={`pointer-events-none absolute end-0 top-full z-50 mt-1.5 w-max max-w-[min(16rem,55vw)] rounded-md border border-border bg-surface-alt px-2 py-1 text-[11px] leading-4 text-text-primary shadow-lg motion-safe:transition-opacity ${tip && !menuOpen ? "opacity-100" : "invisible opacity-0"}`}>

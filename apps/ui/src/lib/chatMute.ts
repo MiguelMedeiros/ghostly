@@ -1,7 +1,7 @@
 import { useEffect, useReducer } from "react";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import type { NotificationSettings } from "./settings";
-import { getPrefix, listSessions } from "./storage";
+import { getPrefix, sessionIdForPeer } from "./storage";
 
 /*
  * Muting one chat's notifications, for a while or until turned back on. The choice is this profile's, on this
@@ -105,7 +105,7 @@ export function chatOfLink(linkId: string | undefined, links: readonly { id: str
   if (!linkId) return undefined;
   if (linkId.startsWith("group:")) return linkId;
   const peer = links.find((l) => l.id === linkId)?.peerPubKeyZ32;
-  return peer ? listSessions().find((s) => s.peerPubKeyB64 === peer)?.id : undefined;
+  return peer ? sessionIdForPeer(peer) : undefined;
 }
 
 /**
@@ -135,11 +135,13 @@ export function useChatMute(chat: string): MutedUntil | undefined {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const until = mutedUntil(chat);
   useEffect(() => {
+    // Only a mute's key: every row of the chat list has this, and another page writes other keys many times a second.
+    const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}mute_`)) redraw(); };
     window.addEventListener(MUTE_EVENT, redraw);
-    window.addEventListener("storage", redraw);
+    window.addEventListener("storage", stored);
     return () => {
       window.removeEventListener(MUTE_EVENT, redraw);
-      window.removeEventListener("storage", redraw);
+      window.removeEventListener("storage", stored);
     };
   }, []);
   useEffect(() => {

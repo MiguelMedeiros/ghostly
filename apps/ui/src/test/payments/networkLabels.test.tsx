@@ -35,6 +35,15 @@ describe("the bubble names its money", () => {
     expect(tag).toHaveTextContent(words);
     expect(tag).toHaveAttribute("data-network", words === "Test money" ? "testnet" : "mainnet");
   });
+
+  it.each([
+    ["a Bitcoin address", target({ method: "bitcoin", network: "bitcoin", provider: "onchain", address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4" })],
+    ["an Ark address", target({ network: "bitcoin", address: "ark1payee" })],
+  ])("a request kept as Testnet that carries %s is real money, in sats", (_what, onMainnet) => {
+    show(incomingRequest({ amount: 50_000, network: "testnet", target: onMainnet }));
+    expect(screen.getByTestId("payment-network")).toHaveTextContent("Real money");
+    expect(screen.queryByText(/test sats/)).not.toBeInTheDocument();
+  });
 });
 
 describe("the review says which money, and real money asks once more", () => {

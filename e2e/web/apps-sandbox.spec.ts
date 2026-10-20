@@ -105,7 +105,8 @@ test("a malicious app reaches nothing: no request, no WebRTC from any frame it m
   const r = report.readings;
   expect(r.origin).toBe("null");
   expect(r.topIsSelf).toBe(false);
-  expect(r.ghostly).toBe("chat,close,context,file,storage");
+  // Every app sees the same API; what it was not granted is refused (chat and files below).
+  expect(r.ghostly).toBe("chat,close,context,file,files,remote,storage");
   expect(r.rtcNames).toBe("none");
   // The runner's nonce: not on the script, not in the markup, not in a violation report, not guessed.
   expect(r.nonceProperty).toBe("undefined");
@@ -120,6 +121,7 @@ test("a malicious app reaches nothing: no request, no WebRTC from any frame it m
   expect(r.storageSet).toBe("ok");
   expect(r.context).toEqual({ version: "1.0.0", inChat: false, peer: null, theme: "dark", locale: "pt-BR" });
   expect(r.chatSend).toBe("refused: not-allowed");
+  expect(r.filesList).toBe("refused: not-allowed");
   const calls = await page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.calls());
   expect(calls.filter((c) => c.ref === VICTIM).map((c) => `${c.op} ${c.key ?? ""}`)).toEqual(["storage.set secret", "storage.set ready"]);
   expect(calls.filter((c) => c.ref !== VICTIM).every((c) => c.ref === EVIL && c.scope === "alone")).toBe(true);
@@ -311,6 +313,32 @@ test("the runner refuses to run outside its sandboxed frame, and its server send
   await appPage(page);
   expect(await page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.runnerAvailable())).toBe(true);
   expect(RTC_PROBES.length).toBeGreaterThan(10);
+});
+
+test("an app may ask for the pointer after a click (mouse look): its sandbox no longer refuses it", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "gamepublisherkey/look";
+  // What the frame's sandbox decides shows in the refusal's name: SecurityError ("the frame is sandboxed and the
+  // 'allow-pointer-lock' permission is not set") before; past it, a browser driven by a test still refuses for want of
+  // window focus (WrongDocumentError), or gives the lock. A person's click in a focused window gets it, and Esc frees it.
+  const entry = `<!doctype html><title>look</title><body style="margin:0"><div id=pad style="width:100vw;height:100vh;background:#123"></div><script>
+    const g = window.ghostly, pad = document.getElementById("pad");
+    pad.addEventListener("click", () => {
+      try {
+        const asked = pad.requestPointerLock();
+        if (asked && asked.then) asked.then(() => g.storage.set("lock", "held"), (e) => g.storage.set("lock", e.name));
+      } catch (e) { g.storage.set("lock", e.name); }
+    });
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveAttribute("sandbox", "allow-scripts allow-pointer-lock");
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await expect.poll(async () => (await stored(page, ref)).lock).toBeDefined();
+  expect(["held", "WrongDocumentError"]).toContain((await stored(page, ref)).lock);
 });
 
 test("Chess, as it is built, runs under the runner's lock", {

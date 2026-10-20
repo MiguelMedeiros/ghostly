@@ -12,8 +12,8 @@ import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, s
 // covers: wallet.test-coins
 
 /** Opens the Wallets page on one card, on its network's tab. */
-async function open(wallet: WalletView, card: string) {
-  const app = renderApp(<Wallet />);
+async function open(wallet: WalletView, card: string, language?: "ar") {
+  const app = renderApp(<Wallet />, language ? { language } : undefined);
   app.engine.update({ wallet });
   await app.user.click(await screen.findByTestId(`wallet-network-${card.split("-")[1]}`));
   await app.user.click(await screen.findByTestId(`wallet-card-${card}`));
@@ -38,12 +38,18 @@ describe("Get test coins", () => {
     let pay!: () => void;
     engine.on("walletTestCoins", () => new Promise((resolve) => { pay = () => resolve({ amount: 10_000, unit: "test sats" }); }));
     const get = await screen.findByTestId("test-coins-get");
-    await user.click(get);
+    get.focus();
+    await user.keyboard("{Enter}");
     expect(get).toHaveTextContent("Asking the faucet…");
-    expect(get).toBeDisabled();
+    // Busy, not disabled: a disabled button drops the keyboard's focus to the page (Chromium), and a press does nothing.
+    expect(get).toHaveAttribute("aria-busy", "true");
+    expect(get).toHaveAttribute("aria-disabled", "true");
+    expect(get).toBeEnabled();
+    await user.keyboard("{Enter}");
     pay();
     expect(await screen.findByTestId("test-coins-result")).toHaveTextContent("+10,000 test sats");
     expect(get).toHaveTextContent("Get test coins");
+    expect(get).toHaveFocus();
     expect(engine.callsTo("walletTestCoins")).toEqual([{ type: "cashu", network: "testnet" }]);
   });
 
@@ -56,6 +62,8 @@ describe("Get test coins", () => {
     await user.click(screen.getByTestId("test-coins-retry"));
     expect(await screen.findByTestId("test-coins-result")).toHaveTextContent("+10,000 test sats");
     expect(screen.queryByTestId("test-coins-error")).not.toBeInTheDocument();
+    // Retry went with its error: the keys are on Get test coins, not on the page.
+    expect(screen.getByTestId("test-coins-get")).toHaveFocus();
     expect(engine.callsTo("walletTestCoins")).toEqual([{ type: "lightning", network: "testnet" }, { type: "lightning", network: "testnet" }]);
   });
 
@@ -68,6 +76,17 @@ describe("Get test coins", () => {
     engine.on("walletTestCoins", () => ({ amount: 1_000, unit: "TEST-USDT", pending: true }));
     await user.click(screen.getByTestId("test-coins-get"));
     expect(await screen.findByTestId("test-coins-result")).toHaveTextContent("+1,000 TEST-USDT on the way");
+  });
+
+  it("in Arabic, the \"+\" stays at its number's left: the signed amount is its own left-to-right run", async () => {
+    const { user, engine } = await open(walletView({ mints: [mint(TEST_MINT, 0)] }), "cashu-testnet", "ar");
+    engine.on("walletTestCoins", () => ({ amount: 10_000, unit: "test sats" }));
+    await user.click(await screen.findByTestId("test-coins-get"));
+    const result = await screen.findByTestId("test-coins-result");
+    expect([...result.querySelectorAll('[dir="ltr"]')].map((el) => el.textContent)).toEqual(["+10,000"]);
+    engine.on("walletTestCoins", () => ({ amount: 1_000, unit: "TEST-USDT", pending: true }));
+    await user.click(screen.getByTestId("test-coins-get"));
+    await waitFor(() => expect([...screen.getByTestId("test-coins-result").querySelectorAll('[dir="ltr"]')].map((el) => el.textContent)).toEqual(["+1,000"]));
   });
 
   it("a faucet behind a login is a link, never asked by Ghostly", async () => {

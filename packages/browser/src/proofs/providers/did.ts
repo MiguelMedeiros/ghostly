@@ -5,6 +5,7 @@ import {
 } from "@ghostly/core";
 import type { ExternalToolSigner, IdentityProofProvider, PublishSigner, SignerInstructions, SubjectPreview } from "../contract";
 import { fetchDidWebFile, lastDidResolution, resolveDid, type DidResolution } from "../did";
+import { ownDid } from "../ownDid";
 import { boundedIdentityFetch } from "../verify";
 
 /**
@@ -29,9 +30,7 @@ const SIG = /^[A-Za-z0-9_-]{86}$/;
 const exactKeys = (raw: unknown, keys: string) => !!raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).sort().join(",") === keys;
 const validVm = (vm: unknown): vm is string => typeof vm === "string" && vm.length <= 640 && VM.test(vm);
 
-/** The profile's own Ghostly did:dht, refused as an external identity. The UI and the engine each set where to read it. */
-let ownDid: () => string | undefined = () => undefined;
-export function setOwnDidSource(source: () => string | undefined): void { ownDid = source; }
+export { setOwnDidSource } from "../ownDid";
 
 /** The add dialog's checks run in the UI, with the same bounded fetch the engine uses. */
 const uiFetch = boundedIdentityFetch({ online: () => globalThis.navigator?.onLine !== false });

@@ -1,6 +1,8 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { GhostlyHttpError, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
@@ -80,6 +82,15 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["group", "--nope"], {}, (i) => i === 0)).toThrow(/Unknown option --nope/);
   });
 
+  it("says to put -- before a two-character word that starts with a dash, as it does for a longer one", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const word of ["-1", "-5", "-ph"]) {
+      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send)), word)
+        .toThrow(new CliError("usage", `Unknown option ${word} (put -- before text that starts with a dash)`));
+    }
+    expect(parseArgs(["bob", "--", "-1"], send.options, idSlot(send)).positionals).toEqual(["bob", "-1"]);
+  });
+
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
     const spec = { force: { type: "boolean" as const, description: "" }, mention: { type: "list" as const, description: "" } };
     expect(parseArgs(["-p", "bot", "g", "--mention", "a", "--no-force", "--mention", "b", "--pretty"], spec).options).toEqual({ profile: "bot", mention: ["a", "b"], force: false, pretty: true });
@@ -87,6 +98,42 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["--nope"], spec)).toThrow(/Unknown option --nope/);
     expect(() => parseArgs(["--mention"], spec)).toThrow(/needs a value/);
     expect(() => parseArgs(["--limit", "ten"], { limit: { type: "number", description: "" } })).toThrow(/takes a number/);
+  });
+
+  it("refuses a number option given as \"\" (an unset variable) as it refuses \"abc\", never reading it as 0", () => {
+    // Number("") is 0: `usage send --all --left ""` posted "0% left" to every chat, `listen --since ""` replayed the journal.
+    for (const [name, option] of [["usage send", "left"], ["task send", "progress"], ["events", "since"], ["chat disconnect", "hold"], ["typing", "for"]] as const) {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      for (const argv of [[`--${option}`, ""], [`--${option}`, " "], [`--${option}=`]]) {
+        expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `--${option} takes a number, not ${JSON.stringify(argv[1] ?? "")}`));
+      }
+    }
+    // `listen` parses with its own spec in main.ts, through the same parser.
+    expect(() => parseArgs(["--since", ""], { since: { type: "number", description: "" } })).toThrow(/^--since takes a number, not ""$/);
+    expect(parseArgs(["--left", "0"], COMMANDS["usage send"].options!).options).toEqual({ left: 0 });
+  });
+
+  it("refuses a word a flag does not take as a usage error that names the flag and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "network must be one of mainnet, testnet".
+    const refused = (name: string, argv: string[], message: string) => {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", message));
+    };
+    for (const name of ["wallet list", "wallet history", "wallet create", "wallet remove", "wallet address", "wallet receive", "pay", "chat pay", "chat request", "lightning default"])
+      refused(name, ["--network", "weird"], "--network takes mainnet or testnet, not \"weird\"");
+    refused("wallet list", ["--network=Testnet"], "--network takes mainnet or testnet, not \"Testnet\"");
+    refused("wallet list", ["--network", ""], "--network takes mainnet or testnet, not \"\"");
+    refused("send", ["--wait", "weird"], "--wait takes none, sent or delivered, not \"weird\"");
+    refused("group send", ["--wait", "delivered"], "--wait takes none or sent, not \"delivered\"");
+    refused("edit", ["--wait", "sent"], "--wait takes none or confirmed, not \"sent\"");
+    refused("task update", ["t", "--wait", "delivered"], "--wait takes none, confirmed or sent, not \"delivered\"");
+    refused("chat wait", ["--until", "weird"], "--until takes live, text or paired, not \"weird\"");
+    refused("chat request", ["1", "--rail", "onchain"], "--rail takes cashu or lightning, not \"onchain\"");
+    refused("chat pay-request", ["p", "--via", "cashu"], "--via takes lightning, not \"cashu\"");
+    // The words each takes still go through as given.
+    expect(parseArgs(["--network", "mainnet"], COMMANDS["wallet list"].options!).options).toEqual({ network: "mainnet" });
+    expect(parseArgs(["--wait=delivered"], TEXT_COMMANDS.send.options!).options).toEqual({ wait: "delivered" });
+    expect(parseArgs(["--until", "paired"], COMMANDS["chat wait"].options!).options).toEqual({ until: "paired" });
   });
 
   it("moves global options given before the command after it", () => {
@@ -141,6 +188,76 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
   });
 
+  it("refuses a word an argument does not take as a usage error that names the argument and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "type must be one of cashu, lightning, …".
+    const refused = (name: string, values: string[], message: string) =>
+      expect(() => positionals(COMMANDS[name], values), `${name} ${values.join(" ")}`).toThrow(new CliError("usage", message));
+    const types = "cashu, lightning, arkade, bark, spark, bitcoin, fedimint or usdt";
+    for (const name of ["wallet create", "wallet remove", "wallet faucet"]) refused(name, ["weird"], `<type> takes ${types}, not "weird"`);
+    refused("wallet create", ["Cashu"], `<type> takes ${types}, not "Cashu"`);
+    refused("wallet address", ["cashu"], "<type> takes bitcoin, arkade, spark or usdt, not \"cashu\"");
+    refused("chat accept", ["bob", "weird"], "<method> takes cashu, lightning, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat transport", ["bob", "weird"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"weird\"");
+    refused("chat transport", ["bob", "constructor"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"constructor\"");
+    // A missing or "" one is still the missing argument, and the words each takes go through as given.
+    expect(() => positionals(COMMANDS["wallet create"], [""])).toThrow(/^Missing <type>/);
+    expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
+    expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
+    expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
+  });
+
+  it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
+    expect(() => positionals(COMMANDS["chat show"], [""])).toThrow(/^Missing <chat>: ghostly chat show <chat>/);
+    expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>/);
+    expect(() => positionals(COMMANDS["group create"], ["", ""])).toThrow(/^Missing <name>/);
+    // `chat rename <chat> ""` gives the chat back the contact's name, by design.
+    expect(positionals(COMMANDS["chat rename"], ["abc", ""])).toEqual({ chat: "abc", name: "" });
+    // Before: 63 commands opened the profile, then answered bad_request "<param> is required" (exit 1).
+    const sweep = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      // Every positional but a leading optional one (`[<chat>] <file>`) gets a word.
+      const given = (command.args ?? []).filter((arg) => !arg.endsWith("?") || arg.endsWith("...?"));
+      return given.flatMap((arg, at) => {
+        if (arg.endsWith("?")) return [];
+        const values = given.map((_, i) => (i === at ? "" : "x"));
+        try {
+          positionals(command, values);
+          return [`${name} <${arg}>`];
+        } catch (error) {
+          return error instanceof CliError && error.code === "usage" && /^Missing </.test(error.message) ? [] : [`${name} <${arg}>: ${String(error)}`];
+        }
+      });
+    });
+    expect(sweep).toEqual([]);
+
+    // The name in "Missing <x>" is the one the usage line shows: `chat pay bob` said <amount> for `<sats>`.
+    const unnamed = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      const given = (command.args ?? []).filter((arg) => !arg.endsWith("?") || arg.endsWith("...?"));
+      return given.flatMap((arg, at) => {
+        if (arg.endsWith("?")) return [];
+        try {
+          positionals(command, given.map((_, i) => (i === at ? "" : "x")));
+          return [];
+        } catch (error) {
+          const shown = /^Missing <([^>]+)>: /.exec((error as Error).message)?.[1];
+          return shown !== undefined && (command.usage.includes(`<${shown}>`) || command.usage.includes(`<${shown}...>`)) ? [] : [`${name}: ${(error as Error).message}`];
+        }
+      });
+    });
+    expect(unnamed).toEqual([]);
+    expect(() => positionals(COMMANDS["chat pay"], ["bob"])).toThrow(/^Missing <sats>: ghostly chat pay <chat> <sats>/);
+    expect(() => positionals(COMMANDS["service add"], ["web", ""])).toThrow(/^Missing <http:\/\/127\.0\.0\.1:port>: /);
+    expect(() => positionals(COMMANDS["file accept"], [])).toThrow(/^Missing <file>: /);
+    expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>: /);
+
+    // A path given as "" read the current folder: `profile picture ""` said "No file <cwd>".
+    const params = (name: string, values: string[], options: Record<string, string | boolean> = {}) => COMMANDS[name].params!({ positionals: values, options }, positionals(COMMANDS[name], values));
+    expect(() => params("profile picture", [""])).toThrow(/^Missing <jpeg>/);
+    expect(() => params("group picture", ["g", ""])).toThrow(/^Missing <jpeg>/);
+    expect(params("profile picture", [""], { clear: true })).toEqual({ path: undefined, clear: true });
+    expect(() => params("identity complete", ["d"], { "evidence-file": "" })).toThrow(/^A path given as "" names no file/);
+  });
+
   it("says a required name, path or --to is missing as a usage error, before anything opens", () => {
     const params = (name: string, argv: string[]) => {
       const command = COMMANDS[name];
@@ -162,6 +279,18 @@ describe("the argument parser", () => {
     usage("group picture", ["g1"], "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
     usage("forward", ["g1"], `Missing <message>: ghostly ${COMMANDS.forward.usage}`);
     usage("forward", ["g1", "m1"], `Missing --to: ghostly ${COMMANDS.forward.usage}`);
+    // Auto-answer's chats and rate are only kept when it goes on: elsewhere they would be dropped without a word.
+    usage("call auto", ["--from", "bob"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    usage("call auto", ["--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
+    expect(params("call auto", ["off"])).toEqual({ on: false });
+    // "" (an unset variable in a script) names no chat: before, it was a prefix of every id and took the only chat.
+    usage("forward", ["bob", "m1", "--to", ""], "--to \"\" names no chat or group");
+    usage("forward", ["bob", "m1", "--to", "alice", "--to", "group:"], "--to \"group:\" names no chat or group");
+    usage("forward", ["bob", "m1", "--to", " "], "--to \" \" names no chat or group");
+    usage("call auto", ["on", "--from", ""], "--from \"\" names no chat");
+    expect(params("forward", ["bob", "m1", "--to", "group:g1"])).toMatchObject({ to: ["group:g1"] });
     // What may be left out still may: a picture cleared, a chat's own name back, a reaction taken back, the only call.
     expect(params("profile picture", ["--clear"])).toEqual({ path: undefined, clear: true });
     expect(params("group picture", ["g1", "--clear"])).toEqual({ group: "g1", path: undefined, clear: true });
@@ -197,11 +326,65 @@ describe("the argument parser", () => {
       expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
     }
+    // A rate no call takes: before, the API's own check answered after the profile opened ("rate must be …", exit 1),
+    // and `call answer` only once a call rang.
+    for (const [name, argv] of [["call start", ["alice"]], ["call answer", []], ["call answer", ["alice"]], ["call auto", ["on"]]] as const) {
+      usage(name, [...argv, "--rate", "44100"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 44100");
+      usage(name, [...argv, "--rate", "0"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 0");
+      expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
+      expect(params(name, [...argv])).toMatchObject({ rate: undefined });
+    }
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
     expect(params("button update", ["alice", "m1", "--text", "Done"])).toMatchObject({ text: "Done" });
     expect(params("chat verify", ["alice", "--code", "ab cd"])).toEqual({ chat: "alice", code: "ab cd" });
+  });
+
+  it("refuses the two sides of an either/or given together, naming both, where before one won without a word", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    const pairs: [name: string, argv: string[], message: string][] = [
+      ["profile picture", ["one.jpg", "--clear"], "--clear removes the picture: not with a <jpeg>"],
+      ["group picture", ["g1", "one.jpg", "--clear"], "--clear removes the picture: not with a <jpeg>"],
+      ["task send", ["bob", "--title", "t", "--progress", "10", "--steps", "4/5"], "--progress or --steps, not both"],
+      ["task update", ["bob", "t1", "--progress", "10", "--steps", "4/5"], "--progress or --steps, not both"],
+      ["usage send", ["bob", "--left", "5", "--used", "1", "--limit", "2"], "--left or --used with --limit, not both"],
+      ["usage send", ["bob", "--left", "5", "--used", "1"], "--left or --used with --limit, not both"],
+      ["group link", ["g1", "--off", "--reset"], "--off turns the link off: not with --reset"],
+      ["group hub", ["g1", "m1", "--pin", "--exclude"], "--pin, --exclude or --auto: one of them"],
+      ["group hub", ["g1", "m1", "--exclude", "--auto"], "--pin, --exclude or --auto: one of them"],
+      ["file save", ["f1", "--dir", "d", "--path", "d/both.txt"], "--path names the file: not with --dir"],
+      ["file save", ["f1", "--timeout", "5"], "--timeout is how long --wait waits: not without --wait"],
+      ["identity complete", ["d1", "--evidence-file", "proof.txt", "--stdin"], "--evidence-file or --stdin, not both"],
+    ];
+    for (const [name, argv, message] of pairs) {
+      let error: unknown;
+      try { params(name, argv); } catch (caught) { error = caught; }
+      expect(error, `${name} ${argv.join(" ")}`).toBeInstanceOf(CliError);
+      expect((error as CliError).code, name).toBe("usage");
+      expect((error as CliError).message, name).toBe(message);
+    }
+    // Each side alone is taken as before.
+    expect(params("profile picture", ["--clear"])).toMatchObject({ path: undefined, clear: true });
+    expect(params("group picture", ["g1", "--clear"])).toMatchObject({ clear: true });
+    expect(params("task send", ["bob", "--title", "t", "--steps", "4/5"]).card).toMatchObject({ done: 4, total: 5 });
+    expect(params("task send", ["bob", "--title", "t", "--progress", "10"]).card).toMatchObject({ progress: 10 });
+    expect(params("usage send", ["bob", "--used", "1", "--limit", "2"]).card).toMatchObject({ used: 1, limit: 2 });
+    expect(params("usage send", ["bob", "--left", "5"]).card).toMatchObject({ left: 5 });
+    expect(params("group link", ["g1", "--reset"])).toEqual({ group: "g1", on: true, reset: true });
+    expect(params("group link", ["g1", "--off"])).toEqual({ group: "g1", on: false, reset: false });
+    for (const role of ["pin", "exclude", "auto"]) expect(params("group hub", ["g1", "m1", `--${role}`])).toMatchObject({ role });
+    expect(params("group hub", ["g1", "m1"])).toMatchObject({ role: "auto" });
+    expect(params("file save", ["f1", "--dir", "d"])).toMatchObject({ dir: resolve("d"), path: undefined });
+    expect(params("file save", ["f1", "--path", "d/one.txt"])).toMatchObject({ dir: undefined, path: resolve("d/one.txt") });
+    expect(params("file save", ["f1"])).toMatchObject({ dir: resolve("."), path: undefined });
+    expect(params("file save", ["f1", "--wait", "--timeout", "5"])).toMatchObject({ wait: true, timeout: 5 });
+    expect(params("identity complete", ["d1", "--evidence-file", "proof.txt"])).toEqual({ draft: "d1", evidenceFile: resolve("proof.txt"), stdin: false });
+    expect(params("identity complete", ["d1", "--stdin"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
   });
 });
 
@@ -215,6 +398,20 @@ describe("errors", () => {
     expect(asCliError({ code: "constructor", message: "x" }).code).toBe("engine");
   });
 
+  // A host that does not answer was `engine` (exit 1), which a bot reads as the engine failing, and a Lightning
+  // address the CLI could not reach said the browser's words ("not allow web apps to read it (CORS)").
+  it("say the engine's known errors by what they are: a host not there, one too slow, a wrong value, a refusal", () => {
+    const host = { host: "nowhere.example" };
+    for (const code of ["mintUnreachable", "hostUnreachable", "networkUnreachable", "usdtRpcUnavailable"] as const)
+      expect(asCliError(engineError(code, host)).code, code).toBe("unavailable");
+    for (const code of ["hostTimedOut", "networkTimedOut"] as const) expect(asCliError(engineError(code, host)).code, code).toBe("timeout");
+    for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
+    for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
+    expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
+    // One the table does not name stays the engine's, in its words.
+    expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
+  });
+
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {
     // Found in bug hunt r3a: `file save --dir` into a folder that did not exist was `engine`, exit 1, with Node's words.
     const { open } = await import("node:fs/promises");
@@ -224,5 +421,24 @@ describe("errors", () => {
     expect(asCliError(Object.assign(new Error("EISDIR: illegal operation"), { code: "EISDIR", syscall: "open", path: "/tmp" })).code).toBe("bad_request");
     // An engine error that only mentions a file keeps its words.
     expect(asCliError(new Error("The file is gone")).code).toBe("engine");
+  });
+
+  it("say a contact that could not be reached as unavailable, not as the engine failing", () => {
+    // `chat pay` / `chat connect` to a contact that never answers: the link's GhostlyHttpError "unreachable".
+    expect(asCliError(new GhostlyHttpError("unreachable", "Could not connect to the peer")).toJSON()).toEqual({ code: "unavailable", message: "Could not connect to the peer" });
+    expect(asCliError(new GhostlyHttpError("closed", "Connection closed")).code).toBe("engine");
+  });
+
+  // A member's admin-only group commands and an invitation already answered were `engine` (exit 1), the code for the
+  // engine failing: a bot could not tell "you are not allowed" from a crash. The engine's own words, as thrown.
+  it("say a group refusal as refused, and an invite into a community as a wrong request", () => {
+    for (const message of [
+      "Only the admin can rename the group", "Only the admin can change the members of this group", "Only the admin can renew the group's secret",
+      "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
+      "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
+      "No invitation to accept", "No invitation to decline",
+    ]) expect(asCliError(new Error(message)).toJSON(), message).toEqual({ code: "refused", message });
+    const community = "Share the group's link with them: anyone who opens it joins";
+    expect(asCliError(new Error(community)).toJSON()).toEqual({ code: "bad_request", message: community });
   });
 });

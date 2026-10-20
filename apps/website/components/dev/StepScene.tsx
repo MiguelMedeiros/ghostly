@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { BITCOIN_B } from "@/components/app/identities/providerMarks";
 import { GHOST_PATH } from "@/components/ghost/path";
 import { APPEAR, BACK, DROP, EVER, LIVE, along, at, passes, path, reverse, type P, type Stage } from "./protocolTimeline";
 
@@ -208,9 +209,8 @@ function Glyph({ kind }: { kind: "message" | "file" | "payment" }) {
   return (
     <g>
       <circle r={8} className="sx-glyph sx-pay" />
-      <text y={4} textAnchor="middle" className="sx-coin">
-        ₿
-      </text>
+      {/* A path, not the ₿ character: Inter draws it only from its latin-ext file, 83 KB more for one coin. */}
+      <path d={BITCOIN_B} fillRule="evenodd" transform="scale(0.62) translate(-11.8 -10.2)" className="sx-coin" />
     </g>
   );
 }

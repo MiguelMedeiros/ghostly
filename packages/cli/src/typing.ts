@@ -1,5 +1,6 @@
 import { TYPING_REFRESH_MS, type TypingKind } from "@ghostly/core";
-import { node, type ApiContext } from "./apiKit";
+import type { EngineState } from "@ghostly/browser/shared/types";
+import { node, state, type ApiContext } from "./apiKit";
 
 /**
  * `typing --for` and `group typing --for`: a `start` holds 6 s on the other side (WISP 401 § Typing, WISP 902 · Group
@@ -48,6 +49,26 @@ export function keepTyping(ctx: ApiContext, target: TypingTarget, ms: number, wo
     });
     map.set(key, end);
   });
+}
+
+/** How long a one-shot's `--for` waits for its chat or group to be live: a fresh one-shot connects first. */
+export const ONE_SHOT_LIVE_GRACE_MS = 15_000;
+
+/**
+ * A one-shot's `--for` (it holds the profile while it runs): kept the whole time once the chat or group is live, as a
+ * daemon keeps it; ended when it is not live within `ONE_SHOT_LIVE_GRACE_MS`, since nobody would see it, and `--stop`
+ * or a send from another shell could not end it.
+ */
+export async function keepOneShot(ctx: ApiContext, target: TypingTarget, kept: Promise<void>, live: (state: EngineState) => boolean): Promise<void> {
+  let stop = () => {};
+  const cameLive = new Promise<boolean>((resolve) => {
+    if (live(state(ctx))) return resolve(true);
+    const timer = setTimeout(() => { off(); resolve(false); }, ONE_SHOT_LIVE_GRACE_MS);
+    const off = ctx.hub.onState((next) => { if (live(next)) { clearTimeout(timer); off(); resolve(true); } });
+    stop = () => { clearTimeout(timer); off(); resolve(true); };
+  });
+  if (await Promise.race([kept.then(() => true), cameLive])) { stop(); await kept; return; }
+  endTyping(ctx, target, false);
 }
 
 /** Ends a kept `--for` in the chat or group; `tell`: and says this side stopped. Whether one was kept. */

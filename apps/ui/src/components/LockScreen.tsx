@@ -244,11 +244,11 @@ function RingingCard({ call, cardRef, profile }: { call: LockedCall; cardRef: Re
       <div ref={cardRef} tabIndex={-1} role="alert" aria-labelledby={nameId} aria-describedby={kindId}
         data-testid="lock-call" data-video={call.hasVideo || undefined}
         className="flex flex-col items-center gap-3 rounded-2xl focus:outline-none">
-        <div aria-hidden="true" className="relative w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center text-2xl overflow-hidden animate-pulse-dot">
+        <div aria-hidden="true" className="relative w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center text-2xl overflow-hidden animate-ring-pulse">
           <PeerAvatar peerPubKey={call.peerPubKey} label={call.name} named={call.named} photo={call.photo} testId="lock-call-avatar" />
         </div>
         <div className="min-w-0 max-w-full">
-          <p id={nameId} data-testid="lock-call-name" className="text-text-primary text-lg font-medium truncate">{call.name}</p>
+          <p id={nameId} data-testid="lock-call-name" dir="auto" className="text-text-primary text-lg font-medium truncate">{call.name}</p>
           <p id={kindId} data-testid="lock-call-kind" className="text-text-muted text-sm">
             {call.hasVideo ? t("calls.incomingVideo") : t("calls.incomingAudio")}
           </p>

@@ -10,7 +10,7 @@ import { seed } from "../support/chatPerf";
  *   SCROLL_CPU_RATE=4 E2E_WEB_URL=http://localhost:<port> npx playwright test -c e2e/playwright.config.ts --project web chat-scroll-slow-cpu
  *
  * prints the long tasks it saw (run it alone to compare builds), and holds what a step's cost grows with: the rows it
- * brings in and the rows in the page.
+ * brings in, the rows in the page, and the rows of those laid out and painted.
  */
 
 test.use({ trace: "off", video: "off" });
@@ -66,4 +66,18 @@ test("wheeling up a long chat on a slower processor draws its older pages withou
   expect(added.length).toBeGreaterThan(10);
   expect(Math.max(...added), "rows a step brings in").toBeLessThanOrEqual(PAGE_ROWS);
   expect(most, "rows in the page at once").toBeLessThanOrEqual(MAX_ROWS);
+  // And of the rows in the page, only those on screen and near it are laid out and painted: with all 150 drawn, each
+  // step was still a long task at 4x. A row on screen is drawn, most of the others are not.
+  const drawn = await list.evaluate(el => {
+    const view = el.getBoundingClientRect();
+    const rows = [...el.querySelectorAll<HTMLElement>("[data-message-row]")].map(row => {
+      const box = row.getBoundingClientRect();
+      const inside = row.querySelector("*");
+      return { onScreen: box.bottom > view.top && box.top < view.bottom, drawn: !inside || inside.checkVisibility({ contentVisibilityAuto: true }) };
+    });
+    return { rows: rows.length, drawn: rows.filter(r => r.drawn).length, onScreenSkipped: rows.filter(r => r.onScreen && !r.drawn).length };
+  });
+  console.log(`chat-scroll-slow-cpu drawn: ${JSON.stringify(drawn)}`);
+  expect(drawn.onScreenSkipped, "rows on screen left undrawn").toBe(0);
+  expect(drawn.drawn, "rows laid out and painted").toBeLessThan(drawn.rows / 2);
 });

@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrPointer } from "@ghostly/browser/nostr/social";
 import { shortNpub } from "@ghostly/browser/nostr/social";
 import type { NostrLookupResult } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/identities";
+import { useEngineValue } from "../../lib/engineState";
 import { ago } from "../../lib/nostr";
 import { ProviderMark } from "../identities/ProviderMark";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
@@ -24,15 +24,15 @@ const relayNames = (relays: readonly string[]) => relays.map(r => r.replace(/^ws
  * be anyone's. What comes back is what the key published about itself, shown as plain text.
  */
 export function NostrEntityCard({ code, pointer }: { code: string; pointer: NostrPointer }) {
-  const state = useEngineState();
+  const relays = useEngineValue(state => state?.nostr.settings.relays ?? []);
   const t = useT();
-  const relays = state?.nostr.settings.relays ?? [];
   const [result, setResult] = useState(() => loaded.get(keyOf(pointer)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const profile = pointer.type === "profile";
 
   const load = async () => {
+    if (busy) return;
     setError(""); setBusy(true);
     try {
       const found = await engine.call("nostrLookup", pointer.type === "profile"
@@ -70,7 +70,7 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
           {profile ? t("chat.entity.loadKeyHint", { relays: relayNames(relays) }) : t("chat.entity.loadNoteHint", { relays: relayNames(relays) })}
           {pointer.relays.length > 0 && ` ${t("chat.entity.codeRelays")}`}
         </p>}
-      <button type="button" data-testid="entity-nostr-load" disabled={busy} className={cardQuiet} onClick={() => void load()}>
+      <button type="button" data-testid="entity-nostr-load" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardQuiet} onClick={() => void load()}>
         {busy ? t("chat.entity.loading") : result ? t("chat.menu.refresh") : profile ? t("chat.entity.loadProfile") : t("chat.entity.loadNote")}
       </button>
       {error && <p role="alert" data-testid="entity-nostr-error" className="m-0 text-danger-ink">{error}</p>}

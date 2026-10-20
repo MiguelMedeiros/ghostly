@@ -7,7 +7,9 @@
  *   checks every other request (the caller's label, 64 KiB, 50 a second) and hands it here as `ghostly-app-request`
  *   with the window's label; the broker knows the app by that label, never by anything the app says.
  * - The broker's answers and events go back through `app_post`: an answer to the request waiting for it (the
- *   result of the app's `app_broker` call), an event into that window alone.
+ *   result of the app's `app_broker` call), an event into that window alone. A `file` answer names where the bytes lie
+ *   in Rust's file storage (`byReference`): Rust reads and checks them and hands them to the app window as they are,
+ *   so a 16 MiB file is never base64 and JSON on this window's thread (32 ms each in Chromium).
  * - There is no frame load to count: the window loads once, and Rust refuses every navigation after it. The broker's
  *   second load is the answer to `writing`.
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
@@ -15,7 +17,7 @@
 import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
 import { registerRunningApp, type AppOpener } from "./open";
-import type { AppsPlatform } from "../platform";
+import type { AppsPlatform, LinkedFilesHost } from "../platform";
 
 /** Rust's events to the Ghostly window (apps/desktop/src/app_sandbox.rs). */
 export const APP_REQUEST_EVENT = "ghostly-app-request";
@@ -35,6 +37,8 @@ export interface DesktopOpenerOptions {
   onStop?: (ref: string, reason: AppStopReason) => void;
   view?: AppView;
   startTimeoutMs?: number;
+  /** Files the person picks for an app granted `files` (`desktopFiles.ts`); none: `files.*` is `not-allowed`. */
+  linkedFiles?: LinkedFilesHost;
 }
 
 /** How long a request for a window the opener does not know yet is kept: the window's label comes back a moment
@@ -58,7 +62,7 @@ export function forIpc(message: unknown): unknown {
   return message;
 }
 
-export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS }: DesktopOpenerOptions): AppOpener {
+export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS, linkedFiles }: DesktopOpenerOptions): AppOpener {
   const brokers = new Map<string, Broker>();
   const early = new Map<string, { at: number; requests: unknown[] }>();
   void listen<{ label: string; request: unknown }>(APP_REQUEST_EVENT, ({ payload }) => {
@@ -83,8 +87,9 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
   }
 
   return async (ref, linkId, options) => {
-    const host = apps();
-    if (!host) throw new Error("Apps cannot run in this app");
+    const engine = apps();
+    if (!engine) throw new Error("Apps cannot run in this app");
+    const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     // Throws where this client has no runner for what the person granted.
@@ -101,6 +106,7 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
       launch: { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null },
       view,
       post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
+      byReference: true,
       stopped: (reason) => {
         if (timer) clearTimeout(timer);
         unregister();

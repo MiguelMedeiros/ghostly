@@ -303,6 +303,62 @@ describe("coming back after a restart, the edges", () => {
     expect(low.link.isDataLinkOpen && high.link.isDataLinkOpen).toBe(true);
   }, 120_000);
 
+  /**
+   * The lower key's app is back after a restart and its knock carries the chat again; seconds later the contact's app
+   * crashes and is back too, and knocks in turn. The lower key took that knock for one crossing its own (its session
+   * was under `CROSSED_FRESH_MS` old) and refused it, so the contact waited for the dead session's end: live again
+   * 16.6-18.9 s after the contact's start, 5 of 5, against 0.5 s with the crash 13 s after the knock (CLI daemons over
+   * HyperDHT on a loopback testnet, 2026-10-13).
+   */
+  it("the contact crashes seconds after the lower key's knock, and its own knock carries the chat", async () => {
+    const kind = "iroh";
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [lowSide, highSide] = [made.inviter, made.joiner];
+    let low = startApp(world, "low", lowSide, { side: highSide, name: "high" }, kind, emptyDhtDeliveryState());
+    let high = startApp(world, "high", highSide, { side: lowSide, name: "low" }, kind, emptyDhtDeliveryState());
+    expect(await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, low, "crash");
+    await run(1_000);
+    low = startApp(world, "low", lowSide, { side: highSide, name: "high" }, kind, low.dhtState, true);
+    expect(await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen && channelOf(high) !== null, 30_000), "the lower key's knock").toBeLessThanOrEqual(5_000);
+    await run(2_000);
+    const held = channelOf(low);
+    await quit(world, high, "crash");
+    await run(500);
+    high = startApp(world, "high", highSide, { side: lowSide, name: "low" }, kind, high.dhtState, true);
+    const liveMs = await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen && channelOf(low) !== held, 120_000);
+    // Before: 30 s and more (the dead session's idle timeout). After: the contact's knock, a round trip and a ping's wait.
+    expect(liveMs, "from the contact's start to live on both sides").toBeLessThanOrEqual(5_000);
+  }, 240_000);
+
+  /**
+   * The chat is live over Iroh, chosen in its Connection menu, and one app crashes. It is back with no Iroh of its own
+   * (its relay out of reach, its listener not up yet) and dials WebRTC, the fallback. The staying side, its dead Iroh
+   * session still held, closed that WebRTC connection as soon as it opened: the restarted app counted a failed dial and
+   * waited its backoff, live again 52.8 s after its start (CLI daemons, local Iroh relay stopped, bug hunt 2026-10-17).
+   */
+  it.each(["lower", "higher"] as const)("back with no Iroh after a crash over chosen Iroh, the %s key's WebRTC dial carries the chat", async restarted => {
+    const kind = "webrtc+iroh";
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    let goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, emptyDhtDeliveryState(), false, undefined, true);
+    const stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, kind, emptyDhtDeliveryState(), false, undefined, true);
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== null, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    expect((stays.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport).toBe("iroh/1");
+    const held = channelOf(stays);
+    await quit(world, goes, "crash");
+    await run(2_000);
+    // Its Iroh endpoint does not come up in this test's time.
+    goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, goes.dhtState, true, 10 * 60_000, true);
+    const liveMs = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== held, 120_000);
+    // Before: the dead session's idle timeout (30 s), then the restarted app's backoff. After: its WebRTC dial and a ping's wait.
+    expect(liveMs, "from the restart to live on both sides").toBeLessThanOrEqual(20_000);
+  }, 240_000);
+
   it("a dial in from another key than the pinned one leaves the held session as it was", async () => {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");

@@ -6,7 +6,7 @@ import { CHESS_REPO, CHESS_STORE_URL, ChessPublisher, openPeers, openStoreInstal
 import { CHESS, CHESS_1_0_2 } from "../support/chessFixture";
 
 /*
- * Chess end to end (WISP 1200; WISP 405 § An app), on the e2e suite's build (VITE_APPS_TEST): the real Chess 2.3.0, its
+ * Chess end to end (WISP 1200; WISP 405 § An app), on the e2e suite's build (VITE_APPS_TEST): the real Chess 2.3.1, its
  * pinned build (e2e/fixtures/chess, taken from its signed bundle by tools/scripts/refresh-chess-fixture.mjs), bundled
  * and signed by the headless CLI with keys made for the test, in a store the CLI signed, served at
  * raw.githubusercontent.com URLs by the test. Ana installs it from the store (the install screen asks for her name in
@@ -17,8 +17,8 @@ import { CHESS, CHESS_1_0_2 } from "../support/chessFixture";
  * which waits until the person agrees to `name`.
  */
 
-/** The sequence Chess 2.3.0 is published at. */
-const SEQUENCE = 4;
+/** The sequence Chess 2.3.1 is published at. */
+const SEQUENCE = 5;
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {
   await peer.page.goto("/#/settings");
@@ -329,12 +329,12 @@ test("a tampered bundle is never installed", { tag: ["@feature:apps.chess.web", 
 test("a lower sequence is not installed over a newer one", { tag: ["@feature:apps.chess.web", "@feature:apps.updates"] }, async ({ peer, browserName }) => {
   const publisher = new ChessPublisher();
   const older = publisher.publish({ sequence: SEQUENCE, path: "v1/app.ghostlyapp" });
-  const newer = publisher.publish({ version: "2.3.1", sequence: SEQUENCE + 1, path: "v2/app.ghostlyapp" });
+  const newer = publisher.publish({ version: "2.3.2", sequence: SEQUENCE + 1, path: "v2/app.ghostlyapp" });
   publisher.signStore({ apps: [newer] });
   const [ana] = await openPeers(peer, browserName, "ana");
   await publisher.serve(ana.context);
   await installFromStore(ana.page);
-  await expect(ana.page.getByTestId("installed-app")).toContainText("2.3.1");
+  await expect(ana.page.getByTestId("installed-app")).toContainText("2.3.2");
 
   // The older version by its link: the install screen says why, and offers no Install.
   await ana.page.getByTestId("apps-add").click();
@@ -350,11 +350,11 @@ test("a lower sequence is not installed over a newer one", { tag: ["@feature:app
   await ana.page.getByTestId("app-store").filter({ hasText: STORE_NAME }).getByTestId("app-store-refresh").click();
   await ana.page.goto("/#/");
   await ana.page.goto("/#/apps");
-  await expect(ana.page.getByTestId("installed-app")).toContainText("2.3.1");
+  await expect(ana.page.getByTestId("installed-app")).toContainText("2.3.2");
   await expect(ana.page.getByTestId("installed-app-open")).toBeVisible();
 });
 
-test("Chess 1.0.2 updates to 2.3.0 only once the person agrees to share their name", { tag: ["@feature:apps.chess.web", "@feature:apps.updates", "@feature:apps.page"] }, async ({ peer, browserName }) => {
+test("Chess 1.0.2 updates to 2.3.1 only once the person agrees to share their name", { tag: ["@feature:apps.chess.web", "@feature:apps.updates", "@feature:apps.page"] }, async ({ peer, browserName }) => {
   const publisher = new ChessPublisher();
   // Chess as it was first published: it asks for `chat` alone.
   const first = publisher.publish({ build: CHESS_1_0_2, sequence: 1 });
@@ -368,7 +368,7 @@ test("Chess 1.0.2 updates to 2.3.0 only once the person agrees to share their na
   const row = ana.page.getByTestId("installed-app");
   await expect(row).toContainText("1.0.2");
 
-  // 2.3.0 is published over it and the store lists it. It asks for `name` too, so it waits for the person: the
+  // 2.3.1 is published over it and the store lists it. It asks for `name` too, so it waits for the person: the
   // installed Chess stays 1.0.2.
   const next = publisher.publish({ sequence: SEQUENCE });
   publisher.signStore({ apps: [next] });
@@ -386,7 +386,7 @@ test("Chess 1.0.2 updates to 2.3.0 only once the person agrees to share their na
   await expect(update.getByTestId("app-permission-name")).toHaveText("See your name in this chat");
   expect(await update.locator("[data-permission]").evaluateAll((all) => all.map((li) => (li as HTMLElement).dataset.permission))).toEqual(["name"]);
 
-  // Agreed: 2.3.0 is the installed Chess, with `name` among what it was granted.
+  // Agreed: 2.3.1 is the installed Chess, with `name` among what it was granted.
   await update.getByTestId("app-update-accept").click();
   await expect(row).toContainText(CHESS.manifest.version);
   await expect(row.getByTestId("installed-app-hint")).not.toHaveText("Update waiting for you");

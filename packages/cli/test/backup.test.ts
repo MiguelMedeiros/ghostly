@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { deserialize, serialize } from "node:v8";
 import { expect, it } from "vitest";
 import { seal } from "@ghostly/browser/backup/envelope";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
@@ -26,7 +27,9 @@ it("backs a profile up under a passphrase and restores it into a new one, never 
   expect(readFileSync(file, "latin1")).not.toContain("Backup bot");
   expect(statSync(file).mode & 0o777).toBe(0o600);
   expect(readdirSync(dir).filter((name) => name.includes(".partial")), "the file being written took its name only when whole").toEqual([]);
-  error(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }), "confirm", 5);
+  // A file there already: refused (exit 1), as a restore into a profile that exists. Not `confirm` (exit 5, "needs
+  // --force"): backup takes no --force.
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }), "refused", 1).message).toBe(`${file} exists: choose another name`);
 
   const wrong = join(dir, "wrong");
   writeFileSync(wrong, "not the passphrase\n");
@@ -96,10 +99,16 @@ it("a backup without a passphrase is made only when asked for by name, says so, 
 it("a backup an older CLI made (version 1) still restores", async () => {
   const dir = home("backup-v1");
   ok(await ghostly(["--home", dir, "profile", "set", "--name", "Old bot"]));
-  // A close may leave the store's last rows in its journal: a backup folds them into the snapshot, as that CLI's close did.
-  ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "folded.ghostly-backup")], { env: PASS }));
-  // As the CLI wrote it until now: the store and every file as base64 in one sealed JSON document.
-  const store = readFileSync(join(dir, "profiles", "default", "db", "snapshot.bin")).toString("base64");
+  // A close may leave the store's last rows in its journal: folded into the snapshot here, as that CLI's close did.
+  const folding = await openPersistentIndexedDb(join(dir, "profiles", "default", "db"));
+  await folding.compact();
+  await folding.close();
+  // As the CLI wrote it until now: the store and every file as base64 in one sealed JSON document. Its store was of
+  // format 1, every value inline: this profile has no messages, so the messages store kept in rows.db has none to inline.
+  const saved = deserialize(readFileSync(join(dir, "profiles", "default", "db", "snapshot.bin"))) as { format: number; databases: { stores: { records: unknown[]; onDisk?: boolean }[] }[] };
+  for (const db of saved.databases) for (const kept of db.stores) if (kept.onDisk) { expect(kept.records).toEqual([]); delete kept.onDisk; }
+  saved.format = 1;
+  const store = serialize(saved).toString("base64");
   const payload = { format: "ghostly-cli-profile/1", createdAt: 1, store, files: [{ path: "ghostly/chat-in-a", data: pattern(3000, 3).toString("base64") }] };
   const file = join(dir, "old.ghostly-backup");
   writeFileSync(file, await seal(JSON.stringify(payload), PASS.GHOSTLY_BACKUP_PASSPHRASE));
@@ -131,6 +140,43 @@ it("a file that is no backup is called that at once, whatever the passphrase, an
     expect(message).toContain("--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE");
     expect(message).not.toContain("--no-passphrase");
   }
+});
+
+// A folder to restore was refused with Node's "EISDIR: illegal operation on a directory, read", and a backup into a
+// folder that does not exist named a file the person never typed (`x.backup.partial-<pid>`).
+it("a path that is wrong on this machine is named as the person typed it: a folder to restore, a missing folder to back up into", async () => {
+  const dir = home("backup-paths");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+  const folder = join(dir, "a-folder");
+  mkdirSync(folder);
+  expect(error(await ghostly(["--home", dir, "profile", "restore", folder, "copy"], { env: NO_PASS }), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+  const missing = join(dir, "nodir");
+  const message = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(missing, "x.ghostly-backup"), "--no-passphrase"], { env: NO_PASS }), "not_found", 3).message;
+  expect(message).toBe(`No such file or folder: ${missing}`);
+  expect(existsSync(missing)).toBe(false);
+});
+
+// A passphrase file that was a folder named no path, one given as "" (an unset variable) said "No such file or folder: "
+// and an empty one "comes from --passphrase-file" to someone who gave it; `--out ""` was the current folder. A picture
+// that is a folder was not_found "No file" for a path that is there, and an evidence file that is a folder named no path.
+it("the files profile commands read are named as every other file: a folder, a path given as \"\", an empty passphrase file", async () => {
+  const dir = home("backup-read-paths");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+  const folder = join(dir, "a-folder"), empty = join(dir, "empty-passphrase"), out = join(dir, "x.ghostly-backup");
+  mkdirSync(folder);
+  writeFileSync(empty, "\n");
+  const NAMES_NO_FILE = 'A path given as "" names no file';
+  for (const command of [["backup", "--out", out], ["restore", out, "copy"]]) {
+    const run = (...args: string[]) => ghostly(["--home", dir, "profile", ...command, ...args], { env: NO_PASS });
+    if (command[0] === "restore") ok(await ghostly(["--home", dir, "profile", "backup", "--out", out], { env: PASS }));
+    expect(error(await run("--passphrase-file", folder), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+    expect(error(await run("--passphrase-file", ""), "usage", 2).message).toBe(NAMES_NO_FILE);
+    expect(error(await run("--passphrase-file", empty), "bad_request", 1).message).toBe(`${empty} is empty: it holds the backup's passphrase`);
+  }
+  expect(readdirSync(join(dir, "profiles"))).toEqual(["default"]);
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", "", "--no-passphrase"], { env: NO_PASS }), "usage", 2).message).toBe(NAMES_NO_FILE);
+  expect(error(await ghostly(["--home", dir, "profile", "picture", folder]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+  expect(error(await ghostly(["--home", dir, "identity", "complete", "draft", "--evidence-file", folder]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
 });
 
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
@@ -237,4 +283,34 @@ it("--light leaves out files over 1 MB (voice messages over 4 MB), and the copy 
   expect(error(await ghostly(["--home", dir, "--profile", "copy", "file", "save", "chat-in-video", "--dir", saved]), "not_found", 3).message).toContain("Not in this backup");
   expect(readdirSync(saved), "nothing written for a file that is not here").toEqual([]);
   expect(existsSync(join(restored.folder, "restored")), "done once: the mark is gone").toBe(false);
+});
+
+// The profile keeps its messages in rows.db: its snapshot names them only. A backup is one store with every value in
+// it (format 1), which this ghostly and any older one restore.
+it("a backup carries the messages kept in rows.db, as a store of format 1", async () => {
+  const dir = home("backup-rows");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Rows bot"]));
+  const dbDir = join(dir, "profiles", "default", "db");
+  const message = { linkId: "chat-1", id: "peer_1", text: "kept in rows.db", sender: "peer", timestamp: 1, via: "datalink" };
+  const putIn = await openPersistentIndexedDb(dbDir);
+  const d = await new Promise<IDBDatabase>((resolve, reject) => { const r = putIn.factory.open("ghostly"); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+  await new Promise<void>((resolve, reject) => { const t = d.transaction("messages", "readwrite"); t.objectStore("messages").put(message); t.oncomplete = () => resolve(); t.onerror = () => reject(t.error); });
+  d.close();
+  await putIn.compact();
+  await putIn.close();
+  expect((deserialize(readFileSync(join(dbDir, "snapshot.bin"))) as { format: number }).format).toBe(3);
+
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "rows.ghostly-backup")], { env: PASS }));
+  const restored = ok(await ghostly(["--home", dir, "profile", "restore", join(dir, "rows.ghostly-backup"), "rows-copy"], { env: PASS })) as { folder: string };
+  const copy = deserialize(readFileSync(join(restored.folder, "db", "snapshot.bin"))) as { format: number; databases: { name: string; stores: { name: string; records: [unknown, unknown][] }[] }[] };
+  expect(copy.format).toBe(1);
+  expect(copy.databases.find((db) => db.name === "ghostly")!.stores.find((s) => s.name === "messages")!.records).toEqual([[["chat-1", "peer_1"], message]]);
+  // Opened, it moves its messages to rows.db again, and reads them back.
+  const reopened = await openPersistentIndexedDb(join(restored.folder, "db"));
+  const r = await new Promise<IDBDatabase>((resolve, reject) => { const q = reopened.factory.open("ghostly"); q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error); });
+  const got = await new Promise((resolve, reject) => { const q = r.transaction("messages").objectStore("messages").get(["chat-1", "peer_1"]); q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error); });
+  expect(got).toEqual(message);
+  r.close();
+  await reopened.close();
+  expect(existsSync(join(restored.folder, "db", "rows.db"))).toBe(true);
 });

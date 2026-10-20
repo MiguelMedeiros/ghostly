@@ -9,6 +9,8 @@
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::sync::Mutex;
 use tauri::{Manager, Runtime};
 
 /// The D-Bus id for this data folder and profile: `<bundle id>.p<16 hex>` (the plugin adds `.SingleInstance`).
@@ -52,7 +54,92 @@ fn this_id(identifier: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<Str
     ))
 }
 
-/// Adds the plugin first, as it asks: a second launch exits in its setup, before any window or peer starts.
+/// The plugin's name and object path for an id, as it builds them (version 2, without its `semver` feature).
+fn bus_name(id: &str) -> String {
+    format!("{id}.SingleInstance")
+}
+
+fn object_path(name: &str) -> String {
+    format!("/{}", name.replace('.', "/").replace('-', "_"))
+}
+
+/// Calls the running instance of `id` on the bus, as the plugin's second instance does: true once it has answered.
+/// With no one holding the name the bus refuses the call at once.
+fn call_running(bus: &zbus::blocking::Connection, id: &str, argv: Vec<String>, cwd: &str) -> bool {
+    let name = bus_name(id);
+    bus.call_method(
+        Some(name.as_str()),
+        object_path(&name).as_str(),
+        Some("org.SingleInstance.DBus"),
+        "ExecuteCallback",
+        &(argv, cwd),
+    )
+    .is_ok()
+}
+
+/// A second launch on a profile that already runs: the running app is handed this launch's arguments and folder
+/// (its window comes forward) and the answer is true, for the app to leave before Tauri starts. The plugin's own
+/// second instance exits in its setup, when tao's X11 device thread has started: the destructors `exit` runs under
+/// that thread could crash the launch (SIGSEGV, SIGABRT) instead of handing over.
+pub fn hand_over(identifier: &str) -> bool {
+    let Some(id) = this_id(identifier, &|name| std::env::var(name).ok()) else {
+        return false;
+    };
+    let Ok(bus) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let cwd = std::env::current_dir().unwrap_or_default();
+    call_running(
+        &bus,
+        &id,
+        std::env::args().collect(),
+        cwd.to_str().unwrap_or_default(),
+    )
+}
+
+/// A launch handed to this app while it was leaving: what it was launched with, and from where.
+static HELD: Mutex<Option<(Vec<String>, String)>> = Mutex::new(None);
+
+/// A later launch handed to this app while it leaves (its window closed, the page saying goodbye: `DEPARTING`) has
+/// no window to bring forward: it is held, to start once this app has gone (`relaunch`). True when it was held.
+fn held(departing: bool, argv: Vec<String>, cwd: String) -> bool {
+    if departing {
+        *HELD.lock().unwrap_or_else(|e| e.into_inner()) = Some((argv, cwd));
+    }
+    departing
+}
+
+fn take_held() -> Option<(Vec<String>, String)> {
+    HELD.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Starts `exe` as that launch was: its own arguments, from its own folder.
+fn launch(exe: &Path, argv: &[String], cwd: &str) -> std::io::Result<std::process::Child> {
+    std::process::Command::new(exe)
+        .args(argv.iter().skip(1))
+        .current_dir(cwd)
+        .spawn()
+}
+
+/// The launch held while this app left, started now that it has gone (`RunEvent::Exit`: the plugin has let go of the
+/// profile's name, so it starts on its own instead of handing over again). From the AppImage, not its mount, which
+/// goes with this app.
+pub fn relaunch<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let Some((argv, cwd)) = take_held() else {
+        return;
+    };
+    match tauri::process::current_binary(&app.env()) {
+        Ok(exe) => {
+            if let Err(error) = launch(&exe, &argv, &cwd) {
+                eprintln!("single instance: the launch held while leaving did not start: {error}");
+            }
+        }
+        Err(error) => eprintln!("single instance: no binary to start the held launch: {error}"),
+    }
+}
+
+/// Adds the plugin first, as it asks: it holds the profile's name for the first instance and answers the next
+/// launches' `hand_over`. Two launches at the very same moment still meet in its setup, where the second exits.
 pub fn register<R: Runtime>(builder: tauri::Builder<R>, identifier: &str) -> tauri::Builder<R> {
     let Some(id) = this_id(identifier, &|name| std::env::var(name).ok()) else {
         return builder;
@@ -60,7 +147,10 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>, identifier: &str) -> tau
     builder.plugin(
         tauri_plugin_single_instance::Builder::new()
             .dbus_id(id)
-            .callback(|app, _argv, _cwd| {
+            .callback(|app, argv, cwd| {
+                if held(crate::DEPARTING.load(Ordering::SeqCst), argv, cwd) {
+                    return;
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
                     let _ = window.show();
@@ -153,6 +243,131 @@ mod tests {
             &env(&[bus, ("HOME", "/home/ana"), ("XDG_DATA_HOME", "data")]),
         );
         assert_eq!(relative, implicit);
+    }
+
+    /// A session bus of the test's own, gone with it.
+    struct Bus(std::process::Child, String);
+
+    impl Bus {
+        fn start() -> Self {
+            use std::io::{BufRead, BufReader};
+            let mut daemon = std::process::Command::new("dbus-daemon")
+                .args(["--session", "--nofork", "--print-address"])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("dbus-daemon");
+            let mut address = String::new();
+            BufReader::new(daemon.stdout.take().unwrap())
+                .read_line(&mut address)
+                .unwrap();
+            Bus(daemon, address.trim().to_string())
+        }
+
+        fn connect(&self) -> zbus::blocking::connection::Builder<'_> {
+            zbus::blocking::connection::Builder::address(self.1.as_str()).unwrap()
+        }
+    }
+
+    impl Drop for Bus {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    /// The running instance, as the plugin serves it: what each later launch handed it.
+    struct Running(std::sync::mpsc::Sender<(Vec<String>, String)>);
+
+    #[zbus::interface(name = "org.SingleInstance.DBus")]
+    impl Running {
+        fn execute_callback(&self, argv: Vec<String>, cwd: String) {
+            let _ = self.0.send((argv, cwd));
+        }
+    }
+
+    #[test]
+    fn the_name_and_path_are_the_plugins() {
+        let name = bus_name("app.ghostly.chat.p0123456789abcdef");
+        assert_eq!(name, "app.ghostly.chat.p0123456789abcdef.SingleInstance");
+        assert_eq!(
+            object_path(&name),
+            "/app/ghostly/chat/p0123456789abcdef/SingleInstance"
+        );
+        assert_eq!(object_path("a-b.c.SingleInstance"), "/a_b/c/SingleInstance");
+    }
+
+    /// The issue: the plugin's second instance exited from its setup while tao's X11 thread was opening the
+    /// display, and could crash. The launch now asks the bus first, before Tauri starts: handed over only when the
+    /// profile's running instance answers, with this launch's arguments and folder, as the plugin passes them.
+    #[test]
+    fn a_second_launch_hands_over_only_to_its_own_profiles_running_instance() {
+        let bus = Bus::start();
+        let launch = bus.connect().build().unwrap();
+        let ana = dbus_id(
+            "app.ghostly.chat",
+            Path::new("/home/ana/.local/share/app.ghostly.chat"),
+            "",
+        );
+        let work = dbus_id(
+            "app.ghostly.chat",
+            Path::new("/home/ana/.local/share/app.ghostly.chat"),
+            "work",
+        );
+        let argv = vec!["ghostly".to_string(), "--flag".to_string()];
+
+        // No one runs: the launch starts.
+        assert!(!call_running(&launch, &ana, argv.clone(), "/home/ana"));
+
+        let (handed, heard) = std::sync::mpsc::channel();
+        let name = bus_name(&ana);
+        let _first = bus
+            .connect()
+            .name(name.as_str())
+            .unwrap()
+            .serve_at(object_path(&name).as_str(), Running(handed))
+            .unwrap()
+            .build()
+            .unwrap();
+
+        assert!(call_running(&launch, &ana, argv.clone(), "/home/ana"));
+        assert_eq!(
+            heard.try_recv(),
+            Ok((argv.clone(), "/home/ana".to_string()))
+        );
+        // Another profile is not that instance: it starts.
+        assert!(!call_running(&launch, &work, argv, "/home/ana"));
+        assert!(heard.try_recv().is_err());
+    }
+
+    /// The issue: a launch within DEPART_MS of the window's close was handed to this app, whose window was going,
+    /// and no window was left. Now it is held while this app leaves, and started once it has gone.
+    #[test]
+    fn a_launch_while_this_app_leaves_is_started_once_it_has_gone() {
+        let argv = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert!(!held(false, argv(&["ghostly"]), "/home/ana".into()));
+        assert_eq!(take_held(), None);
+        assert!(held(true, argv(&["ghostly", "--flag"]), "/home/ana".into()));
+        assert_eq!(
+            take_held(),
+            Some((argv(&["ghostly", "--flag"]), "/home/ana".to_string()))
+        );
+        assert_eq!(take_held(), None);
+
+        // Started as launched: its own arguments, from its own folder.
+        let dir = std::env::temp_dir().join(format!("ghostly-relaunch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut child = launch(
+            Path::new("/bin/sh"),
+            &argv(&["ghostly", "-c", "pwd > started"]),
+            dir.to_str().unwrap(),
+        )
+        .unwrap();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("started")).unwrap().trim(),
+            dir.canonicalize().unwrap().to_str().unwrap()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

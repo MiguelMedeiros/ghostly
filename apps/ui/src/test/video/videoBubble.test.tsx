@@ -147,6 +147,19 @@ describe("a video in the chat", () => {
     expect(revoke).toHaveBeenCalledWith(url);
   });
 
+  it("its poster is made 200 px before it scrolls into the chat list's view, not only once it shows", () => {
+    const inits: (IntersectionObserverInit | undefined)[] = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(_callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { inits.push(init); }
+      observe() {}
+      disconnect() {}
+    });
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<div data-testid="list" data-message-list><VideoBubble file={video()} sender="peer" peerName="Ana" /></div>);
+    expect(inits).toEqual([{ root: screen.getByTestId("list"), rootMargin: "200px 0px" }]);
+    vi.unstubAllGlobals();
+  });
+
   it("scrolled out of view it stops and lets go of its bytes; played again, it goes on from there", async () => {
     let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
     vi.stubGlobal("IntersectionObserver", class {
@@ -295,6 +308,17 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4).");
   });
 
+  it("a right-click on the playing video opens no engine menu, so its stream's address is never offered to copy", async () => {
+    vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "http://127.0.0.1:4100/token-5", release: vi.fn() });
+    show(video({ size: 20 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const streamed = screen.getByTestId("video-player");
+    expect(streamed.getAttribute("src")).toBe("http://127.0.0.1:4100/token-5");
+    // fireEvent returns false when the default (the engine's own menu) was prevented.
+    expect(fireEvent.contextMenu(streamed)).toBe(false);
+  });
+
   it("a refused stream fires error and rejects its play: it plays from its bytes, with no \"can't play\"", async () => {
     const release = vi.fn();
     vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue({ url: "ghostly-file://localhost/token-5", release });
@@ -329,8 +353,9 @@ describe("a video in the chat", () => {
     await enter();
     expect(fullscreenWindow).toHaveBeenLastCalledWith(true);
     expect(screen.getByRole("button", { name: "Exit full screen" })).toHaveAttribute("aria-pressed", "true");
-    // Escape leaves it, the window with it; the video goes on.
-    fireEvent.keyDown(document, { key: "Escape" });
+    // Escape leaves it, the window with it; the video goes on. The Escape is spent (false: its default prevented), so
+    // a notice at the top that also answers Escape stays.
+    expect(fireEvent.keyDown(document, { key: "Escape" })).toBe(false);
     expect(screen.getByTestId("video-frame")).not.toHaveAttribute("data-theater");
     expect(fullscreenWindow).toHaveBeenLastCalledWith(false);
     expect(screen.getByTestId("video-player")).toBeInTheDocument();

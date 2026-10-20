@@ -45,6 +45,7 @@ describe('apps: "wire" in an engine', () => {
       ["appList", undefined], ["appStoreList", undefined], ["appStoreAdd", { url: "https://raw.githubusercontent.com/o/r/HEAD/index.json" }],
       ["appStoreRefresh", undefined], ["appPreview", { url: "https://raw.githubusercontent.com/o/r/HEAD/app.ghostlyapp" }], ["appInstall", { digest: "x", grant: [] }],
       ["appCheckUpdates", undefined], ["appRunCheck", { ref }], ["appEntry", { ref }], ["appStorageGet", { ref, scope: "alone", key: "k" }], ["appDataExport", { ref }],
+      ["appDataExportText", { ref }],
     ] as const)
       await expect(call(method, params), method).rejects.toThrow("Apps do not run on this client");
   });

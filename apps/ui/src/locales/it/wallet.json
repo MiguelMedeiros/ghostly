@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "Questa fattura è scaduta: ora nessuno può pagarla.",
     "invoiceFor": "Fattura di {{amount}}",
     "makePrimary": "Rendi principale",
     "mints": "Mint",
@@ -585,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "sats di prova"
   },
+  "send": {
+    "balance": "Saldo: {{amount}} {{unit}}",
+    "cameraUnavailable": "Fotocamera non disponibile. Incolla, scrivi o scegli un'immagine.",
+    "clipboardEmpty": "Niente da incollare. Copia prima una fattura o un indirizzo.",
+    "clipboardUnavailable": "Impossibile leggere gli appunti. Incolla o scrivi qui sotto.",
+    "image": "Scegli immagine",
+    "max": "Max",
+    "noAmount": "Questa fattura non ha un importo. Chiedine una con l'importo.",
+    "paste": "Incolla",
+    "scan": "Scansiona"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Creo i tuoi portafogli Mainnet…",
@@ -725,8 +737,8 @@
     "gas": "Il faucet si paga con un po’ di Sepolia ETH per il gas: prima inviane un po’ all’indirizzo di questo portafoglio. {{link}}",
     "gasLink": "Apri un faucet di Sepolia ETH",
     "get": "Ottieni monete di prova",
-    "got": "+{{amount}} {{unit}}",
-    "gotPending": "+{{amount}} {{unit}} in arrivo: compaiono qui tra pochi secondi",
+    "got": "{{amount}} {{unit}}",
+    "gotPending": "{{amount}} {{unit}} in arrivo: compaiono qui tra pochi secondi",
     "open": "Apri faucet",
     "openHint": "{{name}}. {{why}}",
     "openHintThen": "{{name}}. {{why}} {{then}}",

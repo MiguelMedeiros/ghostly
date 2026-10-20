@@ -9,7 +9,7 @@ import type { CallEventType } from "./types";
  */
 export function callLineId(type: CallEventType, call?: number): string {
   if (call !== undefined) return `system_call_${type}_${call}`;
-  return `system_call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  return `system_call_${Date.now()}_${crypto.randomUUID().slice(0, 6)}`;
 }
 
 /**

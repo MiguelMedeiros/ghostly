@@ -1,5 +1,5 @@
 import { inviteLink, inviteOwnership, readInviteCode, type InviteRefusal, type LinkParams } from "@ghostly/core";
-import { listSessions, type SessionKeys } from "./storage";
+import { knownChatKeys, listSessions, type SessionKeys } from "./storage";
 
 /**
  * Where a chat lives in the app: by the id of its stored session. The keys
@@ -31,6 +31,14 @@ export function appLinkOrigin(): string {
   return !desktop && /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_APP_ORIGIN;
 }
 
+/**
+ * A part of the app's address, unescaped; null when a `%` in it is not an escape (`#/chat/%`). Anyone can make such
+ * a link, and `decodeURIComponent` throws on it: thrown in an intake, it took the whole app to its error screen.
+ */
+export function decodePart(part: string): string | null {
+  try { return decodeURIComponent(part); } catch { return null; }
+}
+
 /** A `web+ghostly:` link, as the browser hands it over (escaped) or as it was written. */
 const PROTOCOL_LINK = /^\/?web(?:\+|%2B)ghostly(?::|%3A)(?:\/\/|%2F%2F)?/i;
 
@@ -42,7 +50,7 @@ const PROTOCOL_LINK = /^\/?web(?:\+|%2B)ghostly(?::|%3A)(?:\/\/|%2F%2F)?/i;
 export function protocolLinkCode(pathname: string): string | null {
   if (!PROTOCOL_LINK.test(pathname)) return null;
   const rest = pathname.replace(PROTOCOL_LINK, "");
-  try { return decodeURIComponent(rest); } catch { return rest; }
+  return decodePart(rest) ?? rest;
 }
 
 /**
@@ -85,8 +93,12 @@ export function parseInvite(input: string): SessionKeys | null {
 export type JoinOutcome = { kind: "own" | "joined"; sessionId: string } | { kind: "new" };
 
 export function classifyInvite(keys: SessionKeys): JoinOutcome {
-  const known = listSessions().map((session) => ({ id: session.id, seedB64: session.mySeedB64, peerPubKeyZ32: session.peerPubKeyB64 }));
-  const ownership = inviteOwnership({ seedB64: keys.seedB64 }, known);
+  // Read without any chat's messages (`knownChatKeys`); the list's order only when two chats could be the one.
+  const known = knownChatKeys();
+  const found = inviteOwnership({ seedB64: keys.seedB64 }, known);
+  const same = found.kind === "new" ? 0 : known.filter((c) => found.kind === "joined" ? c.seedB64 === found.link.seedB64 : c.peerPubKeyZ32 === found.link.peerPubKeyZ32).length;
+  const ownership = same < 2 ? found
+    : inviteOwnership({ seedB64: keys.seedB64 }, listSessions().map((session) => ({ id: session.id, seedB64: session.mySeedB64, peerPubKeyZ32: session.peerPubKeyB64 })));
   return ownership.kind === "new" ? ownership : { kind: ownership.kind, sessionId: ownership.link.id };
 }
 
@@ -124,7 +136,7 @@ export function buildInviteUrl(
 export function chatRouteSession(pathname: string): string | null {
   const match = pathname.match(/^\/chat\/([^/]+)\/?$/);
   // A `ghostly1` code is one segment too, but it is keys, never a session id.
-  return match && !/^ghostly1/i.test(match[1]) ? decodeURIComponent(match[1]) : null;
+  return match && !/^ghostly1/i.test(match[1]) ? decodePart(match[1]) : null;
 }
 
 /** What Copy and Share hand over: a `ghostly1` code as its link on ghostly.tools, an older code as it is. */

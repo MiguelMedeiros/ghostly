@@ -11,6 +11,7 @@ const KEYS: Record<string, TranslationKey> = {
   offline: "apps.errors.offline",
   status: "apps.errors.status",
   network: "apps.errors.network",
+  slow: "apps.errors.slow",
   "too-large": "apps.errors.tooLarge",
   "other-app": "apps.errors.otherApp",
   rollback: "apps.errors.rollback",

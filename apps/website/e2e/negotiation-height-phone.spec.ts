@@ -64,7 +64,9 @@ test("a link to the section after the loop lands on its heading", async ({ page 
   // and a jump made while the page is still as tall as it is without scripts lands somewhere else.
   await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 45_000 });
   // From the top of the page, as a link to the anchor does: the smooth scroll passes over the loop.
+  // A tap starts with a pointerdown, which turns the page's smooth scrolling on (layout.tsx, js-flag).
   await page.evaluate(() => {
+    window.dispatchEvent(new Event("pointerdown"));
     location.hash = "path";
   });
   const top = () => page.locator("#path").evaluate((el) => Math.round(el.getBoundingClientRect().top));

@@ -13,7 +13,7 @@ import { runnerFor, startApp, type AppStopReason, type AppView, type RunningApp 
 import { appSlot, chatApp, setChatApp, updateChatApp } from "./running";
 import { runnerAvailable } from "./runnerCheck";
 import { registerRunningApp, type AppOpener, type AppTakedown } from "./open";
-import type { AppsPlatform } from "../platform";
+import type { AppsPlatform, LinkedFilesHost } from "../platform";
 
 export interface WebOpenerOptions {
   apps: () => AppsPlatform | null | undefined;
@@ -24,6 +24,8 @@ export interface WebOpenerOptions {
   /** The person's name in a chat, for an app granted `name`: what the contact was told, or none (`nameInChat`). */
   nameIn: (linkId: string) => string | undefined;
   onStop?: (ref: string, reason: AppStopReason) => void;
+  /** Files the person picks for an app granted `files` (`webFiles.ts`); none: `files.*` is `not-allowed`. */
+  linkedFiles?: LinkedFilesHost;
 }
 
 /**
@@ -34,12 +36,13 @@ function warnStop(title: string, reason: AppStopReason): void {
   if (reason !== "closed" && reason !== "stopped") console.warn(`[apps] ${title} stopped: ${reason}`);
 }
 
-export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, nameIn, onStop }: WebOpenerOptions): AppOpener {
+export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, nameIn, onStop, linkedFiles }: WebOpenerOptions): AppOpener {
   /** The layer of each app open alone, by app and chat: the same one opened again is shown as it is. */
   const alone = new Map<string, HTMLElement>();
   return async (ref, linkId, options) => {
-    const host = apps();
-    if (!host) throw new Error("Apps cannot run in this app");
+    const engine = apps();
+    if (!engine) throw new Error("Apps cannot run in this app");
+    const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     // The runner from what the person granted; its server must send that runner's policy.
@@ -76,6 +79,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
           warnStop(entry.title, reason);
           onStop?.(ref, reason);
         },
+        onServing: (on) => { if (chatApp(linkId)?.running === running) updateChatApp(linkId, { serving: on }); },
       });
       setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running });
       return;

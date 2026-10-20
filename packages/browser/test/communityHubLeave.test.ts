@@ -136,11 +136,12 @@ describe("a hub whose app is killed", { timeout: 120_000 }, () => {
 
     // Each side of an edge to it dials it again at once, as the engine does: a connection under way, from one side.
     world.redialSeen = true;
-    // The requests in the hubs' lobbies, and whether each went as the door's (not held while a link signals).
+    // The requests in the hubs' lobbies, and whether each went as the door's or as an edge's signaling (not held while a
+    // link signals).
     const rv = rest[0].groups.communities.session(id)!.state.rv;
     const lobbies = new Set(rest.map(p => lobbyKeys(rv, id, keyOf(p)).identity.pubKeyZ32));
-    const asked: { who: Peer; door: boolean }[] = [];
-    world.onPkarr = (who, op, key, _bg, door) => { if (op === "publish" && lobbies.has(key)) asked.push({ who, door }); };
+    const asked: { who: Peer; door: boolean; background: boolean }[] = [];
+    world.onPkarr = (who, op, key, background, door) => { if (op === "publish" && lobbies.has(key)) asked.push({ who, door, background }); };
     admin.online = false;
     for (const p of rest) await p.groups.send(id, `line ${p.name}`);
     const back = await world.until(() => rest.every(p => connected(world, p, id) > 0), 3 * 60_000);
@@ -151,9 +152,10 @@ describe("a hub whose app is killed", { timeout: 120_000 }, () => {
     expect(heard).toBeLessThanOrEqual(5_000);
     // The hubs left stopped dialling it after the same 20 s its members wait for it: no edge to it is kept open.
     for (const hub of rest.filter(p => p.groups.communities.isHub(id))) expect([...hub.links.values()].some(e => e.kind === "edge" && e.g === id && e.peer === keyOf(admin)), `${hub.name} still dials the killed hub`).toBe(false);
-    // Its members asked a hub left, and their requests went as a knock does, not held while their links dial.
+    // Its members asked a hub left, and their requests went as a knock does, or with no edge up as their way back (an
+    // edge's signaling): never a background look held while their links dial.
     expect(asked.filter(a => orphans.includes(a.who)).length).toBeGreaterThan(0);
-    expect(asked.every(a => a.door), "every request in a hub's lobby").toBe(true);
+    expect(asked.every(a => a.door || !a.background), "every request in a hub's lobby").toBe(true);
   });
 });
 

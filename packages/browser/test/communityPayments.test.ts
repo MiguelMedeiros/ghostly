@@ -6,6 +6,7 @@ import type { CashuWallet } from "../src/engine/wallet";
 import type { GroupPayNote, StoredMessage } from "../src/shared/types";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import { resetDb } from "./fakes";
+import { invoiceFor } from "./helpers/invoice";
 // covers: groups.community.payments.member, groups.community.payments.group-request, groups.protocol.community-pair
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
@@ -59,7 +60,7 @@ function member(world: CommunityWorld, name: string, network: "mainnet" | "testn
     inspect: vi.fn((token: string) => ({ kind: "token", mint: token.split("|")[1], amount: Number(token.split("|")[2]), unit: "sat", accepted: true })),
     reclaim: vi.fn(async () => ({ amount: 0 })),
   };
-  const lightning = { createInvoice: vi.fn(async () => ({ invoice: `lnbc-${name}` })), quote: vi.fn(), pay: vi.fn() };
+  const lightning = { createInvoice: vi.fn(async (amount: number) => ({ invoice: invoiceFor(amount) })), quote: vi.fn(), pay: vi.fn() };
   const putMessage = async (message: StoredMessage) => {
     const at = peer.messages.findIndex(m => m.id === message.id);
     if (at >= 0) peer.messages[at] = message; else peer.messages.push(message);

@@ -1,4 +1,15 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
+
+const ROOT = join(fileURLToPath(import.meta.url), "../../../../../..");
+
+/** A real recording's bytes: e2e/support/voice-fixtures/ (what each engine's MediaRecorder makes) or the CLI's tone. */
+export function recording(name: "chromium.webm" | "macos-wkwebview.webm" | "macos-wkwebview.m4a" | "tone.ogg"): Uint8Array<ArrayBuffer> {
+  const path = name === "tone.ogg" ? "packages/cli/test/fixtures/tone.ogg" : `e2e/support/voice-fixtures/${name}`;
+  return new Uint8Array(readFileSync(join(ROOT, path)));
+}
 
 /**
  * A microphone, a MediaRecorder and an AudioContext for happy-dom, which has none: enough of

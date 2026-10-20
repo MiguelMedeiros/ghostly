@@ -1,4 +1,5 @@
 import { fromBase64Url } from "./bytes";
+import { imageSize } from "./image";
 
 /**
  * Videos. A video is an ordinary file (files/2, files/3 or a held item) whose announcement may also carry a
@@ -51,7 +52,8 @@ const JPEG_START = [0xff, 0xd8, 0xff];
 
 /**
  * A peer's `video` description, or undefined when it is not one. It never refuses the file. A poster that is
- * too large or not a JPEG is dropped on its own; the length and size are kept.
+ * too large, not a JPEG, or says it is more pixels than a sender draws (`posterEdge`) is dropped on its own; the
+ * length and size are kept. It is shown before the file is accepted, so a few bytes must not ask for a huge bitmap.
  */
 export function parseVideoMeta(value: unknown, mime?: string): VideoMeta | undefined {
   if (mime !== undefined && !isVideoMime(mime)) return undefined;
@@ -64,7 +66,8 @@ export function parseVideoMeta(value: unknown, mime?: string): VideoMeta | undef
   if (typeof poster === "string" && poster.length <= Math.ceil((VIDEO_LIMITS.maxPosterBytes * 4) / 3) && BASE64URL.test(poster)) {
     try {
       const bytes = fromBase64Url(poster);
-      if (bytes.length <= VIDEO_LIMITS.maxPosterBytes && JPEG_START.every((b, i) => bytes[i] === b)) meta.poster = poster;
+      const size = bytes.length <= VIDEO_LIMITS.maxPosterBytes && JPEG_START.every((b, i) => bytes[i] === b) ? imageSize(bytes) : undefined;
+      if (size && Math.max(size.width, size.height) <= VIDEO_LIMITS.posterEdge) meta.poster = poster;
     } catch { /* no poster */ }
   }
   return meta;

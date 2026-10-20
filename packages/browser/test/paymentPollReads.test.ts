@@ -93,6 +93,26 @@ it("a round of the payment poll reads the one review still open, not the 1,000 s
   expect(again).not.toHaveBeenCalled();
 });
 
+// The stale-review sweep runs every minute for as long as the app does: it wants the pending reviews (an Approve may
+// still send them), not every review ever made with its prepared swap.
+it("a minute's stale-review sweep reads the pending reviews, not the 1,000 settled ones", async () => {
+  const node = await engine();
+  await node.dropStaleReviews();
+  const pending = await node.preparePayment({ target: bitcoinTarget(), amount: 1_000, feeCap: 1_000, payee: "someone" });
+
+  expect(await reads(() => node.dropStaleReviews()), "the sweep reads the pending review").toBe(1);
+  // Past its expiry it is cancelled, and the next sweeps have nothing to look at.
+  expect((await node.dropStaleReviews(pending.expiresAt + 1)).map((r) => r.id)).toEqual([pending.id]);
+  expect(await reads(() => node.dropStaleReviews(pending.expiresAt + 1))).toBe(0);
+});
+
+it("a pending review left by an earlier run is swept by the first round", async () => {
+  const left = review({ method: "bitcoin", network: "regtest", provider: ONCHAIN_PROVIDER, state: "pending", expiresAt: Date.now() - 1 });
+  await intentRepository.put({ review: left, prepared: {} });
+  const node = await engine();
+  expect((await node.dropStaleReviews()).map((r) => r.id)).toEqual([left.id]);
+});
+
 it("a review left open by an earlier run is found by the first round", async () => {
   const left = review({ method: "bitcoin", network: "regtest", provider: ONCHAIN_PROVIDER, state: "unknown" });
   await intentRepository.put({ review: left, prepared: {} });

@@ -31,7 +31,8 @@ export function useForwarding(from: string | undefined, messages: readonly ChatM
   useEffect(() => { setSelected(null); setForwarding(null); }, [from]);
   useEffect(() => {
     if (!selected || forwarding) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSelected(null); };
+    // An Escape a menu or a field answered is not the choice's; the one that ends it is spent.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); setSelected(null); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selected, forwarding]);

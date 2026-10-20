@@ -1,5 +1,9 @@
-import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
-import { getPrefix } from "./storage";
+import { MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
+import { fitText, fitTextEdit, utf8Bytes } from "./fitText";
+import { getPrefix, setSessionDraft } from "./storage";
+import { decodePart } from "./url";
+import { setChatFolder } from "./chatFolders";
+import { forgetChatMute, groupChat } from "./chatMute";
 import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
 import { transportName } from "./connection";
@@ -8,7 +12,20 @@ import { english } from "./english";
 import { relayCause } from "./problemText";
 import type { Translate } from "../contexts/I18nContext";
 
-/** How a member is named in a group: their announced name, or their key. `t`: the interface's words ("You"). */
+/** Whether a group's name is one `groupName` takes whole: characters (`MAX_GROUP_NAME_LENGTH`) and bytes (`MAX_GROUP_NAME_BYTES`). */
+export const fitsGroupName = (s: string) => [...s].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(s) <= MAX_GROUP_NAME_BYTES;
+
+/**
+ * What a group's name field keeps of what was typed or pasted: as much as `groupName` takes, counted as it counts
+ * (`fitsGroupName`), cut between whole emoji. An input's `maxLength` counts UTF-16 units: a name of emoji stopped at
+ * 32 of them, a family at 5 (agents#1048).
+ */
+export const fitGroupName = (value: string): string => fitText(value, fitsGroupName);
+
+/** A change to a group's name field, kept to what `groupName` takes the way a text field with a limit does (`fitTextEdit`). */
+export const fitGroupNameEdit = (before: string, after: string, caret: number | null): { value: string; caret: number } =>
+  fitTextEdit(before, after, caret, fitsGroupName);
+
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english) =>
   m.me ? t("group.member.you") : m.nick || t("group.member.unnamed", { key: publicKeyLabel(m.key) });
 
@@ -103,7 +120,7 @@ export function groupPath(groupId: string): string {
 /** The group a `/group/…` address points at, or null. */
 export function groupRouteId(pathname: string): string | null {
   const match = pathname.match(/^\/group\/([^/]+)\/?$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  return match ? decodePart(match[1]) : null;
 }
 
 /** When the group last had something unread come: another member's message (an engine without the field: any message). */
@@ -117,6 +134,18 @@ export function groupReadAt(groupId: string): number {
 }
 export function markGroupRead(groupId: string, at = Date.now()): void {
   try { localStorage.setItem(`${getPrefix()}group_read_${groupId}`, String(at)); } catch { /* private mode: nothing is remembered */ }
+}
+
+/**
+ * What this device keeps of a group beside the engine goes with it (left, deleted here, a join called off): what was
+ * typed and not sent, the read mark, the mute and the folder, as a chat's go with the chat (storage.ts deleteSession).
+ * A community keeps its id, so a draft left behind was in the field again after joining it again.
+ */
+export function forgetGroupLocal(groupId: string): void {
+  setSessionDraft(`group:${groupId}`, "");
+  try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
+  forgetChatMute(groupChat(groupId));
+  setChatFolder(groupChat(groupId), undefined);
 }
 
 /** The web app opens a group's link; the extension and desktop hand out the public app's address, which they also accept pasted. */

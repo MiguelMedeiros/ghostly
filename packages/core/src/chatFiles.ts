@@ -34,8 +34,26 @@ import { parseVoiceMeta } from "./voice";
 export const FILE_LIMITS = {
   /** Bytes in one `pf-data` frame: a frame stays far below the 60 KiB a session carries. */
   chunkBytes: 16 * 1024,
-  /** Bytes a sender has sent and not seen confirmed: throughput is this per round trip. */
+  /** Bytes a sender has sent and not seen confirmed, at most: throughput is this per round trip. */
   windowBytes: 1024 * 1024,
+  /**
+   * Bytes all of a chat's files have sent and not seen confirmed, together, at most. Three files' windows at once were 3 MiB, and
+   * as base64 text past what a session's receive queue holds (`SESSION_RECEIVE_PENDING`, 3.75 MiB).
+   */
+  chatWindowBytes: 2 * 1024 * 1024,
+  /**
+   * What a chat's files have in flight is sized by the path (`ChatFiles.paced`), down to this. A fixed 1 MiB on a 5 Mbit/s
+   * uplink queued 1.8 s ahead of every text, ring and hang-up of the sender's in that chat, and of its voice in a call.
+   */
+  minWindowBytes: 64 * 1024,
+  /** How much longer than the shortest round trip seen a confirm may take, by the queue the files keep on the path. */
+  queueMs: 50,
+  /**
+   * A shortest round trip no confirm has come close to for this long is measured again, with the queue drained
+   * (`ChatFiles.paced`). A path that got longer mid-session (another route, a relay) read as a queue for good before, and
+   * held the window at its floor: 0.5 MiB/s where the same path from the start gave 8 MiB/s.
+   */
+  baseProbeMs: 10_000,
   /** A receiver asks its person before taking a file larger than this. */
   askAboveBytes: 25 * 1024 * 1024,
   /** Files taken without asking, per contact, while stored. Past it, every file is asked about. */
@@ -213,6 +231,8 @@ interface Outgoing {
   timer?: ReturnType<typeof setTimeout>;
   /** A pump that paused on a refused frame starts again. */
   wake?: ReturnType<typeof setTimeout>;
+  /** Chunks sent and not confirmed yet, in order: where each ended, when it went, and the chat's bytes in flight then. */
+  sends: { end: number; at: number; flight: number; generation: number }[];
 }
 
 interface Incoming {
@@ -229,6 +249,8 @@ interface Incoming {
   gapAt?: number;
   writing: Promise<void>;
   verifying?: boolean;
+  /** Where it is written is being opened, before it is accepted: it holds one of the turns already. */
+  starting?: boolean;
   /** What was stored is being removed: nothing more is written. */
   dropped?: boolean;
 }
@@ -295,8 +317,20 @@ export function refusalText(why: string, room?: number): { state: TransferState;
 
 export class ChatFiles {
   private readonly entries = new Map<string, Entry>();
+  /** Files sending that may have bytes not confirmed yet: what `inFlight` adds up (the rest are left out as it goes). */
+  private readonly moving = new Set<Entry>();
+  /** Files that stopped sending for the chat's window alone: they go on once another's bytes are confirmed. */
+  private readonly held = new Set<Entry>();
   private attached = false;
   private peerRoomValue: number | null = null;
+  /** Bytes the chat's files may have in flight on this session: sized by the path, from the confirms (`paced`). */
+  private window: number = FILE_LIMITS.minWindowBytes;
+  /** The shortest round trip of a chunk to its confirm on this session: the path without a queue. */
+  private baseRtt = Infinity;
+  /** When a confirm last came close to `baseRtt`, or a probe measured it. */
+  private baseAt = 0;
+  /** The path's own round trip is being measured: one chunk in flight from `since`, until one sent then is confirmed. */
+  private probe?: { since: number; window: number };
 
   constructor(private readonly host: ChatFilesHost) {}
 
@@ -306,7 +340,7 @@ export class ChatFiles {
   restore(records: FileTransferRecord[]): void {
     for (const record of records) {
       const entry: Entry = { record: { ...record } };
-      if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0 };
+      if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0, sends: [] };
       else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve() };
       this.entries.set(key(record.direction, record.id), entry);
     }
@@ -351,6 +385,11 @@ export class ChatFiles {
   attach(): void {
     this.attached = true;
     this.peerRoomValue = null;
+    // Another session may be another path.
+    this.window = FILE_LIMITS.minWindowBytes;
+    this.baseRtt = Infinity;
+    this.baseAt = 0;
+    this.probe = undefined;
     void this.sayRoom();
     this.sweep();
     for (const entry of this.entries.values()) {
@@ -367,6 +406,7 @@ export class ChatFiles {
     if (!this.attached) return;
     this.attached = false;
     this.peerRoomValue = null;
+    this.moving.clear(); this.held.clear();
     for (const entry of this.entries.values()) {
       if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
       if (entry.in) clearTimeout(entry.in.timer);
@@ -399,7 +439,7 @@ export class ChatFiles {
     if (this.entries.has(key("out", file.id))) throw new Error("File transfer already active");
     const entry: Entry = {
       record: { id: file.id, direction: "out", file, state: "queued", confirmed: 0, since: this.now(), ...(digest && { digest }) },
-      out: { next: 0, sent: 0, generation: 0 },
+      out: { next: 0, sent: 0, generation: 0, sends: [] },
     };
     this.entries.set(key("out", file.id), entry);
     this.changed(entry);
@@ -452,9 +492,62 @@ export class ChatFiles {
     return out.block!.bytes.subarray(at, at + length);
   }
 
-  private shouldPump(entry: Entry): boolean {
+  /** Whether this file's own window lets it send more. */
+  private fileMayPump(entry: Entry): boolean {
     const { record } = entry, out = entry.out!;
     return this.attached && record.state === "active" && out.next < record.file.size && out.next - record.confirmed < FILE_LIMITS.windowBytes;
+  }
+
+  private shouldPump(entry: Entry): boolean {
+    return this.fileMayPump(entry) && this.inFlight() < (this.probe ? FILE_LIMITS.chunkBytes : this.window);
+  }
+
+  /**
+   * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
+   * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
+   * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
+   * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
+   * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
+   * flight, so the queue drains first and a slow link's own queue never passes for a longer path.
+   */
+  private paced(sentAt: number, flight: number): void {
+    const now = this.now(), rtt = Math.max(1, now - sentAt);
+    if (this.probe) {
+      // Sent before the probe: it waited behind the queue the probe lets drain.
+      if (sentAt < this.probe.since) return;
+      this.baseRtt = rtt;
+      this.baseAt = now;
+      this.window = this.probe.window;
+      this.probe = undefined;
+      return;
+    }
+    if (rtt - this.baseRtt < FILE_LIMITS.queueMs / 2) this.baseAt = now;
+    this.baseRtt = Math.min(this.baseRtt, rtt);
+    if (now - this.baseAt > FILE_LIMITS.baseProbeMs) {
+      this.probe = { since: now, window: this.window };
+      return;
+    }
+    // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill.
+    const fits = Math.max((flight * (this.baseRtt + FILE_LIMITS.queueMs)) / rtt, rtt - this.baseRtt < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
+    // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
+    const window = flight < this.window / 2 ? Math.max(this.window, fits) : fits;
+    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(FILE_LIMITS.minWindowBytes, Math.round(window)));
+  }
+
+  /** Bytes this chat's files sent and have not seen confirmed. */
+  private inFlight(): number {
+    let bytes = 0;
+    for (const entry of this.moving) {
+      const out = entry.out, { record } = entry;
+      if (!out || record.state !== "active" || out.next <= record.confirmed) { this.moving.delete(entry); continue; }
+      bytes += out.next - record.confirmed;
+    }
+    return bytes;
+  }
+
+  /** Bytes were confirmed, or a file stopped sending: the files the chat's window held go on, before the one that freed it. */
+  private wakeHeld(): void {
+    for (const entry of [...this.held]) { this.held.delete(entry); void this.pump(entry); }
   }
 
   /**
@@ -488,6 +581,9 @@ export class ChatFiles {
         if (!this.sendData(entry.record.id, offset, chunk)) { refused = true; break; }
         out.next = offset + chunk.length;
         out.sent += chunk.length;
+        this.moving.add(entry);
+        if (out.sends[out.sends.length - 1]?.generation !== generation) out.sends.length = 0;
+        out.sends.push({ end: out.next, at: this.now(), flight: this.inFlight(), generation });
       }
     } catch (error) {
       if (generation === out.generation) {
@@ -500,7 +596,7 @@ export class ChatFiles {
         // A refused frame is tried again later, never at once: at once, nothing else would run until it went.
         if (refused) out.wake = setTimeout(() => void this.pump(entry), FILE_LIMITS.sendRetryMs);
         else void this.pump(entry);
-      }
+      } else if (generation === out.generation && this.fileMayPump(entry)) this.held.add(entry);
     }
   }
 
@@ -526,7 +622,7 @@ export class ChatFiles {
   }
 
   private activeIncoming(except: Entry): number {
-    return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying")).length;
+    return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying" || e.in?.starting)).length;
   }
 
   /**
@@ -554,17 +650,25 @@ export class ChatFiles {
     return incoming.target;
   }
 
-  /** An accepted file goes when a session is open and fewer than three others arrive at once. */
+  /**
+   * An accepted file goes when a session is open and fewer than three others arrive at once. One whose target is still
+   * being opened counts among the three: counted only once active, every file offered or queued meanwhile went too, and
+   * the windows of ten files and more at once overflowed the session's receive queue.
+   */
   private startIncoming(entry: Entry): void {
     if (!this.attached || transferEnded(entry.record) || entry.record.state === "asking" || (entry.record.state === "paused" && entry.record.pausedBy === "me")) return;
+    const incoming = entry.in!;
+    if (incoming.starting) return;
     if (this.activeIncoming(entry) >= FILE_LIMITS.maxActiveIncoming) {
       if (entry.record.state !== "queued") { entry.record.state = "queued"; this.changed(entry); }
       this.send({ t: "pf-wait", id: entry.record.id, why: "busy" });
       return;
     }
+    incoming.starting = true;
     void this.target(entry).then(() => {
-      if (transferEnded(entry.record) || !this.attached) return;
-      if (entry.record.state === "paused" && entry.record.pausedBy === "me") return;
+      incoming.starting = false;
+      // Ended, paused or cut off while it opened: its turn goes to the next one.
+      if (transferEnded(entry.record) || !this.attached || (entry.record.state === "paused" && entry.record.pausedBy === "me")) { this.startNext(); return; }
       entry.record.state = "active";
       entry.record.pausedBy = undefined;
       entry.in!.gapAt = undefined;
@@ -573,8 +677,10 @@ export class ChatFiles {
       entry.in!.heardAt = this.now();
       this.armNudge(entry);
     }, (error) => {
+      incoming.starting = false;
       this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
       this.send({ t: "pf-refuse", id: entry.record.id, why: "no-room" });
+      this.startNext();
     });
   }
 
@@ -831,6 +937,7 @@ export class ChatFiles {
         record.state = "active";
         record.pausedBy = record.waitingFor = undefined;
         this.changed(outgoing);
+        this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
         else { this.armStall(outgoing); void this.pump(outgoing); }
         return;
@@ -844,18 +951,25 @@ export class ChatFiles {
         if (frame.why === "paused") { record.state = "paused"; record.pausedBy = "peer"; }
         else { record.state = "asking"; record.waitingFor = frame.why === "busy" ? "busy" : "consent"; }
         this.changed(outgoing);
+        this.wakeHeld();
         return;
       }
       case "pf-got": {
         if (!isInt(frame.offset) || frame.offset <= record.confirmed || frame.offset > out.next) return;
         record.confirmed = frame.offset;
+        // The last chunk this confirms says how long the path took (one sent before a resync says nothing).
+        let sample: Outgoing["sends"][number] | undefined;
+        while (out.sends.length && out.sends[0].end <= frame.offset) sample = out.sends.shift();
+        if (sample?.generation === out.generation) this.paced(sample.at, sample.flight);
         this.changed(outgoing, true);
+        this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
         else { this.armStall(outgoing); void this.pump(outgoing); }
         return;
       }
       case "pf-done": {
-        if (record.state !== "verifying") return;
+        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying.
+        if (record.state !== "verifying" && record.confirmed !== record.file.size) return;
         record.confirmed = record.file.size;
         this.end(outgoing, "done");
         return;
@@ -873,7 +987,10 @@ export class ChatFiles {
     record.state = state;
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
-    if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; }
+    if (entry.out) {
+      entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; entry.out.sends.length = 0;
+      this.moving.delete(entry); this.held.delete(entry);
+    }
     if (entry.in) {
       const incoming = entry.in;
       clearTimeout(incoming.timer);
@@ -882,6 +999,7 @@ export class ChatFiles {
       void incoming.writing.finally(() => { if (transferEnded(record)) incoming.target = undefined; });
     }
     this.changed(entry);
+    if (entry.out) this.wakeHeld();
   }
 
   // ─── What the person does ───────────────────────────────────────────────
@@ -920,6 +1038,7 @@ export class ChatFiles {
     if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
     else { this.send({ t: "pf-wait", id, why: "paused" }); void this.checkpoint(entry); this.startNext(); }
     this.changed(entry);
+    if (entry.out) this.wakeHeld();
   }
 
   resume(direction: "in" | "out", id: string): void {
@@ -953,7 +1072,7 @@ export class ChatFiles {
     // The digest is taken again from the source: the one sent last time may be what was wrong.
     Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
     clearTimeout(entry.out!.timer); clearTimeout(entry.out!.wake);
-    entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1 };
+    entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1, sends: [] };
     this.changed(entry);
     if (this.attached) this.announce(entry);
   }

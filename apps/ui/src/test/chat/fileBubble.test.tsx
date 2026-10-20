@@ -1,10 +1,12 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileBubble } from "../../components/FileBubble";
 import { fileStatus, timeLeft } from "../../lib/fileStatus";
 import { servicesPlatform, type FileTransferState } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { everythingOnScreen } from "../onScreen";
+import { pngHead } from "../pngHead";
 import { renderApp } from "../render";
 
 // covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request, backup.light
@@ -19,9 +21,11 @@ const show = (transfer: FileTransferState | null, patch: Partial<ChatFile> = {})
 };
 
 beforeEach(() => {
+  everythingOnScreen();
   vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
   fakeEngine.on("fileAction", () => undefined);
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("what a file's status line says", () => {
   const f = file();
@@ -170,9 +174,9 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByTestId("file-request")).toBeNull();
     lost.unmount();
     show({ state: "failed", direction: "in", transferred: 0, size: 10, retry: true, error: "Every copy of this file arrived damaged and was deleted. Ask for it again later." });
-    expect(screen.getByTestId("file-status")).toHaveTextContent(/^Did not arrive$/);
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^The file arrived damaged$/);
     fireEvent.click(screen.getByTestId("file-why"));
-    expect(screen.getByTestId("file-why-text")).toHaveTextContent("arrived damaged");
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent(/^Ask the group for it again later\.$/);
     expect(screen.getByTestId("file-request")).toHaveAttribute("title", "Asks the group's members for it again, those whose copy came damaged too.");
     fireEvent.click(screen.getByTestId("file-request"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
@@ -231,12 +235,31 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("↻ pressed from the keyboard keeps the focus while it runs, so a refused resend leaves it on ↻", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser, as the voice play button did
+    // in this same spot: Space then scrolled the chat.
+    let refuse!: (error: Error) => void;
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockImplementation(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "Connection lost", retry: true }, { id: "chat1-out-4" });
+    const button = screen.getByTestId("file-retry");
+    button.focus();
+    fireEvent.click(button);
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(button);
+    expect(retryFile).toHaveBeenCalledTimes(1);
+    await act(async () => { refuse(new Error("No connection to your contact")); });
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).toHaveFocus();
+  });
+
   it("a picture sent from here shows at once, and keeps its image while the transfer starts, moves and ends", async () => {
     const created: string[] = [], revoked: string[] = [];
     const { createObjectURL, revokeObjectURL } = URL;
     URL.createObjectURL = () => { const url = `blob:picture-${created.length}`; created.push(url); return url; };
     URL.revokeObjectURL = (url: string) => { revoked.push(url); };
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(1920, 1080));
     try {
       const id = "chat1-out-pasted";
       const picture = { id, name: "Pasted image.png", size: 3, mime: "image/png" };
@@ -251,15 +274,16 @@ describe("FileBubble: files/3", () => {
       expect(screen.getByRole("img", { name: "Pasted image.png" })).toHaveAttribute("src", src);
       expect(created).toEqual([src]);
       expect(revoked).toEqual([]);
+      // Kept for the run once the bubble goes: the chat opened again shows it without reading it (lib/pictureReads.ts).
       view.unmount();
-      expect(revoked).toEqual([src]);
+      expect(revoked).toEqual([]);
     } finally {
       Object.assign(URL, { createObjectURL, revokeObjectURL });
     }
   });
 
   it("a picture arriving here shows once it is all here, not from a part", async () => {
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(1920, 1080));
     const { createObjectURL } = URL;
     URL.createObjectURL = () => "blob:arrived";
     try {
@@ -315,6 +339,24 @@ describe("FileBubble: files/3", () => {
     expect(servicesPlatform!.getFile).not.toHaveBeenCalled();
   });
 
+  it("Save on a file that is no picture is a stop for Tab, and Enter or Space saves it", async () => {
+    vi.spyOn(servicesPlatform!, "fileHeld").mockResolvedValue("here");
+    const saveFile = vi.fn(async () => true);
+    Object.assign(servicesPlatform!, { saveFile });
+    try {
+      const MB = 1024 ** 2;
+      const { user } = show({ state: "done", transferred: 40 * MB, size: 40 * MB }, { name: "report.pdf", mime: "application/pdf", size: 40 * MB });
+      const save = await screen.findByTestId("file-save");
+      await user.tab();
+      expect(document.activeElement).toBe(save);
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(1));
+      await user.keyboard(" ");
+      await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(2));
+      expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "report.pdf");
+    } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
+  });
+
   it("where the platform cannot tell whether a file is here, the file is asked for as before", async () => {
     const { fileHeld } = servicesPlatform!;
     delete (servicesPlatform as { fileHeld?: unknown }).fileHeld;
@@ -349,6 +391,19 @@ describe("FileBubble: files/3", () => {
       expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "movie.mkv");
       expect(screen.getByTestId("file-status")).toHaveTextContent("4.2 GB");
     } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
+  });
+
+  it("a group's picture all here, too large to show here, is saved through the system though it shows no transfer (Desktop)", async () => {
+    const saveFile = vi.fn(async () => true);
+    Object.assign(servicesPlatform!, { saveFile, fileHeld: vi.fn(async () => "here" as const) });
+    try {
+      // The engine keeps no transfer for a group's file all here: its record says it is done.
+      const picture = { id: "group-g1-in-abc", name: "huge.png", mime: "image/png", size: 900 * 1024 ** 2 };
+      fakeEngine.update({ links: [], transfers: {}, transfersRestored: true });
+      renderApp(<FileBubble file={file(picture)} peerName="Ana" />);
+      fireEvent.click(await screen.findByTestId("file-save"));
+      expect(saveFile).toHaveBeenCalledWith("group-g1-in-abc", "huge.png");
+    } finally { delete (servicesPlatform as { saveFile?: unknown; fileHeld?: unknown }).saveFile; delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
   });
 
   // The save command (apps/desktop file_store.rs) rejects with the system's English: a folder that cannot be written

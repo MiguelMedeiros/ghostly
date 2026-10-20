@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
+import { Menu, MenuItem } from "../../components/Menu";
 import { useDialogFocus } from "../../hooks/useDismiss";
 
 // covers: app.menus
@@ -92,5 +93,31 @@ describe("a modal made of plain elements", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "Field" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add" })).toHaveFocus();
+  });
+
+  it("opened from a menu's row, gives the focus back to the menu's button: the row is gone by then", async () => {
+    function Options() {
+      const [menu, setMenu] = useState(false), [panel, setPanel] = useState(false);
+      const anchor = useRef<HTMLDivElement>(null);
+      return <>
+        <div ref={anchor}>
+          <button type="button" aria-expanded={menu} onClick={() => setMenu(!menu)}>Options</button>
+          <Menu testId="options-menu" open={menu} onClose={() => setMenu(false)} anchorRef={anchor} focusFirst>
+            <MenuItem onClick={() => { setMenu(false); setPanel(true); }}>Identities</MenuItem>
+          </Menu>
+        </div>
+        {panel && <Modal name="Identities" onClose={() => setPanel(false)} />}
+      </>;
+    }
+    const user = userEvent.setup();
+    render(<Options />);
+    screen.getByRole("button", { name: "Options" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Identities" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("dialog", { name: "Identities" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Identities" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Options" })).toHaveFocus();
   });
 });

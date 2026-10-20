@@ -1,7 +1,8 @@
 import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { FILE_BYTES_STEP } from "@ghostly/browser/shared/fileBytes";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { fitName, mimeOf, saveName } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
@@ -33,6 +34,20 @@ describe("the Node file store", () => {
     expect(await store.size("f1")).toBeNull();
     expect(await store.room()).toBeGreaterThan(0);
     await expect(store.size("../escape")).rejects.toThrow(/Invalid file id/);
+  });
+
+  it("stages a file in one read: its digest is hashed as it is copied, the same as one read from disk", async () => {
+    const store = new NodeFileBytes(folder());
+    const digest = vi.spyOn(store, "digest");
+    // Over two steps and a part, and empty.
+    const bytes = new Uint8Array(FILE_BYTES_STEP * 2 + 12_345).map((_, i) => (i * 31) & 0xff);
+    const staged = await store.stage("big", new Blob([bytes]));
+    const empty = await store.stage("empty", new Blob([]));
+    expect(digest).not.toHaveBeenCalled();
+    expect(staged).toBe(await store.digest("big"));
+    expect(empty).toBe(await store.digest("empty"));
+    expect(await store.size("big")).toBe(bytes.length);
+    expect(await store.size("empty")).toBe(0);
   });
 
   it("fits a name in the 255 bytes a file system takes, keeping its extension", () => {
@@ -74,11 +89,19 @@ describe("group administration", () => {
     expect(findMember(group, "ana").key).toBe("abcd12");
     expect(findMember(group, "abce").key).toBe("abce34");
     expect(() => findMember(group, "abc")).toThrow(/more than one/);
-    expect(() => findMember(group, "me")).toThrow(/No member/);
+    expect(() => findMember(group, "nobody")).toThrow(/No member/);
+  });
+
+  // This profile's own key or a prefix of it answered not_found "No member" as if it were not in the group.
+  it("says a ref that names this profile itself is you, not that no member is there", () => {
+    const own = { name: "Crew", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Ana", me: false }] } as unknown as GroupView;
+    for (const ref of ["595m389h77", "595m"]) {
+      expect(() => findMember(own, ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} is you: name another member of Crew` }));
+    }
   });
 
   it("a member's whole key is that member, whatever another member calls itself", () => {
-    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u", OTHER = "o".repeat(52);
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o", OTHER = "o".repeat(52);
     const named = { name: "G", members: [{ key: "me", me: true }, { key: KEY, nick: "Bob", me: false }, { key: OTHER, nick: KEY, me: false }] } as unknown as GroupView;
     expect(findMember(named, KEY).key).toBe(KEY);
     expect(findMember(named, OTHER).key).toBe(OTHER);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
@@ -21,8 +21,10 @@ function usePictures(files: File[]): (string | undefined)[] {
  * Files pasted or dropped into a chat, before they go: the picture (or the name and size of a
  * file), a caption, Send and Cancel. Another paste adds to them; each can be taken out.
  */
-export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSend, onCancel }: {
+export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, onRemove, onSend, onCancel }: {
   files: File[];
+  /** The message field: the focus goes there on close when nothing had it as the sheet opened (a share, a paste on the page). */
+  returnFocus?: RefObject<HTMLElement | null>;
   /** What the composer has to say meanwhile (a paste that could not be read): here, where it is seen and announced. */
   alert?: ReactNode;
   /** What the composer is doing meanwhile (another paste being read). */
@@ -40,7 +42,7 @@ export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSen
   const [broken, setBroken] = useState<ReadonlySet<File>>(new Set());
   const pictures = usePictures(files);
   const backdrop = useBackdropDismiss(onCancel);
-  useDialogFocus(ref, onCancel);
+  useDialogFocus(ref, onCancel, undefined, returnFocus);
   // After the dialog has noted what had the focus (the message field gets it back on close): typing goes to the caption.
   const captionRef = useRef<HTMLInputElement>(null);
   const composition = useComposition();
@@ -49,6 +51,16 @@ export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSen
   const send = () => onSend(caption.trim());
   const paste = (e: ClipboardEvent) => {
     if (onPaste(e.clipboardData)) e.preventDefault();
+  };
+  // The × that has the focus goes with its file when it is the last one (the rows are kept by place), and every ×
+  // goes once one file is left: the focus moves first, to the × before it, or to the caption, not to the page.
+  const removers = useRef<(HTMLButtonElement | null)[]>([]);
+  const remove = (i: number) => {
+    if (document.activeElement === removers.current[i]) {
+      if (files.length === 2) captionRef.current?.focus();
+      else if (i === files.length - 1) removers.current[i - 1]?.focus();
+    }
+    onRemove(i);
   };
   const picture = (i: number) => broken.has(files[i]) ? undefined : pictures[i];
   const lost = (file: File) => setBroken((was) => new Set(was).add(file));
@@ -64,7 +76,7 @@ export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSen
             <div className="bg-black/40 flex items-center justify-center min-h-0">
               <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="max-w-full max-h-[55vh] object-contain" />
             </div>
-            <figcaption className="px-4 pt-2 text-xs text-text-muted truncate" data-testid="attachment-name">{single.name} · {formatFileSize(single.size)}</figcaption>
+            <figcaption className="px-4 pt-2 text-xs text-text-muted truncate" data-testid="attachment-name"><bdi>{single.name}</bdi> · {formatFileSize(single.size)}</figcaption>
           </figure>
         ) : (
           <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">
@@ -74,12 +86,12 @@ export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSen
                   : <div className={`${single ? "flex items-center gap-3 min-w-0" : "h-full flex flex-col items-center justify-center gap-1 p-2 text-center"} text-text-secondary`}>
                     <span className="shrink-0" aria-hidden="true"><DocumentGlyph /></span>
                     <span className={`min-w-0 ${single ? "" : "w-full"}`}>
-                      <span className="block text-xs text-text-primary truncate">{file.name}</span>
+                      <span dir="auto" className="block text-xs text-text-primary truncate">{file.name}</span>
                       <span className="block text-[11px] text-text-muted">{formatFileSize(file.size)}</span>
                     </span>
                   </div>}
                 {files.length > 1 && (
-                  <button type="button" onClick={() => onRemove(i)} aria-label={t("composer.removeFile", { name: file.name })} title={t("composer.removeFile", { name: file.name })}
+                  <button type="button" ref={(element) => { removers.current[i] = element; }} onClick={() => remove(i)} aria-label={t("composer.removeFile", { name: file.name })} title={t("composer.removeFile", { name: file.name })}
                     className="absolute top-1 end-1 w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center cursor-pointer">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
                   </button>

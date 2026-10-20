@@ -1,15 +1,22 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createChatInvite, encodeCommunityLink, encodeGroupEntryLink, inviteLink, randomBytes, toBase64Url, toZ32 } from "@ghostly/core";
 import { neventEncode, npubEncode } from "nostr-tools/nip19";
 import { MessageBubble } from "../../components/MessageBubble";
-import { ensureSession, listSessions } from "../../lib/storage";
+import { ensureSession, listSessions, updateSessionLabel } from "../../lib/storage";
 import { groupView, linkView } from "../fakeEngine";
 import { receivedView } from "../identities/views";
 import { renderApp } from "../render";
 
 // covers: chat.cards.invite, chat.cards.group, chat.cards.nostr, chat.cards.identity, invite.own, invite.rejoin
+
+/** `listSessions()` calls with no cache: each parses every chat's stored copy and merges a long chat's whole history in. */
+const uncached = vi.hoisted(() => ({ n: 0 }));
+vi.mock("../../lib/storage", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../lib/storage")>();
+  return { ...real, listSessions: (...a: Parameters<typeof real.listSessions>) => { if (!a[0]) uncached.n++; return real.listSessions(...a); } };
+});
 
 const hex = () => Array.from(randomBytes(32), b => b.toString(16).padStart(2, "0")).join("");
 const DID_KEY = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
@@ -120,6 +127,25 @@ describe("invite cards", () => {
     expect(screen.getByTestId("entity-invite-copy")).toHaveTextContent("Copy");
   });
 
+  it("reads no chat's messages when a chat changes, and still tells an invite joined since", async () => {
+    for (let i = 0; i < 3; i++) ensureSession({ seedB64: `s${i}`, peerPubKeyB64: `p${i}`, encKeyB64: "k" });
+    const made = createChatInvite(), other = createChatInvite();
+    const own = ensureSession({ seedB64: made.mine.seedB64, peerPubKeyB64: made.mine.peerPubKeyZ32, encKeyB64: made.mine.encKeyB64, profile: "paired-chat/1" });
+    const { user } = bubble(`${made.inviteCode} ${other.inviteCode}`);
+    const [mine, theirs] = screen.getAllByTestId("entity-invite");
+    expect(mine).toHaveAttribute("data-outcome", "own");
+    uncached.n = 0;
+    for (let i = 0; i < 5; i++) act(() => { window.dispatchEvent(new Event("session-updated")); });
+    expect(uncached.n).toBe(0);
+    const joined = ensureSession({ seedB64: other.invite.seedB64, peerPubKeyB64: other.invite.peerPubKeyZ32, encKeyB64: other.invite.encKeyB64, profile: "paired-chat/1" });
+    act(() => { window.dispatchEvent(new Event("session-updated")); });
+    expect(theirs).toHaveAttribute("data-outcome", "joined");
+    await user.click(within(theirs).getByTestId("entity-invite-open"));
+    expect(screen.getByTestId("where")).toHaveTextContent(`/chat/${joined}`);
+    await user.click(within(mine).getByTestId("entity-invite-open"));
+    expect(screen.getByTestId("where")).toHaveTextContent(`/chat/${own}`);
+  });
+
   it("shows no card for a code with a typo", () => {
     const { inviteCode } = createChatInvite();
     bubble(`${inviteCode.slice(0, -1)}${inviteCode.endsWith("q") ? "p" : "q"}`);
@@ -168,6 +194,25 @@ describe("group cards", () => {
     expect(screen.getByTestId("entity-group")).toHaveTextContent("Community group");
     await user.click(screen.getByTestId("entity-group-join"));
     expect(await screen.findByRole("alert")).toHaveTextContent("This group's link was turned off");
+  });
+
+  it("Join pressed from the keyboard keeps the focus while it runs, so a refusal leaves it on Join", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: Space then scrolled the chat.
+    let refuse: (error: Error) => void = () => {};
+    const { user, engine } = bubble(encodeCommunityLink({ g, host }));
+    engine.on("joinGroupByLink", () => new Promise((_, reject) => { refuse = reject; }));
+    const join = screen.getByTestId("entity-group-join");
+    join.focus();
+    await user.keyboard("{Enter}");
+    expect(join).toHaveTextContent("Joining…");
+    expect(join).toBeEnabled();
+    expect(join).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("joinGroupByLink")).toHaveLength(1);
+    await act(async () => refuse(new Error("This group's link was turned off")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This group's link was turned off");
+    expect(join).not.toHaveAttribute("aria-disabled");
+    expect(join).toHaveFocus();
   });
 
   it("opens a group this profile is already in", async () => {
@@ -288,6 +333,23 @@ describe("Nostr cards", () => {
     await user.click(screen.getByTestId("entity-nostr-load"));
     expect(await screen.findByTestId("entity-nostr-error")).toHaveTextContent("Offline");
   });
+
+  it("Load pressed from the keyboard keeps the focus while it runs", async () => {
+    let refuse: (error: Error) => void = () => {};
+    const { user, engine } = bubble(npubEncode(hex()));
+    engine.on("nostrLookup", () => new Promise((_, reject) => { refuse = reject; }));
+    const load = screen.getByTestId("entity-nostr-load");
+    load.focus();
+    await user.keyboard("{Enter}");
+    expect(load).toBeEnabled();
+    expect(load).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("nostrLookup")).toHaveLength(1);
+    await act(async () => refuse(new Error("Offline: turn the network on first")));
+    expect(await screen.findByTestId("entity-nostr-error")).toHaveTextContent("Offline");
+    expect(load).not.toHaveAttribute("aria-disabled");
+    expect(load).toHaveFocus();
+  });
 });
 
 describe("identity cards", () => {
@@ -316,6 +378,26 @@ describe("identity cards", () => {
     ensureSession({ seedB64: "s", peerPubKeyB64: "peer", encKeyB64: "k" });
     await waitFor(() => expect(screen.getByTestId("entity-identity")).toHaveAttribute("data-standing", "verified"));
     expect(screen.getByTestId("entity-identity-badge")).toHaveTextContent("Proved by");
+  });
+
+  it("reads no chat's messages on an engine state, and names the contact who proved it as the chat is named now", async () => {
+    for (let i = 0; i < 3; i++) ensureSession({ seedB64: `s${i}`, peerPubKeyB64: `p${i}`, encKeyB64: "k" });
+    const chat = ensureSession({ seedB64: "s", peerPubKeyB64: "peer", encKeyB64: "k" });
+    updateSessionLabel(chat, "Ana");
+    const { engine } = bubble(`${DID_KEY} did:web:example.com`);
+    const proved = (at: number) => linkView({ peerPubKeyZ32: "peer", peerLastSeenAt: at, identities: { support: true, shared: [], received: [receivedView({ provider: "did", subject: DID_KEY })] } });
+    act(() => engine.update({ links: [proved(0)] }));
+    const [card, unproved] = screen.getAllByTestId("entity-identity");
+    expect(within(card).getByTestId("entity-identity-badge")).toHaveTextContent("Proved by ~Ana");
+    expect(unproved).toHaveAttribute("data-standing", "none");
+    uncached.n = 0;
+    // Presence changes: nothing the cards show.
+    for (let i = 1; i <= 5; i++) act(() => engine.update({ links: [proved(i)] }));
+    expect(uncached.n).toBe(0);
+    updateSessionLabel(chat, "Bea");
+    act(() => engine.update({ links: [proved(6)] }));
+    expect(within(card).getByTestId("entity-identity-badge")).toHaveTextContent("Proved by ~Bea");
+    expect(uncached.n).toBe(0);
   });
 
   it("marks this profile's own Ghostly DID", async () => {

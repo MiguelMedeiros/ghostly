@@ -1,11 +1,12 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { voiceDownloadName } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { audio, decoder, endPlayback, installFakeAudio, installFakeDecoder } from "./fakeMedia";
+import { audio, decoder, endPlayback, installFakeAudio, installFakeDecoder, recording } from "./fakeMedia";
 
 // covers: files.voice.play
 
@@ -38,7 +39,7 @@ async function clickPlay() {
 beforeEach(() => {
   installFakeAudio();
   installFakeDecoder();
-  vi.spyOn(servicesPlatform!, "getFile").mockImplementation(async () => new Blob(["opus"], { type: "audio/webm" }));
+  vi.spyOn(servicesPlatform!, "getFile").mockImplementation(async () => new Blob([recording("chromium.webm")], { type: "audio/webm" }));
 });
 
 afterEach(() => {
@@ -71,11 +72,12 @@ describe("a voice message that will not play as it is", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     audio.refuse = () => refusal("NotSupportedError");
     decoder.decodes = false;
-    show(voice());
+    const message = voice();
+    show(message);
     await clickPlay();
     const problem = screen.getByTestId("voice-problem");
     expect(problem).toHaveTextContent("This device can't play WebM recordings. Save it to play elsewhere.");
-    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", "Voice message.webm");
+    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", voiceDownloadName("audio/webm", message.timestamp));
     expect(screen.getByTestId("voice-save").getAttribute("href")).toMatch(/^blob:/);
     // The real reason, for whoever debugs it: on the element always, in the console in dev builds.
     expect(problem.getAttribute("data-error")).toMatch(/decode/);
@@ -83,6 +85,50 @@ describe("a voice message that will not play as it is", () => {
     expect(logged.some((line) => line.startsWith("[voice] play(): NotSupportedError"))).toBe(true);
     expect(logged.some((line) => line.startsWith("[voice] decode"))).toBe(true);
     expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "idle");
+  });
+
+  it("saves one this device has no player for through the save dialog, not the link the desktop WebView cancels", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    audio.canPlay = () => "";
+    decoder.decodes = false;
+    const message = voice({}, "audio/mp4");
+    show(message);
+    await clickPlay();
+    const save = screen.getByTestId("voice-save");
+    // The click's own download is stopped: on Linux Desktop it is cancelled without a word.
+    expect(fireEvent.click(save)).toBe(false);
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(message.file!.id, voiceDownloadName("audio/mp4", message.timestamp)));
+  });
+
+  it("saves one under the name Ghostly makes for it, never the name the sender gave it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    audio.canPlay = () => "";
+    decoder.decodes = false;
+    const message = voice({}, "audio/webm");
+    message.file = { ...message.file!, name: "Setup.exe" };
+    show(message);
+    await clickPlay();
+    const save = screen.getByTestId("voice-save");
+    const name = voiceDownloadName("audio/webm", message.timestamp);
+    expect(name).toMatch(/^Ghostly voice .+\.webm$/);
+    // The web's fallback link names the same file as the save dialog.
+    expect(save).toHaveAttribute("download", name);
+    fireEvent.click(save);
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(message.file!.id, name));
+    expect(saveFile).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining("Setup"));
+  });
+
+  it("says why when the save dialog could not write the voice message", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("No space left on device (os error 28)"));
+    audio.canPlay = () => "";
+    decoder.decodes = false;
+    show(voice({}, "audio/mp4"));
+    await clickPlay();
+    fireEvent.click(screen.getByTestId("voice-save"));
+    await waitFor(() => expect(screen.getByTestId("voice-problem")).toHaveTextContent("Couldn't save the file there. Try again and choose another folder. Save"));
   });
 
   it("does not try the decoder twice: a WAV that fails too is a plain failure", async () => {
@@ -156,6 +202,37 @@ describe("the voice bubble's layout", () => {
     show(voice({ sender: "me", id: "me_b1" }));
     expect(screen.getByTestId("voice-mic")).toBeInTheDocument();
     expect(screen.queryByTestId("voice-unplayed")).not.toBeInTheDocument();
+  });
+});
+
+describe("a voice message played from the keyboard", () => {
+  it("its play button keeps the focus while the recording loads", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: Space then scrolled the chat.
+    let give: (blob: Blob) => void = () => {};
+    vi.mocked(servicesPlatform!.getFile).mockImplementation(() => new Promise((resolve) => { give = resolve; }));
+    show(voice());
+    const button = screen.getByTestId("voice-play");
+    button.focus();
+    fireEvent.click(button);
+    await flush();
+    expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "loading");
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    // Pressed again meanwhile, it reads nothing more.
+    fireEvent.click(button);
+    expect(servicesPlatform!.getFile).toHaveBeenCalledTimes(1);
+    give(new Blob([recording("chromium.webm")], { type: "audio/webm" }));
+    for (let i = 0; i < 4; i++) await flush();
+    expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "playing");
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).toHaveFocus();
+  });
+});
+
+describe("a voice message's position slider", () => {
+  it("says where it is in the app's language", () => {
+    renderApp(<MessageBubble message={voice()} peerPubKey="peer" />, { language: "pt" });
+    expect(screen.getByTestId("voice-waveform")).toHaveAttribute("aria-valuetext", "0:00 de 0:04");
   });
 });
 

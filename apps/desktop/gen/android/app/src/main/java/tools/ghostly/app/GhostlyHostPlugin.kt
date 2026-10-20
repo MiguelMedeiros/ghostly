@@ -36,10 +36,10 @@ import app.tauri.plugin.Plugin
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 @InvokeArg
@@ -69,6 +69,11 @@ class TagArgs {
 }
 
 @InvokeArg
+class KeepArgs {
+  var keep: List<String> = emptyList()
+}
+
+@InvokeArg
 class SaveArgs {
   lateinit var path: String
   lateinit var name: String
@@ -84,6 +89,9 @@ class BarsArgs {
   var color: Int = 0
   var dark: Boolean = true
 }
+
+/** A share that ended with something for the page: its folder in the share cache and what Rust gets (`received`). */
+private class Handover(val folder: File, val json: String)
 
 /**
  * The Android host of the app (src/android.rs calls it): what Desktop does with the system's processes and windows,
@@ -108,10 +116,12 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     /** At most this many bytes from one share, in all, as a paste brings into the page (pastedFiles.ts `PLATFORM_PASTE_MAX`). */
     private const val MAX_SHARED_BYTES = 256L * 1024 * 1024
     /**
-     * The latest share's number: an older share still copying stops, and is never handed over after a newer one.
-     * Starts at the clock, so a share's folder is newer than any a previous run left.
+     * The shares' numbers: an older share still copying stops, and is never handed over after a newer one with
+     * something in it. Starts at the clock, so a share's folder is newer than any a previous run left. A share never
+     * handed over (overtaken while it waited) has its copies go.
      */
-    private val shareGeneration = AtomicLong(System.currentTimeMillis())
+    private val shareTurns =
+      ShareTurns<Handover>(System.currentTimeMillis()) { thread(name = "ghostly-share-clean") { it.folder.deleteRecursively() } }
     /** Whether this run swept what earlier runs left in the share cache: once, as an activity made again may come. */
     private val sharesSwept = AtomicBoolean(false)
   }
@@ -119,12 +129,12 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   /** Rust (src/android.rs): `kind` is "oidc", "share", "notification" or "network". */
   private external fun received(kind: String, value: String)
 
-  private var pendingSave: SaveArgs? = null
+  private val pendingSave = SaveSlot<SaveArgs>()
 
   override fun load(webView: WebView) {
     // Copies an earlier run left (a share never read, the app stopped): only shares this run takes are kept.
     if (sharesSwept.compareAndSet(false, true)) {
-      val since = shareGeneration.get()
+      val since = shareTurns.last()
       thread(name = "ghostly-share-clean") { SharedCopies.stale(sharedRoot(), since).forEach { it.deleteRecursively() } }
     }
     take(activity.intent)
@@ -150,15 +160,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun take(intent: Intent?) {
-    if (intent == null || intent.getBooleanExtra(EXTRA_HANDLED, false)) return
-    when {
-      intent.hasExtra(EXTRA_NOTIFICATION) -> received("notification", intent.getStringExtra(EXTRA_NOTIFICATION) ?: return)
-      intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "ghostly" && intent.data?.host == "oidc" ->
-        received("oidc", intent.dataString ?: return)
-      intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE -> shared(intent)
-      else -> return
+    if (intent == null) return
+    try {
+      if (intent.getBooleanExtra(EXTRA_HANDLED, false)) return
+      when {
+        intent.hasExtra(EXTRA_NOTIFICATION) -> received("notification", intent.getStringExtra(EXTRA_NOTIFICATION) ?: return)
+        intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "ghostly" && intent.data?.host == "oidc" ->
+          received("oidc", intent.dataString ?: return)
+        intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE -> shared(intent)
+        else -> return
+      }
+      intent.putExtra(EXTRA_HANDLED, true)
+    } catch (e: Exception) {
+      // What another app put in an intent (extras that cannot be unparcelled) drops the intent, never ends the app.
     }
-    intent.putExtra(EXTRA_HANDLED, true)
   }
 
   // ---- Opener ----
@@ -190,15 +205,21 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   /**
    * "Share to Ghostly" from another app: its text and its streams. Each stream is copied into the app's cache (a
    * folder per share and per file, under the name the sharing app gave), off the main thread, then handed to Rust.
-   * Shares are numbered as they arrive: one that a newer share overtook stops copying and is never handed over, so a
-   * big share that ends late cannot replace the one made after it. A share with nothing in it (no file copied, no
-   * text) is never handed over, so it never replaces the one that waits. The page reads the copies by token, as a
-   * paste's, and owns them: they go when it says it is done with them (`shareDone`), never when a newer share comes,
+   * Shares are numbered as they arrive (ShareTurns): one that a newer share overtook stops copying and is never handed
+   * over, so a big share that ends late cannot replace the one made after it. A newer share overtakes only once it has
+   * something (a file copied whole, a text, a title): one that ends up with nothing (no file copied, no text) is never
+   * handed over and never stops one still copying, so it never replaces the one that waits. An older share that ends
+   * with something while a newer one still copies waits for it: dropped if the newer one gets something, handed over
+   * once it ends with nothing, so the replaced share is never shown first. The page reads the copies
+   * by token, as a paste's, and owns them: they go when it says it is done with them (`shareDone`), never when a newer share comes,
    * since the page may still show or read an older one; what a run leaves goes at the next start.
    * Only another app's `content://` streams are read (SharedStream): the app opens a stream as itself.
    * Only what the page takes is copied: each stream in turn while the share stays within [MAX_SHARED_BYTES]
    * (android.ts `withinPasteTotal`, keep the two alike); one that would go past it is left out, by its size before
-   * copying, or by its bytes when the app gives no size.
+   * copying, or by its bytes when the app gives no size (nor kept), and only named in `leftOut`, for the page to say
+   * so; one that cannot be read (no stream, a revoked permission, a broken stream) is named in `unread`, and one the
+   * device has no room for (a full disk, SharedCopies.noRoom) in `noRoom`. A share with
+   * nothing else is still nothing for the turns: its names go with the share it lets go, or alone.
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
@@ -210,41 +231,86 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     if (SharedCopies.nothingIn(title, text, streams.size)) return
     val resolver = activity.contentResolver
     val root = sharedRoot()
-    val generation = shareGeneration.incrementAndGet()
-    val latest = { shareGeneration.get() == generation }
+    val number = shareTurns.arrive()
+    // A text or a title is something already; files only once one is copied whole.
+    if (!SharedCopies.nothingIn(title, text, 0)) shareTurns.has(number)
+    val going = { shareTurns.going(number) }
     thread(name = "ghostly-share") {
-      val own = File(root, generation.toString())
-      own.deleteRecursively()
-      val files = JSONArray()
-      var left = MAX_SHARED_BYTES
-      for ((index, uri) in streams.withIndex()) {
-        if (!latest()) break
-        try {
-          if ((sizeOf(uri) ?: 0L) > left) continue
-          val folder = File(own, index.toString()).apply { mkdirs() }
-          val file = File(folder, SharedName.of(displayName(uri), index))
-          val copied =
-            resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyAtMost(input, it, left, latest) } }
-              ?: continue
-          if (copied < 0) {
+      val own = File(root, number.toString())
+      try {
+        own.deleteRecursively()
+        val files = JSONArray()
+        // Named for the page: what was too large to bring in, what could not be read, and what the device had no room
+        // for. A copy stopped as a newer share came is not.
+        val leftOut = JSONArray()
+        val unread = JSONArray()
+        val noRoom = JSONArray()
+        var left = MAX_SHARED_BYTES
+        for ((index, uri) in streams.withIndex()) {
+          if (!going()) break
+          val name = SharedName.of(displayName(uri), index)
+          val folder = File(own, index.toString())
+          try {
+            if ((sizeOf(uri) ?: 0L) > left) {
+              leftOut.put(name)
+              continue
+            }
+            folder.mkdirs()
+            val file = File(folder, name)
+            val input = resolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
+            val copied = input.use { from -> file.outputStream().use { copyAtMost(from, it, left, going) } }
+            if (copied < 0) {
+              folder.deleteRecursively()
+              if (going()) leftOut.put(name)
+              continue
+            }
+            left -= copied
+            files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
+            shareTurns.has(number)
+          } catch (e: Exception) {
+            // One file that cannot be read (a revoked permission, a broken stream), or that the device has no room
+            // for, leaves the rest of the share, and is named for the page as such; what of it was copied goes.
             folder.deleteRecursively()
-            continue
+            if (going()) (if (SharedCopies.noRoom(e)) noRoom else unread).put(name)
           }
-          left -= copied
-          files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
-        } catch (e: Exception) {
-          // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
         }
-      }
-      // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
-      if (!latest() || files.length() == 0) own.deleteRecursively()
-      // Nothing in it: the share that waits for the page stays as it is.
-      if (!latest() || SharedCopies.nothingIn(title, text, files.length())) return@thread
-      val share = JSONObject().put("title", title).put("text", text).put("files", files)
-      activity.runOnUiThread {
-        // Checked again on the main thread, where shares arrive: a newer one may have come during the hop.
-        if (!latest()) return@runOnUiThread
-        received("share", share.toString())
+        // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
+        if (files.length() == 0) own.deleteRecursively()
+        val share =
+          if (SharedCopies.nothingIn(title, text, files.length())) null
+          else Handover(
+            own,
+            JSONObject().put("title", title).put("text", text).put("files", files)
+              .put("leftOut", leftOut).put("unread", unread).put("noRoom", noRoom).toString(),
+          )
+        // Decided on the main thread, where shares arrive, so none comes between the turn and the handing over. With
+        // nothing in it, an older share that waited for this one may go now; with something, this one goes, waits for
+        // a newer share still copying, or is dropped.
+        activity.runOnUiThread {
+          val handed = if (share == null) shareTurns.nothing(number) else shareTurns.ready(number, share)
+          // Nothing but files too large or not read, and no newer share with something: the page names them all the
+          // same, with the older share this one let go (Rust keeps one share: two in a row would lose the first), or alone.
+          val json =
+            if (share != null || (leftOut.length() == 0 && unread.length() == 0 && noRoom.length() == 0) || !going()) handed?.json
+            else {
+              val notice = handed?.let { JSONObject(it.json) } ?: JSONObject().put("title", "").put("text", "").put("files", JSONArray())
+              for ((key, more) in listOf("leftOut" to leftOut, "unread" to unread, "noRoom" to noRoom)) {
+                val names = notice.optJSONArray(key) ?: JSONArray()
+                for (i in 0 until more.length()) names.put(more.getString(i))
+                notice.put(key, names)
+              }
+              notice.toString()
+            }
+          if (json != null) received("share", json)
+        }
+      } catch (e: Throwable) {
+        // Nothing uncaught here: Android ends the app (and a call in it) for an error in any thread. The share is
+        // dropped, as one that ended with nothing: an older share that waited for it may go now.
+        own.deleteRecursively()
+        activity.runOnUiThread {
+          val handed = shareTurns.nothing(number)
+          if (handed != null) received("share", handed.json)
+        }
       }
     }
   }
@@ -264,16 +330,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Suppress("DEPRECATION")
-  private fun streamsOf(intent: Intent): List<Uri> = when (intent.action) {
-    Intent.ACTION_SEND_MULTIPLE ->
-      if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java) ?: emptyList()
-      else intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM) ?: emptyList()
-    else ->
-      listOfNotNull(
-        if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        else intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM),
-      )
-  }
+  private fun streamsOf(intent: Intent): List<Uri> =
+    SharedStream.of(intent.extras?.get(Intent.EXTRA_STREAM), Uri::class.java, intent.action == Intent.ACTION_SEND_MULTIPLE)
 
   /** The authorities of the app's own content providers (its FileProvider, the libraries'), from its manifest. */
   @Suppress("DEPRECATION")
@@ -434,6 +492,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve()
   }
 
+  /**
+   * Takes away every message notification still there but those posted as `keep`: the page that starts knows only
+   * those of an earlier one's, its chats' tags (they stay, and it replaces, takes away and opens them).
+   */
+  @Command
+  fun cancelNotifications(invoke: Invoke) {
+    val keep = invoke.parseArgs(KeepArgs::class.java).keep.toSet()
+    val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    manager.activeNotifications
+      .filter { it.id == 1 && it.tag != null && it.tag !in keep && it.notification.channelId == CHANNEL }
+      .forEach { manager.cancel(it.tag, it.id) }
+    invoke.resolve()
+  }
+
   @Command
   fun openNotificationSettings(invoke: Invoke) {
     val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -448,22 +520,33 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   // ---- Saving a file ----
 
-  /** Android's document picker, then a copy of the stored file to where the person chose. */
+  /**
+   * Android's document picker, then a copy of the stored file to where the person chose. A save asked for while a
+   * picker is open (SaveSlot) opens none and answers as a cancelled one: the open picker's answer stays its own.
+   */
   @Command
   fun saveFile(invoke: Invoke) {
     val args = invoke.parseArgs(SaveArgs::class.java)
-    pendingSave = args
+    if (!pendingSave.take(args)) {
+      invoke.resolve(JSObject().put("saved", false))
+      return
+    }
     val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
       .addCategory(Intent.CATEGORY_OPENABLE)
       .setType("*/*")
       .putExtra(Intent.EXTRA_TITLE, args.name)
-    startActivityForResult(invoke, intent, "saveChosen")
+    try {
+      startActivityForResult(invoke, intent, "saveChosen")
+    } catch (e: Exception) {
+      // No picker opened (none on this phone): no answer will free the slot.
+      pendingSave.answered()
+      throw e
+    }
   }
 
   @ActivityCallback
   private fun saveChosen(invoke: Invoke, result: ActivityResult) {
-    val args = pendingSave
-    pendingSave = null
+    val args = pendingSave.answered()
     val target = result.data?.data
     if (result.resultCode != Activity.RESULT_OK || target == null || args == null) {
       invoke.resolve(JSObject().put("saved", false))

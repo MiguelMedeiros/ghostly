@@ -67,9 +67,20 @@ describe("payment targets at their boundaries", () => {
   });
 
   it("keeps Bark to the networks Second runs, and Ark/Cashu off testnet", () => {
-    for (const network of ["bitcoin", "signet", "regtest"]) expect(validatePaymentTarget({ ...ark, method: "bark", network }, NOW).network).toBe(network);
+    for (const network of ["bitcoin", "signet", "regtest"]) expect(validatePaymentTarget({ ...ark, method: "bark", network, address: network === "bitcoin" ? "ark1pexample" : "tark1pexample" }, NOW).network).toBe(network);
     for (const network of ["mutinynet", "cashu-test"]) expect(() => validatePaymentTarget({ ...ark, method: "bark", network }, NOW)).toThrow("Unsupported Bark network");
     expect(() => validatePaymentTarget({ ...ark, network: "testnet" }, NOW)).toThrow("Unsupported payment method, asset or network");
+  });
+
+  it("takes an Ark or Bark address only on its own network: ark1 on Bitcoin, tark1 on the test networks", () => {
+    expect(validatePaymentTarget({ ...ark, network: "mutinynet", address: "tark1qexample" }, NOW).address).toBe("tark1qexample");
+    expect(validatePaymentTarget({ ...ark, address: "ARK1QEXAMPLE" }, NOW).address).toBe("ARK1QEXAMPLE");
+    for (const method of ["arkade", "bark"]) {
+      for (const network of ["signet", "regtest", ...(method === "arkade" ? ["mutinynet"] : [])]) expect(() => validatePaymentTarget({ ...ark, method, network, address: "ark1qexample" }, NOW)).toThrow(`That is not an Ark address on ${network}`);
+      expect(() => validatePaymentTarget({ ...ark, method, address: "tark1qexample" }, NOW)).toThrow("That is not an Ark address on Bitcoin");
+      expect(() => validatePaymentTarget({ ...ark, method, address: "bc1qexample" }, NOW)).toThrow("That is not an Ark address on Bitcoin");
+      expect(() => validatePaymentTarget({ ...ark, method, address: "Ark1qexample" }, NOW)).toThrow("That is not an Ark address on Bitcoin");
+    }
   });
 
   it("refuses an on-chain target naming a service, or an address of another network", () => {

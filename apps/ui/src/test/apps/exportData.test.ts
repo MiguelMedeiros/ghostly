@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AppDataExport } from "@ghostly/browser/engine/apps";
+import type { AppDataExport, AppDataExportText } from "@ghostly/browser/engine/apps";
 import { saveAppData } from "../../lib/apps/exportData";
 
 // covers: apps.engine.storage
@@ -10,6 +10,10 @@ vi.mock("../../lib/fileDownload", () => ({
 }));
 
 const REF = `${"k".repeat(52)}/chess`;
+
+/** Files as the engine hands them: each value as the JSON text it is kept as. */
+const asKept = (files: AppDataExport[]): AppDataExportText[] =>
+  files.map(({ app, scope, entries }) => ({ app, scope, entries: Object.keys(entries).map((key) => [key, JSON.stringify(entries[key])] as [string, string]) }));
 
 /** A value as deep as the broker takes (64), around a list of small numbers: about 40 KiB as JSON. */
 const nested = () => {
@@ -25,7 +29,7 @@ describe("the export offered before an uninstall", () => {
       { ghostlyAppData: 1, app: REF, scope: "alone", entries: { b: { c: true } } },
       { ghostlyAppData: 1, app: REF, scope: "chat-1", entries: Object.defineProperty({ a: [1, 2], "x\"y": "z" }, "__proto__", { value: 7, enumerable: true }) },
     ];
-    await saveAppData(REF, exports);
+    await saveAppData(REF, asKept(exports));
     expect(saved.map((s) => s.name)).toEqual(["chess-data.json"]);
     const text = await saved[0]!.blob.text();
     expect(JSON.parse(text)).toEqual(JSON.parse(JSON.stringify(exports)));
@@ -43,7 +47,7 @@ describe("the export offered before an uninstall", () => {
       { ghostlyAppData: 1, app: REF, scope: "chat-2", entries: entries() },
     ];
     const compact = JSON.stringify(exports).length;
-    await saveAppData(REF, exports);
+    await saveAppData(REF, asKept(exports));
     expect(saved).toHaveLength(1);
     expect(saved[0]!.blob.size).toBeLessThan(compact * 1.01);
     const back = JSON.parse(await saved[0]!.blob.text()) as AppDataExport[];

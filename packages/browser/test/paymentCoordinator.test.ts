@@ -2,7 +2,7 @@ import { describe,it,expect,vi } from 'vitest';
 import type { PaymentAdapter, PaymentTarget } from '@ghostly/core';
 import { PaymentCoordinator, type SavedIntent, type IntentRepository } from '../src/engine/paymentAdapters/coordinator';
 // covers: payments.chat.reconcile, payments.chat.review
-const target=():PaymentTarget=>({method:'arkade',network:'regtest',provider:'http://127.0.0.1:43010',asset:'BTC',unit:'sat',address:'test destination',expiresAt:Date.now()+60000});
+const target=():PaymentTarget=>({method:'arkade',network:'regtest',provider:'http://127.0.0.1:43010',asset:'BTC',unit:'sat',address:'tark1testdestination',expiresAt:Date.now()+60000});
 function fixture(){
  const records=new Map<string,SavedIntent>();
  const repo:IntentRepository={get:async id=>structuredClone(records.get(id)),list:async()=>structuredClone([...records.values()]),put:async v=>{records.set(v.review.id,structuredClone(v));},cancel:async id=>{const v=records.get(id);if(!v||v.review.state!=='pending')throw new Error('already submitted');v.review.state='cancelled';return structuredClone(v);},claim:async id=>{const v=records.get(id);if(!v||v.review.state!=='pending')throw new Error('already submitted');v.review.state='submitted';return structuredClone(v);}};

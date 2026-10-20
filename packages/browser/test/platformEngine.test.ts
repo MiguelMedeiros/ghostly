@@ -176,7 +176,8 @@ describe("what the peer tells the page", () => {
     expect(engine.messages.get("l1")!.map((m) => [m.id, m.text])).toEqual([["a", "edited"], ["a2", "a2"], ["c", "c"], ["d", "d"]]);
     expect(engine.messages.get("l1")).not.toBe(before);
     await new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS));
-    expect(listener).toHaveBeenLastCalledWith("l1", engine.messages.get("l1"));
+    // With what changed since the list they last heard: the rows given, as they are now, and the ids deleted.
+    expect(listener).toHaveBeenLastCalledWith("l1", engine.messages.get("l1"), { from: before, messages: [at("d", 4), { ...at("a", 1), text: "edited" }, at("a2", 1)], deleted: ["b"] });
     // A chat whose messages it was never sent: nothing to make them on, nothing to tell.
     listener.mockClear();
     deliver({ kind: "message-changes", linkId: "l2", messages: [at("x", 1)], deleted: [] });
@@ -194,6 +195,7 @@ describe("what the peer tells the page", () => {
     const deliver = scripted.connections[0].deliver;
     deliver({ kind: "messages", linkId: "group:g", messages: [at("group:g", "old", 0)] });
     deliver({ kind: "messages", linkId: "l1", messages: [] });
+    const [group, chat] = [engine.messages.get("group:g"), engine.messages.get("l1")];
     listener.mockClear();
     // Each in its own task, as the port or the in-page peer hands them over.
     for (let i = 1; i <= 256; i++) {
@@ -208,8 +210,9 @@ describe("what the peer tells the page", () => {
 
     await vi.advanceTimersByTimeAsync(MESSAGE_CHANGES_TICK_MS);
     expect(listener).toHaveBeenCalledTimes(2);
-    expect(listener).toHaveBeenCalledWith("group:g", engine.messages.get("group:g"));
-    expect(listener).toHaveBeenCalledWith("l1", engine.messages.get("l1"));
+    // Each with all that changed since the list it had: every row of the catch-up, and the one deleted.
+    expect(listener).toHaveBeenCalledWith("group:g", engine.messages.get("group:g"), { from: group, messages: engine.messages.get("group:g"), deleted: ["old"] });
+    expect(listener).toHaveBeenCalledWith("l1", engine.messages.get("l1"), { from: chat, messages: [at("l1", "hi", 1)], deleted: [] });
     expect(engine.messages.get("group:g")!.map((m) => m.id)).toEqual(Array.from({ length: 256 }, (_, i) => `m${i + 1}`));
     await vi.advanceTimersByTimeAsync(MESSAGE_CHANGES_TICK_MS * 4);
     expect(listener).toHaveBeenCalledTimes(2);

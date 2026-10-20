@@ -18,6 +18,10 @@ const fake = vi.hoisted(() => ({
     connect: async () => {},
     subscribe(listener: () => void) { fake.engine.stateListeners.push(listener); return () => {}; },
     onMessages(listener: (linkId: string, messages: StoredMessage[]) => void) { fake.engine.messageListeners.push(listener); return () => {}; },
+    // No change tick here: every list comes whole.
+    changing: () => false,
+    whole: () => true,
+    askWhole() {},
     linkByPeer(peer: string) { return fake.engine.state?.links.find((l) => l.peerPubKeyZ32 === peer); },
     async call(method: string, params?: unknown) {
       fake.engine.calls.push([method, params]);
@@ -99,6 +103,22 @@ describe("the first run", () => {
     expect(engine.calls.filter(([m]) => m === "exportLinks")).toEqual([]);
     expect(storage.listSessions()).toEqual([]);
     expect(localStorage.getItem("gb-sessions-imported")).toBe("1");
+  });
+
+  it("on a full localStorage, throws nothing, removes no link for want of its chat, and imports once there is room", async () => {
+    const write = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = () => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); };
+    engine.answers.exportLinks = [{ seedB64: "seed-1", peerPubKeyZ32: "peer-1", encKeyB64: "enc", createdAt: 1 }];
+    await start([link({ createdAt: 1 })]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
+    expect(storage.listSessions()).toEqual([]);
+
+    localStorage.setItem = write;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(storage.listSessions()).toHaveLength(1);
+    expect(localStorage.getItem("gb-sessions-imported")).toBe("1");
+    expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
   });
 
   it("does nothing until the peer has reported its state", async () => {
@@ -372,6 +392,21 @@ describe("a long chat, on every update", () => {
     const stored = storage.loadSession("s1")!;
     expect(stored.messages).toHaveLength(300);
     expect(stored.messages.every((m) => m.delivery === "delivered")).toBe(true);
+  });
+});
+
+describe("finding a contact's chat", () => {
+  it("reads only that chat, not every stored chat once per lookup", async () => {
+    // At every start each link is mid-sync, and the sidebar's marks and the mirror looked up each one's chat with a read
+    // of every stored chat: 5,050 reads per engine state with 50 chats.
+    const CHATS = 30;
+    for (let i = 0; i < CHATS; i++) storage.saveSession(session({ id: `s${i}`, peerPubKeyB64: `peer-${i}`, mySeedB64: `seed-${i}` }));
+    // The chats' keys are read once, the first time any chat is looked for.
+    expect(sync.sessionForPeer("peer-0")?.id).toBe("s0");
+    const reads = vi.spyOn(localStorage, "getItem");
+    for (let i = 0; i < CHATS; i++) expect(sync.sessionForPeer(`peer-${i}`)?.id).toBe(`s${i}`);
+    expect(sync.sessionForPeer("nobody")).toBeUndefined();
+    expect(reads.mock.calls.filter(([key]) => storage.isSessionKey(key)).length).toBeLessThanOrEqual(CHATS);
   });
 });
 

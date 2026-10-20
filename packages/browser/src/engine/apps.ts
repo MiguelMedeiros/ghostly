@@ -1,13 +1,13 @@
 import {
   APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
   appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation,
-  readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
+  pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
   type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
   type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
-import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
+import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
 
@@ -77,8 +77,16 @@ const REVOCATION_FILES_KEPT = { max: 64, bytes: APP_FETCH_LIMITS.revocationsByte
 const STORE_REVOCATIONS_KEPT = 4 * APP_STORE_LIMITS.revoked;
 /** A fetched bundle kept for its install screen: at most this many, for this long. */
 const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
+/**
+ * Checked bundles kept in memory: the most recently used `min`, and beyond them each one a running app used (`entry`,
+ * `file`, `fileAt`) within `ms`. The engine is not told when an app closes; one not used for that long goes, and is read
+ * and checked again if it still runs.
+ */
+const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
+/** What a peek reads first: the magic, the length and any usual manifest (about 1 KiB). A longer one is read to its end after. */
+const PEEK_FIRST_BYTES = 4 * 1024;
 
 const bundleId = (digest: string) => `app-${digest}`;
 
@@ -132,14 +140,38 @@ export interface AddedAppStore {
   problem?: string;
 }
 
+/** Where a bundle's file lies in the client's own file storage (`Apps.fileAt`): bytes `offset` to `offset + length` of `id`. */
+export interface AppFileAt { space: string; id: string; offset: number; length: number; sha256: string }
+
 /** One key of one app's storage in one scope (`STORES.appStorage`): the value as JSON, and the bytes of the key and the value. */
 export interface AppStorageRow { ref: string; scope: string; key: string; value: string; size: number }
 /**
- * What a row takes of its scope's 5 MiB: `rowBytes`, its key `keyTimes` over and its value. `size` is the key's bytes
- * and the value's. Not kept in the row, so rows from before count alike.
+ * What one scope holds, as raw sums: its rows, their keys' bytes and their `size` (key and value). Kept in the scope's
+ * counter row beside the rows, written in the same transaction as each of them, so a write after a start reads no
+ * value to count the scope. Sums, not the count itself: a change of how bytes count (`costOf`) counts them anew.
  */
-const costOf = ({ key, size }: { key: string; size: number }): number =>
-  APP_STORAGE_LIMITS.rowBytes + size + (APP_STORAGE_LIMITS.keyTimes - 1) * byteLength(key);
+export interface AppScopeCount { rows: number; keyBytes: number; size: number }
+/**
+ * The key of a scope's counter row (`AppScopeCount` as JSON in `value`, `size` 0): an app's key is never empty
+ * (`keyOf`), and the app's own rows of a scope are `keysOf`, which leaves it out.
+ */
+const COUNT_KEY = "";
+const NO_ROWS: AppScopeCount = { rows: 0, keyBytes: 0, size: 0 };
+/**
+ * What rows take of their scope's 5 MiB: `rowBytes` each, their keys `keyTimes` over and their values. Not kept, so a
+ * count from before counts alike.
+ */
+const costOf = ({ rows, keyBytes, size }: AppScopeCount): number =>
+  rows * APP_STORAGE_LIMITS.rowBytes + size + (APP_STORAGE_LIMITS.keyTimes - 1) * keyBytes;
+/** One row as a count, `sign` -1 to take it away. */
+const countOf = ({ key, size }: { key: string; size: number }, sign = 1): AppScopeCount => ({ rows: sign, keyBytes: sign * byteLength(key), size: sign * size });
+const plus = (a: AppScopeCount, b: AppScopeCount): AppScopeCount => ({ rows: a.rows + b.rows, keyBytes: a.keyBytes + b.keyBytes, size: a.size + b.size });
+function readCount(value: unknown): AppScopeCount | null {
+  try {
+    const c = JSON.parse(value as string) as Partial<AppScopeCount>;
+    return [c.rows, c.keyBytes, c.size].every((n) => Number.isSafeInteger(n) && (n as number) >= 0) ? (c as AppScopeCount) : null;
+  } catch { return null; }
+}
 
 /** Whether an installed app may run now: `needs-files` when its bundle is not on this device (a restored profile). */
 export type AppRunStatus =
@@ -246,6 +278,8 @@ export interface AppRunEntry { ref: string; digest: string; version: string; tit
 
 /** An app's storage in one scope, as the WISP's export file. */
 export interface AppDataExport { ghostlyAppData: 1; app: string; scope: string; entries: Record<string, JsonValue> }
+/** One scope of an app's storage as it is kept: each key with its value's JSON text, for an export file written as is. */
+export interface AppDataExportText { app: string; scope: string; entries: [key: string, json: string][] }
 
 export interface AppsHost {
   fetch: AppFetcher;
@@ -352,8 +386,13 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
 }
 
-/** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`. */
+/** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`, counter rows included. */
 const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []]);
+/** The app's own rows of one scope: its counter row left out. */
+const keysOf = (ref: string, scope: string) => IDBKeyRange.bound([ref, scope, COUNT_KEY], [ref, scope, []], true);
+
+/** A scope's counter row (`COUNT_KEY`). */
+const counterRow = (ref: string, scope: string, count: AppScopeCount): AppStorageRow => ({ ref, scope, key: COUNT_KEY, value: JSON.stringify(count), size: 0 });
 
 function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -380,23 +419,43 @@ export function peekAppManifest(bytes: Uint8Array): { ref: string; sequence: num
   } catch { return null; }
 }
 
+/** Where a bundle's manifest ends, from its first bytes, or null when they are not a bundle's or name a manifest too long. */
+function peekManifestEnd(bytes: Uint8Array): number | null {
+  const magic = utf8Encode(APP_BUNDLE_MAGIC);
+  if (bytes.length < magic.length + 4 || !magic.every((b, i) => bytes[i] === b)) return null;
+  const end = magic.length + 4 + new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(magic.length);
+  return end <= PEEK_BYTES ? end : null;
+}
+
 export class Apps {
   private readonly staged = new Map<string, Staged>();
-  /** Bundles read back and checked, by digest: the one running is read once, not on every `file`. */
+  /** Bundles read back and checked, by digest, least recently used first (`BUNDLES_KEPT`): the ones running are read once, not on every `file`. */
   private readonly verified = new Map<string, AppBundle>();
+  /** When a running app last used its bundle, by digest (`BUNDLES_KEPT`): an icon drawn is not a use. */
+  private readonly runUsed = new Map<string, number>();
   /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
   private readonly verifying = new Map<string, Promise<AppBundle>>();
+  /** Reads of a bundle's URL under way: an install screen opened again waits on the read the closed one began, not on a second. */
+  private readonly bundleReads = new Map<string, Promise<{ bundle: AppBundle; bytes: Uint8Array }>>();
   /**
    * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
   private readonly icons = new Map<string, Uint8Array | null>();
-  /** Bytes used per `ref\0scope`, counted once from the rows and kept in step by the writes here. */
-  private readonly usage = new Map<string, number>();
+  /** What each `ref\0scope` holds, read once from its counter row and kept in step by the writes here. */
+  private readonly usage = new Map<string, AppScopeCount>();
   private readonly queues = new Map<string, Promise<unknown>>();
+  /** The keys read of each `ref\0scope` running, and the one every call made while it runs shares after it. */
+  private readonly keyReads = new Map<string, { running: Promise<string[]>; next?: Promise<string[]> }>();
+  /** Uninstalls begun per reference, for this engine's life: a storage write that waited its turn across one is refused. */
+  private readonly uninstalls = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Drops what `staged` holds past `STAGED.ms`, set while it holds anything: a closed install screen sends no call. */
   private sweep: ReturnType<typeof setTimeout> | null = null;
+  /** The store `previewStore` last read and checked, for Add to take within `STAGED.ms` without reading it again. */
+  private previewed: { url: string; index: AppStoreIndex; digest: string; at: number } | null = null;
+  /** Drops `previewed` past `STAGED.ms`: an index is up to 4 MiB, and a closed Add screen sends no call. */
+  private previewedSweep: ReturnType<typeof setTimeout> | null = null;
   private checking: Promise<AppCheckResult[]> | null = null;
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
@@ -453,6 +512,7 @@ export class Apps {
     if (this.sweep) clearTimeout(this.sweep);
     this.sweep = null;
     this.staged.clear();
+    this.keepPreviewed(null);
     this.held.clear();
     this.heldStores = null;
     this.views = null;
@@ -723,6 +783,7 @@ export class Apps {
 
   private async removeBundle(kind: FileBytesKind, digest: string): Promise<void> {
     this.verified.delete(digest);
+    this.runUsed.delete(digest);
     this.icons.delete(digest);
     await (await fileBytesOf(kind))?.remove(bundleId(digest)).catch(() => {});
   }
@@ -734,9 +795,16 @@ export class Apps {
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
-  private verifiedBundle(app: InstalledApp): Promise<AppBundle> {
+  private verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
+    if (running) this.runUsed.set(app.digest, this.now());
     const kept = this.verified.get(app.digest);
-    if (kept) return Promise.resolve(kept);
+    // Used last, dropped last: a running app's `file` reads keep its bundle, and drop the ones no app has used for a while.
+    if (kept) {
+      this.verified.delete(app.digest);
+      this.verified.set(app.digest, kept);
+      this.dropUnusedBundles();
+      return Promise.resolve(kept);
+    }
     const under = this.verifying.get(app.digest);
     if (under) return under;
     const reading = (async () => {
@@ -744,8 +812,8 @@ export class Apps {
       if (!bytes) fail("needs-files", "This app's files are not on this device yet");
       const read = await readAppBundleAsync(bytes);
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
-      if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
       this.verified.set(app.digest, read.bundle);
+      this.dropUnusedBundles();
       // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
       this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
       return read.bundle;
@@ -754,13 +822,44 @@ export class Apps {
     return reading;
   }
 
+  /**
+   * Apps running at once do not push each other's bundle out, which every `file` read would then read and check again
+   * whole; one closed (or only drawn as an icon) goes once two newer ones are kept, at the next bundle read or hit.
+   */
+  private dropUnusedBundles(): void {
+    for (const digest of this.verified.keys()) {
+      if (this.verified.size <= BUNDLES_KEPT.min) break;
+      if (this.now() - (this.runUsed.get(digest) ?? -Infinity) < BUNDLES_KEPT.ms) continue;
+      this.verified.delete(digest);
+      this.runUsed.delete(digest);
+    }
+  }
+
   // ---------- network ----------
 
-  private async fetchBundle(url: string): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
-    const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
-    const read = await readAppBundleAsync(bytes);
-    if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
-    return { bundle: read.bundle, bytes };
+  private fetchBundle(url: string): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
+    const running = this.bundleReads.get(url);
+    if (running) return running;
+    const read = (async () => {
+      const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
+      const read = await readAppBundleAsync(bytes);
+      if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+      return { bundle: read.bundle, bytes };
+    })().finally(() => { this.bundleReads.delete(url); });
+    this.bundleReads.set(url, read);
+    return read;
+  }
+
+  /**
+   * The manifest at the start of the bundle at `url`, unchecked (`peekAppManifest`): its first `PEEK_FIRST_BYTES`, and
+   * only for a longer manifest a second read from the start to exactly its end (from the start: one file's bytes, even
+   * when it changed between the two).
+   */
+  private async peekAt(url: string): Promise<ReturnType<typeof peekAppManifest>> {
+    const first = await this.host.fetch(url, { maxBytes: PEEK_FIRST_BYTES, peek: true });
+    const end = peekManifestEnd(first);
+    if (end === null || end <= first.length || first.length < PEEK_FIRST_BYTES) return peekAppManifest(first);
+    return peekAppManifest(await this.host.fetch(url, { maxBytes: end, peek: true }));
   }
 
   /**
@@ -771,19 +870,22 @@ export class Apps {
    * this store or another, a preview included, is not checked again.
    */
   private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
+    // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use.
+    const stop = new AbortController();
+    const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, revalidate: true, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
     const [indexBytes, sigBytes] = await Promise.all([
-      this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
-      this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
+      read(url, APP_FETCH_LIMITS.storeIndexBytes),
+      read(besideUrl(url, "ghostly-store.sig"), APP_FETCH_LIMITS.sigBytes),
     ]);
     if (held?.index && held.digest !== undefined && toBase64Url(await sha256Paced(indexBytes)) === held.digest) {
       return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
     }
     const steps = readAppStoreSteps(indexBytes, sigBytes, this.nowS(), heldKey, this.checkedRevocations);
-    let since = performance.now();
+    const pause = pacer(REVOCATIONS_SLICE_MS);
     for (;;) {
       const step = steps.next();
       if (step.done) return step.value;
-      if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+      await pause();
     }
   }
 
@@ -797,7 +899,7 @@ export class Apps {
       if (read.has(url)) continue;
       read.add(url);
       try {
-        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
+        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
         if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
       } catch { /* not published there, or not reachable now */ }
     }
@@ -816,9 +918,9 @@ export class Apps {
     let out: SignedAppRevocation[] | null = null;
     if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
       out = [];
-      let since = performance.now();
+      const pause = pacer(REVOCATIONS_SLICE_MS);
       for (const entry of read.value) {
-        if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+        await pause();
         const one = readAppRevocation(entry);
         if (!one.ok) { out = null; break; }
         out.push(one.revocation);
@@ -861,12 +963,20 @@ export class Apps {
     return (typeof url === "string" && appPasteUrl(url, "ghostly-store.json")) || notReadable(url, "Stores are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
   }
 
-  /** Reads a store at a URL for the person to see before adding it. Nothing is kept. */
+  private keepPreviewed(previewed: Apps["previewed"]): void {
+    if (this.previewedSweep) clearTimeout(this.previewedSweep);
+    this.previewedSweep = previewed ? setTimeout(() => this.keepPreviewed(null), STAGED.ms) : null;
+    this.previewed = previewed;
+  }
+
+  /** Reads a store at a URL for the person to see before adding it. Nothing is stored: the checked index waits in memory for `addStore`. */
   async previewStore({ url }: { url: string }): Promise<AppStorePreview> {
     const at = this.storeUrl(url);
+    this.keepPreviewed(null);
     const read = await this.readStoreAt(at);
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
-    const { index } = read.store;
+    const { index, digest } = read.store;
+    this.keepPreviewed({ url: at, index, digest, at: this.now() });
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
@@ -875,12 +985,17 @@ export class Apps {
 
   /**
    * Adds a store the person chose: read at its URL and pinned to its key (`key`, when given, is the key the person saw,
-   * and another one is refused). A store already added under that key takes the URL and the newer index.
+   * and another one is refused). A store already added under that key takes the URL and the newer index. The index the
+   * preview just read at that URL, under that key, is taken as it is (only its expiry again), not downloaded again.
    */
   async addStore({ url, key }: { url: string; key?: string }): Promise<AppStoreSummary> {
     if (key !== undefined && !isAppKey(key)) fail("store-key", "Not a store key");
     const at = this.storeUrl(url);
-    const read = await this.readStoreAt(at, key);
+    const kept = this.previewed;
+    this.keepPreviewed(null);
+    const read: AppStoreRead = kept && kept.url === at && (key === undefined || key === kept.index.key) && this.now() - kept.at <= STAGED.ms
+      ? { ok: true, store: { index: kept.index, digest: kept.digest, expired: kept.index.expires < this.nowS() } }
+      : await this.readStoreAt(at, key);
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
     const { index, digest } = read.store;
     const held = await this.storeRecord(index.key);
@@ -1204,7 +1319,7 @@ export class Apps {
         for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
           if (candidates.has(url)) continue;
           try {
-            const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
+            const peek = await this.peekAt(url);
             if (peek && newer(peek)) candidates.set(url, { holds: peek });
           } catch { /* this source does not answer now */ }
         }
@@ -1220,7 +1335,7 @@ export class Apps {
         let holds = want.holds;
         if (want.peek) {
           let peek: ReturnType<typeof peekAppManifest>;
-          try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
+          try { peek = await this.peekAt(url); } catch { continue; }
           if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
             if (want.miss) this.listingMisses.set(...want.miss);
             continue;
@@ -1326,7 +1441,7 @@ export class Apps {
     for (const url of new Set(urls.filter(isAppFetchUrl))) {
       // Peeked first, as the update check does: a URL that holds another version (its publisher moved on, a repository's
       // HEAD) is not read whole only to be skipped, at every open and every check.
-      try { if (peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }))?.digest !== app.digest) continue; } catch { continue; }
+      try { if ((await this.peekAt(url))?.digest !== app.digest) continue; } catch { continue; }
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }
       if (fetched.bundle.digest !== app.digest) continue;
@@ -1365,12 +1480,31 @@ export class Apps {
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
-    const bundle = await this.verifiedBundle(app);
+    const bundle = await this.verifiedBundle(app, true);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
     this.ran.add(app.ref);
     const versions = this.started.get(app.ref) ?? new Map<string, number>();
     this.started.set(app.ref, versions.set(app.digest, app.sequence));
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };
+  }
+
+  /**
+   * Where a file of the installed bundle lies in this device's file storage, for a client that hands the bytes to the
+   * app itself (Desktop: Rust reads them, checks their SHA-256 and gives them to the app's window, so they never cross
+   * the Ghostly window). The same checks as `file`; null where the bundle is not in such storage, and for the icon,
+   * which `file` answers from memory.
+   */
+  async fileAt({ ref, path, digest }: { ref: string; path: string; digest?: string }): Promise<AppFileAt | null> {
+    if (path === APP_ICON_PATH) return null;
+    const app = await this.runningOrFail(ref, digest);
+    if (digest !== undefined && digest !== app.digest) fail("no-file", "No such file in this app");
+    if (app.bytes !== "native") return null;
+    const bundle = await this.verifiedBundle(app, true);
+    const file = typeof path === "string" ? bundle.files.get(path) : undefined;
+    const listed = bundle.manifest.files.find((f) => f.path === path);
+    if (!file || !listed) fail("no-file", "No such file in this app");
+    // The bundle was read whole from its stored file (`readBundleBytes`): a file's place in its bytes is its place there.
+    return { space: fileSpace(), id: bundleId(app.digest), offset: file.byteOffset, length: file.length, sha256: listed.sha256 };
   }
 
   /**
@@ -1385,7 +1519,7 @@ export class Apps {
     const icon = path === APP_ICON_PATH ? this.icons.get(app.digest) : undefined;
     if (icon) return icon.slice();
     if (icon === null) fail("no-file", "No such file in this app");
-    const bundle = await this.verifiedBundle(app);
+    const bundle = await this.verifiedBundle(app, path !== APP_ICON_PATH);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();
   }
@@ -1429,6 +1563,11 @@ export class Apps {
     const builtIn = this.builtIn(ref) !== undefined;
     if (!app && !builtIn) fail("not-installed", "This app is not installed");
     const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage, ...(builtIn ? [STORES.settings] : [])], "readwrite");
+    // Counted with the transaction, nothing awaited between: a write that sees the old count is in an older transaction,
+    // whose row this delete takes; a later one is refused (`storageSet`). The record held goes now, so an app asked for
+    // from here on is read after this delete.
+    this.uninstalls.set(ref, (this.uninstalls.get(ref) ?? 0) + 1);
+    this.held.delete(ref);
     tx.objectStore(STORES.apps).delete(ref);
     tx.objectStore(STORES.appStorage).delete(rowsOf(ref));
     if (builtIn) markBuiltIns(tx.objectStore(STORES.settings), (marks) => { marks.removed[ref] ??= this.now(); });
@@ -1468,14 +1607,27 @@ export class Apps {
     return run;
   }
 
-  private async usageOf(ref: string, scope: string): Promise<number> {
+  /**
+   * What a scope holds: its counter row, when the number of rows agrees with it (one key count, no value read). A
+   * scope without one (written before it was kept) or where it disagrees (rows written by an older client) is
+   * counted from its rows once.
+   */
+  private async usageOf(ref: string, scope: string): Promise<AppScopeCount> {
     const id = `${ref}\0${scope}`;
-    let used = this.usage.get(id);
-    if (used === undefined) {
-      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).index(APP_STORAGE_SCOPE_INDEX).getAll([ref, scope]));
-      used = rows.reduce((sum, r) => sum + costOf(r), 0);
-      this.usage.set(id, used);
+    const cached = this.usage.get(id);
+    if (cached) return cached;
+    const rows = await store(STORES.appStorage, "readonly");
+    const [counter, n] = await Promise.all([
+      wrap<AppStorageRow | undefined>(rows.get([ref, scope, COUNT_KEY])),
+      wrap<number>(rows.count(keysOf(ref, scope))),
+    ]);
+    let used = counter ? readCount(counter.value) : n ? null : NO_ROWS;
+    if (!used || used.rows !== n) {
+      // The write that asked keeps the counter row from here on.
+      const all = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(keysOf(ref, scope)));
+      used = all.reduce((sum, r) => plus(sum, countOf(r)), NO_ROWS);
     }
+    this.usage.set(id, used);
     return used;
   }
 
@@ -1491,6 +1643,7 @@ export class Apps {
    * it, so the app can make room.
    */
   async storageSet({ ref, scope, key, value, digest }: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> {
+    const uninstalls = this.uninstalls.get(ref);
     const app = await this.runningOrFail(ref, digest);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     let text: string | undefined;
@@ -1503,8 +1656,8 @@ export class Apps {
       const used = await this.usageOf(app.ref, where);
       const rows = await store(STORES.appStorage, "readonly");
       const old = await wrap<AppStorageRow | undefined>(rows.get([app.ref, where, name]));
-      const next = used - (old ? costOf(old) : 0) + costOf({ key: name, size });
-      if (next > APP_STORAGE_LIMITS.scopeBytes && next > used) fail("full", "This app's storage in this chat is full (5 MiB)");
+      const next = plus(old ? plus(used, countOf(old, -1)) : used, countOf({ key: name, size }));
+      if (costOf(next) > APP_STORAGE_LIMITS.scopeBytes && costOf(next) > costOf(used)) fail("full", "This app's storage in this chat is full (5 MiB)");
       const writing = await store(STORES.appStorage, "readwrite");
       // The chat may have been deleted while this write waited its turn and read. Asked again here, with nothing awaited
       // before the put: a chat still one now is deleted by a later transaction, which takes this row; one already gone
@@ -1513,7 +1666,13 @@ export class Apps {
         this.usage.delete(`${app.ref}\0${where}`);
         fail("bad-scope", "Not a chat of this profile");
       }
-      await wrap(writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow));
+      // The same for the app: uninstalled since this write was asked, its rows are gone and this one would stay.
+      if (this.uninstalls.get(app.ref) !== uninstalls) {
+        this.usage.delete(`${app.ref}\0${where}`);
+        fail("not-installed", "This app is not installed");
+      }
+      writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
+      await wrap(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
@@ -1525,28 +1684,77 @@ export class Apps {
       const used = await this.usageOf(app.ref, where);
       const old = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, where, name]));
       if (!old) return;
-      await wrap((await store(STORES.appStorage, "readwrite")).delete([app.ref, where, name]));
-      this.usage.set(`${app.ref}\0${where}`, used - costOf(old));
+      const next = plus(used, countOf(old, -1));
+      const writing = await store(STORES.appStorage, "readwrite");
+      writing.delete([app.ref, where, name]);
+      await (next.rows ? wrap(writing.put(counterRow(app.ref, where, next))) : wrap(writing.delete([app.ref, where, COUNT_KEY])));
+      this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
 
   async storageKeys({ ref, scope, digest }: { ref: string; scope: string; digest?: string }): Promise<string[]> {
     const app = await this.runningOrFail(ref, digest);
-    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(rowsOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
-    return keys.map((k) => k[2]);
+    const where = this.scopeOf(scope);
+    return this.keysOnce(`${app.ref}\0${where}`, async () => {
+      const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(app.ref, where))) as [string, string, string][];
+      return keys.map((k) => k[2]);
+    });
+  }
+
+  /**
+   * One read of a scope's keys at a time. Every call made while one runs shares the single read that starts after it, so
+   * it still sees each write done before it was made: 50 calls a second on a full scope held the profile's database,
+   * a chat message's write waited 17 s behind them.
+   */
+  private keysOnce(id: string, read: () => Promise<string[]>): Promise<string[]> {
+    const waiting = this.keyReads.get(id);
+    if (waiting) return waiting.next ??= waiting.running.then(() => this.keysStart(id, read), () => this.keysStart(id, read));
+    return this.keysStart(id, read);
+  }
+
+  private keysStart(id: string, read: () => Promise<string[]>): Promise<string[]> {
+    const slot: { running: Promise<string[]>; next?: Promise<string[]> } = { running: read() };
+    this.keyReads.set(id, slot);
+    void slot.running.catch(() => {}).then(() => { if (this.keyReads.get(id) === slot && !slot.next) this.keyReads.delete(id); });
+    return slot.running;
   }
 
   /** An app's storage in every scope, as export files (WISP 1200 § Where installed apps live), offered before an uninstall. */
   async exportData({ ref }: { ref: string }): Promise<AppDataExport[]> {
-    const app = await this.installedOrFail(ref);
-    const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(rowsOf(app.ref)));
-    const scopes = new Map<string, AppDataExport>();
-    for (const row of rows) {
-      const out = scopes.get(row.scope) ?? { ghostlyAppData: 1 as const, app: app.ref, scope: row.scope, entries: {} };
+    return (await this.exportDataText({ ref })).map(({ app, scope, entries }) => {
+      const out: AppDataExport = { ghostlyAppData: 1, app, scope, entries: {} };
       // Defined, not assigned: a key named `__proto__` is kept, where an assignment would set the file's prototype and lose it.
-      Object.defineProperty(out.entries, row.key, { value: JSON.parse(row.value) as JsonValue, enumerable: true, writable: true, configurable: true });
-      scopes.set(row.scope, out);
+      for (const [key, json] of entries) Object.defineProperty(out.entries, key, { value: JSON.parse(json) as JsonValue, enumerable: true, writable: true, configurable: true });
+      return out;
+    });
+  }
+
+  /**
+   * `exportData` with each value as the JSON text it is kept as, for a file written without parsing and writing every
+   * value again. Read a scope at a time, the thread let go between them: ten chats of 5 MiB read at once held it for
+   * the whole read.
+   */
+  async exportDataText({ ref }: { ref: string }): Promise<AppDataExportText[]> {
+    const app = await this.installedOrFail(ref);
+    const scopes: string[] = [];
+    const index = (await store(STORES.appStorage, "readonly")).index(APP_STORAGE_SCOPE_INDEX);
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openKeyCursor(rowsOf(app.ref), "nextunique");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        scopes.push((cursor.key as [string, string])[1]);
+        cursor.continue();
+      };
+    });
+    const out: AppDataExportText[] = [];
+    for (const [i, scope] of scopes.entries()) {
+      if (i) await new Promise((resolve) => setTimeout(resolve, 0));
+      // The app's own rows: the scope's kept count is not one of its keys.
+      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(keysOf(app.ref, scope)));
+      if (rows.length) out.push({ app: app.ref, scope, entries: rows.map((row) => [row.key, row.value]) });
     }
-    return [...scopes.values()];
+    return out;
   }
 }

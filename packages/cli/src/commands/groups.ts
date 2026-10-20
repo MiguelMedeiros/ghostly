@@ -27,26 +27,37 @@ export const commands: Record<string, Command> = {
     method: "group.hub", usage: "group hub <group> <member> [--pin | --exclude | --auto] [--show-secret]",
     summary: "Pin a member as a hub of a private group past 16 members, exclude one, or leave it to their app (admin)", args: ["group", "member"],
     options: { ...showSecret, pin: { type: "boolean", description: "Always a hub while online" }, exclude: { type: "boolean", description: "Never a hub" }, auto: { type: "boolean", description: "A hub if their app stays online (the default)" } },
-    params: ({ options }, a) => ({ group: a.group, member: a.member, role: options.pin === true ? "pin" : options.exclude === true ? "exclude" : "auto", ...secret(options) }),
+    params: ({ options }, a) => {
+      const roles = (["pin", "exclude", "auto"] as const).filter((role) => options[role] === true);
+      if (roles.length > 1) throw new CliError("usage", "--pin, --exclude or --auto: one of them");
+      return { group: a.group, member: a.member, role: roles[0] ?? "auto", ...secret(options) };
+    },
   },
   "group invite": {
     method: "group.invite", usage: "group invite <group> <chat> [--show-secret]", summary: "Invite a contact into a group you administer", args: ["group", "chat"],
     options: showSecret, params: ({ options }, a) => ({ group: a.group, chat: a.chat, ...secret(options) }),
   },
-  "group join": { method: "group.join", usage: "group join <link>", summary: "Join a group by its link", args: ["link"], params: (_, { link }) => ({ link }) },
-  "group leave": { method: "group.leave", usage: "group leave <group>", summary: "Leave a group", args: ["group"], params: (_, { group }) => ({ group }) },
+  "group join": { method: "group.join", usage: "group join [<link> | -]", summary: "Join a group by its link; the link on stdin keeps it out of ps", args: ["link?"], params: (_, { link }) => ({ link }) },
+  "group leave": {
+    method: "group.leave", usage: "group leave <group> --yes", summary: "Leave a group; its history and files go from this device", args: ["group"],
+    options: { yes: { type: "boolean", description: "Confirm" } }, params: ({ options }, { group }) => ({ group, yes: options.yes === true }),
+  },
   "group link": {
     method: "group.link", usage: "group link <group> [--off] [--reset]", summary: "Turn the group's link on (--reset: a new one), or --off", args: ["group"],
     options: { off: { type: "boolean", description: "Turn the link off" }, reset: { type: "boolean", description: "Replace it: the old link stops working" } },
-    params: ({ options }, a) => ({ group: a.group, on: options.off !== true, reset: options.reset === true }),
+    params: ({ options }, a) => {
+      if (options.off === true && options.reset === true) throw new CliError("usage", "--off turns the link off: not with --reset");
+      return { group: a.group, on: options.off !== true, reset: options.reset === true };
+    },
   },
   "group list": { method: "group.list", usage: "group list [--show-secret]", summary: "Groups and invitations", options: showSecret, params: ({ options }) => secret(options) },
   "group picture": {
     method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },
     params: ({ options }, a) => {
-      if (a.path === undefined && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
-      return { group: a.group, path: here(a.path), clear: options.clear === true };
+      if (!a.path && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
+      if (a.path && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
+      return { group: a.group, path: here(a.path || undefined), clear: options.clear === true };
     },
   },
   "group react": {

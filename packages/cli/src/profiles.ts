@@ -17,12 +17,37 @@ const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
  */
 export function ghostlyHome(option?: string): string {
   if (option === "") throw new CliError("usage", "--home needs a folder");
-  return resolve(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")));
+  return userPath(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")));
+}
+
+/**
+ * A path the CLI was given, made absolute. A `~` the shell left alone (`--home=~/bots`, a quoted variable, a unit
+ * file's `Environment=` line) is the user's home, as the shell reads it: it was a folder named `~` in the current one.
+ * `~user/…` is a usage error, not a guess at another user's home.
+ */
+export function userPath(path: string): string {
+  if (path === "~" || path.startsWith("~/")) return join(homedir(), path.slice(1));
+  if (path.startsWith("~")) throw new CliError("usage", `${path}: ~user is not read here: write the folder in full`);
+  return resolve(path);
 }
 
 export function checkProfileName(name: string): string {
   if (!NAME.test(name) || name.includes("..")) throw new CliError("usage", `Not a profile name: ${JSON.stringify(name)} (letters, digits, ".", "_" and "-", up to 64)`);
   return name;
+}
+
+/**
+ * The name a profile shows its contacts, whichever command sets it (`--name`, `profile.set`, `settings set nick`):
+ * trimmed, up to 64 characters on one line, as a group's name; empty is no name. `settings set nick` took any length
+ * and every one took a line break, printed whole by `status`. `field` names it in the refusal.
+ */
+export function checkShownName(name: unknown, field = "name"): string {
+  const shown = typeof name === "string" ? name.trim() : undefined;
+  // Core's MAX_NICK_LENGTH: this file loads before any command, without the engine.
+  if (shown === undefined || [...shown].length > 64 || /\p{Cc}/u.test(shown)) {
+    throw new CliError("bad_request", `${field} must be up to 64 characters on one line`);
+  }
+  return shown;
 }
 
 export function currentProfile(home: string, option?: string): string {
@@ -45,9 +70,14 @@ export interface ProfilePaths { name: string; dir: string; db: string; socket: s
 export function profilePaths(home: string, name: string): ProfilePaths {
   const dir = profileDir(home, name);
   return {
-    name, dir, db: join(dir, "db"), socket: socketPath(dir), lock: join(dir, "daemon.lock"),
+    name, dir, db: join(dir, "db"), socket: socketPath(dir), lock: lockPath(dir),
     events: join(dir, "events.jsonl"), files: join(dir, "files"), log: join(dir, "daemon.log"),
   };
+}
+
+/** The file that says which process holds the profile (`acquireLock`). */
+export function lockPath(dir: string): string {
+  return join(dir, "daemon.lock");
 }
 
 /**

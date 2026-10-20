@@ -6,7 +6,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { findChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
-import { CallMedia, loadCallStack, type CallStack, type MediaOptions } from "./media";
+import { CallMedia, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
 import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
@@ -42,6 +42,10 @@ export interface CallHost {
   maxRedials?: number;
   /** STALL_MS and STALL_END_MS (tests shorten them). */
   stall?: { afterMs: number; endMs: number };
+  /** EARLY_ANSWER_MS (tests shorten it). */
+  earlyAnswerMs?: number;
+  /** CALL_PACE_MS (0: no pace; a test that redials at once on a clock that stands still). */
+  callPaceMs?: number;
 }
 
 /** The audio contract of one call, as commands and events report it. */
@@ -64,6 +68,26 @@ export const STALL_MS = 5_000;
 export const STALL_END_MS = 15_000;
 /** A connection that fails this soon after its answer went in lost the race `redial` describes, and starts over. */
 export const RACE_FAIL_MS = 2_000;
+/**
+ * A ringing call's answer is made ahead (`prepare`), and made again this often while it rings: libjuice gives up on a
+ * connection that has nothing to check (the offer's candidates wait for the answer) after about 40 s.
+ */
+export const EARLY_ANSWER_MS = 30_000;
+/**
+ * A call this side placed that ended before it was answered (hung up while it rang, or rang out) is followed by the
+ * next one in the same chat no sooner than this: the contact's app keeps a call that comes this soon after a missed one
+ * that barely rang as missed and does not ring it (packages/react `QUICK_REDIAL_MS`, 2 s), so a loop would only add lines. A bot looping
+ * `call.start` / `call.hangup` placed 1,375 calls a minute (agents#974). `call.start` refuses sooner with `busy` and the
+ * wait left (`retryAfterMs`); a person placing calls by hand never meets it.
+ */
+export const CALL_PACE_MS = 2_000;
+
+/**
+ * At most this many early answers are being made or held at once, and one being made per chat: a call that ends as
+ * its early answer is made closes it only once made (up to HOST_GATHER_MS later). Past either, the call rings without
+ * one, and its answer makes its own connection (or it gets one once the chat's is made).
+ */
+export const MAX_EARLY_ANSWERS = 4;
 
 interface Call {
   id: string;
@@ -85,6 +109,10 @@ interface Call {
   answered: number;
   answeredAt: number;
   media: CallMedia | null;
+  /** While an incoming call rings: its answer's connection, made ahead (`prepare`), the one being made, and the timer that makes it again. */
+  early: EarlyAnswer | null;
+  making: Making | null;
+  earlyTimer: ReturnType<typeof setTimeout> | null;
   socket: AudioSocket | null;
   /** What the program wrote and the call has not sent yet: kept from the moment the socket opens. */
   queue: PlaybackQueue | null;
@@ -101,6 +129,9 @@ interface Call {
   reason?: EndReason;
 }
 
+/** An early answer being made; `claimed` once the call's answer waits for it, which then takes it itself. */
+interface Making { chat: string; done: Promise<EarlyAnswer | null>; claimed: boolean }
+
 /** Auto-answer, kept in the profile's `calls.json`: every chat, or the listed ones, at a rate. */
 export interface AutoAnswer { on: boolean; from: string[]; rate: CallRate }
 
@@ -108,8 +139,14 @@ export class CallManager {
   private readonly calls = new Map<string, Call>();
   /** Per chat: the timestamp of the last signal handled. */
   private readonly lastSignal = new Map<string, number>();
+  /** Per chat: the timestamp of the last signal sent (`stamp`). */
+  private readonly lastSent = new Map<string, number>();
   /** Per chat: the timer that clears the hang-up signal. */
   private readonly clearing = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Per chat: when this side's last call there ended before it was answered (`CALL_PACE_MS`). */
+  private readonly unansweredAt = new Map<string, number>();
+  /** The early answers being made, those of ended calls too (MAX_EARLY_ANSWERS). */
+  private readonly makings = new Set<Making>();
   private auto: AutoAnswer;
   private readonly configPath: string;
   private stopping = false;
@@ -122,6 +159,16 @@ export class CallManager {
   }
 
   private get now(): number { return (this.host.now ?? Date.now)(); }
+
+  /**
+   * A new signal's timestamp in a chat: now, or 1 ms after the last one sent there. The contact drops a signal no
+   * newer than the last it heard, so a redial or a hang-up in the same millisecond as the signal before it would be lost.
+   */
+  private stamp(chat: string): number {
+    const ts = Math.max(this.now, (this.lastSent.get(chat) ?? 0) + 1);
+    this.lastSent.set(chat, ts);
+    return ts;
+  }
 
   // ---------- signals from the contact ----------
 
@@ -193,6 +240,7 @@ export class CallManager {
     // Unanswered, an offer goes stale: the contact's app has given up or will, and answering it would be refused.
     this.arm(call, Math.max(1000, callSignalHeardAt(offer) + CALL_SIGNAL_MAX_AGE_MS - this.now), "missed", false);
     this.host.emit("call.incoming", `call.incoming:${call.id}`, { call: call.id, chat, name: link ? nameOf(link) : null, video: call.video, auto: this.autoFor(chat) });
+    this.prepare(call);
     if (this.host.answers !== false && this.autoFor(chat)) {
       void this.answer(call.id, {}).catch((error) => process.stderr.write(`ghostly: auto-answer failed: ${error instanceof Error ? error.message : String(error)}\n`));
     }
@@ -254,7 +302,7 @@ export class CallManager {
     try {
       const stack = await this.stack();
       if (!(await this.connect(call, (media) => CallMedia.offer(stack, media)))) return;
-      call.offerTs = this.now;
+      call.offerTs = this.stamp(call.chat);
       call.offering = true;
       await this.send(call.chat, { t: "o", ts: call.offerTs, ...call.media!.local, v: 0 });
     } catch (error) {
@@ -272,11 +320,73 @@ export class CallManager {
     try {
       const stack = await this.stack();
       if (!(await this.connect(call, (media) => CallMedia.answer(stack, offer, media)))) return;
-      await this.send(call.chat, { t: "a", ts: this.now, o: offer.ts, ...call.media!.local, v: 0 });
+      await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: offer.ts, ...call.media!.local, v: 0 });
     } catch (error) {
       process.stderr.write(`ghostly: call ${call.id}: answering again failed (${error instanceof Error ? error.message : String(error)})\n`);
       void this.end(call, "failed", true);
     }
+  }
+
+  /**
+   * The ringing call's answer, made now (`EarlyAnswer`): when the call is answered, its candidates have been gathered
+   * and the answer goes at once. Made again every EARLY_ANSWER_MS while it rings; when it cannot be made, the answer makes its own.
+   */
+  private prepare(call: Call): void {
+    if (this.host.answers === false || call.ended || call.state !== "ringing") return;
+    this.stopEarly(call);
+    call.earlyTimer = setTimeout(() => this.prepare(call), this.host.earlyAnswerMs ?? EARLY_ANSWER_MS);
+    call.earlyTimer.unref?.();
+    if (call.making) return;
+    // Bounded (MAX_EARLY_ANSWERS): a contact that rings and hangs up over and over makes one at a time.
+    const held = [...this.calls.values()].filter((c) => c !== call && c.early).length;
+    if (this.makings.size + held >= MAX_EARLY_ANSWERS || [...this.makings].some((m) => m.chat === call.chat)) return;
+    const offer = call.offer!;
+    const making: Making = {
+      chat: call.chat,
+      done: this.stack().then((stack) => EarlyAnswer.open(stack, offer, {
+        iceServers: this.host.engine.getState().settings?.iceServers ?? [],
+        log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
+      })).catch((error) => {
+        // Not tried again while it rings: the answer makes its own connection, as it did before.
+        this.stopEarly(call);
+        process.stderr.write(`ghostly: call ${call.id}: the answer could not be made ahead (${error instanceof Error ? error.message : String(error)})\n`);
+        return null;
+      }),
+      claimed: false,
+    };
+    call.making = making;
+    this.makings.add(making);
+    void making.done.then((early) => {
+      this.makings.delete(making);
+      if (call.making === making) call.making = null;
+      if (!making.claimed && early) {
+        // The call ended, or was answered on the one made before, while this one was made.
+        if (call.ended || call.state !== "ringing") early.close();
+        else { call.early?.close(); call.early = early; }
+      }
+      // A newer call in this chat rang without one while this was made: its own is made now.
+      const next = this.byChat(making.chat);
+      if (next && next !== call && next.direction === "in" && !next.making && !next.early) this.prepare(next);
+    });
+  }
+
+  /** The answered call's early answer: the one made, if still good, or the one being made; none from then on. */
+  private async takeEarly(call: Call): Promise<EarlyAnswer | null> {
+    this.stopEarly(call);
+    const early = call.early;
+    call.early = null;
+    if (early?.usable) return early;
+    early?.close();
+    const making = call.making;
+    if (!making) return null;
+    making.claimed = true;
+    return making.done;
+  }
+
+  /** The early answer is not made again. */
+  private stopEarly(call: Call): void {
+    if (call.earlyTimer) clearTimeout(call.earlyTimer);
+    call.earlyTimer = null;
   }
 
   // ---------- commands ----------
@@ -284,6 +394,7 @@ export class CallManager {
   async start(chat: string, options: { rate?: unknown }): Promise<Record<string, unknown>> {
     const link = this.callable(chat);
     if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.paced(link.id);
     const rate = rateOf(options.rate, this.auto.rate);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
@@ -293,7 +404,7 @@ export class CallManager {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
       if (call.reason === "crossed") throw new CliError("busy", "The contact called at the same time: their call rings here");
       if (call.ended) throw new CliError("unavailable", "The call ended before it was placed");
-      call.offerTs = this.now;
+      call.offerTs = this.stamp(link.id);
       call.offering = true;
       await this.send(link.id, { t: "o", ts: call.offerTs, ...call.media!.local, v: 0 });
     } catch (error) {
@@ -318,13 +429,18 @@ export class CallManager {
     // Answered: no longer missed if it goes stale; the media has its own time to connect.
     call.state = "connecting";
     this.disarm(call);
+    let early: EarlyAnswer | null = null;
     try {
-      await this.attach(call, (media) => CallMedia.answer(stack, call.offer!, media));
+      early = await this.takeEarly(call);
+      await this.attach(call, (media) => CallMedia.answer(stack, call.offer!, media, early));
       if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
-      await this.send(call.chat, { t: "a", ts: this.now, o: call.offer!.ts, ...call.media!.local, v: 0 });
+      await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: call.offer!.ts, ...call.media!.local, v: 0 });
     } catch (error) {
       await this.end(call, "failed", true, false);
       throw error;
+    } finally {
+      // Unused (the call ended first): closed. Nothing once its connection is the call's.
+      early?.close();
     }
     this.arm(call, CONNECT_MS, "failed", true);
     return this.view(call);
@@ -381,7 +497,7 @@ export class CallManager {
     if (clearing) { clearTimeout(clearing); this.clearing.delete(chat); }
     const call: Call = {
       id: randomBytes(6).toString("hex"), chat, direction, state: "ringing", rate, video: false, offer: null, offerTs: 0,
-      offering: false, redials: 0, attempt: 0, answered: 0, answeredAt: 0, media: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null,
+      offering: false, redials: 0, attempt: 0, answered: 0, answeredAt: 0, media: null, early: null, making: null, earlyTimer: null, socket: null, queue: null, startedAt: this.now, connectedAt: null, timer: null,
       watcher: null, stalledFrom: null, stalls: 0, ended: false,
     };
     this.calls.set(call.id, call);
@@ -494,11 +610,18 @@ export class CallManager {
     this.disarm(call);
     if (call.watcher) clearInterval(call.watcher);
     this.calls.delete(call.id);
+    // A call placed here that the contact never answered: the next one waits a moment (`CALL_PACE_MS`).
+    if (call.direction === "out" && call.connectedAt === null && call.state === "ringing" && (reason === "hangup" || reason === "unanswered")) this.unansweredAt.set(call.chat, this.now);
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
-    call.media?.close();
+    // Whatever the media's close throws, the rest of the end follows: the contact is told, the program reads EOF.
+    try { call.media?.close(); } catch (error) { process.stderr.write(`ghostly: call ${call.id}: closing its media failed: ${error instanceof Error ? error.message : String(error)}\n`); }
+    // A call that ends ringing (declined, missed, stale) closes the answer it made ahead; one being made, once made.
+    this.stopEarly(call);
+    call.early?.close();
+    call.early = null;
     await call.socket?.close();
     if (tell) {
-      await this.send(call.chat, { t: "h", ts: this.now }).catch(() => {});
+      await this.send(call.chat, { t: "h", ts: this.stamp(call.chat) }).catch(() => {});
       if (!this.stopping) {
         const timer = setTimeout(() => {
           this.clearing.delete(call.chat);
@@ -517,6 +640,15 @@ export class CallManager {
         ...(call.connectedAt !== null ? { duration: this.now - call.connectedAt } : {}),
       });
     }
+  }
+
+  /** Refuses a call placed too soon after this side's last unanswered one in the chat (`CALL_PACE_MS`). */
+  private paced(chat: string): void {
+    const pace = this.host.callPaceMs ?? CALL_PACE_MS, last = this.unansweredAt.get(chat);
+    if (!pace || last === undefined) return;
+    const left = last + pace - this.now;
+    if (left <= 0) { this.unansweredAt.delete(chat); return; }
+    throw new CliError("busy", `Your last call in this chat ended unanswered a moment ago: call again in ${Math.ceil(left / 100) / 10} s`, { retryAfterMs: left });
   }
 
   private arm(call: Call, ms: number, reason: EndReason, tell: boolean): void {

@@ -34,9 +34,13 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
     const at = document.activeElement;
     const bar = inputRef.current?.closest("[data-testid=chat-search]");
     if (!bar?.contains(at)) before.current = at instanceof HTMLElement && at !== document.body && !at.closest("[data-menu]") ? at : null;
-    setOpen(true);
     // Already open: back to its field, the words in it chosen, so typing replaces them.
-    requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
+    const field = inputRef.current;
+    if (field) { field.focus(); field.select(); return; }
+    setOpen(true);
+    // The new field takes the focus as it mounts (autoFocus); the frame after only makes sure. Choosing its words there
+    // chose the keys typed meanwhile (a late frame on a busy phone), and the next key replaced them.
+    requestAnimationFrame(() => { if (document.activeElement !== inputRef.current) inputRef.current?.focus(); });
   }, []);
 
   /**

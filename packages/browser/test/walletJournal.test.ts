@@ -443,18 +443,18 @@ describe("Lightning out", () => {
 });
 
 describe("reading ecash and backing it up", () => {
-  it("reads tokens and payment requests without contacting a mint", () => {
+  it("reads tokens and payment requests without contacting a mint", async () => {
     const { wallet } = setup([MINT], [MINT]);
-    expect(wallet.inspect(` ${tokenFrom(`${MINT}/`, [8, 2])} `)).toMatchObject({ kind: "token", amount: 10, unit: "sat", mint: MINT, accepted: true });
-    expect(wallet.inspect(tokenFrom("https://evil.example", [8]))).toMatchObject({ accepted: false });
-    expect(wallet.inspect(tokenFrom(TEST_MINT, [8]))).toMatchObject({ accepted: true });
+    expect(await wallet.inspect(` ${tokenFrom(`${MINT}/`, [8, 2])} `)).toMatchObject({ kind: "token", amount: 10, unit: "sat", mint: MINT, accepted: true });
+    expect(await wallet.inspect(tokenFrom("https://evil.example", [8]))).toMatchObject({ accepted: false });
+    expect(await wallet.inspect(tokenFrom(TEST_MINT, [8]))).toMatchObject({ accepted: true });
     // Ecash of another unit, from a mint this wallet has: read, but this wallet only takes sat.
-    expect(wallet.inspect(tokenFrom(MINT, [256, 128, 64, 32, 16, 4], "usd"))).toMatchObject({ amount: 500, unit: "usd", accepted: false });
+    expect(await wallet.inspect(tokenFrom(MINT, [256, 128, 64, 32, 16, 4], "usd"))).toMatchObject({ amount: 500, unit: "usd", accepted: false });
     const request = new PaymentRequest(undefined, "r1", 21, "sat", [MINT], "for pizza").toEncodedCreqA();
-    expect(wallet.inspect(request)).toEqual({ kind: "request", amount: 21, unit: "sat", mints: [MINT], description: "for pizza" });
-    expect(wallet.inspect(new PaymentRequest(undefined, "r2").toEncodedCreqA())).toEqual({ kind: "request", amount: null, unit: "sat", mints: [], description: undefined });
-    expect(wallet.inspect("cashuBgarbage")).toBeNull();
-    expect(wallet.inspect("hello")).toBeNull();
+    expect(await wallet.inspect(request)).toEqual({ kind: "request", amount: 21, unit: "sat", mints: [MINT], description: "for pizza" });
+    expect(await wallet.inspect(new PaymentRequest(undefined, "r2").toEncodedCreqA())).toEqual({ kind: "request", amount: null, unit: "sat", mints: [], description: undefined });
+    expect(await wallet.inspect("cashuBgarbage")).toBeNull();
+    expect(await wallet.inspect("hello")).toBeNull();
     expect(mint.receive).not.toHaveBeenCalled();
   });
 

@@ -4,6 +4,8 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
 import { activeProfileId, registryKey } from "./profiles";
+import { profileDatabase } from "./profileData";
+import { linkedFilesDatabase } from "./apps/webFiles";
 import { pushPlatform } from "./wakePush";
 
 /** How long the peer may take to take things back from the network and stop, before the clear goes on without it. */
@@ -17,7 +19,8 @@ export const CLEAR_ENGINE_MS = 15_000;
  *    and empties its database but for the wallets (`clearProfileStores`). Never waited on for long: a peer that does
  *    not answer in time is left behind, and its database is emptied from here.
  * 2. The profile's local keys: chats, drafts, settings (lock screen and backup storage included).
- * 3. Its files, wherever they are kept.
+ * 3. Its files, wherever they are kept, and on the web its apps' linked files (the paths and folders they were given;
+ *    the Desktop's go with its files).
  * 4. Its push subscription ends at the push service, so contacts who kept it can no longer wake this app.
  * 5. A host whose peer outlives the page starts a new one. The caller then reloads.
  */
@@ -41,6 +44,12 @@ export async function clearAllData(): Promise<void> {
   }
   keysToRemove.forEach((key) => localStorage.removeItem(key));
   await removeFileBytes().catch(() => {});
+  await new Promise<void>((resolve) => {
+    try {
+      const request = indexedDB.deleteDatabase(linkedFilesDatabase(profileDatabase(activeProfileId())));
+      request.onsuccess = request.onerror = request.onblocked = () => resolve();
+    } catch { resolve(); }
+  });
   await pushPlatform()?.unsubscribe(activeProfileId()).catch(() => {});
   let host: ReturnType<typeof getBrowserHost> | null = null;
   try { host = getBrowserHost(); } catch { /* none in tests */ }

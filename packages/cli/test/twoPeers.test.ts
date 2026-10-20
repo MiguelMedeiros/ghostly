@@ -6,6 +6,8 @@ import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
+import { connectDaemon } from "../src/client";
+import { profilePaths } from "../src/profiles";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, testEnv } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
@@ -506,6 +508,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
     error(await as(bob, "file", "resend", incoming.id), "bad_request", 1);
     error(await as(bob, "file", "request", "nochat-in-nothing"), "not_found", 3);
+    // Nor stopped, answered or resumed once it is all here: refused, not an echo of an action that does nothing.
+    for (const action of ["cancel", "decline", "pause"]) expect(error(await as(bob, "file", action, incoming.id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
+    for (const action of ["accept", "resume"]) expect(error(await as(bob, "file", action, incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    expect(error(await as(alice, "file", "cancel", (sent.file as { id: string }).id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
 
     const large = join(alice, "big.bin");
     writeFileSync(large, randomBytes(26 * 1024 * 1024));
@@ -518,6 +524,38 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(savedLarge.size).toBe(26 * 1024 * 1024);
     expect(sha(join(bob, "big-copy.bin"))).toBe(sha(large));
     await listen.stop();
+
+    // Started again: a file that arrived shows no transfer in the engine's state; its record still says it is done.
+    ok(await as(bob, "daemon", "stop"));
+    const daemon = new Running(["--home", bob, "daemon"], env);
+    running.push(daemon);
+    sockets[bob] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+    expect((ok(await as(bob, "engine", "getState")).transfers as Record<string, unknown>)[incoming.id]).toBeUndefined();
+    const listed = ok(await as(bob, "file", "list", "alice")).files as { file: { id: string }; transfer: { state: string } | null }[];
+    expect(listed.find((f) => f.file.id === incoming.id)?.transfer).toMatchObject({ state: "done", size: 200_000 });
+    expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    expect(error(await as(bob, "file", "cancel", incoming.id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
+    ok(await as(bob, "chat", "wait", "alice", "--until", "live", "--timeout", "60"));
+  });
+
+  it("send files all at once, as a bot sends photos: each its own message on both sides", async () => {
+    // Over the daemon's socket, every request written at once: many land in the same millisecond.
+    const client = (await connectDaemon({ socket: sockets[alice]!, dir: profilePaths(alice, "default").dir }))!;
+    const names = Array.from({ length: 20 }, (_, i) => `burst-${i}.txt`);
+    try {
+      const sent = await Promise.all(names.map((name) => {
+        const path = join(alice, name);
+        writeFileSync(path, `photo ${name}`);
+        return client.call("file.send", { chat: "bob", path }) as Promise<{ file: { id: string } }>;
+      }));
+      expect(new Set(sent.map((s) => s.file.id)).size).toBe(names.length);
+    } finally {
+      client.close();
+    }
+    const burst = (dir: string, chat: string) => async () => ((ok(await as(dir, "file", "list", chat)).files as { file: { name: string }; transfer: { state: string } | null }[])
+      .filter((f) => f.file.name.startsWith("burst-") && f.transfer?.state === "done").map((f) => f.file.name).sort());
+    await expect.poll(burst(bob, "alice"), { timeout: 60_000, interval: 1000 }).toEqual([...names].sort());
+    await expect.poll(burst(alice, "bob"), { timeout: 30_000, interval: 1000 }).toEqual([...names].sort());
   });
 
   it("send a voice note from a file: its length and waveform measured here, the contact sees the bars", async () => {
@@ -687,7 +725,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // a fresh secret. A picture that is not a JPEG is refused before the engine is asked.
     const fixtures = join(import.meta.dirname, "../../../e2e/support/avatar-fixtures");
     ok(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")));
-    error(await as(bob, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")), "engine", 1);
+    error(await as(bob, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")), "refused", 1);
     error(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.png")), "bad_request", 1);
     const reset = ok(await as(alice, "group", "link", "Bot crew", "--reset"));
     expect(reset.link).toBeTruthy();

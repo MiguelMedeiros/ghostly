@@ -3,7 +3,7 @@ import { request as httpRequest } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
-import { hostOnlyCookie, OPEN_COOKIE, openServiceServer, ownCookies, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
+import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, openServiceServer, ownCookies, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
 // covers: headless.services
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: string; aborted: boolean }
@@ -101,6 +101,18 @@ describe("an opened service's host and link", () => {
     expect(page.headers["set-cookie"]).toEqual(["sid=abc; Path=/; HttpOnly", "theme=dark"]);
     await get(service, "/", { cookie: `${cookie}; sid=abc; theme=dark; other_app=secret` });
     expect(seen[1].headers?.find(([name]) => name === "cookie")?.[1]).toBe("sid=abc; theme=dark");
+  });
+
+  it("adds a policy that keeps the page's requests and forms off plain http (this machine, the local network), next to the contact's", async () => {
+    const { service, cookie } = await opened(async (request) => answer(200, request.path === "/own"
+      ? [["content-type", "text/html"], ["content-security-policy", "default-src 'self'"], ["content-security-policy", "img-src *"]]
+      : [["content-type", "text/html"]], ["<p>hi</p>"]));
+    expect(OPENED_SERVICE_CSP).toBe("connect-src 'self' https: wss:; form-action 'self' https:");
+    const page = await get(service, "/", { cookie });
+    expect(page.headers["content-security-policy"]).toBe(OPENED_SERVICE_CSP);
+    // Node joins repeated headers with ", ": each policy is still there, and a browser enforces every one.
+    const own = await get(service, "/own", { cookie });
+    expect(own.headers["content-security-policy"]).toBe(`default-src 'self', img-src *, ${OPENED_SERVICE_CSP}`);
   });
 });
 

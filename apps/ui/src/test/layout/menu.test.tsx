@@ -69,6 +69,37 @@ describe("Menu: one line per row", () => {
     expect(menu.className).toMatch(/\bbottom-full\b/);
   });
 
+  it("with no room for it above or below, it takes the room of the side it opens on, and scrolls", async () => {
+    // A phone on its side (874 × 402), a chat header's ⋮ at its top: the 380px menu ran off the screen's bottom edge,
+    // its last row (Delete chat) half cut, and nothing scrolled to it.
+    viewport(874, 402);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const box = this.dataset.testid === "menu" ? { left: 600, right: 790, top: 50, bottom: 430 } : this.dataset.testid === "anchor" ? { left: 760, right: 792, top: 10, bottom: 46 } : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const menu = screen.getByTestId("menu");
+    expect(menu.className).toMatch(/\btop-full\b/);
+    expect(menu.style.maxHeight).toBe(`${402 - 46 - 4 - 8}px`);
+    expect(menu.className).toMatch(/\boverflow-y-auto\b/);
+  });
+
+  it("portal: with no room above or below, it opens on the roomier side, as tall as that room", async () => {
+    viewport(800, 400);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      // A row's ⋮ low in the list: 300px above it, 60px below, a 380px menu.
+      const box = this.dataset.testid === "menu" ? { left: 0, right: 192, top: 0, bottom: 380 } : this.dataset.testid === "anchor" ? { left: 700, right: 732, top: 304, bottom: 340 } : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<Harness portal />);
+    await user.click(screen.getByRole("button", { name: "Options" }));
+    const menu = screen.getByTestId("menu");
+    const room = 304 - 4 - 8;
+    expect(menu.style.maxHeight).toBe(`${room}px`);
+    expect(menu.style.top).toBe(`${304 - 4 - room}px`);
+  });
+
   it("portal: drawn over the page by its opener, kept in the window, and following it when the list scrolls", async () => {
     viewport(800, 300);
     let opener = { left: 760, right: 792, top: 240, bottom: 276 };

@@ -263,7 +263,7 @@ describe("store-and-forward engine", () => {
   it("holds a video with its length, size and poster; a bad poster alone is dropped", async () => {
     const { a, b } = setup();
     engines.push(a.engine, b.engine);
-    const poster = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 7, 7]).toString("base64url");
+    const poster = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 180, 1, 64, 3, 7, 7]).toString("base64url"); // a JPEG frame header: 320 × 180
     const video = { duration: 2000, width: 320, height: 180, poster };
     a.files.set("link-a-out-m1", { bytes: new Uint8Array(700).fill(5), name: "clip.mp4", size: 700, mime: "video/mp4", video });
     a.files.set("link-a-out-m2", { bytes: new Uint8Array(700).fill(6), name: "clip2.mp4", size: 700, mime: "video/mp4", video: { ...video, poster: "bm90IGEganBlZw" } });

@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
+import { PREVIEWABLE_IMAGE, previewable, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
+import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
@@ -24,9 +25,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const t = useT();
   const peerName = named ?? t("pairing.contact");
   const { platform, transfer, restoring } = useTransfer(file.id);
-  /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
-  const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
+  /** The preview's object URL, for this file id. Held while the bubble shows it: never revoked under the <img>. */
+  const [preview, setPreview] = useState<{ id: string; url: string; release: () => void } | null>(null);
   const picture = PREVIEWABLE_IMAGE.test(file.mime);
+  /** On screen or near it: true, off it: false, not known yet: null. A picture is read only once it is. */
+  const [visible, setVisible] = useState<boolean | null>(() => (typeof IntersectionObserver === "undefined" ? true : null));
   /** A picture's size found here (its first bytes, or as it loaded), when its sender said none or said wrong. */
   const [found, setFound] = useState<{ id: string; size: ImageMeta } | null>(null);
   /** The preview as it loaded, or that it could not be shown, for this URL. */
@@ -66,36 +69,66 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     if (readable) return;
     setPreview(null);
     setSaveOnly(false);
-  }, [readable]);
+    forgetPicture(file.id);
+  }, [readable, file.id]);
+  // A chat opens with up to a hundred bubbles: a picture is read once its bubble comes near the screen. Near the chat
+  // list's own view: measured against the window, the margin stops at the list's edge and a picture is read only once
+  // it shows. More than a fast wheel notch (400 px) ahead: with less, a notch takes a box from out of the margin to on
+  // screen at once, and it shows grey while it is read.
   useEffect(() => {
-    if (!platform || !readable || blobUrl) return;
+    const root = rootRef.current;
+    if (!picture || !root || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { root: root.closest("[data-message-list]"), rootMargin: "400px 0px" });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [picture]);
+  useEffect(() => {
+    if (!platform || !readable || blobUrl || (picture && !visible)) return;
     let cancelled = false;
-    // Only a picture is read, to show it: any other file asks whether it is here (its size), not for its bytes. A
-    // platform that cannot tell is asked for the file, as before.
-    void (picture || !platform.fileHeld ? platform.getFile(file.id) : Promise.resolve(null)).then(async (blob) => {
-      if (cancelled) return;
-      if (!blob) {
+    const gone = new AbortController();
+    // Only a picture is read, to show it, a few at a time and once a run (lib/pictureReads.ts): any other file asks
+    // whether it is here (its size), not for its bytes. A platform that cannot tell is asked for the file, as before.
+    const read: Promise<HeldPicture | null> = picture ? readPicture(file.id, () => platform.getFile(file.id), gone.signal)
+      : platform.fileHeld ? Promise.resolve(null)
+      : platform.getFile(file.id).then((blob) => {
+        if (!blob) return null;
+        const url = URL.createObjectURL(blob);
+        return { url, blob, release: () => URL.revokeObjectURL(url) };
+      });
+    void read.then(async (shown) => {
+      if (cancelled) { shown?.release(); return; }
+      if (!shown) {
         // A picture too large to hand out here, or not here at all: only a file this device holds offers Save.
-        const held = await fileHeld(platform, file.id, transfer?.state === "done");
+        // Finished: done, or no transfer at all (a group's file all here shows none).
+        const held = await fileHeld(platform, file.id, settled);
         if (cancelled) return;
-        const saveable = held === "here" && (picture || !platform.fileHeld ? !!platform.saveFile && transfer?.state === "done" : true);
+        const saveable = held === "here" && (picture || !platform.fileHeld ? !!platform.saveFile && settled : true);
         if (!saveable && !settled) return;
         setSaveOnly(saveable);
         setMissing(saveable ? false : held === "left-out" ? "left-out" : true);
         return;
       }
-      // Its sender said nothing of its size: read here from its first bytes, so the box is right before it shows.
-      const size = picture && !file.image && !knownPictureSize(file.id) ? await readImageMeta(blob, file.mime) : undefined;
-      if (cancelled) return;
-      if (size) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
-      setPreview({ id: file.id, url: URL.createObjectURL(blob) });
+      // A picture's size is read here from its own first bytes, every time: what its sender said only lays out the
+      // box. One its bytes say is too large to draw (a few kilobytes can say gigabytes once decoded), or whose bytes
+      // say no size at all, is not drawn: it offers Save only.
+      const size = picture ? await readImageMeta(shown.blob, file.mime) : undefined;
+      if (cancelled) { shown.release(); return; }
+      if (picture && !previewable(size)) {
+        shown.release();
+        setMissing(false);
+        setSaveOnly(true);
+        return;
+      }
+      if (size && !file.image && !knownPictureSize(file.id)) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
+      setPreview({ id: file.id, url: shown.url, release: shown.release });
       setMissing(false);
       setSaveOnly(false);
     });
-    return () => { cancelled = true; };
-  }, [platform, file.id, file.mime, file.image, picture, readable, settled, transfer?.state, blobUrl]);
-  // Revoked only once nothing shows it: another file in this bubble, or the bubble gone.
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
+    return () => { cancelled = true; gone.abort(); };
+  }, [platform, file.id, file.mime, file.image, picture, visible, readable, settled, transfer?.state, blobUrl]);
+  // Given back only once nothing shows it: another file in this bubble, or the bubble gone. A picture's address stays
+  // kept for the run (lib/pictureReads.ts), so the chat opened again shows it without reading it.
+  useEffect(() => () => { preview?.release(); }, [preview]);
 
   const act = (action: FileAction) => {
     setActionError("");
@@ -193,22 +226,24 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
+          <p dir="auto" className="text-[14px] leading-tight truncate m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
+          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
-            <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
         </div>
         {(blobUrl || saveOnly) && (
-          <a
-            href={blobUrl ?? undefined}
-            download={blobUrl ? file.name : undefined}
-            onClick={(event) => { event.preventDefault(); save(); }}
-            role="button"
+          // A button, not a link to the picture's address: a file that is no picture has none here, and a link
+          // without one is no stop for Tab.
+          <button
+            type="button"
+            onClick={save}
             data-testid="file-save"
-            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
+            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title={t("common.save")}
             aria-label={t("common.save")}
           >
@@ -217,7 +252,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-          </a>
+          </button>
         )}
       </div>
       {offered && group && (

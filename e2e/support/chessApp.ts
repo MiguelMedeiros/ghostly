@@ -1,6 +1,6 @@
 /**
  * The real Chess in a store, for the end-to-end games (WISP 1200 § Publishing, § Stores): its pinned build
- * (support/chessFixture.ts, e2e/fixtures/chess: the page and the manifest of Chess 2.3.0, from the bundle its publisher
+ * (support/chessFixture.ts, e2e/fixtures/chess: the page and the manifest of Chess 2.3.1, from the bundle its publisher
  * signed), bundled and signed again by the headless CLI (`ghostly app publish`,
  * `store sign`, `app revoke`) with keys the CLI makes in the test's own temporary folder (thrown away with it, never a
  * real key), and served at `raw.githubusercontent.com` URLs by `context.route` (serveStore): nothing leaves the machine.

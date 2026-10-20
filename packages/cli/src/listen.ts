@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
-import { CliError } from "./errors";
+import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
+import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { turnRef } from "./turnRefs";
 
@@ -17,11 +18,16 @@ export interface ListenOptions {
   webhook?: string;
   cursor?: string;
   print: boolean;
-  write: (line: string) => void;
+  /** `false` (as `stream.write` says it): the output wants a drain, and the next event waits for `drained`. */
+  write: (line: string) => unknown;
+  /** Resolves once the output takes more (its 'drain'), or is gone. */
+  drained?: () => Promise<void>;
   /** `--from` and `--group`: events of anyone else stop here (they stay in the chat). */
   allow?: Allowlist;
   /** `--turns`: only agent turns, as `agent.turn` events. */
   turns?: boolean;
+  /** The first wait before a webhook is tried again (500 ms), doubled each time up to a minute. */
+  retryMs?: number;
 }
 
 /**
@@ -128,7 +134,9 @@ export function checkWebhook(url: string): URL {
 
 export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
-  const value = Number(readFileSync(path, "utf8").trim());
+  let text: string;
+  try { text = readFileSync(path, "utf8"); } catch (error) { throw localFileError(error, path) ?? error; }
+  const value = Number(text.trim());
   return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
@@ -152,9 +160,56 @@ function writeCursor(path: string, seq: number): void {
   renameSync(path + ".tmp", path);
 }
 
+/**
+ * `--type`: one type (`message.received`, exactly: `group.message` is not its `group.message.edited`), or a family, a
+ * word with no "." (`message`, `chat`) or one ending in "." or "*" (`group.typing.`). Before, a family needed its "." and
+ * `--type chat` let nothing through. A family is whole words: `message` is not `messages.x`.
+ */
 export function matches(event: GhostlyEvent, types: readonly string[]): boolean {
   if (!types.length) return true;
-  return types.some((type) => type.endsWith(".") || type.endsWith("*") ? event.type.startsWith(type.replace(/\*$/, "")) : event.type === type);
+  return types.some((type) => {
+    if (type === "*") return true;
+    const family = /[.*]$/.test(type) ? type.replace(/\.?\*$/, "").replace(/\.$/, "") : type.includes(".") ? null : type;
+    return event.type === type || (family !== null && event.type.startsWith(family + "."));
+  });
+}
+
+/**
+ * Every event type a daemon of this version emits (events.ts, appEvents.ts, holds.ts, identities.ts, calls/manager.ts,
+ * main.ts) and `--turns`' own. A test reads them back from the source: a type added there and not here fails it.
+ */
+export const EVENT_TYPES: readonly string[] = [
+  "agent.turn",
+  "app.closed", "app.message", "app.opened",
+  "button.pressed",
+  "call.connected", "call.ended", "call.incoming", "call.outgoing", "call.resumed", "call.stalled",
+  "chat.announced", "chat.connection", "chat.created", "chat.held", "chat.joined", "chat.pairing", "chat.pinned", "chat.released", "chat.removed", "chat.renamed",
+  "daemon.started",
+  "events.gap",
+  "file.done", "file.failed", "file.offered", "file.stage",
+  "group.created", "group.deleted", "group.event", "group.members", "group.mentioned", "group.message", "group.message.edited", "group.pinned", "group.reaction",
+  "group.removed", "group.sent", "group.status", "group.typing.started", "group.typing.stopped",
+  "identity.approval", "identity.progress", "identity.received", "identity.status",
+  "message.deleted", "message.delivery", "message.edited", "message.reaction", "message.received", "message.sent",
+  "payment.created", "payment.updated",
+  "typing.started", "typing.stopped",
+];
+
+/** The families, the first word of each type: what a `--type` must start with. */
+export const EVENT_FAMILIES: readonly string[] = [...new Set(EVENT_TYPES.map((type) => type.split(".")[0]))];
+
+/**
+ * Checks each `--type` before anything starts. Before, `--type bogus` (or a typo such as `message.recieved`) was taken
+ * and the listener stayed silent for good. A first word that is no family is a usage error naming them; a type, or a
+ * family below the first word, that no event has is said on stderr (`warn`) and kept: a newer daemon may emit it.
+ */
+export function checkTypes(types: readonly string[], warn: (line: string) => void): void {
+  for (const type of types) {
+    if (type === "*") continue;
+    const family = type.split(/[.*]/)[0];
+    if (!EVENT_FAMILIES.includes(family)) throw new CliError("usage", `No event is of type ${type}: --type takes a type, or a family (${EVENT_FAMILIES.join(", ")})`);
+    if (!EVENT_TYPES.some((known) => matches({ seq: 0, id: "", type: known, at: 0 }, [type]))) warn(`ghostly: no event is of type ${type}; the ${family} family has ${EVENT_TYPES.filter((known) => known.startsWith(family + ".")).join(", ")}`);
+  }
 }
 
 /** The environment a hook runs in: this one's, less the backup passphrase (a hook, and what it runs, never needs it). */
@@ -179,27 +234,60 @@ function runExec(command: string, event: GhostlyEvent): Promise<number> {
   });
 }
 
-async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+/** The longest wait between two tries of a webhook that is not answering. */
+const RETRY_MAX_MS = 60_000;
+
+/**
+ * Posts one event; resolves true once the bridge took it, or the status it refused it with (a 4xx or a redirect, three times).
+ * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
+ * waiting up to a minute between tries, for as long as it takes, so the cursor never moves past it. Before, three tries
+ * in 3.5 s and the cursor moved on: a bridge restarting for longer lost every event of the time it was down, for good.
+ */
+async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<true | number> {
+  let wait = retryMs, holding = false;
+  for (let attempt = 0; ; attempt++) {
+    let down = true, status = 0;
     try {
       // A redirect is not followed: it would post the event to wherever it points, off this machine too.
       const response = await fetch(url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
-      if (response.ok) return true;
-    } catch { /* retried */ }
-    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      void response.body?.cancel().catch(() => {});
+      if (response.ok) {
+        if (holding) process.stderr.write(`ghostly: the webhook at ${url.href} answers again: event ${event.seq} taken\n`);
+        return true;
+      }
+      status = response.status;
+      down = status >= 500 || status === 408 || status === 429;
+    } catch { /* not there: tried again */ }
+    if (!down && attempt >= 2) return status;
+    if (down && attempt >= 2 && !holding) {
+      holding = true;
+      process.stderr.write(`ghostly: the webhook at ${url.href} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    wait = Math.min(wait * 2, RETRY_MAX_MS);
   }
-  return false;
+}
+
+/** Events given to a handler and not handled yet: what `listen` holds in memory. */
+export interface EventHandler {
+  (event: GhostlyEvent): void;
+  /** How many events are given and not handled yet. */
+  behind(): number;
+  /** Resolves when every event given is handled. */
+  idle(): Promise<void>;
 }
 
 /**
  * A handler that takes events in order, one at a time. A step that throws (the output closed, the allowlist's lookup,
  * the cursor's disk) is said on stderr and passed: the cursor moves on and the next event is handled.
  */
-export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => void {
+export function eventHandler(options: ListenOptions): EventHandler {
   const webhook = options.webhook ? checkWebhook(options.webhook) : null;
   let chain = Promise.resolve();
-  return (event) => {
+  let behind = 0;
+  const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
+    behind++;
     chain = chain.then(async () => {
       const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
       if (!matches(event, options.types)) return skip();
@@ -209,19 +297,102 @@ export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => v
         if (!next) return skip();
         event = next;
       }
-      if (options.print) options.write(JSON.stringify(event));
+      const full = options.print && options.write(JSON.stringify(event)) === false;
       if (options.exec) {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
       }
-      if (webhook && !(await post(webhook, event))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
-      // A failed handler still moves the cursor: one poisonous event must not stop the stream. The failure is on stderr.
+      // A refusal passes the event for good: said with what the bridge answered, so a wrong path (404) or a missing
+      // token (401) is seen in the log, not only as messages that never came.
+      const answered = webhook ? await post(webhook, event, options.retryMs ?? 500) : true;
+      if (webhook && answered !== true) process.stderr.write(`ghostly: the webhook at ${webhook.href} answered ${answered}: event ${event.seq} (${event.type}) passed, not taken (a 4xx or a redirect is not tried again)\n`);
+      // An output whose reader stopped holds the next event here, not one more line in its buffer per event.
+      if (full) await options.drained?.();
+      // A failed hook (an --exec exiting non-zero, an event the webhook refused) still moves the cursor: one poisonous
+      // event must not stop the stream. The failure is on stderr. A webhook not answering never gets here (`post`).
       if (options.cursor) writeCursor(options.cursor, event.seq);
     }).catch((error: unknown) => {
       try {
         process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
         if (options.cursor) writeCursor(options.cursor, seq);
       } catch { /* the next event moves the cursor */ }
-    });
+    }).finally(() => { behind--; });
   };
+  return Object.assign(handle, { behind: () => behind, idle: () => chain });
+}
+
+/** Events a listener takes ahead of its output and hooks before it stops taking more (a few MB at most). */
+export const MAX_BEHIND = 1_000;
+
+/**
+ * Bounds what a listener holds when its output or hooks fall behind (a stdout reader that hung, a slow --exec): past
+ * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription stops reading) and drops what still
+ * arrives; once every event taken is handled, `resume` opens it again after the last one taken. The daemon's journal
+ * keeps what came meanwhile (and says `events.gap` past what it keeps), so a consumer that hangs for a day does not
+ * grow the listener by the day's traffic.
+ */
+export class Feed {
+  private held = false;
+
+  /** `since`: the last event taken, where a new subscription starts. */
+  constructor(private readonly handle: EventHandler, public since: number | undefined, private readonly pause: () => void, private readonly resume: (since: number | undefined) => void) {}
+
+  get paused(): boolean { return this.held; }
+
+  readonly take = (event: GhostlyEvent): void => {
+    if (this.held) return;
+    this.since = event.seq;
+    this.handle(event);
+    if (this.handle.behind() < MAX_BEHIND) return;
+    this.held = true;
+    this.pause();
+    void this.handle.idle().then(() => { this.held = false; this.resume(this.since); });
+  };
+}
+
+/** How long a feed that fell behind keeps its connection to the daemon open, unread, while its hooks take no event (`followDaemon`). */
+export const PAUSE_HOLD_MS = 60_000;
+
+/**
+ * Follows a daemon's events into `handle` until `close`; a daemon that restarts is picked up again after the last event
+ * seen. A feed that falls behind stops reading the connection, not closes it: what the daemon sent meanwhile (a replay
+ * written whole) is read on resume, so a catch-up reads the journal once, not once per pause. A connection the daemon
+ * ended meanwhile (past what it lets a client leave unread) is opened again after the last event taken.
+ * A feed whose hooks take no event for `holdMs` (`PAUSE_HOLD_MS`: a hook that hung) ends the connection, as a full one
+ * does, so the daemon does not keep a replay and what came live for it while it hangs; resume opens it again after the
+ * last event taken.
+ * `subscribed`: the first subscription's answer (a journal that cannot be replayed rejects it).
+ */
+export function followDaemon(address: DaemonAddress, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS): { subscribed: Promise<unknown>; close(): void } {
+  let current: DaemonClient | null = client;
+  let holding: ReturnType<typeof setTimeout> | undefined;
+  const reconnect = (wait: number) => void (async () => {
+    while (!current && !feed.paused) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = 1000;
+      if (current || feed.paused) return;
+      const next = await connectDaemon(address, 1000);
+      if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+    }
+  })();
+  // A hook still taking events (a slow --exec) keeps the connection; one that took none for `holdMs` lets it go.
+  const hold = (behind: number) => {
+    holding = setTimeout(() => {
+      if (handle.behind() < behind) return hold(handle.behind());
+      const c = current; current = null; c?.destroy();
+    }, holdMs);
+  };
+  const feed = new Feed(handle, since, () => {
+    current?.pause();
+    hold(handle.behind());
+  }, () => {
+    clearTimeout(holding);
+    if (current) current.resume(); else reconnect(0);
+  });
+  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
+    if (current !== c) return;
+    current = null;
+    reconnect(1000);
+  });
+  return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

@@ -28,6 +28,8 @@ describe("a call ringing while the app is locked", () => {
     renderApp(<LockScreen />);
     const card = screen.getByTestId("lock-call");
     expect(screen.getByTestId("lock-call-name")).toHaveTextContent("Casper");
+    // In its own direction: "Casper!" in the Arabic app read "!Casper".
+    expect(screen.getByTestId("lock-call-name")).toHaveAttribute("dir", "auto");
     expect(screen.getByTestId("lock-call-kind")).toHaveTextContent("Incoming video call...");
     expect(card).toHaveTextContent(/^CCasperIncoming video call\.\.\.$/);
     expect(screen.queryByPlaceholderText("Password")).not.toBeInTheDocument();

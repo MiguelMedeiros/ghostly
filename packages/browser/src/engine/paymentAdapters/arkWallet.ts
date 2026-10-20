@@ -1,7 +1,7 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
+import { arkAddressPrefix, validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
 import { deleteDatabase, store, STORES, transact, wrap } from "../../shared/idb";
 import type { ArkadeAdapter, ArkConfig } from "./arkade";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
@@ -11,6 +11,7 @@ import type { WalletNetwork } from "@ghostly/core";
 import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
+import { viewNews } from "./viewNews";
 /** `read`: the balances were read once since this wallet opened (until then `balance` says nothing). */
 export interface ArkWalletView { configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number;
   /** When the first coin still spendable expires (ms), unless it is renewed first; absent with no coin or no expiry known (WISP 06 § Wallets that stay home). */
@@ -24,7 +25,7 @@ const loadArkade=()=>import("./arkade");
 export const RETIRE_READ_MS=10_000;
 /** Every new profile starts with this wallet: nothing to set up before receiving. */
 export const DEFAULT_ARK = {network:"bitcoin",provider:"https://arkade.computer",explorer:"https://mempool.space/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
-const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:"configuration",expiresAt:Date.now()+60000});};
+const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:`${arkAddressPrefix(network)}configuration`,expiresAt:Date.now()+60000});};
 /** A Testnet Ark wallet starts on Mutinynet: a public test network with its own Ark server. */
 export const TESTNET_ARK = {network:"mutinynet",provider:"https://mutinynet.arkade.sh",explorer:"https://mutinynet.com/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
 /** Bitcoin is real money; every other Ark network is for testing. */
@@ -46,7 +47,8 @@ export class ArkWallet {
   private gate=new ModeGate();
   adapter?:ArkadeAdapter;
   view:ArkWalletView={configured:false,locked:true,balance:0};
-  constructor(readonly network:WalletNetwork,private changed:()=>void) {this.key=walletKey("arkWallet",network);}
+  /** `changed(false)`: a balance read that found nothing new; the receipts are checked, the wallet view stays. */
+  constructor(readonly network:WalletNetwork,private changed:(viewChanged?:boolean)=>void) {this.key=walletKey("arkWallet",network);}
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run:()=>Promise<T>):Promise<T>{const next=this.queue.then(run,run);this.queue=next.catch(()=>{});return next;}
   async start() {this.saved=await wrap<StoredArk|undefined>((await store(STORES.settings,"readonly")).get(this.key));this.view={configured:!!this.saved,locked:true,automatic:!!this.saved?.deviceKey,balance:0,network:this.saved?.config.network,provider:this.saved?.config.provider};}
@@ -191,9 +193,11 @@ export class ArkWallet {
     const expiresAt=await this.gate.within(Promise.resolve().then(()=>adapter.expiresAt?.())).catch((error)=>{if(error instanceof ModeChanged)throw error;return this.view.expiresAt;});
     if(this.adapter!==adapter)return;
     const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="incoming"||what==="recoverable");
+    const before=this.view;
     this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,...(expiresAt!==undefined?{expiresAt}:{}),
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};
-    this.changed();
+    // Every 10 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
+    this.changed(viewNews(before,this.view));
     if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),10000);
   }
   /** Swept outputs back into the balance (refused while expired ones wait for the sweep); the next refresh shows them. */

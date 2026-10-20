@@ -28,6 +28,8 @@
 .hero-inner {
   position: relative;
   display: grid;
+  /* One column as wide as the copy's room: a button or a long line never widens it past the screen. */
+  grid-template-columns: minmax(0, 1fr);
   justify-items: start;
   gap: 22px;
   width: auto;
@@ -145,8 +147,9 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
     max-width: none;
     gap: 14px;
   }
+  /* Each line on one line down to a 320px phone. */
   .hero-title {
-    font-size: clamp(40px, 11vw, 48px);
+    font-size: clamp(32px, 11vw, 48px);
   }
   .hero-lead {
     font-size: 17px;
@@ -157,8 +160,12 @@ html.js:not(.calm):not([data-orient="portrait"]):not([data-touch]) .act:not(.act
     width: 100%;
     gap: 10px;
   }
+  /* Centred in the full width, so the side padding only counts on the narrowest phones; there a label wraps
+     rather than running past the edge. */
   .hero-actions .btn {
     width: 100%;
+    padding-inline: 12px;
+    white-space: normal;
   }
   .hero-actions .btn:not(.btn--primary) {
     min-height: 52px;

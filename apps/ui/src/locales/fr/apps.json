@@ -68,12 +68,24 @@
     "removed": "Une boutique que vous avez ajoutée a retiré cette app.",
     "revoked": "Son éditeur a révoqué cette version.",
     "rollback": "Le lien contient une version plus ancienne.",
+    "slow": "C'était trop long avec cette connexion. Réessayez avec une plus rapide.",
     "status": "Rien à ce lien.",
     "storage": "Ce navigateur ne peut pas garder d'apps ici (navigation privée ?). Essayez une fenêtre normale.",
     "storageInfo": "Ghostly garde les fichiers de chaque app sur cet appareil. Les fenêtres privées, comme la Navigation privée de Safari, ne le permettent pas, et un disque plein l'empêche aussi.",
     "storeKey": "Cette boutique est signée par une autre clé.",
     "tooLarge": "Trop volumineux.",
     "unlistedVersion": "Le lien contient une version que cette boutique ne propose pas encore."
+  },
+  "files": {
+    "allow": "Autoriser",
+    "askAgain": "{{app}} demande à lire « {{name}} » à nouveau",
+    "askAgainMore": "{{app}} demande à lire « {{name}} » et {{count}} autres à nouveau",
+    "askFiles": "{{app}} demande à lire des fichiers",
+    "askFolder": "{{app}} demande à lire un dossier",
+    "chooseFiles": "Choisir des fichiers",
+    "chooseFolder": "Choisir un dossier",
+    "notNow": "Pas maintenant",
+    "note": "Rien n’est copié : {{app}} lit ce que vous choisissez, sur cet appareil."
   },
   "install": {
     "equivocation": "Deux versions {{sequence}} différentes existent. Ghostly a gardé celle que vous avez.",
@@ -90,6 +102,8 @@
     "notListed": "Dans aucune de vos boutiques",
     "perm": {
       "chat": "Échanger avec la même app chez votre contact",
+      "files": "Lire les fichiers et dossiers que vous choisissez, et les partager avec votre contact dans la discussion",
+      "filesInfo": "Seulement ce que vous choisissez, jamais le reste de votre appareil. L'app de votre contact peut lire ce qu'elle partage tant que vous l'avez tous deux ouverte.",
       "internet": "Utiliser Internet",
       "internetInfo": "L'app et les serveurs avec lesquels elle échange peuvent apprendre votre adresse IP et ce que vous y faites.",
       "name": "Voir votre nom dans cette discussion",
@@ -148,6 +162,8 @@
     "beside": "Afficher la discussion",
     "full": "Pleine largeur",
     "resume": "Revenir à {{title}}",
+    "resumeSharing": "partage un fichier",
+    "sharingWith": "partage un fichier avec {{name}}",
     "stoppedRemoved": "{{title}} a été arrêtée : {{store}} a retiré cette version",
     "stoppedRevoked": "{{title}} a été arrêtée : son auteur a révoqué cette version",
     "with": "{{title}} avec {{name}}",

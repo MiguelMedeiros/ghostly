@@ -85,11 +85,12 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const durationMs = meta?.duration ?? (local && Number.isFinite(local.duration) ? local.duration * 1000 : undefined);
   const poster = posterUrl(meta?.poster) ?? local?.url;
 
-  // Is it on screen: a poster is made only for one that is, and one that leaves it stops.
+  // Is it on screen (the chat list's view, not the window's): a poster is made only for one that is, and one that leaves
+  // it stops.
   useEffect(() => {
     const root = rootRef.current;
     if (!root || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { rootMargin: "200px 0px" });
+    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { root: root.closest("[data-message-list]"), rootMargin: "200px 0px" });
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
@@ -120,7 +121,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     const fullscreen = theater ? platform?.fullscreenWindow : null;
     if (!fullscreen) return;
     void fullscreen(true).catch(() => {});
-    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setTheater(false); };
+    // Spent: a notice at the top that also answers Escape stays.
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setTheater(false); } };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
@@ -296,6 +298,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               aria-label={file.name}
               data-testid="video-player"
               className="w-full h-full object-contain block bg-black"
+              // The engine's own menu would copy, open or save the stream's address, a token meant for this window alone.
+              onContextMenu={(event) => event.preventDefault()}
               onPlay={() => claimPlayback(file.id)}
               onPause={() => releasePlayback(file.id)}
               onEnded={() => { resumeAt.current = 0; unload(); }}
@@ -394,7 +398,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           ) : null}
           {status && (
             <p className={`flex items-center gap-1 min-w-0 text-[11px] m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
-              <span className="min-w-0 truncate" data-testid="video-status">{status}</span>
+              <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="video-status">{status}</span>
               {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
             </p>
           )}

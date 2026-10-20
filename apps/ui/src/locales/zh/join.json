@@ -21,6 +21,8 @@
   "paste": "从剪贴板粘贴",
   "pasteScreenshot": "也可以粘贴二维码截图。",
   "placeholder": "粘贴邀请…",
+  "qrReaderNotLoaded": "二维码读取器未能加载。请检查网络连接，然后重试。",
+  "qrReaderReload": "二维码读取器仍未能加载。请重新加载 Ghostly。",
   "scan": "扫描二维码",
   "submit": "加入",
   "title": "加入聊天",

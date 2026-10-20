@@ -3,7 +3,7 @@ import type { PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
 import { paymentStateLabel } from "./paymentWords";
-import { Actions, Address, Amount, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
+import { Actions, Address, Amount, Button, Notice, Row, Section, Signed, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
 import { changeableFields } from "./wallet/providers/sourceStatus";
@@ -25,7 +25,8 @@ const DEFAULT_FEE_CAP = 2_000;
 export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; state: WalletState }) {
   const bt = state.bitcoin;
   const { t } = useI18n();
-  const { busy, error, run } = useRun();
+  // The button pressed is busy while it works and keeps the keys (`loading`, by the key `run` was given); the others wait.
+  const { busy, running, error, run } = useRun();
   const [action, setAction] = useState<Action>("receive");
   const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [feeCap, setFeeCap] = useState(String(DEFAULT_FEE_CAP));
   const [review, setReview] = useState<Review | null>(null);
@@ -61,7 +62,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           })()}
           {(bt.status === "error" || !!bt.failures) && (
             <div className="flex flex-wrap justify-center gap-2">
-              <Button disabled={busy} data-testid="bitcoin-retry" onClick={() => void run(() => wallet.bitcoinRetrySource())}>{t("wallet.bitcoin.retry")}</Button>
+              <Button disabled={busy} loading={running === "retry"} data-testid="bitcoin-retry" onClick={() => void run(() => wallet.bitcoinRetrySource(), "retry")}>{t("wallet.bitcoin.retry")}</Button>
               {changeableFields(bt).length > 0 && <Button disabled={busy} data-testid="bitcoin-change-server" onClick={() => setChanging(true)}>{t("wallet.bitcoin.changeServer")}</Button>}
             </div>
           )}
@@ -70,7 +71,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
       ) : (
         <div className="space-y-4">
           <p className="text-text-primary" data-testid="bitcoin-balance">
-            <span className="text-4xl font-semibold tabular-nums">{formatAmount(bt.balance ?? 0, t.language)}</span>
+            <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(bt.balance ?? 0, t.language)}</bdi>
             <span className="text-text-muted text-sm ms-2">{unit}</span>
             {!!bt.unconfirmed && <span className="block text-xs text-warn-ink mt-1">{t("wallet.bitcoin.unconfirmed", { amount: formatAmount(bt.unconfirmed, t.language), unit })}</span>}
             {bt.network !== "bitcoin" && <span className="block text-xs text-warn-ink mt-1">{t("wallet.panel.testCoins", { network: bt.network ?? "" })}</span>}
@@ -80,7 +81,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
             <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
               {bt.address ? <Address value={bt.address} qr={`bitcoin:${bt.address}`} testId="bitcoin-address" note={t("wallet.bitcoin.confirmedAfter")} />
                 : <Notice>{t("wallet.bitcoin.askAddress")}</Notice>}
-              <Button disabled={busy} data-testid="bitcoin-new-address" onClick={() => void run(() => wallet.bitcoinReceiveAddress())}>{bt.address ? t("wallet.bitcoin.newAddress") : t("wallet.bitcoin.getAddress")}</Button>
+              <Button disabled={busy} loading={running === "address"} data-testid="bitcoin-new-address" onClick={() => void run(() => wallet.bitcoinReceiveAddress(), "address")}>{bt.address ? t("wallet.bitcoin.newAddress") : t("wallet.bitcoin.getAddress")}</Button>
             </div>
           )}
           {action === "send" && (
@@ -91,9 +92,9 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
                 <input aria-label={t("wallet.bitcoin.maxFeeInput", { unit })} inputMode="numeric" className={`${input} !w-28 shrink-0`} aria-invalid={feeField.hint ? true : undefined} value={feeField.text} onChange={(e) => feeField.change(e.target.value)} /> {unit}
               </label>
               {feeField.hint && <Notice tone="error" testId="amount-unclear">{feeField.hint}</Notice>}
-              <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount) || !feeCap} onClick={() => void run(async () => {
+              <Button variant="primary" className="w-full" loading={running === "review"} disabled={busy || !!review || !address || !Number(amount) || !feeCap} onClick={() => void run(async () => {
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));
-              })}>{t("wallet.panel.review")}</Button>
+              }, "review")}>{t("wallet.panel.review")}</Button>
               <Notice>{t("wallet.bitcoin.reviewNote")}</Notice>
             </div>
           )}
@@ -102,7 +103,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               {bt.history.length === 0 ? <Notice>{t("wallet.bitcoin.nothingYet")}</Notice> : bt.history.map((tx) => (
                 <div key={tx.txid} className="text-sm py-1 flex flex-wrap justify-between gap-x-2" data-testid="bitcoin-tx">
                   <span className="min-w-0 flex-1 font-mono text-xs text-text-muted truncate">{tx.txid}</span>
-                  <span className={`tabular-nums shrink-0 ${tx.amount > 0 ? "text-accent" : "text-text-primary"}`}>{tx.confirmations ? t("wallet.bitcoin.tx.confirmed", { sign: tx.amount > 0 ? "+" : "−", amount: formatAmount(Math.abs(tx.amount), t.language), count: tx.confirmations }) : t("wallet.bitcoin.tx.unconfirmed", { sign: tx.amount > 0 ? "+" : "−", amount: formatAmount(Math.abs(tx.amount), t.language) })}</span>
+                  {/* The sign goes with the amount, in its own left-to-right run (Signed): the translation's {{sign}} stays empty. */}
+                  <span className={`tabular-nums shrink-0 ${tx.amount > 0 ? "text-accent" : "text-text-primary"}`}>{fillNodes(tx.confirmations ? t("wallet.bitcoin.tx.confirmed", { sign: "", count: tx.confirmations }) : t("wallet.bitcoin.tx.unconfirmed", { sign: "" }), { amount: <Signed sign={tx.amount > 0 ? "+" : "−"} amount={formatAmount(Math.abs(tx.amount), t.language)} /> })}</span>
                 </div>
               ))}
             </div>
@@ -115,7 +117,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
       {bt && <SourcePicker kind="onchain" view={bt} onSet={(id, values) => wallet.bitcoinSetSource(id, values)} onClear={() => wallet.bitcoinClearSource()}
         onRetry={() => wallet.bitcoinRetrySource()} onReconfigure={(values) => wallet.bitcoinReconfigureSource(values)} changing={changing} onChanging={setChanging} />}
       {bt?.status === "ready" && (
-        <Section title={t("wallet.panel.settings")}><Row label={t("wallet.bitcoin.refresh")} hint={t("wallet.bitcoin.refreshHint")}><Button disabled={busy} onClick={() => void run(() => wallet.bitcoinRefresh())}>{t("wallet.bitcoin.refreshNow")}</Button></Row></Section>
+        <Section title={t("wallet.panel.settings")}><Row label={t("wallet.bitcoin.refresh")} hint={t("wallet.bitcoin.refreshHint")}><Button disabled={busy} loading={running === "refresh"} onClick={() => void run(() => wallet.bitcoinRefresh(), "refresh")}>{t("wallet.bitcoin.refreshNow")}</Button></Row></Section>
       )}
     </div>
   );

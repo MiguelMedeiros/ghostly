@@ -136,6 +136,17 @@ class Playhead {
     return Math.sqrt(pace * pace + 2 * decel * d);
   }
 
+  /** Scrolls to `top` at once and takes the playhead there with it: nothing glides or plays on the way. */
+  jump(top: number) {
+    window.scrollTo({ top, behavior: "instant" });
+    this.raw = window.scrollY;
+    this.goal = this.raw;
+    this.held = null;
+    this.vel = 0;
+    clearTimeout(this.restTimer);
+    this.y.set(this.raw);
+  }
+
   private kick() {
     if (this.frame) return;
     this.last = performance.now();
@@ -173,6 +184,14 @@ let shared: Playhead | null = null;
 function playhead(): Playhead {
   shared ??= new Playhead();
   return shared;
+}
+
+/**
+ * Scrolls to `top` at once, the story's pictures and copy with it: for a keyboard reader the page moved for (a focused
+ * step button), who would otherwise watch the panel fade in for one to two seconds after the scroll stopped.
+ */
+export function jumpPlayhead(top: number) {
+  playhead().jump(top);
 }
 
 /** Where a scroll progress starts and ends for an element, like motion's `useScroll` offsets. */

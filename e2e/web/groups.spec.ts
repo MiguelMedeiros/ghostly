@@ -163,7 +163,7 @@ test("four people: create, invite, everyone reads everyone, catch-up, removal, a
   // Gone from her list at once, not kept as a dead row.
   await expect(alice.page.getByTestId("group-row")).toHaveCount(0);
   await expect(groupChat(alice)).toHaveCount(0);
-  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice is no longer a member" })).toBeVisible({ timeout: 60_000 });
+  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice left" })).toBeVisible({ timeout: 60_000 });
   await bob.page.getByTestId("group-members").click();
   await expect(bob.page.getByTestId("group-member")).toHaveCount(2);
   await bob.page.keyboard.press("Escape");

@@ -5,8 +5,12 @@ import { VIDEO_LIMITS, formatVideoDuration, isPlayableVideoType, isVideoMime, pa
 import { fileMessageText } from "../src/voice";
 // covers: files.video.meta
 
-/** Bytes that start like a JPEG. */
-const jpeg = (size: number) => { const bytes = new Uint8Array(size); bytes.set([0xff, 0xd8, 0xff, 0xe0]); return toBase64Url(bytes); };
+/** Bytes that start like a JPEG of `width` × `height` (its frame header first). */
+const jpeg = (size: number, width = 320, height = 180) => {
+  const bytes = new Uint8Array(size);
+  bytes.set([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, height >> 8, height & 0xff, width >> 8, width & 0xff, 3]);
+  return toBase64Url(bytes);
+};
 
 describe("video metadata", () => {
   it("keeps a video's length, size and poster", () => {
@@ -37,6 +41,14 @@ describe("video metadata", () => {
     for (const poster of [jpeg(VIDEO_LIMITS.maxPosterBytes + 1), png, "not base64!", "", 5, { x: 1 }])
       expect(parseVideoMeta({ ...base, poster }, "video/mp4")).toEqual(base);
     expect(parseVideoMeta({ ...base, poster: jpeg(VIDEO_LIMITS.maxPosterBytes) }, "video/mp4")?.poster).toBeDefined();
+  });
+
+  it("drops a poster that says it is more pixels than a sender draws, or does not say", () => {
+    const base = { duration: 1000, width: 1920, height: 1080 };
+    // A few bytes that would ask the engine for a 23,000 px square bitmap before the file is even accepted.
+    for (const poster of [jpeg(600, 23_000, 23_000), jpeg(600, VIDEO_LIMITS.posterEdge + 1, 180), jpeg(600, 180, VIDEO_LIMITS.posterEdge + 1), toBase64Url(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]))])
+      expect(parseVideoMeta({ ...base, poster }, "video/mp4")).toEqual(base);
+    expect(parseVideoMeta({ ...base, poster: jpeg(600, VIDEO_LIMITS.posterEdge, VIDEO_LIMITS.posterEdge) }, "video/mp4")?.poster).toBeDefined();
   });
 
   it("serves playable video with its type, and anything else as bytes", () => {

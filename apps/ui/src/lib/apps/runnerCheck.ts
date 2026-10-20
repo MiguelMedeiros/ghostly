@@ -27,7 +27,9 @@ export function isRunnerPolicy(policy: string, internet = false): boolean {
   const network = internet
     ? only("connect-src", "https:", "wss:") && only("img-src", "data:", "blob:", "https:") && only("media-src", "data:", "blob:", "https:") && only("font-src", "data:", "https:")
     : only("connect-src", "'none'");
-  return network && only("sandbox", "allow-scripts") && only("default-src", "'none'") && only("frame-src", "'none'")
+  // `allow-pointer-lock` came later (2026-10-13): a server still sending the policy without it runs apps, without mouse look.
+  const sandbox = only("sandbox", "allow-scripts", "allow-pointer-lock") || only("sandbox", "allow-scripts");
+  return network && sandbox && only("default-src", "'none'") && only("frame-src", "'none'")
     && only("worker-src", "'none'") && only("form-action", "'none'") && only("frame-ancestors", "'self'")
     && only("script-src", "'unsafe-inline'", "'wasm-unsafe-eval'");
 }

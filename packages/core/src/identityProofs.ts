@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
+import { fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeed, publicKeyFromZ32, sign, verify } from "./identity";
 import { applyIdentityEvent, type IdentityTimelineEntry, type IdentityTimelineEvent } from "./identityTimeline";
 
@@ -33,11 +33,19 @@ export const IDENTITY_MAX_EVIDENCE = 16 * 1024;
 export const IDENTITY_MAX_FRAME = 32 * 1024;
 /** Unanswered challenges a verifier keeps per conversation. */
 const MAX_CHALLENGES = 8;
+/**
+ * Proofs a verifier keeps from one contact. A newer proof of the same identity replaces the older one, and one no longer
+ * standing (withdrawn, revoked, expired) gives its place to a new one; past that a presentation is refused before it is
+ * checked, so a contact cannot make this side store, re-send to its pages and look up its proofs without end.
+ */
+export const IDENTITY_MAX_RECEIVED = 16;
+/** `idp-*` frames a paired session reads from the contact per `IDENTITY_FRAME_WINDOW_MS`; the rest are dropped unread. */
+export const IDENTITY_FRAME_LIMIT = 40;
+export const IDENTITY_FRAME_WINDOW_MS = 60_000;
 
 export const IDENTITY_PROVIDER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 /** Printable ASCII without spaces, so the statement can be built but never needs parsing. */
 export const IDENTITY_SUBJECT = /^[\x21-\x7e]{1,512}$/;
-const KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const BINDING_NONCE = /^[A-Za-z0-9_-]{22}$/;
 const CHALLENGE_NONCE = /^[A-Za-z0-9_-]{43}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -113,7 +121,7 @@ export function isIdentityBinding(value: unknown): value is IdentityBinding {
     Object.keys(b).sort().join(",") === "expiresAt,issuedAt,key,nonce,provider,subject,v" && b.v === 1 &&
     typeof b.provider === "string" && IDENTITY_PROVIDER_ID.test(b.provider) &&
     typeof b.subject === "string" && IDENTITY_SUBJECT.test(b.subject) &&
-    typeof b.key === "string" && KEY.test(b.key) && typeof b.nonce === "string" && BINDING_NONCE.test(b.nonce) &&
+    isZ32Key(b.key) && typeof b.nonce === "string" && BINDING_NONCE.test(b.nonce) &&
     isInt(b.issuedAt) && isInt(b.expiresAt) && b.expiresAt > b.issuedAt && b.expiresAt - b.issuedAt <= IDENTITY_MAX_VALIDITY &&
     // ISO dates in the text need years 1970–9999.
     b.expiresAt < 253_402_300_800;
@@ -155,7 +163,7 @@ export function signIdentityPresentation(seed: Uint8Array, proofId: string, scop
 }
 
 export function verifyIdentityPresentation(key: string, sig: string, proofId: string, scope: IdentityScope, nonce: string, issuedAt: number): boolean {
-  if (typeof sig !== "string" || !SIG.test(sig) || !KEY.test(key)) return false;
+  if (typeof sig !== "string" || !SIG.test(sig) || !isZ32Key(key)) return false;
   return verify(fromBase64Url(sig), identityPresentationBytes(proofId, scope, nonce, issuedAt), publicKeyFromZ32(key));
 }
 
@@ -266,6 +274,20 @@ export function receivedIdentityStatus(r: ReceivedIdentity, presenter: string | 
   return r.status === "unconfirmed" ? "unconfirmed" : "verified";
 }
 
+const standing = (r: ReceivedIdentity, now: number) =>
+  r.status !== "withdrawn" && r.status !== "revoked" && Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) > now;
+/**
+ * `received` with room for one more proof: `replaced` (the older proof of the same identity) dropped, then the oldest ones
+ * no longer standing; undefined when every place is still taken.
+ */
+function receivedWithRoom(received: ReceivedIdentity[], id: string, replaced: (r: ReceivedIdentity) => boolean, now: number): ReceivedIdentity[] | undefined {
+  const kept = received.filter(r => r.id !== id && !replaced(r));
+  const gone = kept.filter(r => !standing(r, now)).sort((a, b) => a.verifiedAt - b.verifiedAt);
+  const drop = new Set(gone.slice(0, Math.max(0, kept.length - IDENTITY_MAX_RECEIVED + 1)));
+  const out = kept.filter(r => !drop.has(r));
+  return out.length < IDENTITY_MAX_RECEIVED ? out : undefined;
+}
+
 const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), 160) ?? "Invalid proof";
 
 /**
@@ -280,6 +302,8 @@ export class IdentityCheckUnavailable extends Error {
 
 /** What the contact is told when the check failed with an IdentityCheckUnavailable. */
 export const IDENTITY_CHECK_UNAVAILABLE = "Your contact's app could not check it. Try again later.";
+
+const TOO_MANY_RECEIVED = "Your contact keeps too many identities from you already";
 
 const peerError = (e: unknown) => e instanceof IdentityCheckUnavailable ? IDENTITY_CHECK_UNAVAILABLE : shortError(e);
 
@@ -404,17 +428,19 @@ export class IdentityExchange {
             { type: "result", side: "mine", proof: s.id, ok: frame.ok === true, error });
           return;
         }
-        case "idp-withdraw":
+        case "idp-withdraw": {
           if (!id) return;
-          await this.options.storage.update(l => {
-            const r = l.received.find(x => x.id === id);
-            const next = { ...l, received: l.received.map(x => x.id === id ? { ...x, status: "withdrawn" as const } : x) };
-            return r && r.status !== "withdrawn"
-              ? this.log(next, { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" })
-              : next;
-          });
+          // A durable write only for a proof this side actually received and still holds: a withdraw naming an
+          // unknown (or already-withdrawn) id is only acknowledged, never written, so it cannot be repeated for a
+          // durable write each time. The ack is always sent (a share the contact refused is withdrawn this way too).
+          const r = this.options.storage.read().received.find(x => x.id === id);
+          if (r && r.status !== "withdrawn")
+            await this.options.storage.update(l => this.log(
+              { ...l, received: l.received.map(x => x.id === id ? { ...x, status: "withdrawn" as const } : x) },
+              { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" }));
           this.send({ t: "idp-withdrawn", id });
           return;
+        }
         case "idp-withdrawn": {
           const s = id ? this.shared(id) : undefined;
           if (s?.status === "withdrawal-pending") await this.setShared({ ...s, status: "withdrawn", at: this.now() });
@@ -427,12 +453,10 @@ export class IdentityExchange {
   private async onRequest(id: string | undefined, provider: unknown) {
     if (!id) return;
     if (typeof provider !== "string" || !this.options.providers().includes(provider)) {
+      // A kind this app does not verify: told so at once (`idp-result`), no durable write. The provider is the
+      // contact's to choose, so a write here would let it fill the timeline (one entry per fresh id, the real
+      // verified line pushed out) and ring the identity cue, with no limit.
       const error = "Your contact's app cannot verify this kind of identity yet";
-      // Shown here too, as a share that failed: a kind this app does not know, named as the contact's app named it.
-      if (typeof provider === "string" && IDENTITY_PROVIDER_ID.test(provider)) {
-        await this.options.storage.update(l => this.log(this.log(l, { type: "shared", side: "theirs", proof: id, provider }),
-          { type: "result", side: "theirs", proof: id, provider, ok: false, error: "This app cannot verify this kind of identity yet" }));
-      }
       this.send({ t: "idp-result", id, ok: false, error });
       return;
     }
@@ -481,6 +505,10 @@ export class IdentityExchange {
     /** The same, as this side's own timeline says it. */
     let reason: string | undefined;
     try {
+      // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
+      // The checked subject is not known yet: an identity kept under the binding's subject may be the one replaced.
+      const mayReplace = (r: ReceivedIdentity) => r.binding.provider === binding.provider && (r.binding.subject === binding.subject || r.verified.subject === binding.subject);
+      if (!receivedWithRoom(this.options.storage.read().received, id, mayReplace, now)) throw new Error(TOO_MANY_RECEIVED);
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
       if (binding.issuedAt > now + IDENTITY_CLOCK_SKEW) throw new Error("The proof is dated in the future");
@@ -496,13 +524,15 @@ export class IdentityExchange {
       const challenge = challengeOf(l);
       if (!challenge) throw new Error("Unknown or reused identity challenge");
       const challenges = l.challenges.filter(c => c.nonce !== nonce);
+      // A newer proof of the same identity replaces the older one; the bound holds for presentations checked at once.
+      const subject = verified?.subject;
+      const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
+      if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
       const logged = this.log(l, { type: "result", side: "theirs", proof: id, requested: challenge.id, provider: binding.provider,
         subject: verified?.subject ?? binding.subject, ok: !!verified, ...(reason ? { error: reason } : {}) });
-      if (!verified) return { ...logged, challenges };
+      if (!verified || !received) return { ...logged, challenges };
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
         verifiedAt: now, checkedAt: now, status: "verified" };
-      // A newer proof of the same identity replaces the older one.
-      const received = l.received.filter(r => r.id !== id && !(r.binding.provider === binding.provider && r.verified.subject === verified!.subject));
       return { ...logged, challenges, received: [...received, record] };
     });
     this.send(verified ? { t: "idp-result", id, ok: true } : { t: "idp-result", id, ok: false, error });

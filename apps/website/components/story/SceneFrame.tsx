@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import { BEAT, DUR, EASE } from "@/lib/motion";
-import { useBeats, usePlayheadProgress } from "@/lib/playhead";
+import { jumpPlayhead, useBeats, usePlayheadProgress } from "@/lib/playhead";
 import { ENTER, EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
 import { IDENTITY, measureFraming, sameFraming, STILL_LIGHT, stillCamera, type Framing } from "./framing";
 import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
@@ -178,17 +178,21 @@ export function SceneFrame({
   useMotionValueEvent(furniture, "change", (v) => setHidden(v < 0.05));
   const state = useMemo<SceneState>(() => ({ p, step, n, still: false, portrait, camera, focus }), [p, step, n, portrait, camera, focus]);
 
-  const jump = (i: number) => {
+  const jump = (i: number, atOnce = false) => {
     const el = ref.current;
     if (!el) return;
     const top = el.getBoundingClientRect().top + window.scrollY;
     const travel = el.offsetHeight - window.innerHeight;
-    window.scrollTo({ top: top + travel * stepAt(i, 0.2, n), behavior: "smooth" });
+    const to = top + travel * stepAt(i, 0.2, n);
+    if (atOnce) jumpPlayhead(to);
+    else window.scrollTo({ top: to, behavior: "smooth" });
   };
 
   // A step button the keyboard lands on is one the reader sees: the browser brings it on screen at the chapter's
-  // nearest edge, where the panel is still (or already) faded out, so the chapter goes to that step. A pointer's
-  // focus is left to its click, and so is the focus the window hands back when the reader returns to it.
+  // nearest edge, where the panel is still (or already) faded out, so the chapter goes to that step, at once: a smooth
+  // scroll and the playhead's glide after it kept the panel faded out for one to two seconds, and a reader tabbing at
+  // a normal pace was on the next step before the first one showed. A pointer's focus is left to its click, and so is
+  // the focus the window hands back when the reader returns to it.
   const away = useRef(false);
   const onStepBlur = (e: React.FocusEvent<HTMLButtonElement>) => {
     away.current = document.activeElement === e.currentTarget;
@@ -197,7 +201,7 @@ export function SceneFrame({
     const back = away.current;
     away.current = false;
     if (back || !e.currentTarget.matches(":focus-visible")) return;
-    if (i !== step || furniture.get() < 1) jump(i);
+    if (i !== step || furniture.get() < 1) jump(i, true);
   };
 
   const room = ROOMS[chapter];

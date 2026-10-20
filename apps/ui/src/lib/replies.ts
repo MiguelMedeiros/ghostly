@@ -4,7 +4,7 @@ import type { MessageReply } from "@ghostly/browser/shared/types";
 import { revealMessage } from "../hooks/useRowWindow";
 import { reducedMotion } from "./motion";
 import { filePreview } from "./chatList";
-import { cardLine, showsCard } from "./statusCards";
+import { appCardLine, cardLine, showsCard } from "./statusCards";
 import type { ChatFile, ChatMessage } from "./types";
 import { englishT, type Translate } from "../locales/translate";
 
@@ -43,7 +43,7 @@ export type Quotable = ReplyTarget & { sender: string; text: string; member?: st
  */
 export function messageSnippet(message: { text: string; card?: StatusCard; file?: ChatFile }, t: Translate = englishT): string {
   if (showsCard(message.card)) return replySnippet(cardLine(message.card));
-  return replySnippet(filePreview(message.file, t) ?? message.text);
+  return replySnippet(appCardLine(message.card, t) ?? filePreview(message.file, t) ?? message.text);
 }
 
 /** A chat's messages by their id here and by the id a reply names (`replyRef`). */
@@ -100,6 +100,14 @@ export const REPLY_FLASH_MS = 1600;
 export const JUMP_EVENT = "ghostly:jump-to-message";
 
 /**
+ * Whether a jump to this row glides there. Not when the person asked for less motion, nor far away (a search's match a
+ * thousand messages up): a smooth scroll that long takes seconds, so it goes at once.
+ */
+export function jumpGlides(row: Element): boolean {
+  return !reducedMotion() && Math.abs(row.getBoundingClientRect().top) <= 3 * window.innerHeight;
+}
+
+/**
  * Scrolls a message into the middle of the chat and marks it for a moment (`data-reply-flash`). False when it is not
  * in the page (a history never holds more than what is loaded, which is all of it).
  */
@@ -107,10 +115,7 @@ export function jumpToMessage(id: string, root: ParentNode = document): boolean 
   const row = [...root.querySelectorAll<HTMLElement>("[data-message-id]")].find(el => el.dataset.messageId === id);
   if (!row) return false;
   row.dispatchEvent(new Event(JUMP_EVENT, { bubbles: true }));
-  const reduce = reducedMotion();
-  // Far away (a search's match a thousand messages up), at once: a smooth scroll that long takes seconds.
-  const far = Math.abs(row.getBoundingClientRect().top) > 3 * window.innerHeight;
-  row.scrollIntoView?.({ block: "center", behavior: reduce || far ? "auto" : "smooth" });
+  row.scrollIntoView?.({ block: "center", behavior: jumpGlides(row) ? "smooth" : "auto" });
   row.removeAttribute("data-reply-flash");
   // A second jump while it is still marked starts the mark again.
   void row.offsetWidth;

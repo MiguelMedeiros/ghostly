@@ -258,9 +258,12 @@
   max-width: 760px;
   margin-bottom: clamp(36px, 5vw, 64px);
 }
+/* A column that never sizes to its content: the deck is 100cqw wide and bleeds out of the column by a margin in % of
+   it, and WebKit sizes an auto column from that width, so the margin came out 0 and the deck sat a gutter right. */
 .sp-deck {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   justify-items: center;
 }
@@ -284,9 +287,19 @@
 .sp-deck-placeholder {
   height: calc(min(340px, (100cqw - 16px) * 0.62) / 1.586 + 63px);
 }
-/* No text under 12px on the site: the card's status and kind, a size up from the app's. */
+/* A finger gets the track (deck/Deck.tsx): a card 76% of the deck's width, the track's padding and the arrows. */
+@media not ((hover: hover) and (pointer: fine)) {
+  .sp-deck-placeholder {
+    height: calc(min(100cqw, 960px) * 0.76 / 1.586 + 60px);
+  }
+}
+/* No text under 12px on the site: the card's status and kind, a size up from the app's. At that size a long status
+   ("Mainnet · experimental") no longer fits its corner of a phone's card: it takes a second line there, never "…",
+   whose cut word would be the warning. */
 .sp-deck .wallet-deck-card-status {
   font-size: 12px;
+  white-space: normal;
+  text-wrap: balance;
 }
 .sp-deck .wallet-deck-card-balance {
   font-size: max(12px, min(13px, calc(var(--card-w) * 0.036)));

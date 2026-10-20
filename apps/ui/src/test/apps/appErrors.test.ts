@@ -20,6 +20,11 @@ describe("app errors", () => {
     expect(appErrorView(new Error(RAW), translateWith(locales.pt)).text).toBe("Este navegador não consegue guardar apps aqui (navegação privada?). Tente uma janela normal.");
   });
 
+  it("a read cut on a slow link says it took too long there, not that the host could not be reached", () => {
+    expect(appErrorView(new Error("slow: That took too long on this connection"), translateWith(locales.en)))
+      .toEqual({ text: "That took too long on this connection. Try again on a faster one." });
+  });
+
   it("other errors have no ⓘ", () => {
     expect(appErrorView(new Error("offline: no network"), translateWith(locales.en))).toEqual({ text: "You are offline." });
   });

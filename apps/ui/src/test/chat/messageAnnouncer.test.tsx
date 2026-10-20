@@ -108,6 +108,14 @@ describe("a new message, read out to a screen reader", () => {
     expect(region()).not.toHaveTextContent("Requested");
   });
 
+  it("an app card reads as the card names it, in the app's language, not its English fallback with the bundle's link", () => {
+    const card = { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url: "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp", opened: true } as const;
+    const view = renderApp(<MessageAnnouncer chat="c" messages={HISTORY} nameOf={nameOf} />, { language: "zh" });
+    view.rerender(<MessageAnnouncer chat="c" messages={[...HISTORY, peer(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${card.url}`, { card })]} nameOf={nameOf} />);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice：🧩 应用：Chess 1\.2\.0$/);
+  });
+
   it("a voice message or a video reads as the chat list says it, in the app's language, not the history's English line", () => {
     const voice = { id: "f1", name: "Voice message.webm", size: 9_000, mime: "audio/webm", voice: { duration: 7_000, peaks: [] } };
     const video = { id: "f2", name: "clip.mp4", size: 90_000, mime: "video/mp4", video: { duration: 4_000, width: 640, height: 360 } };
@@ -143,6 +151,29 @@ describe("a new message, read out to a screen reader", () => {
     update([peer("chat 2's history")], "chat-2");
     wait(ANNOUNCE_WINDOW_MS * 2);
     expect(region()).toHaveTextContent("");
+  });
+
+  it("a message coming into a long chat reads the new rows only, not the whole history again", () => {
+    const history = Array.from({ length: 5_000 }, (_, i) => i % 2 ? mine(`mine ${i}`) : peer(`old ${i}`));
+    const { update } = setup(history);
+    // Every row the announcer reads of the list, counted.
+    let reads = 0;
+    const counted = (rows: Announceable[]) => new Proxy(rows, {
+      get(target, key, receiver) { if (typeof key === "string" && /^\d+$/.test(key)) reads++; return Reflect.get(target, key, receiver); },
+    });
+    const two = [...history, peer("hello"), peer("again")];
+    update(counted(two.slice(0, -1)));
+    update(counted(two));
+    expect(reads).toBeLessThan(50);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^2 new messages from Alice$/);
+    wait(ANNOUNCE_CLEAR_MS);
+    // Older history loaded above is not news, and a message after it still is.
+    const older = [peer("older"), ...two];
+    update(older);
+    update([...older, peer("after the older ones")]);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: after the older ones$/);
   });
 
   it("a chat kept open behind another one reads nothing out", () => {

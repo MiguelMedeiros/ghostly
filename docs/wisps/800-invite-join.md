@@ -53,7 +53,7 @@ This proposal assumes one online admission authority, not DHT compare-and-swap o
 
 A multiuse group invite authorizes a request, not immediate access to content. It has an explicit expiry/use limit/revocation policy and an authenticated admission endpoint. Each joiner has a distinct participation key; 900 handles the membership commit and encrypted epoch welcome. Count uses atomically when admission commits. Denied/expired joins receive no group epoch secrets. Bound pending requests per source/invite and rate-limit verification work.
 
-Private admission can contact an online inviter through the invite bootstrap. Public join discovery needs a separate validated ingress route; do not turn the DHT into an unbounded shared inbox. “The Haunt” is a possible public demonstration, not a required launch surface. Public invites need a deliberate abuse policy.
+Private admission can contact an online inviter through the invite bootstrap. Public join discovery needs a separate validated ingress route; do not turn the DHT into an unbounded shared inbox. “The Haunt” is a possible public demonstration, not a required launch surface. Public invites need a deliberate abuse policy. For 1:1 contact, [8xx · Contact Links](8xx-contact-links.md) proposes both: a link that names nobody, requests that wait under the requester's own key, and the owner's bounds.
 
 ## Compatibility, security and open decisions
 

@@ -12,13 +12,15 @@ import {
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
+  viewerTag,
 } from "@ghostly/core";
 import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/lib/platform";
 import type { WalletNetwork } from "@ghostly/core";
 import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
-import { removeStored, storedBlob } from "../shared/storedFiles";
+import { removeStored, storedBlob, waitingGroupFile } from "../shared/storedFiles";
 import type { FileTransferState } from "../../../../apps/ui/src/lib/platform";
+import { getPrefix } from "../../../../apps/ui/src/lib/storage";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
@@ -30,6 +32,27 @@ import { engineApps } from "./apps";
  * how far the copy got. Gone once the peer has the file, or with the reason the copy failed.
  */
 const preparing = new Map<string, FileTransferState>();
+/**
+ * Large files sent from here whose copy into this device failed (`retry: false`), kept in this profile's localStorage:
+ * nothing of them reached the engine, so after a reload their row, the chat's own, showed as sent. The last few only.
+ */
+const UNSENT_MAX = 20;
+let unsent: { key: string; files: Record<string, FileTransferState> } | null = null;
+function unsentFiles(): Record<string, FileTransferState> {
+  const key = `${getPrefix()}unsent_files`;
+  if (unsent?.key === key) return unsent.files;
+  let files: Record<string, FileTransferState> = {};
+  try { files = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, FileTransferState>; } catch { /* no storage here */ }
+  unsent = { key, files };
+  return files;
+}
+function keepUnsent(fileId: string, transfer: FileTransferState): void {
+  const files = { ...unsentFiles(), [fileId]: transfer };
+  const ids = Object.keys(files);
+  for (const id of ids.slice(0, Math.max(0, ids.length - UNSENT_MAX))) delete files[id];
+  unsent = { key: unsent!.key, files };
+  try { localStorage.setItem(unsent.key, JSON.stringify(files)); } catch { /* no room: it is said while this page lives */ }
+}
 /**
  * The last few files sent from this page, as they were handed over (a recording, a paste, a pick): their bubble shows
  * them at once from these bytes, without reading the stored copy back. Small files only; gone on a reload.
@@ -53,6 +76,20 @@ function preparingChanged(force = false): void {
   if (!force && now - preparingTold < 250) return;
   preparingTold = now;
   for (const listener of preparingListeners) listener();
+}
+
+/** A copy that stopped for want of room: the origin's quota, the OPFS worker's, or the disk's (Desktop). */
+function noRoom(error: unknown): boolean {
+  return (error as { name?: string })?.name === "QuotaExceededError" || /quota|space|full/i.test(error instanceof Error ? error.message : String(error));
+}
+/**
+ * A file being sent copied into this device, its failure said in the app's words (lib/errorText.ts): no room, or the
+ * file could not be read (changed on disk after the pick, gone, a storage that stopped), the system's reason kept.
+ */
+async function copying<T>(copy: Promise<T>): Promise<T> {
+  try { return await copy; } catch (error) {
+    throw new Error(noRoom(error) ? "Not enough space on this device to send it" : `Could not read the file: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
 }
 
 /**
@@ -167,7 +204,10 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     bitcoinReconfigureSource: (values) => engine.call("bitcoinReconfigureSource", { values, ...(network?{network}:{}) }),
     bitcoinReceiveAddress: () => engine.call("bitcoinReceiveAddress", on),
     bitcoinRefresh: () => engine.call("bitcoinRefresh", on),
-    payQuote: async (quote, mint, note, confirmedReal) => (await engine.call("walletPayQuote", { quote, mint, note, ...(confirmedReal ? { confirmedReal: true as const } : {}) })).paid,
+    payQuote: async (quote, mint, note, confirmedReal, chat) => {
+      const linkId = chat && engine.linkByPeer(chat.peerPubKey)?.id;
+      return (await engine.call("walletPayQuote", { quote, mint, note, ...(confirmedReal ? { confirmedReal: true as const } : {}), ...(chat && linkId ? { linkId, invoice: chat.invoice } : {}) })).paid;
+    },
     resolveLightningAddress: (text) => engine.call("lnurlResolve", { text, ...(network?{network}:{}) }),
     lightningAddressInvoice: (id, amount, comment) => engine.call("lnurlInvoice", { id, amount, comment, ...(network?{network}:{}) }),
     async checkPayment(peerPubKeyZ32, paymentId) {
@@ -268,7 +308,11 @@ export const servicesPlatform: ServicesPlatform | null = {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) void engine.call("connect", { linkId: link.id }).catch(() => {});
   },
-  openService: (peerPubKeyZ32, serviceId) => getBrowserHost().openService(peerPubKeyZ32, serviceId),
+  async openService(peerPubKeyZ32, serviceId) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32));
+  },
   openPaymentLink(uri) {
     const open = getBrowserHost().openPaymentLink;
     return open ? open(uri) : null;
@@ -348,9 +392,9 @@ export const servicesPlatform: ServicesPlatform | null = {
     const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
     if (source.size <= SMALL_FILE_BYTES) {
       // Its digest from the bytes in hand (a recording in memory): sending never has to read the stored copy back whole.
-      const digest = await blobDigest(source);
+      const digest = await copying(blobDigest(source));
       keepJustSent(file.id, new Blob([source], { type: file.mime }));
-      await fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+      await copying(fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer }));
       try {
         await engine.call("sendFile", { linkId: link.id, file, timestamp, ...(replyTo && { replyTo }) });
       } catch (error) {
@@ -381,7 +425,12 @@ export const servicesPlatform: ServicesPlatform | null = {
     })().catch((error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error);
       const full = /quota|space|full/i.test(reason) || (error as { name?: string })?.name === "QuotaExceededError";
-      preparing.set(file.id, { state: "failed", transferred: 0, size: file.size, error: staged ? reason : full ? "Not enough space on this device to send it" : `Could not prepare the file: ${reason}` });
+      // A copy that failed left nothing stored to send again: no Retry (`retry: false`), the file is picked again. Said
+      // as core says a copy it could not read (chatFiles.ts), so the app has words for it in every language.
+      const failed: FileTransferState = staged ? { state: "failed", transferred: 0, size: file.size, error: reason }
+        : { state: "failed", transferred: 0, size: file.size, direction: "out", retry: false, error: full ? "Not enough space on this device to send it" : `Could not read the file: ${reason}` };
+      preparing.set(file.id, failed);
+      if (!staged) keepUnsent(file.id, failed);
       preparingChanged(true);
     });
     return { timestamp, file };
@@ -412,13 +461,15 @@ export const servicesPlatform: ServicesPlatform | null = {
     const timestamp = Date.now();
     const metadata = { name: file.name, size: file.size, mime, timestamp, voice: file.voice, video: file.video, image: file.image };
     const record = { id: file.id, linkId: `group:${groupId}`, createdAt: timestamp, direction: "out" as const, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
-    if (source.size <= SMALL_FILE_BYTES) {
-      keepJustSent(file.id, new Blob([source], { type: mime }));
-      await fileStore.put({ ...record, blob: source, digest: await blobDigest(source) });
-    } else {
-      const bytes = await fileBytes();
-      await fileStore.put({ ...record, bytes: bytes.kind, digest: await bytes.stage(file.id, source) });
-    }
+    await copying((async () => {
+      if (source.size <= SMALL_FILE_BYTES) {
+        keepJustSent(file.id, new Blob([source], { type: mime }));
+        await fileStore.put({ ...record, blob: source, digest: await blobDigest(source) });
+      } else {
+        const bytes = await fileBytes();
+        await fileStore.put({ ...record, bytes: bytes.kind, digest: await bytes.stage(file.id, source) });
+      }
+    })());
     const result = await engine.call("sendGroupFile", { groupId, file, ...(options?.replyTo && { replyTo: options.replyTo }) })
       .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error), messageId: undefined }));
     if (result.error) {
@@ -442,8 +493,9 @@ export const servicesPlatform: ServicesPlatform | null = {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) await engine.call("deleteMessage", { linkId: link.id, messageId });
   },
-  getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? null,
+  getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? unsentFiles()[fileId] ?? null,
   transfersRestored: () => engine.state?.transfersRestored ?? false,
+  storedTransfer: async (fileId) => waitingGroupFile(await fileStore.get(fileId).catch(() => undefined)),
   async fileAction(fileId, action) {
     // A file's local id starts with its chat's.
     const linkId = engine.state?.links.find((link) => fileId.startsWith(`${link.id}-in-`) || fileId.startsWith(`${link.id}-out-`))?.id

@@ -3,7 +3,7 @@ import { createIdentity } from "../src/identity";
 import { MAX_AVATAR_LENGTH } from "../src/avatar";
 import { epochKeys, newEpochSecret } from "../src/groupCrypto";
 import {
-  MAX_GROUP_META_BODY, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, encodeGroupMetaBody, groupDisplayName, groupMetaChange, groupMetaNewer, groupMetaPicture, groupName, groupMetaTag, openGroupMeta, parseGroupMetaBody, parseGroupMetaFrame,
+  GROUP_META_PAST, GROUP_META_PAST_CHARS, MAX_GROUP_META_BODY, MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, encodeGroupMetaBody, groupDisplayName, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaToHand, groupName, groupMetaTag, keepPastGroupMeta, openGroupMeta, parseGroupMetaBody, parseGroupMetaFrame,
   parseGroupMetaStatement, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
 } from "../src/groupMeta";
 // covers: groups.picture.protocol, groups.rename.protocol
@@ -72,6 +72,36 @@ describe("group name", () => {
     expect(groupMetaChange(undefined, named, "Ghosts")).toEqual({ name: "Book club", picture: PIC });
     expect(groupMetaChange(named, pictured, "Book club")).toBeNull();
     expect(groupMetaChange(named, pictured, "Ghosts")).toEqual({ name: null });
+  });
+});
+
+describe("statements kept from before, for a member back from away", () => {
+  const seed = createIdentity();
+  const meta = (e: number, r: number, body: string) => signGroupMeta({ g: G, e, h: H, r, ts: 1000 * (10 * e + r) }, body, seed.seed, seed.pubKeyZ32);
+  const named = (e: number, r: number, name: string) => meta(e, r, encodeGroupMetaBody({ name }));
+
+  it("keeps a few, oldest first, within a size bound, and none for the same body signed again", () => {
+    let past: ReturnType<typeof keepPastGroupMeta>, held = named(0, 1, "A");
+    for (const [i, name] of ["B", "C", "D", "E", "F"].entries()) { const next = named(0, i + 2, name); past = keepPastGroupMeta(past, held, next); held = next; }
+    expect(past!.map(m => groupDisplayName(m, ""))).toEqual(["B", "C", "D", "E"].slice(-GROUP_META_PAST));
+    expect(keepPastGroupMeta(undefined, held, meta(1, 1, held.body))).toBeUndefined();
+    expect(keepPastGroupMeta(undefined, undefined, held)).toBeUndefined();
+    // Two large pictures are more than the bound: the older goes.
+    const big = (r: number, name: string) => meta(0, r, encodeGroupMetaBody({ name, pic: url(jpeg(128, 128, 25_000)) }));
+    expect(big(1, "A").body.length * 2).toBeGreaterThan(GROUP_META_PAST_CHARS);
+    expect(keepPastGroupMeta([big(1, "A")], big(2, "B"), named(0, 3, "C"))!.map(m => groupDisplayName(m, ""))).toEqual(["B"]);
+  });
+
+  it("hands each newer than the member's, oldest first, the latest last; only those from while it was a member", () => {
+    const [a, b, c] = [named(0, 1, "A"), named(0, 2, "B"), named(2, 1, "C")];
+    expect(groupMetaToHand([a, b], c, { e: 0, r: 1 }, () => true)).toEqual([b, c]);
+    expect(groupMetaToHand([a, b], c, undefined, () => true)).toEqual([a, b, c]);
+    expect(groupMetaToHand([a, b], c, { e: 2, r: 1 }, () => true)).toEqual([]);
+    // Let in at epoch 1: the statements signed before are no change it saw, only the latest, as the group looks.
+    expect(groupMetaToHand([a, b], c, undefined, m => m.e >= 1)).toEqual([c]);
+    // A former admin's: no member takes them.
+    const other = createIdentity(), former = signGroupMeta({ g: G, e: 1, h: H, r: 1, ts: 1 }, encodeGroupMetaBody({ name: "X" }), other.seed, other.pubKeyZ32);
+    expect(groupMetaToHand([a, former], c, { e: 0, r: 1 }, () => true)).toEqual([c]);
   });
 });
 

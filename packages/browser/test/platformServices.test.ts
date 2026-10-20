@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS } from "@ghostly/core";
+import { LIMITS, isViewerTag, viewerTag } from "@ghostly/core";
 import { setBrowserHost, type BrowserHost } from "../src/host";
 import { registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
@@ -77,6 +77,27 @@ describe("sharing a local web app", () => {
     await expect(services.shareService("Creds", "http://user:pw@localhost:1")).rejects.toThrow("Credentials");
     expect(access).toEqual([]);
     expect(engine.calls).toEqual([]);
+  });
+});
+
+describe("opening a contact's app", () => {
+  // covers: services.open
+  const ME = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+  const ME_ELSEWHERE = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqx";
+
+  it("opens it in an origin of this profile's chat with the contact, never one every profile shares", async () => {
+    withLinks(chat({ myPubKeyZ32: ME }));
+    await services.openService("peer-1", "atlas");
+    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME));
+    expect(isViewerTag(viewerTag(ME))).toBe(true);
+    // Another profile's chat with the same contact, or this one after "Clear all data", has another key of its own.
+    expect(viewerTag(ME_ELSEWHERE)).not.toBe(viewerTag(ME));
+  });
+
+  it("opens nothing for a contact the peer does not know yet", async () => {
+    withLinks();
+    await expect(services.openService("peer-1", "atlas")).rejects.toThrow("Ghostly is still starting");
+    expect(host.openService).not.toHaveBeenCalled();
   });
 });
 
@@ -213,6 +234,23 @@ describe("sending files", () => {
     expect(await services.getFile(file.id)).toBeNull();
   });
 
+  it("a file whose copy into this device fails says it in the app's words, the system's reason kept, to a chat and to a group", async () => {
+    withLinks(chat({ id: "copy-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    // Picked, then changed on disk before it was read: what Chromium answers, in English in every language.
+    const changed = new DOMException("The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.", "NotReadableError");
+    const picked = () => ({ name: "notes.txt", size: 5, type: "text/plain", slice: () => ({ arrayBuffer: () => Promise.reject(changed) }) }) as unknown as File;
+    await expect(services.sendFile("peer-1", picked())).rejects.toThrow(`Could not read the file: ${changed.message}`);
+    await expect(services.sendGroupFile!("g1", picked())).rejects.toThrow(`Could not read the file: ${changed.message}`);
+    // The origin's storage full.
+    const put = vi.spyOn(fileStore, "put").mockRejectedValue(new DOMException("The quota has been exceeded.", "QuotaExceededError"));
+    try {
+      await expect(services.sendFile("peer-1", new File(["hello"], "a.txt"))).rejects.toThrow(/^Not enough space on this device to send it$/);
+      await expect(services.sendGroupFile!("g1", new File(["hello"], "a.txt"))).rejects.toThrow(/^Not enough space on this device to send it$/);
+    } finally { put.mockRestore(); }
+    expect(engine.calls.map(([method]) => method)).toEqual(["groupFileCheck", "groupFileCheck"]);
+  });
+
   it("retries only a file this device sent, on a chat that still takes files", async () => {
     await fileStore.put({ id: "in-file", linkId: "link-1", blob: new Blob(["x"]), createdAt: 1, direction: "in", metadata: { name: "a", size: 1, mime: "text/plain", timestamp: 1 } });
     await fileStore.put({ id: "out-file", linkId: "link-1", blob: new Blob(["x"]), createdAt: 1, direction: "out", metadata: { name: "a", size: 1, mime: "text/plain", timestamp: 3 } });
@@ -226,6 +264,60 @@ describe("sending files", () => {
     withLinks(chat());
     await services.retryFile!("out-file");
     expect(engine.calls).toEqual([["sendFile", { linkId: "link-1", file: { id: "out-file", name: "a", size: 1, mime: "text/plain", timestamp: 3 }, timestamp: 3 }]]);
+  });
+
+  // A file over 16 MiB is copied in before it goes. A copy that fails (the file changed on disk, no room) leaves no
+  // record to send again: Retry, the bubble's only button, always answered "This file cannot be retried". Said as
+  // one not to retry (`retry: false`), the bubble offers none (`canRetryFile`). One the chat refused after the copy
+  // landed keeps it.
+  it("a large file whose copy into this device failed is not offered again; one refused after its copy is", async () => {
+    withLinks(chat({ id: "big-link" }));
+    const big = new File([new Uint8Array(17 * 1024 * 1024)], "big.bin");
+    let fail = true;
+    const copies = {
+      kind: "native",
+      stage: vi.fn(async () => { if (fail) throw new Error("The file changed while it was being copied"); return "digest"; }),
+    } as unknown as FileBytes;
+    registerFileBytes("native", async () => copies, true);
+    try {
+      const { file } = await services.sendFile("peer-1", big);
+      await vi.waitFor(() => expect(services.getTransfer(file.id)?.state).toBe("failed"));
+      // In the words core uses for a copy it could not read, which the app says in its language (errorText.ts).
+      expect(services.getTransfer(file.id)).toMatchObject({ direction: "out", retry: false, error: "Could not read the file: The file changed while it was being copied" });
+      await expect(services.retryFile!(file.id)).rejects.toThrow("cannot be retried");
+
+      fail = false;
+      engine.answers = { sendFile: new Error("This chat stopped: your contact's key changed.") };
+      const refused = await services.sendFile("peer-1", big);
+      await vi.waitFor(() => expect(services.getTransfer(refused.file.id)?.state).toBe("failed"));
+      expect(services.getTransfer(refused.file.id)?.retry).not.toBe(false);
+      expect((await fileStore.get(refused.file.id))?.direction).toBe("out");
+    } finally {
+      registerFileBytes("native", async () => null);
+      resetFileBytes();
+    }
+  });
+
+  // Nothing of it reached the engine: the chat's row of it is the page's own, and its failure lived only in this page.
+  // After a reload the bubble read "No longer available" with the Sent mark, though the file never left.
+  it("a large file whose copy into this device failed for lack of room is still not sent after a reload", async () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
+    withLinks(chat({ id: "full-link" }));
+    const full = { kind: "native", stage: vi.fn(async () => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); }) } as unknown as FileBytes;
+    registerFileBytes("native", async () => full, true);
+    try {
+      const { file } = await services.sendFile("peer-1", new File([new Uint8Array(17 * 1024 * 1024)], "big.bin"));
+      await vi.waitFor(() => expect(services.getTransfer(file.id)?.state).toBe("failed"));
+      vi.resetModules();
+      const reloaded = (await import("../src/platform/services")).servicesPlatform!;
+      expect(reloaded.getTransfer(file.id)).toMatchObject({ state: "failed", direction: "out", retry: false, error: "Not enough space on this device to send it" });
+      await expect(reloaded.retryFile!(file.id)).rejects.toThrow("cannot be retried");
+    } finally {
+      registerFileBytes("native", async () => null);
+      resetFileBytes();
+      vi.unstubAllGlobals();
+    }
   });
 
   it("serves a received file as opaque bytes unless it is a previewable image", async () => {

@@ -91,7 +91,7 @@ export function folderName(name: string): string {
   return name.replace(/\s+/g, " ").trim().slice(0, FOLDER_NAME_MAX).trim();
 }
 
-const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 8) + Date.now().toString(36);
 
 /** The folders, in the person's order. */
 export function chatFolders(): ChatFolder[] {
@@ -178,13 +178,6 @@ export function pinnedBeside(chat: string): string[] {
   return pinnedOrder().filter(id => chats[id] === chats[chat]);
 }
 
-/** A pinned chat's place among the pinned chats shown with it, or undefined for a chat that is not pinned. */
-export function pinnedPlaceBeside(chat: string): PinnedPlace | undefined {
-  const beside = pinnedBeside(chat);
-  const index = beside.indexOf(chat);
-  return index < 0 ? undefined : { index, count: beside.length };
-}
-
 /**
  * Moves a pinned chat to `index` among the pinned chats shown with it (0 is the top; past either end is that end).
  * Its new place among them, or undefined when it is not pinned or already there.
@@ -243,11 +236,13 @@ export const OTHER_CHATS_ID = "chat-folder-others-rows";
 export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: string) => string | undefined; othersFolded: boolean; orderOf: (folder: string | undefined) => readonly string[] | undefined } {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
+    // Another page's write of anything else (a group's read mark, many a second) redrew the whole chat list.
+    const stored = (event: StorageEvent) => { if (!event.key || event.key === foldersKey()) redraw(); };
     window.addEventListener(FOLDERS_EVENT, redraw);
-    window.addEventListener("storage", redraw);
+    window.addEventListener("storage", stored);
     return () => {
       window.removeEventListener(FOLDERS_EVENT, redraw);
-      window.removeEventListener("storage", redraw);
+      window.removeEventListener("storage", stored);
     };
   }, []);
   const { folders, chats, othersFolded, orders } = read();

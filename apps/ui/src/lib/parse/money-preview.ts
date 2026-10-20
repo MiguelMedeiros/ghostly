@@ -1,4 +1,4 @@
-import type { WalletNetwork } from "@ghostly/core";
+import type { Bolt11Invoice, WalletNetwork } from "@ghostly/core";
 import type { MoreMoney } from "./money-more";
 import { englishT, type Translate } from "../../locales/translate";
 import { formatAmount } from "../amount";
@@ -19,4 +19,10 @@ export function moreMoneyPreview(money: MoreMoney, t: Translate = englishT): str
     case "ark": return line(t("chat.preview.arkAddress"), money.request.network, money.request.amountSat);
     case "usdt": return line(t("chat.preview.usdtAddress"), money.request.network);
   }
+}
+
+/** The chat list's line for a Lightning invoice, said as the other formats are: a testnet, signet or regtest one is test money. */
+export function invoicePreview(invoice: Pick<Bolt11Invoice, "network" | "amountSat">, t: Translate = englishT): string {
+  const network: WalletNetwork = invoice.network === "bitcoin" ? "mainnet" : "testnet";
+  return [t("chat.preview.invoice"), moneyKind(network, t), ...sats(invoice.amountSat ?? undefined, network, t)].join(" · ");
 }

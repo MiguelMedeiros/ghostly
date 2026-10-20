@@ -49,7 +49,8 @@ test.describe("service worker", () => {
     for (const { cache, path } of entries) {
       expect(cache).toMatch(/^ghostly-shell-/);
       expect(path, `${path} is a file of the build`).toMatch(/^\/($|assets\/[\w.-]+$|[\w-]+\.(png|svg|json)$|boot-guard\.js$)/);
-      expect(path).not.toMatch(/version\.json|oidc-callback|sw\.js/);
+      // Whole paths: a build's hashed name may end in `sw` (`/assets/fr-CszXulsw.js`).
+      expect(path).not.toMatch(/^\/(version\.json|oidc-callback\.html|sw\.js)$/);
     }
 
     await ana.context.setOffline(true);
@@ -74,7 +75,7 @@ test.describe("service worker", () => {
 
     // No network: Playwright's offline mode leaves routed requests alone, and the test relay is one, so it goes too.
     let offline = false;
-    await ana.context.route(/^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//, (r) => (offline ? r.abort("internetdisconnected") : r.fallback()));
+    await ana.context.route(/^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org|pkarr\.miguelmedeiros\.dev)\//, (r) => (offline ? r.abort("internetdisconnected") : r.fallback()));
     await ana.page.goto("about:blank");
     offline = true;
     await ana.context.setOffline(true);

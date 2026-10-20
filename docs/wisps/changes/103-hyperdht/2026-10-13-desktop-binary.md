@@ -1,0 +1,1 @@
+The Desktop's HyperDHT carries binary messages too: its sidecar hands one to the app, and takes one from it, in base64 on its private pipe, where it dropped them before. So `files/4` can be agreed on a Desktop's HyperDHT session. The wire is unchanged.

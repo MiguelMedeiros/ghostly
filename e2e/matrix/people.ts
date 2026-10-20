@@ -41,7 +41,8 @@ export interface Person {
   /** Leaves (closes the app or the page) and returns how to come back to the chat. */
   away(): Promise<() => Promise<void>>;
   /**
-   * The open chat's audio call button: whether it is off and why (its title), whether this client's page has
+   * The open chat's audio call button: whether it is off (`aria-disabled`: an off call button keeps its focus and
+   * its reason for a screen reader) and why (its title), whether this client's page has
    * WebRTC, and whether it can call at all (a Linux Desktop has no WebRTC and calls natively, in GStreamer).
    */
   callButton(): Promise<{ disabled: boolean; title: string | null; rtc: boolean; calls: boolean }>;
@@ -53,7 +54,7 @@ export interface Person {
 const CALL_BUTTON = `
   const button = document.querySelector('[data-testid="call-audio"]');
   const rtc = typeof RTCPeerConnection !== "undefined";
-  return { disabled: !button || button.disabled, title: button?.getAttribute("title") ?? null, rtc, calls: rtc || "__TAURI_INTERNALS__" in window };`;
+  return { disabled: !button || button.disabled || button.getAttribute("aria-disabled") === "true", title: button?.getAttribute("title") ?? null, rtc, calls: rtc || "__TAURI_INTERNALS__" in window };`;
 
 /* ---------- the browser clients ---------- */
 
@@ -126,7 +127,7 @@ export function webPerson(actor: Actor): Person {
     callButton: () => page().evaluate(() => {
       const button = document.querySelector<HTMLButtonElement>('[data-testid="call-audio"]');
       const rtc = typeof RTCPeerConnection !== "undefined";
-      return { disabled: !button || button.disabled, title: button?.getAttribute("title") ?? null, rtc, calls: rtc };
+      return { disabled: !button || button.disabled || button.getAttribute("aria-disabled") === "true", title: button?.getAttribute("title") ?? null, rtc, calls: rtc };
     }),
   };
   return person;
@@ -137,6 +138,9 @@ export function webPerson(actor: Actor): Person {
 /**
  * Finds a button (or link) by what a person reads on it, its `title` or its `aria-label`, and clicks it;
  * throws with what there was instead. Runs in the page: WebDriver's selectors are CSS only.
+ * An off button (`disabled`, or `aria-disabled` as the call buttons are) throws too, so `press` waits for it to come
+ * on as a Playwright click does: clicking it would do nothing, and the test would go on as if it had (a call pressed
+ * before the contact's calls are known never rings).
  */
 const PRESS = `
   const [label, within] = arguments;
@@ -144,8 +148,11 @@ const PRESS = `
   if (!root) throw new Error("nothing at " + within);
   const candidates = [...root.querySelectorAll("button, a, [role=button], [role=tab], [role=radio], [role=switch]")];
   const named = (e) => [e.textContent, e.getAttribute("title"), e.getAttribute("aria-label")].some((t) => t && t.trim() === label);
-  const target = candidates.find(named);
-  if (!target) throw new Error("no button " + JSON.stringify(label));
+  const off = (e) => e.disabled || e.getAttribute("aria-disabled") === "true";
+  const found = candidates.filter(named);
+  if (!found.length) throw new Error("no button " + JSON.stringify(label));
+  const target = found.find((e) => !off(e));
+  if (!target) throw new Error("button " + JSON.stringify(label) + " is off: " + (found[0].getAttribute("title") ?? ""));
   target.click();
 `;
 

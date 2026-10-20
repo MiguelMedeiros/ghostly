@@ -25,7 +25,7 @@ export function withoutHintGuard(runner: string): string {
  * Desktop's `ghostly-app` scheme (contentSecurityPolicy.test.ts keeps the three the same).
  */
 export const RUNNER_CSP =
-  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; " +
+  "sandbox allow-scripts allow-pointer-lock; default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; " +
   "img-src data: blob:; media-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; " +
   "form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
@@ -37,7 +37,7 @@ export const RUNNER_CSP =
 export const NET_RUNNER_PATH = "/app-frame-net.html";
 
 export const NET_RUNNER_CSP =
-  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; " +
+  "sandbox allow-scripts allow-pointer-lock; default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; " +
   "img-src data: blob: https:; media-src data: blob: https:; font-src data: https:; connect-src https: wss:; frame-src 'none'; " +
   "worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 

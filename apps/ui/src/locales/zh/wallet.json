@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "这张发票已过期：现在没有人能支付它。",
     "invoiceFor": "{{amount}} 的发票",
     "makePrimary": "设为主要",
     "mints": "铸币厂",
@@ -585,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "测试 sats"
   },
+  "send": {
+    "balance": "余额：{{amount}} {{unit}}",
+    "cameraUnavailable": "相机不可用。请粘贴、输入或选择图片。",
+    "clipboardEmpty": "没有可粘贴的内容。请先复制发票或地址。",
+    "clipboardUnavailable": "无法读取剪贴板。请在下方粘贴或输入。",
+    "image": "选择图片",
+    "max": "最大",
+    "noAmount": "此发票没有金额。请索取带金额的发票。",
+    "paste": "粘贴",
+    "scan": "扫描"
+  },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",
     "progress": "正在创建你的 Mainnet 钱包…",
@@ -725,8 +737,8 @@
     "gas": "使用水龙头需要少量 Sepolia ETH 作为 gas：请先向此钱包地址发送一些。{{link}}",
     "gasLink": "打开 Sepolia ETH 水龙头",
     "get": "获取测试币",
-    "got": "+{{amount}} {{unit}}",
-    "gotPending": "+{{amount}} {{unit}} 正在到账：几秒后显示在这里",
+    "got": "{{amount}} {{unit}}",
+    "gotPending": "{{amount}} {{unit}} 正在到账：几秒后显示在这里",
     "open": "打开水龙头",
     "openHint": "{{name}}。{{why}}",
     "openHintThen": "{{name}}。{{why}}{{then}}",

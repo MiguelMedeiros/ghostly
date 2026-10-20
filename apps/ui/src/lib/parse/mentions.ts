@@ -9,8 +9,11 @@ import type { Atom, Detector } from "./types";
 
 /** A member the picker offers: `name` as the group shows them, `tag` a short piece of their key. */
 export interface MentionCandidate { key: string; name: string; tag: string }
-/** What the composer inserted: `@${label}` for `key` (`MENTION_EVERYONE` for everyone). */
-export interface ChosenMention { key: string; label: string }
+/**
+ * What the composer inserted: `@${label}` for `key` (`MENTION_EVERYONE` for everyone), at `at` (the UTF-16 index of its
+ * "@" in the field, moved along as the text changes: `moveChosen`). Without `at`, every place the token stands is it.
+ */
+export interface ChosenMention { key: string; label: string; at?: number }
 /** The "@…" being typed at the caret: `start` is the "@", `end` the caret (UTF-16 indices, as the textarea has them). */
 export interface MentionQuery { start: number; end: number; query: string }
 /**
@@ -74,21 +77,66 @@ export function mentionLabel(name: string): string {
 const wordChar = /[\p{L}\p{N}_]/u;
 
 /**
- * The mentions of a text about to be sent (trimmed, as the group sends it): every place a chosen token still
- * stands whole, in code points, in order, at most `MENTION_LIMITS.count`. A token edited away is simply no mention.
+ * The chosen mentions of a field whose text went from `before` to `after`, each moved with the text around it: one
+ * whose token the change touched is dropped (edited away). `caret`, where the caret is after the change, tells where
+ * it was when the same words stand twice ("@Bob @Bob" losing one); without it, or when it does not fit, the change is
+ * taken as what lies between the text the two have in common at the start and at the end.
+ */
+export function moveChosen(chosen: readonly ChosenMention[], before: string, after: string, caret?: number | null): ChosenMention[] {
+  if (before === after || !chosen.some(c => c.at !== undefined)) return [...chosen];
+  const grown = after.length - before.length;
+  // The change, as [from, to) in `before` replaced by [from, to + grown) in `after`.
+  let from: number, to: number;
+  const fits = (f: number, t: number) => f >= 0 && t >= f && t <= before.length && t + grown >= f && t + grown <= after.length
+    && before.slice(0, f) === after.slice(0, f) && before.slice(t) === after.slice(t + grown);
+  const typed = caret ?? -1;
+  if (grown >= 0 && fits(typed - grown, typed - grown)) [from, to] = [typed - grown, typed - grown];
+  else if (grown < 0 && fits(typed, typed - grown)) [from, to] = [typed, typed - grown];
+  else {
+    from = 0;
+    while (from < before.length && from < after.length && before[from] === after[from]) from++;
+    let tail = 0;
+    while (tail < before.length - from && tail < after.length - from && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+    to = before.length - tail;
+  }
+  return chosen.flatMap(c => {
+    if (c.at === undefined) return [c];
+    const end = c.at + c.label.length + 1;
+    if (end <= from) return [c];
+    if (c.at >= to) return [{ ...c, at: c.at + grown }];
+    return [];
+  });
+}
+
+/**
+ * The mentions of a text about to be sent (trimmed, as the group sends it), in code points, in order, at most
+ * `MENTION_LIMITS.count`: each chosen token that still stands whole at its place (`at`), bound to the member chosen
+ * there, so two members who go by one name are each named where they were picked; a choice with no place names every
+ * place its token stands that no other choice holds. A token edited away is simply no mention.
  */
 export function composeMentions(text: string, chosen: readonly ChosenMention[]): GroupMention[] {
   const trimmed = text.trim();
+  const lead = text.length - text.trimStart().length;
   const found: { at: number; end: number; key: string }[] = [];
+  const whole = (at: number, label: string) => {
+    const end = at + label.length + 1;
+    return at >= 0 && trimmed.startsWith(`@${label}`, at) && !(end < trimmed.length && wordChar.test(trimmed[end]));
+  };
+  const take = (at: number, label: string, key: string) => {
+    const end = at + label.length + 1;
+    if (found.some(f => at < f.end && end > f.at)) return;
+    found.push({ at, end, key });
+  };
   // Longer tokens first, so "@Ann Lee" wins over "@Ann" at the same place.
-  const tokens = [...new Map(chosen.map(c => [`${c.key}\n${c.label}`, c])).values()].sort((a, b) => b.label.length - a.label.length);
+  const byLength = (a: ChosenMention, b: ChosenMention) => b.label.length - a.label.length;
+  for (const { key, label, at } of chosen.filter(c => c.at !== undefined).sort(byLength)) {
+    if (whole(at! - lead, label)) take(at! - lead, label, key);
+  }
+  const tokens = [...new Map(chosen.filter(c => c.at === undefined).map(c => [`${c.key}\n${c.label}`, c])).values()].sort(byLength);
   for (const { key, label } of tokens) {
     const token = `@${label}`;
     for (let at = trimmed.indexOf(token); at !== -1; at = trimmed.indexOf(token, at + 1)) {
-      const end = at + token.length;
-      if (end < trimmed.length && wordChar.test(trimmed[end])) continue;
-      if (found.some(f => at < f.end && end > f.at)) continue;
-      found.push({ at, end, key });
+      if (whole(at, label)) take(at, label, key);
     }
   }
   const points = (i: number) => Array.from(trimmed.slice(0, i)).length;

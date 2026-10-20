@@ -1,8 +1,8 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AppFrameEvent } from "@ghostly/core";
-import type { AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
+import type { AppRangeAsk, AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
-import { applyMessageChanges } from "../shared/messageChanges";
+import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import type { ProfileOpenFailure } from "../shared/idb";
 import type { DeviceGateView } from "../devices/gate";
 
@@ -16,12 +16,29 @@ type Result<M extends EngineMethod> = Awaited<ReturnType<EngineApi[M]>>;
 export const MESSAGE_CHANGES_TICK_MS = 50;
 
 /**
+ * What changed in a chat's list since `from`, the list its listeners last heard: the rows added or changed, as they are
+ * now, and the ids deleted. A listener that kept what it made of `from` has only these to look at.
+ */
+export interface ListChanges extends MessageChanges {
+  from: StoredMessage[];
+}
+
+/** A listener of a chat's messages: the whole list as it is now, and what changed since the last one it heard, if known. */
+export type MessagesListener = (linkId: string, messages: StoredMessage[], changes?: ListChanges) => void;
+
+/**
  * This page's connection to the Ghostly peer, wherever the host keeps it. The
  * peer owns the network; pages only ask it to do things.
  */
 class EngineClient {
   state: EngineState | null = null;
   readonly messages = new Map<string, StoredMessage[]>();
+  /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
+  private readonly partial = new Set<string>();
+  /** The partial chats whose whole history this connection asked for (`askWhole`), once each. */
+  private readonly asked = new Set<string>();
+  /** Per chat, how many readers hold its whole history here (`keepWhole`). */
+  private readonly kept = new Map<string, number>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
    * of the profile. Null while it runs or is still starting. State listeners hear of it.
@@ -38,13 +55,14 @@ class EngineClient {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly stateListeners = new Set<() => void>();
-  private readonly messageListeners = new Set<(linkId: string, messages: StoredMessage[]) => void>();
+  private readonly messageListeners = new Set<MessagesListener>();
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
   private readonly appListeners = new Set<(linkId: string, event: AppFrameEvent) => void>();
+  private readonly appRangeListeners = new Set<(linkId: string, range: AppRangeAsk) => void>();
   private readonly appsCheckedListeners = new Set<() => void>();
-  /** The chats whose messages changed since their listeners last heard, told together when the tick ends. */
-  private readonly changed = new Set<string>();
+  /** The chats whose messages changed since their listeners last heard, and what changed, told together when the tick ends. */
+  private readonly changed = new Map<string, { from: StoredMessage[]; rows: Map<string, StoredMessage>; deleted: Set<string> }>();
   private changesTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * The latest call offer per link, until something answers or ends it: a chat that is not open
@@ -58,9 +76,47 @@ class EngineClient {
     return () => this.stateListeners.delete(listener);
   }
 
-  onMessages(listener: (linkId: string, messages: StoredMessage[]) => void): () => void {
+  onMessages(listener: MessagesListener): () => void {
     this.messageListeners.add(listener);
     return () => this.messageListeners.delete(listener);
+  }
+
+  /** Whether this chat's list here is its whole history, not only its newest page. */
+  whole(linkId: string): boolean {
+    return !this.partial.has(linkId);
+  }
+
+  /**
+   * Asks the peer for this chat's whole history, when only its newest page is here: the listeners hear it when it comes.
+   * Once per connection; nothing to ask for a whole one.
+   */
+  askWhole(linkId: string): void {
+    if (!this.partial.has(linkId) || this.asked.has(linkId) || !this.connection) return;
+    this.asked.add(linkId);
+    this.connection.send({ kind: "history", linkId });
+  }
+
+  /**
+   * While held, this chat's whole history is here for a reader that shows all of it (the chat open, a search): asked for
+   * now if only its newest page is, and whenever only its newest page comes later (a page that connects again). The
+   * returned function lets it go.
+   */
+  keepWhole(linkId: string): () => void {
+    this.kept.set(linkId, (this.kept.get(linkId) ?? 0) + 1);
+    this.askWhole(linkId);
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      const left = (this.kept.get(linkId) ?? 1) - 1;
+      if (left) this.kept.set(linkId, left);
+      else this.kept.delete(linkId);
+    };
+  }
+
+  /** Whether this chat's list changed since its listeners last heard: they hear of it when the tick ends. */
+  changing(linkId: string): boolean {
+    return this.changed.has(linkId);
   }
 
   onAttention(listener: (event: AttentionEvent) => void): () => void {
@@ -87,6 +143,12 @@ class EngineClient {
   onAppFrame(listener: (linkId: string, event: AppFrameEvent) => void): () => void {
     this.appListeners.add(listener);
     return () => this.appListeners.delete(listener);
+  }
+
+  /** A range the contact's app asks of a file an app here serves (`appServe`): the page that served it answers. */
+  onAppRange(listener: (linkId: string, range: AppRangeAsk) => void): () => void {
+    this.appRangeListeners.add(listener);
+    return () => this.appRangeListeners.delete(listener);
   }
 
   /** An update check of the installed mini-apps ran (the scheduled one too): what is installed, and may run, can have changed. */
@@ -124,6 +186,8 @@ class EngineClient {
         (message) => this.handle(message),
         () => {
           this.connection = null;
+          // The next connection is sent each chat again: what it asked for, it asks again.
+          this.asked.clear();
           for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
           this.pending.clear();
           setTimeout(() => void this.connect().catch(() => {}), 500);
@@ -159,8 +223,14 @@ class EngineClient {
       case "messages":
         // The whole history holds what changed before it: told now, and not again when the tick ends.
         this.changed.delete(message.linkId);
+        if (message.more) this.partial.add(message.linkId);
+        else {
+          this.partial.delete(message.linkId);
+          this.asked.delete(message.linkId);
+        }
         this.messages.set(message.linkId, message.messages);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
+        if (this.kept.has(message.linkId)) this.askWhole(message.linkId);
         break;
       case "message-changes": {
         // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.
@@ -168,7 +238,15 @@ class EngineClient {
         const history = this.messages.get(message.linkId);
         if (!history) break;
         this.messages.set(message.linkId, applyMessageChanges(history, message));
-        this.changed.add(message.linkId);
+        let since = this.changed.get(message.linkId);
+        if (!since) this.changed.set(message.linkId, since = { from: history, rows: new Map(), deleted: new Set() });
+        // As `applyMessageChanges` has it: a row both given and deleted goes.
+        for (const id of message.deleted) { since.rows.delete(id); since.deleted.add(id); }
+        for (const row of message.messages) {
+          if (message.deleted.includes(row.id)) continue;
+          since.rows.set(row.id, row);
+          since.deleted.delete(row.id);
+        }
         this.changesTimer ??= setTimeout(() => this.tellChanges(), MESSAGE_CHANGES_TICK_MS);
         break;
       }
@@ -182,6 +260,9 @@ class EngineClient {
       }
       case "app-frame":
         for (const listener of this.appListeners) listener(message.linkId, message.event);
+        break;
+      case "app-range":
+        for (const listener of this.appRangeListeners) listener(message.linkId, message.range);
         break;
       case "apps-checked":
         for (const listener of this.appsCheckedListeners) listener();
@@ -200,10 +281,11 @@ class EngineClient {
     this.changesTimer = null;
     const changed = [...this.changed];
     this.changed.clear();
-    for (const linkId of changed) {
+    for (const [linkId, { from, rows, deleted }] of changed) {
       const messages = this.messages.get(linkId);
       if (!messages) continue;
-      for (const listener of this.messageListeners) listener(linkId, messages);
+      const changes: ListChanges = { from, messages: [...rows.values()], deleted: [...deleted] };
+      for (const listener of this.messageListeners) listener(linkId, messages, changes);
     }
   }
 }

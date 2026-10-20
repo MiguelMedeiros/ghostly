@@ -11,7 +11,7 @@ import { fileMessageText, formatVoiceDuration, parseVoiceMeta, type VoiceMeta } 
 export const GROUP_FILE_LIMITS = {
   /** The largest file a group takes. */
   maxBytes: 100 * 1024 * 1024,
-  /** A file this size or smaller is fetched without asking (voice messages always are, up to `VOICE_LIMITS`). */
+  /** A file this size or smaller is fetched without asking, a voice message too (one recorded is well inside it). */
   autoBytes: 8 * 1024 * 1024,
   /** What a device keeps of a group's files it fetched without asking; past it, every file is asked about. */
   autoBytesPerGroup: 256 * 1024 * 1024,
@@ -19,6 +19,10 @@ export const GROUP_FILE_LIMITS = {
   serveBytesPerDay: 1024 * 1024 * 1024,
   /** Transfers a holder serves at once, all groups together. */
   serveAtOnce: 3,
+  /** Bytes a served transfer gets confirmed (or the rest of its file) for it to count as moving in `wantWaitMs`. */
+  serveMoveBytes: 16 * 1024,
+  /** How long a served transfer keeps its place while all are taken and another member asks: past it, the place is theirs. */
+  servePlaceMs: 5 * 60_000,
   /** File announcements a member sends to one group in a minute. */
   announcePerMinute: 8,
   /** File announcements of one member of a group fetched by themselves in `announceWindowMs`; past it, kept for a Download. */
@@ -39,12 +43,33 @@ export const GROUP_FILE_LIMITS = {
    */
   haveFrames: 10,
   haveWindowMs: 10_000,
+  /**
+   * `group-have` frames a private group's edge takes from its member in `haveWindowMs`, the rest dropped: twice what it
+   * may send, as frames sent at that pace and late by different delays on the way still come in under it.
+   */
+  haveFramesTaken: 20,
   communityHaveEveryMs: 60_000,
   /**
    * How long a want waits for an offer before the next holder is asked; a transfer that does not move for as long is
    * left for the next holder too.
    */
   wantWaitMs: 30_000,
+  /**
+   * A holder that served a file this long, at a pace that leaves more than `wantWaitMs` to go, is left for another that
+   * said it holds the file since (its place free): the next one goes on from the bytes stored. A phone's slow upload
+   * then holds up no member that a free holder could serve.
+   */
+  slowAfterMs: 5_000,
+  /**
+   * How long a served transfer with all its bytes confirmed waits for the member's word that its check passed once the
+   * member's next want has overtaken it.
+   */
+  doneWaitMs: 5_000,
+  /**
+   * What a transfer must bring in `wantWaitMs` (or the rest of its file, when less) to count as moving: a holder that
+   * sends a few bytes at a time is left as one that stalls.
+   */
+  wantMoveBytes: 16 * 1024,
   /** A file session closes this long after its last transfer ends. */
   sessionIdleMs: 60_000,
   /** File sessions opening at once, and open at once, all groups together. */
@@ -146,11 +171,11 @@ export function groupFileFallback(file: Pick<GroupFileMeta, "name" | "size" | "v
 }
 
 /**
- * Whether a device fetches a file by itself (WISP 503 § Automatic and asked downloads): a voice message always, any
- * other file up to `autoBytes` while what it took that way from the group stays within `autoBytesPerGroup`.
+ * Whether a device fetches a file by itself (WISP 503 § Automatic and asked downloads): up to `autoBytes` while what
+ * it took that way from the group stays within `autoBytesPerGroup`. A voice message too: one recorded (15 minutes at
+ * most, about 3.6 MB) always fits, and a bigger file the author called a voice message is asked about like any other.
  */
-export function fetchesByItself(file: Pick<GroupFileMeta, "size" | "voice">, keptAutomatically: number,
+export function fetchesByItself(file: Pick<GroupFileMeta, "size">, keptAutomatically: number,
   limits: { autoBytes: number; autoBytesPerGroup: number } = GROUP_FILE_LIMITS): boolean {
-  if (file.voice) return true;
   return file.size <= limits.autoBytes && keptAutomatically + file.size <= limits.autoBytesPerGroup;
 }

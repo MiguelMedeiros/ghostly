@@ -185,11 +185,16 @@ impl HyperState {
     }
 }
 
+/// The longest line the runtime may print (and `sidecar.mjs`'s `MAX_LINE`, the longest it reads). A frame is at most
+/// 60 KiB on the wire, and JSON writes a control character as `\u0001`: six bytes for one. A contact's frame of
+/// 60 KiB of them is a line of 360 KiB, which must not read as a runtime gone wrong (that stops every chat's endpoint).
+const MAX_LINE: usize = 512 * 1024;
+
 /// Everything the runtime prints, to the endpoint it names.
 async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
     let mut output = BufReader::new(output).lines();
     while let Ok(Some(line)) = output.next_line().await {
-        if line.len() > 256 * 1024 {
+        if line.len() > MAX_LINE {
             break;
         }
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -215,6 +220,16 @@ async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
                     if let Some(reply) = route.pending.take() {
                         let _ = reply.send(Ok(value["id"].clone()));
                     }
+                }
+                // The connection's socket is full, or has room again: the page holds a file back meanwhile.
+                Some(word @ ("full" | "room")) => {
+                    let held = json!({"type":word, "id":value["id"]});
+                    gone = route.events.send(held).is_err();
+                }
+                // A frame that could not go is never lost unseen: the page closes its channel.
+                Some("error") if value["command"] == "send" => {
+                    let unsent = json!({"type":"unsent", "id":value["id"], "seq":value["seq"]});
+                    gone = route.events.send(unsent).is_err();
                 }
                 Some("error") => {
                     let error = value["message"]
@@ -266,6 +281,7 @@ async fn forward(
     slot: Slot,
 ) {
     while let Some(request) = rx.recv().await {
+        let mut value = request.value;
         if let Some(reply) = request.reply {
             let mut routes = routes.lock().unwrap();
             let Some(route) = routes.get_mut(&id) else {
@@ -278,7 +294,6 @@ async fn forward(
             }
             route.pending = Some(reply);
         }
-        let mut value = request.value;
         value["endpoint"] = json!(id);
         if lines.send(value.to_string()).await.is_err() {
             break;
@@ -438,22 +453,43 @@ pub async fn paired_hyperdht_connect(
         .as_u64()
         .ok_or("Invalid native connection ID".into())
 }
+/// One frame: `text`, or `bytes` (a binary message, WISP 103 § Frames, in base64), as the runtime takes it. Answered
+/// once queued for the runtime, in the order the page sends (the page counts the frame against its send budget until
+/// then). The runtime's word comes on the page's channel: `full` once the connection's socket holds more than it
+/// should and `room` once it drained (nothing for a frame that found room), `unsent` under `seq` when it could not
+/// send one.
 #[tauri::command]
-pub fn paired_hyperdht_send(
+pub async fn paired_hyperdht_send(
     state: State<'_, HyperState>,
     endpoint_id: u64,
     connection_id: u64,
-    text: String,
+    seq: u64,
+    text: Option<String>,
+    bytes: Option<String>,
 ) -> Result<(), String> {
-    if text.is_empty() || text.len() > 60 * 1024 {
+    use base64::Engine;
+    let (field, size, frame) = match (text, bytes) {
+        (Some(text), None) => ("text", text.len(), text),
+        (None, Some(bytes)) => (
+            "bytes",
+            base64::engine::general_purpose::STANDARD
+                .decode(&bytes)
+                .map_err(|_| "Invalid binary frame")?
+                .len(),
+            bytes,
+        ),
+        _ => return Err("Invalid frame".into()),
+    };
+    if size == 0 || size > 60 * 1024 {
         return Err("Frame exceeds transport budget".into());
     }
+    let mut value = json!({"type":"send", "id":connection_id, "seq":seq});
+    value[field] = json!(frame);
+    // A runtime slower than the page fills the queue: the page's next send waits here, behind this one.
     sender(&state, endpoint_id)?
-        .try_send(Request {
-            value: json!({"type":"send", "id":connection_id, "text":text}),
-            reply: None,
-        })
-        .map_err(|_| "Native command queue full".into())
+        .send(Request { value, reply: None })
+        .await
+        .map_err(|_| "HyperDHT endpoint closed".into())
 }
 #[tauri::command]
 pub fn paired_hyperdht_close(
@@ -615,33 +651,99 @@ mod tests {
         );
     }
 
+    /// A send to the runtime, in the background as the page's invoke is.
+    fn sending(
+        app: &tauri::App<MockRuntime>,
+        id: u64,
+        seq: u64,
+        text: Option<String>,
+        bytes: Option<String>,
+    ) -> tokio::task::JoinHandle<Result<(), String>> {
+        let handle = app.handle().clone();
+        tokio::spawn(async move {
+            paired_hyperdht_send(handle.state::<HyperState>(), id, 3, seq, text, bytes).await
+        })
+    }
+
     #[tokio::test]
-    async fn frames_are_bounded_and_forwarded_as_they_are() {
+    async fn frames_are_bounded_forwarded_as_they_are_and_answered_once_queued() {
         let app = app();
         let (id, mut rx) = runtime(&app, 1);
         for text in [String::new(), "x".repeat(60 * 1024 + 1)] {
             assert_eq!(
-                paired_hyperdht_send(app.state(), id, 3, text).unwrap_err(),
+                paired_hyperdht_send(app.state(), id, 3, 1, Some(text), None)
+                    .await
+                    .unwrap_err(),
                 "Frame exceeds transport budget"
             );
         }
-        paired_hyperdht_send(app.state(), id, 3, "x".repeat(60 * 1024)).unwrap();
-        // The queue is bounded: a runtime that stopped reading makes sends fail, not pile up.
-        assert_eq!(
-            paired_hyperdht_send(app.state(), id, 3, "more".into()).unwrap_err(),
-            "Native command queue full"
-        );
+        // Answered once queued, without waiting for the runtime to write it: the runtime says only when the socket is
+        // full (`full`, then `room`), on the page's channel, so a frame costs no round trip to the runtime.
+        let first = sending(&app, id, 1, Some("x".repeat(60 * 1024)), None);
+        tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .expect("answered once queued")
+            .unwrap()
+            .unwrap();
+        // The queue is bounded: past it, the next send waits behind the ones before it instead of failing.
+        let second = sending(&app, id, 2, Some("more".into()), None);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!second.is_finished());
         let sent = rx.recv().await.unwrap();
         assert_eq!(sent.value["type"], "send");
-        assert_eq!(sent.value["id"], 3);
+        assert_eq!(
+            (&sent.value["id"], &sent.value["seq"]),
+            (&json!(3), &json!(1))
+        );
         assert_eq!(sent.value["text"].as_str().unwrap().len(), 60 * 1024);
         assert!(sent.reply.is_none());
+        assert_eq!(second.await.unwrap(), Ok(()));
+        let more = rx.recv().await.unwrap();
+        assert_eq!(
+            (&more.value["text"], &more.value["seq"]),
+            (&json!("more"), &json!(2))
+        );
 
         paired_hyperdht_close(app.state(), id, 3).unwrap();
         assert_eq!(
             rx.recv().await.unwrap().value,
             json!({"type": "close", "id": 3})
         );
+    }
+
+    /// A binary message comes as base64, within the same budget as text, and goes to the runtime as it came.
+    #[tokio::test]
+    async fn a_binary_frame_is_base64_within_the_budget_and_forwarded_as_it_is() {
+        use base64::Engine;
+        let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let app = app();
+        let (id, mut rx) = runtime(&app, 1);
+        for (text, bytes, error) in [
+            (None, None, "Invalid frame"),
+            (Some("x".into()), Some(encode(b"x")), "Invalid frame"),
+            (None, Some("not base64!".into()), "Invalid binary frame"),
+            (None, Some(String::new()), "Frame exceeds transport budget"),
+            (
+                None,
+                Some(encode(&vec![4u8; 60 * 1024 + 1])),
+                "Frame exceeds transport budget",
+            ),
+        ] {
+            assert_eq!(
+                paired_hyperdht_send(app.state(), id, 3, 1, text, bytes)
+                    .await
+                    .unwrap_err(),
+                error
+            );
+        }
+        let largest = encode(&vec![4u8; 60 * 1024]);
+        let sent = sending(&app, id, 1, None, Some(largest.clone()));
+        let request = rx.recv().await.unwrap();
+        assert_eq!(
+            request.value,
+            json!({"type": "send", "id": 3, "seq": 1, "bytes": largest})
+        );
+        assert_eq!(sent.await.unwrap(), Ok(()));
     }
 
     #[tokio::test]
@@ -660,7 +762,9 @@ mod tests {
             closed
         );
         assert_eq!(
-            paired_hyperdht_send(app.state(), id, 1, "x".into()).unwrap_err(),
+            paired_hyperdht_send(app.state(), id, 1, 1, Some("x".into()), None)
+                .await
+                .unwrap_err(),
             closed
         );
         assert_eq!(
@@ -809,13 +913,40 @@ mod runtime_tests {
         );
         let incoming = next(&mut page_b).await;
         assert_eq!(incoming["incoming"], true);
-        paired_hyperdht_send(app.state(), a.id, connection, "hello".into()).unwrap();
+        paired_hyperdht_send(app.state(), a.id, connection, 1, Some("hello".into()), None)
+            .await
+            .unwrap();
         let frame = next(&mut page_b).await;
         assert_eq!(
             (&frame["type"], &frame["text"]),
             (&json!("frame"), &json!("hello"))
         );
         assert_eq!(frame["id"], incoming["id"]);
+        // A binary message, in base64 through the runtime and back.
+        paired_hyperdht_send(
+            app.state(),
+            a.id,
+            connection,
+            2,
+            None,
+            Some("BAD/Cg==".into()),
+        )
+        .await
+        .unwrap();
+        let frame = next(&mut page_b).await;
+        assert_eq!(
+            (&frame["type"], &frame["bytes"], &frame["id"]),
+            (&json!("frame"), &json!("BAD/Cg=="), &incoming["id"])
+        );
+        // A frame the runtime cannot send is told to the page, not lost unseen; one that found room is answered by
+        // nothing (a word back for each cost a file a fifth of its speed).
+        paired_hyperdht_send(app.state(), a.id, 999, 3, Some("nowhere".into()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            next(&mut page_a).await,
+            json!({"type":"unsent", "id":999, "seq":3})
+        );
         assert!(page_a.try_recv().is_err());
 
         // Stopping one closes its connection on both ends, and keeps the runtime.
@@ -843,6 +974,45 @@ mod runtime_tests {
         // The next endpoint starts it again.
         start(&app, 4).await.unwrap();
         assert_eq!(spawned(&app), 2);
+    }
+
+    /// A contact's frame of 60 KiB of control characters, six bytes each once written as JSON (a line of 360 KiB),
+    /// reaches the other end, and the runtime and every other endpoint stay up: it used to stop all of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_frame_json_makes_six_times_longer_stops_nothing() {
+        let app = app();
+        let (events_a, mut page_a) = page();
+        let (events_b, mut page_b) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events_a)
+            .await
+            .unwrap();
+        let b = paired_hyperdht_start(app.handle().clone(), app.state(), seed(2), events_b)
+            .await
+            .unwrap();
+        let c = start(&app, 3).await.unwrap();
+        let runtime = pid(&app).await.unwrap();
+        let connection = paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+            .await
+            .unwrap();
+        assert_eq!(next(&mut page_a).await["type"], "open");
+        let incoming = next(&mut page_b).await;
+
+        let text = "\u{1}".repeat(60 * 1024);
+        assert!(json!({ "text": text }).to_string().len() > 6 * 60 * 1024);
+        paired_hyperdht_send(app.state(), a.id, connection, 1, Some(text.clone()), None)
+            .await
+            .unwrap();
+        let frame = next(&mut page_b).await;
+        assert_eq!(
+            (&frame["type"], &frame["id"]),
+            (&json!("frame"), &incoming["id"])
+        );
+        assert_eq!(frame["text"].as_str(), Some(text.as_str()));
+        assert_eq!(pid(&app).await, Some(runtime));
+        assert!(alive(runtime));
+        for id in [a.id, b.id, c.id] {
+            assert!(paired_hyperdht_address(app.state(), id).is_ok(), "{id}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

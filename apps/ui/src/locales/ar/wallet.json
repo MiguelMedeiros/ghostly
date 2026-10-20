@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "انتهت صلاحية هذه الفاتورة: لا يمكن لأحد دفعها الآن.",
     "invoiceFor": "فاتورة بمبلغ {{amount}}",
     "makePrimary": "اجعلها الرئيسية",
     "mints": "دور السك",
@@ -585,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "sats تجريبية"
   },
+  "send": {
+    "balance": "الرصيد: {{amount}} {{unit}}",
+    "cameraUnavailable": "الكاميرا غير متاحة. الصق أو اكتب أو اختر صورة.",
+    "clipboardEmpty": "لا شيء للصق. انسخ فاتورة أو عنوانًا أولًا.",
+    "clipboardUnavailable": "تعذرت قراءة الحافظة. الصقه أو اكتبه في الأسفل.",
+    "image": "اختر صورة",
+    "max": "الحد الأقصى",
+    "noAmount": "هذه الفاتورة بلا مبلغ. اطلب واحدة بالمبلغ.",
+    "paste": "لصق",
+    "scan": "مسح"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "جارٍ إنشاء محافظ Mainnet الخاصة بك…",
@@ -725,8 +737,8 @@
     "gas": "يُدفع للصنبور بقليل من Sepolia ETH لرسوم الغاز: أرسل بعضه إلى عنوان هذه المحفظة أولًا. {{link}}",
     "gasLink": "افتح صنبور Sepolia ETH",
     "get": "احصل على عملات تجريبية",
-    "got": "+{{amount}} {{unit}}",
-    "gotPending": "+{{amount}} {{unit}} في الطريق: تظهر هنا خلال ثوانٍ",
+    "got": "{{amount}} {{unit}}",
+    "gotPending": "{{amount}} {{unit}} في الطريق: تظهر هنا خلال ثوانٍ",
     "open": "افتح الصنبور",
     "openHint": "{{name}}. {{why}}",
     "openHintThen": "{{name}}. {{why}} {{then}}",

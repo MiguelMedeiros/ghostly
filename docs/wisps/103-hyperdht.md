@@ -21,7 +21,7 @@ HyperDHT is a native layer-1 candidate of the one chat ([400](400-chat.md), [100
 
 The session runs on one NoiseSecretStream as frames, each a 4-byte big-endian length word and that many bytes, at most 60 KiB and never empty. The first frame each way is the preface `ghostly/paired-chat/1`. A frame is UTF-8 text (a JSON frame of the session), unless the top bit of its length word is set: then it is a binary message ([100](100-transports.md#text-and-binary-messages-revision-2026-10-12)) of the length in the other 31 bits. A stream that brings an empty frame, one over 60 KiB, text that is not UTF-8 or a binary frame before the preface is closed.
 
-An app before this revision reads a marked frame as one over 60 KiB and closes the stream, so binary messages go only where the session agreed a capability that needs them, which such an app never lists. Where it carries them: the CLI's HyperDHT, and a browser's through a HyperDHT relay. The Desktop's does not yet (its sidecar hands it text only), so it offers no such capability on a HyperDHT session, and none is sent to it.
+An app before this revision reads a marked frame as one over 60 KiB and closes the stream, so binary messages go only where the session agreed a capability that needs them, which such an app never lists. Where it carries them: the CLI's HyperDHT, a browser's through a HyperDHT relay, and the Desktop's (its sidecar hands a binary message to the app in base64 on its private pipe; the wire is the frame above).
 
 ## Browser profile: through a HyperDHT relay (revision 0.3)
 

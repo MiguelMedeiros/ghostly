@@ -70,7 +70,7 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   scanned?: Promise<boolean>;
   static checkConfig(config: Pick<BarkConfig, "network" | "provider" | "explorer">) {
     if (!BARK_NETWORKS.includes(config.network)) throw new Error("Unsupported Bark network");
-    for (const provider of [config.provider, config.explorer]) validatePaymentTarget({ method: "bark", network: config.network, provider, asset: "BTC", unit: "sat", address: "configuration", expiresAt: Date.now() + 60000 });
+    for (const provider of [config.provider, config.explorer]) validatePaymentTarget({ method: "bark", network: config.network, provider, asset: "BTC", unit: "sat", address: `${barkAddressPrefix(config.network)}configuration`, expiresAt: Date.now() + 60000 });
   }
   /** The server this wallet was made for, on its network: a different key is a different Ark, never followed silently. */
   private async checkServer() {

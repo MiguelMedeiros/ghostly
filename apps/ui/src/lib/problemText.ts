@@ -90,9 +90,13 @@ export function problemLine(cause: unknown, t: Translate = english, fallback: Pr
   // wrong" in their place (an identity check's "No Ghostly TXT record at _ghostly.…" was lost that way, 2026-10-07).
   const generic = !said && detail !== undefined && title === t(fallback === "connect" ? "errors.problem.connectFailed" : "errors.generic");
   const next = generic ? detail : said;
-  if (!next) return title;
-  if (/[.!?…。！？]$/.test(title)) return `${title} ${next}`;
-  return t.language === "ja" || t.language === "zh" ? `${title}。${next}` : `${title}. ${next}`;
+  return next ? sentences(title, next, t) : title;
+}
+
+/** Two sentences in a row: a stop after the first when it has none ("。" in Japanese and Chinese). */
+export function sentences(first: string, second: string, t: Translate = english): string {
+  if (/[.!?…。！？]$/.test(first)) return `${first} ${second}`;
+  return t.language === "ja" || t.language === "zh" ? `${first}。${second}` : `${first}. ${second}`;
 }
 
 /**

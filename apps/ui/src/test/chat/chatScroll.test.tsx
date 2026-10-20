@@ -566,6 +566,54 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toHaveAttribute("data-count", "1");
   });
 
+  it("a jump gliding to a message glides all the way while rows on its way lay out, with no leap in one frame", () => {
+    // Rows never drawn take a typical height (90 px, index.css's content-visibility), their real one once near the view.
+    for (let i = 0; i < 40; i++) heights.set(`peer_${i}`, 90);
+    renderApp(<Timeline rows={theirs(0, 40)} />);
+    const drawNear = () => {
+      for (const row of rowsIn(list())) {
+        const box = row.getBoundingClientRect();
+        if (box.bottom > -VIEW && box.top < 2 * VIEW) heights.delete(row.dataset.messageId!);
+      }
+    };
+    drawNear();
+    // The match itself was drawn before (the rows between it and the view were not).
+    heights.delete("peer_25");
+    resized();
+    // The browser's smooth scroll: up to 100 px a frame toward where it was sent. Setting the scroll stops it; a smooth
+    // scrollTo starts it again from where it is.
+    let goal: number | null = null;
+    let sent = 0;
+    const into = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+      goal = list().scrollTop + this.getBoundingClientRect().top - (VIEW - this.getBoundingClientRect().height) / 2;
+    });
+    const to = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      const top = typeof options === "object" ? options.top ?? 0 : 0;
+      if (typeof options === "object" && options.behavior === "smooth") { goal = top; sent++; }
+      else { goal = null; this.scrollTop = top; }
+    });
+    act(() => { jumpToMessage("peer_25", list()); });
+    /** The most the match moved on screen in a frame. */
+    let largest = 0;
+    for (let frame = 0; frame < 100 && goal !== null; frame++) {
+      const before = list().scrollTop, was = topOf("peer_25"), sentBefore = sent;
+      const step = Math.max(-100, Math.min(100, goal - before));
+      scrollTo(before + step);
+      if (list().scrollTop === goal) goal = null;
+      drawNear();
+      resized();
+      largest = Math.max(largest, Math.abs(topOf("peer_25") - was));
+      // Set by someone else, and not sent on again: the glide stops where it was put.
+      if (list().scrollTop !== before + step && sent === sentBefore) goal = null;
+    }
+    into.mockRestore();
+    to.mockRestore();
+    // A frame's glide, and a row above it taking its real height in that frame (90 - 50).
+    expect(largest).toBeLessThanOrEqual(140);
+    // In the middle of the view: (300 - 50) / 2.
+    expect(topOf("peer_25")).toBe(125);
+  });
+
   it("the pill is a button reached with Tab", async () => {
     const rows = theirs(0, 10);
     const { rerender, user } = renderApp(<Timeline rows={rows} />);

@@ -4,8 +4,9 @@ on:
   push:
     tags:
       - "v*"
-  # Security patch releases: security-autorelease.yml calls this with the tag
-  # it created (a tag pushed with a workflow token triggers nothing by itself).
+  # Another workflow can call this with a tag that exists. None does now: every
+  # release tag is pushed by a person (the tag ruleset on v* refuses workflow
+  # tokens), and that push starts this workflow by itself.
   workflow_call:
     inputs:
       tag:
@@ -167,6 +168,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Each platform builds its own frontend: on Windows the platform swap once matched nothing and the app shipped the
+      # old chat (ghostly#1864). Seconds; before anything is uploaded.
+      - name: Desktop build carries its Desktop wiring
+        run: npm run build && npm run check:desktop-bundle
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
@@ -305,8 +311,7 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      # The tag's commit: github.sha is the dispatching branch's on a dispatch, and the default branch's on a
-      # security autorelease.
+      # The tag's commit: github.sha is the dispatching branch's on a dispatch, and the caller's on a workflow_call.
       - name: Commit
         id: commit
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

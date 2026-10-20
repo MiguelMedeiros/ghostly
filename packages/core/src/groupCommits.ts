@@ -1,4 +1,4 @@
-import { fromBase64Url, toBase64Url, utf8Encode } from "./bytes";
+import { fromBase64Url, isZ32Key, toBase64Url, utf8Encode } from "./bytes";
 import { publicKeyFromZ32, sign, verify } from "./identity";
 import { sha256Hex } from "./groupCrypto";
 
@@ -55,7 +55,11 @@ export const GROUP_MEMBER_CAP = { max: MAX_GROUP_MEMBERS as number };
 export const GROUP_VERSION_LARGE = 3;
 export const MAX_GROUP_CHAIN = 1024;
 export const GROUP_ID = /^[A-Za-z0-9_-]{22}$/;
-export const MEMBER_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+/**
+ * A member's key, in its one canonical spelling (`isZ32Key`): a roster names members by string, so a key respelled in
+ * its last character would be a second member for one key, and `publicKeyFromZ32` would throw on it past this check.
+ */
+export const MEMBER_KEY = { test: isZ32Key };
 const TAG = /^[A-Za-z0-9_-]{43}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -88,6 +92,9 @@ function parseCommit(raw: unknown): GroupCommit | null {
   for (let i = 1; i < m.length; i++) if (!(m[i - 1][0] < m[i][0])) return null;
   return { v: 1, g: c.g, e: c.e as number, p: c.p, k: c.k as CommitKind, m, by: c.by, ...(c.s !== undefined ? { s: c.s as string } : {}), ts: c.ts as number, c: c.c, sig: c.sig };
 }
+
+/** Only shape, no signature or parent: a commit as kept, its fields alone (anything else it carried dropped); null when malformed. */
+export const parseGroupCommit = parseCommit;
 
 /** The roster a commit must carry, given the previous one; null when the change is not allowed. */
 export function expectedRoster(previous: Roster | null, kind: CommitKind, by: string, subject?: string): Roster | null {

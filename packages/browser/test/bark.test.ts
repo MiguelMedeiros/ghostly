@@ -76,13 +76,13 @@ describe("the Bark adapter", () => {
     main.wallets.get(`ghostly-bark-${mainConfig.walletId}`)!.fund(10_000);
     const mainTarget = (address: string, over: Partial<PaymentTarget> = {}) => target(address, { network: "bitcoin", provider: MAINNET_BARK.provider, ...over });
     expect(await real.address()).toMatch(/^ark1p/);
-    await expect(real.prepare(mainTarget("tark1pmainx1"), 100, 100)).rejects.toThrow("test network Bark address");
-    await expect(real.prepare(mainTarget(await real.requestAddress(), { network: "signet" }), 100, 100)).rejects.toThrow("does not match this wallet");
+    await expect(real.prepare(mainTarget("tark1pmainx1"), 100, 100)).rejects.toThrow("That is not an Ark address on Bitcoin");
+    await expect(real.prepare(mainTarget(await real.requestAddress(), { network: "signet" }), 100, 100)).rejects.toThrow("That is not an Ark address on signet");
 
     const testConfig = config(), test = await connect(testConfig);
     walletOf(testConfig).fund(10_000);
-    await expect(test.prepare(target("ark1psrvx1"), 100, 100)).rejects.toThrow("Mainnet Bark address");
-    await expect(test.prepare(target(await test.requestAddress(), { network: "bitcoin" }), 100, 100)).rejects.toThrow("does not match this wallet");
+    await expect(test.prepare(target("ark1psrvx1"), 100, 100)).rejects.toThrow("That is not an Ark address on signet");
+    await expect(test.prepare(target(await test.requestAddress(), { network: "bitcoin" }), 100, 100)).rejects.toThrow("That is not an Ark address on Bitcoin");
     expect(main.sent + server.sent).toBe(0);
     await real.dispose(); await test.dispose();
   });

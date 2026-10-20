@@ -36,3 +36,35 @@ it("a joined chat still pairing has native listeners off screen; an unused invit
     vi.unstubAllGlobals();
   }
 });
+
+/**
+ * An invite of this side's from before the app started has no listener; once someone joins it, the chat is a contact's
+ * and takes them at once, as at start. Neither app with WebRTC (two Linux Desktops): the joiner's dials found nothing
+ * to land on, and the chat stayed on the DHT until someone wrote in it or opened it.
+ */
+it("an invite made before the app started takes native listeners when its joiner is pinned", async () => {
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  await db.putLink({ id: "restarted-invite", profile: "paired-chat/1", createdAt: 1, seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+    participationSeed: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, inviteCode: "ghostly1-unused" });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const factory = (transport: NativeTransport) => async (seed: string): Promise<NativeEndpoint> =>
+    ({ transport, descriptor: { seed }, close: vi.fn(async () => {}), connect: vi.fn(), onConnection: null, onDescriptor: null });
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, {
+    transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "fixture", relays: [] }) },
+    automaticWallets: false,
+    nativeTransports: { "iroh/1": factory("iroh/1"), "hyperdht/1": factory("hyperdht/1") },
+  });
+  const row = () => node.getState().links.find((l) => l.id === "restarted-invite")!;
+  try {
+    await node.start();
+    expect(row().availableTransports).toEqual([]);
+    const pairing = (node as unknown as { links: Map<string, { link: { options: { pairing: { pinPeer(key: string, signed: boolean): Promise<void> } } } }> })
+      .links.get("restarted-invite")!.link.options.pairing;
+    await pairing.pinPeer(createIdentity().pubKeyZ32, true);
+    await vi.waitFor(() => expect(row().availableTransports).toEqual(expect.arrayContaining(["iroh/1", "hyperdht/1"])));
+  } finally {
+    await node.shutdown();
+    await db.deleteLink("restarted-invite");
+    vi.unstubAllGlobals();
+  }
+});

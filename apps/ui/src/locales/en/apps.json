@@ -68,12 +68,24 @@
     "removed": "A store you added removed this app.",
     "revoked": "Its publisher revoked this version.",
     "rollback": "The link holds an older version.",
+    "slow": "That took too long on this connection. Try again on a faster one.",
     "status": "Nothing found at that link.",
     "storage": "This browser can't keep apps here (private browsing?). Try a normal window.",
     "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too.",
     "storeKey": "That store is signed by a different key.",
     "tooLarge": "Too large.",
     "unlistedVersion": "The link holds a version this store has not listed yet."
+  },
+  "files": {
+    "allow": "Allow",
+    "askAgain": "{{app}} asks to read “{{name}}” again",
+    "askAgainMore": "{{app}} asks to read “{{name}}” and {{count}} more again",
+    "askFiles": "{{app}} asks to read files",
+    "askFolder": "{{app}} asks to read a folder",
+    "chooseFiles": "Choose files",
+    "chooseFolder": "Choose a folder",
+    "notNow": "Not now",
+    "note": "Nothing is copied: {{app}} reads what you pick, on this device."
   },
   "install": {
     "equivocation": "Two different versions {{sequence}} exist. Ghostly kept the one you have.",
@@ -90,6 +102,8 @@
     "notListed": "Not in any of your stores",
     "perm": {
       "chat": "Talk to the same app on your contact's side",
+      "files": "Read the files and folders you pick, and share them with your contact in the chat",
+      "filesInfo": "Only what you pick, never the rest of your device. Your contact's app can read what it shares while you both have it open.",
       "internet": "Use the internet",
       "internetInfo": "The app and the servers it talks to can learn your IP address and what you do in it.",
       "name": "See your name in this chat",
@@ -148,6 +162,8 @@
     "beside": "Show the chat",
     "full": "Full width",
     "resume": "Back to {{title}}",
+    "resumeSharing": "sharing a file",
+    "sharingWith": "sharing a file with {{name}}",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
     "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
     "with": "{{title}} with {{name}}",

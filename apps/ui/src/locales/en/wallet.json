@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "This invoice expired: nobody can pay it now.",
     "invoiceFor": "Invoice for {{amount}}",
     "makePrimary": "Make primary",
     "mints": "Mints",
@@ -585,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "test sats"
   },
+  "send": {
+    "balance": "Balance: {{amount}} {{unit}}",
+    "cameraUnavailable": "Camera unavailable. Paste, type or choose an image.",
+    "clipboardEmpty": "Nothing to paste. Copy an invoice or an address first.",
+    "clipboardUnavailable": "Could not read the clipboard. Paste or type it below.",
+    "image": "Choose image",
+    "max": "Max",
+    "noAmount": "This invoice has no amount. Ask for one with the amount.",
+    "paste": "Paste",
+    "scan": "Scan"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Setting up your Mainnet wallets…",
@@ -725,8 +737,8 @@
     "gas": "The faucet is paid with a little Sepolia ETH for gas: send some to this wallet's address first. {{link}}",
     "gasLink": "Open a Sepolia ETH faucet",
     "get": "Get test coins",
-    "got": "+{{amount}} {{unit}}",
-    "gotPending": "+{{amount}} {{unit}} on the way: it shows up here in a few seconds",
+    "got": "{{amount}} {{unit}}",
+    "gotPending": "{{amount}} {{unit}} on the way: it shows up here in a few seconds",
     "open": "Open faucet",
     "openHint": "{{name}}. {{why}}",
     "openHintThen": "{{name}}. {{why}} {{then}}",

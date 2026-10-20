@@ -7,12 +7,19 @@
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
  * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
- *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file` answers at
- *   most 16 MiB a second, one read at a time.
+ *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file`,
+ *   `files.read` and `files.list` answer at most 16 MiB a second together, one at a time.
+ * - `files.*` (WISP 1200 · Linked files) only for an app granted `files`, through the platform's `linkedFiles`: the client
+ *   asks the person and keeps the links; the app names only the ids it was given.
+ * - The read lane (WISP 1200 § A read lane to the contact), through the platform's `ranges`, in a chat with `chat`:
+ *   `files.serve` (with `files` too) lets the same app on the contact's side read one kept file, and this broker answers
+ *   the ranges it asks of its own serves; `remote.read` and `remote.stat` read what the contact's app serves, counted
+ *   with `file`'s bytes.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
-import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
+import type { AppFileAt } from "@ghostly/browser/engine/apps";
+import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
@@ -47,7 +54,10 @@ export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "s
 export type AppPhase = "loading" | "starting" | "writing" | "running" | "stopped";
 
 /** Every request type the broker answers: the whole `ghostly.*` API (WISP 1200). */
-export const BROKER_REQUESTS: readonly MiniAppRequestType[] = ["context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "close"];
+export const BROKER_REQUESTS: readonly MiniAppRequestType[] = [
+  "context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget",
+  "files.serve", "files.unserve", "remote.read", "remote.stat", "close",
+];
 
 /** How long the runner has to say `writing` once it has the port. */
 export const START_TIMEOUT_MS = 15_000;
@@ -57,6 +67,12 @@ export const START_TIMEOUT_MS = 15_000;
  * still receives it; only closing the port ends that, and an app this far over is not one that miscounted.
  */
 export const STOP_REQUESTS_PER_SECOND = 10 * MINI_APP_LIMITS.requestsPerSecond;
+
+/**
+ * How long after the person cancels a `files.pick` the app's next one is refused (`too-fast`): asking again at once
+ * would put the picker back in front of them each time they close it.
+ */
+export const PICK_AFTER_CANCEL_MS = 10_000;
 
 /** The deepest JSON a request may carry: a value deeper than this is refused rather than walked. */
 const MAX_DEPTH = 64;
@@ -69,6 +85,19 @@ interface BrokerOptions {
   post(message: unknown, transfer?: Transferable[]): void;
   /** Tears the frame down: called once, with why. */
   stopped(reason: AppStopReason): void;
+  /**
+   * The opener hands a file's bytes to the app itself (Desktop: Rust, from its own file storage): a `file` answer says
+   * where they lie (`{id, ok, file: AppFileAt}`) when the host can, instead of carrying them. Every check is the same.
+   */
+  byReference?: boolean;
+  /**
+   * Whether the app is on screen now. A `files.pick` from one that is not (its chat's panel hidden, another chat or
+   * page showing) is refused (`too-fast`): its sheet would come up over what the person is doing, take the focus from
+   * the box they type in, and name an app they cannot see. None: always (a Desktop app window).
+   */
+  shown?: () => boolean;
+  /** The app serves a file to its contact now (true), or no longer (false): the panel's header says so. */
+  serving?: (on: boolean) => void;
   now?: () => number;
 }
 
@@ -136,7 +165,7 @@ export function jsonValueOf(value: unknown, depth = 0): MiniAppJson | typeof NOT
 /**
  * At least how many bytes `value` takes as JSON, counted only until it passes `budget`: a string by its length (UTF-8
  * and escapes only add), anything else by its fewest. Binary data (an ArrayBuffer or a view on one) and a value too
- * deep are NOT_JSON. It looks at no more than `budget` members, so a request far over 64 KiB is refused
+ * deep, an object that is not plain, or one that throws as it is read are NOT_JSON. It looks at no more than `budget` members, so a request far over 64 KiB is refused
  * without JSON.stringify writing it whole: a 16 MiB Uint8Array took that 1.6 s on the page's thread.
  */
 function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_JSON {
@@ -149,6 +178,10 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
       bytes += item.length + 1;
       for (let i = 0; i < item.length && bytes <= budget; i++) if (!walk(item[i], depth + 1)) return false;
     } else if (item !== null && typeof item === "object") {
+      // Only a plain object is JSON (jsonValueOf): anything else is refused before `for...in` lists its keys, which for
+      // a String object of 10 million characters took 1.5 s on the page's thread and from 30 million threw.
+      const proto = Object.getPrototypeOf(item);
+      if (proto !== Object.prototype && proto !== null) return false;
       bytes += 2;
       for (const key in item) {
         if (bytes > budget) break;
@@ -160,7 +193,7 @@ function jsonBytesAtLeast(value: unknown, budget: number): number | typeof NOT_J
     } else bytes += 1;
     return true;
   };
-  return walk(value, 0) ? bytes : NOT_JSON;
+  try { return walk(value, 0) ? bytes : NOT_JSON; } catch { return NOT_JSON; }
 }
 
 class Refusal extends Error { declare message: MiniAppErrorCode }
@@ -171,7 +204,10 @@ const refuse = (code: MiniAppErrorCode): never => { throw new Refusal(code); };
  * `full` (its storage in this scope holds 5 MiB), `no-file` (no such file in its bundle), `stopped` (a store removed
  * or its publisher revoked the version running, WISP 1200 § Takedowns), and the bounds the broker checks too. Any other failure is `failed`, without the words.
  */
-const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "bad-key", "stopped"]);
+const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "too-fast", "bad-key", "stopped", "cancelled", "changed", "gone"]);
+
+/** What the read lane answers an app with, as it is; anything else is `failed`. */
+const RANGE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["not-open", "not-served", "offline", "peer-closed", "changed", "gone"]);
 
 function refusalOf(error: unknown): MiniAppErrorCode {
   if (error instanceof Refusal) return error.message;
@@ -179,12 +215,46 @@ function refusalOf(error: unknown): MiniAppErrorCode {
   return code && ENGINE_REFUSALS.has(code) ? code as MiniAppErrorCode : "failed";
 }
 
+/** A linked file's id, as the client gives them: 22 base64url characters. */
+const LINK_ID = /^[A-Za-z0-9_-]{22}$/;
+const EXTENSION = /^[a-z0-9]{1,16}$/;
+
+/**
+ * At least how many bytes a `files.list` answer takes as JSON, without writing it: each entry's path, and 80 for the
+ * rest of it (`{"id":"<22 characters>","path":"","size":0,"modified":0,"available":true}`).
+ */
+function listBytes(entries: readonly MiniAppLinkedFile[]): number {
+  let bytes = 2;
+  for (const entry of entries) bytes += 80 + entry.path.length;
+  return bytes;
+}
+
+/** `files.pick`'s options, or a refusal: `{folder?, accept?}` and nothing else that matters. */
+function pickOptions(value: unknown): { folder: boolean; accept: string[] } {
+  if (value === undefined || value === null) return { folder: false, accept: [] };
+  if (typeof value !== "object" || Array.isArray(value)) return refuse("bad-request");
+  const { folder, accept } = value as { folder?: unknown; accept?: unknown };
+  if (folder !== undefined && typeof folder !== "boolean") refuse("bad-request");
+  if (accept !== undefined && (!Array.isArray(accept) || accept.length > MINI_APP_LIMITS.filesAccept || !accept.every((e) => typeof e === "string" && EXTENSION.test(e)))) refuse("bad-request");
+  return { folder: folder === true, accept: [...new Set((accept as string[] | undefined) ?? [])] };
+}
+
+/** `files.read`'s range: whole numbers, an offset within a safe integer, a length of 1 to `filesReadBytes`. */
+function readRange(value: unknown): { offset: number; length: number } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return refuse("bad-request");
+  const { offset, length } = value as { offset?: unknown; length?: unknown };
+  if (!Number.isSafeInteger(offset) || (offset as number) < 0) refuse("bad-request");
+  if (!Number.isSafeInteger(length) || (length as number) < 1) refuse("bad-request");
+  if ((length as number) > MINI_APP_LIMITS.filesReadBytes) refuse("too-large");
+  return { offset: offset as number, length: length as number };
+}
+
 function storageKey(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || utf8Bytes(value) > MINI_APP_LIMITS.storageKeyBytes) refuse("bad-key");
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, serving: onServing, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -193,8 +263,33 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
   let servedBytes = 0;
   /** The `file` read in progress: reads go one at a time, so each is counted before the next one starts. */
   let reading: Promise<unknown> = Promise.resolve();
+  /**
+   * The app's forgets, one at a time: each is a write on the host, and 50 at once (the requests a second) each took
+   * the Desktop's one writing lock in turn on threads of their own, holding off every other app's pick for seconds.
+   */
+  let forgetting: Promise<unknown> = Promise.resolve();
   const scope = launch.chat?.linkId ?? "alone";
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
+  /** Linked files: only for an app granted `files`, in a client that keeps them. Not a version's: the outer platform's. */
+  const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
+  /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. */
+  const ranges = () => (chatAllowed ? platform.ranges ?? null : null);
+  /** What this app serves on its chat's session now: serve id to the linked file and its size as listed. */
+  const serving = new Map<string, { file: string; size: number }>();
+  /** Every serve id this app was given: an ask under one it ended is still answered, so its place frees at once. */
+  const servedEver = new Set<string>();
+  /** Says when the app starts or stops serving anything. */
+  const servingChange = (change: () => void) => {
+    const was = serving.size > 0;
+    change();
+    if (was !== serving.size > 0) onServing?.(!was);
+  };
+  /** A pick waiting for the person: one at a time per app. */
+  let picking = false;
+  /** Aborts as the app stops: a sheet the client shows for it goes with it. */
+  const alive = new AbortController();
+  /** When a pick may be asked again: `PICK_AFTER_CANCEL_MS` after the person cancelled one. */
+  let pickAgainAt = 0;
   let appId: string | null = null;
   let chatOpened = false;
   let peer: { version: string } | null = null;
@@ -213,8 +308,23 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
       if (frameLink !== linkId || appId === null || frame.app !== appId) return;
       if ("d" in frame) { if (peer) event("chat.message", frame.d as MiniAppJson); return; }
       if (frame.o === "open") { peer = { version: frame.v }; event("chat.peer", { open: true, version: frame.v }); }
-      else { peer = null; event("chat.peer", { open: false }); }
+      // The contact's side closed (or the session went): every serve ended with it.
+      else { peer = null; servingChange(() => serving.clear()); event("chat.peer", { open: false }); }
     });
+    const lane = ranges(), files = linkedFiles();
+    const asks = lane && files ? lane.onAsk((askLink, ask) => {
+      if (askLink !== linkId || ask.app !== appId || !servedEver.has(ask.serve)) return;
+      const serve = serving.get(ask.serve);
+      // Ended meanwhile (unserved, or the app stopped): nothing to read, but the answer frees its place.
+      if (serve?.file !== ask.file || phase === "stopped") { void lane.answer(linkId, { app: ask.app, request: ask.request, error: "gone" }).catch(() => {}); return; }
+      // The bytes as the link reads them now: a file that changed or went says so, as `files.read` would.
+      void files.read(launch.ref, ask.file, ask.offset, ask.length).then(
+        (bytes) => lane.answer(linkId, { app: ask.app, request: ask.request, bytes, size: serve.size }),
+        (error) => { const code = refusalOf(error); return lane.answer(linkId, { app: ask.app, request: ask.request, error: code === "changed" ? "changed" : "gone" }); },
+      ).catch(() => { /* the engine went: the contact's read fails as the session does */ });
+    }) : null;
+    const frames = unsubscribe;
+    unsubscribe = () => { frames?.(); asks?.(); };
     chatOpened = true;
     opened = host.chat.open(linkId, launch.ref, launch.version).then(({ app }) => {
       if (phase === "stopped") return;
@@ -227,13 +337,55 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
   const stop = (reason: AppStopReason = "stopped") => {
     if (phase === "stopped") return;
     phase = "stopped";
+    alive.abort();
+    servingChange(() => serving.clear());
     unsubscribe?.();
     unsubscribe = null;
     if (chatOpened && launch.chat) void host.chat.close(launch.chat.linkId, launch.ref).catch(() => {});
     stopped(reason);
   };
 
-  const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[] }> => {
+  /**
+   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read` and `files.list`
+   * share the chain, so an app cannot double its bytes a second by mixing them.
+   */
+  const counted = <T>(load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
+    const read = reading.then(async () => {
+      if (phase === "stopped") refuse("stopped");
+      const at = now();
+      while (served.length && served[0]!.at <= at - 1000) servedBytes -= served.shift()!.bytes;
+      if (servedBytes >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
+      const answer = await load();
+      const bytes = size(answer);
+      served.push({ at, bytes });
+      servedBytes += bytes;
+      return answer;
+    });
+    reading = read.catch(() => {});
+    return read;
+  };
+
+  /** The contact's reads (`remote.*`), one at a time on a chain of their own. */
+  let remoteReading: Promise<unknown> = Promise.resolve();
+  /**
+   * Counted as `counted` counts, but waiting for the contact only: a contact that never answered held the app's own
+   * `file`, `files.read`, `files.list` and `files.serve` behind it for good. Checked against the budget
+   * before it asks, its bytes added once they came.
+   */
+  const countedRemote = <T>(load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
+    const read = remoteReading.then(async () => {
+      await counted(async () => undefined, () => 0);
+      const answer = await load();
+      const bytes = size(answer);
+      served.push({ at: now(), bytes });
+      servedBytes += bytes;
+      return answer;
+    });
+    remoteReading = read.catch(() => {});
+    return read;
+  };
+
+  const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[]; file?: AppFileAt }> => {
     switch (type as MiniAppRequestType) {
       case "context": {
         // After the chat open answered: before it, a contact whose app is already open would read as not open, and the
@@ -252,13 +404,17 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
           const at = now();
           while (served.length && served[0]!.at <= at - 1000) servedBytes -= served.shift()!.bytes;
           if (servedBytes >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
-          const file = await host.file(launch.ref, path as string);
-          served.push({ at, bytes: file.byteLength });
-          servedBytes += file.byteLength;
+          const where = byReference && host.fileAt ? await host.fileAt(launch.ref, path as string) : null;
+          const file = where ?? await host.file(launch.ref, path as string);
+          const size = where ? where.length : (file as Uint8Array).byteLength;
+          served.push({ at, bytes: size });
+          servedBytes += size;
           return file;
         });
         reading = read.catch(() => {});
-        const bytes = await read;
+        const got = await read;
+        if (!(got instanceof Uint8Array)) return { file: got };
+        const bytes = got;
         // The host's copy is the caller's (AppsPlatform.file): handed over as it is when it is the whole buffer, where
         // copying it again doubled what a read cost the page.
         const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
@@ -286,6 +442,98 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
         if (args.length !== 1 || utf8Bytes(JSON.stringify(args[0])) > MINI_APP_LIMITS.chatDataBytes) refuse("too-large");
         const error = await host.chat.send(launch.chat!.linkId, launch.ref, args[0] as MiniAppJson);
         if (error) refuse(error);
+        return {};
+      }
+      case "files.pick": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        const options = pickOptions(args[0]);
+        if (picking || now() < pickAgainAt || !shown()) refuse("too-fast");
+        picking = true;
+        try {
+          return { value: await files.pick(launch.ref, launch.title, options, alive.signal) as unknown as MiniAppJson };
+        } catch (error) {
+          if (refusalOf(error) === "cancelled") pickAgainAt = now() + PICK_AFTER_CANCEL_MS;
+          throw error;
+        } finally {
+          picking = false;
+        }
+      }
+      case "files.list": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        // Counted as file bytes: 100 000 links answered 15 MB, and 50 lists a second made the page copy 758 MB a second.
+        return { value: await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes) as unknown as MiniAppJson };
+      }
+      case "files.read": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        const id = args[0];
+        if (typeof id !== "string" || !LINK_ID.test(id)) refuse("bad-request");
+        const { offset, length } = readRange(args[1]);
+        const bytes = await counted(() => files.read(launch.ref, id as string, offset, length), (read) => read.byteLength);
+        if (bytes.byteLength > length) refuse("failed");
+        // The host's answer is the caller's (LinkedFilesHost.read): handed over as it is, as `file`'s is, where copying
+        // it again cost the page a third of the read.
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
+        return { value: buffer, transfer: [buffer] };
+      }
+      case "files.serve": {
+        const files = linkedFiles(), lane = ranges();
+        if (!files || !lane || !launch.chat) return refuse("not-allowed");
+        const id = args[0];
+        if (typeof id !== "string" || !LINK_ID.test(id)) refuse("bad-request");
+        // Its size, as the contact's reads tell it: an id this app does not keep, or cannot read now, is gone.
+        // The one link where the host can look it up: a library's whole list per serve spent the app's second on it.
+        const entry = files.entry
+          ? await counted(() => files.entry!(launch.ref, id as string), (link) => (link ? listBytes([link]) : 0))
+          : (await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes)).find((link) => link.id === id);
+        if (!entry?.available) refuse("gone");
+        const answer = await lane.serve(launch.chat!.linkId, launch.ref, id as string);
+        if ("error" in answer) refuse(answer.error);
+        const { serve } = answer as { serve: string };
+        servedEver.add(serve);
+        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size }));
+        return { value: serve };
+      }
+      case "files.unserve": {
+        const lane = ranges();
+        if (!linkedFiles() || !lane || !launch.chat) return refuse("not-allowed");
+        const serve = args[0];
+        if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
+        let was = false;
+        servingChange(() => { was = serving.delete(serve as string); });
+        if (was) await lane.unserve(launch.chat!.linkId, serve as string);
+        return {};
+      }
+      case "remote.read":
+      case "remote.stat": {
+        const lane = ranges();
+        if (!lane || !launch.chat) return refuse("not-allowed");
+        const serve = args[0];
+        if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
+        const { offset, length } = type === "remote.stat" ? { offset: 0, length: 1 } : readRange(args[1]);
+        const read = await countedRemote(() => lane.read(launch.chat!.linkId, launch.ref, serve as string, offset, length), (got) => ("bytes" in got ? got.bytes.byteLength : 0));
+        if ("error" in read) refuse(RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
+        const { bytes, size } = read as { bytes: Uint8Array; size: number };
+        if (type === "remote.stat") return { value: { size } };
+        if (bytes.byteLength > length) refuse("failed");
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
+        return { value: buffer, transfer: [buffer] };
+      }
+      case "files.forget": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        const id = args[0];
+        if (typeof id !== "string" || (id !== "all" && !LINK_ID.test(id))) refuse("bad-request");
+        const forget = forgetting.then(() => {
+          if (phase === "stopped") refuse("stopped");
+          return files.forget(launch.ref, id as string);
+        });
+        forgetting = forget.catch(() => {});
+        await forget;
         return {};
       }
       default:
@@ -333,8 +581,9 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
       return stop("closed");
     }
 
-    answer(type, args).then(({ value, transfer }) => {
+    answer(type, args).then(({ value, transfer, file }) => {
       if (phase === "stopped") return;
+      if (file) return post({ id, ok: true, file });
       post(value === undefined ? { id, ok: true } : { id, ok: true, value }, transfer);
     }, (error: unknown) => {
       if (phase === "stopped") return;
@@ -371,20 +620,31 @@ export interface RunningApp {
 }
 
 /**
+ * Whether an app's frame is on screen: in the page, in a tab that shows, and not under anything hidden (a chat kept
+ * loaded behind another one, a panel Back hid).
+ */
+export function onScreen(frame: HTMLIFrameElement): boolean {
+  return frame.isConnected && document.visibilityState !== "hidden" && (frame.checkVisibility?.() ?? true);
+}
+
+/**
  * Runs an app in a sandboxed frame of the runner, inside `container`: the frame, its one port, the start and the
  * teardown. The frame is removed when the app stops, for whatever reason.
  */
-export function startApp({ container, host, launch, view, onStop, startTimeoutMs = START_TIMEOUT_MS }: {
+export function startApp({ container, host, launch, view, onStop, onServing, startTimeoutMs = START_TIMEOUT_MS }: {
   container: HTMLElement;
   host: AppsPlatform;
   launch: AppLaunch;
   view: AppView;
   onStop?: (reason: AppStopReason) => void;
+  /** It serves a file to its contact now, or no longer. */
+  onServing?: (on: boolean) => void;
   startTimeoutMs?: number;
 }): RunningApp {
   const runner = runnerFor(host, launch);
   const frame = document.createElement("iframe");
-  frame.setAttribute("sandbox", "allow-scripts");
+  // Scripts, and the pointer for mouse look (Esc always gives it back): nothing else of what a page may do.
+  frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.setAttribute("allow", "");
   frame.title = launch.title;
@@ -393,7 +653,9 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
 
   const broker = createBroker({
     host, launch, view,
-    post: (message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
+    shown: () => onScreen(frame),
+    serving: onServing,
+    post:(message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
     stopped: (reason) => {
       if (timer) clearTimeout(timer);
       frame.removeEventListener("load", loaded);

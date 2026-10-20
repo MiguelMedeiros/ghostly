@@ -1,4 +1,4 @@
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, invoke, transformCallback } from "@tauri-apps/api/core";
 import { RTC_CONFIG, type CallMedia } from "@ghostly/core";
 import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, type DeviceSource } from "../lib/mediaDevices";
 import { setCallLevels, type LevelSource } from "../lib/voiceLevels";
@@ -76,6 +76,63 @@ export function connectionStateOf(ice: string): { ice: RTCIceConnectionState; co
   }
 }
 
+/** How long a channel's message missing from the order is waited for before the ones after it go on without it. */
+const LOST_AFTER_MS = 1000;
+
+/**
+ * Tauri's `Channel`, except that a message lost on the way holds the ones after it back for a moment, not for
+ * good. Tauri numbers a channel's messages and hands them over in that order; anything over 1 KiB (a picture)
+ * comes by a fetch of its own, and one whose fetch fails never comes: every message after it, pictures, ICE
+ * states and levels, waited behind it until the call ended, and the call window's <video> never started.
+ */
+class CallChannel {
+  readonly id: number;
+  onmessage: (message: unknown) => void = () => {};
+  private next = 0;
+  private readonly early = new Map<number, unknown>();
+  private end: number | null = null;
+  private wait: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    this.id = transformCallback((raw: { message?: unknown; index: number; end?: true }) => {
+      if (raw.end) this.end = raw.index;
+      // One that comes after the ones behind it went on is too late.
+      else if (raw.index >= this.next) this.early.set(raw.index, raw.message);
+      this.deliver();
+    });
+  }
+
+  private deliver(): void {
+    while (this.early.has(this.next)) {
+      const message = this.early.get(this.next);
+      this.early.delete(this.next++);
+      this.onmessage(message);
+    }
+    if (this.end !== null && this.next >= this.end) {
+      clearTimeout(this.wait ?? undefined);
+      (window as { __TAURI_INTERNALS__?: { unregisterCallback?: (id: number) => void } }).__TAURI_INTERNALS__?.unregisterCallback?.(this.id);
+      return;
+    }
+    if (!this.early.size && this.end === null) {
+      clearTimeout(this.wait ?? undefined);
+      this.wait = null;
+    } else if (!this.wait) {
+      this.wait = setTimeout(() => {
+        this.wait = null;
+        this.next = Math.min(...this.early.keys(), this.end ?? Infinity);
+        this.deliver();
+      }, LOST_AFTER_MS);
+    }
+  }
+
+  toJSON(): string {
+    return `__CHANNEL__:${this.id}`;
+  }
+}
+
+/** How long a picture's decode may take before the next picture is drawn without it. */
+const DECODE_MS = 1000;
+
 /** A canvas showing the last JPEG that came, and the video track that films it. */
 class Picture {
   private readonly canvas = document.createElement("canvas");
@@ -93,15 +150,33 @@ class Picture {
     this.track = this.canvas.captureStream(15).getVideoTracks()[0];
   }
 
-  /** Frames that come while one is being decoded replace each other: only the newest is drawn. */
+  /**
+   * Frames that come while one is being decoded replace each other: only the newest is drawn. A decode that has
+   * not settled in `DECODE_MS` holds the next ones back no more, and is not drawn when it does.
+   */
   show(jpeg: Uint8Array): void {
     if (this.drawing) {
       this.waiting = jpeg;
       return;
     }
     this.drawing = true;
+    let over = false;
+    const next = () => {
+      if (over) return;
+      over = true;
+      clearTimeout(stuck);
+      this.drawing = false;
+      const waiting = this.waiting;
+      this.waiting = null;
+      if (waiting) this.show(waiting);
+    };
+    const stuck = setTimeout(next, DECODE_MS);
     void createImageBitmap(new Blob([jpeg as BlobPart], { type: "image/jpeg" }))
       .then((bitmap) => {
+        if (over) {
+          bitmap.close();
+          return;
+        }
         if (this.canvas.width !== bitmap.width || this.canvas.height !== bitmap.height) {
           this.canvas.width = bitmap.width;
           this.canvas.height = bitmap.height;
@@ -114,12 +189,7 @@ class Picture {
         first?.();
       })
       .catch(() => {})
-      .finally(() => {
-        this.drawing = false;
-        const next = this.waiting;
-        this.waiting = null;
-        if (next) this.show(next);
-      });
+      .finally(next);
   }
 }
 
@@ -170,7 +240,7 @@ function reporting(track: MediaStreamTrack, wanted: string | null): void {
 
 async function openCamera(device: string | null = null): Promise<MediaStreamTrack> {
   const picture = new Picture();
-  const frames = new Channel<unknown>();
+  const frames = new CallChannel();
   frames.onmessage = (message) => picture.show(bytesOf(message));
   let camera: number;
   let used: string | null;
@@ -199,6 +269,10 @@ async function openCamera(device: string | null = null): Promise<MediaStreamTrac
 function microphone(device: string | null = null): MediaStreamTrack {
   const context = new AudioContext();
   const track = context.createMediaStreamDestination().stream.getAudioTracks()[0];
+  // Only the track is needed, never its sound. A running context keeps the system's output open with nothing in it
+  // (WebKitGTK: its Web Audio threads and a PipeWire stream, 4-6% of a core) for the whole call; suspended, the track
+  // stays live. It is never resumed, so WebKitGTK's freeze in a resume() after a suspend() (lib/sounds.ts) cannot happen.
+  void context.suspend().catch(() => {});
   reporting(track, device);
   // Who is speaking: the page hears neither side, so the call this track is sent on says both levels.
   const side = (of: "mic" | "peer"): LevelSource => (heard) => callOf.get(track)?.listen(of, heard) ?? (() => {});
@@ -221,6 +295,20 @@ function microphone(device: string | null = null): MediaStreamTrack {
 }
 
 type Handler<E extends Event = Event> = ((event: E) => void) | null;
+
+/**
+ * Our half of the video lane, from the peer's description: Rust always offers and answers it both ways, so ours is
+ * the peer's turned round. A peer that takes no picture (`vr: 0`, a bot) has its section rebuilt `a=inactive`,
+ * and the call hook then turns no camera or screen on. No video section: open, as before.
+ */
+function videoDirection(sdp: string): RTCRtpTransceiverDirection {
+  const video = sdp.split(/\r?\n(?=m=)/).find((section) => section.startsWith("m=video"));
+  const said = video?.match(/^a=(sendrecv|sendonly|recvonly|inactive)\s*$/m)?.[1];
+  if (said === "inactive") return "inactive";
+  if (said === "sendonly") return "recvonly";
+  if (said === "recvonly") return "sendonly";
+  return "sendrecv";
+}
 
 interface Lane {
   mid: string | null;
@@ -269,7 +357,7 @@ export class NativePeerConnection extends EventTarget {
   constructor(private readonly config: RTCConfiguration) {
     super();
     open.add(this);
-    const events = new Channel<unknown>();
+    const events = new CallChannel();
     events.onmessage = (message) => this.heard(bytesOf(message));
     this.opened = invoke("native_call_open", { id: this.id, events, iceServers: ownIceServers(config) });
     const lane = (kind: "audio" | "video"): Lane => ({
@@ -382,7 +470,7 @@ export class NativePeerConnection extends EventTarget {
     const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...this.devices() }));
     this.using(microphone);
     if (this.muted) await this.mute(true);
-    this.negotiated();
+    this.negotiated(offer);
     return { type: "answer", sdp };
   }
 
@@ -400,7 +488,7 @@ export class NativePeerConnection extends EventTarget {
       return;
     }
     await this.hold(() => invoke("native_call_accept", { id: this.id, answer: description.sdp ?? "" }));
-    this.negotiated();
+    this.negotiated(description.sdp ?? "");
   }
 
   /**
@@ -423,10 +511,11 @@ export class NativePeerConnection extends EventTarget {
     else this.remote.onFirstFrame = hand;
   }
 
-  private negotiated(): void {
+  /** Both sides have described the lanes; `remote` is the peer's description, offer or answer. */
+  private negotiated(remote: string): void {
     this.lanes();
     this.audio.currentDirection = "sendrecv";
-    this.video.currentDirection = "sendrecv";
+    this.video.currentDirection = videoDirection(remote);
   }
 
   /** Sends this camera's picture, or none. */

@@ -73,6 +73,19 @@ describe("the task commands", () => {
     expect(() => params("task send", ["g1", "--json", "{nope"])).toThrow(/not valid JSON/);
   });
 
+  it("refuse a --json file that is not there or is a folder in the CLI's words with the path, and \"\" as naming no file", () => {
+    // Before, Node's text ("ENOENT: no such file or directory, open …", "EISDIR: illegal operation on a directory, read" with
+    // no path), and "" was the current folder.
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-cardjson-"));
+    const missing = join(dir, "nofile.json");
+    for (const name of ["task send", "routine send", "usage send"]) {
+      const send = (...json: string[]) => () => params(name, ["g1", ...json]);
+      expect(send("--json", missing)).toThrow(expect.objectContaining({ code: "not_found", message: `No such file or folder: ${missing}` }));
+      expect(send("--json", dir)).toThrow(expect.objectContaining({ code: "bad_request", message: `${dir} is a folder: name a file` }));
+      expect(send("--json", "")).toThrow(expect.objectContaining({ code: "usage", message: "A path given as \"\" names no file" }));
+    }
+  });
+
   it("refuse a new card without its title as a usage error (exit 2) that names the flag; --json may give it", () => {
     expect(() => params("task send", ["g1", "--steps", "1/4"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--title is needed: ghostly task send/) }));
     expect(() => params("task send", ["g1", "--title", " "])).toThrow(expect.objectContaining({ code: "usage" }));
@@ -108,7 +121,32 @@ describe("the task commands", () => {
     // An update's card may have the link already; a whole card in --json stays the card's to check.
     expect(params("task update", ["g1", "t", "--pr-checks", "failing"]).card).toEqual({ pr: { checks: "failing" } });
     expect(params("task send", send("--json", '{"pr":{"state":"open"},"tags":["a","b","c","d"]}')).card).toMatchObject({ pr: { state: "open" } });
-    expect(params("task send", send("--steps", "5/5", "--progress", "100", "--tag", "a", "--tag", "b", "--tag", "c")).card).toMatchObject({ done: 5, total: 5, progress: 100, tags: ["a", "b", "c"] });
+    expect(params("task send", send("--steps", "5/5", "--json", '{"progress":100}', "--tag", "a", "--tag", "b", "--tag", "c")).card).toMatchObject({ done: 5, total: 5, progress: 100, tags: ["a", "b", "c"] });
+  });
+
+  it("refuse a wrong status or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
+    // Before, these reached the card's check: bad_request (exit 1), "Status card: title is at most 120 characters".
+    const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    const send = (...flags: string[]) => ["g1", "--title", "Build", ...flags];
+    usage("task send", send("--status", "weird"), /^--status takes queued, running, blocked, done, failed or cancelled, not "weird"$/);
+    usage("task update", ["g1", "t", "--status", "weird"], /^--status takes queued, running, blocked, done, failed or cancelled, not "weird"$/);
+    usage("task send", ["g1", "--title", "x".repeat(130)], /^--title takes at most 120 characters, not 130$/);
+    usage("task update", ["g1", "t", "--title", "   "], /^--title takes text, not " {3}"$/);
+    usage("task send", send("--step", "x".repeat(210)), /^--step takes at most 200 characters, not 210$/);
+    usage("task update", ["g1", "t", "--step", ""], /^--step takes text, not ""$/);
+    usage("task send", send("--branch", "b".repeat(300)), /^--branch takes at most 120 characters, not 300$/);
+    usage("task send", send("--tag", "t".repeat(30)), /^--tag takes at most 24 characters, not 30$/);
+    usage("task send", send("--tag", "web", "--tag", " web "), /^--tag "web" is given twice$/);
+    usage("task send", send("--item", `done:${"i".repeat(300)}`), /^--item's text takes at most 200 characters, not 300$/);
+    usage("task send", send("--item", "i".repeat(201)), /^--item's text takes at most 200 characters, not 201$/);
+    usage("task send", send("--item", "done:"), /^--item's text takes text, not "done:"$/);
+    usage("task send", send(...Array.from({ length: 21 }, (_, i) => ["--item", `step ${i}`]).flat()), /^--item is given at most 20 times, not 21$/);
+    usage("task send", send("--link", `${"l".repeat(100)}=https://x.com`), /^--link's label takes at most 40 characters, not 100$/);
+    usage("task send", send("--link", "notaurl"), /^--link takes an https link of at most 512 characters, or label=link, not "notaurl"$/);
+    usage("task send", send(...Array.from({ length: 5 }, (_, i) => ["--link", `https://x.com/${i}`]).flat()), /^--link is given at most 4 times, not 5$/);
+    // A character the card counts as one counts as one here; --json keeps the card's words for the card's check.
+    expect(params("task send", ["g1", "--title", "🚀".repeat(120)]).card).toEqual({ title: "🚀".repeat(120) });
+    expect(params("task send", send("--json", `{"step":"${"x".repeat(210)}","status":"weird"}`)).card).toMatchObject({ status: "weird" });
   });
 
   it("start the groups' sessions even in a one-shot: the chat they name may be a group", () => {
@@ -392,6 +430,21 @@ describe("routines", () => {
     expect(params("routine update", ["g1", "nightly", "--next", "1791849403000"])).toMatchObject({ card: { nextRunAt: 1791849403000 } });
     expect(() => params("routine send", ["g1"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--name and --schedule are needed/) }));
     expect(() => params("routine send", ["g1", "--name", "Nightly"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--schedule is needed/) }));
+  });
+
+  it("refuse a wrong state or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
+    const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    const send = (...flags: string[]) => ["g1", "--name", "Nightly", "--schedule", "every day", ...flags];
+    usage("routine send", send("--state", "weird"), /^--state takes active or paused, not "weird"$/);
+    usage("routine update", ["g1", "nightly", "--state", "sleeping"], /^--state takes active or paused, not "sleeping"$/);
+    usage("routine send", ["g1", "--name", "n".repeat(130), "--schedule", "d"], /^--name takes at most 120 characters, not 130$/);
+    usage("routine send", ["g1", "--name", "Nightly", "--schedule", "s".repeat(90)], /^--schedule takes at most 80 characters, not 90$/);
+    usage("routine update", ["g1", "nightly", "--schedule", " "], /^--schedule takes text, not " "$/);
+    usage("routine send", send("--cron", "1".repeat(200)), /^--cron takes at most 64 characters, not 200$/);
+    usage("routine send", send("--cron", "0 1 * * *; rm"), /^--cron takes a cron line of 0-9 A-Z a-z \* , \/ \? # - and spaces, not "0 1 \* \* \*; rm"$/);
+    usage("routine update", ["g1", "nightly", "--run", `ok:${"r".repeat(201)}`], /^--run's summary takes at most 200 characters, not 201$/);
+    usage("routine send", send("--link", "x=http://ci.example"), /^--link takes an https link/);
+    expect(params("routine send", send("--cron", " 0 1 * * * ")).card).toMatchObject({ cron: " 0 1 * * * " });
   });
 
   it("send a routine active from now, and each run becomes the last and the newest of ten recent ones", async () => {

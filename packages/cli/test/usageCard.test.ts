@@ -5,6 +5,7 @@ import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
+import { CliError, EXIT } from "../src/errors";
 // covers: headless.usage
 
 /** `usage send` (WISP 405 § Usage) against an engine that keeps what it is sent. */
@@ -23,7 +24,7 @@ function fake() {
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
     getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async () => []),
-    sendMessage: vi.fn(async ({ linkId, text, card: raw }: { linkId: string; text: string; card?: unknown }) => {
+    sendMessage: vi.fn(async ({ linkId, text, card: raw }: { linkId: string; text: string; card?: unknown }): Promise<{ error: string | null; messageId: string }> => {
       const c = card(raw) as StatusCard;
       const id = `me_${++n}`;
       of(linkId).push({ linkId, id, wireId: `w${n}`, text: text || statusCardText(c), sender: "me", timestamp: Date.now(), via: "datalink", delivery: "sent", card: c });
@@ -70,12 +71,26 @@ describe("usage send", () => {
     usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
     usage(["--all", "--window", "5 h"], /^--left is needed/);
     usage(["Alice", "--used", "5"], /^--used goes with --limit: ghostly usage send/);
-    usage(["Alice", "--limit", "50", "--left", "40"], /^--limit goes with --used: ghostly usage send/);
+    usage(["Alice", "--limit", "50"], /^--limit goes with --used: ghostly usage send/);
+    usage(["Alice", "--limit", "50", "--left", "40"], /^--left or --used with --limit, not both$/);
     usage(["Alice", "--left", "140"], /^--left takes a percent from 0 to 100, not 140$/);
     // --json may give them, and the two ways to say it stand.
     expect(params(["Alice", "--json", '{"left":40}']).card).toEqual({ left: 40 });
     expect(params(["Alice", "--used", "5", "--limit", "50"]).card).toEqual({ used: 5, limit: 50 });
     expect(params(["Alice", "--left", "0"]).card).toEqual({ left: 0 });
+  });
+
+  it("refuses a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
+    const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    // Before: bad_request (exit 1), "Status card: label is at most 24 characters".
+    usage(["Alice", "--left", "50", "--label", "l".repeat(30)], /^--label takes at most 24 characters, not 30$/);
+    usage(["Alice", "--left", "50", "--account", "a".repeat(25)], /^--account takes at most 24 characters, not 25$/);
+    usage(["Alice", "--left", "50", "--window", "w".repeat(17)], /^--window takes at most 16 characters, not 17$/);
+    usage(["Alice", "--left", "50", "--label", " "], /^--label takes text, not " "$/);
+    usage(["Alice", "--left", "50", "--also", `${"w".repeat(20)}=80`], /^--also's window takes at most 16 characters, not 20$/);
+    usage(["Alice", "--left", "50", "--also", "week=150"], /^--also takes a percent from 0 to 100, not 150$/);
+    usage(["Alice", "--left", "50", "--also", "a=1", "--also", "b=1", "--also", "c=1", "--also", "d=1"], /^--also is given at most 3 times, not 4$/);
+    expect(params(["Alice", "--json", `{"left":40,"label":"${"l".repeat(30)}"}`]).card).toMatchObject({ label: "l".repeat(30) });
   });
 
   it("sends the card once, then edits that one message with each report: one card per chat, whole reports", async () => {
@@ -117,6 +132,28 @@ describe("usage send", () => {
     await expect(callApi(ctx, "usage.send", { all: true, card: { left: 140 } })).rejects.toMatchObject({ code: "bad_request", message: /left is a number from 0 to 100/ });
     await expect(callApi(ctx, "usage.send", { chat: "Miguel", card: { label: "Claude" } })).rejects.toMatchObject({ code: "bad_request", message: /left \(a percent\) or used and limit/ });
     expect(node.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("--all checks --wait and --timeout once, before any chat, and fails when no chat took the card", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "usage.send", { all: true, card: { left: 5 }, wait: "bogus" })).rejects.toMatchObject({ code: "bad_request", message: "wait must be one of none, sent" });
+    await expect(callApi(ctx, "usage.send", { all: true, card: { left: 5 }, timeout: 99999 })).rejects.toMatchObject({ code: "bad_request", message: /timeout must be a number from 1 to 3600/ });
+    expect(node.getMessages).not.toHaveBeenCalled();
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    // Each chat's refusal keeps its code; every chat refusing is the call failing (exit 1), with each one in details.
+    node.sendMessage.mockImplementation(async () => ({ error: "The contact is away", messageId: "" }));
+    const failed = await callApi(ctx, "usage.send", { all: true, card: { left: 5 } }).catch((error: unknown) => error) as CliError;
+    expect(failed).toBeInstanceOf(CliError);
+    expect(EXIT[failed.code]).toBe(1);
+    const chats = (failed.details as { chats: { chat: string; error: { code: string; message: string } }[] }).chats;
+    expect(chats.map((c) => c.chat)).toEqual(["chat-one", "chat-two"]);
+    for (const c of chats) expect(c.error).toMatchObject({ code: expect.any(String), message: expect.stringMatching(/away/) });
+    // One chat taking it is enough: the other's refusal is said, the call answers.
+    node.sendMessage.mockImplementationOnce(async () => ({ error: "The contact is away", messageId: "" }));
+    node.sendMessage.mockImplementationOnce(async ({ linkId }: { linkId: string }) => ({ error: null, messageId: `${linkId}_1` }));
+    const some = await callApi(ctx, "usage.send", { all: true, card: { left: 5 } }) as { chats: Record<string, unknown>[] };
+    expect(some.chats[0]).toMatchObject({ chat: "chat-one", error: { code: expect.any(String), message: expect.stringMatching(/away/) } });
+    expect(some.chats[1]).toMatchObject({ chat: "chat-two", updated: false });
   });
 
   it("starts no group sessions for --all, as it reaches 1:1 chats only", () => {

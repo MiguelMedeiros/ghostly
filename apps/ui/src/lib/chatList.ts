@@ -1,11 +1,10 @@
 import { formatVideoDuration, formatVoiceDuration } from "@ghostly/core";
 import { findMoney } from "./money";
 import { plainText } from "./parse";
-import { moreMoneyPreview } from "./parse/money-preview";
+import { invoicePreview, moreMoneyPreview } from "./parse/money-preview";
 import { englishT, type Translate } from "../locales/translate";
 import { formatAt } from "./time";
 import type { Language } from "./settings";
-import { formatAmount } from "./amount";
 import type { ChatFile } from "./types";
 
 /**
@@ -43,7 +42,7 @@ function readPreview(text: string, t: Translate): string {
   if (money.type === "cashu") return t("chat.preview.ecash");
   if (money.type === "onchain" || money.type === "bolt12" || money.type === "ark" || money.type === "usdt") return moreMoneyPreview(money, t);
   if (money.type === "lnurl") return `⚡ ${money.destination.kind === "address" ? t("chat.preview.lightningAddress") : "LNURL"} · ${money.destination.text}`;
-  return money.invoice.amountSat === null ? t("chat.preview.invoice") : t("chat.preview.invoiceSats", { amount: formatAmount(money.invoice.amountSat, t.language) });
+  return invoicePreview(money.invoice, t);
 }
 
 /** How long ago, as short as a list's column allows ("now", "5m", "3h", "2d" in English), then the date. */

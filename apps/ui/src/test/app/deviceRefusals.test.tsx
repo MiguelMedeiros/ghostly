@@ -39,7 +39,7 @@ describe("the offer of a move, on a standby", () => {
     fakeEngine.on("deviceHandoffAccept", () => { throw new Error("handoff-refused: There is no offer to accept."); });
     const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
     await user.click(await screen.findByTestId("handoff-accept"));
-    expect(await screen.findByTestId("handoff-offer-error")).toHaveTextContent("MacBook does not let this device take the profile.");
+    expect(await screen.findByTestId("handoff-offer-error")).toHaveTextContent("That offer endedAsk again from MacBook.");
     expect(screen.getByTestId("handoff-offer-error")).toHaveAttribute("role", "alert");
     await waitFor(() => expect(screen.getByTestId("handoff-accept")).toBeEnabled());
   });

@@ -1,8 +1,9 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
-import { GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
+import { GROUP_ANCHOR_ANSWER_MS, GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { setJoinTraceSink } from "../src/engine/joinTrace";
 import { EditQueue } from "../src/engine/edits";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
@@ -54,6 +55,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     start = vi.fn();
     stop = vi.fn(async () => {});
     wake = vi.fn();
+    expectPeer = vi.fn();
     depart = vi.fn();
     connect = vi.fn(async () => {});
     disconnect = vi.fn();
@@ -167,6 +169,33 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].peerNick).toBe("Old timer");
   });
 
+  it("a read that finds the contact as before, and a round trip about the same as the one shown, post no state", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const { events } = linkOf(chat.id).options;
+    const emits = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const read = (lastPacketAt: number) => events.onPresence({ online: true, lastPacketAt, seenAt: 5, nick: "Bob", services: [{ id: "web", type: "http" }] });
+    read(10);
+    expect(emits).toHaveBeenCalledTimes(1);
+    // Every read parses the packet again: equal services in a new array are the same.
+    read(10); read(10);
+    expect(emits).toHaveBeenCalledTimes(1);
+    read(11);
+    expect(emits).toHaveBeenCalledTimes(2);
+    expect(node.getState().links[0]).toMatchObject({ peerOnline: true, peerLastSeenAt: 5, peerServices: [{ id: "web", type: "http" }] });
+
+    // The round trip a state carries is the link's (`rttMs`): a pong within 10 ms of it shows nothing new.
+    emits.mockClear();
+    (linkOf(chat.id) as never as { rttMs: number }).rttMs = 40;
+    events.onRtt(40);
+    expect(emits).toHaveBeenCalledTimes(1);
+    expect(node.getState().links[0].transportRttMs).toBe(40);
+    events.onRtt(43); events.onRtt(37);
+    expect(emits).toHaveBeenCalledTimes(1);
+    events.onRtt(55);
+    expect(emits).toHaveBeenCalledTimes(2);
+  });
+
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
     const legacy = row({ profile: undefined, participationSeed: undefined }), paired = row();
     const { node, linkOf } = await started(legacy, paired);
@@ -175,6 +204,18 @@ describe("a chat as the contact drives it", () => {
     const view = (id: string) => node.getState().links.find((l) => l.id === id)!;
     expect(view(legacy.id).peerAck).toBe(42);
     expect(view(paired.id).peerAck).toBe(0);
+  });
+
+  it("a call's fast poll reads a legacy chat's record, never a paired one's: its signals go only over the session", async () => {
+    const legacy = row({ profile: undefined, participationSeed: undefined }), paired = row();
+    const { node, linkOf } = await started(legacy, paired);
+    for (const fast of [true, false]) {
+      node.setFastPoll({ linkId: legacy.id, fast });
+      node.setFastPoll({ linkId: paired.id, fast });
+    }
+    const polls = (id: string) => (linkOf(id) as never as { session: { setFastPoll: ReturnType<typeof vi.fn> } }).session.setFastPoll;
+    expect(polls(legacy.id).mock.calls).toEqual([[true], [false]]);
+    expect(polls(paired.id)).not.toHaveBeenCalled();
   });
 
   it("an open data link replays pending payments; a closed one sends the waiting messages back to retry", async () => {
@@ -192,6 +233,22 @@ describe("a chat as the contact drives it", () => {
     events.onPairingState({ status: "ready" });
     events.onDataLinkState("connecting");
     expect(node.getState().links[0].pairing).toEqual({ status: "connecting" });
+  });
+
+  it("a removed chat's link closing as it stops makes none of its outbox or files again", async () => {
+    // A bot that paired with new contacts and removed their chats kept both for every chat it ever removed.
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id);
+    node["outboxFor"](chat.id);
+    link.options.events.onFilesSession(true);
+    // As the real link does: stopping closes its data link and its files session.
+    link.stop.mockImplementation(async () => { await null; link.options.events.onDataLinkState("idle"); link.options.events.onFilesSession(false); });
+    node.removeLink({ linkId: chat.id });
+    expect(link.stop).toHaveBeenCalledOnce();
+    await link.stop.mock.results[0]!.value;
+    expect(node["outboxes"].has(chat.id)).toBe(false);
+    expect(node["fileDesk"]["chats"].has(chat.id)).toBe(false);
   });
 
   it("a ready session remembers which ways of paying the contact chose, wallets aside, for requests held while it is away", async () => {
@@ -215,6 +272,33 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].lastSyncAt).toBeGreaterThan(0);
     expect(nodeEvents.onCallSignal).toHaveBeenCalledWith(chat.id, "offer");
     expect(await saved(chat.id)).toMatchObject({ peerTransports: ["iroh/1"], peerFallback: false });
+  });
+
+  it("a chat that never synced and whose reads fail (no network) shows its first sync under way once, not a state at every read", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const { events } = linkOf(chat.id).options;
+    const emit = vi.spyOn(node as unknown as { emitState(): void }, "emitState");
+    events.onPoll({ polling: true, nextInMs: 0 });
+    expect(node.getState().links[0].poll.polling, "the first sync under way").toBe(true);
+    events.onStatus("error");
+    events.onPoll({ polling: false, nextInMs: 2_000 });
+    expect(node.getState().links[0].poll.polling).toBe(false);
+    const first = emit.mock.calls.length;
+    expect(first).toBeGreaterThan(0);
+    for (let i = 0; i < 10; i++) {
+      events.onPoll({ polling: true, nextInMs: 0 });
+      // A read under way after the first one is no first sync under way: the list shows none, whenever it is drawn.
+      expect(node.getState().links[0].poll.polling).toBe(false);
+      events.onStatus("error");
+      events.onPoll({ polling: false, nextInMs: 2_000 });
+    }
+    expect(emit.mock.calls.length - first, "ten failed reads").toBe(0);
+    // The read that works is news: the chat synced.
+    events.onPoll({ polling: true, nextInMs: 0 });
+    events.onStatus("online");
+    expect(emit.mock.calls.length).toBeGreaterThan(first);
+    expect(node.getState().links[0].lastSyncAt).toBeGreaterThan(0);
   });
 
   it("once paired, the chat is pinned to that contact: another key is refused, and a failed save pins nothing", async () => {
@@ -318,6 +402,43 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     }
     // Stored first (the links store reads back in id order), each idle since long ago.
     const older = () => Array.from({ length: 10 }, (_, i) => row({ ...paired(), id: `chat-a${i}` }));
+
+    it("a paired chat whose listener failed to start (Iroh's relay out of reach) starts it again on a later tick, and at once when the network is back", async () => {
+      // A CLI daemon started while its Iroh relay was down (2026-10-13): two minutes after the relay was back, its chat
+      // still had no Iroh listener, and a contact with no WebRTC could not dial it. Only opening the chat on screen
+      // started one again, and a daemon's chats are never on screen.
+      const chat = row({ ...paired() });
+      await db.putLink(chat);
+      const iroh = vi.fn(async () => endpoint());
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      const linkOf = () => links.filter((l) => l.options.params.id === chat.id).at(-1)! as unknown as Recorded & { registerEndpoint: ReturnType<typeof vi.fn> };
+      await vi.waitFor(() => expect(node["links"].get(chat.id)?.transportErrors?.["iroh/1"]).toBe("Iroh relay unreachable"));
+      expect(linkOf().registerEndpoint).not.toHaveBeenCalled();
+      // The next tick before the wait is over: nothing yet.
+      node["retryNative"]();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(iroh).toHaveBeenCalledOnce();
+      // One retry period later, the tick starts it again, and the chat has it.
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16_000);
+      onTestFinished(() => { clock.mockRestore(); });
+      node["retryNative"]();
+      await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(2);
+      expect(node["links"].get(chat.id)?.transportErrors?.["iroh/1"]).toBeUndefined();
+      // Failed again: the network coming back starts it at the next tick, its wait anew.
+      linkOf().availableTransports = ["webrtc/1"];
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      void node["ensureNativeEndpoints"](chat.id);
+      await vi.waitFor(() => expect(node["nativeFailed"].has(chat.id)).toBe(true));
+      node.wake({ network: true });
+      node["retryNative"]();
+      await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledTimes(2));
+    });
 
     it("the chat live most recently takes one first, among chats live when the app quit", async () => {
       // Omarchy (2026-09-30): both apps restarted, and the chat they had just been live in got no listener on one side:
@@ -472,12 +593,241 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
         node.setActiveLink({ linkId: null });
       });
 
+      it("on a network that blocks direct connections (a VPN), a chat whose contact has WebRTC takes one too: WebRTC is no way there", async () => {
+        // An app behind a VPN that drops UDP, its eight listeners held by contacts with no WebRTC: the chat with a contact
+        // that has WebRTC (a CLI) went down with the VPN and had nothing else to go live on, for as long as the VPN was on.
+        vi.stubGlobal("RTCPeerConnection", class {});
+        onTestFinished(() => { vi.unstubAllGlobals(); });
+        const record = (transports: string[]) => ({ rev: 1, issued: Date.now(), author: createIdentity().pubKeyZ32, versions: [1], transports,
+          capabilities: [], extensions: [], descriptors: {}, name: "" });
+        const { node, holders, nine } = await allLive([10, 9, 8, 7, 6, 5, 4, 3], { capsState: { rev: 1, peer: record(["iroh/1", "webrtc/1"]) } });
+        // This device's own WebRTC attempts gathered no public candidate: no STUN server answers through the VPN.
+        const directPath = node["directPath"] as { note(peer: string, evidence: string): void; blocked: boolean };
+        directPath.note(createIdentity().pubKeyZ32, "no-public");
+        directPath.note(createIdentity().pubKeyZ32, "no-public");
+        expect(directPath.blocked).toBe(true);
+        await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([holders[0]]);
+      });
+
       it("a text over the DHT in a chat not on screen takes one too: a bot has no chat on screen", async () => {
         const { node, holders, nine } = await allLive([3, 4, 5, 6, 7, 8, 9, 10]);
         await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
         await node["nativeQueue"];
         expect(nine.registerEndpoint).toHaveBeenCalled();
         expect(yielded(holders)).toEqual([holders[7]]);
+      });
+
+      describe("groups take listeners least recently used first, as chats do (WISP 902 § Transports)", () => {
+        /** A group's edges toward these many members, each reached only natively (an app with no WebRTC, or a VPN). */
+        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean } = {}) {
+          const { groupId } = await node.createGroup({ name: "Plaza" });
+          const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+          const keys = Array.from({ length: members }, () => createIdentity().pubKeyZ32);
+          // A member the group's beacon names as a hub.
+          if (options.hub !== undefined) {
+            const groups = node["groups"] as { view(id: string): { id: string; members: unknown[] } | undefined };
+            const view = groups.view.bind(groups);
+            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g
+              : { ...g, members: [...g.members, { key: keys[options.hub!], role: "member", me: false, online: false, missing: 0, hub: true }] }; });
+          }
+          // A text in it a moment ago: it was in use more lately than the chats, each quiet for minutes.
+          if (options.used) expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
+          const edgeIds: string[] = [];
+          for (const key of keys) edgeIds.push(await openEdge(node, state, key));
+          await node["nativeQueues"].get("iroh/1");
+          return { groupId, edgeIds };
+        }
+
+        it("a group opened takes listeners for its edges from the chats unused longest, with every listener held by a chat", async () => {
+          // A Mac on a VPN (2026-10-18): eight chats held the eight listeners, and no group edge ever got one: "0 of 2 reachable".
+          const { node, linkOf, holders } = await allLive([4, 12, 3, 9, 5, 2.5, 6, 3]);
+          const { groupId, edgeIds } = await groupOf(node, 3);
+          const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await vi.waitFor(() => expect(onIroh()).toHaveLength(3));
+          expect(new Set(yielded(holders))).toEqual(new Set([holders[1], holders[3], holders[6]]));
+          node.setActiveLink({ linkId: null });
+        });
+
+        it("a group not on screen keeps one edge, to its hub; opened, it takes more as chats unused for two minutes let theirs go", async () => {
+          const { node, linkOf, holders } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+          const { groupId, edgeIds } = await groupOf(node, 10, { hub: 4, used: true });
+          const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+          await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[4]]));
+          expect(yielded(holders)).toEqual([holders[0]]);
+          const waiting = () => edgeIds.filter((id) => (node["edgeView"](groupId, linkOf(id).options.params.groupPeer!) as GroupEdgeView | undefined)?.noSlot);
+          expect(waiting()).toHaveLength(9);
+          // Opened: four more, from the chats quiet longest; the three used a minute ago keep theirs.
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await vi.waitFor(() => expect(onIroh()).toHaveLength(5));
+          await node["nativeQueues"].get("iroh/1");
+          expect(new Set(yielded(holders))).toEqual(new Set(holders.slice(0, 5)));
+          expect(onIroh()).toContain(edgeIds[4]);
+          node.setActiveLink({ linkId: null });
+        });
+
+        it("a group not on screen keeps the edge to the member seen last when it has no hub", async () => {
+          const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+          const { groupId } = await node.createGroup({ name: "Plaza" });
+          expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
+          const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+          // Two edges whose members were heard from before any listener was free, the second one later.
+          vi.spyOn(node["groups"], "tick").mockResolvedValue();
+          const [early, late] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+          const made = [early, late].map((key) => node["openEdge"](state as never, key));
+          const edgeIds = await Promise.all(made);
+          await node["nativeQueues"].get("iroh/1");
+          const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+          // Whichever took the floor first, the member seen last ends up holding it.
+          const now = Date.now();
+          node["links"].get(edgeIds[0])!.lastSyncAt = now - 60_000;
+          node["links"].get(edgeIds[1])!.lastSyncAt = now - 1_000;
+          for (const id of edgeIds) linkOf(id).availableTransports = ["webrtc/1"];
+          node["groupNativeRetryAt"] = 0;
+          for (const id of edgeIds) node["groupNativeWaiting"].add(id);
+          node["retryNative"]();
+          await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[1]]));
+        });
+
+        it("no thrash: a chat and a group both used within two minutes do not take each other's listener", async () => {
+          const { node, linkOf, holders } = await allLive([10, 1, 1, 1, 1, 1, 1, 1]);
+          const { groupId, edgeIds: [edge] } = await groupOf(node, 1);
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await vi.waitFor(() => expect(linkOf(edge).availableTransports).toContain("iroh/1"));
+          expect(yielded(holders)).toEqual([holders[0]]);
+          // Back to the chat it took from, a moment later: the group was on screen just now, and keeps its edge.
+          const chat = holders[0].options.params.id;
+          node.setActiveLink({ linkId: chat });
+          await node["nativeQueues"].get("iroh/1");
+          expect(linkOf(edge).availableTransports).toContain("iroh/1");
+          expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+          // And back to the group: the chat was just used too, and nothing moves.
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await node["nativeQueues"].get("iroh/1");
+          expect(linkOf(edge).availableTransports).toContain("iroh/1");
+          expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+          expect(yielded(holders)).toEqual([holders[0]]);
+          node.setActiveLink({ linkId: null });
+        });
+
+        it("a retry with many groups' edges waiting reads the view of each group it decides on, never every group's per edge", async () => {
+          // A CLI bot in many groups: each waiting edge's turn, per transport, built every group's whole view, every 15 s
+          // (1.8 s at twenty groups of fifteen members).
+          const { node } = await allLive([10, 9, 8, 7, 6, 5, 4, 3]);
+          for (let i = 0; i < 5; i++) await groupOf(node, 4);
+          expect(node["groupNativeWaiting"].size).toBeGreaterThan(10);
+          const groups = node["groups"];
+          const views = vi.spyOn(groups, "views"), view = vi.spyOn(groups, "view");
+          node["groupNativeRetryAt"] = 0;
+          node["anchorCheckAt"] = 0;
+          node["retryNative"]();
+          await node["nativeQueues"].get("iroh/1");
+          expect(view).toHaveBeenCalled();
+          expect(views).not.toHaveBeenCalled();
+        });
+
+        describe("both ends keep the same edge (ghostly-agents#1437)", () => {
+          type Edge = Holder;
+          const irohSaid = (edge: Edge) => edge.options.events.onPacketTransports(["iroh/1"], { "iroh/1": { id: "cd".repeat(32), relay: "https://relay.test./", addresses: [] } } as never);
+          /** An admin with these many chats live and three groups of two members each, made one after another. */
+          async function admin(chats: number) {
+            const started = await nativeStarted(...older().slice(0, chats));
+            const linkOf = (id: string) => started.linkOf(id) as unknown as Edge;
+            const groups = [];
+            for (let i = 0; i < 3; i++) groups.push(await groupOf(started.node, 2));
+            await started.node["nativeQueues"].get("iroh/1");
+            const onIroh = (ids: string[]) => ids.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            return { ...started, linkOf, groups, onIroh };
+          }
+
+          it("the admin answers the edge its third group's member keeps to it, past its own four group listeners", async () => {
+            // Zero's lab (bh-zero50): groups one and two held the admin's four group listeners, its third group kept
+            // the edge to the other member, and the edge the member kept to the admin met "no slot" for good.
+            const { node, linkOf, groups, onIroh } = await admin(2);
+            const [, , [first, second]] = groups.map((g) => g.edgeIds);
+            expect(onIroh(groups.flatMap((g) => g.edgeIds))).toHaveLength(5);
+            expect(onIroh([first, second])).toEqual([first]);
+            // Each member's packet says it holds a listener on its edge to the admin: the one it keeps.
+            irohSaid(linkOf(first));
+            irohSaid(linkOf(second));
+            await vi.waitFor(() => expect(onIroh([second])).toEqual([second]));
+            await node["nativeQueues"].get("iroh/1");
+            expect(onIroh(groups.flatMap((g) => g.edgeIds))).toHaveLength(6);
+          });
+
+          it("with every listener taken, it takes one from its own edge past a group's one, never from a chat", async () => {
+            const { node, linkOf, groups, onIroh } = await admin(3);
+            const chats = older().slice(0, 3).map((r) => linkOf(r.id));
+            for (const chat of chats) chat.canReleaseEndpoint.mockReturnValue(false);
+            const [[a1, a2], [b1, b2], [, second]] = groups.map((g) => g.edgeIds);
+            // Three chats, four group listeners and the third group's own: all eight taken.
+            expect(onIroh([a1, a2, b1, b2])).toHaveLength(4);
+            expect(onIroh([second])).toEqual([]);
+            irohSaid(linkOf(groups[2].edgeIds[0]));
+            irohSaid(linkOf(second));
+            await vi.waitFor(() => expect(onIroh([second])).toEqual([second]));
+            // One of the edges past their group's one gave its listener up, and no chat did.
+            expect(onIroh([a2, b2])).toHaveLength(1);
+            expect(onIroh([a1, b1])).toHaveLength(2);
+            for (const chat of chats) expect(chat.releaseEndpoint).not.toHaveBeenCalled();
+            await node["nativeQueues"].get("iroh/1");
+          });
+
+          it("a member whose kept edge gets no answer in twenty seconds keeps the next one, and the first gives its listener up", async () => {
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            const { groupId, edgeIds } = await groupOf(node, 3, { hub: 0, used: true });
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[0]]));
+            for (const id of edgeIds) linkOf(id).isDataLinkOpen = false;
+            // The member heard from last comes after the hub.
+            node["links"].get(edgeIds[2])!.lastSyncAt = Date.now() - 1_000;
+            const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
+            // Up for less than twenty seconds: it waits.
+            check();
+            expect(onIroh()).toEqual([edgeIds[0]]);
+            node["links"].get(edgeIds[0])!.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            check();
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[2]]));
+            expect(linkOf(edgeIds[0]).releaseEndpoint).toHaveBeenCalledWith("iroh/1");
+            expect(node["groupEdgesByRank"](groupId, undefined)[0].stored.id).toBe(edgeIds[2]);
+            // That one goes unanswered too: the group keeps the last one left.
+            node["links"].get(edgeIds[2])!.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            check();
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[1]]));
+            // Every other one passed over lately: the last stays, its listener kept.
+            node["links"].get(edgeIds[1])!.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(onIroh()).toEqual([edgeIds[1]]);
+            expect(linkOf(edgeIds[1]).releaseEndpoint).not.toHaveBeenCalled();
+          });
+
+          it("no move while the member holds a listener for it and is there, nor while another edge of the group is live", async () => {
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            const { edgeIds } = await groupOf(node, 3, { hub: 0, used: true });
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[0]]));
+            for (const id of edgeIds) linkOf(id).isDataLinkOpen = false;
+            const hub = node["links"].get(edgeIds[0])!;
+            hub.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            irohSaid(linkOf(edgeIds[0]));
+            hub.presence = { ...hub.presence, online: true };
+            const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
+            // Away, with another edge of the group live: the group is reachable through that one.
+            hub.presence = { ...hub.presence, online: false };
+            linkOf(edgeIds[1]).isDataLinkOpen = true;
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
+            expect(onIroh()).toEqual([edgeIds[0]]);
+          });
+        });
       });
     });
   });
@@ -730,6 +1080,23 @@ describe("files a contact sends", () => {
     expect(linkOf(chat.id).options.events.onFileIncoming({ id: "a", name: "x", size: 1, mime: "", timestamp: 3 })).toBe("duplicate file id");
   });
 
+  it("files finished before a restart carry no transfer in the state, after the session opens too; failed ones keep theirs", async () => {
+    // A view for each finished file went into every state the engine built: its cost grew with the chat's file history.
+    const chat = row();
+    await db.putLink(chat);
+    const blob = new Blob([new Uint8Array(8)]);
+    const record = (id: string, state: "done" | "failed") => ({ id, direction: "in" as const, file: { id, name: `${id}.bin`, size: 8, mime: "" }, state, confirmed: state === "done" ? 8 : 0, since: 1, agreed: true, ...(state === "failed" && { error: "Damaged" }) });
+    await fileStore.put({ id: `${chat.id}-in-old`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "old", transfer: { state: "done", transferred: 8, size: 8 } });
+    await fileStore.put({ id: `${chat.id}-in-w3`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "w3", transfer: { state: "done", transferred: 8, size: 8 }, wire3: record("w3", "done") });
+    await fileStore.put({ id: `${chat.id}-in-bad`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "bad", transfer: { state: "failed", transferred: 0, size: 8 }, wire3: record("bad", "failed") });
+    const { node, linkOf } = await started();
+    linkOf(chat.id).options.events.onFilesSession!(true);
+    const { transfers } = node.getState();
+    expect(transfers[`${chat.id}-in-old`]).toBeUndefined();
+    expect(transfers[`${chat.id}-in-w3`]).toBeUndefined();
+    expect(transfers[`${chat.id}-in-bad`]).toMatchObject({ state: "failed", error: "Damaged" });
+  });
+
   it("asked whether it holds a file, a chat that never took it reads none of its stored files", async () => {
     const chat = row();
     await db.putLink(chat);
@@ -904,6 +1271,19 @@ describe("text in a chat", () => {
     linkOf(chat.id).validateText.mockReturnValueOnce("Payment tokens are not text" as never);
     expect(await node.sendMessage({ linkId: chat.id, text: "cashuA" })).toMatchObject({ error: "Payment tokens are not text", refused: true });
     expect(await db.getMessages(chat.id)).toHaveLength(1);
+  });
+
+  it("a text within 16 KiB whose frame passes the contact's frame limit once encoded is refused before it is kept", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    // 16,384 UTF-8 bytes of control characters: six characters each in the frame's JSON, past the 60 K a session takes.
+    const controls = `j1 ${"\u0001".repeat(16_381)}`;
+    expect(await node.sendMessage({ linkId: chat.id, text: controls, timestamp: 4 }))
+      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true });
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    expect(linkOf(chat.id).sendMessage).not.toHaveBeenCalled();
+    // As many quotes (two characters each) fit, and go.
+    expect(await node.sendMessage({ linkId: chat.id, text: "\"".repeat(16_384), timestamp: 5 })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
   });
 
   it("the receipt of a message I sent reads that message, not the chat's whole history", async () => {
@@ -1108,7 +1488,13 @@ describe("what arrives from held storage", () => {
     expect(await host.receiveFile(chat.id, wire("a"), bytes("held"), "d")).toBe("duplicate file id");
     const [message] = await db.getMessages(chat.id);
     expect(message).toMatchObject({ id: "peer_a", via: "hold" });
-    expect(await fileStore.get(message.file!.id)).toMatchObject({ direction: "in", digest: "d" });
+    const stored = await fileStore.get(message.file!.id);
+    expect(stored).toMatchObject({ direction: "in", digest: "d" });
+    // In file storage as every other file, not a Blob in its record: the CLI keeps the files store in memory, and in
+    // its snapshot, so 60 held pictures took a daemon from 172 to 650 MB.
+    expect(stored!.blob).toBeUndefined();
+    expect(stored!.bytes).toBe("idb");
+    expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
   });
 });
 
@@ -1221,6 +1607,25 @@ describe("private groups through the engine", () => {
     expect(edge().options.resume).toBe("webrtc/1");
   });
 
+  it("an edge's link counts a member never seen from when the edge was made, not from each start, as a chat's does", async () => {
+    // Counted from each start, an edge to a member away for a day (no packet at the relays) was read every 4 s for the
+    // first ten minutes of every start, as an invite just sent: 16 such members of a group asked the relays for 240 a minute.
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+    const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+    const edge = () => links.filter((l) => l.options.params.id === edgeId).at(-1)!;
+    // Made just now (a member just admitted): its join is still awaited.
+    expect(edge().options.madeAt).toBe((await saved(edgeId))!.createdAt);
+    // Made a month ago: after a restart, nothing is awaited.
+    const monthAgo = Date.now() - 30 * 86_400_000;
+    await db.putLink({ ...(await saved(edgeId))!, createdAt: monthAgo });
+    await node.shutdown();
+    nodes.splice(nodes.indexOf(node), 1);
+    await started();
+    expect(edge().options.madeAt).toBe(monthAgo);
+  });
+
   // covers: groups.native-links
   describe("native transports on a group's links (WISP 902 § Transports)", () => {
     const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
@@ -1244,25 +1649,25 @@ describe("private groups through the engine", () => {
       const edgeId = await openEdge(node, state,createIdentity().pubKeyZ32);
       await vi.waitFor(() => expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBe("Iroh relay unreachable"));
       // The next tick before the wait is over: nothing yet.
-      node["retryGroupNative"]();
+      node["retryNative"]();
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(iroh).toHaveBeenCalledOnce();
       // One retry period later, the tick starts it again, and the edge has it.
       const now = Date.now();
       const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16_000);
       onTestFinished(() => { clock.mockRestore(); });
-      node["retryGroupNative"]();
+      node["retryNative"]();
       await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledOnce());
       expect(iroh).toHaveBeenCalledTimes(2);
       expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBeUndefined();
       // Failed again (the network went down once more): the network coming back starts it at the next tick.
       edgeOf(edgeId).availableTransports = ["webrtc/1"];
       iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
-      node["groupNativeFailed"].clear();
+      node["nativeFailed"].clear();
       void node["ensureNativeEndpoints"](edgeId);
-      await vi.waitFor(() => expect(node["groupNativeFailed"].has(edgeId)).toBe(true));
+      await vi.waitFor(() => expect(node["nativeFailed"].has(edgeId)).toBe(true));
       node.wake({ network: true });
-      node["retryGroupNative"]();
+      node["retryNative"]();
       await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(2));
     });
 
@@ -1339,6 +1744,36 @@ describe("private groups through the engine", () => {
       expect(iroh).toHaveBeenCalledOnce();
     });
 
+    // A web member already in the group, its VPN on: each edge's offer is answered and connects nothing. The edge waited
+    // for ICE to give up (15 s in Chromium, 90 s where the connection never says `failed`) before it went native, and the
+    // member's group messages waited all that while, where its 1:1 chats went on over Iroh's relay in seconds (2026-10-16).
+    it("an edge on the web whose answered offer connects nothing goes on over Iroh's relay at once, not when ICE gives up", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      irohWeb.start.mockImplementation(async () => endpoint());
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, irohWeb: true });
+      nodes.push(node);
+      await node.start();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const stalled = await openEdge(node, state, createIdentity().pubKeyZ32);
+      await node["nativeQueue"];
+      const first = edgeOf(stalled);
+      expect(first.options.rtcAvailable).toBe(true);
+      expect(irohWeb.start).not.toHaveBeenCalled();
+      first.options.events.onRtcStalled();
+      await vi.waitFor(() => expect(edgeOf(stalled)).not.toBe(first));
+      // No goodbye: the member must not take the restart for a leave.
+      expect(first.stop).toHaveBeenCalledWith(false);
+      const again = edgeOf(stalled);
+      expect(again.options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(again.registerEndpoint).toHaveBeenCalledOnce());
+      expect(irohWeb.start).toHaveBeenCalledOnce();
+      // A stall is no evidence about this device's network: the notice stays as it was.
+      expect(node.getState().transport.directBlocked).toBeUndefined();
+    });
+
     // A member whose app quit in the middle of the attempt (one-shot CLI commands while its daemon was down) looked like a
     // network that blocks: its edge stayed native for this whole run, and past 4 such edges members stayed unreachable.
     it("an edge gone native tries WebRTC again once its member is seen online after a packet said it was gone, not while it stays online", async () => {
@@ -1380,6 +1815,86 @@ describe("private groups through the engine", () => {
       expect(iroh).toHaveBeenCalledTimes(2);
     });
 
+    // A member on a VPN, in a group, the VPN turned on with the edges live: every WebRTC connection closed and none came
+    // back. The edges this side offers on said so (`no-path`) and went native; one it answers on said nothing, and stayed
+    // on WebRTC, down, while the member's 1:1 chats went on over Iroh's relay (2026-10-16).
+    it("an open edge whose WebRTC died goes on over a native transport once this device's attempts say its network blocks direct connections", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const offered: string[] = [];
+      for (let i = 0; i < 3; i++) offered.push(await openEdge(node, state, createIdentity().pubKeyZ32));
+      const answered = await openEdge(node, state, createIdentity().pubKeyZ32);
+      await node["nativeQueue"];
+      const quiet = edgeOf(answered);
+      for (const id of [...offered, answered]) edgeOf(id).options.events.onDirectEvidence("open");
+      // The VPN comes on: each connection ends.
+      for (const id of [...offered, answered]) { edgeOf(id).isDataLinkOpen = false; edgeOf(id).options.events.onDirectEvidence("closed"); }
+      await node["nativeQueue"];
+      expect(edgeOf(answered)).toBe(quiet);
+      // This side's offers on three edges are answered and connect nothing.
+      for (const id of offered) {
+        const first = edgeOf(id);
+        first.options.events.onDirectEvidence("no-path");
+        await vi.waitFor(() => expect(edgeOf(id)).not.toBe(first));
+      }
+      expect(node.getState().transport.directBlocked).toBe(true);
+      // The edge it answers on goes native too, with no goodbye.
+      await vi.waitFor(() => expect(edgeOf(answered)).not.toBe(quiet));
+      expect(quiet.stop).toHaveBeenCalledWith(false);
+      expect(edgeOf(answered).options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(edgeOf(answered).registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(4);
+    });
+
+    // A member's packet that carries a WebRTC answer and its `_tr` can leave its `_svc` out for size, and reads as gone;
+    // the next one reads as back. Each such pair put the edge back on WebRTC, which died again on the VPN (2026-10-16).
+    it("an edge gone native does not go back to WebRTC on a return once WebRTC failed again after one, or once it went live natively", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const presence = (online: boolean, at: number) => ({ online, lastPacketAt: at, services: online ? [] : null });
+      const flicker = async (link: ReturnType<typeof edgeOf>, at: number) => {
+        link.options.events.onPresence(presence(false, at));
+        link.options.events.onPresence(presence(true, at + 1));
+        await node["nativeQueue"];
+      };
+      const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+      const first = edgeOf(edgeId);
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(first));
+      // Gone and back once: WebRTC again, as before.
+      await flicker(edgeOf(edgeId), 1);
+      await vi.waitFor(() => expect(edgeOf(edgeId).options.rtcAvailable).toBe(true));
+      // It failed again: native, and there it stays, whatever the member's packets say.
+      edgeOf(edgeId).options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId).options.rtcAvailable).toBe(false));
+      const held = edgeOf(edgeId);
+      await flicker(held, 3);
+      await flicker(held, 5);
+      expect(edgeOf(edgeId)).toBe(held);
+
+      // Another edge gone native whose session opened over Iroh: the member is reachable, WebRTC is not.
+      const liveId = await openEdge(node, state, createIdentity().pubKeyZ32);
+      const rtc = edgeOf(liveId);
+      rtc.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(liveId)).not.toBe(rtc));
+      const native = edgeOf(liveId);
+      native.options.events.onDataLinkState("open");
+      native.options.events.onDataLinkState("idle");
+      await flicker(native, 7);
+      expect(edgeOf(liveId)).toBe(native);
+      // The network changed: what failed on the old one says nothing of this one, and a return tries WebRTC again.
+      node.wake({ network: true });
+      await flicker(native, 9);
+      await vi.waitFor(() => expect(edgeOf(liveId)).not.toBe(native));
+      expect(edgeOf(liveId).options.rtcAvailable).toBe(true);
+    });
+
     // libdatachannel's race on a loaded core refused every answer to the edge's offers, through the pauses after them:
     // the next offer would wait minutes of backoff while the member is there (meshSignals on CI, 2026-10-11).
     it("an edge whose answers WebRTC here keeps refusing goes on over a native transport, as one whose WebRTC connected nothing", async () => {
@@ -1406,6 +1921,37 @@ describe("private groups through the engine", () => {
       first.options.events.onAnswersRefused();
       await node["nativeQueue"];
       expect(edgeOf(refused)).toBe(again);
+      expect(iroh).toHaveBeenCalledOnce();
+    });
+
+    // A joiner or an admin behind a VPN: the admin's packet was seen on the entry session, which never went live, and the
+    // join stayed at "Let in: getting the group's keys" until it was cancelled (2026-10-16).
+    it.each(["guest", "host"] as const)("an entry session (%s side) whose WebRTC connects nothing goes on over a native transport, as an edge does", async (role) => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      vi.spyOn(node["groups"], "tick").mockResolvedValue();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, role, me.seedB64, other.pubKeyZ32);
+      await node["nativeQueue"];
+      expect(iroh).not.toHaveBeenCalled();
+      const first = edgeOf(entryId);
+      expect(first.options.rtcAvailable).toBe(true);
+      // Said in the join's trace, which a CLI daemon writes to its log.
+      const traced: string[] = [];
+      setJoinTraceSink((line) => traced.push(JSON.parse(line).step));
+      onTestFinished(() => { setJoinTraceSink(null); });
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(entryId)).not.toBe(first));
+      expect(first.stop).toHaveBeenCalledWith(false);
+      const again = edgeOf(entryId);
+      expect(again.options.rtcAvailable).toBe(false);
+      // Still the one admission it carries, on the same pinned session.
+      expect(again.options).toMatchObject({ oneShot: true, paymentMethods: { cashu: false } });
+      expect(again.expectPeer).toHaveBeenCalled();
+      expect(traced).toContain("link.native");
+      await vi.waitFor(() => expect(again.registerEndpoint).toHaveBeenCalledOnce());
       expect(iroh).toHaveBeenCalledOnce();
     });
 
@@ -1521,7 +2067,7 @@ describe("private groups through the engine", () => {
       expect(host.peerRoom(groupId)).toBeUndefined();
     });
 
-    it("an app whose Iroh is the browser build holds twelve Iroh listeners for group links: six members with no WebRTC are all reached, the thirteenth waits", async () => {
+    it("an app whose Iroh is the browser build holds twelve Iroh listeners for group links, and answers past them the edge each member keeps to it", async () => {
       // As the CLI runs (the web app the same, its HyperDHT through a relay): Iroh's wasm, HyperDHT of its own, WebRTC.
       vi.stubGlobal("RTCPeerConnection", class {});
       onTestFinished(() => { vi.unstubAllGlobals(); });
@@ -1550,9 +2096,12 @@ describe("private groups through the engine", () => {
       // HyperDHT keeps its four: a link needs one native transport, and none of the six waits.
       await vi.waitFor(() => expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS));
       expect(waiting()).toHaveLength(0);
+      // Thirteen in all, each keeping its edge to its admin (its packet says it listens there): each is answered, past
+      // the twelve a group's other edges may hold (ghostly-agents#1437), on one transport each.
       await join(7);
-      await vi.waitFor(() => expect(waiting()).toHaveLength(1));
-      expect(running("iroh/1")).toHaveLength(GROUP_IROH_WEB_SLOTS);
+      await vi.waitFor(() => expect(running("iroh/1")).toHaveLength(GROUP_IROH_WEB_SLOTS + 1));
+      await node["nativeQueues"].get("hyperdht/1");
+      expect(waiting()).toHaveLength(0);
       expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS);
       // With no WebRTC (GHOSTLY_WEBRTC=0), those twelve are what its groups may hold in all.
       vi.unstubAllGlobals();

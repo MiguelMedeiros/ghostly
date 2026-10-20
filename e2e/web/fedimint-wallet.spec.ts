@@ -95,7 +95,10 @@ test("Fedimint on regtest: join by invite, ecash in over the gateway, notes out 
   await expect(panel(bob).getByTestId("fedimint-redeemed")).toHaveText("Redeemed 1,000 test sats.", { timeout: 90_000 });
   // Redeeming costs the federation's fee: the notes' face value, less a few sats.
   await expect.poll(() => sats(bob), { timeout: 30_000 }).toBeGreaterThan(990);
+  // The notes stay on screen until Alice closes them: another amount alone does not take them, or their Take back, away.
   await panel(alice).getByTestId("fedimint-send-amount").fill("500");
+  await expect(panel(alice).getByTestId("fedimint-notes-out")).toHaveText(notes);
+  await panel(alice).getByTestId("fedimint-notes-done").click();
   await panel(alice).getByTestId("fedimint-spend").click();
   await expect(panel(alice).getByTestId("fedimint-notes-out")).toBeVisible();
   await expect.poll(() => sats(alice), { timeout: 30_000 }).toBe(funded - 1_500);

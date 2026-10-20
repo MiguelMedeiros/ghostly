@@ -276,4 +276,8 @@ test("a contact who shared no proof: the header still has their Ghostly mark, wh
   await expect(panel.getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
   expect((await box(panel)).width).toBeCloseTo(390, 0);
   await shot(bob, "ghostly-phone-panel");
+  // Closed, it gives the focus back to ⋮, which it was opened from (the menu's row is gone by then).
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId("chat-options")).toBeFocused();
 });

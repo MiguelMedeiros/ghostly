@@ -102,6 +102,8 @@ export function assertTokenUnits(amount: number): void {
 export function assertWholeSats(amount: number): void {
   if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 2_100_000_000_000_000) throw new Error("Enter a positive whole amount in sats");
 }
+/** Arkade and Bark addresses are bech32m with `ark` on Bitcoin and `tark` on the test networks (one case only). */
+export const arkAddressPrefix = (network: string) => network === "bitcoin" ? "ark1" : "tark1";
 export function validatePaymentTarget(value: unknown, now = Date.now()): PaymentTarget {
   if (!value || typeof value !== "object") throw new Error("Invalid payment target");
   const t = value as PaymentTarget;
@@ -126,6 +128,7 @@ export function validatePaymentTarget(value: unknown, now = Date.now()): Payment
   // Second's Ark servers run on Bitcoin, signet and regtest only.
   if (t.method === "bark" && !["bitcoin", "signet", "regtest"].includes(t.network)) throw new Error("Unsupported Bark network");
   if (typeof t.address !== "string" || !t.address || t.address.length > 4096 || typeof t.provider !== "string" || t.provider.length > 512) throw new Error("Invalid payment destination");
+  if ((t.method === "arkade" || t.method === "bark") && ((t.address !== t.address.toLowerCase() && t.address !== t.address.toUpperCase()) || !t.address.toLowerCase().startsWith(arkAddressPrefix(t.network)))) throw new Error(`That is not an Ark address on ${t.network === "bitcoin" ? "Bitcoin" : t.network}`);
   if (t.method !== "bitcoin" && t.method !== "fedimint" && t.method !== "spark") {
     const url = new URL(t.provider);
     if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) throw new Error("Use HTTPS or a local test provider");

@@ -28,17 +28,20 @@ export class NodeFileBytes implements FileBytes {
     return handle;
   }
 
+  /** Copies `source` in and gives its digest, hashed as it is copied (as the web's stores do): the file is read once, not twice. */
   async stage(id: string, source: Blob, onProgress?: (copied: number) => void): Promise<string> {
     await this.remove(id);
     try {
+      const hash = createHash("sha256");
       for (let offset = 0; offset < source.size; offset += FILE_BYTES_STEP) {
         const bytes = new Uint8Array(await source.slice(offset, offset + FILE_BYTES_STEP).arrayBuffer());
+        hash.update(bytes);
         await this.append(id, offset, bytes);
         onProgress?.(offset + bytes.length);
       }
       if (source.size === 0) await this.append(id, 0, new Uint8Array());
       await this.close(id);
-      return await this.digest(id);
+      return digestText(new Uint8Array(hash.digest()));
     } catch (error) {
       await this.remove(id).catch(() => {});
       throw error;

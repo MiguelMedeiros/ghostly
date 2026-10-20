@@ -6,7 +6,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { SharePicker } from "../../pages/SharePicker";
 import { groupChat } from "../../lib/chatMute";
 import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
-import { saveSession } from "../../lib/storage";
+import { saveSession, setSessionDraft } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -67,6 +67,21 @@ describe("in the composer", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("closing the sheet puts the focus in the message field, where the shared text is, though nothing had it as the sheet opened", async () => {
+    const { user } = renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    act(() => {
+      receiveShare(share({ text: "Look at this", files: [file("a.txt"), file("b.txt"), file("c.txt")] }));
+      sendShareTo("chat-1");
+    });
+    await screen.findByTestId("attachment-sheet");
+    expect(screen.getByTestId("attachment-caption")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…")).toHaveFocus();
+  });
+
   it("files not read yet (the Android app's) are read when the composer takes them, not before", async () => {
     const read = vi.fn(async () => [file("photo.jpg")]);
     renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
@@ -86,6 +101,64 @@ describe("in the composer", () => {
     });
     expect(await screen.findByText(/Nothing pasted under that token/)).toBeInTheDocument();
     expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+  });
+
+  it("a text longer than the field takes goes whole as a text file on the sheet, the draft left as it was", async () => {
+    const long = "a".repeat(19_999) + "Z";
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} maxLength={16_384} textBytes={16_384} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ text: long, files: [file()] }));
+      sendShareTo("chat-1");
+    });
+    const sheet = await screen.findByTestId("attachment-sheet");
+    const items = within(sheet).getAllByTestId("attachment-item");
+    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Shared text.txt"), expect.stringContaining("ghost.txt")]);
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("");
+  });
+
+  it.each([["Japanese", "日本語".repeat(2_000)], ["emoji", "👻".repeat(5_000)]])("a %s text under the field's length but over the message's bytes goes as a text file too", async (_, text) => {
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} maxLength={16_384} textBytes={16_384} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ text }));
+      sendShareTo("chat-1");
+    });
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("Shared text.txt");
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("");
+  });
+
+  it("a text that fits alone but not after the draft goes as a text file, the draft left as it was", async () => {
+    setSessionDraft("chat-joined", "a".repeat(10_000));
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-joined" onSend={onSend} onSendFile={onSendFile} maxLength={16_384} textBytes={16_384} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ text: "b".repeat(10_000) }));
+      sendShareTo("chat-joined");
+    });
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("Shared text.txt");
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("a".repeat(10_000));
+  });
+
+  it("a draft over the cap, where files cannot go, takes every edit that shortens it and none that grows it", async () => {
+    const { user } = renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} maxLength={16_384} textBytes={16_384} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ text: "a".repeat(16_499) + "Z" }));
+      sendShareTo("chat-1");
+    });
+    const field = screen.getByPlaceholderText<HTMLTextAreaElement>("Message…");
+    expect(field.value).toHaveLength(16_500);
+    await user.click(field);
+    field.setSelectionRange(field.value.length, field.value.length);
+    await user.keyboard("{Backspace}");
+    expect(field.value).toHaveLength(16_499);
+    expect(field.value.endsWith("Z")).toBe(false);
+    await user.keyboard("b");
+    expect(field.value).toHaveLength(16_499);
+    field.setSelectionRange(0, 3_000);
+    await user.keyboard("{Backspace}");
+    expect(field.value).toHaveLength(13_499);
+    await user.keyboard("b");
+    expect(field.value).toHaveLength(13_500);
   });
 
   it("another chat's composer leaves it alone", () => {
@@ -152,12 +225,77 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-files")).toHaveAttribute("dir", "auto");
   });
 
+  it("wraps a long one-word file name inside its card, so its end and extension stay on screen", () => {
+    const name = "IMG_20261013_021233_holiday_beach_sunset_camera_backup_final_version_2.jpg";
+    receiveShare(share({ files: [file(name)] }));
+    picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent(name);
+    expect(screen.getByTestId("share-files").className).toContain("[overflow-wrap:anywhere]");
+  });
+
   it("Cancel drops the share and goes home", async () => {
     receiveShare(share({ text: "never mind" }));
     const { user } = picker();
     await user.click(screen.getByTestId("share-cancel"));
     expect(incomingShare()).toBeNull();
     expect(screen.getByTestId("where")).toHaveTextContent("/");
+  });
+
+  it("names the files too large to share and how to send them; with nothing else, offers no chat", () => {
+    receiveShare(share({ files: [file("a.png")], leftOut: ["VID_1.mp4"] }));
+    const { unmount } = picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent("a.png");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
+    expect(screen.getByTestId("share-left-out-next")).toHaveTextContent("Open a chat and send it with + → Document.");
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+    unmount();
+
+    // Only names, with no share waiting: said alone.
+    resetIncomingShare();
+    receiveShare(share({ leftOut: ["VID_1.mp4", "VID_2.mp4"] }));
+    picker();
+    expect(screen.queryByTestId("share-none")).toBeNull();
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4, VID_2.mp4");
+    expect(screen.queryByTestId("share-summary")).toBeNull();
+    expect(screen.queryByTestId("share-chat")).toBeNull();
+    expect(screen.getByTestId("share-cancel")).toBeInTheDocument();
+  });
+
+  it("names the files it could not read apart from those too large, also when that was all of a later share", () => {
+    receiveShare(share({ text: "look", leftOut: ["VID_1.mp4"], unread: ["IMG_2.jpg"] }));
+    // A later share whose only file could not be read: named with the share that waits, which stays.
+    receiveShare(share({ unread: ["IMG_3.jpg"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
+    expect(screen.getByTestId("share-unread-title")).toHaveTextContent("Couldn't read: IMG_2.jpg, IMG_3.jpg");
+    expect(screen.getByTestId("share-unread-next")).toHaveTextContent("Share it again from its app, or open a chat and send it with + → Document.");
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+  });
+
+  it("a share too large to read (the web app's, over 64 MB): says so without a name, and how to send it", () => {
+    vi.useFakeTimers();
+    try {
+      receiveShare(share({ leftOut: [""] }));
+      picker();
+      act(() => { vi.advanceTimersByTime(6000); });
+      expect(screen.queryByTestId("share-none")).toBeNull();
+      expect(screen.getByTestId("share-left-out-title").textContent).toBe("Too large to share here");
+      expect(screen.getByTestId("share-left-out-next")).toHaveTextContent("Open a chat and send it with + → Document.");
+      expect(screen.queryByTestId("share-chat")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("names the files the device had no room to copy as such, not as unread, also when that was all of a later share", () => {
+    receiveShare(share({ text: "look", noRoom: ["VID_1.mp4"] }));
+    receiveShare(share({ noRoom: ["VID_2.mp4"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-no-room-title")).toHaveTextContent("No room on this device for: VID_1.mp4, VID_2.mp4");
+    expect(screen.getByTestId("share-no-room-next")).toHaveTextContent("Free some space, then share it again.");
+    expect(screen.queryByTestId("share-unread")).toBeNull();
   });
 
   it("with nothing shared, it says so once it has waited", () => {

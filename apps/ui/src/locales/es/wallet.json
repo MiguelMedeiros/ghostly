@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "Esta factura caducó: ya nadie puede pagarla.",
     "invoiceFor": "Factura de {{amount}}",
     "makePrimary": "Hacer principal",
     "mints": "Mints",
@@ -585,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "sats de prueba"
   },
+  "send": {
+    "balance": "Saldo: {{amount}} {{unit}}",
+    "cameraUnavailable": "Cámara no disponible. Pega, escribe o elige una imagen.",
+    "clipboardEmpty": "Nada que pegar. Copia antes una factura o una dirección.",
+    "clipboardUnavailable": "No se pudo leer el portapapeles. Pégalo o escríbelo abajo.",
+    "image": "Elegir imagen",
+    "max": "Máx.",
+    "noAmount": "Esta factura no tiene importe. Pide una con el importe.",
+    "paste": "Pegar",
+    "scan": "Escanear"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Creando tus billeteras de Mainnet…",
@@ -725,8 +737,8 @@
     "gas": "El faucet se paga con un poco de Sepolia ETH para el gas: envía algo a la dirección de esta billetera primero. {{link}}",
     "gasLink": "Abrir un faucet de Sepolia ETH",
     "get": "Obtener monedas de prueba",
-    "got": "+{{amount}} {{unit}}",
-    "gotPending": "+{{amount}} {{unit}} en camino: aparece aquí en unos segundos",
+    "got": "{{amount}} {{unit}}",
+    "gotPending": "{{amount}} {{unit}} en camino: aparece aquí en unos segundos",
     "open": "Abrir faucet",
     "openHint": "{{name}}. {{why}}",
     "openHintThen": "{{name}}. {{why}} {{then}}",

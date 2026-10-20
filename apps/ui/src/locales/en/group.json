@@ -20,6 +20,12 @@
     "sendFailed": "Could not send",
     "shareHint": "Share the group's link",
     "shareLink": "Share link",
+    "takenBack": "{{contact}} took back the invitation to {{name}}",
+    "takenBackNext": "Ask {{contact}} for a new invitation or the group's link.",
+    "takenBackNextUnknown": "Ask the group's admin for a new invitation or the group's link.",
+    "takenBackNoName": "{{contact}} took back the invitation to the group",
+    "takenBackUnknown": "The invitation to {{name}} was taken back",
+    "takenBackUnknownNoName": "The invitation to the group was taken back",
     "unnamed": "A group"
   },
   "connection": {
@@ -27,6 +33,7 @@
     "communityConnecting": "Connecting to the group…",
     "communityNote": "Your app links to one of the group's hubs (members' apps that relay), and the hubs pass every message on to everyone. A member who was away gets what they missed when they are back.",
     "connecting": "Connecting to members…",
+    "hubsNote": "Past 16 members, your app links to a few members only: the admin and the group's hubs, members' apps that pass messages on to the rest. A hub sees who talks when, not what is said. Group links use WebRTC, and Iroh or HyperDHT with a member whose app has no WebRTC (Ghostly Desktop on Linux). A member who is not reachable gets what they missed when they are back.",
     "label": "Group connection",
     "labelWith": "Group connection: {{state}}",
     "noWebrtc": "Groups can't connect from this app yet",
@@ -50,7 +57,7 @@
     "hint": "You get a link to share: whoever opens it joins. Everyone in the group reads everything sent while they are in it.",
     "kind": "Kind of group",
     "private": "Private",
-    "privateHint": "Up to 32 people, from your contacts or your link, which works while your app is open. Everyone connects to everyone.",
+    "privateHint": "Up to 32 people, from your contacts or your link, which works while your app is open. Up to 16 connect to each other directly; past that, members' apps that stay on (hubs) pass messages on.",
     "title": "New group"
   },
   "error": {
@@ -63,6 +70,7 @@
     "forked": "The membership history forked",
     "gone": "{{name}} is no longer a member",
     "joined": "{{name}} joined",
+    "left": "{{name}} left",
     "pictureChanged": "{{name}} changed the group's picture",
     "pictureChangedNoName": "The group's picture was changed",
     "pictureChangedYou": "You changed the group's picture",
@@ -79,9 +87,12 @@
   },
   "forget": {
     "invitation": "The invitation goes from this device. {{contact}} is told you declined.",
+    "invitationKept": "The invitation and the group's history go from this device. {{contact}} is told you declined.",
+    "invitationKeptUnknown": "The invitation and the group's history go from this device. The contact who sent it is told you declined.",
     "invitationUnknown": "The invitation goes from this device. The contact who sent it is told you declined.",
     "joining": "You stop asking to join, and the group goes from this device.",
-    "kept": "The group and its history go from this device."
+    "kept": "The group and its history go from this device.",
+    "takenBack": "The invitation goes from this device. It was taken back, so nobody is told."
   },
   "hubs": {
     "auto": "Hub if always on",
@@ -122,6 +133,8 @@
   "leave": {
     "blocked": "Nobody is online to become admin",
     "blockedCommunity": "Nobody is online to take your leave",
+    "blockedCommunityAdminForgetNext": "Wait for a member to be online, or remove the members first, or make one of them admin.",
+    "blockedCommunityAdminNext": "Wait for a member to be online, or remove the members first.",
     "blockedCommunityNext": "Try again in a moment.",
     "blockedNext": "Make someone admin, or wait for a member.",
     "body": "The group and its history go from this device. You will not read what is said after, and to come back someone has to let you in again.",
@@ -144,6 +157,7 @@
     "disableTitle": "Turn the link off?",
     "enable": "Turn on the link",
     "enableFailed": "Could not turn the link on",
+    "endsOnHandover": "The link shared so far stops working. {{name}} can share a new one.",
     "full": "The group is full ({{count}} of {{count}}). Nobody joins until someone leaves.",
     "fullShort": "The group is full",
     "hideQr": "Hide QR",
@@ -210,7 +224,7 @@
     "members": "Members…",
     "rotate": "Rotate keys"
   },
-  "readNote": "Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go directly to each member; whoever was away gets what they missed from any member who has it (the group's last {{count}} messages) when they meet again.",
+  "readNote": "Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go to each member; whoever was away gets what they missed from any member who has it (the group's last {{count}} messages) when they meet again.",
   "readNoteCommunity": "Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",
   "remove": {
     "body": "They won't get the group's new messages.",

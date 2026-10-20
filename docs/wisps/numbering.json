@@ -288,6 +288,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "none",
+    "id": "313",
+    "oldFile": "3xx-x401.md",
+    "file": "3xx-x401.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "13",
     "id": "400",
     "oldFile": "13-chat.md",
@@ -439,6 +448,15 @@
     "kind": "Profile",
     "displayNumber": "801",
     "numberAssignment": "defined"
+  },
+  {
+    "oldId": "none",
+    "id": "802",
+    "oldFile": "8xx-contact-links.md",
+    "file": "8xx-contact-links.md",
+    "kind": "Profile",
+    "displayNumber": "8xx",
+    "numberAssignment": "unassigned"
   },
   {
     "oldId": "21",

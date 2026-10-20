@@ -3,8 +3,8 @@
  * call written down with the app reference the broker gave it, so a test sees which app the broker took a request for.
  */
 import type { AppFrameEvent, AppSendError } from "@ghostly/core";
-import type { MiniAppJson } from "@ghostly/core/miniApp";
-import type { AppsPlatform } from "../platform";
+import type { MiniAppJson, MiniAppLinkedFile } from "@ghostly/core/miniApp";
+import type { AppRangeAsk, AppRangesHost, AppsPlatform } from "../platform";
 
 export interface MemoryHostCall {
   op: string;
@@ -26,6 +26,18 @@ export interface MemoryHost extends AppsPlatform {
   receive(linkId: string, frame: AppFrameEvent): void;
   /** What `chat.send` answers next (null: it went). */
   sendResult: AppSendError | null;
+  /** What the person picks at the next `files.pick`: these files (path and bytes), or nothing (`cancelled`). */
+  nextPick: { path: string; bytes: Uint8Array; modified?: number }[] | "cancel";
+  /** The links each app keeps, by reference: the entry, its bytes now (a test changes them to make it `changed`). */
+  readonly linked: Map<string, Map<string, { entry: MiniAppLinkedFile; bytes: Uint8Array | null }>>;
+  /** The read lane: what the contact's app serves, by serve id (its bytes), as `remote.read` reads it. */
+  readonly remote: Map<string, Uint8Array>;
+  /** What this side's apps serve now, by serve id. */
+  readonly serves: Map<string, { linkId: string; ref: string; file: string }>;
+  /** What `ranges.serve` answers next (null: it serves). */
+  serveResult: "not-open" | "offline" | "peer-closed" | null;
+  /** The contact's app asks a range of a serve: what the broker answered. */
+  askRange(linkId: string, ask: AppRangeAsk): Promise<Parameters<AppRangesHost["answer"]>[1]>;
 }
 
 /** The chat app id this host gives an app in a chat: not the real derivation, just one per chat and app. */
@@ -42,6 +54,17 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
     const key = `${ref} ${scope}`;
     let map = stored.get(key);
     if (!map) stored.set(key, (map = new Map()));
+    return map;
+  };
+  const linked: MemoryHost["linked"] = new Map();
+  const remote: MemoryHost["remote"] = new Map(), serves: MemoryHost["serves"] = new Map();
+  const asks = new Set<(linkId: string, ask: AppRangeAsk) => void>();
+  const answers = new Map<string, (answer: Parameters<AppRangesHost["answer"]>[1]) => void>();
+  let nextServe = 0;
+  let nextId = 0;
+  const linksOf = (ref: string) => {
+    let map = linked.get(ref);
+    if (!map) linked.set(ref, (map = new Map()));
     return map;
   };
   const host: MemoryHost = {
@@ -81,6 +104,61 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
       onFrame: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
       peer: (linkId, app) => peers.get(`${linkId} ${app}`) ?? null,
     },
+    nextPick: "cancel",
+    linked,
+    linkedFiles: {
+      pick: async (ref, _title, options) => {
+        calls.push({ op: "files.pick", ref, key: `${options.folder ? "folder" : "files"} ${options.accept.join(",")}` });
+        const picked = host.nextPick;
+        host.nextPick = "cancel";
+        if (picked === "cancel") throw new Error("cancelled: Nothing was picked");
+        const links = linksOf(ref);
+        return picked.map(({ path, bytes, modified = 1 }) => {
+          const id = `link${String(nextId++).padStart(18, "0")}`;
+          const entry: MiniAppLinkedFile = { id, path, size: bytes.length, modified, available: true };
+          links.set(id, { entry, bytes });
+          return entry;
+        });
+      },
+      list: async (ref, _title) => { calls.push({ op: "files.list", ref }); return [...linksOf(ref).values()].map((l) => l.entry); },
+      entry: async (ref, id) => { calls.push({ op: "files.entry", ref, key: id }); return linksOf(ref).get(id)?.entry ?? null; },
+      read: async (ref, id, offset, length) => {
+        calls.push({ op: "files.read", ref, key: id });
+        const link = linksOf(ref).get(id);
+        if (!link || !link.bytes) throw new Error("gone: No such file");
+        if (link.bytes.length !== link.entry.size) throw new Error("changed: The file changed");
+        return link.bytes.slice(offset, offset + length);
+      },
+      forget: async (ref, id) => {
+        calls.push({ op: "files.forget", ref, key: id });
+        if (id === "all") linksOf(ref).clear();
+        else linksOf(ref).delete(id);
+      },
+    },
+    remote,
+    serves,
+    serveResult: null,
+    ranges: {
+      serve: async (linkId, ref, file) => {
+        calls.push({ op: "ranges.serve", ref, linkId, key: file });
+        if (host.serveResult) return { error: host.serveResult };
+        const serve = `serve${String(nextServe++).padStart(17, "0")}`;
+        serves.set(serve, { linkId, ref, file });
+        return { serve };
+      },
+      unserve: async (linkId, serve) => { calls.push({ op: "ranges.unserve", ref: serves.get(serve)?.ref ?? "", linkId, key: serve }); serves.delete(serve); },
+      read: async (linkId, ref, serve, offset, length) => {
+        calls.push({ op: "ranges.read", ref, linkId, key: serve });
+        const bytes = remote.get(serve);
+        return bytes ? { bytes: bytes.slice(offset, offset + length), size: bytes.length } : { error: "not-served" };
+      },
+      onAsk: (listener) => { asks.add(listener); return () => { asks.delete(listener); }; },
+      answer: async (linkId, answer) => { answers.get(`${linkId} ${answer.app} ${answer.request}`)?.(answer); },
+    },
+    askRange: (linkId, ask) => new Promise((resolve) => {
+      answers.set(`${linkId} ${ask.app} ${ask.request}`, resolve);
+      for (const listener of [...asks]) listener(linkId, ask);
+    }),
     receive(linkId, frame) {
       if (!("d" in frame)) {
         if (frame.o === "open") peers.set(`${linkId} ${frame.app}`, { version: frame.v });

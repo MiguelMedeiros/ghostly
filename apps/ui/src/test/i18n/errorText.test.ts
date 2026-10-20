@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
+import { failedReason, failedStatus } from "../../lib/fileStatus";
+import { problemText } from "../../lib/problemText";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
 
@@ -38,13 +40,60 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Items waiting for this contact would exceed 64 MB. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, "Items waiting for this contact would exceed ${"],
   ["Message exceeds 16384 UTF-8 bytes.", "packages/browser/src/engine/node.ts", "Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes."],
   ["Message exceeds 4096 UTF-8 bytes.", "packages/browser/src/engine/groupEdits.ts", "Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes."],
+  ["Message too long once encoded. Shorten it or send it as a file.", `${CORE}/ghostlink.ts`],
   ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
+  ["That message is not in this chat", "packages/browser/src/engine/node.ts"],
+  ["No message to forward", "packages/browser/src/engine/node.ts"],
+  ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
+  // Any engine call whose storage write the browser refused for want of space (engine/server.ts): Chromium's message is empty.
+  ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (QuotaExceededError: The quota has been exceeded.)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (No space left on device (os error 28))", `${BROWSER}/engine/forwards.ts`, "Not enough space on this device ("],
+  // A part that loads on demand whose file did not come (offline before the worker kept it, or a deploy replaced it under
+  // an open tab): the browser's own words, Chromium's, WebKit's and Firefox's. The part written there is the load.
+  ["Failed to fetch dynamically imported module: https://app.ghostly.tools/assets/index-AbC123.js", `${BROWSER}/engine/wallet.ts`, 'import("@cashu/cashu-ts")'],
+  ["Importing a module script failed.", `${BROWSER}/engine/paymentAdapters/providers/nwcProvider.ts`, 'await import("./nwc")'],
+  ["error loading dynamically imported module: https://app.ghostly.tools/assets/bitcoind-AbC123.js", `${BROWSER}/engine/paymentAdapters/providers/bitcoindProvider.ts`, 'await import("./bitcoind")'],
   ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
   ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
   ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
   ["No permitted transport could connect", `${CORE}/ghostlink.ts`],
+  // A transport change that did not land, and the dials it names.
+  ["no permitted transport connected", `${CORE}/ghostlink.ts`],
+  ["Transport change failed: iroh/1 did not connect in time. Retry or choose another transport.", `${CORE}/ghostlink.ts`, ". Retry or choose another transport."],
+  ["iroh/1 did not connect in time", `${CORE}/ghostlink.ts`, " did not connect in time"],
+  ["Transport change timed out. Your previous connection is kept when available; retry or choose another transport.", `${CORE}/transportSwitch.ts`],
+  ["Transport change cancelled", `${CORE}/ghostlink.ts`],
+  ["Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", `${CORE}/transportSwitch.ts`],
+  ["Peer native address unavailable; reconnect WebRTC once to exchange endpoints", `${CORE}/ghostlink.ts`],
+  ["Peer native address unavailable; the contact's app has not given it yet", `${CORE}/ghostlink.ts`],
+  ["Native connection limit reached", "native/transports/hyperdht/endpoint.mjs"],
+  ["HyperDHT handshake timed out", "native/transports/hyperdht/endpoint.mjs"],
+  ["Noise handshake failed", "native/transports/hyperdht/endpoint.mjs"],
+  // The same dial failed on this side, by its own runtime.
+  ["Iroh connection timed out", "native/transports/src/iroh_transport.rs"],
+  ["Iroh connection timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["HyperDHT connection timed out", "apps/desktop/src/hyperdht.rs"],
+  ["Native stream timed out", "apps/desktop/src/paired_transport.rs"],
+  ["Native stream timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["Native channel closed", "native/transports/hyperdht/endpoint.mjs"],
+  ["Native channel did not reach the application", "apps/ui/src/desktop/nativeTransports.ts"],
+  // A dial past the contact's two channels: its endpoint destroys the stream, and the dialer's stream reads a reset
+  // (libudx's own words, measured on a local HyperDHT testnet).
+  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
+  ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
+  // A contact's app that is seen but does not answer (frozen, asleep): its record is fresh, the dial fails after ~4 s.
+  ["PEER_CONNECTION_FAILED: Could not connect to peer", "node_modules/hyperdht/lib/errors.js", "static PEER_CONNECTION_FAILED(msg = 'Could not connect to peer')"],
+  ["HOLEPUNCH_ABORTED: Holepunch aborted", "node_modules/hyperdht/lib/errors.js", "static HOLEPUNCH_ABORTED(msg = 'Holepunch aborted')"],
+  // The Desktop's own HyperDHT runtime (apps/desktop/src/hyperdht.rs): a dial while one runs, the runtime gone.
+  ["A native connection attempt is already running", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT endpoint closed", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT runtime stopped", "apps/desktop/src/hyperdht.rs"],
+  ["Native runtime stopped", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT failed", "apps/desktop/src/hyperdht.rs"],
+  ["It did not connect", `${BROWSER}/engine/node.ts`],
   ["The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated app to negotiate a transport change.", `${CORE}/ghostlink.ts`],
   ["Calls need a live connection", `${CORE}/ghostlink.ts`],
@@ -96,6 +145,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
+  // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
+  ["Could not read the file: The file changed while it was being copied", `${BROWSER}/platform/services.ts`, "`Could not read the file: ${reason}`"],
+  ["Not enough space on this device to send it", `${BROWSER}/platform/services.ts`],
   ["Held messages need S3 storage (Profile → Backups) and a contact that allows them.", `${BROWSER}/engine/node.ts`],
   ["Not enough space on your contact's device for this file (2.0 MB free).", `${BROWSER}/platform/services.ts`, "Not enough space on your contact's device for this file ("],
   ["That file is too large for your contact's app (max 64 MB). Larger files need an updated Ghostly on their side.", `${BROWSER}/platform/services.ts`, ". Larger files need an updated Ghostly on their side."],
@@ -111,7 +163,16 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: This device has no space left for the file", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
+  ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
+  // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
+  ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
+  ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
+  // A file forwarded that is still arriving here, or whose bytes are gone (a copy of mine that failed, "Not sent").
+  ["The file has not arrived yet", `${BROWSER}/engine/forwards.ts`],
+  ["The file is not on this device any more", `${BROWSER}/engine/forwards.ts`],
   ["That is not a valid mint URL", CODES],
   ["Mints must use https", CODES],
   ["Enter an amount in sats", `${BROWSER}/engine/wallet.ts`],
@@ -154,6 +215,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["A Lightning payment for this request is still pending", `${BROWSER}/engine/payments.ts`],
   ["You already paid this request", `${BROWSER}/engine/payments.ts`],
   ["Already paid by another member of the group", `${BROWSER}/engine/payments.ts`],
+  ["Another member of the group is paying it", `${BROWSER}/engine/payments.ts`],
   ["The payment was refused", `${BROWSER}/engine/payments.ts`],
   // A refused send's review once its ecash came back (refusedLine): what came back, less what the mint kept.
   ["Refused: Already paid by another member of the group. 98 sats came back; the mint kept 2 as its fee.", `${BROWSER}/engine/payments.ts`, " came back; the mint kept ${back.fee} as its fee."],
@@ -174,6 +236,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This pays with real money: confirm it with Send real money first. Nothing was sent.", CODES],
   ["Could not create the Spark wallet: the network is down. Nothing was saved; try again.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, ". Nothing was saved; try again."],
   ["You were removed from this group", `${CORE}/groupSession.ts`],
+  ["A group's name is 1 to 64 characters on one line", `${BROWSER}/engine/node.ts`, "A group's name is 1 to "],
+  ["A group's name is 1 to 64 characters", `${CORE}/groupMeta.ts`, "A group's name is 1 to "],
+  ["This picture cannot be used", `${CORE}/groupMeta.ts`],
+  ["This hub setting cannot be used", `${CORE}/groupMeta.ts`],
   ["You left this group", `${CORE}/groupSession.ts`],
   ["Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.", `${CORE}/groupSession.ts`, " holds a different membership history for epoch "],
   ["Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.", `${CORE}/groupSession.ts`, ". Membership changes are halted; the admin must re-form the group."],
@@ -192,14 +258,18 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["An edit cannot be empty", `${CORE}/groupSession.ts`],
   ["Too long to edit in this group", `${CORE}/groupCommunity.ts`],
   ["Only the admin can invite", `${BROWSER}/engine/groups.ts`],
+  ["Managing this group is off on this device. Turn on Manage groups from this device first.", `${CORE}/groupCommits.ts`],
   ["This contact is already a member", `${BROWSER}/engine/groups.ts`],
   ["A group holds 32 members at most", `${BROWSER}/engine/groups.ts`, " members at most"],
-  ["Connect to this contact first. Their app needs groups (an updated Ghostly).", `${BROWSER}/engine/groups.ts`],
+  ["This contact is not connected right now. Invite them when they are online.", `${BROWSER}/engine/groups.ts`],
+  ["Their app does not take part in groups: they need an updated Ghostly first.", `${BROWSER}/engine/groups.ts`],
   ["The contact who invited you is not connected. Try again when they are.", `${BROWSER}/engine/groups.ts`],
   ["You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", `${BROWSER}/engine/groups.ts`],
   ["Nobody in the group is connected right now to take your leave. Try again in a moment.", `${BROWSER}/engine/community.ts`],
   ["Only the admin can share a link to the group", `${BROWSER}/engine/groups.ts`],
   ["This is not a link to a group", `${BROWSER}/engine/groups.ts`],
+  ["There are no digits to confirm", `${BROWSER}/devices/enroll.ts`],
+  ["Only an enrollment that did not finish is removed here", `${BROWSER}/devices/links.ts`],
   ["You are already joining this group", `${BROWSER}/engine/groups.ts`],
   ["This group is joined with its current link", `${BROWSER}/engine/groups.ts`],
   ["You have an invitation to this group. Answer it first.", `${BROWSER}/engine/groups.ts`],
@@ -207,6 +277,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This link names a private group of yours, not a community", `${BROWSER}/engine/groups.ts`],
   ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
+  ["Only the admin can renew the group's secret", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
   ["Only the admin can change the group's picture", `${CORE}/groupSession.ts`],
@@ -223,6 +294,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["You sent many files to this group just now. Wait a minute.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
   ["You sent many files to this group just now. Wait 7 minutes.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
   ["Not enough space on this device for this file", `${BROWSER}/engine/groupFiles.ts`],
+  ["Every copy of this file arrived damaged and was deleted. Ask for it again later.", `${BROWSER}/engine/groupFiles.ts`],
   ["An empty file cannot go to a group", `${BROWSER}/platform/services.ts`],
   ["This app takes no group files", `${BROWSER}/engine/groups.ts`],
   ["A group takes files of up to 100.0 MB", `${BROWSER}/engine/node.ts`, "A group takes files of up to "],
@@ -387,6 +459,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
+  ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
+  ["Hide my IP from contacts needs a TURN server. Turn it off first", `${BROWSER}/engine/node.ts`],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
@@ -444,12 +518,109 @@ describe("errors in the app's language", () => {
     // A file sent with + whose copy could not be read is not a paste, and is sent again.
     expect(knownErrorParts("Could not read the file: The file changed while it was being copied", english)).toEqual({
       title: "The file cannot be read", next: "Send it again, or pick the file again.", detail: "Could not read the file: The file changed while it was being copied" });
+    // A large file this device had no room to copy before sending it: what to free, and that it is picked again.
+    expect(knownErrorParts("Not enough space on this device to send it", english)).toEqual({
+      title: "Not enough space on this device", next: "Free some space, then pick the file again." });
+    expect(knownErrorParts("Not enough space on this device to send it", translators.pt)).toEqual({
+      title: "Não há espaço suficiente neste dispositivo", next: "Libere espaço e escolha o arquivo de novo." });
+  });
+
+  it.each(LANGUAGES)("a storage that is full when a group is made or a text sent says so and what to do in %s, its name behind the ⓘ", (language) => {
+    const t = translators[language];
+    const raw = "Not enough space on this device (QuotaExceededError)";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
+    expect(problemText(new Error(raw), t).title).not.toBe(t("errors.generic"));
+  });
+
+  it.each(LANGUAGES)("a forward's copy Desktop's disk had no room for says so in %s, the system's English behind the ⓘ", (language) => {
+    const t = translators[language];
+    const raw = "Not enough space on this device (No space left on device (os error 28))";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
+  });
+
+  it("Windows' full disk, as the Desktop's file store says it (file_store.rs io_text), reads as no room on a forward and on a file received", () => {
+    const pt = translators.pt;
+    const windows = "No space left on device: Não há espaço suficiente no disco. (os error 112)";
+    const forward = `Not enough space on this device (${windows})`;
+    expect(problemText(new Error(forward), pt)).toEqual({ tone: "error", title: pt("errors.app.noRoom"), next: pt("errors.app.noRoomNext"), detail: forward });
+    const received = `Could not store the file: ${windows}`;
+    expect(knownErrorParts(received, pt)).toMatchObject({ title: pt("errors.files.noRoomHere"), next: pt("errors.files.noRoomHereNext") });
+  });
+
+  it("a storage that is full says the same with the browser's own message, and reads in English as a sentence and its next step", () => {
+    const raw = "Not enough space on this device (QuotaExceededError: The quota has been exceeded.)";
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "Not enough space on this device", next: "Free some space, then try again.", detail: raw });
+  });
+
+  it("a picked file that changed on disk before its copy says it cannot be read and what to do, not the browser's English", () => {
+    const pt = translators.pt;
+    const changed = "Could not read the file: The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.";
+    expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
+  });
+
+  it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-in-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    // As fileDesk.ts `withdrawn` keeps it: failed, with no direction.
+    const bubble = (error: string) => {
+      const transfer = { state: "failed", transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("No room on this device for this file")).toEqual({ status: t("errors.files.noRoomHere"), info: { text: t("errors.files.floor.noRoomNext") } });
+    expect(bubble("Too many files are waiting here")).toEqual({ status: t("errors.files.floor.tooMany"), info: { text: t("errors.files.floor.tooManyNext") } });
+    expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
+  it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
+    const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
+    expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
+    expect(knownErrorParts(damaged, english)).toEqual({ title: "The file arrived damaged", next: "Ask the group for it again later." });
+  });
+
+  it("a forward refused for a file still arriving or no longer here says why and what to do, in the language", () => {
+    const pt = translators.pt;
+    expect(knownErrorParts("The file has not arrived yet", pt)).toEqual({ title: "Ainda não recebido", next: "Espere ele chegar e encaminhe depois." });
+    expect(knownErrorParts("The file has not arrived yet", english)).toEqual({ title: "Not received yet", next: "Wait until it has arrived, then forward it." });
+    expect(knownErrorParts("The file is not on this device any more", pt)).toEqual({ title: "Este arquivo não está neste dispositivo", next: "Envie de onde você o tem." });
+    expect(knownErrorParts("The file is not on this device any more", english)).toEqual({ title: "This file is not on this device", next: "Send it from where you have it." });
   });
 
   it("an action refused in limited mode says why and what to do, in the language", () => {
     const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
     expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
+  });
+
+  it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {
+    const off = new Error("Managing this group is off on this device. Turn on Manage groups from this device first.");
+    expect(knownErrorParts(off, english)).toEqual({ title: "Managing this group is off on this device", next: "Turn it on first: Manage groups from this device, on the group's page." });
+    expect(knownErrorParts(off, translators.pt)?.title).toBe("Gerenciar este grupo está desligado neste dispositivo");
+  });
+
+  it("an Invite to a contact whose app is only closed says to invite them once online, not to update", () => {
+    const away = new Error("This contact is not connected right now. Invite them when they are online.");
+    expect(knownErrorParts(away, english)).toEqual({ title: "This contact is offline", next: "Invite them when they're online." });
+    expect(knownErrorParts(away, translators.pt)).toEqual({ title: "Este contato está offline", next: "Convide quando ele estiver online." });
+    const old = new Error("Their app does not take part in groups: they need an updated Ghostly first.");
+    expect(knownErrorParts(old, english)).toEqual({ title: "Their app needs an update first", next: "Their app needs groups (an updated Ghostly)." });
+  });
+
+  it("a contact's unknown native address with no WebRTC between the two apps says it comes from them, not to reconnect over WebRTC", () => {
+    const withRtc = new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    expect(knownErrorParts(withRtc, english)?.next).toBe("Reconnect over WebRTC once to exchange it.");
+    const noRtc = new Error("Peer native address unavailable; the contact's app has not given it yet");
+    expect(knownErrorParts(noRtc, english)).toEqual({ title: "Your contact's address for this transport isn't known yet", next: "It comes once your contact opens this chat in their app.", detail: noRtc.message });
+    expect(knownErrorParts(noRtc, translators.pt)?.next).toBe("Chega quando o contato abrir esta conversa no app.");
+  });
+
+  it("a part of Ghostly that did not load is said in the language, not in the browser's English", () => {
+    const pt = translators.pt;
+    for (const raw of ["Failed to fetch dynamically imported module: https://app.ghostly.tools/assets/index-AbC123.js", "Importing a module script failed.", "error loading dynamically imported module: https://app.ghostly.tools/assets/x.js"]) {
+      expect(problemText(new TypeError(raw), pt)).toEqual({ tone: "error", title: "Uma parte do Ghostly não carregou.", next: "Verifique sua conexão e tente de novo. Se continuar falhando, recarregue o Ghostly.", detail: raw });
+    }
+    expect(errorText(new TypeError("Importing a module script failed."), english)).toBe("Part of Ghostly did not load. Check your connection, then try again. If it still fails, reload Ghostly.");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {

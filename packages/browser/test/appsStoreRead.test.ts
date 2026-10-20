@@ -25,7 +25,7 @@ beforeEach(async () => {
   net = new FakeNet();
   verifies.mockClear();
 });
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 /** Valid revocations of apps of a key of the store's owner's own: any key may sign for its own apps. */
 const revocations = (count: number, from = 0): Promise<SignedAppRevocation[]> => {
@@ -49,13 +49,19 @@ describe("reading a store's index", () => {
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => clock);
     const real = verifies.getMockImplementation()!;
-    let inThisTurn = 0, most = 0, turns = 0, reading = true;
+    let inThisTurn = 0, most = 0, turns = 0;
     verifies.mockImplementation((...args) => { clock += 1; most = Math.max(most, ++inThisTurn); return real(...args); });
-    // What else the page has to do: one timer after another, each a turn of its thread.
-    const turn = () => { inThisTurn = 0; turns += 1; if (reading) setTimeout(turn, 0); };
-    setTimeout(turn, 0);
+    // Each time the read lets the thread go, the page gets a turn: the engine's pause is a message to itself
+    // (`yieldThread`), counted here. A timer would not do: the pause is not one, so that no clamp of nested timers adds
+    // 4 ms to each.
+    const post = MessagePort.prototype.postMessage;
+    const posts = vi.spyOn(MessagePort.prototype, "postMessage").mockImplementation(function (this: MessagePort, ...args) {
+      inThisTurn = 0;
+      turns += 1;
+      return post.apply(this, args);
+    });
     const preview = await store.previewStore({ url: STORE_URL });
-    reading = false;
+    posts.mockRestore();
     expect(preview).toMatchObject({ key: keyOf(STORE_KEY), sequence: 1 });
     expect(verifies).toHaveBeenCalledTimes(301);
     expect(most, "signature checks in one turn of the thread").toBeLessThanOrEqual(11);
@@ -73,7 +79,7 @@ describe("reading a store's index", () => {
 
     verifies.mockClear();
     await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
-    expect(verifies, "Add: the index's signature, and no revocation again").toHaveBeenCalledTimes(1);
+    expect(verifies, "Add: the index the preview read, checked once").not.toHaveBeenCalled();
 
     // The store's next index: one revocation more, the rest copied again.
     await net.putStore(await storeFiles({ sequence: 2, revoked: [...held, ...await revocations(1, 20)] }));
@@ -89,6 +95,33 @@ describe("reading a store's index", () => {
       expect(await store.refreshStores()).toMatchObject([{ sequence: 2, problem: "bad-revocation" }]);
       expect(verifies, "the index and the forged one, each time").toHaveBeenCalledTimes(2);
     }
+  });
+
+  it("Add takes the index the preview just read: no second download or check, unless it is another URL or key, or minutes old", async () => {
+    await net.putStore(await storeFiles({ revoked: await revocations(5) }));
+    let now = NOW_S * 1000;
+    const store = apps(net, { now: () => now });
+    const indexReads = () => net.requests.filter((u) => u === STORE_URL).length;
+    await store.previewStore({ url: STORE_URL });
+    verifies.mockClear();
+    expect(await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) })).toMatchObject({ key: keyOf(STORE_KEY), sequence: 1, expired: false });
+    expect(indexReads(), "the preview's read only").toBe(1);
+    expect(verifies).not.toHaveBeenCalled();
+
+    // Taken once: a second Add reads again.
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    expect(indexReads()).toBe(2);
+
+    // Another key than the one previewed: read again, and refused.
+    await store.previewStore({ url: STORE_URL });
+    await expect(store.addStore({ url: STORE_URL, key: keyOf(signer("someone else")) })).rejects.toThrow(/^store-key/);
+    expect(indexReads()).toBe(4);
+
+    // A preview left open for more than ten minutes: read again.
+    await store.previewStore({ url: STORE_URL });
+    now += 10 * 60 * 1000 + 1;
+    await store.addStore({ url: STORE_URL, key: keyOf(STORE_KEY) });
+    expect(indexReads()).toBe(6);
   });
 
   it("an index whose own signature does not verify costs one signature check, whatever it carries", async () => {

@@ -1,28 +1,31 @@
-import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
-import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
+import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
+import { checkShownName } from "./profiles";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
-import { STATUS_CARD_METHODS } from "./statusCards";
+import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
-import { endTyping, keepTyping, sayTyping } from "./typing";
-import { GROUP_ADMIN_METHODS } from "./groupAdmin";
+import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
+import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
+import { X401_METHODS } from "./x401";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
+import { TRANSPORT_NAMES } from "./words";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -71,12 +74,34 @@ export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> 
   autoDownloads: "boolean", serveFiles: "boolean",
 };
 
-// ---------- transports ----------
+/**
+ * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
+ * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1). A
+ * wrong scheme ("Use an https:// relay address") too.
+ */
+function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
+  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address)\b/.test(error.message)) return error;
+  const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
+  return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^(Not|Use) /, (word) => word.toLowerCase())}`);
+}
 
-const TRANSPORT_NAMES: Record<string, PairedTransport | "auto" | "dht"> = {
-  auto: "auto", dht: "dht", webrtc: "webrtc/1", iroh: "iroh/1", hyperdht: "hyperdht/1",
-  "webrtc/1": "webrtc/1", "iroh/1": "iroh/1", "hyperdht/1": "hyperdht/1",
-};
+// ---------- chat names ----------
+
+/** The engine keeps a chat's name to 48 UTF-16 units (renameLink). */
+const CHAT_NAME_UNITS = 48;
+
+/**
+ * A chat's name on this side (`chat rename`, an invite's `--label`): what the engine keeps whole, on one line, refused
+ * with the rule as a profile's or a group's name is. Taken as given, the engine cut it at 48 UTF-16 units without a
+ * word (half an emoji left as a lone surrogate) and kept line breaks. Counted as the engine counts: an emoji is two.
+ */
+function chatName(params: Params, name: string): string | undefined {
+  const value = str(params, name);
+  if (value !== undefined && (value.trim().length > CHAT_NAME_UNITS || /\p{Cc}/u.test(value.trim()))) {
+    throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_UNITS} characters on one line (an emoji counts as two)`);
+  }
+  return value;
+}
 
 // ---------- mentions ----------
 
@@ -97,7 +122,8 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
       // A member's key is that member, whatever another member calls itself.
       const byKey = group.members.filter((m) => !m.me && m.key === ref);
       const matches = byKey.length ? byKey : group.members.filter((m) => !m.me && (m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
-      if (matches.length !== 1) throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one member` : `No member ${JSON.stringify(ref)} in ${group.name}`);
+      if (matches.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`);
+      if (!matches.length) throw noMember(group, ref);
       key = matches[0].key;
       spelled = [matches[0].nick?.trim(), ref, key.slice(0, 8)].filter((s): s is string => !!s);
     }
@@ -108,6 +134,36 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
   return out;
 }
 
+/** Per host: stops watching the invite it marked as the chat on screen. */
+const inviteShown = new WeakMap<ApiContext, () => void>();
+
+/**
+ * Marks a new invite as the chat on screen (native listeners, the quick pace) only until it is paired: a paired chat
+ * keeps its listeners anyway, and a daemon nobody looks at reads an away contact at the background pace, as its
+ * other chats and the same chat after a restart do. Nor past its wait for a peer (`AWAITING_PEER_MS`): an invite
+ * nobody joined is then read at the background pace like the daemon's other ones, which it no longer holds back.
+ */
+function showUntilPaired(ctx: ApiContext, linkId: string): void {
+  inviteShown.get(ctx)?.();
+  node(ctx).setActiveLink({ linkId });
+  // Gone only once a state had it: one pushed before the invite was made does not end it.
+  let seen = false;
+  const done = (s: EngineState) => {
+    const link = s.links.find((l) => l.id === linkId);
+    if (link) seen = true;
+    return link ? !!link.peerParticipationKey : seen;
+  };
+  const stop = () => { off(); clearTimeout(timer); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
+  const hide = () => { stop(); node(ctx).setActiveLink({ linkId: null }); };
+  const timer = setTimeout(hide, AWAITING_PEER_MS);
+  timer.unref?.();
+  const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
+  inviteShown.set(ctx, stop);
+}
+
+/** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
+const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is not (a function|iterable)/;
+
 // ---------- methods ----------
 
 const METHODS: Record<string, Method> = {
@@ -117,6 +173,7 @@ const METHODS: Record<string, Method> = {
   ...BUTTON_METHODS,
   ...GROUP_ADMIN_METHODS,
   ...IDENTITY_METHODS,
+  ...X401_METHODS,
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
   ...CALL_METHODS,
@@ -140,11 +197,7 @@ const METHODS: Record<string, Method> = {
   },
   async "profile.set"(ctx, params) {
     const patch: Partial<Settings> = {};
-    const name = params.name;
-    if (name !== undefined) {
-      if (typeof name !== "string" || [...name].length > 64) throw new CliError("bad_request", "name must be a string of up to 64 characters");
-      patch.nick = name.trim();
-    }
+    if (params.name !== undefined) patch.nick = checkShownName(params.name);
     if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
@@ -155,6 +208,7 @@ const METHODS: Record<string, Method> = {
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
+    let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
@@ -162,26 +216,31 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
+      // The name contacts see: `profile set --name`'s rule.
+      if (key === "nick") { patch.nick = checkShownName(value, key); continue; }
       if (kind === "ice") {
         if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
         // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
         const servers = value.map(iceServerSetting);
         for (const server of servers) { const problem = iceServerProblem(server); if (problem) throw new CliError("bad_request", `${key}: ${problem}`); }
         patch[key] = servers;
+        // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
+        const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
+        if (unused.length) warning = `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
         continue;
       }
       patch[key] = value;
     }
-    await node(ctx).updateSettings({ settings: patch });
-    return redactSettings(state(ctx).settings);
+    await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
+    return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
-    const label = str(params, "label");
+    const label = chatName(params, "label");
     const { linkId, inviteCode } = await node(ctx).createLink();
     if (label) await node(ctx).renameLink({ linkId, label });
     // Native listeners start for the chat on screen (or a paired one): a new invite is the chat a bot waits on.
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     // Its first records must be out before a one-shot leaves. A daemon publishes them later too: it answers at once when
     // the relays' request budget holds them back (a few invites in a minute), and says when they go.
     const progressOf = (s: EngineState) => s.links.find((l) => l.id === linkId)?.pairingProgress;
@@ -193,20 +252,23 @@ const METHODS: Record<string, Method> = {
   },
   async "invite.join"(ctx, params) {
     let invite = str(params, "invite", true).trim();
+    const label = chatName(params, "label");
     const hash = invite.indexOf("#");
     if (/^https?:\/\//i.test(invite) && hash !== -1) invite = invite.slice(hash + 1);
     let linkId: string;
     try {
       ({ linkId } = await node(ctx).joinLink({ inviteCode: invite }));
     } catch (error) {
+      // This profile's own invite: the sentence alone, and the chat that owns it as its own field, not the engine's tag
+      // for its RPC clients ("own-invite <chat>: …").
+      const own = ownInviteRefusal(error);
+      if (own) throw new CliError("refused", "This is your own invite. Share it with a contact; they join with it.", own.linkId ? { chat: own.linkId } : undefined);
       const message = error instanceof Error ? error.message : String(error);
-      if (/own invite/i.test(message)) throw new CliError("refused", message);
       if (/does not look like/i.test(message)) throw new CliError("bad_request", message);
       throw error;
     }
-    const label = str(params, "label");
     if (label) await node(ctx).renameLink({ linkId, label });
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     return { chat: linkId };
   },
 
@@ -215,15 +277,15 @@ const METHODS: Record<string, Method> = {
     return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group show");
     return { ...chatDetailsJson(link, bool(params, "showSecret")), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.history"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group history");
     return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group send", "[text...]");
     const text = str(params, "text", true);
     checkTextSize(text);
     if (!bool(params, "force")) {
@@ -231,6 +293,8 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
+    // Read before anything is sent, as `wait` is: a timeout refused after the send made a retry send it again.
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const replyTo = str(params, "reply");
     // Buttons under the text (WISP 406 · Message Buttons): the text is the question, and what older apps show.
     const card = buttonsCard(params);
@@ -241,7 +305,7 @@ const METHODS: Record<string, Method> = {
     if (result.error) throw /not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
-    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
   /**
@@ -249,7 +313,7 @@ const METHODS: Record<string, Method> = {
    * once the chat is live and both apps offer edit/1; `--wait confirmed` waits for the contact to confirm it.
    */
   async "chat.edit"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group edit", "<message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
@@ -257,21 +321,23 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
     if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
-    if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
     return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed: !!message && !message.edit?.pending };
   },
   /**
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
    * `kind` (typing, recording, thinking) and `status` (a short line, e.g. "Transcribing your audio…") say what this
    * side is doing; a new one reaches the contact at once.
-   * `for`: kept that many seconds (a one-shot stays that long), until a message to the chat or a stop.
+   * `for`: kept that many seconds (a one-shot stays that long once the chat is live, and stops when it is not live
+   * within `ONE_SHOT_LIVE_GRACE_MS`), until a message to the chat or a stop.
    */
   async "chat.typing"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group typing");
     const typing = !bool(params, "stop");
     const { kind, status } = typingWord(params, typing);
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
@@ -281,15 +347,16 @@ const METHODS: Record<string, Method> = {
     node(ctx).setTyping({ linkId: link.id, typing, ...word });
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
-    if (kept && ctx.mode === "one-shot") await kept;
+    const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
+    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
     };
   },
   /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
   async "chat.react"(ctx, params) {
-    const link = notAGroup(ctx, params, () => chatOf(ctx, params), "group react", "<message> <emoji>");
+    const link = chatNotGroup(ctx, params, "group react", "<message> <emoji>");
     return { chat: link.id, ...(await react(ctx, link.id, params)) };
   },
   /**
@@ -302,6 +369,22 @@ const METHODS: Record<string, Method> = {
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
     if (result.error) throw new CliError(/not in this chat|Nothing is pinned/.test(result.error) ? "not_found" : /Only the admin/.test(result.error) ? "refused" : "bad_request", result.error);
     return { [target.group ? "group" : "chat"]: target.id, messageId: remove ? null : messageId, removed: remove };
+  },
+  /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
+  async "saved.add"(ctx, params) {
+    return saveMark(ctx, params, false);
+  },
+  async "saved.remove"(ctx, params) {
+    return saveMark(ctx, params, true);
+  },
+  /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
+  async "saved.list"(ctx) {
+    const { links, groups } = state(ctx);
+    return (await node(ctx).savedMessages()).map(({ savedAt, message }) => {
+      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: chatMessageJson(message, links.find((l) => l.id === message.linkId)) };
+      const id = message.linkId.slice("group:".length);
+      return { group: id, savedAt, message: groupMessageJson(message, groups.find((g) => g.id === id)) };
+    });
   },
   /**
    * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
@@ -327,11 +410,11 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     let results;
     try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
-    const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, error: result.error }));
+    const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
       const sent = await node(ctx).getMessage(to[i]!.id, messageId);
@@ -345,12 +428,29 @@ const METHODS: Record<string, Method> = {
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    const message = await node(ctx).getMessage(link.id, messageId);
+    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    // Before, both answered done and nothing was sent: the engine sends again whatever id it is given.
+    if (message.sender !== "me") throw new CliError("not_found", `No message ${messageId} of yours in this chat: only your own messages are sent again`);
+    if (message.delivery === "delivered") throw new CliError("refused", "Nothing to send again: it was delivered");
     await node(ctx).retryMessage({ linkId: link.id, messageId });
     return { chat: link.id, messageId };
   },
   async "chat.delete"(ctx, params) {
-    const link = chatOf(ctx, params);
+    // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
+    if (bool(params, "everyone")) {
+      const target = chatOrGroup(ctx, str(params, "chat", true));
+      const ref = str(params, "message", true);
+      const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
+      if (!message) throw new CliError("not_found", `No message ${ref} of yours in this ${target.group ? "group" : "chat"}: only your own messages are deleted for everyone`);
+      const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
+      if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+      return { [target.group ? "group" : "chat"]: target.id, deleted: message.id, everyone: true };
+    }
+    // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
+    // flag says so, with the command that takes it, not "No chat".
+    const ref = str(params, "message") ?? "<message>";
+    const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
@@ -363,12 +463,12 @@ const METHODS: Record<string, Method> = {
     return details;
   },
   async "chat.rename"(ctx, params) {
-    const link = chatOf(ctx, params);
-    await node(ctx).renameLink({ linkId: link.id, label: str(params, "name") ?? "" });
+    const link = chatNotGroup(ctx, params, "group rename", "<name...>");
+    await node(ctx).renameLink({ linkId: link.id, label: chatName(params, "name") ?? "" });
     return chatJson(findChat(state(ctx).links, link.id));
   },
   async "chat.remove"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
     await node(ctx).removeLink({ linkId: link.id });
     return { removed: link.id };
@@ -385,6 +485,7 @@ const METHODS: Record<string, Method> = {
   async "chat.connect"(ctx, params) {
     const link = chatOf(ctx, params);
     await releaseHold(ctx, link.id, "connect");
+    inviteTaken(link);
     await node(ctx).connect({ linkId: link.id });
     return chatJson(findChat(state(ctx).links, link.id));
   },
@@ -471,6 +572,7 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const card = buttonsCard(params);
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
@@ -480,7 +582,7 @@ const METHODS: Record<string, Method> = {
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
-    const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
+    const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
     return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
@@ -498,6 +600,7 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const linkId = `group:${group.id}`;
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
@@ -508,7 +611,7 @@ const METHODS: Record<string, Method> = {
     // message never edited, as if an edit had gone.
     if (edits === before) return { group: group.id, messageId, edits, sent: false, edges: 0, unchanged: true };
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
-    const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000)
+    const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
     return { group: group.id, messageId, edits, sent: edges > 0 || (!!message && !message.edit?.pending), edges };
   },
@@ -534,16 +637,20 @@ const METHODS: Record<string, Method> = {
     sayTyping(ctx, target, typing, word);
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
-    if (kept && ctx.mode === "one-shot") await kept;
+    const reached = (s: EngineState) => (s.groups.find((g) => g.id === group.id) ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
+    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s) > 0);
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: group.members.filter((m) => !m.me && m.online && !m.viaHub).length, sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
     };
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
-    await node(ctx).leaveGroup({ groupId: group.id });
-    return { left: group.id };
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
+    const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
+    // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
+    const next = admin ? group.members.find((m) => m.key === admin) : undefined;
+    return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
   },
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params);
@@ -577,19 +684,79 @@ const METHODS: Record<string, Method> = {
     if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method}`);
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
-    let args = raw as Params | undefined;
+    const args = raw as Params | undefined;
+    // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is not in 1.5: no app shows it, and the Desktop's
+    // own transports do not follow it yet. Nobody turns it on through here either, until the release that shows it.
+    if (method === "updateSettings" && args?.settings && typeof args.settings === "object" && "relayOnly" in args.settings) {
+      throw new CliError("bad_request", "relayOnly is not a setting yet: Hide my IP from contacts comes in a later release");
+    }
     // Real money moves only on an explicit confirmation of this call (WISP 1100 § Mainnet).
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
     }
+    const deletes = DESTRUCTIVE_CALLS.get(method);
+    if (deletes && !bool(params, "yes")) throw new CliError("confirm", `${method} ${deletes}; pass --yes (yes: true over the socket) to go on`);
+    if (method === "clearProfileData") return clearProfile(ctx);
+    // A call given less than it takes failed with JavaScript's own TypeError, or did nothing and answered null.
+    const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
+    const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
+    const problem = engineParamsProblem(method, args);
+    if (problem) throw wrong(problem);
+    if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
+    // Someone chose the chat on screen: an invite's mark no longer clears it.
+    if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
-    if (args === undefined) args = undefined;
-    return (await target.call(node(ctx), args)) ?? null;
+    try {
+      return (await target.call(node(ctx), args)) ?? null;
+    } catch (error) {
+      // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
+      // not there. Not every TypeError: Node's `fetch failed` is the network.
+      if (error instanceof TypeError && BAD_VALUE.test(error.message)) throw wrong("a parameter of the wrong kind", error.message);
+      throw error;
+    }
   },
 };
+
+/**
+ * "Clear all data": the engine withdraws what it can, stops and empties its stores; the app reloads its page after it.
+ * A daemon would go on serving the stopped engine's memory (chats and groups that are gone, new ones that are not
+ * kept): it stops once it has answered, and the next command starts on the emptied profile.
+ */
+async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number; groups: number }; stopped?: true }> {
+  const { links, groups } = state(ctx);
+  await node(ctx).clearProfileData();
+  const cleared = { chats: links.length, groups: groups.length };
+  if (ctx.mode !== "daemon" || !ctx.stop) return { cleared };
+  setTimeout(() => ctx.stop!(), 10);
+  return { cleared, stopped: true };
+}
+
+/**
+ * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo): `engine.call`
+ * runs the secret guard of `send`, `edit` and `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
+ */
+const ENGINE_SENDS: ReadonlySet<string> = new Set([
+  "sendMessage", "sendGroupMessage", "editMessage", "forwardMessages", "sendGroupFile",
+  // A payment's memo reaches the contact as a message's text does (`chat pay` and `chat request` guard it too).
+  "sendPayment", "requestPayment", "requestGroupPayment", "askToPay",
+]);
+
+async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
+  let texts: unknown = [args.text, args.card, args.caption, args.memo];
+  if (method === "forwardMessages") {
+    const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
+    const linkId = args.linkId;
+    texts = typeof linkId === "string" && linkId ? await Promise.all(ids.map(async (id) => {
+      const message = await node(ctx).getMessage(linkId, id);
+      return message && !message.file ? message.text : null;
+    })) : [];
+  }
+  const secret = secretIn(texts);
+  if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; call ${method} with --force if you mean to`, { kind: secret.kind });
+}
 
 /** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
 async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {
@@ -641,8 +808,13 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: s
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, ref); } catch { throw error; }
     const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown} ${rest}`, { group: group.id });
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}`, { group: group.id });
   }
+}
+
+/** The chat a chat command with a group twin names: a group's name says so, with `command`, the twin (see `notAGroup`). */
+function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "") {
+  return notAGroup(ctx, params, () => chatOf(ctx, params), command, rest);
 }
 
 /**
@@ -660,35 +832,77 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
  * A page of a chat's or a group's history. Without `after` only that page is read from the store (the newest, or those
  * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
  */
+async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
+  const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
+  const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
+  if (result.error) throw new CliError(/not in this chat/.test(result.error) ? "not_found" : "bad_request", result.error);
+  return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
+}
+
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
-  if (params.after !== undefined && params.after !== null) return history(await node(ctx).getMessages(chat), params, json);
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  if (params.after !== undefined && params.after !== null) {
+    const whole = await node(ctx).getMessages(chat), { messages, more } = history(whole, params);
+    const gone = await originalsGone(ctx, chat, messages, whole);
+    return { messages: messages.map((m) => quoteChecked(json(m), m, gone)), more };
+  }
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before ?? undefined;
   if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
   const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
     throw error instanceof Error && error.message === `No message ${before}` ? new CliError("not_found", error.message) : error;
   });
-  return { messages: page.messages.map((m) => json(m)), more: page.more };
+  const gone = await originalsGone(ctx, chat, page.messages);
+  return { messages: page.messages.map((m) => quoteChecked(json(m), m, gone)), more: page.more };
 }
 
-function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+/** Past this many originals outside a page, its history is read once instead of row by row. */
+const ORIGINAL_READS = 32;
+
+/**
+ * The originals a page's replies found here when they came that are gone now: deleted on this device, or for everyone
+ * by their author (WISP 400 § Delete for everyone). Each is looked for in the page, else read as its one row, one at
+ * a time (a burst of reads stalls fake-indexeddb's scheduler); `whole` is the chat's whole history when it was read
+ * already. Before, such a reply still said `found`, with the original's text.
+ */
+async function originalsGone(ctx: ApiContext, chat: string, page: readonly StoredMessage[], whole: readonly StoredMessage[] = page): Promise<Set<string>> {
+  const here = new Set(whole.map((m) => m.id));
+  const asked = [...new Set(page.flatMap((m) => (m.replyTo?.messageId && !here.has(m.replyTo.messageId) ? [m.replyTo.messageId] : [])))];
+  // The whole history read: what is not in it is gone.
+  if (whole !== page) return new Set(asked);
+  // Many (a long page of answers to old messages): the history once is cheaper than a burst of row reads.
+  if (asked.length > ORIGINAL_READS) return originalsGone(ctx, chat, page, await node(ctx).getMessages(chat));
+  const gone = new Set<string>();
+  for (const id of asked) if (!(await node(ctx).getMessage(chat, id))) gone.add(id);
+  return gone;
+}
+
+/** A reply whose original is gone, as the apps show it ("Original message deleted"): not found, and none of its text. */
+function quoteChecked(json: MessageJson, message: StoredMessage, gone: ReadonlySet<string>): MessageJson {
+  const id = message.replyTo?.messageId;
+  if (!json.replyTo || !id || !gone.has(id)) return json;
+  return { ...json, replyTo: { ...json.replyTo, snippet: "", found: false, deleted: true } };
+}
+
+function history(messages: StoredMessage[], params: Params): { messages: StoredMessage[]; more: boolean } {
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before;
   const after = params.after;
-  let list = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
-  const cut = (value: unknown, side: "before" | "after") => {
+  const sorted = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
+  // Each id is found in the whole history, not in what the other side already cut away: a window with nothing in it
+  // (`--after b --before b`, or crossed) is an empty page, not "No message b".
+  const bound = (value: unknown, side: "before" | "after"): ((m: StoredMessage, at: number) => boolean) | undefined => {
     if (value === undefined || value === null) return;
-    if (typeof value === "number") { list = list.filter((m) => (side === "before" ? m.timestamp < value : m.timestamp > value)); return; }
+    if (typeof value === "number") return (m) => (side === "before" ? m.timestamp < value : m.timestamp > value);
     if (typeof value !== "string") throw new CliError("bad_request", `${side} must be a timestamp or a message id`);
-    const index = list.findIndex((m) => m.id === value);
+    const index = sorted.findIndex((m) => m.id === value);
     if (index === -1) throw new CliError("not_found", `No message ${value}`);
-    list = side === "before" ? list.slice(0, index) : list.slice(index + 1);
+    return (_, at) => (side === "before" ? at < index : at > index);
   };
-  cut(before, "before");
-  cut(after, "after");
+  const bounds = [bound(before, "before"), bound(after, "after")].filter((b) => b !== undefined);
+  const list = sorted.filter((m, at) => bounds.every((within) => within(m, at)));
   const more = after !== undefined && after !== null ? list.length > limit : list.length > limit;
   const page = after !== undefined && after !== null ? list.slice(0, limit) : list.slice(-limit);
-  return { messages: page.map((m) => json(m)), more };
+  return { messages: page, more };
 }
 
 export { findChat, findGroup } from "./apiKit";
