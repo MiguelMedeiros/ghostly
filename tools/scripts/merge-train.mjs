@@ -252,6 +252,16 @@ export function vouchedAt(events, labels, fallback) {
   return queuedAt(labels.includes(LABEL.queue) ? events.filter((e) => e.label?.name === LABEL.queue) : events, fallback);
 }
 
+/**
+ * Whether a queued pull request's base changed at or after the latest `queue`: that label vouched for its head against
+ * the old base. Events past the ones read are a doubt the line already waits on (`waiting`), so they do not count here.
+ */
+export function baseChangedAfterQueue(p) {
+  const vouched = Date.parse(vouchedAt(p.events ?? [], p.labels, null));
+  if (!vouched) return false;
+  return (p.events ?? []).some((e) => BASE_CHANGES.has(e.event) && Date.parse(e.created_at) >= vouched);
+}
+
 /** The line: `queue:priority` first, then by the time each joined, then by number. */
 export function order(prs) {
   const at = (p) => Date.parse(p.queuedAt) || 0;
@@ -768,6 +778,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       say(`DROP #${p.number} (head pushed after it was queued)`);
       done.dropped.push(p.number);
       await leave(p, null, newCommitsText(`${p.sha.slice(0, 12)} was pushed after \`queue\` was added`));
+    } else if (baseChangedAfterQueue(p)) {
+      // `queue` vouches for the head against the base it had then: on another base the same head lands another diff
+      // (what the old base held and this one lacks), so it needs a new review too. GitHub's own retarget counts as well.
+      say(`DROP #${p.number} (base changed since it was queued)`);
+      done.dropped.push(p.number);
+      await leave(p, null, `Merge train: the base of this pull request changed after it was queued, so it left the line: its Files changed against \`${base}\` are not the ones reviewed. Add \`queue\` again once they are reviewed and green.`);
     }
   }
 
