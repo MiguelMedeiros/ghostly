@@ -1,6 +1,6 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AppFrameEvent } from "@ghostly/core";
-import type { AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
+import type { AppRangeAsk, AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import type { ProfileOpenFailure } from "../shared/idb";
@@ -33,6 +33,8 @@ export type MessagesListener = (linkId: string, messages: StoredMessage[], chang
 class EngineClient {
   state: EngineState | null = null;
   readonly messages = new Map<string, StoredMessage[]>();
+  /** Per chat, the ids the engine deleted in it, as its last whole history said (the `messages` event's `deleted`). */
+  readonly deletedIds = new Map<string, readonly string[]>();
   /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
   private readonly partial = new Set<string>();
   /** The partial chats whose whole history this connection asked for (`askWhole`), once each. */
@@ -59,6 +61,7 @@ class EngineClient {
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
   private readonly appListeners = new Set<(linkId: string, event: AppFrameEvent) => void>();
+  private readonly appRangeListeners = new Set<(linkId: string, range: AppRangeAsk) => void>();
   private readonly appsCheckedListeners = new Set<() => void>();
   /** The chats whose messages changed since their listeners last heard, and what changed, told together when the tick ends. */
   private readonly changed = new Map<string, { from: StoredMessage[]; rows: Map<string, StoredMessage>; deleted: Set<string> }>();
@@ -144,6 +147,12 @@ class EngineClient {
     return () => this.appListeners.delete(listener);
   }
 
+  /** A range the contact's app asks of a file an app here serves (`appServe`): the page that served it answers. */
+  onAppRange(listener: (linkId: string, range: AppRangeAsk) => void): () => void {
+    this.appRangeListeners.add(listener);
+    return () => this.appRangeListeners.delete(listener);
+  }
+
   /** An update check of the installed mini-apps ran (the scheduled one too): what is installed, and may run, can have changed. */
   onAppsChecked(listener: () => void): () => void {
     this.appsCheckedListeners.add(listener);
@@ -222,6 +231,8 @@ class EngineClient {
           this.asked.delete(message.linkId);
         }
         this.messages.set(message.linkId, message.messages);
+        if (message.deleted?.length) this.deletedIds.set(message.linkId, message.deleted);
+        else this.deletedIds.delete(message.linkId);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
         if (this.kept.has(message.linkId)) this.askWhole(message.linkId);
         break;
@@ -253,6 +264,9 @@ class EngineClient {
       }
       case "app-frame":
         for (const listener of this.appListeners) listener(message.linkId, message.event);
+        break;
+      case "app-range":
+        for (const listener of this.appRangeListeners) listener(message.linkId, message.range);
         break;
       case "apps-checked":
         for (const listener of this.appsCheckedListeners) listener();

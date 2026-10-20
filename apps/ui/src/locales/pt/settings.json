@@ -80,6 +80,8 @@
     "allow": "Permitir",
     "camera": "Câmera",
     "cameraInfo": "Usada em chamadas e fotos. Fica neste dispositivo, para este perfil.",
+    "denied": "Bloqueado. Permita o microfone e a câmera nos ajustes do navegador ou do sistema.",
+    "deniedIos": "Bloqueado pelo iOS. Em Ajustes → Apps → Safari, permita Microfone (e Câmera) e abra o Ghostly de novo.",
     "failed": "Não foi possível abrir. Verifique se o Ghostly tem permissão.",
     "level": "Nível do microfone",
     "microphone": "Microfone",

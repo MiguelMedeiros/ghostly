@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
@@ -42,4 +43,19 @@ test("an audio file plays in the chat: name, play, seek bar, time and the shared
   // It ends by itself and goes back to the start, ready to play again.
   await expect(received).toHaveAttribute("data-state", "idle", { timeout: 10_000 });
   await expect(received.getByTestId("audio-play")).toHaveAccessibleName("Play audio");
+});
+
+test("an audio file's status reads whole: it wraps instead of being cut", { tag: ["@feature:files.audio.play"] }, async ({ peer }, testInfo) => {
+  const [alice, bob] = await Promise.all([peer("audio-alice"), peer("audio-bob")]);
+  await pair(alice, bob);
+
+  // Over the 25 MiB a receiver takes without asking: the sender waits for an answer, a line longer than the bubble.
+  const path = testInfo.outputPath("long concert recording.mp3");
+  writeFileSync(path, Buffer.alloc(26 * 1024 * 1024, 7));
+  await alice.page.getByTestId("file-input").setInputFiles(path);
+  const status = audios(alice).last().getByTestId("audio-status");
+  await expect(status).toHaveText("· Waiting for your contact to accept · 26.0 MB", { timeout: 30_000 });
+  const box = await status.evaluate((el) => ({ cut: el.scrollWidth > el.clientWidth + 1, right: el.getBoundingClientRect().right, bubble: el.closest("[data-testid=audio-bubble]")!.getBoundingClientRect().right }));
+  expect(box.cut, "the status is not cut with …").toBe(false);
+  expect(box.right).toBeLessThanOrEqual(box.bubble + 1);
 });

@@ -1,3 +1,4 @@
+import { isAppleMobile } from "./installPrompt";
 import { getPrefix } from "./storage";
 
 /*
@@ -42,6 +43,22 @@ export function chooseDevice(kind: DeviceKind, device: ChosenDevice | null): voi
   else delete choices[kind];
   try { localStorage.setItem(key(), JSON.stringify(choices)); } catch { /* chosen for now, not remembered */ }
   window.dispatchEvent(new Event(DEVICES_EVENT));
+}
+
+/** Whether `getUserMedia` failed because the person, the browser or the system refused it (not a missing device). */
+export function isMediaDenied(error: unknown): boolean {
+  const name = (error as { name?: unknown } | null)?.name;
+  return name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError";
+}
+
+/**
+ * Where to turn a refused microphone or camera back on, as a translation key. On an iPhone or iPad, Safari and the
+ * home-screen app refuse at once, with no prompt, once iOS was told no (Settings → Apps → Safari): only the Settings
+ * app turns them back on. Chrome and Firefox on iOS have their own switches, so they get the general line.
+ */
+export function mediaDeniedText(userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent,
+  touchPoints = typeof navigator === "undefined" ? 0 : navigator.maxTouchPoints ?? 0): "settings.media.deniedIos" | "settings.media.denied" {
+  return isAppleMobile(userAgent, touchPoints) && !/CriOS|FxiOS|EdgiOS/.test(userAgent) ? "settings.media.deniedIos" : "settings.media.denied";
 }
 
 /** The ids browsers give their own "follow the system" entries, which the default option already is. */

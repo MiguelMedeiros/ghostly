@@ -178,13 +178,6 @@ export function pinnedBeside(chat: string): string[] {
   return pinnedOrder().filter(id => chats[id] === chats[chat]);
 }
 
-/** A pinned chat's place among the pinned chats shown with it, or undefined for a chat that is not pinned. */
-export function pinnedPlaceBeside(chat: string): PinnedPlace | undefined {
-  const beside = pinnedBeside(chat);
-  const index = beside.indexOf(chat);
-  return index < 0 ? undefined : { index, count: beside.length };
-}
-
 /**
  * Moves a pinned chat to `index` among the pinned chats shown with it (0 is the top; past either end is that end).
  * Its new place among them, or undefined when it is not pinned or already there.

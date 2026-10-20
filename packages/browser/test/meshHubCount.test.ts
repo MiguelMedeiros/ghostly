@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { MESH_HUBS } from "@ghostly/core";
-import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
+import { CommunityWorld, RELAY_NETWORK, sameRun, seededRandom, type Peer } from "./communityWorld";
 // covers: groups.hubs
 
 /**
@@ -8,10 +8,20 @@ import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
  * Hubs): each member may be a hub, and the beacon lists at most eight. Joins in a row spend the relays' budget, so
  * readings and writes of the beacon are held back now and then; the group still settles on at most eight hubs, and the
  * other members keep edges with two of them, not a full mesh.
+ *
+ * Each run is the same (`sameRun`). On the wall clock, the engines' ticks ran on the world's clock while what they
+ * stamped outside a tick (a joiner's knock, the admin's commits) read the real one, minutes behind once the world ran
+ * ahead; how far behind depended on how fast the machine ran, and a busy CI runner read 9 hubs at minutes 3 and 4
+ * (twice in a week). An app's engine and its device's clock agree: over 20 seeds with the world's clock as `Date.now`,
+ * every minute read 8; on the wall clock, minute 1 read up to 18 and minute 2 often 9.
  */
 describe("hubs when every member stays online", () => {
+  let restore = () => {};
+  afterEach(() => { restore(); restore = () => {}; });
+
   it("at most maxHubs hubs, and the others keep two edges", async () => {
-    const world = new CommunityWorld(undefined, RELAY_NETWORK);
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    restore = sameRun(world, 1);
     const admin = world.add("admin", undefined, { staysOnline: true });
     const id = await admin.groups.create("Hubs", "mesh");
     const link = await admin.groups.enableLink(id);

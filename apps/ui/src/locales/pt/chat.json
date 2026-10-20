@@ -3,7 +3,8 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
     "messagesFrom": "{{count}} mensagens novas de {{name}}",
-    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas"
+    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas",
+    "rowMoved": "Agora na posição {{place}} de {{count}}"
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
@@ -241,9 +242,9 @@
   "menu": {
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
+    "more": "Mais…",
+    "moreTitle": "Mais opções",
     "moveDown": "Mover para baixo",
-    "moveFirst": "Já é a primeira",
-    "moveLast": "Já é a última",
     "moveUp": "Mover para cima",
     "pin": "Fixar conversa",
     "refresh": "Atualizar",

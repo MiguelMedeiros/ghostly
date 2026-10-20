@@ -435,29 +435,47 @@ fn header<'a>(request: &'a Request<'_>, name: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("Missing {name}"))
 }
 
-/// The raw body is the bytes; `x-space`, `x-id` and `x-offset` say where they go.
+/// Android's append: its WebView cannot read a request's body, so Tauri's IPC goes through `postMessage` there, as JSON
+/// only. The page sends `{ space, id, offset, bytes }`, the bytes as base64url (a JSON array of numbers would cost the
+/// page ~90 ms and Rust 32 MiB of values per MiB).
+#[cfg(any(mobile, test))]
+fn json_append(args: &serde_json::Value) -> Result<(String, String, u64, Vec<u8>), String> {
+    let text = |name: &str| {
+        args.get(name)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| format!("Missing {name}"))
+    };
+    let offset = args
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .ok_or("Invalid offset")?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(text("bytes")?)
+        .map_err(|_| "Expected raw bytes")?;
+    Ok((text("space")?, text("id")?, offset, bytes))
+}
+
+/// The raw body is the bytes; `x-space`, `x-id` and `x-offset` say where they go. On Android, JSON (`json_append`).
 #[tauri::command]
 pub async fn file_bytes_append<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     request: Request<'_>,
 ) -> Result<(), String> {
-    let bytes = match request.body() {
-        InvokeBody::Raw(bytes) => bytes.clone(),
-        // Android: its WebView cannot read a request's body, so Tauri's IPC goes through `postMessage` there, which
-        // carries the bytes as a JSON array of numbers.
+    let (space, id, offset, bytes) = match request.body() {
+        InvokeBody::Raw(bytes) => (
+            header(&request, "x-space")?.to_string(),
+            header(&request, "x-id")?.to_string(),
+            header(&request, "x-offset")?
+                .parse()
+                .map_err(|_| "Invalid offset")?,
+            bytes.clone(),
+        ),
         #[cfg(mobile)]
-        InvokeBody::Json(serde_json::Value::Array(values)) => values
-            .iter()
-            .map(|v| v.as_u64().and_then(|n| u8::try_from(n).ok()))
-            .collect::<Option<Vec<u8>>>()
-            .ok_or("Expected raw bytes")?,
+        InvokeBody::Json(args) => json_append(args)?,
+        #[allow(unreachable_patterns)]
         _ => return Err("Expected raw bytes".into()),
     };
-    let space = header(&request, "x-space")?.to_string();
-    let id = header(&request, "x-id")?.to_string();
-    let offset: u64 = header(&request, "x-offset")?
-        .parse()
-        .map_err(|_| "Invalid offset")?;
     let store = store(&app)?;
     let base = store.base.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -695,6 +713,23 @@ mod tests {
         (0..len)
             .map(|i| ((index * 7919 + i as u64 * 31) % 251) as u8)
             .collect()
+    }
+
+    #[test]
+    fn an_android_append_carries_its_bytes_as_base64url_in_the_json_args() {
+        let bytes = step(3, 1024 * 1024 + 1);
+        let args = serde_json::json!({ "space": "ghostly", "id": "chat-in-abc", "offset": 5u64 << 40, "bytes": URL_SAFE_NO_PAD.encode(&bytes) });
+        assert_eq!(
+            json_append(&args).unwrap(),
+            ("ghostly".into(), "chat-in-abc".into(), 5u64 << 40, bytes)
+        );
+        let broken = serde_json::json!({ "space": "ghostly", "id": "x", "offset": 0, "bytes": "not base64!" });
+        assert_eq!(json_append(&broken).unwrap_err(), "Expected raw bytes");
+        let numbers =
+            serde_json::json!({ "space": "ghostly", "id": "x", "offset": 0, "bytes": [1, 2] });
+        assert_eq!(json_append(&numbers).unwrap_err(), "Missing bytes");
+        let no_offset = serde_json::json!({ "space": "ghostly", "id": "x", "bytes": "" });
+        assert_eq!(json_append(&no_offset).unwrap_err(), "Invalid offset");
     }
 
     #[test]
