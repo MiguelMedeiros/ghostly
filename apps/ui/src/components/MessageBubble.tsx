@@ -6,6 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { focusLost } from "../lib/focus";
 import { Menu, MenuItem } from "./Menu";
+import { useContextMenu, type MenuPoint } from "../lib/contextMenu";
 import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
@@ -610,6 +611,16 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   // Which delete waits for its confirmation: this device's, or everyone's.
   const [confirm, setConfirm] = useState<"here" | "everyone" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  // A right-click on the message: this menu, at the pointer, with the focus on ⋮ as a click on it would leave it (the
+  // keys work, Escape goes back there). Each one opens it afresh: the press that asked closes a menu open before.
+  const [pointed, setPointed] = useState<MenuPoint & { n: number }>();
+  useContextMenu(ref, "[data-message-row]", (at) => {
+    button.current?.focus({ preventScroll: true });
+    setConfirm(null);
+    setPointed((was) => ({ ...at, n: (was?.n ?? 0) + 1 }));
+    setOpen(true);
+  });
   const side = align === "left" ? "end" : "start";
   // A delete takes this row away with its ⋮, where the confirmation gives the focus back: once the row is gone, the
   // focus goes to the ⋮ of the message now in its place (the one before it at the end), not to the page.
@@ -629,13 +640,14 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
   return (
     <div ref={ref} className="relative self-center shrink-0">
       <button
+        ref={button}
         type="button"
         data-testid="message-options"
         title={t("chat.message.options")}
         aria-label={t("chat.message.options")}
         aria-haspopup="true"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { setPointed(undefined); setOpen((v) => !v); }}
         // Faint but always reachable by touch; on a pointer it waits for the message to be hovered.
         className={`p-1 rounded-full transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
           open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
@@ -645,7 +657,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
           <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" />
         </svg>
       </button>
-      <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t("chat.message.options")}>
+      <Menu key={pointed?.n} open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} at={pointed} focusFirst label={t("chat.message.options")}>
         {onReply && <MenuItem testId="message-reply" onClick={() => { setOpen(false); onReply(); }} icon={<ReplyGlyph />}>
           {t("chat.message.reply")}
         </MenuItem>}

@@ -3,6 +3,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { folderUnread, type BadgeGroup } from "../lib/appBadge";
 import { OTHER_CHATS_ID, deleteFolder, folderChatsId, moveFolder, renameFolder, type ChatFolder } from "../lib/chatFolders";
 import { MUTE_EVENT } from "../lib/chatMute";
+import { useContextMenu, type MenuPoint } from "../lib/contextMenu";
 import type { ChatSession } from "../lib/types";
 import { DeleteFolderDialog, FolderNameDialog } from "./chat/ChatFolderDialogs";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
@@ -41,6 +42,13 @@ export function ChatFolderHeader({ folder, sessions, groups, place, onToggle, or
   const [asking, setAsking] = useState<"name" | "delete">();
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
   const closeMenu = () => setMenuOpen(false);
+  // A right-click on the header: its ⋮ menu at the pointer, the focus on ⋮ (each one opens it afresh, as a message's does).
+  const [pointed, setPointed] = useState<MenuPoint & { n: number }>();
+  useContextMenu(menuRef, "[data-testid=chat-folder]", (at) => {
+    optionsRef.current?.focus({ preventScroll: true });
+    setPointed((was) => ({ ...at, n: (was?.n ?? 0) + 1 }));
+    setMenuOpen(true);
+  });
   // A folder moved from its ⋮ keeps the focus on that ⋮, in its new place: the page puts the moved rows back in, which drops it.
   const moved = useRef(false);
   useLayoutEffect(() => { if (moved.current) { moved.current = false; optionsRef.current?.focus(); } }, [place.index]);
@@ -59,11 +67,11 @@ export function ChatFolderHeader({ folder, sessions, groups, place, onToggle, or
         {unread.count > 99 ? "99+" : unread.count}
       </span>}
       <div ref={menuRef} className="relative flex shrink-0 pe-1.5">
-        <button ref={optionsRef} type="button" data-testid="chat-folder-options" aria-haspopup="true" aria-expanded={menuOpen} aria-label={optionsLabel} title={optionsLabel} onClick={() => setMenuOpen(o => !o)}
+        <button ref={optionsRef} type="button" data-testid="chat-folder-options" aria-haspopup="true" aria-expanded={menuOpen} aria-label={optionsLabel} title={optionsLabel} onClick={() => { setPointed(undefined); setMenuOpen(o => !o); }}
           className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full text-text-muted transition-colors hover:bg-text-primary/10 hover:text-accent aria-expanded:bg-text-primary/10 aria-expanded:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1" /><circle cx="12" cy="5" r="1" /><circle cx="12" cy="19" r="1" /></svg>
         </button>
-        <Menu testId="chat-folder-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} portal focusFirst label={optionsLabel}>
+        <Menu key={pointed?.n} testId="chat-folder-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} portal at={pointed} focusFirst label={optionsLabel}>
           <MenuItem testId="chat-folder-rename" onClick={() => { closeMenu(); setAsking("name"); }}>{t("sidebar.folder.rename")}</MenuItem>
           {place.index > 0 && <MenuItem testId="chat-folder-up" onClick={() => move(-1)}>{t("chat.menu.moveUp")}</MenuItem>}
           {place.index < place.count - 1 && <MenuItem testId="chat-folder-down" onClick={() => move(1)}>{t("chat.menu.moveDown")}</MenuItem>}
