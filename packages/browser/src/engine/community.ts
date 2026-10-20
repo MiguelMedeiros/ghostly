@@ -1274,15 +1274,19 @@ export class Communities {
 
   /**
    * My request is not in the hub's lobby any more, and the lobby has room for it: another member's write, made from a
-   * reading from before mine, dropped it (`LOBBY_CHECK_MS`). A full lobby that pushed it out is left as it is: asking
-   * again there would push out someone else. A read that fails says nothing, and the usual refresh asks again.
+   * reading from before mine, dropped it (`LOBBY_CHECK_MS`). A full lobby that pushed it out is left as it is (asking
+   * again there would push out someone else), unless its oldest request was there a hub's busy read before mine: the
+   * hub has read that one, so mine goes in its place. Many members a closed hub carried ask the hub left in the same
+   * second; with 6 places, the rest waited each 20 s refresh while the lobby held requests already taken (agents#1718).
+   * A read that fails says nothing, and the usual refresh asks again.
    */
   private async lobbyLost(groupId: string, live: Live, hub: string, ts: number): Promise<boolean> {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
     const records = await this.host.resolve(keys.identity.pubKeyZ32, true, true).catch(() => undefined);
     if (records === undefined) return false;
     const entries = readLobby(keys, records ?? []);
-    const lost = !entries.some(e => e.key === live.session.myKey && e.ts >= ts) && entries.length < COMMUNITY_TOPOLOGY.lobbyEntries;
+    const full = entries.length >= COMMUNITY_TOPOLOGY.lobbyEntries;
+    const lost = !entries.some(e => e.key === live.session.myKey && e.ts >= ts) && (!full || entries.some(e => e.ts <= ts - this.timings.lobbyPollMs));
     if (lost) traceJoin(groupId, "lobby.lost");
     return lost;
   }
@@ -1291,7 +1295,12 @@ export class Communities {
     const keys = lobbyKeys(live.session.state.rv, groupId, live.session.myKey);
     // With no edge up, where my members ask is my way back (`wayBack`).
     const back = this.wayBack(groupId, live);
-    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, !back, !back && this.doorBusy(groupId, live, now), back).catch(() => null)) ?? []);
+    // Members about to ask here (`lobbyBusyUntil`: another hub left or its app closed, or someone asked): a group's read,
+    // not a background look. As background, the relays' budget held it back (background yields to links that signal and
+    // keeps to its share) and answered the lobby already known: ~40 s of requests unseen, the members a closed hub
+    // carried cut off for 22-115 s (agents#1718).
+    const busy = now < live.lobbyBusyUntil;
+    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, !back && !busy, !back && this.doorBusy(groupId, live, now), back).catch(() => null)) ?? []);
     for (const { key, ts } of entries) {
       // A member of the roster gets its edge. A key no commit names may be a member ahead of me on the roster, or one
       // whose admission lost a race, and needs an edge to find out: for a moment, and no member's (`wantAhead`).
