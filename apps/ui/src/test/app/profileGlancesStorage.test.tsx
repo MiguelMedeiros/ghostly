@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useProfileGlances } from "../../hooks/useProfileSwitcher";
@@ -43,5 +44,28 @@ describe("the other profiles' glances, while another window writes", () => {
       await waitFor(() => expect(chatsRead(), `a write of ${key}`).toBeGreaterThan(0));
       await waitFor(() => expect(result.current.othersUnread).toBe(unread));
     }
+  });
+
+  it("count a write of the other profile's chat or read mark again without opening its database; its lock opens it", async () => {
+    const other = createProfile("Small");
+    const prefix = prefixOf(other.id);
+    localStorage.setItem(`${prefix}c1`, JSON.stringify(chat("c1", 2)));
+    const { result } = renderHook(() => useProfileGlances());
+    await waitFor(() => expect(result.current.othersUnread).toBe(2));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+
+    const open = vi.spyOn(indexedDB, "open");
+    const listed = vi.spyOn(indexedDB, "databases");
+    for (const [key, unread] of [[`${prefix}c1`, 4], [`${prefix}read_c1`, 1], [`${prefix}c2`, 3]] as const) {
+      if (key === `${prefix}read_c1`) localStorage.setItem(key, "3");
+      else localStorage.setItem(key, JSON.stringify(chat(key.slice(prefix.length), key.endsWith("c1") ? 4 : 2)));
+      writtenElsewhere(key);
+      await waitFor(() => expect(result.current.othersUnread, `a write of ${key}`).toBe(unread));
+    }
+    expect([open.mock.calls.length, listed.mock.calls.length], "its chats and read marks").toEqual([0, 0]);
+
+    writtenElsewhere(settingsKeyFor(other.id));
+    await waitFor(() => expect(open.mock.calls.length + listed.mock.calls.length).toBeGreaterThan(0));
+    await waitFor(() => expect(result.current.othersUnread).toBe(3));
   });
 });
