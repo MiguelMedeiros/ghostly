@@ -941,7 +941,11 @@ export class Communities {
         const check = live.lobbyChecks?.get(hub);
         if (check && now >= check.at) {
           live.lobbyChecks!.delete(hub);
-          if (await this.lobbyLost(groupId, live, hub, check.ts)) live.lobbyWrites.delete(hub);
+          const lost = await this.lobbyLost(groupId, live, hub, check.ts);
+          if (lost === "room") live.lobbyWrites.delete(hub);
+          // Pushed out of a full lobby: asked again once the hub has read the requests there (`lobbyPollMs`), not at the
+          // next refresh.
+          else if (lost === "full") live.lobbyWrites.set(hub, now - this.timings.lobbyWriteMs + this.timings.lobbyPollMs + Math.floor(this.random() * LOBBY_CHECK_JITTER_MS));
         }
         // A request the relays held back (the budget, while a link of mine signals) goes again in a moment, not at the
         // next refresh: the hub cannot open an edge for a member it never saw ask (a member cut off by a hub that left
@@ -1283,18 +1287,21 @@ export class Communities {
   }
 
   /**
-   * My request is not in the hub's lobby any more, and the lobby has room for it: another member's write, made from a
-   * reading from before mine, dropped it (`LOBBY_CHECK_MS`). A full lobby that pushed it out is left as it is: asking
-   * again there would push out someone else. A read that fails says nothing, and the usual refresh asks again.
+   * My request is not in the hub's lobby any more (`LOBBY_CHECK_MS`). With room for it ("room"): another member's write,
+   * made from a reading from before mine, dropped it. Full ("full"): the newer requests pushed it out, and asking again
+   * at once would push out one of them before the hub read it, so it waits for the hub's next reading. Many members a
+   * closed hub carried ask the hub left in the same second; with 6 places, the rest waited for the 20 s refresh while the
+   * lobby held requests the hub had already taken, and were cut off for up to 115 s (CLI daemons, 2026-10-19). A read
+   * that fails says nothing, and the usual refresh asks again.
    */
-  private async lobbyLost(groupId: string, live: Live, hub: string, ts: number): Promise<boolean> {
+  private async lobbyLost(groupId: string, live: Live, hub: string, ts: number): Promise<"room" | "full" | false> {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
     const records = await this.host.resolve(keys.identity.pubKeyZ32, true, true).catch(() => undefined);
     if (records === undefined) return false;
     const entries = readLobby(keys, records ?? []);
-    const lost = !entries.some(e => e.key === live.session.myKey && e.ts >= ts) && entries.length < COMMUNITY_TOPOLOGY.lobbyEntries;
-    if (lost) traceJoin(groupId, "lobby.lost");
-    return lost;
+    if (entries.some(e => e.key === live.session.myKey && e.ts >= ts)) return false;
+    traceJoin(groupId, "lobby.lost");
+    return entries.length < COMMUNITY_TOPOLOGY.lobbyEntries ? "room" : "full";
   }
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {
