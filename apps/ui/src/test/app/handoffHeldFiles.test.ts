@@ -158,3 +158,37 @@ describe("a taker copies the files its frozen copy holds into its staging", () =
     for (const file of held) expect(storage.files.get(`${staging.database}/${file.id}`)).toEqual(file.bytes);
   });
 });
+
+/*
+ * A group file's record holds its author's digest from the announcement on, before any byte came. A member can serve
+ * another file of the same size whole and never confirm it: the bytes stay, the record still `transferring`. The giver
+ * named them by the announced digest, the taker's check failed twice, and every move of the profile ended "The copy
+ * was damaged".
+ */
+describe("a giver names a group file by the digest of its bytes until they passed the author's", () => {
+  const announced = Uint8Array.from({ length: 4_000 }, (_, i) => (i * 3) % 251);
+  const served = Uint8Array.from(announced, (byte, i) => (i === 0 ? byte ^ 1 : byte));
+  const group = { message: "m1", author: "a1" };
+  const record = (id: string, transfer: object) => ({ id, linkId: "group:g1", direction: "in", bytes: "opfs", digest: digestText(sha256(announced)), createdAt: 1,
+    metadata: { name: "clip.mp4", size: announced.length, mime: "video/mp4", timestamp: 1 }, transfer, group });
+
+  // One source per test: it keeps its connection to the database open, as a move does.
+  it("a file still coming, other bytes stored whole, is listed by their own digest; one whose bytes passed, by the author's, unread", async () => {
+    await storage.store.append("group-g1-in-1", 0, served);
+    await storage.store.append("group-g1-in-2", 0, announced);
+    await frozenCopy([
+      record("group-g1-in-1", { state: "transferring", transferred: 0, size: announced.length }),
+      record("group-g1-in-2", { state: "done", transferred: announced.length, size: announced.length }),
+    ]);
+    storage.calls.read = storage.calls.digest = 0;
+
+    const files = await handoffProfileHost("1.1.2", "web").source("ghostly").files();
+
+    expect(files).toEqual([
+      { id: "group-g1-in-1", size: served.length, sha256: digestText(sha256(served)) },
+      { id: "group-g1-in-2", size: announced.length, sha256: digestText(sha256(announced)) },
+    ]);
+    // Only the file still coming is read, once.
+    expect(storage.calls).toEqual({ read: 1, digest: 0 });
+  });
+});
