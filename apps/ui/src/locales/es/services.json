@@ -29,7 +29,10 @@
     "stopped": "Detenido"
   },
   "window": {
+    "elsewhere": "{{app}} intentó llevarte a otro sitio, fuera de lo que comparte tu contacto.",
     "failed": "La solicitud falló.",
+    "notAnswering": "{{app}} no responde en el equipo de tu contacto. Pídele que compruebe que está en marcha.",
+    "tooSlow": "{{app}} no respondió a tiempo en el equipo de tu contacto. Vuelve a intentarlo en un momento.",
     "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea."
   },
   "yourApps": "Tus apps"
