@@ -2,7 +2,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { concatBytes, fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
-import { sanitizeNick } from "./text";
+import { sanitizeNick, unwrapPasted } from "./text";
 import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
@@ -105,8 +105,12 @@ export const GROUP_READ_NOTE_COMMUNITY = `Anyone with the group's link can join,
 
 /** A community group's link: `group2/<group id>/<entry key>` (web: `#/join/group2/…`). */
 export function encodeCommunityLink(link: { g: string; host: string }): string { return `group2/${link.g}/${link.host}`; }
-/** A pasted link, a `/join/…` path or the bare code; null when it is not a community group's link. */
+/** A pasted link, a `/join/…` path or the bare code (or one in words: `unwrapPasted`); null when it is not a community group's link. */
 export function decodeCommunityLink(input: string): { g: string; host: string } | null {
+  return readCommunityLink(input) ?? readCommunityLink(unwrapPasted(input));
+}
+
+function readCommunityLink(input: string): { g: string; host: string } | null {
   const clean = input.trim().replace(/^.*#/, "").replace(/^.*?\/join\//, "").replace(/^\/+/, "");
   const parts = clean.split("/");
   if (parts.length !== 3 || parts[0] !== "group2" || !GROUP_ID.test(parts[1]) || !MEMBER_KEY.test(parts[2])) return null;
