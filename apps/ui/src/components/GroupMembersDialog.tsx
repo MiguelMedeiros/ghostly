@@ -257,7 +257,7 @@ const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, m
     </span>
     {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
     {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
-    {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-warn-ink">{t("group.members.missing", { count: m.missing })}</span>}
+    {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-warn-ink">{t(m.missing === 1 ? "group.members.missingOne" : "group.members.missing", { count: m.missing })}</span>}
     {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1">
       {tools === "hubs" && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy}
         value={m.hubRole ?? "auto"} options={HUB_ROLES.map(value => ({ value, label: hubLabels[value] }))} onChange={role => onHub(m.key, role)} />}
