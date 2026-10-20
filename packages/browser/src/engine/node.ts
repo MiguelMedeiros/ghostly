@@ -3317,13 +3317,19 @@ export class GhostlyNode implements EngineImplementation {
     const bytes = new TextEncoder().encode(trimmed).length;
     if (live && !live.stored.profile && !(live.link?.isDataLinkOpen && trimmed.length <= LIMITS.maxChatMessageBytes / 4) && bytes > MAX_DHT_TEXT_BYTES)
       return { error: `Message too large for DHT (${bytes} bytes, max ${MAX_DHT_TEXT_BYTES}). Try a shorter message or share a link instead.`, refused: true };
-    if (!live?.link) return { error: "You are offline" };
+    // Limited mode starts no link (it dials nothing): a chat's text waits as it does for a contact away, and goes once
+    // the check works (`leaveLimited` starts the links, the live link sends what waits). Refused as "You are offline",
+    // it contradicted the banner's "Messages you write wait until then" (agents#1721). A compatibility chat, which
+    // keeps no waiting text, says the real reason.
+    const waitsForCheck = !!live && !live.link && this.limitedMode && !!live.stored.profile;
+    if (live && !live.link && this.limitedMode && !live.stored.profile) return { error: LIMITED_MODE_ERROR };
+    if (!live || (!live.link && !waitsForCheck)) return { error: "You are offline" };
     if (!trimmed) return { error: null };
 
     // Picked here (the CLI, a bot): past what just came, so an answer written in the same millisecond goes below it.
     const timestamp = params.timestamp ?? arrivalKey(Date.now(), this.placedAt.get(linkId));
     // Sent: whatever this side was typing is done (the contact clears it on the message too).
-    if (live.stored.profile) live.link.setTyping(false);
+    if (live.stored.profile) live.link?.setTyping(false);
     if (live.stored.profile) {
       // A reply names a message of this chat, as both sides know it (WISP 400 § Replies); anything else is refused.
       const found = params.replyTo === undefined ? undefined : await this.replyFor(linkId, params.replyTo);
@@ -3338,6 +3344,7 @@ export class GhostlyNode implements EngineImplementation {
     if (card) return { error: "Status cards need a current chat; this compatibility chat sends text only.", refused: true };
     // A compatibility chat's records have no room for a reply (WISP 402): said, rather than sent without it.
     if (params.replyTo !== undefined) return { error: "Replies need a current chat; this compatibility chat sends text only.", refused: true };
+    if (!live.link) return { error: "You are offline" };
     const via = live.link.isDataLinkOpen ? "datalink" : "pkarr";
     await this.storeMessage({ linkId, id: `me_${timestamp}`, text: trimmed, sender: "me", timestamp, via });
     const at = Date.now(), snapshot = pathSnapshot(live, via);
@@ -3359,7 +3366,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async sendChatText(live: LiveLink, trimmed: string, timestamp: number, preview?: LinkPreview, reply?: MessageReply, forwarded?: number, card?: StatusCard): Promise<{ error: string | null; refused?: boolean; messageId?: string }> {
     const { link } = live, linkId = live.stored.id;
-    if (!link) return { error: "You are offline" };
+    if (!link && !this.limitedMode) return { error: "You are offline" };
     this.chatInUse(live);
     const bytes = new TextEncoder().encode(trimmed).length;
     if (bytes > LIMITS.maxChatMessageBytes) return { error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`, refused: true };
@@ -3367,6 +3374,14 @@ export class GhostlyNode implements EngineImplementation {
     if (!pairedMessageFits(timestamp, trimmed, reply && pairedWireReply(reply), forwarded, card)) return { error: PAIRED_FRAME_TOO_LARGE, refused: true };
     const stop = this.chatStopped(live);
     if (stop) return { error: stop };
+    const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }), ...(card && { card }) };
+    if (!link) {
+      // Limited mode: no link yet (`sendMessage`). It waits for the check, then goes as a text waiting for the live link.
+      const id = `me_${toBase64Url(randomBytes(16))}`, wireId = id.slice(3), reason = "Sent once Ghostly can check which device is active.";
+      await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: "datalink", delivery: "waiting", deliveryError: reason, ...(preview && { preview }), ...answers });
+      await this.outboxFor(linkId).wait(id, reason);
+      return { error: null, messageId: id };
+    }
     // Someone else used the invite first: the contact reads nothing of this side's, so nothing waits to go either.
     if (!link.isDataLinkOpen && link.dhtDelivery?.inviteTaken) return { error: INVITE_TAKEN, refused: true };
     const wireId = toBase64Url(randomBytes(16)), id = `me_${wireId}`;
@@ -3374,7 +3389,6 @@ export class GhostlyNode implements EngineImplementation {
     // Not live: the contact's app may be closed. Wake it, if it shared how; it then connects and takes this message.
     if (delivery !== "stream") this.wakePeer(live);
     // A card rides with the row; the DHT floor and a hold carry its text alone (WISP 405 · Status Cards).
-    const answers = { ...(reply && { replyTo: reply }), ...(forwarded && { forwarded }), ...(card && { card }) };
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
       if (!validationError) {
@@ -4812,7 +4826,8 @@ export class GhostlyNode implements EngineImplementation {
         try {
           if (forwardKind(message) === "text") {
             const sent = groupId ? await this.groups.send(groupId, message.text, [], undefined, hops)
-              : !live!.link ? { error: "You are offline" }
+              // In limited mode a chat's text waits for the check, as one sent there does (`sendMessage`).
+              : !live!.link && !(this.limitedMode && live!.stored.profile) ? { error: this.limitedMode ? LIMITED_MODE_ERROR : "You are offline" }
               : live!.stored.profile ? await this.sendChatText(live!, message.text.trim(), now(), message.preview, undefined, hops)
               : await this.sendMessage({ linkId: to, text: message.text, timestamp: now() });
             if (sent.error) { note(sent.error); continue; }
