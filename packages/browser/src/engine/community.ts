@@ -586,7 +586,12 @@ export class Communities {
     if (!live) { await this.forget(groupId); return; }
     const s = live.session;
     if (s.status !== "active" || s.others.length === 0) { await this.forget(groupId); return; }
-    const edges = [...this.host.edges(groupId).entries()].filter(([, id]) => this.host.linkReady(id, 2));
+    // Only an edge to someone still in the group carries the leave, and an admin's role on to its heir: the edge to a
+    // member just removed (kept open for its farewell) or one leaving reaches nobody who stays. Counted, an admin who
+    // removed the other member and left at once handed the role to a member it had no way to, which never got the
+    // commit nor the removal's secret: it could not write, and nobody opening the link got in (agents#1664).
+    const others = new Set(s.others);
+    const edges = [...this.host.edges(groupId).entries()].filter(([key, id]) => others.has(key) && this.host.linkReady(id, 2));
     if (!edges.length) throw new Error("Nobody in the group is connected right now to take your leave. Try again in a moment.");
     let next: string | undefined;
     if (s.isAdmin) {
