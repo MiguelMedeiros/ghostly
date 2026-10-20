@@ -38,7 +38,7 @@ function Screen({ files, open = true, audioFiles = [], where = FAMILY }: { files
         <NowPlayingChat.Provider value={where}>
           {files.map((file) => (
             <div key={file.id} data-message-id={`m-${file.id}`}>
-              <VoiceBubble file={file as ChatFile & { voice: { duration: number; peaks: number[] } }} sender="peer" peerName="Ana" />
+              <VoiceBubble file={file as ChatFile & { voice: { duration: number; peaks: number[] } }} sender="peer" peerName="Ana" timestamp={1_700_000_000_000} />
             </div>
           ))}
           {audioFiles.map((file) => (
