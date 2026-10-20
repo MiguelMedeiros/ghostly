@@ -637,7 +637,16 @@ export class CommunitySession {
   get name(): string { return groupDisplayName(this.state.meta, this.state.name); }
   get myKey(): string { return this.identity.pubKeyZ32; }
   get top(): CommunityCommit { return this.state.chain[this.state.chain.length - 1]; }
-  get topHash(): string { return communityCommitHash(this.top); }
+  /**
+   * The top commit's hash, kept for the commit it was taken from: a view reads it for each member (its roster, what
+   * each member's lines are missing), and hashing it every time cost tens of milliseconds per state in big communities.
+   */
+  get topHash(): string {
+    const top = this.top;
+    if (this.topHashOf?.commit !== top) this.topHashOf = { commit: top, hash: communityCommitHash(top) };
+    return this.topHashOf.hash;
+  }
+  private topHashOf: { commit: CommunityCommit; hash: string } | undefined;
   get epoch(): number { return this.top.e; }
   get roster(): Roster { return this.rosters.get(this.topHash)!; }
   get admin(): string | undefined { return rosterAdmin(this.roster); }
