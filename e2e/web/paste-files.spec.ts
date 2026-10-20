@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, test } from "../support/fixtures";
 
 /** A 1×1 PNG, as a screenshot would put one on the clipboard. */
@@ -63,7 +63,7 @@ test("a pasted screenshot and a dropped file reach the contact", { tag: ["@featu
 });
 
 /** Where the first `needle` inside the element is drawn: its box on the screen, from the text itself. */
-const textBox = (element: ReturnType<Page["getByTestId"]>, needle: string) => element.evaluate((root, find) => {
+const textBox = (element: Locator, needle: string) => element.evaluate((root, find) => {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const at = node.textContent!.indexOf(find);
@@ -94,7 +94,7 @@ test("a file named in the other script reads from its start, in the sheet and in
 
   const name = "تقرير الربع الثالث النهائي للمشروع مع كل الملاحق والجداول.pdf";
   await alice.page.getByTestId("file-input").setInputFiles({ name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n") });
-  const shown = chat(bob).getByTestId("file-bubble").getByTestId("file-name");
+  const shown = chat(bob).getByTestId("file-bubble").getByTitle(name);
   await expect(shown).toHaveText(name, { timeout: 30_000 });
   // Cut with … on a phone, at its end: its first word is on the screen, inside the name's box.
   const [box, first] = await Promise.all([shown.evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect), textBox(shown, "تقرير")]);
