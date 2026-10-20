@@ -373,9 +373,17 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
    * Forgets a message here: the chat history first, so the bubble goes at
    * once, then the peer's own copy of it and the bytes of any file it carried.
    * Nothing is sent — the contact keeps what it has.
+   *
+   * A message of mine still waiting to be sent (Cancel sending) is the engine's to send: it goes from the chat only
+   * once the engine took the delete. One refused (limited mode) stays, and the rejection says why under it.
    */
   const forgetMessage = useCallback(
-    (messageId: string) => {
+    async (messageId: string, waiting = false): Promise<void> => {
+      if (waiting) {
+        if (peerKey && platform) await platform.deleteMessage(peerKey, messageId);
+        deleteMessage(messageId);
+        return;
+      }
       deleteMessage(messageId);
       if (peerKey) void platform?.deleteMessage(peerKey, messageId).catch(() => {});
     },
@@ -1049,7 +1057,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 peerPubKey={params.peerPubKeyB64}
                 peerNick={contactNick}
                 contactName={isAnonymous ? "" : shownName}
-                onDelete={() => forgetMessage(row.message.id)}
+                onDelete={() => forgetMessage(row.message.id, row.message.sender === "me" && row.message.delivery === "waiting")}
                 onDeleteForEveryone={paired && chatLink && removableForEveryone(row.message) ? () => removeForEveryone(row.message.id) : undefined}
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
                 onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
