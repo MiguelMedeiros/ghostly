@@ -129,6 +129,7 @@ describe("the argument parser", () => {
     refused("task update", ["t", "--wait", "delivered"], "--wait takes none, confirmed or sent, not \"delivered\"");
     refused("chat wait", ["--until", "weird"], "--until takes live, text or paired, not \"weird\"");
     refused("chat request", ["1", "--rail", "onchain"], "--rail takes cashu or lightning, not \"onchain\"");
+    refused("chat request", ["1", "--method", "weird"], "--method takes cashu, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
     refused("chat pay-request", ["p", "--via", "cashu"], "--via takes lightning, not \"cashu\"");
     // The words each takes still go through as given.
     expect(parseArgs(["--network", "mainnet"], COMMANDS["wallet list"].options!).options).toEqual({ network: "mainnet" });
