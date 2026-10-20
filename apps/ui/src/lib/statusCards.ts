@@ -126,6 +126,11 @@ export function activeTaskCount(entries: readonly CardEntry[]): number {
   return entries.filter((e) => e.active).length;
 }
 
+/** How many cards are going: the tasks still going and the routines not paused. A phone's ⋮ counts these, and has Tasks only with one. */
+export function goingCardCount(entries: readonly CardEntry[]): number {
+  return entries.filter((e) => e.active || (e.card.kind === "routine" && e.card.state === "active")).length;
+}
+
 /**
  * A status's dot, bar and word: the accent while it runs, success with ✓ when done, red with ✕ when it failed, amber
  * when blocked (the word in the warn ink, which a light theme darkens to 4.5:1), muted while queued or once cancelled.
@@ -236,4 +241,14 @@ export function cardLabel(t: Translate, card: ShownCard): string {
 export function cardLine(card: ShownCard): string {
   if (card.kind === "usage") return `📊 ${card.label ? `${card.label} · ` : ""}${usageLeft(card)}%`;
   return card.kind === "task" ? card.title : `↻ ${card.name}`;
+}
+
+/**
+ * An app card's line where a message's text would be (the chat list, a quote, the pinned bar, Saved, the screen
+ * reader): "🧩 App: Chess 1.2.0" in the reader's language. Its text is the English fallback an older app shows, with
+ * the bundle's link (WISP 405 § An app). None for any other message.
+ */
+export function appCardLine(card: StatusCard | undefined, t: Translate): string | undefined {
+  if (card?.kind !== "app") return undefined;
+  return `🧩 ${t("apps.card.label", { title: card.version ? `${card.title} ${card.version}` : card.title })}`;
 }

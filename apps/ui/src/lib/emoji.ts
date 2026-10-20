@@ -26,6 +26,7 @@ interface Data {
 
 let data: Data | null = null;
 let loading: Promise<void> | null = null;
+let failures = 0;
 
 /**
  * Loads the data set (about 420 KiB), the first time an emoji panel shows: the first screen does without it. Loaded
@@ -33,8 +34,14 @@ let loading: Promise<void> | null = null;
  */
 export function loadEmoji(): Promise<void> {
   return (loading ??= import("@emoji-mart/data").then((module) => { data = module.default as unknown as Data; },
-    (cause: unknown) => { loading = null; throw cause; }));
+    (cause: unknown) => { loading = null; failures++; throw cause; }));
 }
+
+/**
+ * Whether the data set failed to load more than once: Chromium keeps a failed import for as long as the page lives,
+ * so there only a reload brings it.
+ */
+export const emojiFailedAgain = (): boolean => failures > 1;
 
 /** Whether the data set is here (`loadEmoji`): until then there is no emoji to offer, find or name. */
 export const emojiLoaded = (): boolean => data !== null;

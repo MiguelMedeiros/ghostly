@@ -1,0 +1,1 @@
+A Ghostly receiver refuses at `pf-start` a `files/2` file larger than `files/3` takes without asking (25 MiB), or one past the contact's 500 MiB taken without asking, since `files/2` cannot ask the person. Every Ghostly sender uses `files/3` for such files. No new frame.

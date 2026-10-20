@@ -94,7 +94,7 @@ Implementation evidence below is what is merged on `dev` on 2026-09-28. Pull req
 | [600](600-media.md) | Voice and Video | Draft | 1:1 calls in every chat while live; screen sharing from inside a call (#253); Linux Desktop with native media, no screen sharing yet; the microphone, camera and speaker chosen in Settings and during a call (#388, #400, #406, #419) |
 | [601](601-webrtc-media.md) | WebRTC Media | Draft | Compatibility chats and the chat session (`calls/1`); Desktop on Linux with WebRTC in Rust and GStreamer media (#331); signals carry up to eight candidates and calls use the profile's TURN relay (#375); on Linux, the chosen devices in GStreamer (#406, #419) |
 | [700](700-local-services.md) | Local Services | Draft | HTTP proxy in every chat, hosted from Desktop, the extension and the CLI; Shared services from the composer's + (#268) |
-| [701](701-http-services.md) | HTTP Local Service Profile | Draft | `ph` frames in the chat session (`services/1`, #207); the web app can neither host nor open one |
+| [701](701-http-services.md) | HTTP Local Service Profile | Draft | `ph` frames in the chat session (`services/1`, #207); the web app hosts none, and opens one when built with a services host |
 | [800](800-invite-join.md) | Invite and Join | Draft | Bearer `ghostly1` invite that pins the inviter's participation key (#210); a copy cannot stop a paired chat (#302); admission protocol proposed |
 | [801](801-invitation-profiles.md) | Implemented Invitation Profiles | Draft | Every new chat makes a `ghostly1…` code (#210); `pair1/`, `pair2d/` and v0.4 codes still read |
 | [Contact links · 8xx planned](8xx-contact-links.md) | Contact Links | Draft | Not built; planned for 1.4 in the web app, the extension, Desktop and the CLI |

@@ -235,6 +235,25 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("↻ pressed from the keyboard keeps the focus while it runs, so a refused resend leaves it on ↻", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser, as the voice play button did
+    // in this same spot: Space then scrolled the chat.
+    let refuse!: (error: Error) => void;
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockImplementation(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "Connection lost", retry: true }, { id: "chat1-out-4" });
+    const button = screen.getByTestId("file-retry");
+    button.focus();
+    fireEvent.click(button);
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(button);
+    expect(retryFile).toHaveBeenCalledTimes(1);
+    await act(async () => { refuse(new Error("No connection to your contact")); });
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).toHaveFocus();
+  });
+
   it("a picture sent from here shows at once, and keeps its image while the transfer starts, moves and ends", async () => {
     const created: string[] = [], revoked: string[] = [];
     const { createObjectURL, revokeObjectURL } = URL;
@@ -318,6 +337,24 @@ describe("FileBubble: files/3", () => {
     expect(screen.getByTestId("file-status")).toHaveTextContent(/^40\.0 MB$/);
     expect(fileHeld).toHaveBeenCalledWith("chat1-in-abc");
     expect(servicesPlatform!.getFile).not.toHaveBeenCalled();
+  });
+
+  it("Save on a file that is no picture is a stop for Tab, and Enter or Space saves it", async () => {
+    vi.spyOn(servicesPlatform!, "fileHeld").mockResolvedValue("here");
+    const saveFile = vi.fn(async () => true);
+    Object.assign(servicesPlatform!, { saveFile });
+    try {
+      const MB = 1024 ** 2;
+      const { user } = show({ state: "done", transferred: 40 * MB, size: 40 * MB }, { name: "report.pdf", mime: "application/pdf", size: 40 * MB });
+      const save = await screen.findByTestId("file-save");
+      await user.tab();
+      expect(document.activeElement).toBe(save);
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(1));
+      await user.keyboard(" ");
+      await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(2));
+      expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "report.pdf");
+    } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
   });
 
   it("where the platform cannot tell whether a file is here, the file is asked for as before", async () => {

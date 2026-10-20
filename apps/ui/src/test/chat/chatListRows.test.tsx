@@ -121,6 +121,14 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(within(rowOf("Xan")).getByTestId("chat-row-preview")).toHaveTextContent(/^📎 notes.pdf$/);
   });
 
+  it("says an app card as the card names it, in the app's language, not its English fallback with the bundle's link", () => {
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp";
+    const card = { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } as const;
+    saveSession(chat("a", { nick: "Ana", messages: [message({ text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`, card })] }));
+    renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "zh" });
+    expect(within(rowOf("Ana")).getByTestId("chat-row-preview")).toHaveTextContent(/^🧩 应用：Chess 1\.2\.0$/);
+  });
+
   it("says a join as the chat's line does, in the app's language, not the notice's English text", () => {
     saveSession(chat("j", { nick: "Jo", messages: [message({ text: "👋 Jo joined", sender: "system", systemEvent: { type: "join", pubKey: key("j") } })] }));
     saveSession(chat("k", { nick: "Kim", messages: [message({ text: "👋 Me joined", sender: "system", systemEvent: { type: "join", pubKey: key("z") } })] }));

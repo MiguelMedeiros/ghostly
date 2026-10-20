@@ -11,13 +11,24 @@ const JOINS: Record<string, { param: string; arg: string; command: string; what:
   "invite.join": { param: "invite", arg: "<invite-or-link>", command: "invite join", what: "An invite" },
 };
 
-export async function secretsFromStdin(method: string, params: Record<string, unknown>, read: () => Promise<string>, tty = false): Promise<string | undefined> {
+/**
+ * A join given no invite, a redeem given no token and a send given no text read stdin, but a pipe nobody writes or closes (what Node's exec and most harnesses give a
+ * child) would hold it for ever without a word: a note once nothing has come for a while, the usage error once nothing
+ * has come at all. A producer that started writing is waited for to the end; `-` asked for stdin and waits as long.
+ */
+export const STDIN_NOTE_MS = 2_000;
+export const STDIN_GIVE_UP_MS = 60_000;
+
+/** `read`'s `onData`: called at the first chunk, once something is coming. */
+export type StdinRead = (onData?: () => void) => Promise<string>;
+
+export async function secretsFromStdin(method: string, params: Record<string, unknown>, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<string | undefined> {
   const warning = (what: string) => `${what} on the command line shows in ps and the shell's history: give it on stdin instead`;
   if (method === "wallet.redeem") {
     if (params.token !== undefined) return warning("A token");
     const missing = () => new CliError("usage", "Missing <cashu-token>: give it as an argument or on stdin (… | ghostly wallet redeem)");
     if (tty) throw missing();
-    const token = (await read()).trim();
+    const token = (await readUnasked(read, note, { what: "a Cashu token", missing: "Missing <cashu-token>", command: "wallet redeem", as: "an argument" })).trim();
     if (!token) throw missing();
     params.token = token;
     return undefined;
@@ -28,7 +39,7 @@ export async function secretsFromStdin(method: string, params: Record<string, un
     if (params[join.param] !== undefined && params[join.param] !== "-") return warning(join.what);
     const missing = () => new CliError("usage", `Missing ${join.arg}: give it on stdin (… | ghostly ${join.command}) or as an argument`);
     if (tty) throw missing();
-    const value = (await read()).trim();
+    const value = (params[join.param] === "-" ? await read() : await readUnasked(read, note, { what: join.what.toLowerCase(), missing: `Missing ${join.arg}`, command: join.command, as: "an argument" })).trim();
     if (!value) throw missing();
     params[join.param] = value;
     return undefined;
@@ -53,6 +64,29 @@ export async function secretsFromStdin(method: string, params: Record<string, un
     return onLine ? warning("An API key") : undefined;
   }
   return undefined;
+}
+
+/**
+ * `send`, `edit`, `group send` and `group edit` with no text words read it from stdin the same way: `command` is the
+ * command line as given (`send bob`). `asked`: `--stdin`, which waits as long as it takes.
+ */
+export async function textFromStdin(read: StdinRead, command: string, asked: boolean, note: (text: string) => void): Promise<string> {
+  const text = asked ? await read() : await readUnasked(read, note, { what: "the text", missing: "No text", command, as: "arguments" });
+  return text.replace(/\n$/, "");
+}
+
+/** What `readUnasked` says: `what` is waited for, `missing` is the usage error's title, `as` the other way to give it. */
+interface Unasked { what: string; missing: string; command: string; as: string }
+
+async function readUnasked(read: StdinRead, note: (text: string) => void, ask: Unasked): Promise<string> {
+  let noteTimer: ReturnType<typeof setTimeout> | undefined, giveUpTimer: ReturnType<typeof setTimeout> | undefined;
+  const stop = () => { clearTimeout(noteTimer); clearTimeout(giveUpTimer); };
+  const nothingCame = new Promise<never>((_, reject) => {
+    noteTimer = setTimeout(() => note(`Waiting for ${ask.what} on stdin (… | ghostly ${ask.command}): give it there or as ${ask.as}`), STDIN_NOTE_MS);
+    giveUpTimer = setTimeout(() => reject(new CliError("usage", `${ask.missing}: nothing came on stdin in ${STDIN_GIVE_UP_MS / 1000} s; give it there (… | ghostly ${ask.command}) or as ${ask.as}`)), STDIN_GIVE_UP_MS);
+  });
+  try { return await Promise.race([read(stop), nothingCame]); }
+  finally { stop(); }
 }
 
 /**

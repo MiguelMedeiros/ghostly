@@ -58,6 +58,9 @@ export const RELEASE_GUARDS = [
 /** The only front matter keys a fragment has: a misspelled `release` would otherwise leave its entry unheld. */
 const KEYS = ["section", "release"];
 
+/** Groups written the other way, with the spelling the changelog uses: two spellings would make two bold groups. */
+const GROUP_SPELLINGS = { Chats: "Chat", Group: "Groups", Call: "Calls", Wallet: "Wallets", App: "Apps", File: "Files", Device: "Devices" };
+
 /**
  * A fragment's section and bullets, or a list of what is wrong with it. `version` is the repository's (package.json):
  * before a guard's `from`, an entry about that flag must be held for its release.
@@ -78,6 +81,7 @@ export function parseFragment(name, text, version) {
   const [heading, group, ...rest] = section.split(" / ").map((part) => part.trim());
   if (!heading || rest.length || group === "") problems.push(`${name}: "section" is "<### heading>" or "<### heading> / <**group**>"`);
   if (/[#*]/.test(section)) problems.push(`${name}: "section" is the heading's words, without # or **`);
+  if (Object.hasOwn(GROUP_SPELLINGS, group)) problems.push(`${name}: the group is written "${GROUP_SPELLINGS[group]}", not "${group}"`);
   const body = match[2].trim();
   if (!body) problems.push(`${name}: no text after the front matter`);
   else if (!body.startsWith("- ")) problems.push(`${name}: the text is one or more list items ("- ...")`);

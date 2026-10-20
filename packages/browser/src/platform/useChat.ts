@@ -115,7 +115,6 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   useEffect(() => {
     if (!linkId) return;
-    void engine.call("setActiveLink", { linkId }).catch(() => {});
     // An offer that arrived before this chat was open (it may be open because of it).
     const pending = engine.takeCallOffer(linkId);
     if (pending) setIncomingCallSignal(pending);
@@ -124,10 +123,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
       engine.takeCallOffer(linkId);
       setIncomingCallSignal(signal);
     });
-    return () => {
-      off();
-      void engine.call("setActiveLink", { linkId: null }).catch(() => {});
-    };
+    return off;
   }, [linkId]);
 
   /** `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies). */

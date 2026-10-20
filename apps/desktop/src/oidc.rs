@@ -16,13 +16,19 @@
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 const WAIT: Duration = Duration::from_secs(10 * 60);
 const MAX_REQUEST: usize = 32 * 1024;
+/// How long one connection has to send its whole request; the browser's arrives at once.
+const REQUEST_TIME: Duration = Duration::from_secs(5);
+/// Connections served at once, so a slow one never holds the browser's.
+const CONNECTIONS: usize = 4;
+/// How often the listener and a connection's reads look at the time and the cancel.
+const POLL: Duration = Duration::from_millis(50);
 const PATH: &str = "/oidc-callback";
 /// The "port" a deep-link sign-in reports to the page, which then asks with an [`APP_STATE`] state.
 const DEEP_LINK: u16 = 0;
@@ -223,17 +229,42 @@ Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-s
     );
 }
 
-/// Reads one request, headers and a body announced by Content-Length, within the size limit.
+/// One read into `chunk`, before `until` and while `stop` is unset. None when the time is up, it stops, or the
+/// peer is gone. The stream's read timeout is [`POLL`], so a quiet peer does not hold it past either.
+fn read_some(
+    stream: &mut TcpStream,
+    chunk: &mut [u8],
+    until: Instant,
+    stop: &dyn Fn() -> bool,
+) -> Option<usize> {
+    loop {
+        if stop() || Instant::now() >= until {
+            return None;
+        }
+        match stream.read(chunk) {
+            Ok(0) => return None,
+            Ok(n) => return Some(n),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+                ) => {}
+            Err(_) => return None,
+        }
+    }
+}
+
+/// Reads one request, headers and a body announced by Content-Length, within the size limit, all of it before
+/// `until` (a peer sending a byte now and then is dropped then) and while `stop` is unset.
 fn read_request(
     stream: &mut TcpStream,
+    until: Instant,
+    stop: &dyn Fn() -> bool,
 ) -> Option<(String, String, HashMap<String, String>, String)> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     loop {
-        let n = stream.read(&mut chunk).ok()?;
-        if n == 0 {
-            return None;
-        }
+        let n = read_some(stream, &mut chunk, until, stop)?;
         buf.extend_from_slice(&chunk[..n]);
         if buf.len() > MAX_REQUEST {
             return None;
@@ -256,10 +287,7 @@ fn read_request(
                 return None;
             }
             while buf.len() < end + 4 + length {
-                let n = stream.read(&mut chunk).ok()?;
-                if n == 0 {
-                    return None;
-                }
+                let n = read_some(stream, &mut chunk, until, stop)?;
                 buf.extend_from_slice(&chunk[..n]);
             }
             let body = String::from_utf8(buf[end + 4..end + 4 + length].to_vec()).ok()?;
@@ -279,7 +307,8 @@ fn state_of(answer: &str) -> Option<String> {
 }
 
 /// Serves the listener until an answer with `state` arrives, the wait ends, or it is cancelled. Its page is in
-/// `lang`.
+/// `lang`. Up to [`CONNECTIONS`] connections are served at once, each with [`REQUEST_TIME`] for its request, so
+/// one that sends slowly neither holds the browser's nor keeps the wait from ending.
 pub fn serve(
     listener: &TcpListener,
     state: &str,
@@ -290,47 +319,76 @@ pub fn serve(
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let host = format!("127.0.0.1:{port}");
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    loop {
-        if cancelled.load(Ordering::SeqCst) {
-            return Err("Sign-in cancelled".into());
-        }
-        if Instant::now() >= deadline {
-            return Err("Sign-in timed out. Try again.".into());
-        }
-        let mut stream = match listener.accept() {
-            Ok((stream, _)) => stream,
-            Err(e) if e.kind() == ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(50));
+    // Set once the wait is over (or the answer is taken), which ends the connections still reading.
+    let over = AtomicBool::new(false);
+    let answer = Mutex::new(None);
+    let serving = AtomicUsize::new(0);
+    let stop = || over.load(Ordering::SeqCst) || cancelled.load(Ordering::SeqCst);
+    std::thread::scope(|scope| {
+        let result = loop {
+            if let Some(answer) = answer.lock().unwrap().take() {
+                break Ok(answer);
+            }
+            if cancelled.load(Ordering::SeqCst) {
+                break Err("Sign-in cancelled".into());
+            }
+            if Instant::now() >= deadline {
+                break Err("Sign-in timed out. Try again.".into());
+            }
+            if serving.load(Ordering::SeqCst) >= CONNECTIONS {
+                std::thread::sleep(POLL);
                 continue;
             }
-            Err(e) => return Err(e.to_string()),
+            let mut stream = match listener.accept() {
+                Ok((stream, _)) => stream,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {
+                    std::thread::sleep(POLL);
+                    continue;
+                }
+                Err(e) => break Err(e.to_string()),
+            };
+            serving.fetch_add(1, Ordering::SeqCst);
+            let (host, answer, serving, over, stop) = (&host, &answer, &serving, &over, &stop);
+            scope.spawn(move || {
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(POLL));
+                let until = deadline.min(Instant::now() + REQUEST_TIME);
+                if let Some((method, target, headers, body)) =
+                    read_request(&mut stream, until, stop)
+                {
+                    // A page elsewhere reaching this port by a name that resolves here is refused.
+                    if headers.get("host") != Some(host) {
+                        respond(&mut stream, "400 Bad Request", "text/plain", "Bad request");
+                    } else {
+                        let path = target.split(['?', '#']).next().unwrap_or("");
+                        match (method.as_str(), path) {
+                            ("GET", PATH) => respond(
+                                &mut stream,
+                                "200 OK",
+                                "text/html; charset=utf-8",
+                                &page(lang),
+                            ),
+                            // Exactly one answer is taken, even when two arrive at once.
+                            ("POST", PATH)
+                                if state_of(&body).as_deref() == Some(state)
+                                    && !over.swap(true, Ordering::SeqCst) =>
+                            {
+                                respond(&mut stream, "200 OK", "text/plain", "OK");
+                                *answer.lock().unwrap() = Some(body);
+                            }
+                            ("POST", PATH) => {
+                                respond(&mut stream, "409 Conflict", "text/plain", "Not awaited")
+                            }
+                            _ => respond(&mut stream, "404 Not Found", "text/plain", "Not found"),
+                        }
+                    }
+                }
+                serving.fetch_sub(1, Ordering::SeqCst);
+            });
         };
-        let _ = stream.set_nonblocking(false);
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let Some((method, target, headers, body)) = read_request(&mut stream) else {
-            continue;
-        };
-        // A page elsewhere reaching this port by a name that resolves here is refused.
-        if headers.get("host").map(String::as_str) != Some(host.as_str()) {
-            respond(&mut stream, "400 Bad Request", "text/plain", "Bad request");
-            continue;
-        }
-        let path = target.split(['?', '#']).next().unwrap_or("");
-        match (method.as_str(), path) {
-            ("GET", PATH) => respond(
-                &mut stream,
-                "200 OK",
-                "text/html; charset=utf-8",
-                &page(lang),
-            ),
-            ("POST", PATH) if state_of(&body).as_deref() == Some(state) => {
-                respond(&mut stream, "200 OK", "text/plain", "OK");
-                return Ok(body);
-            }
-            ("POST", PATH) => respond(&mut stream, "409 Conflict", "text/plain", "Not awaited"),
-            _ => respond(&mut stream, "404 Not Found", "text/plain", "Not found"),
-        }
-    }
+        over.store(true, Ordering::SeqCst);
+        result
+    })
 }
 
 /// A provider's sign-in page: https, no credentials, and naming where it returns (`redirect_uri`), or,
@@ -658,6 +716,136 @@ mod tests {
         assert!(serve(&listener, STATE, "en", Instant::now(), &cancelled)
             .unwrap_err()
             .contains("timed out"));
+    }
+
+    /// A connection that sends a request's start a byte at a time, every 100 ms, for up to `max`. Ends with how
+    /// long it lasted before the listener closed it (or `max`).
+    fn trickle(port: u16, max: Duration) -> std::thread::JoinHandle<Duration> {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        std::thread::spawn(move || {
+            let start = Instant::now();
+            for byte in b"POST /oidc-callback HTTP/1.1\r\nX: ".iter().cycle() {
+                if start.elapsed() >= max || stream.write_all(&[*byte]).is_err() {
+                    break;
+                }
+                // Waits the 100 ms here: nothing to read is the listener still waiting, the end is it closing.
+                match stream.read(&mut [0u8; 64]) {
+                    Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                    _ => break,
+                }
+            }
+            start.elapsed()
+        })
+    }
+
+    #[test]
+    fn a_connection_sending_slowly_does_not_hold_the_browsers_answer() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let host = format!("127.0.0.1:{port}");
+        let cancelled = AtomicBool::new(false);
+        let slow = trickle(port, Duration::from_secs(12));
+        let client = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(post(port, &host, &format!("#id_token=abc&state={STATE}"))
+                .starts_with("HTTP/1.1 200"));
+        });
+        let start = Instant::now();
+        let answer = serve(
+            &listener,
+            STATE,
+            "en",
+            Instant::now() + Duration::from_secs(30),
+            &cancelled,
+        )
+        .unwrap();
+        let took = start.elapsed();
+        client.join().unwrap();
+        assert_eq!(answer, format!("#id_token=abc&state={STATE}"));
+        assert!(took < Duration::from_secs(3), "answered after {took:?}");
+        // Once the answer is taken, the slow connection is let go too.
+        assert!(slow.join().unwrap() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_connection_sending_slowly_is_dropped_after_its_time() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let host = format!("127.0.0.1:{port}");
+        let cancelled = AtomicBool::new(false);
+        let client = std::thread::spawn(move || {
+            let lasted = trickle(port, Duration::from_secs(12)).join().unwrap();
+            assert!(post(port, &host, &format!("#id_token=abc&state={STATE}"))
+                .starts_with("HTTP/1.1 200"));
+            lasted
+        });
+        serve(
+            &listener,
+            STATE,
+            "en",
+            Instant::now() + Duration::from_secs(30),
+            &cancelled,
+        )
+        .unwrap();
+        let lasted = client.join().unwrap();
+        assert!(
+            lasted >= REQUEST_TIME - Duration::from_millis(500)
+                && lasted < REQUEST_TIME + Duration::from_secs(2),
+            "dropped after {lasted:?}"
+        );
+    }
+
+    #[test]
+    fn the_wait_ends_on_time_and_on_cancel_while_a_connection_sends_slowly() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let slow = trickle(port, Duration::from_secs(12));
+        let start = Instant::now();
+        let cancelled = AtomicBool::new(false);
+        let error = serve(
+            &listener,
+            STATE,
+            "en",
+            Instant::now() + Duration::from_secs(1),
+            &cancelled,
+        )
+        .unwrap_err();
+        assert!(error.contains("timed out"), "{error}");
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(slow.join().unwrap() < Duration::from_secs(3));
+
+        let slow = trickle(port, Duration::from_secs(12));
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel = cancelled.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            cancel.store(true, Ordering::SeqCst);
+        });
+        let start = Instant::now();
+        assert_eq!(
+            serve(
+                &listener,
+                STATE,
+                "en",
+                Instant::now() + Duration::from_secs(30),
+                &cancelled,
+            )
+            .unwrap_err(),
+            "Sign-in cancelled"
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(slow.join().unwrap() < Duration::from_secs(3));
     }
 
     #[test]

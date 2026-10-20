@@ -3,10 +3,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
     "messagesFrom": "{{count}} mensagens novas de {{name}}",
-    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas"
+    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas",
+    "rowMoved": "Agora na posição {{place}} de {{count}}"
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
+    "message": "Áudio",
     "pause": "Pausar áudio",
     "play": "Tocar áudio",
     "position": "Posição no áudio",
@@ -15,8 +17,8 @@
   },
   "compat": {
     "burned": "A conversa foi apagada",
-    "continued": "Convidou o seu contacto para uma nova conversa.",
-    "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam a funcionar nos dois sentidos; uma nova conversa acrescenta ficheiros, pagamentos e mensagens guardadas.",
+    "continued": "Você convidou seu contato para uma nova conversa.",
+    "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam funcionando nos dois sentidos; uma nova conversa acrescenta arquivos, pagamentos e mensagens guardadas.",
     "label": "Conversa de compatibilidade · Ghostly antigo",
     "open": "Abrir a nova conversa",
     "overLimit": "Não foi possível publicar a mensagem: limite da DHT excedido.",
@@ -26,6 +28,8 @@
   "connecting": "conectando",
   "createdHere": "Você criou esta conversa",
   "deleteArrivingFileHint": "Apagada só aqui. O arquivo para de chegar; seu contato vê o envio cancelado.",
+  "deleteForEveryone": "Apagar para todos",
+  "deleteForEveryoneHint": "Apagada também nos aparelhos do contato ou do grupo. Um app de antes disso mostra \"Mensagem removida\" no lugar; uma cópia que alguém salvou continua com essa pessoa.",
   "deleteMessage": "Apagar mensagem",
   "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
   "deleteSendingFileHint": "Apagada só aqui. O envio para; seu contato não vai receber o arquivo.",
@@ -238,9 +242,9 @@
   "menu": {
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
+    "more": "Mais…",
+    "moreTitle": "Mais opções",
     "moveDown": "Mover para baixo",
-    "moveFirst": "Já é a primeira",
-    "moveLast": "Já é a última",
     "moveUp": "Mover para cima",
     "pin": "Fixar conversa",
     "refresh": "Atualizar",

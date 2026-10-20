@@ -17,6 +17,16 @@ export function iceServerProblem(server: IceServerSetting): string | null {
 }
 
 /**
+ * Why "Hide my IP from contacts" (`relayOnly`) cannot be on with these ICE servers, or null: it needs a TURN server
+ * with its username and credential, which every connection to a contact then goes through. Without one there is no
+ * way to reach a contact that hides this device's address, and the mode never falls back to a direct path.
+ */
+export function relayOnlyProblem(servers: readonly IceServerSetting[] | undefined): string | null {
+  const turn = (servers ?? []).some((server) => !iceServerProblem(server) && server.urls.split(/[\s,]+/).some((url) => /^turns?:/i.test(url)));
+  return turn ? null : "Add a TURN server first";
+}
+
+/**
  * A server as WebRTC writes it (`urls` a list, as every TURN guide does) in this setting's own form: the addresses
  * comma-separated. Anything else is left as it is, for `iceServerProblem` to say what is wrong.
  */
