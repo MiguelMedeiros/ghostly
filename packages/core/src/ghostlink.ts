@@ -4607,9 +4607,13 @@ export class GhostLink {
     try { this.channel.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: the contact's liveness finds out */ }
   }
 
-  /** A link made just now for a peer that is about to show up (a group's entry session): look fast for a while. */
-  expectPeer(): void {
-    this.session.expectPeer();
+  /**
+   * A link made just now for a peer that is about to show up (a group's entry session): look fast for a while.
+   * `awaited`: nothing reaches the peer until this link reads it (the edge to a member just let in): its reads go on the
+   * relays' floor meanwhile (`LinkSession.expectPeer`).
+   */
+  expectPeer(awaited = false): void {
+    this.session.expectPeer(awaited);
   }
 
   /** The peer's packet is at hand without a relay (a member of the group carried it, `CarriedTransport`): read it now. */
