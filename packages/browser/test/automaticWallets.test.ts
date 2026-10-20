@@ -13,7 +13,7 @@ const info = vi.fn(async () => ({ network: 'bitcoin', signerPubkey: `02${'ab'.re
 vi.mock('@arkade-os/sdk', async (original) => ({ ...await original<object>(), RestArkProvider: class { getInfo = info; } }));
 vi.mock('../src/engine/paymentAdapters/arkade', () => ({
   ARK_NETWORKS: ['bitcoin', 'mutinynet', 'signet', 'regtest'],
-  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string }, mnemonic: string) => ({ config, mnemonic, address: async () => `ark1${mnemonic.split(' ')[0]}`, balance: async () => silent.get(mnemonic) ?? funds.get(mnemonic) ?? 0, boardingAddress: async () => 'tb1qfixture', incoming: async () => 0, dispose: vi.fn() })) },
+  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string }, mnemonic: string) => ({ config, mnemonic, address: async () => `ark1${mnemonic.split(' ')[0]}`, balance: async () => silent.get(mnemonic) ?? funds.get(mnemonic) ?? 0, boardingAddress: async () => 'tb1qfixture', balances: async () => ({ balance: await (silent.get(mnemonic) ?? funds.get(mnemonic) ?? 0), incoming: 0 }), dispose: vi.fn() })) },
 }));
 vi.mock('../src/engine/paymentAdapters/backup', async (original) => ({ ...await original<object>(), snapshotArkDatabase: async () => ({ fixture: true }), restoreArkDatabase: async () => {} }));
 vi.mock('../src/engine/paymentAdapters/usdt', () => ({
