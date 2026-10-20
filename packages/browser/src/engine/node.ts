@@ -114,7 +114,7 @@ import {
 } from "@ghostly/core";
 import type { AppRangeAsk, AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { SavedMessages } from "./saved";
-import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
+import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
@@ -2006,7 +2006,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async clearRestoreMark(): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).delete(RESTORE_UNCHECKED_KEY));
+    await committed((await store(STORES.settings, "readwrite")).delete(RESTORE_UNCHECKED_KEY));
   }
 
   /**
@@ -6245,7 +6245,7 @@ export class GhostlyNode implements EngineImplementation {
     if (typeof groupId !== "string" || !groupId) throw new Error("Name the group");
     const next = new Set(this.groupAdminOff);
     if (on) next.delete(groupId); else next.add(groupId);
-    await wrap((await store(STORES.settings, "readwrite")).put({ at: Date.now(), groups: [...next].sort() }, GROUP_ADMIN_OFF_KEY));
+    await committed((await store(STORES.settings, "readwrite")).put({ at: Date.now(), groups: [...next].sort() }, GROUP_ADMIN_OFF_KEY));
     this.groupAdminOff = next;
     this.emitState();
   }
@@ -6729,7 +6729,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     try {
       const verifier = await makeHandoffVerifier(password);
-      await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
+      await committed((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
       await this.syncDeviceVerifier().catch(() => {});
       await this.stateDeviceVerifier();
     } catch (error) {
@@ -6742,7 +6742,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The profile has no verifier any more: its settings, the device state, and what the turn record states. */
   private async dropHandoffVerifier(): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
+    await committed((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
     await this.syncDeviceVerifier().catch(() => {});
     await this.stateDeviceVerifier();
   }
