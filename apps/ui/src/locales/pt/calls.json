@@ -68,6 +68,7 @@
     "audioFailed": "Chamada de áudio não conectou",
     "audioIncoming": "Chamada de áudio recebida",
     "audioMissed": "Chamada de áudio perdida",
+    "audioMissedMany": "{{count}} chamadas de áudio perdidas",
     "audioStarted": "Chamada de áudio iniciada",
     "audioUnanswered": "Chamada de áudio sem resposta",
     "videoCancelled": "Chamada de vídeo cancelada",
@@ -77,6 +78,7 @@
     "videoFailed": "Chamada de vídeo não conectou",
     "videoIncoming": "Chamada de vídeo recebida",
     "videoMissed": "Chamada de vídeo perdida",
+    "videoMissedMany": "{{count}} chamadas de vídeo perdidas",
     "videoStarted": "Chamada de vídeo iniciada",
     "videoUnanswered": "Chamada de vídeo sem resposta"
   },
