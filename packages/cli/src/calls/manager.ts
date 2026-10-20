@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { answersOffer, callSignalHeardAt, parseCallSignal, signalHasVideo, CALL_SIGNAL_MAX_AGE_MS, type CallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
-import { findChat } from "../apiKit";
+import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
 import { CallMedia, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
@@ -472,7 +472,8 @@ export class CallManager {
   getAuto(): AutoAnswer { return { ...this.auto, from: [...this.auto.from] }; }
 
   setAuto(next: { on: boolean; from?: string[]; rate?: unknown }): AutoAnswer {
-    const from = (next.from ?? []).map((ref) => this.chatId(ref));
+    // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
+    const from = (next.from ?? []).map((ref) => findOwnNamedChat(this.host.engine.getState().links, ref).id);
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
     const tmp = `${this.configPath}.tmp`;
     writeFileSync(tmp, JSON.stringify({ autoAnswer: this.auto }, null, 2) + "\n", { mode: 0o600 });

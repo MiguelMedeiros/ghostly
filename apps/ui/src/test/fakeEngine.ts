@@ -221,8 +221,8 @@ export class FakeEngine implements BrowserHost {
     this.send?.(event);
   }
 
-  messages(linkId: string, messages: StoredMessage[]): void {
-    this.emit({ kind: "messages", linkId, messages });
+  messages(linkId: string, messages: StoredMessage[], deleted?: string[]): void {
+    this.emit({ kind: "messages", linkId, messages, ...(deleted && { deleted }) });
   }
 
   /** A chat's newest page only, as the peer sends it to a page attached with `newest`: older rows left out. */

@@ -2,7 +2,7 @@ import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { usePeerAvatar, usePeerNick, useShareProfile } from "../hooks/useAvatars";
 import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
@@ -66,6 +66,7 @@ import {
   getInviteCode,
   deleteSession,
   loadSession,
+  loadShownSession,
   peerDisplayName,
   updateSessionLabel,
 } from "../lib/storage";
@@ -82,6 +83,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { setChatFolder } from "../lib/chatFolders";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
+import { useOnline } from "../hooks/useOnline";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
 import { useSameValue } from "../hooks/useSameValue";
@@ -195,6 +197,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    addMissedCallMessage,
+    uncountMissedCall,
     deleteMessage,
     setNick,
   } = useChat(params);
@@ -204,6 +208,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setNick(sharedNick);
   }, [sharedNick, setNick]);
 
+  // A missed call counted on another line: taking it back (a held call that rang after all) takes one off that line.
+  const countedOnRef = useRef(new Map<string, string>());
+  // The chat is on screen: a missed line the person already read may still count the next call (they see it change).
+  const seenRef = useRef(false);
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => {
       // Kept in English in the history: the call line is worded in the person's language where it is drawn (MessageBubble).
@@ -231,11 +239,24 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         },
       };
 
+      if (type === "call_missed") {
+        // A burst of missed calls from the contact is one line ("12 missed calls"), its rung calls' Incoming lines
+        // gone with it (agents#992).
+        const line = addMissedCallMessage(msg, { rang: call !== undefined ? callLineId("call_received", call) : undefined, seen: seenRef.current });
+        if (line && line !== msg.id) countedOnRef.current.set(msg.id, line);
+        return msg.id;
+      }
       addSystemMessage?.(msg);
       return msg.id;
     },
-    [addSystemMessage],
+    [addSystemMessage, addMissedCallMessage],
   );
+  const removeCallEventMessage = useCallback((id: string) => {
+    const line = countedOnRef.current.get(id);
+    if (line === undefined) { deleteMessage(id); return; }
+    countedOnRef.current.delete(id);
+    uncountMissedCall(line);
+  }, [deleteMessage, uncountMissedCall]);
 
   const platform = useServicesPlatform();
   const webrtc = useWebRTC({
@@ -244,7 +265,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
     // Only a line of this side's own (a call that lost a glare): the contact never had it, so nothing goes out.
-    removeCallEventMessage: deleteMessage,
+    removeCallEventMessage,
     media: platform?.callMedia?.(),
     // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
     iceServers: engine.state?.settings.iceServers,
@@ -453,7 +474,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
-  const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
+  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
+  const quoteIndex = useMemo(() => replyIndex(messages, false, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
@@ -540,7 +562,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A sheet (a phone): its rarer rows are behind More…, a second sheet. A popover lists them all.
   const sheetMenu = useIsMobile();
   const [showMore, setShowMore] = useState(false);
-  const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards). Found over the whole timeline, so a
   // run is the same whichever of its rows are in the page.
@@ -567,6 +588,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
   const pageShown = usePageShown();
   useEffect(() => {
+    seenRef.current = visible && pageShown;
     if (!visible || !pageShown) return;
     markSessionAsRead(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
@@ -581,7 +603,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
-  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;
+  // Not offline (Ghostly's switch or the device): no wake-up goes out, and the buttons say why instead of "did not open".
+  const deviceOnline = useOnline();
+  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop
+    && deviceOnline && engine.state?.settings.online !== false;
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
@@ -1184,63 +1209,41 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
-      {/* Tech Info Modal */}
       {showTechInfo && techInfo && (
-        <div 
-          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in"
-          {...techBackdrop}
-        >
-          <div 
-            className="bg-surface-alt rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h2 className="text-lg font-semibold text-text-primary">{t("chat.menu.techInfo")}</h2>
-              <button
-                onClick={() => setShowTechInfo(false)}
-                aria-label={t("common.close")}
-                className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <div className="p-4 space-y-4 text-sm">
-              <TechInfoSection title={t("chat.tech.identity")}>
-                <TechInfoRow label={t("chat.tech.sessionId")} value={techInfo.sessionId} mono copyable />
-                <TechInfoRow label={t("chat.tech.myKey")} value={techInfo.myPubKey} mono copyable />
-                <TechInfoRow label={t("chat.tech.peerKey")} value={techInfo.peerPubKey} mono copyable />
-                <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
-              </TechInfoSection>
-              <TechInfoSection title={t("chat.tech.protocol")}>
-                <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
-                <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
-                <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
-                <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
-              </TechInfoSection>
-              <TechInfoSection title={t("chat.tech.sync")}>
-                <TechInfoRow label={t("chat.tech.status")} value={status} />
-                <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
-                <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
-                <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
-                <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
-              </TechInfoSection>
-              <TechInfoSection title={t("chat.tech.ackStatus")}>
-                <TechInfoRow 
-                  label={t("chat.tech.myAck")} 
-                  value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
-                />
-                <TechInfoRow 
-                  label={t("chat.tech.peerAck")} 
-                  value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
-                />
-                <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
-              </TechInfoSection>
-            </div>
-          </div>
+        <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
+        <div className="p-4 space-y-4 text-sm">
+          <TechInfoSection title={t("chat.tech.identity")}>
+            <TechInfoRow label={t("chat.tech.sessionId")} value={techInfo.sessionId} mono copyable />
+            <TechInfoRow label={t("chat.tech.myKey")} value={techInfo.myPubKey} mono copyable />
+            <TechInfoRow label={t("chat.tech.peerKey")} value={techInfo.peerPubKey} mono copyable />
+            <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
+          </TechInfoSection>
+          <TechInfoSection title={t("chat.tech.protocol")}>
+            <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
+            <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
+            <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
+            <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
+          </TechInfoSection>
+          <TechInfoSection title={t("chat.tech.sync")}>
+            <TechInfoRow label={t("chat.tech.status")} value={status} />
+            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
+            <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
+            <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
+            <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
+          </TechInfoSection>
+          <TechInfoSection title={t("chat.tech.ackStatus")}>
+            <TechInfoRow 
+              label={t("chat.tech.myAck")} 
+              value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
+            />
+            <TechInfoRow 
+              label={t("chat.tech.peerAck")} 
+              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
+            />
+            <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
+          </TechInfoSection>
         </div>
+        </TechInfoDialog>
       )}
     </div>
     {/* A mini-app opened here (WISP 1200): beside the chat, over it on a phone. Always here while Apps is, so its frame
@@ -1256,6 +1259,39 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     </div>
     </NowPlayingChat.Provider>
     </CueChat.Provider>
+  );
+}
+
+/**
+ * The chat's Tech Info, a dialog: the focus goes into it, Tab stays in it, Escape or its ✕ closes it, and the focus goes
+ * back to ⋮ (the menu's row that opened it is gone by then).
+ */
+function TechInfoDialog({ onClose, returnFocus, children }: { onClose: () => void; returnFocus: React.RefObject<HTMLElement | null>; children: React.ReactNode }) {
+  const { t } = useI18n();
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, onClose, () => true, returnFocus);
+  const backdrop = useBackdropDismiss(onClose);
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in" {...backdrop}>
+      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-tech-info-title"
+        className="focus:outline-none bg-surface-alt rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 id="chat-tech-info-title" className="text-lg font-semibold text-text-primary">{t("chat.menu.techInfo")}</h2>
+          <button
+            onClick={onClose}
+            aria-label={t("common.close")}
+            className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 

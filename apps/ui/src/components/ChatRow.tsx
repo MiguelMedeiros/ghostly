@@ -12,7 +12,7 @@ import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
-import { cardLine, showsCard } from "../lib/statusCards";
+import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
@@ -24,6 +24,7 @@ import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
 import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
+import { callLineCount } from "../lib/storage";
 import type { Translate } from "../locales/translate";
 import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
@@ -344,9 +345,9 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
-                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
+                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : payment ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? appCardLine(p.lastMessage.card, t) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>

@@ -43,6 +43,9 @@ export const WEBSITE_INPUTS = [
   "docs/CLI.md",
   "docs/AI-AGENTS.md",
   "packages/cli/SKILL.md",
+  "packages/cli/README.md",
+  // llms.test.mjs checks the install line against the CLI's package name.
+  "packages/cli/package.json",
   // Quoted on /developers: sync-references.mjs's excerpt().
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",
@@ -85,9 +88,13 @@ export const PACKAGES_READ_FROM_SITE = [
   "apps/website/lib/invite.ts",
   // packages/browser's atprotoOAuth test: the client metadata the site serves.
   "apps/website/public/oauth/",
-  // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach.
+  // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach, and the
+  // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
   "apps/website/content/agents.ts",
+  "docs/CLI.md",
+  "apps/website/content/cli.ts",
+  "apps/website/scripts/llms.mjs",
   // packages/browser's websiteStore and websiteStoreOnce tests: the store pages' store and reader, its copy of core's, the build's reader and the test store.
   "apps/website/lib/store.ts",
   "apps/website/lib/storeRead.ts",

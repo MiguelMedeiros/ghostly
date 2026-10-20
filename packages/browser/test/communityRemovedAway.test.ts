@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { communityCommitHash, decodeCommunityLink, knockIdentity } from "@ghostly/core";
+import { communityCommitHash, createIdentity, decodeCommunityLink, encodeCommunityLink, identityFromSeedB64, knockIdentity } from "@ghostly/core";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
 // covers: groups.community.remove, groups.community.join, groups.community.send, groups.protocol.community-topology
 
@@ -296,6 +296,43 @@ describe("a member that opens the link of a community it is in", { timeout: 120_
     expect((await bob.store.getGroups())[0].joining).toBeUndefined();
     expect(session(bob, id)).toBe(before);
     expect(world.view(bob, id)?.status).toBe("active");
+  });
+
+  it("with another entry key in it, asks its own door: its member key goes to no other", async () => {
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
+    const id = await admin.groups.create("Open door");
+    const link = await admin.groups.enableLink(id);
+    for (const p of [bob, carol]) await p.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(p => world.member(p, id)), 10 * 60_000);
+    await world.run(60_000);
+    const before = session(carol, id), door = decodeCommunityLink(link)!.host;
+    // A link to the group under a key that is not its door (one somebody made).
+    const other = createIdentity().pubKeyZ32;
+    const opened: { peer: string; seed: string }[] = [], openEntry = carol.host.openEntry;
+    carol.host.openEntry = async (l, role, seed, peer) => { opened.push({ peer, seed }); return openEntry(l, role, seed, peer); };
+    expect(await carol.groups.joinByLink(`https://app.ghostly.tools/#/join/${encodeCommunityLink({ g: id, host: other })}`)).toBe(id);
+    expect(opened.map(o => o.peer)).toEqual([door]);
+    expect((await carol.store.getGroups())[0].joining).toMatchObject({ host: door, check: true });
+    await world.run(60_000);
+    expect((await carol.store.getGroups())[0].joining).toBeUndefined();
+    expect(session(carol, id)).toBe(before);
+    expect(world.view(carol, id)).toMatchObject({ status: "active", canSend: true });
+  });
+
+  it("removed, with another entry key in it, knocks with a fresh key, never the one it was a member with", async () => {
+    const { world, dave, id, daveKey } = await removedWhileAway();
+    await world.restart(dave);
+    await world.until(() => world.view(dave, id)?.status === "removed", 90_000);
+    const other = createIdentity().pubKeyZ32, opened: string[] = [], openEntry = dave.host.openEntry;
+    dave.host.openEntry = async (l, role, seed, peer) => { opened.push(identityFromSeedB64(seed).pubKeyZ32); return openEntry(l, role, seed, peer); };
+    await dave.groups.joinByLink(encodeCommunityLink({ g: id, host: other }));
+    expect(opened).toHaveLength(1);
+    expect(opened[0]).not.toBe(daveKey);
+    expect(identityFromSeedB64((await dave.store.getGroups())[0].joining!.seedB64).pubKeyZ32).not.toBe(daveKey);
+    // The group it kept stays as it was.
+    expect(world.view(dave, id)).toMatchObject({ status: "removed", canSend: false });
+    expect(world.texts(dave, id)).toEqual(["dave, while a member"]);
   });
 });
 

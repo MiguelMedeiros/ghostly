@@ -46,6 +46,8 @@ const { callRtcConfig } = await import("@ghostly/core");
 const { chooseDevice } = await import("../../lib/mediaDevices");
 const { callLevels } = await import("../../lib/voiceLevels");
 
+/** The AudioContexts the page made, and what was asked of each. */
+const contexts: { state: AudioContextState; calls: string[] }[] = [];
 const commands = () => tauri.invoke.mock.calls.map(([command]) => command);
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer;
 
@@ -57,9 +59,15 @@ beforeEach(() => {
   vi.stubGlobal("MediaStream", FakeMediaStream);
   // The microphone's stand-in is a silent AudioContext track whose `enabled` is the browser's own.
   vi.stubGlobal("MediaStreamTrack", class { get enabled() { return (this as { on?: boolean }).on ?? true; } set enabled(on: boolean) { (this as { on?: boolean }).on = on; } });
+  contexts.length = 0;
   vi.stubGlobal("AudioContext", class {
+    state: AudioContextState = "running";
+    readonly calls: string[] = [];
+    constructor() { contexts.push(this); }
     createMediaStreamDestination() { return { stream: new FakeMediaStream([new FakeTrack("audio")]) }; }
-    close() { return Promise.resolve(); }
+    suspend() { this.calls.push("suspend"); this.state = "suspended"; return Promise.resolve(); }
+    resume() { this.calls.push("resume"); this.state = "running"; return Promise.resolve(); }
+    close() { this.calls.push("close"); this.state = "closed"; return Promise.resolve(); }
   });
   // The pictures are canvases filmed by captureStream(), which happy-dom does not have.
   HTMLCanvasElement.prototype.captureStream = function () { return new FakeMediaStream([new FakeTrack("video")]) as unknown as MediaStream; };
@@ -360,6 +368,18 @@ describe("the RTCPeerConnection stand-in", () => {
     // Such a stream's sound is measured by the page itself.
     expect(callLevels(new FakeMediaStream([new FakeTrack("audio")]) as unknown as MediaStream)).toBeUndefined();
     expect(callLevels(null)).toBeUndefined();
+  });
+
+  it("lets the system's audio output go for the microphone's stand-in: its context is suspended at once, and closed with it", async () => {
+    // A running context keeps an output stream open with nothing in it: 4-6% of a core in WebKitGTK, all call long.
+    const [track] = (await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks();
+    expect(contexts.map((context) => context.calls)).toEqual([["suspend"]]);
+    expect(contexts[0].state).toBe("suspended");
+    // Muting is the track's `enabled`, not its sound: the context is never woken for it.
+    track.enabled = false;
+    track.enabled = true;
+    track.stop();
+    expect(contexts[0].calls).toEqual(["suspend", "close"]);
   });
 
   it("mutes the microphone in Rust once the call has started", async () => {

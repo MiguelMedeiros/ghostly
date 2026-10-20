@@ -1,12 +1,18 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { voicePeaksOf } from "@ghostly/core";
+import { open, type FileHandle } from "node:fs/promises";
+import { VOICE_LIMITS, VOICE_METER, downsamplePeaks, voiceLevel } from "@ghostly/core";
 
 /**
  * The waveform and length of a voice note sent from a file (`file send --voice`), measured as the apps measure their
  * own recordings (packages/core voice.ts `voicePeaksOf`, the recorder's meter) so the bars look the same. The sound is
  * decoded here, without native code: WAV by hand, Opus in WebM or Ogg and MP3 with the wasm decoders, anything
  * else (AAC in MP4, FLAC…) with `ffmpeg` when it is on the PATH.
+ *
+ * The decoders hand their samples to a sink a piece at a time, and the meter (`VoiceMeter`) keeps only the
+ * analyser's window of them: the whole sound decoded into memory first took 2.6 GiB for a 60-minute MP3, in the
+ * daemon, only for it to be refused as longer than a voice note (agents#878). Decoding stops once the sound is longer
+ * than a voice note may be. A WAV and an MP3 are read from the file in pieces, and a kind left to ffmpeg is not read
+ * here at all: the whole file read first took +190 MiB for a 15-minute WAV (agents#1577).
  */
 
 export interface Sound {
@@ -17,34 +23,130 @@ export interface Sound {
 
 export interface VoiceMeasure { duration: number; peaks: number[] }
 
-/** Longer than any voice note (15 minutes) with room: a file past it is not decoded into memory. */
-const MAX_BYTES = 256 * 1024 * 1024;
-const FFMPEG_TIMEOUT_MS = 120_000;
+/** Where a decoder puts what it decoded: `push` answers false once nothing more is wanted (the decoder stops). */
+export interface SoundSink {
+  start(sampleRate: number): void;
+  push(channels: readonly Float32Array[], length: number): boolean;
+}
 
-/** The waveform and length of the sound in `path`, or why they could not be read. */
+/** Longer than any voice note (15 minutes) with room: a WebM or Ogg past it is not read (their demuxers hold it all). */
+const MAX_BYTES = 256 * 1024 * 1024;
+/** Read first to tell a file's kind; a WAV's header is looked for in up to `WAV_HEAD_MAX` (as in ffmpeg's output). */
+const HEAD_BYTES = 64 * 1024;
+const WAV_HEAD_MAX = 1024 * 1024;
+const FFMPEG_TIMEOUT_MS = 120_000;
+/** Read past the longest voice note by this much, so its length is known to be too long (`parseVoiceMeta` allows 5 s). */
+const PAST_LIMIT_MS = 6_000;
+
+/**
+ * The recorder's meter, run over the samples as they come (core `voiceLevelsOf`, reading for reading): the channels
+ * averaged as `mix` does, a reading every `intervalMs` over the window that ends there, nothing kept but that window.
+ */
+export class VoiceMeter implements SoundSink {
+  private rate = 0;
+  private window = 1;
+  private ring = new Float32Array(1);
+  private count = 0;
+  private step = 1;
+  private nextEnd = 0;
+  private limit = Infinity;
+  private readonly levels: number[] = [];
+  private readonly scratch: number[] = [];
+
+  constructor(private readonly maxMs: number = VOICE_LIMITS.maxDurationMs + PAST_LIMIT_MS) {}
+
+  start(sampleRate: number): void {
+    if (this.rate) return;
+    this.rate = sampleRate;
+    this.window = Math.max(1, Math.round((VOICE_METER.window * sampleRate) / VOICE_METER.windowRate));
+    this.ring = new Float32Array(this.window);
+    this.nextEnd = this.endOf(1);
+    this.limit = Math.ceil((this.maxMs * sampleRate) / 1000);
+  }
+
+  private endOf(step: number): number { return Math.round((step * VOICE_METER.intervalMs * this.rate) / 1000); }
+
+  push(channels: readonly Float32Array[], length: number): boolean {
+    if (!(this.rate > 0)) return false;
+    const one = channels.length === 1 ? channels[0]! : null, n = channels.length;
+    for (let i = 0; i < length; i++) {
+      if (this.count >= this.limit) return false;
+      let sample: number;
+      if (one) sample = one[i]!;
+      else {
+        // As `mix` adds into a Float32Array: rounded to a float after each channel.
+        sample = 0;
+        for (let c = 0; c < n; c++) sample = Math.fround(sample + channels[c]![i]! / n);
+      }
+      this.ring[this.count % this.window] = sample;
+      this.count++;
+      while (this.count === this.nextEnd) {
+        const from = Math.max(0, this.count - this.window);
+        this.scratch.length = 0;
+        for (let k = from; k < this.count; k++) this.scratch.push(this.ring[k % this.window]!);
+        this.levels.push(voiceLevel(this.scratch));
+        this.nextEnd = this.endOf(++this.step);
+      }
+    }
+    return this.count < this.limit;
+  }
+
+  /** The length and waveform measured so far; null when no sound came. */
+  result(): VoiceMeasure | null {
+    if (!this.count || !(this.rate > 0)) return null;
+    return { duration: Math.round((this.count / this.rate) * 1000), peaks: downsamplePeaks(this.levels, VOICE_LIMITS.bars) };
+  }
+}
+
+/** Every sample, kept: the whole sound in memory (tests and comparisons; `measureVoice` never does this). */
+class Collector implements SoundSink {
+  rate = 0;
+  private readonly parts: Float32Array[] = [];
+  start(sampleRate: number): void { this.rate ||= sampleRate; }
+  push(channels: readonly Float32Array[], length: number): boolean {
+    this.parts.push(mix(channels, length).slice());
+    return true;
+  }
+  sound(): Sound {
+    const mono = new Float32Array(this.parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const part of this.parts) { mono.set(part, at); at += part.length; }
+    return { mono, sampleRate: this.rate };
+  }
+}
+
+/**
+ * The waveform and length of the sound in `path`, or why they could not be read. A sound longer than a voice note may
+ * be is read only a little past that length: its duration says it is too long, and the send is refused for it.
+ */
 export async function measureVoice(path: string): Promise<{ voice: VoiceMeasure } | { problem: string }> {
-  let sound: Sound;
+  const meter = new VoiceMeter();
   try {
-    sound = await decodeSound(path);
+    await streamSound(path, meter);
   } catch (error) {
     return { problem: error instanceof Error ? error.message : String(error) };
   }
-  if (sound.mono.length === 0) return { problem: "no sound in it" };
-  return { voice: { duration: Math.round((sound.mono.length / sound.sampleRate) * 1000), peaks: voicePeaksOf(sound.mono, sound.sampleRate) } };
+  const voice = meter.result();
+  return voice ? { voice } : { problem: "no sound in it" };
 }
 
+/** The whole sound in `path`, in memory. */
 export async function decodeSound(path: string): Promise<Sound> {
-  const bytes = await readFile(path);
-  if (bytes.length > MAX_BYTES) throw new Error("too large to decode");
+  const collector = new Collector();
+  await streamSound(path, collector);
+  return collector.sound();
+}
+
+/** Decodes the sound in `path` into `sink`, by this module's decoders or else ffmpeg. */
+export async function streamSound(path: string, sink: SoundSink): Promise<void> {
   let own: Error | undefined;
   try {
-    const sound = await decodeBytes(bytes);
-    if (sound) return sound;
+    if (await streamFile(path, sink)) return;
   } catch (error) {
     own = error instanceof Error ? error : new Error(String(error));
   }
   try {
-    return await decodeWithFfmpeg(path);
+    await streamFfmpeg(path, sink);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(own ? `${own.message}; ${reason}` : reason, { cause: error });
@@ -53,24 +155,82 @@ export async function decodeSound(path: string): Promise<Sound> {
 
 /** The sound in a file this module decodes itself, or null for a kind it leaves to ffmpeg. */
 export async function decodeBytes(bytes: Uint8Array): Promise<Sound | null> {
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE") return decodeWav(bytes);
-  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
-    const opus = demuxWebm(bytes);
-    return opus ? decodeOpus(opus) : null;
-  }
-  if (ascii(bytes, 0, 4) === "OggS") {
-    const opus = demuxOgg(bytes);
-    return opus ? decodeOpus(opus) : null;
-  }
-  if (ascii(bytes, 0, 3) === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0)) return decodeMp3(bytes);
+  const collector = new Collector();
+  return (await streamBytes(bytes, collector)) ? collector.sound() : null;
+}
+
+type Kind = "wav" | "webm" | "ogg" | "mp3" | null;
+
+/** The kind of sound a file's first bytes say it is, of those this module decodes itself. */
+function kindOf(head: Uint8Array): Kind {
+  if (ascii(head, 0, 4) === "RIFF" && ascii(head, 8, 4) === "WAVE") return "wav";
+  if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return "webm";
+  if (ascii(head, 0, 4) === "OggS") return "ogg";
+  if (ascii(head, 0, 3) === "ID3" || (head[0] === 0xff && (head[1]! & 0xe0) === 0xe0)) return "mp3";
   return null;
+}
+
+/** Feeds `sink` the sound of a kind this module decodes itself; false for a kind it leaves to ffmpeg. */
+async function streamBytes(bytes: Uint8Array, sink: SoundSink): Promise<boolean> {
+  const kind = kindOf(bytes);
+  if (kind === "wav") { streamWav(bytes, sink); return true; }
+  if (kind === "mp3") { await streamMp3(slices(bytes, MP3_PIECE), sink); return true; }
+  return kind ? streamOpusOf(kind, bytes, sink) : false;
+}
+
+/** As `streamBytes`, reading the file only as far as its decoder goes; a kind left to ffmpeg is not read past its head. */
+async function streamFile(path: string, sink: SoundSink): Promise<boolean> {
+  const file = await open(path);
+  try {
+    const { size } = await file.stat();
+    const kind = kindOf(await readAt(file, 0, Math.min(size, 12)));
+    if (kind === "wav") { await streamWavFile(file, size, sink); return true; }
+    if (kind === "mp3") { await streamMp3(piecesOf(file, size, MP3_PIECE), sink); return true; }
+    if (!kind) return false;
+    if (size > MAX_BYTES) throw new Error("too large to decode");
+    return streamOpusOf(kind, await file.readFile(), sink);
+  } finally {
+    await file.close();
+  }
+}
+
+async function streamOpusOf(kind: "webm" | "ogg", bytes: Uint8Array, sink: SoundSink): Promise<boolean> {
+  const opus = kind === "webm" ? demuxWebm(bytes) : demuxOgg(bytes);
+  if (!opus) return false;
+  await streamOpus(opus, sink);
+  return true;
+}
+
+/** Up to `length` bytes of the file from `at` (fewer at its end), into `into` when given. */
+async function readAt(file: FileHandle, at: number, length: number, into = Buffer.allocUnsafe(length)): Promise<Buffer> {
+  let got = 0;
+  while (got < length) {
+    const { bytesRead } = await file.read(into, got, length - got, at + got);
+    if (!bytesRead) break;
+    got += bytesRead;
+  }
+  return into.subarray(0, got);
+}
+
+function* slices(bytes: Uint8Array, piece: number): Generator<Uint8Array> {
+  for (let at = 0; at < bytes.length; at += piece) yield bytes.subarray(at, at + piece);
+}
+
+/** The file in pieces of `piece` bytes, each read into the same buffer once the one before is used. */
+async function* piecesOf(file: FileHandle, size: number, piece: number): AsyncGenerator<Uint8Array> {
+  const buffer = Buffer.allocUnsafe(piece);
+  for (let at = 0; at < size; at += piece) {
+    const bytes = await readAt(file, at, Math.min(piece, size - at), buffer);
+    if (!bytes.length) return;
+    yield bytes;
+  }
 }
 
 function ascii(bytes: Uint8Array, at: number, length: number): string {
   return String.fromCharCode(...bytes.subarray(at, at + length));
 }
 
-function mix(channels: Float32Array[], length: number): Float32Array {
+function mix(channels: readonly Float32Array[], length: number): Float32Array {
   if (channels.length === 1) return channels[0]!.subarray(0, length);
   const mono = new Float32Array(length);
   for (const channel of channels) for (let i = 0; i < length; i++) mono[i]! += channel[i]! / channels.length;
@@ -81,6 +241,13 @@ function mix(channels: Float32Array[], length: number): Float32Array {
 
 /** PCM (8, 16, 24 or 32 bit) or float (32 or 64 bit) WAV. A data chunk whose size is unknown (a pipe) runs to the end. */
 export function decodeWav(bytes: Uint8Array): Sound {
+  const collector = new Collector();
+  streamWav(bytes, collector);
+  return collector.sound();
+}
+
+/** The format of a WAV and where its samples are; null while its header is not all there. */
+function wavHeader(bytes: Uint8Array): { format: number; channels: number; sampleRate: number; bits: number; from: number; to: number } | null {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let format = 0, channels = 0, sampleRate = 0, bits = 0;
   let at = 12;
@@ -89,41 +256,81 @@ export function decodeWav(bytes: Uint8Array): Sound {
     const size = view.getUint32(at + 4, true);
     const body = at + 8;
     if (id === "fmt ") {
+      if (body + 16 > bytes.length) return null;
       format = view.getUint16(body, true);
       channels = view.getUint16(body + 2, true);
       sampleRate = view.getUint32(body + 4, true);
       bits = view.getUint16(body + 14, true);
       // WAVE_FORMAT_EXTENSIBLE: the real format is the sub-format GUID's first two bytes.
-      if (format === 0xfffe && size >= 26) format = view.getUint16(body + 24, true);
+      if (format === 0xfffe && size >= 26) { if (body + 26 > bytes.length) return null; format = view.getUint16(body + 24, true); }
     } else if (id === "data") {
       if (!channels || !sampleRate || !bits) throw new Error("a WAV without its format");
-      const end = size === 0 || size === 0xffffffff || body + size > bytes.length ? bytes.length : body + size;
-      return { mono: wavSamples(view, body, end, format, channels, bits), sampleRate };
+      const to = size === 0 || size === 0xffffffff ? Infinity : body + size;
+      return { format, channels, sampleRate, bits, from: body, to };
     }
     at = body + size + (size & 1);
   }
-  throw new Error("a WAV without sound");
+  return null;
 }
 
-function wavSamples(view: DataView, from: number, to: number, format: number, channels: number, bits: number): Float32Array {
-  const width = bits / 8;
-  const read: ((at: number) => number) | undefined =
-    format === 1 && bits === 8 ? (at) => (view.getUint8(at) - 128) / 128
+/** How a WAV's sample is read, or undefined for a format not read here. */
+function sampleReader(view: DataView, format: number, bits: number): ((at: number) => number) | undefined {
+  return format === 1 && bits === 8 ? (at) => (view.getUint8(at) - 128) / 128
     : format === 1 && bits === 16 ? (at) => view.getInt16(at, true) / 32768
     : format === 1 && bits === 24 ? (at) => (((view.getInt8(at + 2) << 16) | (view.getUint8(at + 1) << 8) | view.getUint8(at)) / 8388608)
     : format === 1 && bits === 32 ? (at) => view.getInt32(at, true) / 2147483648
     : format === 3 && bits === 32 ? (at) => view.getFloat32(at, true)
     : format === 3 && bits === 64 ? (at) => view.getFloat64(at, true)
     : undefined;
-  if (!read) throw new Error(`a WAV in a format not read here (${format}, ${bits} bit)`);
-  const frames = Math.floor((to - from) / (width * channels));
-  const mono = new Float32Array(frames);
-  for (let frame = 0; frame < frames; frame++) {
-    let sum = 0;
-    for (let c = 0; c < channels; c++) sum += read(from + (frame * channels + c) * width);
-    mono[frame] = sum / channels;
+}
+
+/** Frames of a channel each pushed at a time: few enough to keep nothing large, many enough for few calls. */
+const PIECE_FRAMES = 4096;
+
+function streamWav(bytes: Uint8Array, sink: SoundSink): void {
+  const header = wavHeader(bytes);
+  if (!header) throw new Error("a WAV without sound");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const read = sampleReader(view, header.format, header.bits);
+  if (!read) throw new Error(`a WAV in a format not read here (${header.format}, ${header.bits} bit)`);
+  sink.start(header.sampleRate);
+  pushWavFrames(view, header.from, Math.min(bytes.length, header.to), header.channels, header.bits / 8, read, sink);
+}
+
+/** As `streamWav`, reading the file a piece of frames at a time until the sink wants no more. */
+async function streamWavFile(file: FileHandle, size: number, sink: SoundSink): Promise<void> {
+  let header: ReturnType<typeof wavHeader> = null;
+  for (let length = HEAD_BYTES; !header; length *= 2) {
+    header = wavHeader(await readAt(file, 0, Math.min(size, length)));
+    if (length >= size || length >= WAV_HEAD_MAX) break;
   }
-  return mono;
+  if (!header) throw new Error("a WAV without sound");
+  const { format, bits, channels } = header;
+  if (!sampleReader(new DataView(new ArrayBuffer(0)), format, bits)) throw new Error(`a WAV in a format not read here (${format}, ${bits} bit)`);
+  sink.start(header.sampleRate);
+  const frame = (bits / 8) * channels, end = Math.min(size, header.to);
+  const buffer = Buffer.allocUnsafe(PIECE_FRAMES * frame);
+  for (let at = header.from; at + frame <= end;) {
+    const bytes = await readAt(file, at, Math.min(buffer.length, end - at), buffer);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const pushed = pushWavFrames(view, 0, bytes.length, channels, bits / 8, sampleReader(view, format, bits)!, sink);
+    if (!pushed.more || !pushed.at) return;
+    at += pushed.at;
+  }
+}
+
+/** The whole frames between `from` and `to`, as the channels' samples; the byte where it stopped (a frame cut off). */
+function pushWavFrames(view: DataView, from: number, to: number, channels: number, width: number, read: (at: number) => number, sink: SoundSink): { at: number; more: boolean } {
+  const frame = width * channels;
+  const parts = Array.from({ length: channels }, () => new Float32Array(PIECE_FRAMES));
+  let at = from;
+  while (at + frame <= to) {
+    const count = Math.min(PIECE_FRAMES, Math.floor((to - at) / frame));
+    for (let f = 0; f < count; f++) for (let c = 0; c < channels; c++) parts[c]![f] = read(at + (f * channels + c) * width);
+    at += count * frame;
+    if (!sink.push(parts, count)) return { at, more: false };
+  }
+  return { at, more: true };
 }
 
 // ---------- Opus (WebM, Ogg) ----------
@@ -271,6 +478,15 @@ export function demuxOgg(bytes: Uint8Array): OpusStream | null {
 }
 
 export async function decodeOpus(stream: OpusStream): Promise<Sound> {
+  const collector = new Collector();
+  await streamOpus(stream, collector);
+  return collector.sound();
+}
+
+/** Opus frames decoded at a time: about 2 s of sound at 20 ms a frame. */
+const OPUS_BATCH = 100;
+
+async function streamOpus(stream: OpusStream, sink: SoundSink): Promise<void> {
   const { OpusDecoder } = await import("opus-decoder");
   const head = stream.head && ascii(stream.head, 0, 8) === "OpusHead" ? stream.head : null;
   const channels = head ? head[9]! : Math.max(1, stream.channels);
@@ -282,11 +498,16 @@ export async function decodeOpus(stream: OpusStream): Promise<Sound> {
   const decoder = new OpusDecoder({ channels, preSkip, ...mapping });
   await decoder.ready;
   try {
-    const decoded = decoder.decodeFrames(stream.frames);
-    let length = decoded.samplesDecoded;
     // Ogg says where the sound ends; the rest of the last frame is padding.
-    if (stream.endGranule !== undefined && stream.endGranule > preSkip) length = Math.min(length, stream.endGranule - preSkip);
-    return { mono: mix(decoded.channelData, length), sampleRate: decoded.sampleRate };
+    let left = stream.endGranule !== undefined && stream.endGranule > preSkip ? stream.endGranule - preSkip : Infinity;
+    for (let at = 0; at < stream.frames.length && left > 0; at += OPUS_BATCH) {
+      const decoded = decoder.decodeFrames(stream.frames.slice(at, at + OPUS_BATCH));
+      if (!decoded.samplesDecoded) continue;
+      sink.start(decoded.sampleRate);
+      const length = Math.min(decoded.samplesDecoded, left);
+      left -= length;
+      if (!sink.push(decoded.channelData, length)) return;
+    }
   } finally {
     decoder.free();
   }
@@ -295,13 +516,29 @@ export async function decodeOpus(stream: OpusStream): Promise<Sound> {
 // ---------- MP3 ----------
 
 export async function decodeMp3(bytes: Uint8Array): Promise<Sound> {
+  const collector = new Collector();
+  await streamMp3(slices(bytes, MP3_PIECE), collector);
+  return collector.sound();
+}
+
+/** MP3 bytes handed to the decoder at a time: about 16 s of a 128 kbit/s file. */
+const MP3_PIECE = 256 * 1024;
+
+/** The MP3 in `pieces`, decoded one at a time (the decoder copies each in before the next is asked for). */
+async function streamMp3(pieces: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, sink: SoundSink): Promise<void> {
   const { MPEGDecoder } = await import("mpg123-decoder");
   const decoder = new MPEGDecoder();
   await decoder.ready;
   try {
-    const decoded = decoder.decode(bytes);
-    if (!decoded.samplesDecoded) throw new Error("no MP3 frames in it");
-    return { mono: mix(decoded.channelData, decoded.samplesDecoded), sampleRate: decoded.sampleRate };
+    let any = false;
+    for await (const piece of pieces) {
+      const decoded = decoder.decode(piece);
+      if (!decoded.samplesDecoded) continue;
+      any = true;
+      sink.start(decoded.sampleRate);
+      if (!sink.push(decoded.channelData, decoded.samplesDecoded)) return;
+    }
+    if (!any) throw new Error("no MP3 frames in it");
   } finally {
     decoder.free();
   }
@@ -310,16 +547,49 @@ export async function decodeMp3(bytes: Uint8Array): Promise<Sound> {
 // ---------- ffmpeg ----------
 
 /** Anything ffmpeg reads, as a float WAV on its output (the channels kept, so they are averaged as above). */
-export function decodeWithFfmpeg(path: string, command = process.env.GHOSTLY_FFMPEG || "ffmpeg"): Promise<Sound> {
+export async function decodeWithFfmpeg(path: string, command = process.env.GHOSTLY_FFMPEG || "ffmpeg"): Promise<Sound> {
+  const collector = new Collector();
+  await streamFfmpeg(path, collector, command);
+  return collector.sound();
+}
+
+/**
+ * Anything ffmpeg reads, into `sink` as its WAV output comes: nothing kept but a frame cut between two pieces. Once
+ * the sink wants no more, ffmpeg is stopped.
+ */
+export function streamFfmpeg(path: string, sink: SoundSink, command = process.env.GHOSTLY_FFMPEG || "ffmpeg"): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, ["-v", "error", "-nostdin", "-i", path, "-vn", "-f", "wav", "-c:a", "pcm_f32le", "-"], { stdio: ["ignore", "pipe", "pipe"] });
-    const chunks: Buffer[] = [];
-    let size = 0, errors = "";
+    let errors = "", pending: Buffer = Buffer.alloc(0), header: ReturnType<typeof wavHeader> = null, done = false, failed: Error | null = null;
+    let read: ((at: number) => number) | undefined, left = Infinity;
     const timer = setTimeout(() => child.kill("SIGKILL"), FFMPEG_TIMEOUT_MS);
+    const stop = () => { done = true; child.stdout.removeAllListeners("data"); child.kill("SIGKILL"); };
     child.stdout.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BYTES * 2) child.kill("SIGKILL");
-      else chunks.push(chunk);
+      if (done) return;
+      pending = pending.length ? Buffer.concat([pending, chunk]) : chunk;
+      try {
+        if (!header) {
+          if (pending.length < 12) return;
+          if (ascii(pending, 0, 4) !== "RIFF" || ascii(pending, 8, 4) !== "WAVE") throw new Error("ffmpeg gave no WAV");
+          header = wavHeader(pending);
+          if (!header) { if (pending.length > 1024 * 1024) throw new Error("a WAV without sound"); return; }
+          const view = new DataView(pending.buffer, pending.byteOffset, pending.byteLength);
+          if (!sampleReader(view, header.format, header.bits)) throw new Error(`a WAV in a format not read here (${header.format}, ${header.bits} bit)`);
+          sink.start(header.sampleRate);
+          left = header.to === Infinity ? Infinity : header.to - header.from;
+          pending = pending.subarray(header.from);
+        }
+        const view = new DataView(pending.buffer, pending.byteOffset, pending.byteLength);
+        read = sampleReader(view, header.format, header.bits)!;
+        const to = Math.min(pending.length, left);
+        const { at, more } = pushWavFrames(view, 0, to, header.channels, header.bits / 8, read, sink);
+        if (left !== Infinity) left -= at;
+        pending = Buffer.from(pending.subarray(at));
+        if (!more || left <= 0) stop();
+      } catch (error) {
+        failed = error instanceof Error ? error : new Error(String(error));
+        stop();
+      }
     });
     child.stderr.on("data", (chunk: Buffer) => { if (errors.length < 2000) errors += chunk.toString(); });
     child.on("error", (error: NodeJS.ErrnoException) => {
@@ -328,8 +598,12 @@ export function decodeWithFfmpeg(path: string, command = process.env.GHOSTLY_FFM
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (failed) { reject(failed); return; }
+      // Stopped here because the sink had what it wanted: not a failure of ffmpeg's.
+      if (done && header) { resolve(); return; }
       if (code !== 0) { reject(new Error(`ffmpeg could not read it${errors.trim() ? `: ${errors.trim().split("\n")[0]}` : ""}`)); return; }
-      try { resolve(decodeWav(Buffer.concat(chunks))); } catch (error) { reject(error); }
+      if (!header) { reject(new Error("a WAV without sound")); return; }
+      resolve();
     });
   });
 }

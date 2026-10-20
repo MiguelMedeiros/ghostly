@@ -68,6 +68,7 @@
     "audioFailed": "تعذّر توصيل المكالمة الصوتية",
     "audioIncoming": "مكالمة صوتية واردة",
     "audioMissed": "مكالمة صوتية فائتة",
+    "audioMissedMany": "مكالمات صوتية فائتة: {{count}}",
     "audioStarted": "بدأت مكالمة صوتية",
     "audioUnanswered": "مكالمة صوتية بلا رد",
     "videoCancelled": "أُلغيت مكالمة الفيديو",
@@ -77,6 +78,7 @@
     "videoFailed": "تعذّر توصيل مكالمة الفيديو",
     "videoIncoming": "مكالمة فيديو واردة",
     "videoMissed": "مكالمة فيديو فائتة",
+    "videoMissedMany": "مكالمات فيديو فائتة: {{count}}",
     "videoStarted": "بدأت مكالمة فيديو",
     "videoUnanswered": "مكالمة فيديو بلا رد"
   },

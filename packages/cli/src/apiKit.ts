@@ -127,6 +127,17 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
   throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);
 }
 
+/**
+ * `findChat` for a grant the daemon keeps acting on (`call auto on --from`): only the chat's id, its contact's key or the
+ * label this side gave it name the chat. A prefix of its id or the name its contact gave itself is refused, with the
+ * chat it found: the contact chose those, so another contact could take the grant by calling itself that name.
+ */
+export function findOwnNamedChat(links: readonly LinkView[], ref: string): LinkView {
+  const chat = chatBy(links, ref);
+  if (chat.theirName) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label (ghostly chat list)`, { chat: chat.link.id, name: chat.link.peerNick ?? null, contact: chat.link.peerPubKeyZ32 });
+  return chat.link;
+}
+
 /** Only an invitation so far: this profile is not in the group (yet), and whoever invited chose its name. */
 const invitedOnly = (group: GroupView) => group.status === undefined && !!group.invitation;
 

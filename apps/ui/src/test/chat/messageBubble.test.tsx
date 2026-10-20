@@ -451,6 +451,11 @@ describe("MessageBubble: system lines", () => {
     expect(screen.getByText("Missed audio call").parentElement).not.toHaveTextContent("(");
   });
 
+  it("a line that stands for a burst of missed calls says how many (agents#992)", () => {
+    bubble({ sender: "system", text: "12 missed video calls", callEvent: { type: "call_missed", hasVideo: true, count: 12 } });
+    expect(screen.getByText("12 missed video calls")).toBeInTheDocument();
+  });
+
   it("shows no length for a call ended within its first second, rather than (0 s)", () => {
     bubble({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 400 } });
     expect(screen.getByText("Audio call ended").parentElement).not.toHaveTextContent("(");
@@ -815,7 +820,7 @@ describe("MessageBubble: deleting", () => {
     const { user } = bubble({ sender: "me", text: "wrong chat" }, { onDelete, onDeleteForEveryone });
     await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete for everyone" }));
-    expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted from your contact's or the group's devices too.");
+    expect(screen.getByTestId("message-delete-menu").querySelector("p")).toHaveTextContent(/^Deleted from your contact's devices too\./);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onDeleteForEveryone).not.toHaveBeenCalled();
     await user.click(screen.getByTestId("message-options"));
@@ -827,6 +832,15 @@ describe("MessageBubble: deleting", () => {
     await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted only here.");
+  });
+
+  it("Delete for everyone in a group says it goes from the members' devices, not a contact's", async () => {
+    const { user } = bubble({ sender: "me", text: "wrong group" }, { linkId: "group:g1", onDeleteForEveryone: vi.fn() });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-delete-everyone"));
+    const hint = screen.getByTestId("message-delete-menu").querySelector("p");
+    expect(hint).toHaveTextContent(/^Deleted from the members' devices too\./);
+    expect(hint).not.toHaveTextContent(/contact/);
   });
 
   it("offers no Delete for everyone on the contact's message, or while it still waits to be sent", async () => {

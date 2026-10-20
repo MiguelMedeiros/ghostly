@@ -780,6 +780,8 @@ export class GhostLink {
   /** `plan`: a switch both sides agreed; without one, a replacement the contact dialled (`attachReplacement`). */
   private candidate: { channel: FrameChannel; session: PairedSession; binding?: NativeBinding; plan?: SwitchPlan; reject(error: Error): void } | null = null;
   private candidateEpoch = 0;
+  /** The native dial a transport change has in flight, per transport (`prepareSwitch`). */
+  private readonly switchDials = new Map<PairedTransport, Promise<void>>();
   /** Channels a switch replaced, closed after `SWITCH_RETIRE_MS` (or at once on disconnect). */
   private retiring = new Map<FrameChannel, { timer: ReturnType<typeof setTimeout>; close(): void; rtc: boolean; closed: Promise<void> }>();
   private rtcCandidateWaiter: { resolve(): void; reject(error: Error): void } | null = null;
@@ -3813,11 +3815,19 @@ export class GhostLink {
           } else {
             const endpoint = this.endpoints.get(transport), descriptor = plan.remote.descriptors[transport];
             if (!endpoint || !descriptor) { done.reject(new Error("Peer native address unavailable")); return; }
-            this.switcher.dialing(plan);
-            void endpoint.connect(descriptor).then(({ channel, binding }) => {
-              if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) { channel.close(); return; }
-              return this.attachCandidate(channel, binding, plan).then(done.resolve, done.reject);
-            }).catch(done.reject);
+            // One switch dial in flight per transport: a cancelled one runs to its own timeout (it cannot be aborted),
+            // and the next waits for it rather than stacking another beside it.
+            const turn = (this.switchDials.get(transport) ?? Promise.resolve()).then(async () => {
+              if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) return;
+              this.switcher.dialing(plan);
+              try {
+                const { channel, binding } = await endpoint.connect(descriptor);
+                if (!active || epoch !== this.candidateEpoch || this.switcher.pending !== plan) { channel.close(); return; }
+                void this.attachCandidate(channel, binding, plan).then(done.resolve, done.reject);
+              } catch (error) { done.reject(error instanceof Error ? error : new Error(String(error))); }
+            });
+            this.switchDials.set(transport, turn);
+            void turn.then(() => { if (this.switchDials.get(transport) === turn) this.switchDials.delete(transport); });
           }
         });
         return;

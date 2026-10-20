@@ -27,6 +27,8 @@ An app before this revision reads a marked frame as one over 60 KiB and closes t
 
 A browser has no UDP, so it cannot run HyperDHT itself. It can reach it through a **HyperDHT relay**: a server that runs the UDP half of HyperDHT and talks to the browser over one WebSocket (Holepunch's `@hyperswarm/dht-relay` protocol, [implementation](../../infra/services/hyperdht-relay/)). The chat session and its wire are the Desktop's: the same preface, the same length-prefixed frames, the same binding. A browser and a Desktop talk HyperDHT to each other.
 
+With Hide my IP from contacts on (`relayOnly`, [100](100-transports.md)), a Desktop's chats with its contacts go through the HyperDHT relay as a browser's do, with the same `relayed: true` descriptor, and offer no `hyperdht/1` when no relay is set: its own HyperDHT connects directly and would give a contact its address. The links to the profile's own devices keep the Desktop's own.
+
 **Non-custodial only.** dht-relay's client can hand its secret key to the relay, which then runs the handshake and the stream for it ("custodial", the library's default). A Ghostly client MUST NOT do that. In the non-custodial mode:
 
 - the browser keeps its keypair and runs the Noise IK handshake; the relay forwards the handshake messages;

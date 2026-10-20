@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { voiceDownloadName } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
@@ -71,11 +72,12 @@ describe("a voice message that will not play as it is", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     audio.refuse = () => refusal("NotSupportedError");
     decoder.decodes = false;
-    show(voice());
+    const message = voice();
+    show(message);
     await clickPlay();
     const problem = screen.getByTestId("voice-problem");
     expect(problem).toHaveTextContent("This device can't play WebM recordings. Save it to play elsewhere.");
-    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", "Voice message.webm");
+    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", voiceDownloadName("audio/webm", message.timestamp));
     expect(screen.getByTestId("voice-save").getAttribute("href")).toMatch(/^blob:/);
     // The real reason, for whoever debugs it: on the element always, in the console in dev builds.
     expect(problem.getAttribute("data-error")).toMatch(/decode/);
@@ -96,7 +98,26 @@ describe("a voice message that will not play as it is", () => {
     const save = screen.getByTestId("voice-save");
     // The click's own download is stopped: on Linux Desktop it is cancelled without a word.
     expect(fireEvent.click(save)).toBe(false);
-    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(message.file!.id, "Voice message.m4a"));
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(message.file!.id, voiceDownloadName("audio/mp4", message.timestamp)));
+  });
+
+  it("saves one under the name Ghostly makes for it, never the name the sender gave it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    audio.canPlay = () => "";
+    decoder.decodes = false;
+    const message = voice({}, "audio/webm");
+    message.file = { ...message.file!, name: "Setup.exe" };
+    show(message);
+    await clickPlay();
+    const save = screen.getByTestId("voice-save");
+    const name = voiceDownloadName("audio/webm", message.timestamp);
+    expect(name).toMatch(/^Ghostly voice .+\.webm$/);
+    // The web's fallback link names the same file as the save dialog.
+    expect(save).toHaveAttribute("download", name);
+    fireEvent.click(save);
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(message.file!.id, name));
+    expect(saveFile).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining("Setup"));
   });
 
   it("says why when the save dialog could not write the voice message", async () => {

@@ -186,6 +186,8 @@ describe("the profile's did:dht", () => {
     did.start();
     await vi.advanceTimersByTimeAsync(20_000);
     expect(state.puts).toHaveLength(1);
+    // The hour counts from the publish's record being saved: its transaction ends on a real task, not a faked timer.
+    await vi.waitFor(() => expect(did.view()?.published).toBeDefined());
     await vi.advanceTimersByTimeAsync(DID_REPUBLISH_MS);
     expect(state.puts).toHaveLength(2);
     await did.setListed({ id: "domain-1", listed: true });
