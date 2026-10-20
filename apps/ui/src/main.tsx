@@ -78,10 +78,9 @@ async function boot() {
   // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
   // Its window is named after the app and the contact ("Chess with Ana"), in the profile's language.
   const windowTitle = (title: string, linkId: string | null) => appWithContact(title, linkId, translatorFor(loadSettings().language));
-  // Files the person picks for an app granted `files`: the system's dialog, titled in the profile's language, and links
-  // the host keeps per profile (apps/desktop/src/linked_files.rs).
-  const pickTitle = (app: string, folder: boolean) => pickSheetText(translatorFor(loadSettings().language)).ask(app, folder);
-  const linkedFiles = desktopLinkedFiles(invoke, fileSpace, pickTitle);
+  // Files the person picks for an app granted `files`: the client's sheet, then the system's dialog on its click, both in
+  // the profile's language, and links the host keeps per profile (apps/desktop/src/linked_files.rs).
+  const linkedFiles = desktopLinkedFiles(invoke, fileSpace, () => pickSheetText(translatorFor(loadSettings().language)));
   setLinkedFiles(linkedFiles);
   setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle, linkedFiles }));
   if (gate.full) startSessionSync();
