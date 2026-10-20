@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageDetailsView } from "@ghostly/browser/shared/types";
 import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
+import { useState } from "react";
+import { ChatOnScreen } from "../../lib/chatOnScreen";
 import { buildDetails, formatBytes, formatDuration, pathWords } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { servicesPlatform } from "../../lib/platform";
@@ -116,6 +118,29 @@ describe("opening and closing", () => {
     await detailsClick(moving.user, screen.getByTestId("file-pause"));
     await detailsClick(moving.user, screen.getByTestId("file-cancel"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+  });
+
+  // agents#1704: a chat on a call stays loaded, hidden, when a notification opens another: its details stayed over the
+  // other chat, with Tab caught in them.
+  it("close when their chat goes off screen, and nothing of them is left over the page", async () => {
+    fakeEngine.on("messageDetails", () => textView());
+    let show: (on: boolean) => void = () => {};
+    function Loaded() {
+      const [visible, setVisible] = useState(true);
+      show = setVisible;
+      return <ChatOnScreen.Provider value={visible}><div className={visible ? "" : "hidden"}><MessageBubble message={message()} peerPubKey="peer" onDelete={() => {}} /></div></ChatOnScreen.Provider>;
+    }
+    const { user } = renderApp(<Loaded />);
+    await detailsClick(user, screen.getByText("hello"));
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
+    act(() => show(false));
+    await waitFor(() => expect(screen.queryByTestId("message-details")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("message-details-backdrop")).not.toBeInTheDocument();
+    // Back on screen, they stay closed until asked again.
+    act(() => show(true));
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+    await detailsClick(user, screen.getByText("hello"));
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
   });
 
   it("the ⋮ menu has Details beside Delete, and Details opens them", async () => {

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { MessageDetailsView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
 import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
+import { ChatOnScreen } from "../lib/chatOnScreen";
 import { buildDetails, type DetailRow } from "../lib/messageDetails";
 import type { ChatMessage } from "../lib/types";
 import "./message-details.css";
@@ -32,6 +33,11 @@ export function MessageDetailsPanel({ message, linkId, picture, onClose, returnF
   const [copiedAll, setCopiedAll] = useState(false);
   useOutsideDismiss(ref, true, onClose);
   useTabTrap(ref);
+  // Its chat went off screen (another chat opened while this one stays loaded): the details go with it.
+  const onScreen = useContext(ChatOnScreen);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => { if (!onScreen) close.current(); }, [onScreen]);
 
   useEffect(() => {
     let live = true;

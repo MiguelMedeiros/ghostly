@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText } from "@ghostly/core";
 import { Chat } from "../../pages/Chat";
@@ -136,6 +136,19 @@ describe("a chat's ⋮ menu, in groups", () => {
     const menu = screen.getByTestId("chat-options-menu");
     expect(menu).toHaveAttribute("data-menu", "popover");
     expect(layout(menu).filter(row => row !== "chat-hold-open")).toEqual(["chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-folder-open", "chat-refresh", "chat-tech-info", "—", "Delete chat"]);
+  });
+});
+
+// agents#1704: a chat kept loaded (on a call) when another opens closes what it opened over the page.
+describe("a chat that goes off screen", () => {
+  it("closes its Tech Info, which does not stay over the chat opened", async () => {
+    viewport(1024, 768);
+    const { user, rerender } = openChat();
+    await user.click(await screen.findByTestId("chat-options"));
+    await user.click(screen.getByTestId("chat-tech-info"));
+    expect(screen.getByRole("heading", { name: "Tech Info" })).toBeInTheDocument();
+    rerender(<Chat sessionId="chat-1" visible={false} onCallChange={() => {}} callLayer={null} />);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Tech Info" })).not.toBeInTheDocument());
   });
 });
 
