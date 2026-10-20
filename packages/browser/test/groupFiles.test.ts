@@ -462,6 +462,56 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(Math.min(...fromBob)).toBe(cut);
   });
 
+  it("a holder whose app goes away mid-way is left as soon as another holder is in reach, not a stall's wait later", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 600_000, cut = 256 * 1024;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 11));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    // Only Bob holds it for Carol (Alice's app is closed), and his bytes stop past the first 256 KiB.
+    alice.online = false;
+    t.hold = (from, to, frame) => from === bob && to === carol && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    t.world.reopen(carol);
+    await t.world.until(() => [...t.files.get(carol)!.transfers.values()].some(v => v.transferred >= cut), 5 * 60_000);
+    // Bob's app closes, and Alice's opens again.
+    bob.online = false;
+    t.hold = null;
+    t.world.reopen(alice);
+    const gone = t.world.now;
+    await t.world.until(() => t.seen.some(s => s.from === "alice" && s.to === "carol" && s.frame.t === "pf-offer"), 5 * 60_000);
+    // Asked once Alice is in reach again, not once a stall's `wantWaitMs` went by.
+    expect(t.world.now - gone).toBeLessThan(GROUP_FILE_LIMITS.wantWaitMs / 2);
+    await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+    // From the bytes stored here.
+    const toAlice = t.seen.filter(s => s.from === "carol" && s.to === "alice" && s.frame.t === "pf-accept").map(s => s.frame.offset as number);
+    expect(toAlice).toEqual([cut]);
+  });
+
+  it("a holder whose app goes away mid-way, with no other holder in reach, goes on from the bytes stored here when it comes back", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 600_000, cut = 256 * 1024;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 11));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    alice.online = false;
+    t.hold = (from, to, frame) => from === bob && to === carol && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    t.world.reopen(carol);
+    await t.world.until(() => [...t.files.get(carol)!.transfers.values()].some(v => v.transferred >= cut), 5 * 60_000);
+    bob.online = false;
+    t.hold = null;
+    await t.world.run(10_000);
+    t.world.reopen(bob);
+    await t.world.until(() => t.done(carol, id, messageId), 5 * 60_000);
+    expect(sha(t.got(carol, id, messageId).bytes!)).toBe(meta.d);
+    const fromBob = t.seen.filter(s => s.from === "bob" && s.to === "carol" && s.frame.t === "pf-data").map(s => s.frame.offset as number);
+    expect(fromBob.filter(offset => offset < cut).length).toBe(cut / (16 * 1024));
+  });
+
   it("a holder serving bad bytes then stalling does not get the next holder blamed", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
