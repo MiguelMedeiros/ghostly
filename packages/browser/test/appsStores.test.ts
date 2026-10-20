@@ -341,6 +341,35 @@ describe("stores", () => {
     expect(net.requests).not.toContain(COPY_URL);
   });
 
+  it("a store removed and added back refuses an index older than the last one taken from it, a default store's too", async () => {
+    const v1 = await bundle();
+    const OLD_URL = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
+    const taken = { sequence: 6, removed: [{ ref: v1.ref, digest: v1.digest, reason: "Malware", at: NOW_S }] };
+    for (const defaults of [[], [{ url: STORE_URL, key: keyOf(STORE_KEY) }]]) {
+      await emptyProfile();
+      await net.putStore(await storeFiles({ sequence: 5, apps: [listing(v1)] }), OLD_URL);
+      await net.putStore(await storeFiles(taken));
+      const store = apps(net, { defaults });
+      await store.start();
+      store.stop();
+      await store.addStore({ url: STORE_URL });
+      await store.removeStore({ key: keyOf(STORE_KEY) });
+      await expect(store.addStore({ url: OLD_URL }), `defaults: ${defaults.length}`).rejects.toThrow(/^rollback/);
+      expect(await store.listStores()).toEqual([]);
+      await net.putStore(await storeFiles({ ...taken, apps: [listing(v1)] }), OLD_URL);
+      await expect(store.addStore({ url: OLD_URL }), "another index under the same sequence").rejects.toThrow(/^equivocation/);
+      // The same index, or a newer one, comes back as it was added the first time; removed again, the newest one holds.
+      expect(await store.addStore({ url: STORE_URL })).toMatchObject({ sequence: 6, preloaded: defaults.length > 0 });
+      expect((await store.listStores())[0]).toMatchObject({ removed: [{ ref: v1.ref }] });
+      await store.removeStore({ key: keyOf(STORE_KEY) });
+      await net.putStore(await storeFiles({ sequence: 7 }), OLD_URL);
+      expect(await store.addStore({ url: OLD_URL })).toMatchObject({ sequence: 7 });
+      await store.removeStore({ key: keyOf(STORE_KEY) });
+      await store.removeStore({ key: keyOf(STORE_KEY) });
+      await expect(store.addStore({ url: STORE_URL })).rejects.toThrow(/^rollback/);
+    }
+  });
+
   it("an index whose bytes have not changed is not checked again, only its expiry; a changed one is read whole", async () => {
     const v1 = await bundle();
     await net.putStore(await storeFiles({ apps: [listing(v1)], revoked: [await revocation(v1.ref, [v1.digest])], expires: NOW_S + 3600 }));
