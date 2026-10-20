@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, checkTypes, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -211,6 +211,20 @@ describe("hooks", () => {
       bridge.close();
     }
   }, 10_000);
+
+  it("a webhook with a user or password in its URL is a usage error that does not repeat them: fetch never posts to one", async () => {
+    // What `post` would meet: every event held as "not answering", for good, the password on stderr each time.
+    await expect(fetch("http://bridge:s3cret@127.0.0.1:1/hook", { method: "POST" })).rejects.toThrow(TypeError);
+    for (const url of ["http://bridge:s3cret@127.0.0.1:8080/hook", "http://s3cret@localhost:8080/hook", "https://:s3cret@[::1]/hook"]) {
+      let error: unknown;
+      try { checkWebhook(url); } catch (thrown) { error = thrown; }
+      expect(error, url).toBeInstanceOf(CliError);
+      expect((error as CliError).code).toBe("usage");
+      expect((error as CliError).message).toMatch("no user or password");
+      expect((error as CliError).message).not.toMatch("s3cret");
+    }
+    expect(checkWebhook("http://127.0.0.1:8080/hook?token=abc").href).toBe("http://127.0.0.1:8080/hook?token=abc");
+  });
 
   it("an event the webhook refuses (a 4xx) is passed: said on stderr, the cursor moves on", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor");
