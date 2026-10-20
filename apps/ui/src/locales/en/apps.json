@@ -167,6 +167,7 @@
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
     "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
     "with": "{{title}} with {{name}}",
-    "withName": "with {{name}}"
+    "withName": "with {{name}}",
+    "withSharing": "{{title}} · sharing a file with {{name}}"
   }
 }
