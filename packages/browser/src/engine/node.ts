@@ -7501,6 +7501,8 @@ export class GhostlyNode implements EngineImplementation {
       ? resumeHere(this.transportLogOf(live), this.transportsHere(), stored.peerTransports ?? live.caps?.peer?.transports) : {};
     // The DHT delivery view the pages last heard of (`onDhtDelivery`).
     let dhtShown: string | undefined;
+    // The DHT delivery view the outbox last looked at (`onDhtDelivery`).
+    let dhtFlushed: string | undefined;
     // Whether the chat's invite was taken from this side, as last heard (`onDhtDelivery`).
     let wasTaken = false;
     live.link = new GhostLink({
@@ -7614,7 +7616,15 @@ export class GhostlyNode implements EngineImplementation {
         onGroupFrame: stored.profile ? frame => this.groups.handleContactFrame(linkId, frame) : undefined,
         onGroupsSupport: () => this.emitState(),
         onDhtDelivery: view => {
-          if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}).then(() => this.editQueues.get(linkId)?.flush()).catch(() => {});
+          // Every read of the mailbox says so, whatever it found: the outbox looks again only when the view changed (a
+          // receipt cleared `pendingUntil`, the contact's mode, an error gone). Looked at on each read, waiting texts read
+          // the chat's whole history every 4-30 s for up to their 7 days: 11.7% of a core for 30 away contacts (agents#1776).
+          // Their own backoff timers and a receipt (`Outbox.received`) still look.
+          const viewed = JSON.stringify(view);
+          if (stored.profile && !stored.group && viewed !== dhtFlushed) {
+            dhtFlushed = viewed;
+            void this.outboxes.get(linkId)?.flush().catch(() => {}).then(() => this.editQueues.get(linkId)?.flush()).catch(() => {});
+          }
           this.observeTransport(linkId);
           // The invite was not taken after all: the chat takes back the listeners it gave up (`takenFromUs`).
           const taken = !!live.link?.takenFromUs;
