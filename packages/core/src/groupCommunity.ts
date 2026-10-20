@@ -1702,8 +1702,9 @@ export class CommunitySession {
       }
     }
     this.markSeen(raw);
-    // The first one, should it come too (from a member who carried it): a duplicate.
-    if (original) this.markSeen({ ...raw, ...original });
+    // The first one, should it come too (from a member who carried it): a duplicate. Only under a commit I know: a
+    // place naming none would be a new entry in `seen` per frame, never pruned before the window passes it.
+    if (original && firstAt) this.markSeen({ ...raw, ...original });
     this.keep(raw);
     // The message itself is stored already; what changed here (seen, store) is saved in a batch.
     this.persistSoon();
