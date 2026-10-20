@@ -11,6 +11,7 @@ import type { GhostlyEvent } from "../src/events";
 import { allowlist } from "../src/listen";
 import { chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
+import { ONE_SHOT_RECEIPT_MS } from "../src/waits";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
@@ -306,6 +307,60 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent" })).rejects.toMatchObject({ code: "engine", message: "Peer is gone" });
     // A send and its wait read the message itself: in a long chat, the whole history costs each of them a read of every row.
     expect((ctx.runtime.server.node as unknown as { getMessages: ReturnType<typeof vi.fn> }).getMessages).not.toHaveBeenCalled();
+  });
+
+  // agents#1640: a script's one-shot sends to a contact who is online. A text sent over the live link left at `sent` was
+  // taken for unconfirmed as the profile closed, sent again on the DHT at the next start, and that copy held the chat's
+  // one DHT text awaiting a receipt: the next send timed out after 30 s, every 5-8 messages.
+  it("a one-shot's text sent over the live link waits a moment for its receipt before it leaves", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored = [msg("me_1", 5, { sender: "me", delivery: "sending" })];
+      const { ctx, emit } = fake(stored);
+      Object.assign(ctx, { mode: "one-shot" });
+      const sent = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(10);
+      stored[0] = { ...stored[0], delivery: "sent", via: "datalink" };
+      emit({ seq: 1, id: "x", type: "message.delivery", at: 1, chat: "chat-one", messageId: "me_1" });
+      await vi.advanceTimersByTimeAsync(300);
+      let done = false;
+      void sent.then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done, "it does not leave at sent").toBe(false);
+      stored[0] = { ...stored[0], delivery: "delivered" };
+      emit({ seq: 2, id: "y", type: "message.delivery", at: 2, chat: "chat-one", messageId: "me_1" });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await sent).toMatchObject({ delivery: "delivered" });
+
+      // No receipt within ONE_SHOT_RECEIPT_MS: it leaves at sent, as before, with no error.
+      stored[0] = { ...stored[0], delivery: "sent", via: "datalink" };
+      const late = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(ONE_SHOT_RECEIPT_MS + 100);
+      expect(await late).toMatchObject({ delivery: "sent" });
+
+      // A text on the DHT, or a daemon: no wait past sent.
+      stored[0] = { ...stored[0], delivery: "sent", via: "pkarr" };
+      const dht = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await dht).toMatchObject({ delivery: "sent" });
+      Object.assign(ctx, { mode: "daemon" });
+      stored[0] = { ...stored[0], delivery: "sent", via: "datalink" };
+      const daemon = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await daemon).toMatchObject({ delivery: "sent" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a one-shot's timeout says the text goes at the next command, not while a profile it is closing is online", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored = [msg("me_1", 5, { sender: "me", delivery: "queued" })];
+      const { ctx } = fake(stored);
+      Object.assign(ctx, { mode: "one-shot" });
+      const sent = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await sent).toMatchObject({ code: "timeout", message: "Timed out after 30 s: the message is queued and goes with this profile's next command, or keep it online with `ghostly daemon --detach`" });
+    } finally { vi.useRealTimers(); }
   });
 
   it("send's wait sees a delivery that never came as message.delivery, and one that came as the time ran out", async () => {
