@@ -242,6 +242,7 @@
     "forkedMember": "グループの変更は一時停止中です",
     "forkedNext": "管理者がグループを作り直す必要があります。",
     "full": "グループのメンバーは最大 {{max}} 人です",
+    "growMore": "他 {{count}} 人",
     "growNeedsUpdates": "{{max}} 人を超えるには全員の更新が必要です",
     "growNeedsUpdatesNext": "未更新: {{names}}。",
     "hubSetting": "このハブの設定は使えません",
