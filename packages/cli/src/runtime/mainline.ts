@@ -94,8 +94,8 @@ const MISSING_KEPT = 256;
 
 /**
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
- * packet also goes to the DHT, and a read goes there when every relay is failing or the read failed for anything but
- * this app's own request budget (that is a wait, not an outage).
+ * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
+ * request budget held it back (the DHT has no budget). A background read the budget holds waits for it.
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -180,7 +180,11 @@ export class RelaysAndDht implements PkarrTransport {
         return found;
       }
       ({ packet: fromRelays, failed } = answered);
-      if (isDiscoveryBudgetError(failed)) throw failed;
+      // The relays' budget held the read back: the DHT, which has no budget and already has a contact's first
+      // envelope, is asked instead. Waiting for the relays' minute made each pairing past ~10 chats on working relays
+      // take 3-18 s (13-37 s on one relay), where DHT-only pairings take 0.1-2.8 s (agents#1715). Found nowhere there,
+      // or a background read, it is still a wait.
+      if (isDiscoveryBudgetError(failed)) return this.heldBack(pubKeyZ32, failed, options);
       if (failed instanceof RelaysFailedError) fromRelays = failed.kept;
       if (!failed) this.lastVia = "relay";
       if (!failed && !down()) return fromRelays;
@@ -193,6 +197,14 @@ export class RelaysAndDht implements PkarrTransport {
       if (fromRelays) return fromRelays;
       throw failed ?? error;
     }
+  }
+
+  private async heldBack(pubKeyZ32: string, held: unknown, options: PkarrRequestOptions): Promise<SignedPacket> {
+    if (options.background) throw held;
+    const fromDht = await this.fromDht(pubKeyZ32).catch(() => null);
+    if (!fromDht) throw held;
+    this.lastVia = "dht";
+    return fromDht;
   }
 
   private async fromDht(pubKeyZ32: string): Promise<SignedPacket | null> {
