@@ -4,9 +4,9 @@ import { runsEngine } from "@ghostly/browser/devices/state";
 import { deviceStateOf, forgetDevice } from "@ghostly/browser/devices/store";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
-import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
+import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
 import { retryUnsaved, unreadUnder } from "./storage";
-import { peekFresh } from "./profilePeek";
+import { peekFresh, storeKey as peekStoreKey } from "./profilePeek";
 import { verifyPassword } from "./settings";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
@@ -183,6 +183,19 @@ export async function profileGlance(id: string): Promise<ProfileGlance> {
   if (profileLock(id)) return { locked: true, unread: 0, fresh: 0 };
   if (!(await deviceStateOf(databaseOf(id)).then(runsEngine, () => false))) return { locked: false, standby: true, unread: 0, fresh: 0 };
   return { locked: false, unread: unreadUnder(prefixOf(id)), fresh: peekFresh(id), avatar: await storedAvatar(databaseOf(id)) };
+}
+/**
+ * Whether another window's write of this storage key (null: the storage was cleared) can change what `profileGlance(id)`
+ * shows: the registry, the peeks, that profile's settings (its lock), one of its chats or read marks. A draft typed in
+ * that profile, a mute, a key of any other profile cannot.
+ */
+export function changesGlance(key: string | null, id: string): boolean {
+  if (key === null || key === registryKey() || key === peekStoreKey() || key === settingsKeyFor(id)) return true;
+  const prefix = prefixOf(id);
+  if (!key.startsWith(prefix)) return false;
+  // As `unreadUnder` reads them: a chat is `<prefix><chat id>`, its read mark `<prefix>read_<chat id>`.
+  const rest = key.slice(prefix.length);
+  return !rest.includes("_") || /^read_[^_]+$/.test(rest);
 }
 /** The picture a profile's peer keeps in its settings (WISP 04), if it is the small JPEG the peer accepts. */
 async function storedAvatar(dbName: string): Promise<string | undefined> {

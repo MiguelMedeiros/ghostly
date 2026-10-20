@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
-import { profileGlance, type ProfileGlance } from "../lib/profileData";
+import { changesGlance, profileGlance, type ProfileGlance } from "../lib/profileData";
 import { currentProfile, listProfiles, type ProfileEntry } from "../lib/profiles";
 import { PEEK_EVENT } from "../lib/profilePeek";
 
@@ -38,10 +38,21 @@ export function useProfileGlances(): { current: ProfileEntry; others: OtherProfi
       void Promise.all(entries.map(async (entry) => ({ entry, glance: await profileGlance(entry.id).catch(() => undefined) })))
         .then((others) => { if (alive) setState({ current, others }); });
     };
+    // Another window's write: only one that can change another profile's glance (not each key typed in a draft).
+    const onStorage = (e: Event) => {
+      const key = e instanceof StorageEvent ? e.key : null;
+      const current = currentProfile().id;
+      if (listProfiles().some((p) => p.id !== current && changesGlance(key, p.id))) load();
+    };
     load();
-    const events = ["profiles-updated", "settings-updated", "storage", PEEK_EVENT];
+    const events = ["profiles-updated", "settings-updated", PEEK_EVENT];
     for (const name of events) window.addEventListener(name, load);
-    return () => { alive = false; for (const name of events) window.removeEventListener(name, load); };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      alive = false;
+      for (const name of events) window.removeEventListener(name, load);
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
   const othersUnread = state.others.reduce((sum, o) => sum + (o.glance?.unread ?? 0), 0);
   const othersFresh = state.others.reduce((sum, o) => sum + (o.glance?.fresh ?? 0), 0);
