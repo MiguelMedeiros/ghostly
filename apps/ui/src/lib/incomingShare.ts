@@ -8,6 +8,12 @@ import { useSyncExternalStore } from "react";
  * sent until the person sends it there.
  */
 
+/**
+ * Most files one share brings, on the web (sw/policy.ts `MAX_SHARED_FILES`) and on Android (GhostlyHostPlugin.kt
+ * `MAX_SHARED_FILES`): keep the three alike.
+ */
+export const MAX_SHARE_FILES = 32;
+
 /** A file of a share as the picker shows it: a browser's File, or one not read into the page yet. */
 export type SharedFile = Pick<File, "name" | "size" | "type">;
 
@@ -22,6 +28,8 @@ export interface IncomingShare {
   unread?: string[];
   /** The names of files Android had no room to copy (the device is full); the picker says so. */
   noRoom?: string[];
+  /** The names of files left out past the most one share brings (`MAX_SHARE_FILES`); the picker says so on a line of its own. */
+  pastLimit?: string[];
   /**
    * Reads `files` into the page where they are only names and sizes (the Android app's share: its bytes are read
    * when a chat's composer takes it, not before the picker shows). Without it, `files` are the Files.
@@ -51,18 +59,19 @@ export function isEmptyShare(share: IncomingShare): boolean {
 
 /**
  * A share arrived: it waits for a chat to be picked. An empty one is dropped, and never clears one that waits; one
- * that only names files left out (too large, not read, or no room for them) is said all the same, with the share that
- * waits when there is one.
+ * that only names files left out (too large, not read, no room for them, or past the most one share brings) is said
+ * all the same, with the share that waits when there is one.
  */
 export function receiveShare(share: IncomingShare): void {
   if (isEmptyShare(share)) {
-    if (!share.leftOut?.length && !share.unread?.length && !share.noRoom?.length) return;
+    if (!share.leftOut?.length && !share.unread?.length && !share.noRoom?.length && !share.pastLimit?.length) return;
     pending = pending
       ? {
         ...pending,
         leftOut: [...pending.leftOut ?? [], ...share.leftOut ?? []],
         unread: [...pending.unread ?? [], ...share.unread ?? []],
         noRoom: [...pending.noRoom ?? [], ...share.noRoom ?? []],
+        pastLimit: [...pending.pastLimit ?? [], ...share.pastLimit ?? []],
       }
       : share;
   } else pending = share;
