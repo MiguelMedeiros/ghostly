@@ -474,17 +474,20 @@ export function GroupChat() {
   const savedHere = useSavedIn(`group:${groupId}`);
   // The composer turned off under the focus (removed, left on another device, the group forked): the field goes disabled
   // and the browser drops the focus to the page. It goes to the line that says why, or to the ⋮ when there is none.
+  // Off for a moment on a group still active (a join, leave or removal past 16 members): nothing says why, and the
+  // composer gives the focus back itself once it is on again (`MessageInput`). Moved to ⋮, it stayed there and the next
+  // keys opened its menu (agents#1739).
   const noticeRef = useRef<HTMLDivElement>(null);
-  const canSend = !!group?.canSend;
+  const canSend = !!group?.canSend, active = group?.status === "active";
   const couldSend = useRef(canSend);
   useLayoutEffect(() => {
     const could = couldSend.current;
     couldSend.current = canSend;
-    if (!could || canSend) return;
+    if (!could || canSend || active) return;
     const at = document.activeElement;
     if (at && at !== document.body && !at.closest("[data-composer]")) return;
     (noticeRef.current ?? optionsRef.current)?.focus();
-  }, [canSend]);
+  }, [canSend, active]);
   if (!state) return null;
   const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
