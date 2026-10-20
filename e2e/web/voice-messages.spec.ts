@@ -254,6 +254,17 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("voice-bar")).toHaveCount(0);
 
+  // From the keyboard, Enter on Pause pauses and Enter on the bin throws it away: both sent it (Enter sent from anywhere).
+  await mic(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+  await page.getByTestId("voice-pause").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+  await page.getByTestId("voice-delete").focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveCount(0);
+
   // One held, then one hands-free with a pause, a listen and more: two in a row from Alice.
   await hold(page, 1_600);
   await expect(voices(alice)).toHaveCount(1);
