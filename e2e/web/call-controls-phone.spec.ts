@@ -138,12 +138,15 @@ for (const { name, viewport, narrowest } of smallRows) {
 }
 
 /**
- * The small call window's state line ("Audio call" and the clock), measured against the window's corner button and
- * its edges: what of it lies under the button or is cut, and whether the words are shown beside the clock.
+ * The small call window's state line ("Audio call" and the clock), measured against the window's corner button, the
+ * own camera's preview of a video call and its edges: what of it lies under one of them or is cut, and whether the
+ * words are shown beside the clock.
  */
 const stateLine = (page: Page) => page.getByTestId("call-window").evaluate((small) => {
   const box = small.getBoundingClientRect();
   const button = small.querySelector("[data-testid=call-minimize]")!.getBoundingClientRect();
+  const preview = small.querySelector("[data-testid=call-self-view]")?.getBoundingClientRect();
+  const over = (r: DOMRect, o: DOMRect) => r.left < o.right && r.right > o.left && r.top < o.bottom && r.bottom > o.top;
   const line = small.querySelector("[data-testid=call-status]")!;
   const shown = line.getBoundingClientRect();
   const wrong: string[] = [];
@@ -155,7 +158,8 @@ const stateLine = (page: Page) => page.getByTestId("call-window").evaluate((smal
     if (!clock && r.top >= shown.bottom - 1) continue;
     if (!clock) words = true;
     const where = `${part.textContent} at ${Math.round(r.left - box.left)}..${Math.round(r.right - box.left)} of ${Math.round(box.width)}`;
-    if (r.left < button.right && r.right > button.left && r.top < button.bottom && r.bottom > button.top) wrong.push(`under the button: ${where}`);
+    if (over(r, button)) wrong.push(`under the button: ${where}`);
+    if (preview && over(r, preview)) wrong.push(`under the preview: ${where}`);
     if (r.left < box.left || r.right > box.right || part.scrollWidth > part.clientWidth + 1) wrong.push(`cut: ${where}`);
   }
   return { wrong, words };
@@ -188,3 +192,53 @@ for (const language of ["pt", "ar"]) {
     await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
   });
 }
+
+for (const width of [320, 414]) {
+  test(`a ${width} px phone's small window of a video call shows its clock clear of the own camera's preview`, { tag: ["@feature:calls.mini-window", "@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    const bob: Peer = await peer("bob", { mobile: true, viewport: { width, height: 740 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await alice.page.getByTestId("call-video").click();
+    await bob.page.getByTitle("Accept video call").click();
+    await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+    await bob.page.getByTestId("call-minimize").click();
+    const small = bob.page.getByTestId("call-window");
+    await expect(small).toHaveAttribute("data-mini", "true");
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    await expect(bob.page.getByTestId("call-self-view")).toBeVisible();
+    // The clock was centred between the corner button and the right edge, and its last 11 px ran under the preview.
+    await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
+    await bob.page.getByTestId("call-hang-up").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+  });
+}
+
+test("on a phone the notice that the contact shares their screen is clear of your own picture", { tag: ["@feature:calls.video", "@feature:calls.screen-share", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 375, height: 667 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  await alice.page.getByTestId("call-video").click();
+  await bob.page.getByTitle("Accept video call").click();
+  await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+  await alice.page.getByTestId("share-screen").click();
+  const notice = bob.page.getByTestId("call-sharing");
+  await expect(notice).toHaveText(/is sharing their screen$/);
+  // Both started at 64 px down, the notice centred and your picture at the right: its end was under the picture.
+  const self = (await bob.page.getByTestId("call-self-view").boundingBox())!;
+  const box = (await notice.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(self.y + self.height);
+  expect(box.x + box.width).toBeLessThanOrEqual(375);
+  // Your picture dragged down over it: the notice is still drawn on top, end to end.
+  await bob.page.mouse.move(self.x + self.width / 2, self.y + self.height / 2);
+  await bob.page.mouse.down();
+  await bob.page.mouse.move(self.x + self.width / 2, box.y + box.height / 2, { steps: 8 });
+  await bob.page.mouse.up();
+  const moved = (await bob.page.getByTestId("call-self-view").boundingBox())!;
+  expect(moved.y).toBeLessThan(box.y + box.height);
+  expect(moved.y + moved.height).toBeGreaterThan(box.y);
+  const onTop = (x: number) => notice.evaluate((el, at) => el.contains(document.elementFromPoint(at.x, at.y)), { x, y: box.y + box.height / 2 });
+  expect([await onTop(box.x + 12), await onTop(box.x + box.width - 12)]).toEqual([true, true]);
+  await bob.page.getByTestId("call-hang-up").click();
+});

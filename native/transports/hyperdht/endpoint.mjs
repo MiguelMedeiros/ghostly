@@ -9,8 +9,8 @@ const PREFACE = 'ghostly/paired-chat/1'
 const CLOSE_FLUSH_MS = 300
 /**
  * Bytes a channel may hold before `send` throws: above what every sender here lets itself queue (the CLI's 1 MiB high
- * water mark and an app's quarter above it; the Desktop page's send budget over the sidecar's `SEND_ROOM`), so it
- * trips only for one that ignores its own line.
+ * water mark and an app's quarter above it; the Desktop page, which stops a file once the sidecar says `full` past its
+ * `SEND_ROOM`), so it trips only for one that ignores its own line.
  */
 const MAX_BUFFERED = 2 * 1024 * 1024
 /**

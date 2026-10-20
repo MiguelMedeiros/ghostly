@@ -36,11 +36,12 @@ it("once the QR reader failed again, Join says to reload, with Reload, also when
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The QR reader still did not load. Reload Ghostly to load it."));
   const button = screen.getByRole("button", { name: "Reload" });
 
-  // No connection: a reload would leave the browser's own error page, so the app stays.
+  // No connection: a reload would leave the browser's own error page, so the app stays, and says why.
   fireEvent.click(button);
   await waitFor(() => expect(fetched).toHaveBeenCalledWith(location.pathname, { method: "HEAD", cache: "no-store" }));
   await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
   expect(reload).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent("Can't reach Ghostly's server. Check your connection, then reload.");
 
   // Join closed and opened again: the reader is still the failed one.
   unmount();
@@ -50,6 +51,26 @@ it("once the QR reader failed again, Join says to reload, with Reload, also when
   reachable = true;
   fireEvent.click(screen.getByRole("button", { name: "Reload" }));
   await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+});
+
+it("Reload brings the app back with Join open and the camera on (`#/scan`); a device's code reloads where it was", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(() => Promise.resolve(new Response(null, { status: 200 })));
+  let reloadedAt = "";
+  vi.spyOn(window.location, "reload").mockImplementation(() => { reloadedAt = location.hash; });
+  history.replaceState(null, "", "#/chat/abc");
+  const { unmount } = renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
+  pastePicture();
+  fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+  await waitFor(() => expect(reloadedAt).toBe("#/scan"));
+
+  unmount();
+  reloadedAt = "";
+  history.replaceState(null, "", "#/settings/devices");
+  renderApp(<JoinDialog onDevice={async () => {}} onClose={() => {}} />);
+  pastePicture();
+  fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+  await waitFor(() => expect(reloadedAt).toBe("#/settings/devices"));
+  history.replaceState(null, "", "#/");
 });
 
 it("Reload goes with the reader's notice only, not with a later one", async () => {

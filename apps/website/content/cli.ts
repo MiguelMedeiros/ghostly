@@ -38,6 +38,7 @@ export const LINKS = {
   reference: `${DOCS}/packages/cli/README.md`,
   paymentBot: `${DOCS}/packages/cli/examples/payment-bot.mjs`,
   echoBot: `${DOCS}/packages/cli/examples/echo-bot.sh`,
+  voiceAgent: "https://github.com/MiguelMedeiros/ghostly-voice-agent",
   legacy: `${DOCS}/docs/wisps/402-legacy-chat.md`,
 } as const;
 
@@ -114,6 +115,7 @@ export const cli = {
     guide: "Guide",
     reference: "Every command and event",
     agents: "AI agents",
+    voiceAgent: "A voice agent that answers calls",
     wisp: "WISP 1100: the contract",
   },
   legacy: {

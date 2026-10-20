@@ -95,6 +95,8 @@ A reader that takes edits applies it as the live frame does ([401](401-paired-ch
 
 The author sends an edit on the floor only after its message's receipt, since the reader must have the message to find it. The element costs about 40 bytes of the packet: a text near 256 bytes does not fit with it, and its edit waits for a live session instead, never going without the element. It takes the floor's one text slot like any text, with the same retries and expiry; a confirmation of the same edit on the live session ends them.
 
+A removal ([400](400-chat.md#delete-for-everyone), revision 2026-10-18) never goes on the floor: the pair has no room to say it, and an older reader would show its fallback as the new text. It waits for the live session. A text on the floor whose id a reader holds a tombstone for is receipted and taken as the copy already there.
+
 ## Forwards
 
 A forwarded text ([400](400-chat.md#forwards), revision 0.8) carries its hop count as the signed body's optional **fifteenth** element: a whole number from 1 to 255. The eleventh to fourteenth are then present: `null` for no reply and no edit, `[]` for no reactions, `null` for none taken. An edit never carries one. The element costs about 20 bytes: a text whose packet, or whose plaintext against the reader's 900 bytes, has no room for it goes **without** it, and reads as written there. A reader drops a fifteenth element that is not such a number and keeps the text; readers from before ignore it (they accept a body of up to 16 elements).

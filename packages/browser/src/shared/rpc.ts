@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
+import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SavedMessage, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
@@ -139,6 +139,7 @@ export interface EngineApi {
   pollNow(params: { linkId: string }): void;
   removeLink(params: { linkId: string }): void;
   renameLink(params: { linkId: string; label: string }): void;
+  /** The chat on screen, or `group:<id>` for a group: it takes native connections first (WISP 902 § Transports). */
   setActiveLink(params: { linkId: string | null }): void;
   /** `refused`: the text was not kept (it cannot be sent this way); any other error leaves it to be sent later. */
   /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
@@ -186,10 +187,30 @@ export interface EngineApi {
    * queue).
    */
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
+  /**
+   * The read lane (`app-ranges/1`, WISP 1200 § A read lane to the contact): lets the contact's app read `file` (this
+   * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
+   * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
+   */
+  appServe(params: { linkId: string; ref: string; file: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
+  /** Ends a serve. */
+  appUnserve(params: { linkId: string; serve: string }): void;
+  /** The bytes of an `app-range` event's request and the file's size, or why it cannot be read. */
+  appRangeAnswer(params: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): void;
+  /**
+   * Reads a range of what the contact's app serves: at most 1 MiB, fewer at the end of the file, with the file's size;
+   * or why not (`not-open`, `not-served`, `changed`, `gone`, `offline`, `peer-closed`, `failed`).
+   */
+  appRemoteRead(params: { linkId: string; ref: string; serve: string; offset: number; length: number }): { bytes: Uint8Array; size: number } | { error: string };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
   deleteMessage(params: { linkId: string; messageId: string }): void;
+  /**
+   * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and from every member's
+   * device as its last edit. A chat's or a group's (`group:<id>`); refused for someone else's, a payment or a notice.
+   */
+  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean };
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */
@@ -377,6 +398,13 @@ export interface EngineApi {
    * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.
    */
   statusCardIndex(): CardIndexRow[];
+  /**
+   * Saves a message on this device, or unsaves it with `remove`: `linkId` a chat's link or `group:<id>`, `messageId` the
+   * message's id here or, in a 1:1 chat, the id both sides know. Nothing is sent: the mark stays in this profile here.
+   */
+  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): { error: string | null };
+  /** This profile's saved messages from all its chats and groups, the last saved first, each as it is now. */
+  savedMessages(): SavedMessage[];
   /** `admin`: the member a leaving admin handed the role to. */
   leaveGroup(params: { groupId: string }): { admin?: string };
   removeGroupMember(params: { groupId: string; key: string }): void;
@@ -554,6 +582,12 @@ export type EngineImplementation = {
 };
 
 export type EngineMethod = keyof EngineApi;
+
+/**
+ * A range the contact's app asks of a served file (`app-range`): answered with `appRangeAnswer` under its `request`, the
+ * engine's own number for this ask (not the contact's on the wire, which it may ask again under once cancelled).
+ */
+export interface AppRangeAsk { app: string; request: number; serve: string; file: string; offset: number; length: number }
 type Params<M extends EngineMethod> = Parameters<EngineApi[M]> extends [infer P] ? P : undefined;
 
 export interface RpcRequest<M extends EngineMethod = EngineMethod> {
@@ -562,6 +596,19 @@ export interface RpcRequest<M extends EngineMethod = EngineMethod> {
   method: M;
   params: Params<M>;
 }
+
+/**
+ * A client asks for a chat's or group's whole history: the host hands it to `EngineServer.history`, which sends it to
+ * that client alone as a `messages` event, in order with what changes in it. Not an engine call: nothing answers it but
+ * that event.
+ */
+export interface HistoryRequest {
+  kind: "history";
+  linkId: string;
+}
+
+/** What a client sends the server. */
+export type ClientMessage = RpcRequest | HistoryRequest;
 
 export interface RpcResponse {
   kind: "response";
@@ -598,12 +645,18 @@ export interface AttentionEvent {
 export type EngineEvent =
   | { kind: "attention"; event: AttentionEvent }
   | { kind: "state"; state: EngineState }
-  | { kind: "messages"; linkId: string; messages: StoredMessage[] }
+  /**
+   * A chat's or group's history, whole; with `more`, only its newest page (a client attached with `newest`), the older
+   * rows not sent: the client asks for them (`HistoryRequest`).
+   */
+  | { kind: "messages"; linkId: string; messages: StoredMessage[]; more?: true }
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }
   /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat), already checked; never stored. */
   | { kind: "app-frame"; linkId: string; event: import("@ghostly/core").AppFrameEvent }
+  /** The contact's app asks for a range of a file this side's app serves (`appServe`): the page that served it answers. */
+  | { kind: "app-range"; linkId: string; range: AppRangeAsk }
   /** An update check of the installed mini-apps ran (WISP 1200 § Updates, § Takedowns): read them again. */
   | { kind: "apps-checked" }
   /**

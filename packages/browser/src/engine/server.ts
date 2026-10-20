@@ -3,7 +3,7 @@ import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
 import { errorLine, profileOpenFailure } from "../shared/idb";
-import type { PeerServer } from "../devices/linkOnly";
+import type { PeerServer, PeerStopOptions } from "../devices/linkOnly";
 import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
 
 /**
@@ -56,6 +56,8 @@ export class EngineServer implements PeerServer {
         },
         // A contact's mini-app frame (WISP 1200 § In a chat): to the pages, where the app runs. Never stored.
         onAppFrame: (linkId, event) => this.broadcast({ kind: "app-frame", linkId, event }),
+        // A range the contact's app asks of a served file: the page that served it reads it and answers.
+        onAppRange: (linkId, range) => this.broadcast({ kind: "app-range", linkId, range }),
         // An update check of the installed apps ran: the pages read them again, and stop one it stopped.
         onAppsChecked: () => this.broadcast({ kind: "apps-checked" }),
         // Another device took the turn (WISP 06): the pages show the standby screen and start again into the gate.
@@ -81,8 +83,10 @@ export class EngineServer implements PeerServer {
   /**
    * `read`: the chats and groups whose whole history the client read itself, after `mark` (`historyMark`). One that has
    * not changed since is not read and sent again: the client hears only what changes in it from now on.
+   * `newest`: each chat's newest rows that many (`messagePage`), not its whole history, which the client asks for when
+   * it needs it (`HistoryRequest`). What changes in the chat goes to it on top of that page.
    */
-  attach(client: EngineClientSink, read?: { mark: number; ids: Iterable<string> }): void {
+  attach(client: EngineClientSink, read?: { mark: number; ids: Iterable<string> }, scope: { newest?: number } = {}): void {
     this.clients.add(client);
     const sent = new Set<string>();
     if (read) for (const id of read.ids) if ((this.changedAt.get(id) ?? 0) <= read.mark) sent.add(id);
@@ -99,7 +103,7 @@ export class EngineServer implements PeerServer {
         if (sent.has(link.id)) continue;
         await this.inOrder(link.id, async () => {
           if (!this.clients.has(client)) return;
-          client.post({ kind: "messages", linkId: link.id, messages: await this.node.getMessages(link.id) });
+          client.post(scope.newest ? await this.newestOf(link.id, scope.newest) : { kind: "messages", linkId: link.id, messages: await this.node.getMessages(link.id) });
           this.histories.get(client)?.add(link.id);
         });
       }
@@ -113,8 +117,8 @@ export class EngineServer implements PeerServer {
     });
   }
 
-  stop(): Promise<void> {
-    return this.node.shutdown();
+  stop(options: PeerStopOptions = {}): Promise<void> {
+    return this.node.shutdown({ quitting: options.quitting === true });
   }
 
   detach(client: EngineClientSink): void {
@@ -171,6 +175,30 @@ export class EngineServer implements PeerServer {
       return result instanceof Promise ? this.track(linkId, result) : Promise.resolve();
     } catch (error) {
       return Promise.reject(error);
+    }
+  }
+
+  /** A chat's newest page, as a `messages` event: `more` when older rows are left out. */
+  private async newestOf(linkId: string, limit: number): Promise<EngineEvent> {
+    const page = await this.node.messagePage({ linkId, limit });
+    return { kind: "messages", linkId, messages: page.messages, ...(page.more ? { more: true as const } : {}) };
+  }
+
+  /**
+   * A chat's or group's whole history, to this client alone as a `messages` event, after what is still being sent for it
+   * (a `HistoryRequest`, which the host hands here): what changes while it is read follows it.
+   */
+  async history(client: EngineClientSink, linkId: unknown): Promise<void> {
+    if (typeof linkId !== "string" || !this.clients.has(client)) return;
+    try {
+      await this.ready;
+      await this.inOrder(linkId, async () => {
+        if (!this.clients.has(client)) return;
+        const messages = await this.node.getMessages(linkId);
+        if (this.clients.has(client) && this.post(client, { kind: "messages", linkId, messages })) this.histories.get(client)?.add(linkId);
+      });
+    } catch {
+      // The peer never started (the client was told at its attach), or the read failed: nothing is sent.
     }
   }
 

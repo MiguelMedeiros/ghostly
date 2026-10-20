@@ -146,6 +146,13 @@
     "cannotRetry": "此文件无法重试",
     "clipboardUnavailable": "无法读取剪贴板",
     "clipboardUnavailableNext": "请用 + 添加附件。",
+    "floor": {
+      "noRoomNext": "请释放空间，然后请联系人重新发送。",
+      "notInAWeek": "一周内未送达",
+      "refused": "此设备无法接收这个文件",
+      "tooMany": "这里等待处理的文件太多",
+      "tooManyNext": "请先处理等待中的文件，然后请联系人重新发送。"
+    },
     "gone": "此文件已不在这里",
     "noRoom": "联系人的设备空间不足",
     "noRoomHere": "此设备空间不足",
@@ -502,6 +509,12 @@
     "usdtRejected": "USDT RPC 拒绝了这个操作",
     "usdtReverted": "交易已回滚",
     "usdtRevertedNext": "没有发送代币；gas 已花费。"
+  },
+  "relayOnly": {
+    "keepsTurn": "隐藏 IP 需要这个 TURN 服务器",
+    "keepsTurnNext": "请先关闭它，再移除服务器。",
+    "needsTurn": "请先添加 TURN 服务器",
+    "needsTurnNext": "在上方保存一个，然后再开启。"
   },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",

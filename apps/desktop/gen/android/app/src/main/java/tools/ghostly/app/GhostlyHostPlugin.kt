@@ -217,7 +217,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * Only what the page takes is copied: each stream in turn while the share stays within [MAX_SHARED_BYTES]
    * (android.ts `withinPasteTotal`, keep the two alike); one that would go past it is left out, by its size before
    * copying, or by its bytes when the app gives no size (nor kept), and only named in `leftOut`, for the page to say
-   * so; one that cannot be read (no stream, a revoked permission, a broken stream) is named in `unread`. A share with
+   * so; one that cannot be read (no stream, a revoked permission, a broken stream) is named in `unread`, and one the
+   * device has no room for (a full disk, SharedCopies.noRoom) in `noRoom`. A share with
    * nothing else is still nothing for the turns: its names go with the share it lets go, or alone.
    */
   private fun shared(intent: Intent) {
@@ -239,10 +240,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       try {
         own.deleteRecursively()
         val files = JSONArray()
-        // Named for the page: what was too large to bring in, and what could not be read. A copy stopped as a newer
-        // share came is not.
+        // Named for the page: what was too large to bring in, what could not be read, and what the device had no room
+        // for. A copy stopped as a newer share came is not.
         val leftOut = JSONArray()
         val unread = JSONArray()
+        val noRoom = JSONArray()
         var left = MAX_SHARED_BYTES
         for ((index, uri) in streams.withIndex()) {
           if (!going()) break
@@ -266,10 +268,10 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
             files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
             shareTurns.has(number)
           } catch (e: Exception) {
-            // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share, and
-            // is named for the page; what of it was copied goes.
+            // One file that cannot be read (a revoked permission, a broken stream), or that the device has no room
+            // for, leaves the rest of the share, and is named for the page as such; what of it was copied goes.
             folder.deleteRecursively()
-            if (going()) unread.put(name)
+            if (going()) (if (SharedCopies.noRoom(e)) noRoom else unread).put(name)
           }
         }
         // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
@@ -278,7 +280,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           if (SharedCopies.nothingIn(title, text, files.length())) null
           else Handover(
             own,
-            JSONObject().put("title", title).put("text", text).put("files", files).put("leftOut", leftOut).put("unread", unread).toString(),
+            JSONObject().put("title", title).put("text", text).put("files", files)
+              .put("leftOut", leftOut).put("unread", unread).put("noRoom", noRoom).toString(),
           )
         // Decided on the main thread, where shares arrive, so none comes between the turn and the handing over. With
         // nothing in it, an older share that waited for this one may go now; with something, this one goes, waits for
@@ -288,10 +291,10 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           // Nothing but files too large or not read, and no newer share with something: the page names them all the
           // same, with the older share this one let go (Rust keeps one share: two in a row would lose the first), or alone.
           val json =
-            if (share != null || (leftOut.length() == 0 && unread.length() == 0) || !going()) handed?.json
+            if (share != null || (leftOut.length() == 0 && unread.length() == 0 && noRoom.length() == 0) || !going()) handed?.json
             else {
               val notice = handed?.let { JSONObject(it.json) } ?: JSONObject().put("title", "").put("text", "").put("files", JSONArray())
-              for ((key, more) in listOf("leftOut" to leftOut, "unread" to unread)) {
+              for ((key, more) in listOf("leftOut" to leftOut, "unread" to unread, "noRoom" to noRoom)) {
                 val names = notice.optJSONArray(key) ?: JSONArray()
                 for (i in 0 until more.length()) names.put(more.getString(i))
                 notice.put(key, names)

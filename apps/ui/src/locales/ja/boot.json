@@ -12,6 +12,7 @@
   "otherTab": "Ghostly はすでに別のタブで開いています。",
   "otherTabHint": "そのタブを閉じると、このタブに切り替わります。",
   "reload": "再読み込み",
+  "reloadUnreachable": "Ghostly のサーバーに接続できません。接続を確認してから、再読み込みしてください。",
   "shared": "別のタブの Ghostly に送りました。",
   "sharedHint": "そちらでチャットを選んでください。このタブは閉じてかまいません。",
   "title": "このブラウザでは Ghostly を実行できません",

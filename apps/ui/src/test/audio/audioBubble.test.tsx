@@ -115,6 +115,14 @@ describe("an audio file in the chat", () => {
     expect(getFile).not.toHaveBeenCalled();
   });
 
+  it("a name in the other direction than the app's starts at its start, cut at its end", () => {
+    // A <bdi> inside the truncating line took the line's (the page's) direction for the cut: "…g about the release plan.wav".
+    show(song({ name: "تسجيل اجتماع الفريق الأسبوعي.wav" }));
+    const name = screen.getByTestId("audio-name");
+    expect(name).toHaveAttribute("dir", "auto");
+    expect(name).toHaveClass("truncate");
+  });
+
   it("plays from its bytes; the seek bar moves it; the time reads position of length", async () => {
     show(song());
     fireEvent.click(screen.getByTestId("audio-play"));
@@ -180,7 +188,7 @@ describe("an audio file in the chat", () => {
     const revoke = vi.spyOn(URL, "revokeObjectURL");
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
     const voice: ChatFile & { voice: { duration: number; peaks: number[] } } = { id: "chat1-in-voice1", name: "Voice message.webm", size: 900, mime: "audio/webm", voice: { duration: 3000, peaks: [1, 2, 3] } };
-    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" /></>);
+    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" timestamp={1_700_000_000_000} /></>);
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
     const url = screen.getByTestId("audio-element").getAttribute("src");

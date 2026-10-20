@@ -7,6 +7,7 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "../engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
+import type { Removal } from "../engine/removals";
 import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
@@ -78,6 +79,8 @@ export interface StoredLink {
   inviteCode?: string;
   /** Messages deleted on this device, by id, so a republished one is not stored again. */
   deletedIds?: string[];
+  /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
+  removals?: Removal[];
   /**
    * Files of mine whose offer went on the DHT floor (WISP 403 § Files) and that were deleted here before they went live,
    * by wire id: the next session that carries files/3 says each is cancelled (`pf-abort`), so the contact's bubble does too.
@@ -153,6 +156,13 @@ export interface StoredGroup {
    * started again still lets them in.
    */
   invited?: Record<string, number>;
+  /**
+   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, the newest
+   * `MAX_REMOVED_IDS`: a copy that comes again (a catch-up, a member handing it on) is not stored again.
+   */
+  removedIds?: string[];
+  /** My messages I deleted for everyone, their removal said to the members and again to an edge that opens (`engine/removals.ts`). */
+  removals?: Removal[];
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
@@ -920,6 +930,8 @@ export interface StoredMessage {
    * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
    */
   card?: StatusCard;
+  /** Only on the row a removal of mine reads as to the edit queues (`engine/removals.ts`): never stored, never shown. */
+  removed?: true;
   /**
    * A reply that presses a button of this side's own message (WISP 406 · Message Buttons), as the author's engine took
    * it: set only when the button was open for this person. What `button.pressed` reports.
@@ -949,6 +961,12 @@ export interface CardIndexRow {
   timestamp: number;
   editedAt?: number;
 }
+
+/**
+ * A message saved on this device (`savedMessages`): when it was saved and its row as it is now (an edit shows its latest
+ * version). Kept for the profile here only, never sent.
+ */
+export interface SavedMessage { savedAt: number; message: StoredMessage }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
 export interface MessagePage { messages: StoredMessage[]; more: boolean }
@@ -1245,6 +1263,12 @@ export interface Settings {
   readRelays?: boolean;
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
+  /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
+   * group edges) goes through the TURN server in `iceServers` alone, with no STUN server. On only with a TURN server
+   * (`relayOnlyProblem`). Absent means off. The Desktop's own Iroh and HyperDHT do not follow it yet.
+   */
+  relayOnly?: boolean;
   /**
    * The Iroh relays a browser build homes on (WISP 102, relay only): a page cannot send UDP, so every Iroh
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
@@ -1719,6 +1743,11 @@ export interface EngineState {
    * device set moved after a removal, and only the person can start the copy as a profile of its own.
    */
   restoreCheck?: "checking" | "removed";
+  /**
+   * Limited mode only while the active device's read at start is out (WISP 06 § When a device checks): the profile shows
+   * as it is, nothing goes out, and nobody is asked anything until the read answers. Absent otherwise.
+   */
+  startCheck?: true;
   /**
    * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
    * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page

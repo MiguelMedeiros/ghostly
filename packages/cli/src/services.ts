@@ -101,6 +101,15 @@ export interface OpenedService {
   host: string;
 }
 
+/**
+ * Added to every answer of a contact's app, next to any policy the contact sends (a browser enforces both): its
+ * scripts and forms reach its own origin and public https sites, never plain http. The page is served from
+ * `<random>.localhost`, which Chrome counts as this machine, so its own guard for requests to local addresses
+ * (Local Network Access) would not ask before the page read or posted to another service on 127.0.0.1 or the local
+ * network. Pictures, frames and navigation are not covered.
+ */
+export const OPENED_SERVICE_CSP = "connect-src 'self' https: wss:; form-action 'self' https:";
+
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
   response.end(text);
@@ -166,8 +175,10 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
         if (!cookie) continue;
         if (cookies.size < MAX_COOKIE_NAMES) cookies.add(setCookieName(cookie)!);
         out[lower] = [...((out[lower] as string[] | undefined) ?? []), cookie];
-      } else out[lower] = value;
+      } else if (lower === "content-security-policy") out[lower] = [...((out[lower] as string[] | undefined) ?? []), value];
+      else out[lower] = value;
     }
+    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), OPENED_SERVICE_CSP];
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);

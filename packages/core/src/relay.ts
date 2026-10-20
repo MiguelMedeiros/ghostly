@@ -357,6 +357,14 @@ export function normalizeRelayUrl(input: string): string | null {
 /** A relay the breaker leaves alone for failing (`RelayBreaker`): nothing was asked of it now. */
 class RelayLeftAloneError extends Error {}
 
+/**
+ * A read the relays failed (or left alone for failing before), when its caller has another path to ask
+ * (`RelayTransport.resolve` with `keptOnFailure` false): `kept` is the newest packet the relays gave for the key before.
+ */
+export class RelaysFailedError extends Error {
+  constructor(readonly kept: SignedPacket) { super("No Pkarr relay reachable"); }
+}
+
 export class RelayTransport implements PkarrTransport {
   private relays: string[];
   private readonly timeoutMs: number;
@@ -510,7 +518,7 @@ export class RelayTransport implements PkarrTransport {
     if (failure) { this.breaker.failure(relay, failure.kind, failure.reason); return; }
     // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
     if (method) this.networkCooldown.delete(`${method} ${relay}`);
-    this.breaker.success(relay);
+    this.breaker.success(relay, this.relays);
   }
 
   setRelays(relays: string[]): void {
@@ -823,8 +831,11 @@ export class RelayTransport implements PkarrTransport {
    *
    * A hedge spends a second request, so it goes only where the budget has requests to spare (`hedgeRoom`), never for a
    * background read (nobody waits on it), and later for a key whose last read found nothing (`HEDGE_MISSING_MS`).
+   *
+   * `keptOnFailure` false: a read the relays failed throws `RelaysFailedError` with the packet they gave last, in place
+   * of handing that back as their answer (a CLI asks the DHT then, `RelaysAndDht`).
    */
-  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
+  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}, keptOnFailure = true): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
     // A chat reading its contact at a slow pace has nothing due: the reserve kept for it lapses (`CHAT_RESERVE`).
     if (options.background && !options.urgent && !options.group) this.chatNeeds.delete(pubKeyZ32);
@@ -954,6 +965,7 @@ export class RelayTransport implements PkarrTransport {
     // key would hide the outage)…
     const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
     if (resting && known) {
+      if (down && !keptOnFailure) throw new RelaysFailedError(known);
       if (!down && budgetWait < Infinity) this.heldBackUntil(pubKeyZ32, Date.now() + budgetWait);
       return known;
     }
@@ -1016,7 +1028,7 @@ export class RelayTransport implements PkarrTransport {
     this.slowUntil.set(relay, Date.now() + SLOW_DEMOTE_MS);
     const another = this.relays.some((r) => r !== relay && this.breaker.blockedFor(r) === 0 && !this.isCoolingDown(r, "GET"));
     if (another) this.breaker.failure(relay, "error", "slow");
-    else this.breaker.success(relay);
+    else this.breaker.success(relay, this.relays);
   }
 
   /**

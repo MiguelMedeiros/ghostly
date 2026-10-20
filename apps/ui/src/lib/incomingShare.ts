@@ -19,6 +19,8 @@ export interface IncomingShare {
   leftOut?: string[];
   /** The names of files Android could not read (a revoked permission, a broken stream); the picker says so. */
   unread?: string[];
+  /** The names of files Android had no room to copy (the device is full); the picker says so. */
+  noRoom?: string[];
   /**
    * Reads `files` into the page where they are only names and sizes (the Android app's share: its bytes are read
    * when a chat's composer takes it, not before the picker shows). Without it, `files` are the Files.
@@ -43,13 +45,20 @@ export function isEmptyShare(share: IncomingShare): boolean {
 
 /**
  * A share arrived: it waits for a chat to be picked. An empty one is dropped, and never clears one that waits; one
- * that only names files left out (too large, or not read) is said all the same, with the share that waits when there
- * is one.
+ * that only names files left out (too large, not read, or no room for them) is said all the same, with the share that
+ * waits when there is one.
  */
 export function receiveShare(share: IncomingShare): void {
   if (isEmptyShare(share)) {
-    if (!share.leftOut?.length && !share.unread?.length) return;
-    pending = pending ? { ...pending, leftOut: [...pending.leftOut ?? [], ...share.leftOut ?? []], unread: [...pending.unread ?? [], ...share.unread ?? []] } : share;
+    if (!share.leftOut?.length && !share.unread?.length && !share.noRoom?.length) return;
+    pending = pending
+      ? {
+        ...pending,
+        leftOut: [...pending.leftOut ?? [], ...share.leftOut ?? []],
+        unread: [...pending.unread ?? [], ...share.unread ?? []],
+        noRoom: [...pending.noRoom ?? [], ...share.noRoom ?? []],
+      }
+      : share;
   } else pending = share;
   emit();
 }
