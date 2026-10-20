@@ -106,7 +106,8 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     expect(found?.records[0]?.value).toBe("hello");
     expect(b.discovery().path).toEqual({ via: "dht" });
     expect(publishMs).toBeLessThan(1_500);
-    expect(readMs).toBeLessThan(3_000);
+    // The DHT's packet waits for the relays until a slow one would have answered (`SLOW_MS`), for a newer copy there.
+    expect(readMs).toBeLessThan(3_500);
     expect(missingMs).toBeLessThan(4_500);
   });
 
@@ -138,6 +139,56 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
       await new Promise((r) => setTimeout(r, 1_000));
     }
   });
+
+  // agents#1594: with the relay 2 s to answer (far, loaded, or fetching from the DHT itself), the hedge took whichever
+  // packet came first: the DHT's older copy won every read over the relay's newer one (5/5 reads v1).
+  it("a relay that takes 2 s with a newer packet than the DHT's: the read is the newer one", async () => {
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const answer = relays(store);
+    const slow = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PUT") await new Promise((r) => setTimeout(r, 2_000));
+      return answer(input, init);
+    }) as typeof fetch;
+    const me = createIdentity();
+    const a = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS.slice(0, 1), fetch: answer, log: () => {} });
+    await a.publish(me, [{ label: "_x", value: "v1" }]);
+    // v2 on the relay only: a web contact, one whose DHT put failed, a network that blocks UDP.
+    const relayOnly = new RelaysAndDht(null, { relays: RELAYS.slice(0, 1), fetch: answer, log: () => {} });
+    await relayOnly.publish(me, [{ label: "_x", value: "v2" }]);
+    let onDht = null;
+    for (let i = 0; i < 20 && onDht?.records[0].value !== "v1"; i++) onDht = await (await peer(bootstrap)).get(me.pubKeyZ32).catch(() => null);
+    expect(onDht?.records[0].value, "the DHT still holds v1").toBe("v1");
+    const b = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS.slice(0, 1), fetch: slow, log: () => {} });
+    const reads: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const started = Date.now();
+      const found = await b.resolve(me.pubKeyZ32);
+      reads.push(`${found?.records[0].value}/${Date.now() - started}ms`);
+      await new Promise((r) => setTimeout(r, FRESH_READ_MS + 100));
+    }
+    console.log(`MAINLINE slow relay with the newer packet: ${reads.join(" ")}`);
+    for (const read of reads) expect(read.split("/")[0]).toBe("v2");
+  });
+
+  // agents#1595: relays that take 4 s to say a key is not there. Every poll of it (an unused invite's joiner key)
+  // hedged at 1.5 s, a DHT lookup of its own each time (+47 in 10 min).
+  it("polls of a key nobody published, answered 404 slowly, do not each look it up on the DHT", async () => {
+    const answer = relays({ down: false, packets: new Map() });
+    const slow404 = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "PUT") await new Promise((r) => setTimeout(r, 4_000));
+      return answer(input, init);
+    }) as typeof fetch;
+    const dht = await peer(bootstrap);
+    let lookups = 0;
+    const get = dht.get.bind(dht);
+    dht.get = (key: string) => { lookups++; return get(key); };
+    const c = new RelaysAndDht(dht, { relays: RELAYS.slice(0, 1), fetch: slow404, log: () => {} });
+    const key = createIdentity().pubKeyZ32;
+    for (let i = 0; i < 4; i++) expect(await c.resolve(key)).toBeNull();
+    console.log(`MAINLINE slow 404: 4 reads, ${lookups} DHT lookups`);
+    // The first read cannot know the key is missing: it hedges at 1.5 s. The next ones wait as the relays' hedge does.
+    expect(lookups).toBeLessThanOrEqual(1);
+  }, 60_000);
 
   it("a group's edge goes live while every relay answers 500, through the DHT, without a restart", async () => {
     const store = { down: true, packets: new Map<string, Uint8Array>() };
