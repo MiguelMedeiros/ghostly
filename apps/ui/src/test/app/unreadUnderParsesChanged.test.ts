@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { unreadUnder } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 
-// covers: app.profiles
+// covers: profiles.switcher
 
 /**
  * Another profile's unread count (the account switcher's glance) is read again at each of its chats' writes in another
