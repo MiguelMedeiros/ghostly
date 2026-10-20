@@ -299,13 +299,30 @@ export function eventHandler(options: ListenOptions): EventHandler {
   let chain = Promise.resolve();
   let behind = 0;
   let stopped = false;
+  /** The last event the cursor says, and the last one `--type` dropped while others were still being handled. */
+  let kept = -1, dropped = -1;
   const keep = (seq: number) => {
     if (!options.cursor) return;
     try { writeCursor(options.cursor, seq); } catch (error) { throw new CursorError(error); }
+    kept = Math.max(kept, seq);
+  };
+  /** The cursor past events dropped meanwhile, once nothing before them is left to handle. */
+  const keepDropped = () => {
+    if (behind > 0 || dropped <= kept) return;
+    try { keep(dropped); } catch (failed) {
+      if (!(failed instanceof CursorError) || !options.cursorFailed) return;
+      stopped = true;
+      options.cursorFailed(failed.error);
+    }
   };
   const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
     if (stopped) return;
+    // A type it was not asked for is dropped as it comes: not held behind a webhook or an --exec still at work, not
+    // counted toward MAX_BEHIND, not kept. An app's frames at 48 a second, each 32 KiB, filled the bound in 21 s behind
+    // a bridge that was down, ~32 MiB held to be dropped, and the feed paused with the one wanted event pending
+    // (agents#1597). The cursor passes it once the events before it are handled.
+    if (!matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
       if (stopped) return;
@@ -342,7 +359,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
         stopped = true;
         options.cursorFailed(failed.error);
       }
-    }).finally(() => { behind--; });
+    }).finally(() => { behind--; keepDropped(); });
   };
   return Object.assign(handle, { behind: () => behind, idle: () => chain });
 }
