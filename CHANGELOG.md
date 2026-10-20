@@ -4,6 +4,68 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.5.1
+
+### Security
+
+- Voice messages: the Save on a voice message that will not play, and the CLI's `file save --dir`, save it under the name Ghostly makes for it ("Ghostly voice <date time>"), never under the name the sender gave it.
+- Files: a received file's name can no longer hide its real extension behind a run of blank characters. Blank fillers are removed, and the spaces inside a name are reduced to one.
+- Apps: the side that serves a file over the read lane (`app-ranges/1`) takes at most 32 MiB of requests a second from one contact, a cancelled request counted as the read it started, so a contact can no longer make this device read without a bound.
+
+### For users
+
+**Apps**
+
+- An app card ("Ana opened Chess") now reads in your language in the chat list, in a reply's quote, the pinned bar, Saved and what a screen reader says: "🧩 App: Chess 1.2.0", not the English line and link sent for older apps.
+- In Japanese and Chinese, a long contact name no longer pushes "sharing a file" out of a mini-app's panel header on a phone: only the name is cut.
+
+**Wallets**
+
+- From the keyboard, Send's Scan, Paste and Choose image keep your place: Paste and Choose image keep the focus while they read, and the focus goes from Scan to the camera's Cancel and back.
+
+### Fixed
+
+**Apps**
+
+- On a phone, after Back to the chat, the "Back to Cinema" line under the chat's header says "sharing a file" too, while a mini-app lets your contact read one of your files.
+
+**Chat**
+
+- Taking a file out of several pasted or dropped into a chat with its × from the keyboard keeps the focus on the sheet: on the × now in its place, on the one before it when it was the last, or on the caption once one file is left. It fell to the page, and a screen reader said nothing.
+- An audio file's status line in a chat reads whole: it wraps under its time instead of being cut with "…", which hid its end even on a desktop ("Waiting for your contact to accept · 26.0 MB" lost its size).
+- A chat's Tech Info is a dialog for the keyboard and a screen reader: the focus goes into it, Tab stays inside, Escape closes it, and closing it gives the focus back to ⋮ instead of dropping it to the page.
+- The round Save button on a file that is not a picture (a PDF, a ZIP, a text file…) can be reached with Tab and pressed with Enter or Space again: it was skipped by the keyboard, so only the message's ⋮ → Download could save it without a mouse.
+- A file's or a video's status line in a chat reads whole on a phone: it wraps to a second line instead of being cut with "…", which hid its end ("Paused by your conta…" lost how far the file was, "Waiting for your contact to acc…" its size). Long languages were cut on a desktop too.
+- On a phone, Saved messages and Tasks have a Back to the chat list, and the Chats tab is lit while they are open. Before, they had no Back and no tab lit.
+- A contact's reactions to messages the chat cannot find by their id (a file's or a payment's, or ids that never were) no longer make the app read the whole chat for each one: such a chat is read at most once every 10 seconds, the first at once, and the reactions that came meanwhile land then. Before, 20 of them read a chat of 10,000 messages whole 20 times.
+- A contact or a group member who deletes for everyone many messages in a row, ones that are here too, no longer makes the app read the whole chat for each one: their quotes are looked for at most once every 10 seconds per chat, the first at once. Before, each removal read the chat whole (234 ms in a group of 10,000 messages), up to three times a second per member.
+- A contact or a group member who deletes for everyone messages that are not here (never came, or said again) no longer makes the app read the whole chat for each one: their quotes are looked for at most once every 10 seconds per chat, the first at once. Before, a burst of them, which anyone in the chat could send, read a long chat whole three times a second.
+- A contact's message I had already deleted here, then deleted by its author for everyone, no longer keeps its text in my replies that quote it: the quote says the original was deleted, as it does when the message was still here.
+- Recording a voice message hands-free, Enter on the bin, Pause or Play reached with the keyboard presses that button: Enter on the bin sent the recording you were throwing away. Enter anywhere else still sends, as it does after a click on Resume.
+
+**Groups**
+
+- In a community, Delete for everyone takes the message off every member's device, not only off yours, and a member who catches up later does not get it back.
+- A private group's file that was coming from a member whose app closed mid-way now goes on from another member who has it as soon as one is in reach, from the part already here. Before, it stood still for about 30 seconds after the last byte, even with the sender online all that time.
+- An app with no WebRTC (the CLI, or any app on a VPN) in many private groups no longer stalls every 15 seconds: each group connection waiting for a native listener read every group's whole member list, so twenty groups of fifteen blocked the app for 1.8 seconds per round. It now reads only the group it decides on (about 70 ms).
+- Removed from a group while typing, the keyboard focus moves to the line that says so instead of falling back to the top of the page.
+
+**Everywhere**
+
+- An app over its relays' request budget no longer rebuilds and signs a held-back background packet every 4 seconds: it sends it again when the budget frees room for it (up to a minute). An idle app in several groups spent most of its publishing work on packets the budget refused again. Messages, offers and answers keep their turn as before.
+- Reading a QR from a picture (Open image in Join, Choose image in Send on the Lightning and Cashu cards, or a pasted or dropped screenshot) no longer freezes the app while it looks. Before, a phone photo held the app for most of a second on a desktop, and for seconds on a phone.
+- Scanning a QR with the camera (Join, and Send on the Lightning and Cashu cards) no longer makes the app stutter. Each camera frame is now read off to the side, so the app keeps answering while it looks. Before, every frame held the app for 40 to 220 ms on a desktop, and more on a phone or in low light.
+
+**Wallets**
+
+- Send on the Lightning and Cashu cards now reads a `bitcoin:` link the way the chat does. It refuses a link that must not be paid: one with a `req-` parameter the app does not understand, or an amount it cannot read. It also leaves out a Lightning invoice that is not the same payment as its link (another amount or another network). Before, a scan or a paste of such a link went straight to the review of its invoice.
+
+### For developers
+
+**Apps**
+
+- On the read lane (`app-ranges/1`), a request number the contact cancelled and asks again gets the bytes of its new ask. The page's late answer to the first ask used to go out as the second's (another file's bytes and size), and the first ask kept one of its app's 4 places for the rest of the session.
+
 ## 1.5.0
 
 Saved messages, Delete for everyone, a wallet Send that scans a QR code, a tidier chat menu, and apps that let your contact read a file you picked.

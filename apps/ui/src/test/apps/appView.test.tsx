@@ -94,6 +94,44 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(line).not.toHaveAttribute("data-serving");
   });
 
+  it("on a phone after Back, the way back to it still says while it shares a file with the contact", async () => {
+    windowIs(true);
+    const { user } = panel();
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { serving: true }));
+    await user.click(screen.getByTestId("mini-app-back"));
+    const resume = screen.getByTestId("mini-app-resume");
+    expect(resume).toHaveAttribute("data-serving", "true");
+    // A pause before the sharing words (jsdom puts a space between the spans, a browser does not).
+    expect(resume).toHaveAccessibleName(/^Back to Chess ?, sharing a file$/);
+    // A line of their own under the title: a long title never pushes them out, nor they the app's name.
+    expect(within(resume).getByTestId("mini-app-resume-sharing")).toHaveClass("block");
+    act(() => updateChatApp("link-1", { serving: false }));
+    expect(resume).not.toHaveAttribute("data-serving");
+    expect(resume).toHaveAccessibleName("Back to Chess");
+    expect(within(resume).queryByTestId("mini-app-resume-sharing")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["ja", " とファイルを共有中"],
+    ["zh", "正在与 "],
+    ["en", "sharing a file with "],
+  ] as const)("in %s, cuts only the contact's name on a narrow line, never the words that say it shares", async (language, words) => {
+    windowIs(false);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Bartholomew Montgome", named: true }} peerKey="peer" />, { language });
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { serving: true }));
+    const line = within(screen.getByTestId("mini-app")).getByTestId("mini-app-with");
+    // The name alone truncates; the translated words around it keep their width.
+    const name = within(line).getByTestId("mini-app-with-name");
+    expect(name).toHaveTextContent(/^Bartholomew Montgome$/);
+    expect(name).toHaveClass("truncate", "min-w-0");
+    const kept = [...line.children].filter((node) => node !== name);
+    expect(kept.some((node) => node.textContent === words)).toBe(true);
+    for (const node of kept) expect(node).toHaveClass("shrink-0");
+  });
+
   it("has the chat's look in its header: the app, with the contact, and the chat's connection", async () => {
     windowIs(false);
     panel();

@@ -191,7 +191,7 @@ import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOrigi
 import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
 import { canEdit, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
-import { patchRemoval, removalNumber, removalRow, withRemoval, type Removal } from "./removals";
+import { QuoteSweeps, patchRemoval, removalNumber, removalRow, withRemoval, type Removal, type RemovedQuotes } from "./removals";
 import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { mintAwaiting, walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
@@ -851,6 +851,11 @@ export class GhostlyNode implements EngineImplementation {
   private readonly cardRestores = new Map<string, { at: number; busy: boolean; again: boolean; timer?: ReturnType<typeof setTimeout> }>();
   /** The contacts' edits of messages not here yet. */
   private readonly editBuffer = new EditBuffer();
+  /** Removals of messages, whose quotes are looked for at most once a while per chat (`forgetQuotes`). */
+  private readonly quoteSweeps = new QuoteSweeps(async (chat, removed) => {
+    const ids = await this.forgetQuotes(chat, removed);
+    if (ids.length) await this.messagesChanged(chat, ids);
+  });
   /** Received status card updates, applied at most once a second per message (WISP 405 · Status Cards). */
   private readonly cardEdits = new CardEditPacer();
   /** When each message's buttons were last pressed here (`pressButton`). */
@@ -1550,7 +1555,9 @@ export class GhostlyNode implements EngineImplementation {
   private async forgetGroupMessage(chat: string, id: string): Promise<void> {
     await this.groups.removed(chat.slice("group:".length), id);
     await db.deleteMessage(chat, id);
-    await this.messagesChanged(chat, [id, ...await this.forgetQuotes(chat, id, id)]);
+    // Its quotes cost no read of the group each (`QuoteSweeps`): a member can post and remove at the pace of edits.
+    this.quoteSweeps.add(chat, id, id);
+    await this.messagesChanged(chat, [id]);
     this.emitState();
   }
 
@@ -2371,6 +2378,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const queue of this.editQueues.values()) queue.stop();
     for (const restore of this.cardRestores.values()) clearTimeout(restore.timer);
     this.cardRestores.clear();
+    this.quoteSweeps.stop();
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
@@ -3189,6 +3197,7 @@ export class GhostlyNode implements EngineImplementation {
     this.editQueues.delete(linkId);
     clearTimeout(this.cardRestores.get(linkId)?.timer);
     this.cardRestores.delete(linkId);
+    this.quoteSweeps.forget(linkId);
     this.editBuffer.forget(linkId);
     live.carried?.stop();
     // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
@@ -3529,7 +3538,11 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
-    if (live.stored.deletedIds?.includes(id)) return true;
+    if (live.stored.deletedIds?.includes(id)) {
+      // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line.
+      if (edit.rm) this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
+      return true;
+    }
     // The contact deleted its message for everyone (WISP 400 § Delete for everyone): forgotten as a delete here is, a
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
@@ -4008,21 +4021,25 @@ export class GhostlyNode implements EngineImplementation {
     }
     await db.deleteMessage(linkId, messageId);
     live.lastMessageAt = (await db.getMessagePage(linkId, { limit: 1 })).messages[0]?.timestamp ?? 0;
-    const quoting = removed ? await this.forgetQuotes(linkId, messageId, replyRef(message ?? { id: messageId, linkId })) : [];
-    await this.messagesChanged(linkId, [messageId, ...quoting]);
+    // Its quotes cost no read of the chat each (`QuoteSweeps`): a contact can send and remove, or name ids that never were.
+    if (removed) this.quoteSweeps.add(linkId, messageId, replyRef(message ?? { id: messageId, linkId }));
+    await this.messagesChanged(linkId, [messageId]);
     this.emitState();
   }
 
   /**
-   * A message deleted for everyone leaves no line of it here (WISP 400 § Delete for everyone): the replies of the chat
-   * that quote it keep the quote's id and who wrote it, which say it was deleted, and lose its snippet. The chat is
-   * read whole: a removal is rare. The ids of the replies changed.
+   * Messages deleted for everyone leave no line of them here (WISP 400 § Delete for everyone): the replies of the chat
+   * that quote one keep the quote's id and who wrote it, which say it was deleted, and lose its snippet. The chat is
+   * read whole, so removals are gathered (`QuoteSweeps`). The ids of the replies changed.
    */
-  private async forgetQuotes(linkId: string, messageId: string, ref: string | undefined): Promise<string[]> {
-    const quotes = (reply: MessageReply | undefined) => !!reply && (reply.messageId === messageId || (ref !== undefined && reply.id === ref));
-    const ids = (await db.getMessages(linkId)).filter(m => quotes(m.replyTo) && (m.replyTo!.snippet || m.replyTo!.messageId !== messageId)).map(m => m.id);
+  private async forgetQuotes(linkId: string, removed: RemovedQuotes): Promise<string[]> {
+    const byRef = new Map<string, string>();
+    for (const [id, ref] of removed) if (ref !== undefined) byRef.set(ref, id);
+    // The removed message a reply quotes: by its id here, or by the reference both sides know it by.
+    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byRef.get(reply.id);
+    const ids = (await db.getMessages(linkId)).filter(m => { const id = quoted(m.replyTo); return id !== undefined && (m.replyTo!.snippet || m.replyTo!.messageId !== id); }).map(m => m.id);
     if (!ids.length) return [];
-    await db.patchMessages(linkId, ids, m => quotes(m.replyTo) ? { replyTo: { ...m.replyTo!, snippet: "", messageId } } : null);
+    await db.patchMessages(linkId, ids, m => { const id = quoted(m.replyTo); return id === undefined ? null : { replyTo: { ...m.replyTo!, snippet: "", messageId: id } }; });
     return ids;
   }
 
@@ -5056,16 +5073,20 @@ export class GhostlyNode implements EngineImplementation {
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 
-  /** Ranges the contact's apps asked, by chat, app and request, until a page answers them. */
+  /** Ranges the contact's apps asked, by chat, app and this engine's number for the ask, until a page answers them. */
   private readonly appRanges = new Map<string, AppRangeTask>();
+  private nextAppRangeAsk = 0;
 
   /**
    * Every task stays until a page answers it, live or not: until the link settles it, it holds one of its app's places
    * (WISP 1200: at most 4 in flight), so the contact gets `busy` rather than more reads while a page is still reading.
+   * The page answers under a number of the engine's, not the contact's: a number the contact cancelled is free for it to
+   * ask again while the page still reads the first ask, whose answer must not go out as the second's.
    */
   private appRangeAsked(linkId: string, task: AppRangeTask): void {
-    this.appRanges.set(`${linkId} ${task.app} ${task.request}`, task);
-    const { app, request, serve, file, offset, length } = task;
+    const request = ++this.nextAppRangeAsk;
+    this.appRanges.set(`${linkId} ${task.app} ${request}`, task);
+    const { app, serve, file, offset, length } = task;
     this.events.onAppRange?.(linkId, { app, request, serve, file, offset, length });
   }
 
@@ -8064,9 +8085,8 @@ export class GhostlyNode implements EngineImplementation {
       if (group && !live.stored.groupEntry && live.link && `group:${group}` !== this.activeLinkId && this.keepsGroupNative(live.stored)) groups.add(group);
     }
     if (!groups.size) return;
-    const views = new Map(this.groups.views().map(view => [view.id, view]));
     for (const groupId of groups) {
-      const edges = this.groupEdgesByRank(groupId, views.get(groupId));
+      const edges = this.groupEdgesByRank(groupId, this.groups.view(groupId));
       if (!edges.length || edges.some(live => live.link!.isDataLinkOpen)) continue;
       const [anchor, next] = edges;
       if (next && !this.anchorPassed(next, now) && this.unanswered(anchor, now)) {
@@ -8100,8 +8120,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A group opened on screen: its edges with no native listener take one as a chat on screen does, the one it keeps first. */
   private groupOnScreen(groupId: string): void {
     const native = Object.keys(this.nativeFactories) as NativeTransport[];
-    const view = this.groups.views().find(g => g.id === groupId);
-    for (const live of this.groupEdgesByRank(groupId, view)) {
+    for (const live of this.groupEdgesByRank(groupId, this.groups.view(groupId))) {
       if (native.every(t => live.link!.availableTransports.includes(t))) continue;
       void this.ensureNativeEndpoints(live.stored.id);
     }
@@ -8170,9 +8189,13 @@ export class GhostlyNode implements EngineImplementation {
       const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
       const slots = this.nativeSlots(key), groups = owners.filter(other => other.stored.group).length;
       const now = Date.now();
-      // Groups' views (newest message, hubs, admins), read once for this decision and only if needed.
-      let views: Map<string, GroupView> | undefined;
-      const viewOf = (groupId: string) => (views ??= new Map(this.groups.views().map(view => [view.id, view]))).get(groupId);
+      // Each group's view (newest message, hubs, admins), read once for this decision and only if needed: that one
+      // group's, not every group's per edge.
+      const views = new Map<string, GroupView | undefined>();
+      const viewOf = (groupId: string) => {
+        if (!views.has(groupId)) views.set(groupId, this.groups.view(groupId));
+        return views.get(groupId);
+      };
       const anchors = new Map<string, LiveLink | undefined>();
       const anchorOf = (groupId: string) => {
         if (!anchors.has(groupId)) anchors.set(groupId, this.groupEdgesByRank(groupId, viewOf(groupId))[0]);

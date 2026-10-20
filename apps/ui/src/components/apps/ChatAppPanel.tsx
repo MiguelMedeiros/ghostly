@@ -11,6 +11,20 @@ import "./chat-app-panel.css";
 
 const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
+/** A stand-in for the contact's name while the line is translated: the name goes back in as an element of its own. */
+const NAME = "\u0001";
+
+/**
+ * "with Ana", "sharing a file with Ana": only the name is cut when the line is too long, never the words around it,
+ * wherever the language puts them ("Ana とファイルを共有中" would lose "sharing" after a long name).
+ */
+function aroundName(text: string, name: string) {
+  return text.split(NAME).flatMap((part, i) => [
+    i > 0 && <bdi key={`name-${i}`} data-testid="mini-app-with-name" className="min-w-0 truncate">{name}</bdi>,
+    part && <span key={i} className="shrink-0 whitespace-pre">{part}</span>,
+  ]);
+}
+
 /**
  * A mini-app in a 1:1 chat (WISP 1200 § Per client, web): beside the chat on a wide screen, over it on a phone, with
  * the chat's own look in its header: the app's name, "with" the contact and their picture, and the chat's connection
@@ -124,8 +138,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         <div className="min-w-0 flex-1 ms-1">
           <h2 data-testid="mini-app-title" dir="auto" className="m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
           {/* While the app serves a file to the contact, the line says so (WISP 1200 § A read lane to the contact). */}
-          <p data-testid="mini-app-with" data-serving={app?.serving || undefined} className={`m-0 text-[12px] leading-tight truncate ${named ? "text-text-secondary" : "text-text-muted italic"}`}>
-            <bdi>{t(app?.serving ? "apps.view.sharingWith" : "apps.view.withName", { name })}</bdi>
+          <p data-testid="mini-app-with" data-serving={app?.serving || undefined} className={`m-0 flex min-w-0 text-[12px] leading-tight whitespace-nowrap ${named ? "text-text-secondary" : "text-text-muted italic"}`}>
+            {aroundName(t(app?.serving ? "apps.view.sharingWith" : "apps.view.withName", { name: NAME }), name)}
           </p>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
@@ -161,16 +175,25 @@ function TabTrap({ root }: { root: RefObject<HTMLElement | null> }) {
   return null;
 }
 
-/** On a phone, an app the person went Back from: still running, one tap away, under the chat's header. */
+/**
+ * On a phone, an app the person went Back from: still running, one tap away, under the chat's header. While it serves
+ * a file to the contact, it says so here too (WISP 1200 § A read lane to the contact): the panel's header is hidden.
+ */
 export function ChatAppResume({ linkId }: { linkId: string }) {
   const { t } = useI18n();
   const app = useChatApp(linkId);
   if (!app || app.shown) return null;
   return (
-    <button type="button" data-testid="mini-app-resume" onClick={() => updateChatApp(linkId, { shown: true })}
+    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={() => updateChatApp(linkId, { shown: true })}
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
-      <span className="min-w-0 flex-1 truncate">{t("apps.view.resume", { title: app.title })}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{t("apps.view.resume", { title: app.title })}</span>
+        {/* A line of its own: beside the title, a narrow phone cut the app's name in some languages. */}
+        {app.serving && <span data-testid="mini-app-resume-sharing" className="block truncate text-[12px] font-normal text-text-secondary">
+          <span className="sr-only">, </span>{t("apps.view.resumeSharing")}
+        </span>}
+      </span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m9 18 6-6-6-6" /></svg>
     </button>
   );

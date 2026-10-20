@@ -13,15 +13,17 @@ import { renderApp } from "../render";
 // covers: wallet.cashu.send-scan, wallet.cashu.pay-invoice, wallet.lnurl.address, payments.mainnet-confirm
 
 /** What the next QR read finds (a picture or the camera), and what the clipboard holds. */
-const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null }));
+const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null, camera: null as MediaStream | null, held: null as Promise<void> | null }));
 vi.mock("../../lib/qrReader", async (original) => ({
   ...await original<typeof import("../../lib/qrReader")>(),
   readQrImage: async () => qr.text,
-  qrCamera: async () => { throw new Error("NotAllowedError"); },
+  qrCamera: async () => { if (qr.camera) return qr.camera; throw new Error("NotAllowedError"); },
+  qrDecoder: async () => () => null,
+  scanQrFrames: () => {},
 }));
 vi.mock("../../lib/clipboard", async (original) => ({
   ...await original<typeof import("../../lib/clipboard")>(),
-  readClipboardText: async () => qr.clipboard,
+  readClipboardText: async () => { await qr.held; return qr.clipboard; },
 }));
 
 const TEST_MINT = TEST_MINTS[0];
@@ -40,7 +42,7 @@ function show(methods: Partial<WalletPlatform>, network: "testnet" | "mainnet" =
 }
 
 describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
-  beforeEach(() => { qr.text = null; qr.clipboard = null; });
+  beforeEach(() => { qr.text = null; qr.clipboard = null; qr.camera = null; qr.held = null; });
 
   it("a picture of an invoice's QR opens its review; Pay pays it and the result leads back to Send", async () => {
     qr.text = `LIGHTNING:${invoice.toUpperCase()}`;
@@ -121,6 +123,22 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     expect(quoteInvoice).not.toHaveBeenCalled();
   });
 
+  it("a bitcoin: link the chat would not pay opens no review: refused, or its Lightning leg left out", async () => {
+    const quoteInvoice = vi.fn();
+    const { user } = show({ quoteInvoice });
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    // BIP 21: a req- parameter this app does not understand means the link is not paid.
+    qr.text = `bitcoin:?req-pop=x&lightning=${invoice}`;
+    await user.upload(screen.getByLabelText("Choose image"), picture());
+    expect(await screen.findByTestId("wallet-pay-refused")).toHaveTextContent("This link asks for something this app does not understand");
+    // A fallback for another amount than its link's is not the same payment.
+    qr.text = `bitcoin:bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?amount=0.001&lightning=${invoice}`;
+    await user.upload(screen.getByLabelText("Choose image"), picture());
+    expect(await screen.findByText("That is not a Lightning invoice or a Lightning address.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Pay$/ })).toBeDisabled();
+    expect(quoteInvoice).not.toHaveBeenCalled();
+  });
+
   it("no camera: Scan says so and leaves Paste, the field and Choose image", async () => {
     const { user } = show({});
     await user.click(screen.getByRole("tab", { name: "Send" }));
@@ -128,5 +146,43 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     expect(await screen.findByTestId("wallet-send-scan-error")).toHaveTextContent("Camera unavailable");
     expect(screen.getByTestId("wallet-send-paste")).toBeEnabled();
     expect(screen.getByTestId("wallet-pay-input")).toBeInTheDocument();
+  });
+
+  it("from the keyboard, Paste keeps the focus while it reads and after it finds nothing", async () => {
+    let release = () => {};
+    qr.held = new Promise((resolve) => { release = resolve; });
+    qr.clipboard = " ";
+    const { user } = show({});
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    const paste = screen.getByTestId("wallet-send-paste");
+    paste.focus();
+    await user.keyboard("{Enter}");
+    // Busy: marked so, not disabled (a disabled button drops the focus to the page), and a second press does nothing.
+    expect(paste).not.toBeDisabled();
+    expect(paste).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByTestId("wallet-send-image")).not.toBeDisabled();
+    expect(paste).toHaveFocus();
+    release();
+    expect(await screen.findByTestId("wallet-send-scan-error")).toHaveTextContent("Nothing to paste");
+    expect(paste).not.toHaveAttribute("aria-disabled");
+    expect(paste).toHaveFocus();
+  });
+
+  it("from the keyboard, Scan hands the focus to the camera's Cancel, and Cancel back to Scan", async () => {
+    const track = { stop: vi.fn() };
+    qr.camera = { getTracks: () => [track] } as unknown as MediaStream;
+    // A stand-in camera: the preview takes it and plays (frames are read elsewhere: scanQrFrames).
+    const srcObject = vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(() => {});
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const { user } = show({});
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    screen.getByTestId("wallet-send-camera").focus();
+    await user.keyboard("{Enter}");
+    const cancel = await screen.findByTestId("wallet-send-scan-stop");
+    await waitFor(() => expect(cancel).toHaveFocus());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByTestId("wallet-send-camera")).toHaveFocus());
+    expect(track.stop).toHaveBeenCalled();
+    srcObject.mockRestore(); play.mockRestore();
   });
 });

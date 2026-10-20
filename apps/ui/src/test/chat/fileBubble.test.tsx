@@ -339,6 +339,24 @@ describe("FileBubble: files/3", () => {
     expect(servicesPlatform!.getFile).not.toHaveBeenCalled();
   });
 
+  it("Save on a file that is no picture is a stop for Tab, and Enter or Space saves it", async () => {
+    vi.spyOn(servicesPlatform!, "fileHeld").mockResolvedValue("here");
+    const saveFile = vi.fn(async () => true);
+    Object.assign(servicesPlatform!, { saveFile });
+    try {
+      const MB = 1024 ** 2;
+      const { user } = show({ state: "done", transferred: 40 * MB, size: 40 * MB }, { name: "report.pdf", mime: "application/pdf", size: 40 * MB });
+      const save = await screen.findByTestId("file-save");
+      await user.tab();
+      expect(document.activeElement).toBe(save);
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(1));
+      await user.keyboard(" ");
+      await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(2));
+      expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "report.pdf");
+    } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
+  });
+
   it("where the platform cannot tell whether a file is here, the file is asked for as before", async () => {
     const { fileHeld } = servicesPlatform!;
     delete (servicesPlatform as { fileHeld?: unknown }).fileHeld;

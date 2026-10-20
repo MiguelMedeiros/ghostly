@@ -177,3 +177,36 @@ describe("a bot's Tasks in a phone's ⋮", () => {
     expect(within(screen.getByTestId("chat-options-menu")).queryByTestId("chat-tasks")).not.toBeInTheDocument();
   });
 });
+
+describe("a chat's Tech Info", () => {
+  it("is a dialog for the keyboard: the focus goes in, Tab stays in it, Escape closes it and gives the focus back to ⋮", async () => {
+    viewport(390, 844);
+    const { user } = openChat();
+    const options = await screen.findByTestId("chat-options");
+    await user.click(options);
+    await user.click(screen.getByTestId("chat-more-open"));
+    await user.click(screen.getByTestId("chat-tech-info"));
+    const dialog = screen.getByRole("dialog", { name: "Tech Info" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    for (let i = 0; i < 6; i++) {
+      await user.tab();
+      expect(dialog.contains(document.activeElement), `Tab ${i + 1}`).toBe(true);
+    }
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Tech Info" })).not.toBeInTheDocument();
+    expect(options).toHaveFocus();
+  });
+
+  it("closed by its ✕, on a wide screen too, gives the focus back to ⋮", async () => {
+    viewport(1024, 768);
+    const { user } = openChat();
+    const options = await screen.findByTestId("chat-options");
+    await user.click(options);
+    await user.click(screen.getByTestId("chat-tech-info"));
+    const dialog = screen.getByRole("dialog", { name: "Tech Info" });
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Tech Info" })).not.toBeInTheDocument();
+    expect(options).toHaveFocus();
+  });
+});

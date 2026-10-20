@@ -90,6 +90,27 @@ describe("a pasted picture or file", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("a × pressed from the keyboard leaves the focus on the sheet: on the × now there, the one before, or the caption once none is left", async () => {
+    const { user } = composer();
+    const text = (name: string) => new File([name], name, { type: "text/plain" });
+    paste(field(), { files: [text("one.txt"), text("two.txt"), text("three.txt")] });
+    const open = await screen.findByTestId("attachment-sheet");
+    // The first: the next file's × takes its place.
+    within(open).getByRole("button", { name: "Remove one.txt" }).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(within(open).getByRole("button", { name: "Remove two.txt" }));
+    paste(within(open).getByTestId("attachment-caption"), { files: [text("four.txt")] });
+    // The last: the one before it.
+    within(open).getByRole("button", { name: "Remove four.txt" }).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(within(open).getByRole("button", { name: "Remove three.txt" }));
+    // One file left has no ×: the caption.
+    await user.keyboard("{Enter}");
+    expect(within(open).getAllByTestId("attachment-item")).toHaveLength(1);
+    expect(within(open).queryByRole("button", { name: /^Remove / })).toBeNull();
+    expect(document.activeElement).toBe(within(open).getByTestId("attachment-caption"));
+  });
+
   it("the first file that cannot go stops the rest and says why; the caption is not sent", async () => {
     onSendFile.mockResolvedValueOnce("That file is too large (max 100.0 MB).");
     const { user } = composer();

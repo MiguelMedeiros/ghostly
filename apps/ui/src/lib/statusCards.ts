@@ -242,3 +242,13 @@ export function cardLine(card: ShownCard): string {
   if (card.kind === "usage") return `📊 ${card.label ? `${card.label} · ` : ""}${usageLeft(card)}%`;
   return card.kind === "task" ? card.title : `↻ ${card.name}`;
 }
+
+/**
+ * An app card's line where a message's text would be (the chat list, a quote, the pinned bar, Saved, the screen
+ * reader): "🧩 App: Chess 1.2.0" in the reader's language. Its text is the English fallback an older app shows, with
+ * the bundle's link (WISP 405 § An app). None for any other message.
+ */
+export function appCardLine(card: StatusCard | undefined, t: Translate): string | undefined {
+  if (card?.kind !== "app") return undefined;
+  return `🧩 ${t("apps.card.label", { title: card.version ? `${card.title} ${card.version}` : card.title })}`;
+}
