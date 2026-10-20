@@ -91,6 +91,29 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
+    // Another site that knows the app's origin posts a form to it while it is open, at the top and into a frame of its
+    // own: neither reaches the contact as this person (the worker forwards only the app's own frames' navigations).
+    const other = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><iframe name="inner"></iframe>
+        <form id="framed" method="post" target="inner" action="${out.origin}/api/steal?framed"><input name="a" value="1"></form>
+        <form id="top" method="post" action="${out.origin}/api/steal?top"><input name="a" value="1"></form>
+        <script>document.getElementById("framed").submit(); setTimeout(() => document.getElementById("top").submit(), 500);</script>`);
+    });
+    await new Promise<void>((done) => other.listen(0, "127.0.0.1", done));
+    const elsewhere = await person.page.context().newPage();
+    try {
+      await elsewhere.goto(`http://127.0.0.1:${(other.address() as AddressInfo).port}/`);
+      await elsewhere.waitForURL((at) => at.pathname === "/api/steal", { timeout: 30_000 });
+      await elsewhere.waitForLoadState("load");
+      await person.page.waitForTimeout(2_000);
+    } finally {
+      await elsewhere.close();
+      other.close();
+    }
+    expect(app.seen.filter((r) => r.path.startsWith("/api/steal"))).toEqual([]);
+    await expect(demo.locator("#title")).toHaveText("Hello from the demo");
+
     // An iPhone on its side (Chromium plays its safe area): ✕, the name and the app clear of the notch on either side
     // and of the home indicator. The app cannot keep clear of them itself: `env(safe-area-inset-*)` is 0 in its frame.
     // ✕ was at x=8 under the notch, and the frame ran edge to edge and to the bottom.
