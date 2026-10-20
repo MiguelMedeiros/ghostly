@@ -2,7 +2,7 @@ import { act, createEvent, fireEvent, screen, waitFor, within } from "@testing-l
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
-import { guardFileDrops, pastedFiles, pastedImageName, PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
+import { guardFileDrops, pastedFiles, pastedImageName, pasteIsPictureOnly, PLATFORM_PASTE_MAX } from "../../lib/pastedFiles";
 import { fakeEngine } from "../fakeEngine";
 import type { ClipboardFile } from "@ghostly/browser/host";
 import { renderApp } from "../render";
@@ -405,6 +405,41 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(paste(field(), { html: `<img src="https://example.com/a.png"><img src="https://example.com/b.png">` })).toBe(true);
     expect(paste(field(), { html: `<img src="https://example.com/a.png">`, text: "a caption" })).toBe(true);
     expect(fakeEngine.readClipboardFiles).not.toHaveBeenCalled();
+  });
+});
+
+// agents#1575: WebKitGTK makes a rich copy's HTML again on every `getData("text/html")`, ~90 ms a MB, and every paste
+// read and parsed it to see whether it was one picture: a page copied whole froze the chat 0.1-0.9 s more.
+describe("telling a picture's copy from a rich copy", () => {
+  /** A clipboard counting its reads of the HTML. */
+  const clip = (html: string, text: string) => {
+    const reads = { html: 0 };
+    const data = { files: [] as unknown as FileList, items: [] as unknown as DataTransferItemList, types: ["text/html", "text/plain"],
+      getData: (type: string) => type === "text/html" ? (reads.html++, html) : type === "text/plain" ? text : "" } as unknown as DataTransfer;
+    return { data, reads };
+  };
+  const page = `<article>${"<p style='color:#333'>A paragraph of the article, <a href='https://example.com'>a link</a>.</p>".repeat(2_000)}<img src="https://example.com/a.png"></article>`;
+
+  it("a rich copy with text never reads its HTML, nor parses it", () => {
+    const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
+    const { data, reads } = clip(page, "A paragraph of the article, a link.\n".repeat(2_000));
+    expect(pasteIsPictureOnly(data)).toBe(false);
+    expect(reads.html).toBe(0);
+    expect(parse).not.toHaveBeenCalled();
+    parse.mockRestore();
+  });
+
+  it("HTML with no picture or several is not parsed; a picture's copy still is one, with no text or its address", () => {
+    const parse = vi.spyOn(DOMParser.prototype, "parseFromString");
+    expect(pasteIsPictureOnly(clip("<p>words</p>", "").data)).toBe(false);
+    expect(pasteIsPictureOnly(clip(`<img src="https://e.com/a.png"><img src="https://e.com/b.png">`, "").data)).toBe(false);
+    expect(parse).not.toHaveBeenCalled();
+    const one = clip(`<meta charset="utf-8"><img src="https://e.com/a.png">`, "");
+    expect(pasteIsPictureOnly(one.data)).toBe(true);
+    expect(one.reads.html).toBe(1);
+    expect(pasteIsPictureOnly(clip(`<img src="https://e.com/a.png">`, "https://e.com/a.png").data)).toBe(true);
+    expect(pasteIsPictureOnly(clip(`<IMG SRC="https://e.com/a.png">`, "").data)).toBe(true);
+    parse.mockRestore();
   });
 });
 
