@@ -2938,6 +2938,145 @@ describe("building a batch with git", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
+
+  describe("a head whose rebase would land something other than the base merged with it", () => {
+    /** A repository with `dev` at "base" (a.txt, b.txt), and `make` builds the pull request's branch in it. */
+    const setup = (make: (git: (args: string[]) => string, write: (file: string, text: string) => void) => void) => {
+      const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+      const origin = join(root, "origin");
+      const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      const write = (file: string, text: string) => {
+        writeFileSync(join(origin, file), text);
+        git(["add", file]);
+      };
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      write("a.txt", "a\n");
+      write("b.txt", "b\n");
+      git(["commit", "-q", "-m", "base"]);
+      make(git, write);
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const pr = { number: 1, title: "fix: number 1", sha: git(["rev-parse", "HEAD"]) };
+      git(["checkout", "-q", "dev"]);
+      git(["clone", "-q", "origin", "clone"], root);
+      const clone = join(root, "clone");
+      // What the reviewed head makes of dev's tip, as the batch's squash merge (and GitHub's) makes it.
+      const merged = git(["merge-tree", "--write-tree", "dev", pr.sha]).split("\n")[0];
+      return { root, git, clone, pr, merged, layer: gitLayer({ cwd: clone }) };
+    };
+    const landsMerged = async ({ root, git, clone, pr, merged, layer }: ReturnType<typeof setup>) => {
+      try {
+        expect(await layer.rebase("dev", pr)).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "conflict" });
+        const built = await layer.build("dev", [pr]);
+        expect(built).toMatchObject({ applied: [1], dropped: [] });
+        expect(git(["rev-parse", `${built.sha}^{tree}`], clone)).toBe(merged);
+        layer.close();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    };
+
+    it("sends the batch way a branch that took a change back in a merge of the base, which its rebase would land", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          git(["checkout", "-q", "-b", "fix-1"]);
+          write("a.txt", "a, and a hidden change\n");
+          git(["commit", "-q", "-m", "the hidden change"]);
+          git(["checkout", "-q", "dev"]);
+          write("c.txt", "c\n");
+          git(["commit", "-q", "-m", "dev moves"]);
+          // The merge of dev puts a.txt back: the reviewed diff is only docs.md.
+          git(["checkout", "-q", "fix-1"]);
+          git(["merge", "-q", "--no-commit", "dev"]);
+          write("a.txt", "a\n");
+          write("docs.md", "docs\n");
+          git(["commit", "-q", "-m", "Merge branch 'dev' into fix-1"]);
+          git(["checkout", "-q", "dev"]);
+          write("d.txt", "d\n");
+          git(["commit", "-q", "-m", "dev moves again"]);
+          git(["checkout", "-q", "fix-1"]);
+        }),
+      );
+    }, 60_000);
+
+    it("sends the batch way a branch that made a change in a merge of the base, which its rebase would lose", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          git(["checkout", "-q", "-b", "fix-1"]);
+          write("notes.md", "notes\n");
+          git(["commit", "-q", "-m", "notes"]);
+          git(["checkout", "-q", "dev"]);
+          write("c.txt", "c\n");
+          git(["commit", "-q", "-m", "dev moves"]);
+          git(["checkout", "-q", "fix-1"]);
+          git(["merge", "-q", "--no-commit", "dev"]);
+          write("b.txt", "b, reviewed\n");
+          git(["commit", "-q", "-m", "Merge branch 'dev' into fix-1"]);
+          git(["checkout", "-q", "dev"]);
+          write("d.txt", "d\n");
+          git(["commit", "-q", "-m", "dev moves again"]);
+          git(["checkout", "-q", "fix-1"]);
+        }),
+      );
+    }, 60_000);
+
+    it("sends the batch way a branch that lands a change again after the base reverted it, which its rebase would skip", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          git(["checkout", "-q", "-b", "fix-1"]);
+          write("a.txt", "a, fixed\n");
+          git(["commit", "-q", "-m", "the fix"]);
+          // dev takes the same change and then reverts it: the rebase skips the branch's commit as already applied.
+          git(["checkout", "-q", "dev"]);
+          write("c.txt", "c\n");
+          git(["commit", "-q", "-m", "dev moves"]);
+          git(["cherry-pick", "fix-1"]);
+          git(["revert", "--no-edit", "HEAD"]);
+          git(["checkout", "-q", "fix-1"]);
+        }),
+      );
+    }, 60_000);
+
+    it("sends the batch way a branch that repeats a change the base has and then takes it back", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          // dev lands the fix; the branch repeats it, takes it back, and adds docs: its diff is docs.md only.
+          write("a.txt", "a, fixed\n");
+          git(["commit", "-q", "-m", "the fix"]);
+          git(["checkout", "-q", "-b", "fix-1", "HEAD^"]);
+          write("a.txt", "a, fixed\n");
+          git(["commit", "-q", "-m", "the fix, again"]);
+          write("a.txt", "a\n");
+          write("docs.md", "docs\n");
+          git(["commit", "-q", "-m", "docs: a harmless doc change"]);
+        }),
+      );
+    }, 60_000);
+
+    it("still rebases a branch whose merge of the base holds nothing of its own", async () => {
+      const { root, git, clone, pr, merged, layer } = setup((git, write) => {
+        git(["checkout", "-q", "-b", "fix-1"]);
+        write("notes.md", "notes\n");
+        git(["commit", "-q", "-m", "notes"]);
+        git(["checkout", "-q", "dev"]);
+        write("c.txt", "c\n");
+        git(["commit", "-q", "-m", "dev moves"]);
+        git(["checkout", "-q", "fix-1"]);
+        git(["merge", "-q", "--no-edit", "dev"]);
+        git(["checkout", "-q", "dev"]);
+        write("d.txt", "d\n");
+        git(["commit", "-q", "-m", "dev moves again"]);
+        git(["checkout", "-q", "fix-1"]);
+      });
+      try {
+        const built = await layer.rebase("dev", pr);
+        expect(built).toMatchObject({ baseSha: git(["rev-parse", "dev"]), sha: expect.any(String) });
+        expect(git(["rev-parse", `${built.sha}^{tree}`], clone)).toBe(merged);
+        layer.close();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }, 60_000);
+  });
 });
 
 describe("a stalled request or git call", () => {
