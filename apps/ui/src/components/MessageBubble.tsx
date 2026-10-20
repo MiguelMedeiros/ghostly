@@ -32,6 +32,7 @@ import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
+import { callLineCount } from "../lib/storage";
 import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
 import { ReplyQuote } from "./chat/ReplyQuote";
@@ -985,7 +986,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         >
           <CallEventIcon type={type} hasVideo={hasVideo} />
-          <span>{callEventText(t, type, hasVideo) ?? message.text}</span>
+          <span>{callEventText(t, type, hasVideo, callLineCount(message.callEvent)) ?? message.text}</span>
           {duration !== undefined && duration >= 1000 && (
             <span className="text-text-muted">({formatCallLength(duration, t)})</span>
           )}
