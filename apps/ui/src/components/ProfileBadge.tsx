@@ -1,12 +1,14 @@
 import { THEME_COLOR, themeOf, type ProfileEntry } from "../lib/profiles";
 import { initial } from "../lib/initial";
 
-/** A local profile's picture, or its initial in its own color: which profile this is, at a glance (WISP 04). */
+/**
+ * A local profile's picture, or its initial in its own color: which profile this is, at a glance (WISP 04). The initial
+ * is drawn by CSS, a picture and not text: in a control it is no word of the label its name must hold (Label in Name).
+ */
 export function ProfileBadge({ entry, size = 44, avatar }: { entry: ProfileEntry; size?: number; avatar?: string }) {
   if (avatar) return <img src={avatar} alt="" draggable={false} className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />;
   return (
-    <span aria-hidden="true" className="shrink-0 grid place-items-center rounded-full font-semibold text-[#111b21]" style={{ width: size, height: size, background: THEME_COLOR[themeOf(entry.id)], fontSize: size * 0.42 }}>
-      {initial(entry.name)}
-    </span>
+    <span aria-hidden="true" data-initial={initial(entry.name)} className="shrink-0 grid place-items-center rounded-full font-semibold text-[#111b21] before:content-[attr(data-initial)]"
+      style={{ width: size, height: size, background: THEME_COLOR[themeOf(entry.id)], fontSize: size * 0.42 }} />
   );
 }
