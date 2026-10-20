@@ -335,6 +335,23 @@ describe("the argument parser", () => {
       expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
       expect(params(name, [...argv])).toMatchObject({ rate: undefined });
     }
+    // A voice note's length or waveform out of range: before, the API answered after the profile opened (exit 1,
+    // "voice must be a number from 1 to 9007199254740991" or one sentence for every case), and --peaks alone was dropped.
+    const voice = "--voice takes a length in milliseconds from 1 to 900000 (15 minutes), not";
+    usage("file send", ["alice", "a.wav", "--voice", "0"], `${voice} 0`);
+    usage("file send", ["alice", "a.wav", "--voice", "-5"], `${voice} -5`);
+    usage("file send", ["alice", "a.wav", "--voice", "2.5"], `${voice} 2.5`);
+    usage("file send", ["alice", "a.wav", "--voice", "1000000"], `${voice} 1000000`);
+    const peaks = "--peaks takes up to 128 numbers from 0 to 255, comma-separated, not";
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,2,999"], `${peaks} "1,2,999"`);
+    usage("file send", ["alice", "a.wav", "--voice", "2000", "--peaks", "a,b"], `${peaks} "a,b"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,,2"], `${peaks} "1,,2"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
+    usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
+    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
