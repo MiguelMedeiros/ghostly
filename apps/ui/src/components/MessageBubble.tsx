@@ -1001,12 +1001,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // "Botty". In a group the "~" marks the name a member gave themselves, which no contact name of yours replaces.
   const own = contactName ?? (message.nick || peerNick);
   const nick = own && !isMe && (!author || author.first) ? `${contactName === undefined ? "~" : ""}${own}` : "";
+  // Isolated, as on a routine row (RoutineCard.tsx): in a right-to-left chat a Latin name read "Carol~".
+  const nickRun = <bdi>{nick}</bdi>;
   const nickEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
     <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
       {author && onOpenAuthor && !choosing
-        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nick}</button>
-        : nick}
+        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nickRun}</button>
+        : nickRun}
     </div>
   ) : null;
   const menu = !choosing && (
