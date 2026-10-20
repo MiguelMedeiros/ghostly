@@ -66,10 +66,13 @@ function Grips({ handleProps }: { handleProps: (corner: Corner) => Record<string
   );
 }
 
+/** `mm:ss`, or `h:mm:ss` past the hour: an hour and five minutes read 65:00. */
 function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  const mmss = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return h ? `${h}:${mmss}` : mmss;
 }
 
 export function CallOverlay({
