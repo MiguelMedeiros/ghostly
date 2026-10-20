@@ -2578,6 +2578,7 @@ export class Groups {
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(state.id) ?? true,
       adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),
+      removed: id => this.isRemoved(state.id, id),
       save: async next => {
         const group = this.stored.get(state.id);
         // A save that was due when the group was forgotten (`GROUP_LIMITS.saveWithinMs`) is not one of the group joined again.
