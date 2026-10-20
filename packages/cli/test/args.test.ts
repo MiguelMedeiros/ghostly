@@ -424,6 +424,16 @@ describe("errors", () => {
     expect(asCliError(new Error("The file is gone")).code).toBe("engine");
   });
 
+  it("say a change the full disk could not take as unavailable, in the store's words", () => {
+    // A daemon on a full disk answered done for a settings change, a chat's label, that a restart then lost.
+    const store = Object.assign(new DOMException("No room left on the disk of /home/x/store: free some space, then try again", "QuotaExceededError"), { cause: new Error("ENOSPC") });
+    expect(asCliError(store).toJSON()).toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    // As the engine's `committed` hands it on: its own words, the store's as the cause.
+    expect(asCliError(Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError", cause: store })).toJSON())
+      .toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    expect(asCliError(new DOMException("", "QuotaExceededError")).code).toBe("unavailable");
+  });
+
   it("say a contact that could not be reached as unavailable, not as the engine failing", () => {
     // `chat pay` / `chat connect` to a contact that never answers: the link's GhostlyHttpError "unreachable".
     expect(asCliError(new GhostlyHttpError("unreachable", "Could not connect to the peer")).toJSON()).toEqual({ code: "unavailable", message: "Could not connect to the peer" });
