@@ -32,6 +32,18 @@ describe("Send sorts what it was given", () => {
     expect(routeSend("bitcoin:bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?lightning=nonsense").kind).toBe("unknown");
   });
 
+  it("a BIP 21 link's lightning= leg only as the chat reads the same link: the same payment, and a link that may be paid", () => {
+    const address = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080";
+    // The fallback asks 25 times the link's amount: not the same payment, so it is not paid from here.
+    expect(routeSend(`bitcoin:${address}?amount=0.0001&lightning=${REGTEST_INVOICE}`).kind).toBe("unknown");
+    // A req- parameter this app does not understand (BIP 21), or an amount it cannot read: the link is not paid at all.
+    expect(routeSend(`bitcoin:${address}?amount=0.0025&req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    expect(routeSend(`bitcoin:?req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    expect(routeSend(`bitcoin:?amount=abc&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    // A req- parameter it does understand is no reason to refuse.
+    expect(routeSend(`bitcoin:${address}?amount=0.0025&req-lightning=${REGTEST_INVOICE}&lightning=${REGTEST_INVOICE}`).kind).toBe("invoice");
+  });
+
   it("an invoice with no amount is told apart", () => {
     const route = routeSend(anyAmount());
     expect(route.kind).toBe("no-amount");
