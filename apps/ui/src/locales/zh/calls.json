@@ -40,6 +40,8 @@
   "rejected": "通话被拒绝",
   "relayNoAnswer": "你的中继没有响应",
   "relayNoAnswerNext": "请在设置，网络中检查 TURN 服务器。隐藏 IP 时从不直接连接。",
+  "relayOnlyNow": "通话已结束：隐藏 IP 已开启",
+  "relayOnlyNowNext": "此通话直接连到你的联系人。再拨一次：将通过你的中继。",
   "relayOnlyOff": "隐藏 IP 开启时通话已关闭",
   "relayOnlyOffNext": "本应用的通话还不能使用中继。要通话，请在设置，网络中关闭它。",
   "selfView": "拖动以移动，拉动角落以调整大小，双击以重置",
