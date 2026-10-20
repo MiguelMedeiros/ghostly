@@ -2416,8 +2416,9 @@ describe("a green pull request run that is not the pull request's own", () => {
   it("does not count a green run from before its base was changed, and counts the next one", async () => {
     const repo = fakeRepo();
     repo.add(21);
-    repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T01:00:00Z"));
-    repo.events.get(21)!.push({ event: "base_ref_changed", created_at: "2026-10-08T01:30:00Z" });
+    // Moved before it was queued (after, it leaves the line: see below).
+    repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-07T23:00:00Z"));
+    repo.events.get(21)!.unshift({ event: "base_ref_changed", created_at: "2026-10-07T23:30:00Z" });
     expect((await repo.run()).merged).toEqual([]);
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: its green CI run on its last commit ran before its base was changed/);
     // Closed and reopened: a run against this base.
@@ -2430,10 +2431,43 @@ describe("a green pull request run that is not the pull request's own", () => {
     for (const event of ["automatic_base_change_succeeded", "automatic_base_change_failed"]) {
       const repo = fakeRepo();
       repo.add(21);
-      repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T01:00:00Z"));
-      repo.events.get(21)!.push({ event, created_at: "2026-10-08T01:30:00Z" });
+      repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-07T23:00:00Z"));
+      repo.events.get(21)!.unshift({ event, created_at: "2026-10-07T23:30:00Z" });
       expect((await repo.run()).merged).toEqual([]);
       expect(repo.comments.get(21)![0].body).toMatch(/Waiting: its green CI run on its last commit ran before its base was changed/);
+    }
+  });
+
+  it("takes out one whose base changed after it was queued: `queue` vouched for its diff against the old base", async () => {
+    // Reviewed into epic/x (whose tip holds commits dev lacks), queued, flown alone there, then moved to dev: the same
+    // head against dev also lands what the epic held, which nobody reviewed.
+    const repo = fakeRepo();
+    repo.add(7, { base: "epic/x", behind: true });
+    await repo.run({ base: "epic/x" });
+    const rebasedHead = repo.alone(7)!.sha;
+    expect(repo.pulls.get(7)!.sha).toBe(rebasedHead);
+    repo.pulls.get(7)!.base = "dev";
+    repo.events.get(7)!.push({ event: "base_ref_changed", created_at: "2026-10-08T01:00:00Z" });
+    repo.runs.set(rebasedHead, prRunOf(repo, green, "fix-7", "2026-10-08T02:00:00Z"));
+    const pushes = repo.pushes.length;
+    const r = await repo.run();
+    expect(r.dropped).toEqual([7]);
+    expect(r.log.join("\n")).toMatch(/DROP #7 \(base changed since it was queued\)/);
+    expect(repo.pulls.get(7)!.labels).not.toContain(LABEL.queue);
+    expect(repo.comments.get(7)!.at(-1)!.body).toMatch(/base of this pull request changed after it was queued/);
+    expect(repo.pushes.length).toBe(pushes);
+    expect(repo.batch()).toBeUndefined();
+    expect(repo.landed).toEqual([]);
+    // GitHub's own move (its old base deleted) is a new base too; one queued again after the move stays.
+    for (const event of ["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]) {
+      const moved = fakeRepo();
+      moved.add(21);
+      moved.add(22);
+      moved.events.get(21)!.push({ event, created_at: "2026-10-08T01:00:00Z" });
+      moved.events.get(22)!.unshift({ event, created_at: "2026-10-07T23:00:00Z" });
+      const m = await moved.run();
+      expect(m.dropped).toEqual([21]);
+      expect(moved.landed).toEqual(["#22"]);
     }
   });
 
