@@ -372,8 +372,8 @@ side that invited answers once.
 
 ## The socket API
 
-The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `/tmp/ghostly-<hash>/`, a
-folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
+The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `ghostly-<hash>/` in
+`$XDG_RUNTIME_DIR`, else `/tmp/ghostly-<uid>-<hash>/`, a folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
 `socket`, whether the daemon runs or not. One JSON object per line each way:
 
 ```json
@@ -418,8 +418,8 @@ ghostly listen --type call.                # call.incoming … call.connected {"
 node examples/call-echo.mjs greeting.wav   # a program that answers, greets, then echoes after 1 s
 ```
 
-**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `/tmp/ghostly-calls-<hash>/<call>.sock` (in a
-folder of yours alone, 0700) when that path is too long; `call start`, `call answer`, `call list` and the
+**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `ghostly-calls-<hash>/<call>.sock` in
+`$XDG_RUNTIME_DIR`, else in `/tmp/ghostly-calls-<uid>-<hash>/` (a folder of yours alone, 0700), when that path is too long; `call start`, `call answer`, `call list` and the
 `call.connected` event name it. It carries raw PCM,
 with no framing:
 
