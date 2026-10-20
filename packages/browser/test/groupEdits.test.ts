@@ -489,6 +489,34 @@ describe("GroupEdits on its own", () => {
     for (const m of [alice, carol]) expect(textOf(m.peer, messageId!)).toBeUndefined();
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
+
+  it("a community: messages deleted for everyone while a member was away never reach it when it comes back, not even for a moment", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Crew");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id)), 10 * 60_000);
+    await world.run(20_000);
+    // Every row Carol's app stores, even one taken out again a moment later.
+    const stored: string[] = [];
+    const store = carol.edits.stored.bind(carol.edits);
+    vi.spyOn(carol.edits, "stored").mockImplementation(async m => { stored.push(m.id); await store(m); });
+    carol.peer.online = false;
+    await world.run(5_000);
+    const gone: string[] = [];
+    for (let i = 0; i < 3; i++) gone.push((await bob.peer.groups.send(id, `secret ${i}`)).messageId!);
+    await world.until(() => gone.every(m => !!textOf(alice.peer, m)), 60_000);
+    for (const m of gone) expect(await bob.edits.removeMine(id, m)).toMatchObject({ error: null });
+    await world.until(() => gone.every(m => alice.peer.groups.isRemoved(id, m)), 60_000);
+    carol.peer.online = true;
+    // Whoever catches her up hands her the removals, and not the lines they took out.
+    await world.until(() => gone.every(m => carol.peer.groups.isRemoved(id, m)), 3 * 60_000);
+    await world.run(60_000);
+    expect(stored.filter(m => gone.includes(m))).toEqual([]);
+    for (const m of gone) expect(textOf(carol.peer, m)).toBeUndefined();
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
 });
 
 /** A peer of `world` with edits wired as the engine wires them. `old`: an app from before edits. */

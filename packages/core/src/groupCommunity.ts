@@ -458,6 +458,11 @@ export interface CommunitySessionHooks {
    * the answer asks again. Absent: an answer goes all at once, as before 2026-10-07.
    */
   handled?(to: string): Promise<CatchUpHandled>;
+  /**
+   * Whether message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: a frame of it
+   * that comes (a catch-up, a hub passing it on) is not taken, kept or passed on. Absent: none is.
+   */
+  removed?(id: string): boolean;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -1458,6 +1463,29 @@ export class CommunitySession {
     this.persistSoon();
   }
 
+  /**
+   * Message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: its frame goes from
+   * the store, so no catch-up hands it to a member who was away (they get the removal, which stays). A frame said again
+   * (`reseal`) carries the first one's place inside: its author's are opened to tell.
+   */
+  forget(id: string): void {
+    const author = id.slice(0, id.indexOf(":"));
+    const kept = this.state.store.filter(f => f.s !== author || this.storedId(f) !== id);
+    if (kept.length === this.state.store.length) return;
+    this.state.store = kept;
+    this.persistSoon();
+  }
+
+  /** The id of the message a stored frame is, by its first place when it was said again (and I can open it). */
+  private storedId(f: CommunityMessageFrame): string {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    const plain = secret ? decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c) : null;
+    let parsed: unknown = null;
+    try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload: its own place */ }
+    const original = isObject(parsed) && parsed.o !== undefined ? readOriginal(parsed.o, f) : null;
+    return original ? communityMessageId(f.s, original.e, original.h, original.n) : communityMessageId(f.s, f.e, f.h, f.n);
+  }
+
   private keep(frame: CommunityMessageFrame): void {
     this.state.store.push(frame);
     let bytes = this.state.store.reduce((sum, f) => sum + f.c.length, 0);
@@ -1702,6 +1730,8 @@ export class CommunitySession {
     const firstAt = original && this.commitByShort(original.e, original.h);
     const readFirst = !!firstAt && rosterHas(this.rosterOf(firstAt.hash) ?? [], this.myKey);
     const id = communityMessageId(raw.s, first.e, first.h, first.n);
+    // Deleted for everyone (`hooks.removed`): it stays gone here, and is neither kept nor passed on.
+    if (this.hooks.removed?.(id)) { this.markSeen(raw); this.persistSoon(); return false; }
     // Or the group's state said again once more (`renewLasting`), its first past the window: the one kept here names it.
     if (original && ((readFirst && this.isDuplicate(first)) || this.keepsLasting(raw, id))) {
       // Kept in the first's place, so it outlives the first's commit.
@@ -1876,6 +1906,8 @@ export class CommunitySession {
       // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
       if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      // Deleted for everyone and still here (a removal taken by an app that kept the frame, before `forget`): their removal goes, not it.
+      if (this.hooks.removed?.(communityMessageId(stored.s, stored.e, stored.h, stored.n))) continue;
       if (!this.heardAfterOut(stored)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;

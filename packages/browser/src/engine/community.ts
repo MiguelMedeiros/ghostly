@@ -1935,6 +1935,8 @@ export class Communities {
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(id) ?? true,
       adminTurn: () => this.host.adminTurn?.(id) ?? Promise.resolve(true),
+      // A message deleted for everyone (WISP 400 § Delete for everyone) is noted with the group (`Groups.removed`).
+      removed: messageId => !!this.stored.get(id)?.removedIds?.includes(messageId),
       relay: frame => { if (this.live.get(id)?.hub) for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
       // A catch-up answer goes a slice at a time, each once the member's app handled the last (`COMMUNITY_LIMITS.catchUpSlice`).
       ...(this.host.linkHandled && {

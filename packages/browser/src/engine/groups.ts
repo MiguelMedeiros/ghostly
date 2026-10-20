@@ -1272,6 +1272,8 @@ export class Groups {
       group.removedIds = [...(group.removedIds ?? []), messageId].slice(-MAX_REMOVED_IDS);
       await this.store.putGroup(group);
     }
+    // A community's catch-up no longer hands its frame to a member who was away.
+    this.communities.session(groupId)?.forget(messageId);
     await this.files?.forget(groupId, messageId);
   }
 
