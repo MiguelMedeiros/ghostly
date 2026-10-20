@@ -4492,6 +4492,8 @@ export class GhostLink {
       this.handledWaiters.push(waiter);
     });
   }
+  /** Frames the contact sent on this session that this app received and has not handled yet: 0 without a session. */
+  framesWaiting(): number { return this.paired?.waiting ?? 0; }
   /** Something came back on the session: the ping's wait is over. */
   private heardFromPeer(): void {
     if (this.pongWait) clearTimeout(this.pongWait);

@@ -56,6 +56,11 @@ export interface GroupsHost {
    * catch-up answer goes all at once.
    */
   linkHandled?(linkId: string): Promise<boolean | "late">;
+  /**
+   * Frames that came on the link and this app has not handled yet (`GhostLink.framesWaiting`): a phone with a long
+   * history is seconds behind what it received. Absent: none.
+   */
+  linkWaiting?(linkId: string): number;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
   linkReady(linkId: string, version?: number): boolean;
   /** Whether the link's connection is open, whatever the other app announces on it. Absent: not known. */
@@ -367,7 +372,8 @@ export const MESH_GOSSIP_MS = 60_000;
 export const MESH_GAP_AGAIN_MS = 10_000;
 /**
  * A member whose messages were just asked of another (`Groups.askOf`) is told where I am only once that one's answer
- * has come: no message of it for this long, or `MESH_SYNC_HOLD_MAX_MS` after it was asked. Told at once, its own
+ * has come: no message of it for this long and none of its frames still waiting to be handled here, or
+ * `MESH_SYNC_HOLD_MAX_MS` after it was asked with none waiting. Told at once, its own
  * answer raced the other's, which holds the same messages among everyone's in the order they were written, and a
  * member back in a group of five read each member's lines apart, the newest above older ones (WISP 902 § Catch-up).
  * A message of the answer is one written before the asking: what the member writes meanwhile is no reason to wait, so
@@ -2144,12 +2150,16 @@ export class Groups {
 
   /**
    * Whether the answer of the member asked for someone's messages may still be coming: its edge up, asked under
-   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message of its answer (or the asking) under `MESH_SYNC_HOLD_MS` ago.
+   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message of its answer (or the asking) under `MESH_SYNC_HOLD_MS` ago; or, however
+   * long ago, frames of its edge still waiting to be handled here. An app that handles a frame a second was still on the
+   * others' syncs ahead of that answer 1.5 s after the ask, and on its 200 messages three minutes after: the next member
+   * was asked for the same messages, and both handed them on.
    */
   private answering(groupId: string, { via, at }: { via: string; at: number }, now: number): boolean {
     const edge = this.host.edges(groupId).get(via);
-    if (!edge || !this.host.linkReady(edge) || now - at >= MESH_SYNC_HOLD_MAX_MS) return false;
-    return now - Math.max(at, this.lastHanded.get(groupId)?.get(via) ?? 0) < MESH_SYNC_HOLD_MS;
+    if (!edge || !this.host.linkReady(edge)) return false;
+    if ((this.host.linkWaiting?.(edge) ?? 0) > 0) return true;
+    return now - at < MESH_SYNC_HOLD_MAX_MS && now - Math.max(at, this.lastHanded.get(groupId)?.get(via) ?? 0) < MESH_SYNC_HOLD_MS;
   }
 
   /**
