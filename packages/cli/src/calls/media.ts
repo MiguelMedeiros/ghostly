@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { createRequire } from "node:module";
 import type { IceServer, PeerConnection, Track } from "node-datachannel";
 import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CANDIDATES, RTC_CONFIG, type CallIceServer, type CallSignal } from "@ghostly/core";
 import { CallAudio, type OpusCodec } from "./audio";
@@ -17,6 +18,71 @@ export interface CallStack {
 
 let loading: Promise<CallStack | string> | null = null;
 
+/** opusscript's libopus in WebAssembly, the module its own wrapper drives. */
+interface OpusNative {
+  OpusScriptHandler: { new (rate: number, channels: number, application: number): OpusHandler; destroy_handler(handler: OpusHandler): void };
+  _malloc(bytes: number): number;
+  _free(pointer: number): void;
+  HEAPU8: Uint8Array;
+  HEAPU16: Uint16Array;
+}
+interface OpusHandler {
+  _encode(pcm: number, bytes: number, packet: number, frameSize: number): number;
+  _decode(packet: number, bytes: number, pcm: number): number;
+  _encoder_ctl(ctl: number, value: number): number;
+}
+
+const OPUS_APPLICATION_VOIP = 2048, OPUS_SET_BITRATE = 4002;
+/** The largest packet a codec reads or writes (opusscript's MAX_PACKET_SIZE). */
+const MAX_PACKET_BYTES = 1276 * 3;
+/**
+ * Room for a frame of PCM as the module reads and writes it, one byte of PCM in each 16-bit element: a concealment (an
+ * empty packet) writes 120 ms at 48 kHz, 5,760 samples, 23,040 bytes, at any rate.
+ */
+const PCM_ROOM_BYTES = 5760 * 2 * 2;
+/** The most PCM a decode hands back, as opusscript's: its largest frame, 60 ms at 48 kHz (CallAudio's `conceal`). */
+const MAX_PCM_OUT = (48_000 * 60) / 1000 * 2;
+
+/**
+ * An Opus encoder or decoder on opusscript's libopus, with buffers that hold what libopus writes. opusscript's own
+ * wrapper (0.1.1) keeps 5,760 bytes for its PCM and reaches it through views at twice the buffer's address, past it: a
+ * 20 ms frame at 48 kHz takes 3,840 bytes there and a concealment 23,040. With three calls or more, as calls ended and
+ * others started, one codec's audio landed on another's state: noise, then "memory access out of bounds" in every
+ * call until the daemon restarted. The bytes in and out are the same as opusscript's.
+ */
+function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
+  const handler = new native.OpusScriptHandler(rate, 1, OPUS_APPLICATION_VOIP);
+  const pcm = native._malloc(PCM_ROOM_BYTES), packet = native._malloc(MAX_PACKET_BYTES);
+  let deleted = false;
+  const codec: OpusCodec = {
+    encode(frame, frameSize) {
+      if (deleted || frame.length * 2 > PCM_ROOM_BYTES) throw new Error("Encode error: Bad argument");
+      native.HEAPU16.set(frame, pcm / 2);
+      const length = handler._encode(pcm, frame.length, packet, frameSize);
+      if (length < 0) throw new Error(`Encode error: ${length}`);
+      return Buffer.from(native.HEAPU8.subarray(packet, packet + length));
+    },
+    decode(data) {
+      if (deleted || data.length > MAX_PACKET_BYTES) throw new Error("Decode error: Bad argument");
+      native.HEAPU8.set(data, packet);
+      const samples = handler._decode(packet, data.length, pcm);
+      if (samples < 0) throw new Error(`Decode error: ${samples}`);
+      return Buffer.from(native.HEAPU16.subarray(pcm / 2, pcm / 2 + Math.min(samples * 2, MAX_PCM_OUT)));
+    },
+    // Once: a second delete would free blocks another codec may hold by then.
+    delete() {
+      if (deleted) return;
+      deleted = true;
+      native.OpusScriptHandler.destroy_handler(handler);
+      native._free(pcm);
+      native._free(packet);
+    },
+  };
+  // What browsers send for speech; the default of the build is far more.
+  if (handler._encoder_ctl(OPUS_SET_BITRATE, 32_000) < 0) { codec.delete?.(); throw new Error("Encoder CTL error"); }
+  return codec;
+}
+
 /** The media stack, or why calls are not available here (the reason the call buttons of the contact's app show). */
 export function loadCallStack(): Promise<CallStack | string> {
   return (loading ??= (async () => {
@@ -24,13 +90,9 @@ export function loadCallStack(): Promise<CallStack | string> {
     try {
       const ndc = (await import("node-datachannel")) as unknown as CallStack["ndc"] & { default?: CallStack["ndc"] };
       const lib = (ndc.PeerConnection ? ndc : ndc.default!) as CallStack["ndc"];
-      const OpusScript = ((await import("opusscript")) as unknown as { default: typeof import("opusscript") }).default;
-      const opus = (rate: CallRate): OpusCodec => {
-        const codec = new OpusScript(rate, 1, OpusScript.Application.VOIP);
-        // What browsers send for speech; the default of the build is far more.
-        codec.setBitrate(32_000);
-        return codec as unknown as OpusCodec;
-      };
+      // opusscript's module itself (its factory is synchronous), not its wrapper: see `opusCodec`.
+      const native = (createRequire(import.meta.url)("opusscript/build/opusscript_native_wasm.js") as () => OpusNative)();
+      const opus = (rate: CallRate): OpusCodec => opusCodec(native, rate);
       // Checked once here: a broken wasm build would otherwise fail the first call.
       opus(48000).delete?.();
       return { ndc: lib, opus };

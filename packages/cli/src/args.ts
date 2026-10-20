@@ -7,6 +7,11 @@ export interface OptionSpec {
   optionalValue?: boolean;
   /** A boolean the command takes only as `--no-<name>`: help shows it so. */
   negatedOnly?: boolean;
+  /**
+   * The words a string option takes: any other (or "") is a usage error that names the flag and lists them, before the
+   * profile opens. Before, the API answered it ("network must be one of mainnet, testnet", bad_request, exit 1).
+   */
+  choices?: readonly string[];
 }
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
 
@@ -52,7 +57,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         inline = eq === -1 ? undefined : arg.slice(eq + 1);
       } else {
         const long = byShort.get(arg.slice(1));
-        if (!long) throw new CliError("usage", `Unknown option ${arg}`);
+        if (!long) throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
         name = long;
       }
       if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean" && inline === undefined) { options[name.slice(3)] = false; continue; }
@@ -73,12 +78,16 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         value = argv[++i];
       }
       if (option.type === "number") {
-        const number = Number(value);
+        // Number("") and Number(" ") are 0: an unset variable must not read as 0 and be acted on.
+        const number = value.trim() === "" ? NaN : Number(value);
         if (!Number.isFinite(number)) throw new CliError("usage", `--${name} takes a number, not ${JSON.stringify(value)}`);
         options[name] = number;
       } else if (option.type === "list") {
         options[name] = [...((options[name] as string[] | undefined) ?? []), value];
-      } else options[name] = value;
+      } else {
+        if (option.choices && !option.choices.includes(value)) throw new CliError("usage", `--${name} takes ${listed(option.choices)}, not ${JSON.stringify(value)}`);
+        options[name] = value;
+      }
       continue;
     }
     if (arg.startsWith("-") && arg !== "-") throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
@@ -86,6 +95,9 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
   }
   return { positionals, options };
 }
+
+/** Words as a sentence lists them: "a", "a or b", "a, b or c". */
+const listed = (words: readonly string[]) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} or ${words.at(-1)}` : words[0]);
 
 /** The global option a word names (`--profile`, `--profile=bot`, `-p`), else undefined. */
 export function globalOption(arg: string): OptionSpec | undefined {

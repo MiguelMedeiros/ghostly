@@ -8,7 +8,7 @@ import { TEST_MINT } from "../src/shared/mints";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import { FakeLightningProvider, FakeOnchainProvider, fakeAddress, fakeInvoice, fakeLightning, fakeOnchain } from "../src/engine/paymentAdapters/providers/testing";
-import type { StoredLink, StoredPayment } from "../src/shared/types";
+import type { StoredLink, StoredPayment, WalletTx } from "../src/shared/types";
 import { REAL_MONEY_UNCONFIRMED } from "../src/engine/paymentAdapters/walletInstances";
 import { CASHU_REQUEST_TIMEOUT_MS, NEVER_REACHED_MINT, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import type { CashuPrepared } from "../src/engine/wallet";
@@ -212,6 +212,46 @@ describe("a payment in a chat", () => {
     // The contact is told which transaction paid it, and the chat shows the payment.
     expect(link.sendPayment).toHaveBeenCalledWith(expect.objectContaining({ id: review.id, requestId: request.id }));
     expect(node.getState().payments[review.id]).toMatchObject({ kind: "payment", direction: "out", txid: approved.txid });
+  });
+
+  it("a Cashu request is paid once between a review and pay-request, in either order", async () => {
+    const { node } = track(engine());
+    const approve = vi.spyOn(node["paymentCoordinator"], "approve").mockRejectedValue(new Error("reached the approval"));
+    const chat = addChat(node, stubLink());
+    const request: StoredPayment = { id: "req-c1", linkId: chat.id, kind: "request", direction: "in", amount: 10, unit: "sat", state: "pending", createdAt: 1, mints: [TEST_MINT] };
+    node["desk"]["payments"].set(request.id, request);
+    const sent = (): StoredPayment => ({ id: "ecash-1", linkId: chat.id, kind: "payment", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 2, requestId: request.id, token: "cashuBsent" });
+    const payRequest = vi.spyOn(node["desk"], "payRequest").mockImplementation(async () => { node["desk"]["payments"].set("ecash-1", sent()); });
+
+    // A review is made (a Cashu review reserves no ecash), then `chat pay-request` pays: the review can no longer be approved.
+    const review = savedReview({ linkId: chat.id, requestId: request.id, address: request.id });
+    await intentRepository.put({ review, prepared: {} });
+    await node.payRequest({ linkId: chat.id, paymentId: request.id });
+    expect(payRequest).toHaveBeenCalledOnce();
+    expect((await intentRepository.get(review.id))?.review.state).toBe("cancelled");
+    await expect(node.approvePayment({ id: review.id })).rejects.toThrow("already has a payment");
+
+    // A review still pending for a request paid meanwhile is not approved either (the store had not caught up, another tab).
+    const late = savedReview({ linkId: chat.id, requestId: request.id, address: request.id });
+    await intentRepository.put({ review: late, prepared: {} });
+    await expect(node.approvePayment({ id: late.id })).rejects.toThrow("already has a payment; reconcile it instead");
+    expect(approve).not.toHaveBeenCalled();
+    expect((await intentRepository.get(late.id))?.review.state).toBe("pending");
+
+    // A review already approved or sent may hold money: pay-request pays nothing beside it.
+    node["desk"]["payments"].delete("ecash-1");
+    await intentRepository.put({ review: { ...late, state: "submitted" }, prepared: {} });
+    await expect(node.payRequest({ linkId: chat.id, paymentId: request.id })).rejects.toThrow("already has a payment. Reconcile it");
+    expect(payRequest).toHaveBeenCalledOnce();
+
+    // A request that names where to pay is paid only through its review: pay-request leaves that review alone.
+    payRequest.mockRestore();
+    const onchain: StoredPayment = { id: "req-btc", linkId: chat.id, kind: "request", direction: "in", amount: 1_000, unit: "sat", state: "pending", createdAt: 3, target: bitcoinTarget() };
+    node["desk"]["payments"].set(onchain.id, onchain);
+    const reviewed = savedReview({ linkId: chat.id, requestId: onchain.id, method: "bitcoin" } as Partial<PaymentReview>);
+    await intentRepository.put({ review: reviewed, prepared: {} });
+    await expect(node.payRequest({ linkId: chat.id, paymentId: onchain.id })).rejects.toThrow("Review and explicitly approve");
+    expect((await intentRepository.get(reviewed.id))?.review.state).toBe("pending");
   });
 
   it("approval waits for the contact to be back and to still take that way of paying; the review stays", async () => {
@@ -569,6 +609,22 @@ describe("the Cashu wallet and Lightning", () => {
     expect(node.getState().wallet.networks?.testnet.lightning).toMatchObject({ providerId: CASHU_MINT_SOURCE });
   });
 
+  it("an invoice paid from its card in a chat: on Testnet the chat is told it was paid, on Mainnet nothing more is said", async () => {
+    const { node } = track(engine());
+    const said = vi.spyOn(node["desk"], "sayInvoicePaid").mockImplementation(() => {});
+    const cashuPay = vi.spyOn(node["wallet"], "payQuote").mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValue(true);
+    const invoice = fakeInvoice(25, new Uint8Array(32).fill(9));
+    await node.walletPayQuote({ quote: "melt", mint: TEST_MINT, linkId: "l1", invoice });
+    expect(said).toHaveBeenCalledExactlyOnceWith("l1", invoice, { pending: false });
+    // Still pending at the mint: not paid yet, said once it settles.
+    await node.walletPayQuote({ quote: "melt", mint: TEST_MINT, linkId: "l1", invoice });
+    expect(said).toHaveBeenLastCalledWith("l1", invoice, { pending: true });
+    await node.walletPayQuote({ quote: "melt", mint: "https://mint.minibits.cash/Bitcoin", confirmedReal: true, linkId: "l1", invoice });
+    await node.walletPayQuote({ quote: "melt", mint: TEST_MINT });
+    expect(cashuPay).toHaveBeenCalledTimes(4);
+    expect(said).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps each network's history apart, counts test sats waiting while the page shows Mainnet, and chimes once per new receipt", async () => {
     const { node, view, events } = track(engine());
     node["settings"].mints = ["https://real.example", TEST_MINT];
@@ -599,6 +655,21 @@ describe("the Cashu wallet and Lightning", () => {
     history.push(tx("new", "https://real.example"), tx("test-in", TEST_MINT));
     await node["refreshWallet"]();
     expect(events.onAttention.mock.calls.map(([e]) => e.type)).toEqual(["coin", "coin"]);
+  });
+
+  it("plays the test-coins cue for Get test coins only, never for a contact's ecash whose memo reads like it", async () => {
+    const { node, view, events } = track(engine());
+    node["settings"].mints = [TEST_MINT];
+    const history: WalletTx[] = [];
+    view.mockImplementation(async (network) => ({ mints: [], balance: 0, history: network === "testnet" ? [...history] : [], feesPaid: 0 }) as never);
+    await node["refreshWallet"]();
+    const at = Date.now() + 1_000;
+    history.push(
+      { id: "faucet", mint: TEST_MINT, kind: "lightning-in", amount: 10_000, fee: 0, timestamp: at, note: "Test coins from the test mint" },
+      { id: "contact", mint: TEST_MINT, kind: "ecash-in", amount: 21, fee: 0, timestamp: at, note: "Test coins from the test mint" },
+    );
+    await node["refreshWallet"]();
+    expect(events.onAttention.mock.calls.map(([e]) => [e.id, e.cue])).toEqual([["coin:faucet", "testcoins"], ["coin:contact", undefined]]);
   });
 
   it("a wallet backup that does not restore connects nothing; one that does, connects", async () => {

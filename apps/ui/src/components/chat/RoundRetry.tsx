@@ -28,7 +28,8 @@ const retryGlyph = (
 
 /**
  * The ↻ that takes the place of a voice message's play button or a file's icon when it did not go (`danger`: a
- * red ring) or stopped moving (a quiet one). While its action runs (`busy`) the ring turns.
+ * red ring) or stopped moving (a quiet one). While its action runs (`busy`) the ring turns, and a press does nothing;
+ * it is not disabled, which would drop a keyboard's focus to the page (as the play button there keeps it).
  */
 export function RoundRetry({ danger = false, busy = false, label, hint, testId, onClick }: {
   danger?: boolean;
@@ -40,9 +41,9 @@ export function RoundRetry({ danger = false, busy = false, label, hint, testId, 
   onClick: () => void;
 }) {
   return (
-    <button type="button" data-testid={testId} aria-label={label} title={hint ?? label} aria-busy={busy || undefined} disabled={busy} onClick={onClick}
+    <button type="button" data-testid={testId} aria-label={label} title={hint ?? label} aria-busy={busy || undefined} aria-disabled={busy || undefined} onClick={() => { if (!busy) onClick(); }}
       data-tone={danger ? "danger" : "neutral"}
-      className={`relative w-9 h-9 shrink-0 grid place-items-center rounded-full border-none bg-black/20 hover:bg-black/30 cursor-pointer disabled:cursor-default transition-colors ${danger ? "text-danger-ink" : "text-text-primary/90"}`}>
+      className={`relative w-9 h-9 shrink-0 grid place-items-center rounded-full border-none bg-black/20 hover:bg-black/30 cursor-pointer aria-disabled:cursor-default transition-colors ${danger ? "text-danger-ink" : "text-text-primary/90"}`}>
       <ProgressRing fraction={1} busy={busy} className={danger ? "text-danger-ink" : "text-text-primary/65"} />
       {retryGlyph}
     </button>

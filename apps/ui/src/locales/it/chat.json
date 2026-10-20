@@ -3,10 +3,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} nuovi messaggi",
     "messagesFrom": "{{count}} nuovi messaggi da {{name}}",
-    "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate"
+    "pinMoved": "Spostata al posto {{place}} di {{count}} chat fissate",
+    "rowMoved": "Ora al posto {{place}} di {{count}}"
   },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",
+    "message": "Audio",
     "pause": "Metti in pausa l'audio",
     "play": "Riproduci audio",
     "position": "Posizione nell'audio",
@@ -26,6 +28,8 @@
   "connecting": "connessione",
   "createdHere": "Hai creato questa chat",
   "deleteArrivingFileHint": "Eliminato solo qui. Il file smette di arrivare; il tuo contatto vedrà l'invio annullato.",
+  "deleteForEveryone": "Elimina per tutti",
+  "deleteForEveryoneHint": "Eliminato anche dai dispositivi del tuo contatto o del gruppo. Un'app precedente mostra \"Messaggio rimosso\" al suo posto; una copia salvata da qualcuno resta sua.",
   "deleteMessage": "Elimina messaggio",
   "deleteMessageHint": "Eliminato solo qui. Il tuo contatto conserva la sua copia.",
   "deleteSendingFileHint": "Eliminato solo qui. L'invio si ferma; il tuo contatto non riceverà il file.",
@@ -176,6 +180,7 @@
     "messages": "{{count}} messaggi",
     "noChats": "Ancora nessuna chat",
     "noMatch": "Nessuna chat con questo nome",
+    "partial": "{{sent}} di {{count}} inviati",
     "pick": "Scegline fino a {{count}}",
     "search": "Cerca chat",
     "select": "Seleziona",
@@ -237,9 +242,9 @@
   "menu": {
     "continueNew": "Continua in una nuova chat",
     "hold": "Trattieni messaggi…",
+    "more": "Altro…",
+    "moreTitle": "Altre opzioni",
     "moveDown": "Sposta giù",
-    "moveFirst": "È già la prima",
-    "moveLast": "È già l'ultima",
     "moveUp": "Sposta su",
     "pin": "Fissa chat",
     "refresh": "Aggiorna",
@@ -274,6 +279,11 @@
     "retry": "Invia di nuovo"
   },
   "noMessages": "Nessun messaggio",
+  "nowPlaying": {
+    "close": "Interrompi e chiudi",
+    "label": "In riproduzione",
+    "open": "Mostra nella chat"
+  },
   "offline": "offline",
   "online": "online",
   "options": "Opzioni",

@@ -94,11 +94,15 @@ export class CallAudio {
   }
 
   stop(): void {
-    this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
-    this.options.encoder.delete?.();
-    this.options.decoder.delete?.();
+    if (this.stopped) return;
+    this.stopped = true;
+    // Once, and never throwing: a codec of a broken Opus module ("memory access out of bounds") does not keep the call
+    // from ending (its connection, its program's socket, the hang-up and call.ended come after).
+    for (const codec of [this.options.encoder, this.options.decoder]) {
+      try { codec.delete?.(); } catch { /* gone with the module */ }
+    }
   }
 
   /** Sends the frame that is due now. Exposed for tests, which drive the clock themselves. */

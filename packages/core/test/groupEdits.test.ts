@@ -3,6 +3,7 @@ import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession, groupMessageId, type GroupEdgeFrame, type GroupEditFrame, type GroupState } from "../src/groupSession";
 import { CommunitySession, COMMUNITY_LIMITS, type CommunityFrame } from "../src/groupCommunity";
 import { COMMUNITY_EDIT_FRAME, GROUP_EDIT_FRAME, carryMentions, communityEditFrame, meshMessageRef, parseCommunityEdit, type GroupIncomingEdit } from "../src/groupEdits";
+import { REMOVED_TEXT } from "../src/pairedEdits";
 // covers: groups.protocol.edits
 
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -70,6 +71,20 @@ describe("group-edit frames (a private group)", () => {
     const frame = mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME)!.frame as GroupEditFrame;
     expect(JSON.stringify(frame)).not.toContain("Working");
     expect(meshMessageRef(id)).toEqual({ s: frame.s, e: frame.e, n: frame.n });
+  });
+
+  it("a removal goes sealed as the message's last edit, its fallback alone, and may pass a card's bound by one", async () => {
+    const { mesh, alice, bob, carol } = await trio();
+    const id = ((await bob.sendText("Working: 0 of 3")) as { id: string }).id;
+    const card = { kind: "task", id: "t1", title: "Fix it", status: "running" } as const;
+    expect(await bob.sendEdit(id, { v: 5_001, ts: 9, text: "too far", card })).toEqual({ error: "This message was edited too many times" });
+    expect(await bob.sendEdit(id, { v: 5_002, ts: 9, text: REMOVED_TEXT, remove: true })).toEqual({ error: "This message was edited too many times" });
+    expect(await bob.sendEdit(id, { v: 5_001, ts: 9, text: REMOVED_TEXT, mentions: [{ k: alice.myKey, o: 0, l: 2 }], card, remove: true })).toEqual({ sent: 2 });
+    await mesh.settle();
+    for (const s of [alice, carol]) expect(mesh.of(s)).toEqual([{ id, sender: bob.myKey, e: 5_001, ts: 9, m: REMOVED_TEXT, rm: true }]);
+    expect(JSON.stringify(mesh.sent.find(f => f.frame.t === GROUP_EDIT_FRAME)!.frame)).not.toContain("Message removed");
+    // Only its author removes it.
+    expect(await carol.sendEdit(id, { v: 5_001, ts: 9, text: REMOVED_TEXT, remove: true })).toEqual({ error: "Only your own messages can be edited" });
   });
 
   it("only its author edits a message: a member can hand the author's edit on, never alter or forge one", async () => {
@@ -228,6 +243,16 @@ describe("community edit frames", () => {
     expect(parseCommunityEdit({ ...frame, t: "reaction" }, author)).toBeNull();
   });
 
+  it("say a removal with its fallback text alone; a rm other than true is nothing", () => {
+    const frame = communityEditFrame({ id, e: 5_001, ts: 5, m: REMOVED_TEXT, k: [{ k: other, o: 0, l: 3 }], sc: { kind: "task", id: "t", title: "x", status: "done" }, rm: true });
+    expect(frame).toEqual({ t: COMMUNITY_EDIT_FRAME, id, v: 5_001, ts: 5, text: REMOVED_TEXT, rm: true });
+    expect(parseCommunityEdit(frame, author)).toEqual({ id, e: 5_001, ts: 5, m: REMOVED_TEXT, rm: true });
+    expect(parseCommunityEdit({ ...frame, v: 101 }, author)).toEqual({ id, e: 101, ts: 5, m: REMOVED_TEXT, rm: true });
+    expect(parseCommunityEdit({ ...frame, m: [{ k: other, o: 0, l: 3 }], sc: { kind: "task", id: "t", title: "x", status: "done" } }, author)).toEqual({ id, e: 5_001, ts: 5, m: REMOVED_TEXT, rm: true });
+    for (const bad of [{ ...frame, rm: false }, { ...frame, rm: 1 }, { ...frame, v: 5_002 }]) expect(parseCommunityEdit(bad, author)).toBeNull();
+    expect(parseCommunityEdit(frame, other)).toBeNull();
+  });
+
   it("go through the group with a text's room, not an application frame's", async () => {
     const out: CommunityFrame[] = [];
     const state = CommunitySession.create("Crew");
@@ -241,6 +266,9 @@ describe("community edit frames", () => {
     expect(await session.sendEdit({ id: `${other}:0:0123456789abcdef:0`, v: 1, ts: 1, text: "no" })).toEqual({ error: "Only your own messages can be edited" });
     expect(await session.sendEdit({ id: mine, v: 1, ts: 1, text: " " })).toEqual({ error: "An edit cannot be empty" });
     expect(await session.sendEdit({ id: mine, v: 1, ts: 1, text: "\u0001".repeat(COMMUNITY_LIMITS.textBytes) })).toEqual({ error: "Too long to edit in this group" });
+    expect(await session.sendEdit({ id: mine, v: 5_001, ts: 1, text: REMOVED_TEXT, remove: true })).toHaveProperty("id");
+    expect(await session.sendEdit({ id: mine, v: 5_001, ts: 1, text: "past a text's bound" })).toEqual({ error: "This message was edited too many times" });
+    expect(out).toHaveLength(3);
   });
 });
 

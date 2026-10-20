@@ -10,7 +10,7 @@ import { CopyButton } from "./CopyButton";
  * A web address: a new tab, with no opener and no referrer; on Desktop the system browser, since its WebView opens
  * no new tab (`externalLinkProps`). It reads left to right on its own (`dir`), so no
  * direction control before or inside it can make it show another address, and as it is typed only when that is
- * plain ASCII: anything else shows as the browser will read it (`shownUrl`).
+ * plain ASCII with no user part: anything else shows as the browser will read it (`shownUrl`).
  */
 export function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
   return (

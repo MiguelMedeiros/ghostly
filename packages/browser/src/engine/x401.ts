@@ -1,6 +1,6 @@
 import { newX401HolderKey, readX401SdJwtVc, sameX401HolderJwk, toBase64Url, type X401ClaimPath, type X401HolderJwk, type X401SdJwtVc } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
-import { newDeviceKey, sealSeed } from "./paymentAdapters/persistence";
+import { sealSecret } from "./dataKey";
 import type { SealedProofKey } from "./identities";
 
 /** A holder key: its public JWK, and its secret sealed as an identity proof's seed is. */
@@ -100,8 +100,8 @@ export class X401Credentials {
    */
   async newKey(): Promise<{ id: string; jwk: X401HolderJwk; dropped?: string }> {
     const { secret, jwk } = newX401HolderKey();
-    const deviceKey = newDeviceKey();
-    const key: StoredHolderKey = { id: newId(), jwk, secret: { sealed: await sealSeed(toBase64Url(secret), deviceKey), deviceKey }, createdAt: Date.now() };
+    const id = newId();
+    const key: StoredHolderKey = { id, jwk, secret: await sealSecret(toBase64Url(secret), { store: STORES.settings, key: id, field: "x401.holderKey" }), createdAt: Date.now() };
     secret.fill(0);
     return this.serial(async () => {
       const stored = await this.load();
@@ -114,9 +114,12 @@ export class X401Credentials {
 
   /**
    * Adds an issued credential bound to one of the keys `newKey` made. Refused: a credential that does not read, one
-   * that has expired, one bound to another key, one already kept.
+   * that has expired, one bound to another key, one already kept, a label past `LABEL_CHARS` (it was cut without a
+   * word). A label is one line: its line breaks and tabs read as one space, as a group's name.
    */
-  add({ credential, label }: { credential: string; label?: string }): Promise<X401CredentialView> {
+  add({ credential, label: given }: { credential: string; label?: string }): Promise<X401CredentialView> {
+    const label = given?.replace(/\s+/g, " ").trim();
+    if (label && ([...label].length > LABEL_CHARS || /\p{Cc}/u.test(label))) return Promise.reject(new Error(`A credential's label is up to ${LABEL_CHARS} characters on one line`));
     const read = readX401SdJwtVc(credential);
     if (!read.ok) return Promise.reject(new Error(`Not an SD-JWT VC Ghostly can keep: ${read.reason}`));
     const vc = read.value;
@@ -131,7 +134,7 @@ export class X401Credentials {
     if (!holderKey) throw new Error(`${notWaiting(stored, vc.holder)}: ${ASK_FOR_A_NEW_KEY}`);
     if (stored.credentials.length >= MAX_CREDENTIALS) throw new Error(`A profile keeps at most ${MAX_CREDENTIALS} credentials: remove one first`);
     const kept: StoredX401Credential = {
-      id: newId(), label: (label?.trim() || vc.type).slice(0, LABEL_CHARS), format: vc.format, credential, type: vc.type, issuer: vc.issuer,
+      id: newId(), label: label || vc.type.slice(0, LABEL_CHARS), format: vc.format, credential, type: vc.type, issuer: vc.issuer,
       holderKey, addedAt: Date.now(), ...(vc.expiresAt !== undefined ? { expiresAt: vc.expiresAt * 1000 } : {}),
     };
     await this.save({ ...stored, keys: stored.keys.filter((k) => k !== holderKey), credentials: [...stored.credentials, kept] });

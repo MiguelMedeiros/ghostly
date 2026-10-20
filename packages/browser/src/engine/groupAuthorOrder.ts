@@ -79,7 +79,10 @@ export class GroupAuthorOrder {
     else rows.push(followed);
     this.rows.set(groupId, rows);
     let due = this.due.get(groupId);
-    if (!due?.has(row.sender) && !rows.slice(0, at >= 0 ? at : -1).some(r => r.sender === row.sender && after(r, row))) return;
+    const first = rows.slice(0, at >= 0 ? at : -1).findIndex(r => r.sender === row.sender && after(r, row));
+    if (!due?.has(row.sender) && first < 0) return;
+    // The rows to place again, and those that go along: followed as if they came now, while they wait for the rest.
+    if (first >= 0) for (const r of rows.slice(first)) r.at = Math.max(r.at, row.at);
     if (!due) this.due.set(groupId, (due = new Map()));
     due.set(row.sender, { since: due.get(row.sender)?.since ?? row.at, last: row.at });
     if (!this.missing(groupId, row.sender)) void this.run(groupId, row.at);

@@ -1,5 +1,5 @@
 import type { GroupsHost } from "./groups";
-import { AUTHOR_ORDER_ROWS, AUTHOR_ORDER_SETTLE_MS, AUTHOR_ORDER_WINDOW_MS } from "./groupAuthorOrder";
+import { AUTHOR_ORDER_ROWS, AUTHOR_ORDER_SETTLE_MS, AUTHOR_ORDER_WAIT_MAX_MS, AUTHOR_ORDER_WINDOW_MS } from "./groupAuthorOrder";
 
 /**
  * How long a history's lines wait for the next older message before they are placed again: about the gap between the
@@ -20,8 +20,9 @@ interface Followed { id: string; epoch: number; line: boolean; at: number }
  * its epoch) and, in a private group, the answers of several members race, so the messages of the epoch before can come
  * after the line. Then the line, and the rows after it written knowing it, are placed again below them, in their order;
  * no clock is read. A row only ever moves down, and only rows placed here in the last few minutes, so a live
- * conversation read long ago never moves. The lines wait for the rest of the older messages (`tick`), so a row moves
- * about once a catch-up page.
+ * conversation read long ago never moves. The lines wait for the rest of the older messages (`tick`), and while
+ * messages of an epoch before are still on their way (`onTheirWay`) the rows wait for them, as `GroupAuthorOrder`'s do:
+ * a row moves about once a catch-up.
  */
 export class GroupLineOrder {
   /** Per history: the rows followed, in the order they are placed in it. */
@@ -31,7 +32,7 @@ export class GroupLineOrder {
   private readonly due = new Set<string>();
   private readonly running = new Set<string>();
 
-  constructor(private readonly host: Pick<GroupsHost, "placeAgain">) {}
+  constructor(private readonly host: Pick<GroupsHost, "placeAgain">, private readonly onTheirWay: (linkId: string) => boolean = () => false) {}
 
   /**
    * A row is being stored, a line of the history or a message sealed under this epoch, and takes its place now: `at` is
@@ -50,7 +51,12 @@ export class GroupLineOrder {
     return stored => {
       const now = this.rows.get(linkId);
       if (!stored) { if (now) this.rows.set(linkId, now.filter(r => r !== followed)); return; }
-      if (!followed.line && now?.some(r => r.line && r.epoch > followed.epoch && now.indexOf(r) < now.indexOf(followed))) this.wait(linkId, at);
+      if (followed.line || !now) return;
+      const line = now.findIndex(r => r.line && r.epoch > followed.epoch);
+      if (line < 0 || line > now.indexOf(followed)) return;
+      // The line and the rows after it: followed as if they came now, while they wait for the rest.
+      for (const r of now.slice(line)) r.at = Math.max(r.at, at);
+      this.wait(linkId, at);
     };
   }
 
@@ -64,10 +70,14 @@ export class GroupLineOrder {
     if (moved.some(r => !r.line)) this.wait(linkId, at);
   }
 
-  /** Time passed: histories no older message came to for a moment, or that waited long enough, are put in order. */
+  /**
+   * Time passed: histories no older message came to for a moment, and nothing more is on its way for, or that waited
+   * long enough, are put in order.
+   */
   tick(now: number): void {
     for (const [linkId, { since, last }] of this.waiting) {
       if (now - last < LINE_ORDER_SETTLE_MS && now - since < LINE_ORDER_WAIT_MAX_MS) continue;
+      if (now - last < AUTHOR_ORDER_SETTLE_MS && now - since < AUTHOR_ORDER_WAIT_MAX_MS && this.onTheirWay(linkId)) continue;
       this.waiting.delete(linkId);
       this.run(linkId);
     }

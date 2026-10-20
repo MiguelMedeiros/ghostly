@@ -13,6 +13,7 @@ import {setDeckSwitchSound} from "./deck/motion";
 import {useI18n} from "../contexts/I18nContext";
 import {switchProfile} from "../lib/profiles";
 import {PROFILE_NOTICE} from "../lib/profilePeek";
+import {claimFeedback} from "../lib/feedbackClaims";
 
 const seen=new Set<string>();
 /** The engine sends live facts separately from replayed snapshots. */
@@ -31,11 +32,7 @@ export function AttentionFeedback(){
     seen.add(event.id);
     const run=async()=>{
       // Extension pages may share one engine. Claim one presentation per event.
-      const key="ghostly_feedback_claims";
-      let claims:string[]=[];
-      try {claims=JSON.parse(localStorage.getItem(key)??"[]") as string[];}catch{/* unavailable */}
-      if(claims.includes(event.id)) return;
-      try{localStorage.setItem(key,JSON.stringify([...claims.slice(-255),event.id]));}catch{/* in-memory dedupe still applies */}
+      if(!claimFeedback(event.id,Date.now())) return;
       // A muted chat's messages arrive as ever, without a sound or a notification (apps/ui/src/lib/chatMute.ts), unless
       // one names me in a group that still notifies mentions.
       const chat=chatOfLink(event.linkId,engine.state?.links);

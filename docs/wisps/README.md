@@ -56,6 +56,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 701 | Local services | [HTTP Local Service Profile](701-http-services.md) | Profile | Draft | Available |
 | 800 | Invites | [Invite and Join](800-invite-join.md) | Contract | Draft | Available |
 | 801 | Invites | [Implemented Invitation Profiles](801-invitation-profiles.md) | Profile | Draft | Available |
+| 8xx | Invites | [Contact Links](8xx-contact-links.md) | Profile | Draft | Planned |
 | 900 | Groups | [Group Session Negotiation](900-group-sessions.md) | Contract | Draft | Available |
 | 9xx | Groups | [GossipSub Transport](901-gossipsub.md) | Adapter | Draft | Planned |
 | 902 | Groups | [Group Mesh Distribution Profile](902-group-mesh.md) | Profile | Draft | Available |

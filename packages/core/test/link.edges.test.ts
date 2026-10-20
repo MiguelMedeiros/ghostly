@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64, type Identity } from "../src/identity";
-import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RelayTransport } from "../src/relay";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RELAY_REQUESTS_PER_MINUTE, RelayTransport } from "../src/relay";
 import { fromBase64Url } from "../src/bytes";
 import { buildLinkRecords, emptyLinkRecords } from "../src/records";
 import { createLink, type LinkParams } from "../src/invite";
@@ -18,6 +18,7 @@ import {
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
   UNUSED_INVITE_WAIT_MAX_MS,
+  countUnusedInvite,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -324,6 +325,36 @@ describe("LinkSession presence and signals", () => {
     // Something new for it is not.
     await a.s.sendMessage("for later");
     expect(lastPublish()).toBeUndefined();
+    await a.s.stop(false);
+  });
+
+  it("a background write the budget holds back for a while goes again when its share frees, not every 4 s; a chat's write keeps its turn", async () => {
+    // An idle admin's daemon built and signed 1,041 packets in 9 minutes that the budget refused again (bug hunt, 2026-10-19).
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
+    a.s.start();
+    b.s.start();
+    await settle();
+    const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    a.s.setDataLinkOpen(true);
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(lastPublish()).toEqual({ background: true });
+    const held = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held);
+    // Its share frees: it goes.
+    a.transport.failPublish = null;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held + 1);
+    expect(lastPublish()).toEqual({ background: true });
+    // A chat's write held back the same way tries again within 4 s, which keeps it first in line (`WRITE_FIRST_MS`).
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    expect(await a.s.sendMessage("held")).toBeNull();
+    expect(lastPublish()).toBeUndefined();
+    const chat = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(a.transport.publish.mock.calls.length).toBeGreaterThan(chat);
+    a.transport.failPublish = null;
     await a.s.stop(false);
   });
 
@@ -642,6 +673,8 @@ describe("LinkSession poll pacing", () => {
 
   it("reads an invite nobody used less often once no longer awaited, and at the background pace once its contact shows", async () => {
     const { a, b } = pair({ invite: () => true }, { getServices: () => [{ id: "atlas", type: "http" }] });
+    // Among enough other unused invites of the app that their count asks for the longest wait.
+    for (let i = 0; i < 29; i++) countUnusedInvite(a.transport, {}, true);
     a.s.start();
     await settle();
     vi.setSystemTime(NOW + 3 * AWAITING_PEER_MS);
@@ -704,9 +737,10 @@ describe("LinkSession poll pacing", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const reads = requests.filter((r) => r.method === "GET").length;
     await expect(relays.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
-    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual([15_000, 15_000]);
-    // The chats' reads took the background share of each relay's minute, not the minute.
-    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE);
+    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual(DEFAULT_RELAYS.map(() => 15_000));
+    // The chats' reads took the background share of each relay's minute, not the minute: 20 on a relay of 30 or 60,
+    // two thirds of pkarr.miguelmedeiros.dev's 5, so its write still went out there.
+    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE + Math.ceil(RELAY_REQUESTS_PER_MINUTE["https://pkarr.miguelmedeiros.dev"] * 2 / 3));
     for (const chat of chats) await chat.stop(false);
   });
 

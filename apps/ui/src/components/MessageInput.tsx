@@ -22,7 +22,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import { useComposition } from "../hooks/useComposition";
@@ -393,16 +393,23 @@ export function MessageInput({
     if (textareaRef.current) fitFieldHeight(textareaRef.current);
   };
 
-  const handleEmojiSelect = (emoji: string) => {
-    const input = textareaRef.current;
-    const start = input?.selectionStart ?? text.length, end = input?.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + emoji + text.slice(end);
-    if (next.length > Math.max(maxLength, 16_384)) return;
-    caretRef.current = start + emoji.length;
+  /** Words into the draft at the caret; false where the draft cannot take them. */
+  const insertText = (words: string): boolean => {
+    const input = textareaRef.current, draft = textRef.current;
+    const start = input?.selectionStart ?? draft.length, end = input?.selectionEnd ?? draft.length;
+    const next = draft.slice(0, start) + words + draft.slice(end);
+    if (next.length > Math.max(maxLength, 16_384)) return false;
+    caretRef.current = start + words.length;
     setText(next);
     onTyping?.(true);
+    return true;
+  };
+  const insertRef = useRef(insertText); insertRef.current = insertText;
+
+  const handleEmojiSelect = (emoji: string) => {
+    if (!insertText(emoji)) return;
     // On a phone the keyboard would cover the panel: the field takes the focus only on a wide screen.
-    if (!phone) input?.focus({ preventScroll: true });
+    if (!phone) textareaRef.current?.focus({ preventScroll: true });
   };
 
   const handleGifSelect = async (url: string) => {
@@ -485,13 +492,17 @@ export function MessageInput({
   /**
    * A paste's files to the sheet. True when the paste was taken; false leaves it to the field: no files, or a rich
    * copy, is text as it always was. A paste that showed nothing at all asks the platform (a webview may keep copied
-   * files or a picture from the page).
+   * files or a picture from the page), and so does a browser's copied picture: its address, if it came with one, goes
+   * into the draft when the platform finds no picture (`intoDraft`: the paste was aimed at the draft's field).
    */
-  const takePaste = (data: DataTransfer | null): boolean => {
+  const takePaste = (data: DataTransfer | null, intoDraft = false): boolean => {
     if (locked || edit) return false;
     const files = pastedFiles(data);
     if (files) return offerFiles(files);
-    if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
+    if (!onSendFile || disabled) return false;
+    const plain = data?.getData("text/plain") ?? "";
+    const picture = pasteIsPictureOnly(data) && (intoDraft || !plain);
+    if (!picture && !pasteShowsNothing(data)) return false;
     // Ctrl+V again while the first is read would read the same clipboard beside it: every file twice on the sheet.
     if (readingRef.current) return true;
     const read = platformPastedFiles();
@@ -506,14 +517,15 @@ export function MessageInput({
       ended();
       // Read to its end where files cannot go any more (an edit began meanwhile): said, as a paste never read is.
       if (found.length) { if (!offerRef.current(found)) showToast(t("errors.files.pasteLate")); }
-      else if (named) showToast(t("errors.files.pasteUnreadable"));
+      else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
+      else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
 
   const handlePaste = (e: ClipboardEvent) => {
-    if (takePaste(e.clipboardData)) e.preventDefault();
+    if (takePaste(e.clipboardData, true)) e.preventDefault();
   };
 
   /** A caption goes as a message of its own after the files, through the same checks as the draft. */

@@ -43,6 +43,12 @@ interface UseWebRTCParams {
   /** The profile's own ICE servers (a TURN relay), tried after the apps' STUN servers. */
   iceServers?: readonly CallIceServer[];
   /**
+   * "Hide my IP from contacts": the call goes through the TURN server in `iceServers` only (`callRtcConfig`), and its
+   * signals carry relay candidates only. A call that finds no relay candidate fails (`relay`), it never goes direct;
+   * media that cannot keep to relays (`CallMedia.keepsToRelays`) places and answers no call (`relayOnly`).
+   */
+  relayOnly?: boolean;
+  /**
    * How many candidates a signal carries: `PAIRED_CALL_CANDIDATES` on a chat session, whose frames have room for
    * every path; a compatibility chat's DHT record keeps the default (one host, one server reflexive).
    */
@@ -57,6 +63,7 @@ interface UseWebRTCParams {
 /** The browser's own WebRTC and capture. */
 const browserMedia: CallMedia = {
   restartsIce: true,
+  keepsToRelays: true,
   createPeerConnection: (config) => new RTCPeerConnection(config),
   getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
   getDisplayMedia: (options) => navigator.mediaDevices.getDisplayMedia(options),
@@ -72,11 +79,15 @@ export const SCREEN_SHARE_ERROR_MS = 8000;
 const REFUSED_WITHOUT_PICKER_MS = 300;
 
 /**
- * An answered call whose connection fails before it ever connected waits this long for the caller's second offer
+ * An answered call whose connection fails before it ever connected waits this long for the caller's next offer
  * before it gives up. A headless Ghostly (libdatachannel 0.24.5) can refuse a good answer and fail the handshake with
- * it (packages/cli/src/calls/manager.ts, `redial`); it then offers again once, on a new connection.
+ * it (packages/cli/src/calls/manager.ts, `redial`); it then offers again on a new connection, where the same race can
+ * refuse the answer again.
  */
 export const RESTART_GRACE_MS = 8000;
+
+/** How many times an answered call starts over on the caller's newer offer: the headless CLI's `MAX_REDIALS`. */
+export const MAX_RESTARTS = 4;
 
 /**
  * An unanswered call rings this long (WISP 601, "Ringing"): the caller then hangs up and says "No answer"; the side
@@ -102,11 +113,16 @@ export const NO_ANSWER_SHOWN_MS = 6000;
 /** How long the reason a microphone or camera could not be used stays on screen. */
 export const MEDIA_PROBLEM_SHOWN_MS = 8000;
 
-/** Why the microphone or camera could not be used: refused (by the person, the browser or the system), or none to use. */
-export type MediaProblem = "denied" | "unavailable";
+/**
+ * Why a call could not use the microphone or camera: refused (by the person, the browser or the system), or none to
+ * use. Or, with "Hide my IP from contacts" on, why it could not start: `relay`, the TURN server gave no relay
+ * candidate (it did not answer); `relayOnly`, this app's call media cannot keep a call to the relay.
+ */
+export type MediaProblem = "denied" | "unavailable" | "relay" | "relayOnly";
 
-/** What a failed `getUserMedia` means for the person, or null when the failure was not the microphone's or camera's. */
+/** What a failed call start means for the person, or null when the failure was not the microphone's, camera's or relay's. */
 export function mediaProblem(error: unknown): MediaProblem | null {
+  if (error instanceof CallRelayError) return error.problem;
   const { name } = (error ?? {}) as { name?: unknown };
   switch (name) {
     case "NotAllowedError":
@@ -131,6 +147,8 @@ export function mediaProblem(error: unknown): MediaProblem | null {
  * connection is made in its place, up to `GATHER_ATTEMPTS` in all.
  */
 export const GATHER_STALL_MS = 4000;
+/** A TURN server's candidate in a description: the only kind a call's signal carries while "Hide my IP from contacts" is on. */
+const RELAY_CANDIDATE = /^a=candidate:\S+ \d+ udp \d+ \S+ \d+ typ relay( |$)/im;
 export const GATHER_ATTEMPTS = 3;
 /**
  * An offer or an answer with its host candidates waits this long at most for a server reflexive one, not the 10 s
@@ -169,6 +187,14 @@ export class CallUnreachableError extends Error {
   constructor(message = "The call could not reach the network") {
     super(message);
     this.name = "CallUnreachableError";
+  }
+}
+
+/** "Hide my IP from contacts" kept the call from starting: see `MediaProblem`. */
+export class CallRelayError extends CallUnreachableError {
+  constructor(readonly problem: "relay" | "relayOnly") {
+    super(problem === "relay" ? "Your relay did not answer" : "Calls are off while Hide my IP is on");
+    this.name = "CallRelayError";
   }
 }
 
@@ -236,11 +262,14 @@ export function useWebRTC({
   onError,
   media,
   iceServers,
+  relayOnly,
   maxCandidates,
   devices,
 }: UseWebRTCParams) {
   const iceServersRef = useRef(iceServers);
   iceServersRef.current = iceServers;
+  const relayOnlyRef = useRef(relayOnly === true);
+  relayOnlyRef.current = relayOnly === true;
   const maxCandidatesRef = useRef(maxCandidates);
   maxCandidatesRef.current = maxCandidates;
   const onErrorRef = useRef(onError);
@@ -281,6 +310,14 @@ export function useWebRTC({
   const showMediaProblem = useCallback((error: unknown) => {
     const problem = mediaProblem(error);
     if (problem) setMediaProblemShown(problem);
+  }, []);
+  /**
+   * With "Hide my IP from contacts" on, a call needs media whose connections keep to the relay: one that would gather
+   * this device's own addresses (the Linux Desktop's call engine, which has its own STUN server) makes no call at all.
+   * Asked before the microphone is.
+   */
+  const assertKeepsToRelays = useCallback(() => {
+    if (relayOnlyRef.current && !mediaRef.current.keepsToRelays) throw new CallRelayError("relayOnly");
   }, []);
 
   /**
@@ -324,8 +361,8 @@ export function useWebRTC({
    * headless caller answers our ICE checks before it even has our answer; only this says the media really flows.
    */
   const mediaUpRef = useRef(false);
-  /** Whether this call already started over on a caller's second offer: a second failure is final. */
-  const restartedRef = useRef(false);
+  /** How many times this call started over on a caller's newer offer: a failure after the last (MAX_RESTARTS) is final. */
+  const restartsRef = useRef(0);
   /** The id of our call's "call started" line, while it rings: a glare it loses takes the line back out. */
   const startedLineRef = useRef<string | null>(null);
   /** The wait for a second offer after the answered call's connection failed (`RESTART_GRACE_MS`). */
@@ -397,9 +434,9 @@ export function useWebRTC({
     hangUpRef.current(tell, false, true);
   }, []);
 
-  /** Our answered call's media never came up, and it has not started over yet: a caller's second offer restarts it. */
+  /** Our answered call's media never came up, and it has starts over left (MAX_RESTARTS): a caller's newer offer restarts it. */
   const restartable = useCallback(
-    () => !!answeredRef.current && !mediaUpRef.current && !restartedRef.current && (callStateRef.current === "connecting" || callStateRef.current === "connected"),
+    () => !!answeredRef.current && !mediaUpRef.current && restartsRef.current < MAX_RESTARTS && (callStateRef.current === "connecting" || callStateRef.current === "connected"),
     [],
   );
 
@@ -438,7 +475,7 @@ export function useWebRTC({
     peerRestartsRef.current = false;
     peerFingerprintRef.current = "";
     answeredRef.current = null;
-    restartedRef.current = false;
+    restartsRef.current = 0;
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => {
         t.onended = null;
@@ -488,7 +525,8 @@ export function useWebRTC({
   }, []);
 
   const createPeerConnection = useCallback(() => {
-    const pc = mediaRef.current.createPeerConnection(callRtcConfig(iceServersRef.current));
+    assertKeepsToRelays();
+    const pc = mediaRef.current.createPeerConnection(callRtcConfig(iceServersRef.current, { relayOnly: relayOnlyRef.current }));
     mediaUpRef.current = false;
 
     const connectedNow = () => {
@@ -541,7 +579,7 @@ export function useWebRTC({
     };
 
     const failed = (closed = false) => {
-      // An answered call whose media never came up waits for the caller's second offer (see RESTART_GRACE_MS), once.
+      // An answered call whose media never came up waits for the caller's next offer (see RESTART_GRACE_MS), up to MAX_RESTARTS times.
       if (restartable()) {
         if (!restartGraceRef.current) restartGraceRef.current = setTimeout(() => { restartGraceRef.current = null; giveUp(); }, RESTART_GRACE_MS);
         return;
@@ -618,7 +656,7 @@ export function useWebRTC({
     pcRef.current = pc;
     giveUpRef.current = giveUp;
     return pc;
-  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable, clearReconnect, reconnects, callUp]);
+  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable, clearReconnect, reconnects, callUp, assertKeepsToRelays]);
 
   /**
    * Makes the call's connection with `make` (its description set) and waits for its candidates (for a reflexive one
@@ -631,11 +669,13 @@ export function useWebRTC({
       const pc = await make();
       await waitForIceGathering(pc, undefined, { stallMs: GATHER_STALL_MS, hostBoundMs: HOST_GATHER_MS });
       if (cancelled()) return null;
-      if (sdpHasCandidates(pc.localDescription?.sdp)) return pc;
+      // While "Hide my IP from contacts" is on, only a relay candidate counts: it is all the signal carries.
+      if (relayOnlyRef.current ? RELAY_CANDIDATE.test(pc.localDescription?.sdp ?? "") : sdpHasCandidates(pc.localDescription?.sdp)) return pc;
       // Its events are not ours any more: the next connection takes its place in pcRef.
       pcRef.current = null;
       pc.close();
-      if (attempt >= GATHER_ATTEMPTS) throw new CallUnreachableError();
+      // While "Hide my IP from contacts" is on, only the TURN server gives candidates: none means it did not answer.
+      if (attempt >= GATHER_ATTEMPTS) throw relayOnlyRef.current ? new CallRelayError("relay") : new CallUnreachableError();
     }
   }, []);
 
@@ -671,7 +711,7 @@ export function useWebRTC({
       if (sdp && sdpHasCandidates(sdp)) {
         const ts = Math.max(Date.now(), lastRestartOfferRef.current + 1);
         restartOfferRef.current = lastRestartOfferRef.current = ts;
-        const signal: CallSignal = { t: "r", ts, ...extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current }), ...describeSelf() };
+        const signal: CallSignal = { t: "r", ts, ...extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current }), ...describeSelf() };
         traceLink("call", "call-ice-restart", { candidates: signal.c?.length ?? 0 });
         publishCallSignal(JSON.stringify(signal));
       }
@@ -714,7 +754,7 @@ export function useWebRTC({
         await pc.setLocalDescription(await pc.createAnswer());
         await waitForIceGathering(pc, ICE_RESTART_GATHER_MS, { fresh: true });
         if (!current()) return;
-        const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current });
+        const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current });
         const signal: CallSignal = { t: "a", ts: Date.now(), ...params, ...describeSelf(), re: offer.ts };
         traceLink("call", "call-ice-restart-answer", { candidates: signal.c?.length ?? 0 });
         publishCallSignal(JSON.stringify(signal));
@@ -842,6 +882,8 @@ export function useWebRTC({
     async (withVideo: boolean) => {
       // Never two calls at once: a call is placed once the one on in another chat has ended.
       if (callStateRef.current !== "idle" || anotherCallOn(callKey)) return;
+      // Nothing rings and no line is added: the call window says why there is no call.
+      try { assertKeepsToRelays(); } catch (error) { showMediaProblem(error); return; }
 
       // The contact's call held back here may still ring there: a call of ours would cross it, and theirs, the earlier
       // offer, wins the glare on both sides while this side has already spent it, so neither would ring. It rings here
@@ -892,7 +934,7 @@ export function useWebRTC({
         if (!pc) return;
 
         const sdp = pc.localDescription!.sdp;
-        const params = extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current });
+        const params = extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current });
 
         const offerTs = Date.now();
         myOfferTimestampRef.current = offerTs;
@@ -935,6 +977,7 @@ export function useWebRTC({
       addCallEventMessage,
       removeCallEventMessage,
       showMediaProblem,
+      assertKeepsToRelays,
       callKey,
       ringOffer,
     ],
@@ -961,7 +1004,7 @@ export function useWebRTC({
       }, cancelled);
       if (!pc) return false;
 
-      const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current });
+      const params = extractParamsFromSdp(pc.localDescription!.sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current });
       const signal: CallSignal = { t: "a", ts: Date.now(), o: offer.ts, ...params, v: withVideo ? 1 : 0, ...(mediaRef.current.restartsIce ? { x: 1 as const } : {}) };
       if (withVideo) signal.k = "c";
       peerRestartsRef.current = offer.x === 1;
@@ -974,8 +1017,8 @@ export function useWebRTC({
   );
 
   /**
-   * The caller offered again while our answered call was still connecting: a headless Ghostly does that once, on a
-   * new connection, when libdatachannel refused our answer (see RESTART_GRACE_MS). The call starts over on a new
+   * The caller offered again while our answered call was still connecting: a headless Ghostly does that, on a new
+   * connection, when libdatachannel refused our answer (see RESTART_GRACE_MS). The call starts over on a new
    * connection with the same microphone and camera; the old connection is closed first.
    */
   const restartAnswer = useCallback(
@@ -985,7 +1028,7 @@ export function useWebRTC({
       if (!answered || !stream) return;
       const attempt = ++attemptRef.current;
       const cancelled = () => attemptRef.current !== attempt;
-      restartedRef.current = true;
+      restartsRef.current++;
       clearRestartGrace();
       const old = pcRef.current;
       pcRef.current = null;
@@ -1028,6 +1071,7 @@ export function useWebRTC({
         applyRemotePicture(offer);
         callHadVideoRef.current = withVideo || signalHasVideo(offer);
         callConnectedEventFiredRef.current = false;
+        assertKeepsToRelays();
 
         const stream = await mediaRef.current.getUserMedia({
           audio: captureFrom("audio"),
@@ -1060,6 +1104,7 @@ export function useWebRTC({
       updateCallState,
       couldNotConnect,
       showMediaProblem,
+      assertKeepsToRelays,
       callKey,
     ],
   );

@@ -1,3 +1,4 @@
+import { isZ32Key } from "./bytes";
 import { decodeDnsAnswers, readDnsName } from "./dns";
 import { normalizeDomain } from "./domainProofs";
 
@@ -51,11 +52,15 @@ export function decodeSvcbRecords(dnsPacket: Uint8Array): SvcbRecord[] {
   return records;
 }
 
-/** The homeserver a Pubky key's packet names: the z-base-32 key its `_pubky` record points at, or undefined. */
+/**
+ * The homeserver a Pubky key's packet names: the z-base-32 key its `_pubky` record points at, or undefined. The target
+ * is read next as a key (`pubkyRecords` checks the homeserver's packet against it), so only a canonical one names a
+ * homeserver; a respelled one is none, not a lookup that fails as "no records".
+ */
 export function pubkyHomeserverOf(dnsPacket: Uint8Array, userZ32: string): string | undefined {
   // Like the SDK: the first `_pubky` record. Pkarr stores names with the key appended; accept the relative form too.
   const record = decodeSvcbRecords(dnsPacket).find(r => r.name === `_pubky.${userZ32}` || r.name === "_pubky");
-  return record && Z32.test(record.target) ? record.target : undefined;
+  return record && isZ32Key(record.target) ? record.target : undefined;
 }
 
 /** Where a homeserver answers browsers: a public host name and, when its record says so, a port. */

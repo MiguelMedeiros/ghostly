@@ -316,6 +316,45 @@ describe("redeeming a token", () => {
     expect(await wallet.view()).toMatchObject({ openSwaps: 1, swapsAmount: 62 });
   });
 
+  it("the same token sent again under another payment, from this chat or another, is never finished for it: the first payment gets it", async () => {
+    mintApi.completeSwap.mockRejectedValueOnce(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet, events } = setup();
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    // The mint would answer now: none of these may finish the redeem written down for p1.
+    mintApi.completeSwap.mockResolvedValue(receiveAnswer());
+    const another = (id: string, linkId: string) => (amount: number, mint: string): StoredPayment => ({ ...incoming(amount, mint), id, linkId, requestId: "r2" });
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: another("p2", "l1") })).rejects.toThrow("This ecash is already being received");
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: another("p1", "l2") })).rejects.toThrow("This ecash is already being received");
+    await expect(wallet.receiveToken(TOKEN)).rejects.toThrow("This ecash is already being received");
+    expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+    expect(await balance()).toBe(72);
+    expect(await all(STORES.payments)).toEqual([]);
+    expect(await swaps()).toMatchObject([{ payment: { id: "p1", linkId: "l1" } }]);
+
+    // The mint can be asked again: the redeem is finished as p1's, and p1's chat is told.
+    mintApi.restore.mockResolvedValue(UNSIGNED);
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }]);
+    await pass(30_000);
+    expect(events.onSwapSettled).toHaveBeenCalledOnce();
+    expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: "p1", linkId: "l1" }) }), true);
+    expect(await balance()).toBe(72 + 62);
+    expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", linkId: "l1", amount: 62 }]);
+    expect(await all<WalletTx>(STORES.walletTx)).toHaveLength(1);
+    expect(await swaps()).toEqual([]);
+  });
+
+  it("the same payment sent again finishes its own redeem written down", async () => {
+    mintApi.completeSwap.mockRejectedValueOnce(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet } = setup();
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    mintApi.completeSwap.mockResolvedValueOnce(receiveAnswer());
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
+    expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "p1", amount: 62 }]);
+    expect(await swaps()).toEqual([]);
+  });
+
   it("only an answer counts: a restore that fails says nothing, and the redeem is finished when it works again", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.checkProofsStates.mockResolvedValue([{ state: "SPENT" }]);

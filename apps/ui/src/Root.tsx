@@ -25,7 +25,7 @@ import { LimitedStartGate } from "./components/devices/LimitedStart";
 import { useDeviceGate } from "./hooks/useDeviceGate";
 import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
-import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
+import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, decodePart, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
 import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { groupPath } from "./lib/groups";
@@ -43,6 +43,7 @@ const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile))
 const Identities = menuPage(() => import("./pages/Identities").then((m) => m.Identities));
 const Apps = menuPage(() => import("./pages/Apps").then((m) => m.Apps));
 const Tasks = menuPage(() => import("./pages/Tasks").then((m) => m.Tasks));
+const Saved = menuPage(() => import("./pages/Saved").then((m) => m.Saved));
 const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
 
 /**
@@ -115,7 +116,8 @@ function ChatLinkIntake() {
       else open(reading.keys);
       return;
     }
-    if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
+    const session = decodePart(rest);
+    if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && session !== null && loadSession(session)) return; // an ordinary chat address
     // Whatever it was, it leaves the address bar and the history: it may hold a key.
     setInvalid(INVITE_REFUSAL_MESSAGE[reading.reason]);
     navigate("/", { replace: true });
@@ -225,9 +227,12 @@ function GroupLinkIntake() {
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
     if (!found) return;
-    setCode(decodeURIComponent(found));
+    // A `%` that is not an escape: no group's link, said as one the engine could not read.
+    const link = decodePart(found);
+    if (link === null) setProblem({ tone: "error", title: t("group.link.broken") });
+    else setCode(link);
     navigate("/", { replace: true });
-  }, [pathname, navigate]);
+  }, [pathname, navigate, t]);
   useEffect(() => {
     if (!code || !hasUnlocked) return;
     setCode("");
@@ -248,7 +253,8 @@ function isIntake(pathname: string): boolean {
   // The app icon's shortcuts: the sidebar acts on them and takes them out of the history.
   if (pathname === "/new" || pathname === "/scan") return true;
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
-  return !!rest && (rest.includes("/") || !loadSession(decodeURIComponent(rest)));
+  const session = rest === undefined ? null : decodePart(rest);
+  return !!rest && (rest.includes("/") || session === null || !loadSession(session));
 }
 
 function HomeAnchor() {
@@ -344,6 +350,7 @@ export function Root() {
                       {/* Mini-apps (WISP 1200): the page sends the person home where Apps does not show. */}
                       <Route path="/apps" element={<Apps />} />
                       <Route path="/tasks" element={<Tasks />} />
+                      <Route path="/saved" element={<Saved />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
                       {/* The installed web app: what another app shared, and the icon's shortcuts (manifest.json). */}
                       <Route path="/shared" element={<SharePicker />} />

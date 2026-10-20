@@ -269,6 +269,10 @@ async function openCamera(device: string | null = null): Promise<MediaStreamTrac
 function microphone(device: string | null = null): MediaStreamTrack {
   const context = new AudioContext();
   const track = context.createMediaStreamDestination().stream.getAudioTracks()[0];
+  // Only the track is needed, never its sound. A running context keeps the system's output open with nothing in it
+  // (WebKitGTK: its Web Audio threads and a PipeWire stream, 4-6% of a core) for the whole call; suspended, the track
+  // stays live. It is never resumed, so WebKitGTK's freeze in a resume() after a suspend() (lib/sounds.ts) cannot happen.
+  void context.suspend().catch(() => {});
   reporting(track, device);
   // Who is speaking: the page hears neither side, so the call this track is sent on says both levels.
   const side = (of: "mic" | "peer"): LevelSource => (heard) => callOf.get(track)?.listen(of, heard) ?? (() => {});

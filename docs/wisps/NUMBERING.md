@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 59 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 60 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -14,7 +14,7 @@ All 59 specifications have the document status Draft; each says in its header wh
 | 500-599 | File transfer (500), chat files (501), compatibility file frames (502) |
 | 600-699 | Voice and video (600), WebRTC media (601) |
 | 700-799 | Local services (700), HTTP local service profile (701) |
-| 800-899 | Invite and join (800), invitation profiles (801) |
+| 800-899 | Invite and join (800), invitation profiles (801); public contact links (8xx, number to be defined) |
 | 900-999 | Group session negotiation (900), group mesh (902), group community (903); optional GossipSub distribution (9xx, number to be defined) |
 | 1000-1099 | Storage contract (1000), local file storage (1001), S3-compatible storage (1002) |
 | 1100-1199 | Headless runtime and its local control API (1100); local only, nothing on the wire |
@@ -78,6 +78,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 701 | [701](701-http-services.md) |
 | 20 | [800](800-invite-join.md) |
 | 801 | [801](801-invitation-profiles.md) |
+| none | [8xx · contact-links · number to be defined](8xx-contact-links.md) |
 | 21 | [900](900-group-sessions.md) |
 | 9xx-group-mesh | [902](902-group-mesh.md) |
 | 9xx-group-community | [903](903-group-community.md) |

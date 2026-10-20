@@ -553,7 +553,7 @@ export class CashuWallet {
   /** The ecash of a paid invoice goes in with its history line, in the transaction that drops the quote. */
   private async storeMinted(quote: StoredQuote, proofs: Proof[]): Promise<StoredQuote> {
     const minted = sats(proofs);
-    const tx = walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? TEST_COINS_NOTE : undefined);
+    const tx: WalletTx = { ...walletTx(quote.mint, "lightning-in", minted, quote.amount - minted, quote.paymentId ? "Request paid over Lightning" : quote.testCoins ? TEST_COINS_NOTE : undefined), quote: quote.quote };
     await transact([STORES.proofs, STORES.walletTx, STORES.quotes], (stores) => {
       for (const p of proofs) stores[STORES.proofs].put(toStored(quote.mint, p));
       stores[STORES.walletTx].put(tx);
@@ -889,6 +889,10 @@ export class CashuWallet {
       // A redeem of this very token that is still written down is finished as it was made: never a second swap for it.
       const written = (await this.swapsAt(mint)).filter((s) => s.kind === "receive");
       let swap = written.find((s) => s.token === token);
+      // Written down for another payment (another id, another chat) or for none: that payment's, never finished for this one.
+      const own = payment?.(0, mint);
+      const sameRecord = (a?: StoredPayment, b?: StoredPayment) => a?.id === b?.id && a?.linkId === b?.linkId && a?.direction === b?.direction;
+      if (swap && !sameRecord(swap.payment, own)) throw engineError("ecashBeingReceived");
       // Already in the wallet, with only its chat still to be told: nothing to redeem again.
       if (swap?.finished) return { amount: swap.tx?.amount ?? 0, mint, fee: swap.tx?.fee ?? 0 };
       if (!swap) {

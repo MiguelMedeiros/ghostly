@@ -35,7 +35,7 @@ describe("pin", () => {
     expect(COMMANDS.pin.usage).toBe("pin <chat|group> <message> | --remove");
     expect(line("alice", "peer_x")).toEqual({ chat: "alice", message: "peer_x", remove: false });
     expect(() => line("alice")).toThrow(/Missing <message>: ghostly pin <chat\|group> <message> \| --remove/);
-    expect(() => line()).toThrow(/Missing <chat>/);
+    expect(() => line()).toThrow(/Missing <chat\|group>/);
     expect(() => line("alice", "peer_x", "peer_y")).toThrow(/Too many arguments/);
     // A group's id may start with a dash: it is still the message.
     expect(line("crew", "-k:0:1")).toEqual({ chat: "crew", message: "-k:0:1", remove: false });

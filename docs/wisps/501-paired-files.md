@@ -18,7 +18,7 @@ Formerly "Paired Files". This is how files travel in every chat of [400](400-cha
 
 ## files/3: files of any size (revision 0.3)
 
-`files/3` is a session capability ([03](03-capabilities.md)): each side lists it in its `paired-capabilities` frame, and it is on while both do. Without it, `files/2` below applies unchanged, with its 100 MiB limit; an app that speaks both uses `files/3` with a contact that lists it and `files/2` with one that does not.
+`files/3` is a session capability ([03](03-capabilities.md)): each side lists it in its `paired-capabilities` frame, and it is on while both do. Without it, `files/2` below applies unchanged, with its 100 MiB limit; an app that speaks both uses `files/3` with a contact that lists it and `files/2` with one that does not. On a session where `files/3` is on, a receiver refuses a new `files/2` file (`pf-start` answered with `pf-cancel`, `target: "sender"`): every file goes through the consent below.
 
 ### Frames
 
@@ -85,7 +85,7 @@ The receiver MUST validate offsets, exact size and digest, then finish durable `
 
 ## Limits and scope
 
-For `files/2`: the common contract's 100 MiB file bound, three concurrent incoming files, 500 MiB per-peer stored quota and 30-second idle timeout apply. Cancellation releases partial resources. `files/2` retries whole files; `files/3` resumes (above). Neither offers offline download or group distribution. No DHT bulk fallback.
+For `files/2`: the common contract's 100 MiB file bound, three concurrent incoming files, 500 MiB per-peer stored quota and 30-second idle timeout apply. A `files/2` file larger than the room the receiver has left is refused at `pf-start`. A Ghostly receiver also refuses at `pf-start` a `files/2` file larger than `files/3` takes without asking (25 MiB), or one past the contact's 500 MiB taken without asking: `files/2` cannot ask, and every Ghostly app lists `files/3`. Cancellation releases partial resources. `files/2` retries whole files; `files/3` resumes (above). Neither offers offline download or group distribution. No DHT bulk fallback.
 
 [PairedFiles](../../packages/core/src/pairedFiles.ts), [shared limits](../../packages/core/src/frames.ts), [paired capability evidence](PAIRED-CAPABILITIES.md). Validate corrupted/end-missing transfer, disk failure before receipt, cancel and reconnect independently of the transport adapter.
 

@@ -56,7 +56,7 @@ export function templatePage({ title }: AppTemplate): string {
 <button id="hello" type="button" disabled>Say hello</button>
 <ul id="log" aria-label="Messages"></ul>
 <script type="module">
-// The types of the API come from the SDK (npm install --save-dev @ghostlytools/sdk); nothing of it runs here.
+// The types of the API come from the SDK (npm install --save-dev --prefix .. @ghostlytools/sdk); nothing of it runs here.
 /** @typedef {import('@ghostlytools/sdk/app').MiniAppApi} MiniAppApi */
 /** @typedef {import('@ghostlytools/sdk/app').MiniAppJson} MiniAppJson */
 
@@ -159,10 +159,12 @@ chat, and the files of its own bundle. Apps run in Ghostly from release 1.2.
 
 \`index.html\` is plain JavaScript, typed with JSDoc against \`@ghostlytools/sdk/app\`: \`MiniAppApi\` is
 \`window.ghostly\`, and the same module has the limits (\`MINI_APP_LIMITS\`) and the codes a refused call rejects with
-(\`MINI_APP_ERROR_CODES\`). For the types in your editor:
+(\`MINI_APP_ERROR_CODES\`). For the types in your editor, install it in the folder above this one, where your editor
+still finds it: \`ghostly app publish\` takes every file of this folder, so \`node_modules\` and \`package.json\` stay
+out of it.
 
 \`\`\`sh
-npm install --save-dev @ghostlytools/sdk
+npm install --save-dev --prefix .. @ghostlytools/sdk
 \`\`\`
 
 - What a contact's app sends is untrusted: check its shape, bound its size, and show it as text, never as HTML.

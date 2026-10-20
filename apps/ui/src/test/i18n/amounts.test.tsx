@@ -106,6 +106,21 @@ describe("in Portuguese", () => {
     expect(row).not.toHaveTextContent("Test coins from the test mint");
   });
 
+  it("the Cashu history shows a contact's memo as written, even one that reads like a note of the engine's", async () => {
+    const { engine, user } = renderApp(<Wallet />, { language: "pt" });
+    engine.update({ wallet: walletView({ mints: [mint(TEST_MINT, 10_000)], balance: 10_000, history: [
+      { id: "contact", timestamp: 3, mint: TEST_MINT, kind: "ecash-in", amount: 21, fee: 0, note: "Test coins from the test mint" },
+      { id: "paid", timestamp: 2, mint: TEST_MINT, kind: "lightning-out", amount: 5, fee: 0, note: "Request paid over Lightning" },
+      { id: "sent", timestamp: 1, mint: TEST_MINT, kind: "ecash-out", amount: 3, fee: 0, note: "A Lightning payment failed" },
+    ] }) });
+    await user.click(await screen.findByTestId("wallet-network-testnet"));
+    await user.click(await screen.findByTestId("wallet-history"));
+    const rows = await screen.findAllByTestId("wallet-tx");
+    expect(rows[0]).toHaveTextContent("Test coins from the test mint");
+    expect(rows[1]).toHaveTextContent("Request paid over Lightning");
+    expect(rows[2]).toHaveTextContent("A Lightning payment failed");
+  });
+
   it("a wallet's decimal amount field takes the comma a phone's decimal key types, and shows it as typed", async () => {
     let meant = "";
     const Field = () => { const [value, setValue] = useState(""); meant = value; return <Amount value={value} onChange={setValue} unit="USDT" decimals={6} testId="amount" />; };

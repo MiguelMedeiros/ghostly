@@ -16,10 +16,12 @@
  *
  * Links are per app (its reference), not per chat, and the app reads them only by the ids this module chose.
  */
+import { yieldThread } from "@ghostly/core";
 import { MINI_APP_LIMITS, type MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import { keepTabInside } from "../../hooks/useDismiss";
 import type { Translate } from "../../locales/translate";
 import type { LinkedFilesHost } from "../platform";
+import { PICK_AFTER_CANCEL_MS } from "./broker";
 
 /** What the sheets say, in the person's language. */
 export interface PickSheetText {
@@ -107,15 +109,38 @@ interface Link {
 const RECENT_FILES = 4;
 
 /** Refusals cross to the broker as "<code>: words" (broker.ts reads the code). */
-const refusal = (code: "cancelled" | "changed" | "gone" | "too-large", words: string) => new Error(`${code}: ${words}`);
+const refusal = (code: "cancelled" | "changed" | "gone" | "too-large" | "too-fast", words: string) => new Error(`${code}: ${words}`);
 
-function randomId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/** 16 bytes from `at` as unpadded base64url (22 characters). */
+function idOf(bytes: Uint8Array, at: number): string {
+  let id = "";
+  for (let i = at; i < at + 15; i += 3) {
+    const word = (bytes[i]! << 16) | (bytes[i + 1]! << 8) | bytes[i + 2]!;
+    id += BASE64URL[word >> 18]! + BASE64URL[(word >> 12) & 63]! + BASE64URL[(word >> 6) & 63]! + BASE64URL[word & 63]!;
+  }
+  const last = bytes[at + 15]!;
+  return id + BASE64URL[last >> 2]! + BASE64URL[(last & 3) << 4]!;
 }
 
+/** Random ids, 16 bytes each: 4096 of them (the most one `getRandomValues` gives) per draw, not a draw per id. */
+function randomIds(n: number): string[] {
+  const ids: string[] = [];
+  while (ids.length < n) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16 * Math.min(n - ids.length, 4096)));
+    for (let at = 0; at < bytes.length; at += 16) ids.push(idOf(bytes, at));
+  }
+  return ids;
+}
+
+const randomId = () => randomIds(1)[0]!;
+
+/** How many picked files a pick turns into links per turn of the thread: a pick of 100,000 lets the page answer between. */
+const PICK_CHUNK = 4096;
+
 /** Whether a path names something hidden: any of its parts starts with a dot. */
-const hidden = (path: string) => path.split("/").some((part) => part.startsWith("."));
+const hidden = (path: string) => path.startsWith(".") || path.includes("/.");
 
 const extensionOf = (path: string) => {
   const name = path.slice(path.lastIndexOf("/") + 1);
@@ -253,6 +278,9 @@ export function idbPickStore(name: () => string): PickStore {
   };
 }
 
+/** How long a sheet's first button stays off after the sheet shows: longer than a double click or a key typed next. */
+const SHEET_SETTLE_MS = 500;
+
 /**
  * A sheet of the client's own: a title, a note, a second button and a first one whose click does `act`. Modal: Tab
  * and Shift+Tab go round its buttons, never to the app under it. It goes, answering null, when `signal` aborts (its
@@ -300,11 +328,16 @@ function sheet(parts: { title: string; note?: string; secondary: string; primary
     back.append(box);
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     let done = false;
+    // A key or click the person was already making (a second Enter, a double click, typing in the message box) is not
+    // an answer: the sheet opens with focus on its box, and its button works only a moment after it shows.
+    primary.disabled = true;
+    const armed = setTimeout(() => { primary.disabled = false; }, SHEET_SETTLE_MS);
     const tab = (e: KeyboardEvent) => keepTabInside(e, box);
     const stopped = () => finish(null);
     const finish = (value: unknown) => {
       if (done) return;
       done = true;
+      clearTimeout(armed);
       document.removeEventListener("keydown", tab);
       parts.signal?.removeEventListener("abort", stopped);
       back.remove();
@@ -321,8 +354,10 @@ function sheet(parts: { title: string; note?: string; secondary: string; primary
       primary.disabled = true;
       parts.act().then(finish, () => finish(null));
     });
+    box.tabIndex = -1;
+    box.classList.add("outline-none");
     document.body.appendChild(back);
-    primary.focus({ preventScroll: true });
+    box.focus({ preventScroll: true });
   });
 }
 
@@ -335,9 +370,10 @@ export interface WebLinkedFilesOptions {
   ask?: (app: string, folder: boolean, accept: string[], signal?: AbortSignal) => Promise<Picked | null>;
   /** Asks the person to let the browser read kept picks again (`grant` asks it); by default the sheet, which goes on `signal`. */
   askAgain?: (app: string, name: string, more: number, grant: () => Promise<boolean>, signal?: AbortSignal) => Promise<boolean>;
+  now?: () => number;
 }
 
-export function webLinkedFiles({ text, picker = browserPicker(), store = null, ask, askAgain }: WebLinkedFilesOptions): LinkedFilesHost {
+export function webLinkedFiles({ text, picker = browserPicker(), store = null, ask, askAgain, now = Date.now }: WebLinkedFilesOptions): LinkedFilesHost {
   const apps = new Map<string, Map<string, Link>>();
   /** Each kept pick by id, with whether the browser lets it be read now and how many of its entries are not forgotten. */
   const picks = new Map<string, { stored: StoredPick; granted: boolean; left: number }>();
@@ -346,6 +382,12 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
   const askedAgain = new Set<string>();
   /** Files of kept picks got lately, the oldest first. */
   const recent = new Map<Link, Blob>();
+  /**
+   * The apps whose sheet is up, and when each may ask again after the person cancelled one: per app, not per broker, as
+   * an app open in several chats has a broker in each.
+   */
+  const picking = new Set<string>();
+  const pickAgainAt = new Map<string, number>();
   const linksOf = (ref: string) => {
     let links = apps.get(ref);
     if (!links) apps.set(ref, (links = new Map()));
@@ -430,21 +472,43 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
 
   return {
     async pick(ref, title, { folder, accept }, signal) {
-      await load(ref);
-      const picked = await askPerson(title, folder, accept, signal);
-      if (!picked) throw refusal("cancelled", "Nothing was picked");
-      const kept = picked.files.filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
-      const links = linksOf(ref);
-      if (links.size + kept.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
+      if (signal?.aborted) throw refusal("cancelled", "The app stopped");
+      if (picking.has(ref) || now() < (pickAgainAt.get(ref) ?? 0)) throw refusal("too-fast", "The app's sheet is open, or was just cancelled");
+      picking.add(ref);
+      let picked: Picked | null;
+      try {
+        await load(ref);
+        picked = await askPerson(title, folder, accept, signal);
+      } finally {
+        picking.delete(ref);
+      }
+      if (!picked) {
+        // The person cancelled a running app's sheet; one taken down with its app is no app asking again.
+        if (!signal?.aborted) pickAgainAt.set(ref, now() + PICK_AFTER_CANCEL_MS);
+        throw refusal("cancelled", "Nothing was picked");
+      }
       // A pick its handles read again holds no file: each is got when the app reads it.
       const pickId = picked.keep ? randomId() : undefined;
-      const added = kept.map(({ path, file, at }) => {
-        const entry: MiniAppLinkedFile = { id: randomId(), path, size: file.size, modified: file.lastModified ?? 0, available: true };
-        links.set(entry.id, { entry, ...(pickId ? { pick: pickId } : { file: file as Blob }), ...(at !== undefined && { at }) });
-        return { entry, at };
-      });
+      const added: Link[] = [];
+      const entries: StoredPick["entries"] = [];
+      // In chunks, the thread let go between them: at 100,000 files the links took the page for half a second.
+      for (let from = 0; from < picked.files.length; from += PICK_CHUNK) {
+        if (from) await yieldThread();
+        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
+        if (linksOf(ref).size + added.length + chunk.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
+        const ids = randomIds(chunk.length);
+        chunk.forEach(({ path, file, at }, i) => {
+          const entry: MiniAppLinkedFile = { id: ids[i]!, path, size: file.size, modified: file.lastModified ?? 0, available: true };
+          added.push({ entry, ...(pickId ? { pick: pickId } : { file: file as Blob }), ...(at !== undefined && { at }) });
+          if (pickId) entries.push({ id: entry.id, path, size: entry.size, modified: entry.modified, ...(at !== undefined && { at }) });
+        });
+      }
+      const links = linksOf(ref);
+      // Again: another pick of the app's may have made its links between the chunks.
+      if (links.size + added.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
+      for (const link of added) links.set(link.entry.id, link);
       if (pickId && picked.keep) {
-        const stored: StoredPick = { ref, id: pickId, keep: picked.keep, entries: added.map(({ entry: { available: _, ...rest }, at }) => ({ ...rest, ...(at !== undefined && { at }) })) };
+        const stored: StoredPick = { ref, id: pickId, keep: picked.keep, entries };
         picks.set(pickId, { stored, granted: true, left: stored.entries.length });
         // Kept for the next page; a store that fails leaves the links for this one.
         await store?.put(stored).catch(() => {});
@@ -472,6 +536,10 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
         if (signal?.aborted) askedAgain.delete(ref);
       }
       return [...linksOf(ref).values()].map((link) => link.entry);
+    },
+    async entry(ref, id) {
+      await load(ref);
+      return linksOf(ref).get(id)?.entry ?? null;
     },
     async read(ref, id, offset, length) {
       await load(ref);

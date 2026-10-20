@@ -613,7 +613,8 @@ export class CallManager {
     // A call placed here that the contact never answered: the next one waits a moment (`CALL_PACE_MS`).
     if (call.direction === "out" && call.connectedAt === null && call.state === "ringing" && (reason === "hangup" || reason === "unanswered")) this.unansweredAt.set(call.chat, this.now);
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
-    call.media?.close();
+    // Whatever the media's close throws, the rest of the end follows: the contact is told, the program reads EOF.
+    try { call.media?.close(); } catch (error) { process.stderr.write(`ghostly: call ${call.id}: closing its media failed: ${error instanceof Error ? error.message : String(error)}\n`); }
     // A call that ends ringing (declined, missed, stale) closes the answer it made ahead; one being made, once made.
     this.stopEarly(call);
     call.early?.close();

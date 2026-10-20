@@ -401,6 +401,29 @@ describe("two call managers", { timeout: 60_000 }, () => {
     stack.deaf(false);
   });
 
+  // Its codecs' delete throwing (a broken Opus module: "memory access out of bounds") went up through the media's close
+  // and stopped the call's end there: no hang-up to the contact, no call.ended, the connection left open.
+  it("a call whose codecs throw as it ends still ends: the contact is told, call.ended goes out, the connection closes", async () => {
+    const counted = countingStack();
+    const throwing = async (): Promise<CallStack | string> => {
+      const real = await counted();
+      if (typeof real === "string") return real;
+      return { ...real, opus: (rate) => {
+        const codec = real.opus(rate);
+        return { encode: codec.encode, decode: codec.decode, delete: () => { codec.delete?.(); throw new RangeError("memory access out of bounds"); } };
+      } };
+    };
+    const { a, b } = pairOfManagers({ b: throwing });
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await until(() => (b.calls.list() as { state: string }[])[0]?.state === "connected");
+    await b.calls.hangup(undefined);
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "hangup" });
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await until(() => counted.open() === 0);
+    expect(b.calls.list()).toEqual([]);
+  });
+
   it("a hang-up saying the contact could not connect (an app whose microphone was refused) ends a ringing call as failed", async () => {
     const { a, b } = pairOfManagers();
     await a.calls.start("chat-ab", {});

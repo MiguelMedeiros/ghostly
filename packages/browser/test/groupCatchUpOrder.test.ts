@@ -220,6 +220,35 @@ describe("a member back in a private group reads what it missed in the order it 
     expect(texts.indexOf("dave: agreed")).toBeGreaterThan(texts.indexOf("alice 120"));
   });
 
+  it("someone joined while the member was away: the rows of the epoch before are waited for too, not placed again a page at a time", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , carol, dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    const written: string[] = [];
+    const write = async (i: number) => { written.push(`alice ${i}`); await alice.groups.send(id, `alice ${i}`); await world.run(50); };
+    for (let i = 1; i <= 190; i++) await write(i);
+    // A join is a new epoch: of her newest 32, the first 22 and all the older ones are in the epoch before.
+    const erin = world.add("erin");
+    await erin.groups.joinByLink(await alice.groups.enableLink(id));
+    await world.until(() => world.view(carol, id)?.members.length === 5, 10 * 60_000);
+    for (let i = 191; i <= 200; i++) await write(i);
+    // Away when Dave is back: she holds nothing of the epoch before, and a turn asking her would delay the rest.
+    erin.online = false;
+    const placeAgain = dave.host.placeAgain!;
+    let calls = 0, rows = 0;
+    dave.host.placeAgain = async (linkId, ids) => { calls++; rows += ids.length; await placeAgain(linkId, ids); };
+    world.slow = (_from, to) => to === dave ? 4 : 0;
+    world.reopen(dave);
+    await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 240_000);
+    await world.run(20_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+    // Her newest 32 race a hand-on and the older pages come later: a few moves, each row about once, as without a
+    // join. Waiting on her current epoch only, each older one handed on moved her newer rows (500 moves).
+    expect(calls).toBeLessThanOrEqual(6);
+    expect(rows).toBeLessThanOrEqual(written.length + 32);
+  });
+
   it("what the member asked first writes meanwhile is not its answer: the others are told as soon as that has come", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
     const [alice, bob, carol, dave, eve] = peers;

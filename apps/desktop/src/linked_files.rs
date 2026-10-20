@@ -3,8 +3,8 @@
 //!
 //! - The app's broker (in the Ghostly window) asks; only the Ghostly window may call these commands, and an app window
 //!   never names a path: it reads by the ids given here.
-//! - A folder brings everything under it except hidden files and folders (a name starting with "."); symbolic links
-//!   are not followed. `accept`, when it names extensions, keeps only those.
+//! - A folder brings everything under it except hidden files and folders (a name starting with ".") and folders that
+//!   cannot be read; symbolic links are not followed. `accept`, when it names extensions, keeps only those.
 //! - A link remembers the size and date its file had when picked: a file that changed since reads as `changed`, one
 //!   that went as `gone`, until it is picked again.
 //! - Links live in `linked/<space>/<app>.json` in the app's data folder (`space` is the page's database name, `<app>`
@@ -14,9 +14,13 @@
 //!   with 100,000 links that was 27 MB a forget. The file is written whole again only once the forgotten lines are as
 //!   many as the links left (and at least `COMPACT_AFTER`), so forgetting costs a few hundred bytes a link on average.
 //!
-//! Refusals are `"<code>: words"`, the codes the broker passes to the app (`cancelled`, `changed`, `gone`, `too-large`).
+//! - One dialog at a time per app: kept here, so a reload of the page (a profile switch) with one up neither opens a
+//!   second nor links what is then picked in it (`page_started`).
+//!
+//! Refusals are `"<code>: words"`, the codes the broker passes to the app (`cancelled`, `changed`, `gone`, `too-fast`,
+//! `too-large`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -137,6 +141,23 @@ pub struct LinkedFiles {
     /// uninstall, `drop_space` on a deleted profile): a pick reads it before its dialog opens, and keeps nothing if it
     /// moved meanwhile.
     cleared: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    /// The apps whose system dialog is up, by their links file (`start_pick`): kept here and not in the page, which a
+    /// reload (a profile switch) starts again while the dialog stays on screen.
+    picking: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+/// A pick whose dialog is up: its app gets no other until this one is answered and dropped.
+pub struct Picking {
+    links: LinkedFiles,
+    file: PathBuf,
+    /// As `begin` read it before the dialog opened, for `add`.
+    pub begun: u64,
+}
+
+impl Drop for Picking {
+    fn drop(&mut self) {
+        locked(&self.links.picking).remove(&self.file);
+    }
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -210,21 +231,46 @@ fn accepted(name: &str, accept: &[String]) -> bool {
     extension.is_some_and(|e| accept.contains(&e))
 }
 
-/// Everything under a folder that `accept` names, its name first in each path: hidden entries and symbolic links left
-/// out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
+/// The name a picked folder goes by, first in its paths. A whole drive has none of its own: it goes by its letter (`D`
+/// for `D:\`), its share (`films` for `\\nas\films`) or `Disk` (`/`), never with a `:` or a `\` that would make a
+/// path look absolute.
+fn folder_name(root: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    match root.components().next_back()? {
+        Component::Normal(name) => name.to_str().map(str::to_string),
+        Component::RootDir | Component::Prefix(_) => {
+            let drive = root.components().find_map(|c| match c {
+                Component::Prefix(p) => match p.kind() {
+                    Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                        Some(char::from(letter).to_string())
+                    }
+                    Prefix::UNC(_, share) | Prefix::VerbatimUNC(_, share) => {
+                        share.to_str().map(str::to_string)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            });
+            Some(drive.unwrap_or_else(|| "Disk".to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// Everything under a folder that `accept` names, its name first in each path: hidden entries, symbolic links and
+/// folders that cannot be read left out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
 pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
-    let top = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("A folder with no name")?
-        .to_string();
+    let top = folder_name(root).ok_or("A folder with no name")?;
     let mut found = Vec::new();
     let mut stack = vec![(top, root.to_path_buf())];
     while let Some((shown, dir)) = stack.pop() {
-        let mut entries: Vec<_> = fs::read_dir(&dir)
-            .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .collect();
+        // Only the picked folder must be read: one under it that cannot be (`lost+found`, another user's) is left out.
+        let listing = match fs::read_dir(&dir) {
+            Ok(listing) => listing,
+            Err(e) if dir == root => return Err(e.to_string()),
+            Err(_) => continue,
+        };
+        let mut entries: Vec<_> = listing.filter_map(Result::ok).collect();
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {
@@ -269,6 +315,7 @@ impl LinkedFiles {
             books: Arc::default(),
             writing: Arc::default(),
             cleared: Arc::default(),
+            picking: Arc::default(),
         }
     }
 
@@ -358,9 +405,44 @@ impl LinkedFiles {
         Ok(times(&file) + times(folder))
     }
 
+    /// A pick about to open its dialog: refused while the app's last one is up, whichever page asked for it.
+    pub fn start_pick(&self, space: &str, app: &str) -> Result<Picking, String> {
+        let file = self.file(space, app)?;
+        // Held while `begin` reads, so a `page_started` meanwhile either finds this pick or comes before it.
+        let mut picking = locked(&self.picking);
+        if picking.contains(&file) {
+            return Err("too-fast: The app's dialog is open".into());
+        }
+        let begun = self.begin(space, app)?;
+        picking.insert(file.clone());
+        Ok(Picking {
+            links: self.clone(),
+            file,
+            begun,
+        })
+    }
+
+    /// The Ghostly window's page starts again: the apps of the page before are gone, so every dialog they left up
+    /// keeps nothing when the person answers it (as `let_go`). It stays up, and its app still gets no other.
+    pub fn page_started(&self) {
+        let _writing = locked(&self.writing);
+        for file in locked(&self.picking).iter() {
+            self.clear(file.clone());
+        }
+    }
+
     /// Counted with `writing` held, so a pick's `add` sees it or comes before it.
     fn clear(&self, at: PathBuf) {
         *locked(&self.cleared).entry(at).or_default() += 1;
+    }
+
+    /// The app stopped with its dialog up: the system's dialog cannot be taken back, so what the person picks in it is
+    /// kept for nobody, as after an uninstall. The app's links stay.
+    pub fn let_go(&self, space: &str, app: &str) -> Result<(), String> {
+        let file = self.file(space, app)?;
+        let _writing = locked(&self.writing);
+        self.clear(file);
+        Ok(())
     }
 
     /// Keeps links to what was picked, and answers them as the app sees them: nothing if the app's links all went or
@@ -382,7 +464,14 @@ impl LinkedFiles {
         }
         let mut added = Vec::with_capacity(picked.len());
         for (path, full) in picked {
-            let Ok(meta) = fs::metadata(&full) else {
+            // A file only, as `walk` keeps: opening a named pipe picked with the files waited for a writer for good,
+            // and every app's links with it.
+            if !fs::metadata(&full).is_ok_and(|meta| meta.is_file()) {
+                continue;
+            }
+            // Opened, not only looked at: a file that cannot be read (another user's) is left out, as `walk` leaves
+            // out a folder that cannot be, rather than listed as there and then `gone` on every read.
+            let Ok(meta) = fs::File::open(&full).and_then(|file| file.metadata()) else {
                 continue;
             };
             let (size, modified) = stamp(&meta);
@@ -559,10 +648,11 @@ pub async fn linked_files_pick<R: tauri::Runtime>(
     check_space(&space)?;
     check_app(&app_ref)?;
     check_accept(&accept)?;
-    let begun = links.begin(&space, &app_ref)?;
+    // Held until what was picked is added (or not): the app's next dialog waits for this one, page reload or not.
+    let up = links.start_pick(&space, &app_ref)?;
     #[cfg(target_os = "android")]
     {
-        let _ = (links, begun, title, folder);
+        let _ = (links, up, title, folder);
         Err("Apps cannot pick files on Android".into())
     }
     #[cfg(not(target_os = "android"))]
@@ -599,11 +689,24 @@ pub async fn linked_files_pick<R: tauri::Runtime>(
             } else {
                 picked_files(paths, &accept)
             };
-            links.add(&space, &app_ref, begun, picked)
+            links.add(&space, &app_ref, up.begun, picked)
         })
         .await
         .map_err(|e| e.to_string())?
     }
+}
+
+/// The app whose pick is in flight stopped: the pick keeps nothing when the person answers.
+#[tauri::command]
+pub async fn linked_files_pick_cancel<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    space: String,
+    app_ref: String,
+) -> Result<(), String> {
+    let links = state(&app)?;
+    tauri::async_runtime::spawn_blocking(move || links.let_go(&space, &app_ref))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -733,6 +836,102 @@ mod tests {
             .unwrap()
             .iter()
             .all(|(p, _)| !p.contains("elsewhere") && !p.contains("link.mp4")));
+    }
+
+    /// A whole drive has no name of its own (`/`, `D:\`): it is linked under one that keeps every path relative.
+    #[test]
+    fn a_whole_drive_is_named_too() {
+        assert_eq!(folder_name(&films()).as_deref(), Some("Films"));
+        #[cfg(unix)]
+        assert_eq!(folder_name(Path::new("/")).as_deref(), Some("Disk"));
+        #[cfg(windows)]
+        {
+            assert_eq!(folder_name(Path::new(r"D:\")).as_deref(), Some("D"));
+            assert_eq!(folder_name(Path::new(r"\\?\D:\")).as_deref(), Some("D"));
+            assert_eq!(
+                folder_name(Path::new(r"\\nas\films\")).as_deref(),
+                Some("films")
+            );
+        }
+        assert_eq!(folder_name(Path::new("Films/..")), None);
+    }
+
+    /// `lost+found` at the root of an ext4 drive, a folder of another user: the rest of the folder is still linked.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_be_read_is_left_out_and_the_rest_is_linked() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = films();
+        let locked = root.join("lost+found");
+        fs::create_dir(&locked).unwrap();
+        fs::write(locked.join("kept.mp4"), b"x").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        // As root every folder can be read: nothing to prove.
+        let readable = fs::read_dir(&locked).is_ok();
+        let found = walk(&root, &["mp4".to_string()]);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+        if readable {
+            return;
+        }
+        let found: Vec<String> = found.unwrap().into_iter().map(|(p, _)| p).collect();
+        assert_eq!(found, ["Films/Season 1/E01.mp4", "Films/Up.mp4"]);
+        // The picked folder itself must be read.
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).unwrap();
+        let picked = walk(&root, &[]);
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(picked.is_err());
+    }
+
+    /// Another user's file, root's after a `sudo cp`: left out of the pick, not listed as there and then `gone`.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cannot_be_read_is_left_out_and_the_rest_is_linked() {
+        use std::os::unix::fs::PermissionsExt;
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let locked = root.join("Locked.mp4");
+        fs::write(&locked, b"x").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        // As root every file can be read: nothing to prove.
+        let readable = fs::File::open(&locked).is_ok();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap());
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
+        if readable {
+            return;
+        }
+        let added: Vec<String> = added.unwrap().into_iter().map(|e| e.path).collect();
+        assert_eq!(added, ["Films/Season 1/E01.mp4", "Films/Up.mp4"]);
+        let listed = links.list("ghostly", APP).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().all(|e| e.available));
+    }
+
+    /// A named pipe picked with the files: opening one waits for a writer, and every app's links waited with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_named_pipe_picked_is_left_out_and_nothing_waits_on_it() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let pipe = root.join("Live.mp4");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&pipe)
+            .status()
+            .unwrap()
+            .success());
+        let picked = picked_files(vec![root.join("Up.mp4"), pipe], &["mp4".to_string()]);
+        let (done, added) = std::sync::mpsc::channel();
+        let picker = links.clone();
+        std::thread::spawn(move || done.send(pick(&picker, picked)));
+        let added = added
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the pick waited on the pipe")
+            .unwrap();
+        assert_eq!(
+            added.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            ["Up.mp4"]
+        );
+        // The lock every app's links take is free again.
+        links.forget("ghostly", APP, "all").unwrap();
     }
 
     #[test]
@@ -992,6 +1191,69 @@ mod tests {
             .unwrap_err()
             .starts_with("cancelled: "));
         assert!(!links.base.join("ghostly").exists());
+    }
+
+    // An app whose window closed with its dialog up got what the person then picked in it linked.
+    #[test]
+    fn a_pick_whose_app_stopped_keeps_nothing_and_the_app_keeps_its_links() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        assert_eq!(pick(&links, walk(&root, &[]).unwrap()).unwrap().len(), 4);
+        let begun = links.begin("ghostly", APP).unwrap();
+        links.let_go("ghostly", APP).unwrap();
+        assert!(links
+            .add("ghostly", APP, begun, walk(&root, &[]).unwrap())
+            .unwrap_err()
+            .starts_with("cancelled: "));
+        assert_eq!(links.list("ghostly", APP).unwrap().len(), 4);
+        // The app reopened picks again.
+        assert_eq!(pick(&links, walk(&root, &[]).unwrap()).unwrap().len(), 4);
+        assert!(links.let_go("ghostly", "cinema").is_err());
+    }
+
+    // The one-dialog guard and the cancel lived in the page: after a reload (a profile switch) with a dialog up, the
+    // reopened app got a second dialog, and what was picked in the first was linked for the profile left.
+    #[test]
+    fn a_dialog_up_across_a_page_reload_keeps_nothing_and_its_app_gets_no_other() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let other = APP.replace("/cinema", "/chess");
+        let up = links.start_pick("ghostly", APP).unwrap();
+        assert!(links
+            .start_pick("ghostly", APP)
+            .err()
+            .unwrap()
+            .starts_with("too-fast: "));
+        // Another app, or the same app in another profile, has a dialog of its own.
+        let other_up = links.start_pick("ghostly", &other).unwrap();
+        drop(links.start_pick("ghostly_b", APP).unwrap());
+        drop(other_up);
+        links.page_started();
+        // The page before is gone, its dialog still up: the app reopened gets no other.
+        assert!(links
+            .start_pick("ghostly", APP)
+            .err()
+            .unwrap()
+            .starts_with("too-fast: "));
+        // The person answers it: nothing is linked for an app that is no longer running.
+        assert!(links
+            .add("ghostly", APP, up.begun, walk(&root, &[]).unwrap())
+            .unwrap_err()
+            .starts_with("cancelled: "));
+        assert!(links.list("ghostly", APP).unwrap().is_empty());
+        drop(up);
+        // Answered, the app picks again; a dialog opened after the reload keeps what is picked.
+        let again = links.start_pick("ghostly", APP).unwrap();
+        links.page_started();
+        let later = links.start_pick("ghostly", &other).unwrap();
+        drop(again);
+        assert_eq!(
+            links
+                .add("ghostly", &other, later.begun, walk(&root, &[]).unwrap())
+                .unwrap()
+                .len(),
+            4
+        );
     }
 
     #[test]

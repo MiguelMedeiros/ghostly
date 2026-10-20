@@ -21,7 +21,7 @@ export const commands: Record<string, Command> = {
   "identity withdraw": { method: "identity.withdraw", usage: "identity withdraw <chat> <id>", summary: "Withdraw a proof from a contact", args: ["chat", "id"], params: (_, a) => ({ chat: a.chat, id: a.id }) },
   "x401 credential add": {
     method: "x401.credential.add", usage: "x401 credential add <file|-> [--label <name>]", summary: "Keep an issued SD-JWT VC bound to a key from x401 key new (a file, or - for stdin)",
-    args: ["file"], options: { label: { type: "string", description: "Your name for it (default: its type)" } },
+    args: ["file"], options: { label: { type: "string", description: "Your name for it, up to 80 characters on one line (default: its type)" } },
     params: ({ options }, a) => ({ file: a.file === "-" ? "-" : here(a.file), label: options.label }),
   },
   "x401 credential list": {

@@ -6,7 +6,7 @@ import type { EngineState } from "@ghostly/browser/shared/types";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
-import { invoiceNetwork } from "../src/wallets";
+import { invoiceNetwork, paymentJson } from "../src/wallets";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
 /** The wallet and payment methods over a fake engine: what they refuse before the engine is asked. */
@@ -56,6 +56,7 @@ function fake() {
     walletReceiveToken: vi.fn(async (_: unknown) => ({ amount: 1 })),
     bitcoinReceiveAddress: vi.fn(async (_: unknown) => "tb1q"),
     connect: vi.fn(async (_: unknown) => undefined),
+    setChatPaymentMethods: vi.fn(async (_: unknown) => undefined),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {} }, mode: "daemon", version: "t" } as unknown as ApiContext;
   return { ctx, node };
@@ -90,6 +91,18 @@ describe("wallets", () => {
     await expect(callApi(ctx, "wallet.list", { network: "" })).rejects.toMatchObject({ code: "bad_request", message: "network must be one of mainnet, testnet" });
     expect(node.walletCreate).not.toHaveBeenCalled();
     expect(node.walletRemove).not.toHaveBeenCalled();
+  });
+
+  it("chat.accept refuses networks that name no network, as it refuses a bogus one, before the engine", async () => {
+    // Found in a bug hunt: `chat accept bob cashu --networks ""` exited 0 and left cashu on no network while methods still said it was on.
+    const { ctx, node } = fake();
+    for (const networks of [[], ["bogus"]]) {
+      await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks }), JSON.stringify(networks)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^networks must list mainnet and\/or testnet/) });
+    }
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: [] })).rejects.toThrow(/--off/);
+    expect(node.setChatPaymentMethods).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: ["testnet"] });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
   });
 
   it("removal holding money needs the person's acceptLoss", async () => {
@@ -205,6 +218,13 @@ describe("real money", () => {
     expect(invoiceNetwork("lightning:LNTBS1pxyz")).toBe("testnet");
     expect(invoiceNetwork("lnbcrt500n1pxyz")).toBe("testnet");
     expect(invoiceNetwork("hello")).toBeNull();
+  });
+
+  it("a received Fedimint payment says its network and fedimint as its method", () => {
+    const received = { id: "p", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: "f" } as const;
+    expect(paymentJson({ ...received, network: "testnet" })).toMatchObject({ network: "testnet", method: "fedimint" });
+    expect(paymentJson({ ...received, network: "mainnet" })).toMatchObject({ network: "mainnet", method: "fedimint" });
+    expect(paymentJson({ id: "r", linkId: "l", kind: "request", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, federations: ["f"], invoice: "lntbs1x", network: "testnet" }).method).toBe("fedimint");
   });
 
   it("no spend on Mainnet without confirmReal, and confirmedReal only with it", async () => {

@@ -266,11 +266,15 @@ try {
   `prove`, `proveAsOther`, a stubbed `fetch` and `revoke` for re-checks. The suites are the ones in
   `packages/browser`, moved into the source so the app and you run the same file.
 - **Fakes** (`@ghostlytools/sdk/fakes`): in-memory regtest sats and test identities that hold nothing and
-  reach nothing, to drive your tests without a network.
+  reach nothing, to drive your tests without a network. `testProvidersEnabled` and `testIdentitiesEnabled` are
+  the app's own switches (a storage key, read by a development or e2e build only) and are folded to false when
+  the package is built: to have the fakes in the app, register them like any adapter.
 - **Real networks**: gate on an environment variable (`GHOSTLY_<NAME>_REGTEST=1`), skip otherwise,
   never real funds, never a real account, never print a secret.
 - **In the app**: `GHOSTLY_PLUGINS=… npm run build:web`, then `npx vite preview apps/web`; or add a spec
-  next to `e2e/web/sdk-plugin.spec.ts`, which drives the example through the pickers.
+  next to `e2e/web/sdk-plugin.spec.ts`, which drives the example through the pickers. A plain `build:web` is a
+  release build: it ignores the `ghostly-test-providers` and `ghostly-test-identities` keys (set `VITE_APPS_TEST=1`
+  on the build to read them, as the e2e suite does).
 
 ## Versioning and stability
 

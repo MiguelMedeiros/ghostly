@@ -41,7 +41,7 @@ All ${numbering.length} specifications have the document status Draft; each says
 | 500-599 | File transfer (500), chat files (501), compatibility file frames (502) |
 | 600-699 | Voice and video (600), WebRTC media (601) |
 | 700-799 | Local services (700), HTTP local service profile (701) |
-| 800-899 | Invite and join (800), invitation profiles (801) |
+| 800-899 | Invite and join (800), invitation profiles (801); public contact links (8xx, number to be defined) |
 | 900-999 | Group session negotiation (900), group mesh (902), group community (903); optional GossipSub distribution (9xx, number to be defined) |
 | 1000-1099 | Storage contract (1000), local file storage (1001), S3-compatible storage (1002) |
 | 1100-1199 | Headless runtime and its local control API (1100); local only, nothing on the wire |

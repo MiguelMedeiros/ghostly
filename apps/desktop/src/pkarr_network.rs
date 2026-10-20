@@ -58,7 +58,11 @@ use crate::turn_network::{TurnDht, TurnSources};
 /// The relays written to before Settings named any: the browser clients' defaults
 /// (`DEFAULT_RELAYS` in packages/core/src/relay.ts). The app hands over the list
 /// in Settings as it starts, so a relay is added there, not here.
-pub const DEFAULT_RELAYS: [&str; 2] = ["https://pkarr.pubky.org", "https://pkarr.pubky.app"];
+pub const DEFAULT_RELAYS: [&str; 3] = [
+    "https://pkarr.pubky.org",
+    "https://pkarr.pubky.app",
+    "https://pkarr.miguelmedeiros.dev",
+];
 
 /// Reads this client allows itself per relay and minute; past it, a read
 /// returns the newest seen and leaves the relays to the DHT lookup. Relays
@@ -96,7 +100,7 @@ const READ_BACK_EVERY: Duration = Duration::from_millis(300);
 /// …this many times at most; after that it waits for the writes themselves.
 const READ_BACKS: usize = 4;
 /// A relay that says (`x-ratelimit-remaining`) it has fewer requests left than this for us is left
-/// to the others; pkarr.pubky.org allows 50 a minute per address, pkarr.pubky.app 1000.
+/// to the others; pkarr.pubky.org allows 50 a minute per address, pkarr.pubky.app 1000, pkarr.miguelmedeiros.dev 10.
 const RESERVE: i64 = 4;
 /// A second opinion on an urgent read is asked of a relay only while it has this many left.
 const SECOND_OPINION_RESERVE: i64 = 12;

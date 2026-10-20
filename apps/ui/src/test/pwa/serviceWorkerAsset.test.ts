@@ -12,21 +12,25 @@ const WASM = "/assets/ghostly_iroh_web_bg-abc.wasm";
 
 interface FetchEvent { request: Request; respondWith(response: Promise<Response> | Response): void; waitUntil(promise: Promise<unknown>): void }
 
-/** The worker's script, started in a scope whose cache stores with `put`. Returns its `fetch` listener. */
+/** The worker's script, started in a scope whose cache stores with `put`. Returns its `fetch` listener and the
+ *  messages the worker posted to open pages. */
 async function startWorker(put: (key: string, response: Response) => Promise<void>) {
   const listeners = new Map<string, (event: FetchEvent) => void>();
   const cache = { match: async () => undefined, put };
+  const posted: { type: string }[] = [];
+  const windowClient = { postMessage: (message: { type: string }) => { posted.push(message); } };
   vi.stubGlobal("__SW_BUILD__", "test");
   vi.stubGlobal("__SW_PRECACHE__", ["/"]);
   vi.stubGlobal("caches", { open: async () => cache, match: async () => undefined });
   vi.stubGlobal("self", {
     location: { origin: ORIGIN },
     registration: { scope: `${ORIGIN}/` },
+    clients: { matchAll: async () => [windowClient] },
     addEventListener: (type: string, listener: (event: FetchEvent) => void) => { listeners.set(type, listener); },
   });
   vi.resetModules();
   await import("../../../../web/src/sw/sw");
-  return listeners.get("fetch")!;
+  return { onFetch: listeners.get("fetch")!, posted };
 }
 
 /** One request through the worker: what it answered with, and what it asked to be kept alive for. */
@@ -48,7 +52,7 @@ afterEach(() => {
 describe("a build file that is not precached", () => {
   it("is answered before it is stored: a store that never ends holds nothing back", async () => {
     const stored: string[] = [];
-    const onFetch = await startWorker((key) => { stored.push(key); return new Promise(() => {}); });
+    const { onFetch } = await startWorker((key) => { stored.push(key); return new Promise(() => {}); });
     vi.stubGlobal("fetch", async () => new Response("wasm bytes"));
 
     const { answer, waited } = ask(onFetch, WASM);
@@ -62,7 +66,7 @@ describe("a build file that is not precached", () => {
   });
 
   it("is answered when the store fails, and the failure stays in the worker", async () => {
-    const onFetch = await startWorker(() => Promise.reject(new Error("quota")));
+    const { onFetch } = await startWorker(() => Promise.reject(new Error("quota")));
     vi.stubGlobal("fetch", async () => new Response("wasm bytes"));
 
     const { answer, waited } = ask(onFetch, WASM);
@@ -71,15 +75,36 @@ describe("a build file that is not precached", () => {
     await expect(Promise.all(waited)).resolves.toBeDefined();
   });
 
-  it("is not stored when the answer is not the whole file", async () => {
+  it("is not stored when the answer is a server error, and the error stays in the worker", async () => {
     const stored: string[] = [];
-    const onFetch = await startWorker(async (key) => { stored.push(key); });
+    const { onFetch } = await startWorker(async (key) => { stored.push(key); });
+    vi.stubGlobal("fetch", async () => new Response("later", { status: 503 }));
+
+    const { answer, waited } = ask(onFetch, WASM);
+
+    expect((await answer)!.status).toBe(503);
+    expect(stored).toEqual([]);
+    expect(waited).toEqual([]);
+  });
+
+  it("is not stored on a 404, and every open page is told the build is gone", async () => {
+    const stored: string[] = [];
+    const { onFetch, posted } = await startWorker(async (key) => { stored.push(key); });
     vi.stubGlobal("fetch", async () => new Response("gone", { status: 404 }));
 
     const { answer, waited } = ask(onFetch, WASM);
 
     expect((await answer)!.status).toBe(404);
     expect(stored).toEqual([]);
-    expect(waited).toEqual([]);
+    // One waitUntil: telling the pages. After it settles they have the build-gone message.
+    expect(waited).toHaveLength(1);
+    await Promise.all(waited);
+    expect(posted).toEqual([{ type: "build-gone" }]);
+
+    // Try again asks for the same gone file: the pages were told, once per life of the worker.
+    const again = ask(onFetch, WASM);
+    expect((await again.answer)!.status).toBe(404);
+    await Promise.all(again.waited);
+    expect(posted).toEqual([{ type: "build-gone" }]);
   });
 });

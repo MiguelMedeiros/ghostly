@@ -2,7 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, QUICK_REDIAL_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
+import { MAX_RESTARTS, MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, QUICK_REDIAL_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
 
 // covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.end-and-answer, calls.media-blocked, calls.screen-share, calls.upgrade
 
@@ -815,18 +815,44 @@ describe("a headless caller starting over on a second offer", () => {
     expect(call.fastPoll()).toBe(false);
   });
 
-  it("a failure after starting over is final", async () => {
+  it("starts over as many times as the caller offers again: a refusal on the new connection too is not the end", async () => {
     const call = renderCall();
     const { pc: first } = await answered(call);
+    // The caller's libdatachannel refuses our answer on its first two connections (the same race, twice in a row).
     act(() => first.setIceState("failed"));
     call.receive(remote.offer(Date.now() + 1));
     await settle();
-
     act(() => FakePeerConnection.instances[1].setIceState("failed"));
+    expect(call.result.current.callState).toBe("connecting");
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+
+    call.receive(remote.offer(Date.now() + 2));
+    await settle();
+    const third = FakePeerConnection.instances[2];
+    act(() => { third.setIceState("connected"); third.setConnectionState("connected"); });
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["a", "a", "a"]);
+    expect(devices.getUserMedia).toHaveBeenCalledOnce();
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
+  });
+
+  it("a failure after the caller's last start-over (MAX_RESTARTS) is final", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+    act(() => first.setIceState("failed"));
+    for (let i = 1; i <= MAX_RESTARTS; i++) {
+      call.receive(remote.offer(Date.now() + i));
+      await settle();
+      if (i < MAX_RESTARTS) act(() => FakePeerConnection.instances[i].setIceState("failed"));
+    }
+    expect(call.result.current.callState).toBe("connecting");
+
+    act(() => FakePeerConnection.instances[MAX_RESTARTS].setIceState("failed"));
 
     expect(call.result.current.callState).toBe("idle");
     act(() => { vi.advanceTimersByTime(5000); });
-    expect(call.publishedKinds()).toEqual(["a", "a", "h", null]);
+    expect(call.publishedKinds()).toEqual([...Array<string>(MAX_RESTARTS + 1).fill("a"), "h", null]);
   });
 
   it("hanging up while it waits ends the call, and the wait does nothing later", async () => {

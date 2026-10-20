@@ -76,7 +76,7 @@ export function IncomingCallNotification({
             </span>
           </div>
           <div>
-            <p id={nameId} className="text-text-primary text-lg font-medium">{peerName}</p>
+            <p id={nameId} dir="auto" className="text-text-primary text-lg font-medium">{peerName}</p>
             <p id={kindId} className="text-text-muted text-sm">
               {hasVideo ? t("calls.incomingVideo") : t("calls.incomingAudio")}
             </p>

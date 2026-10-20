@@ -8,6 +8,7 @@
     "noRoomNext": "Libere espaço e tente de novo.",
     "noRoomToSave": "Não há mais espaço neste dispositivo",
     "noRoomToSaveNext": "Nada foi salvo. Libere espaço e tente de novo.",
+    "partNotLoaded": "Uma parte do Ghostly não carregou.",
     "pickCard": "Escolha um cartão Lightning primeiro",
     "signerKey": "Seu assinador tem uma chave diferente da desta identidade. Nada foi publicado.",
     "starting": "O Ghostly está iniciando…",
@@ -44,6 +45,10 @@
   "chat": {
     "editTooMany": "Esta mensagem não pode ser editada de novo",
     "editTooManyNext": "Uma mensagem aceita no máximo {{max}} edições.",
+    "forwardNone": "Nada para encaminhar",
+    "forwardNoneNext": "Escolha as mensagens de novo e encaminhe.",
+    "messageGone": "Essa mensagem não está mais nesta conversa",
+    "messageGoneNext": "Ela foi apagada. Volte à conversa e escolha de novo.",
     "noRoom": "Sem espaço para uma nova conversa",
     "noRoomNext": "Libere espaço neste dispositivo, por exemplo apagando conversas antigas, e tente de novo.",
     "replyGone": "Não dá para responder a essa mensagem",
@@ -143,6 +148,13 @@
     "cannotRetry": "Não é possível tentar enviar este arquivo de novo",
     "clipboardUnavailable": "Não foi possível ler a área de transferência",
     "clipboardUnavailableNext": "Anexe com +.",
+    "floor": {
+      "noRoomNext": "Libere espaço e peça ao seu contato para enviar de novo.",
+      "notInAWeek": "Não chegou em uma semana",
+      "refused": "Este dispositivo não pôde receber este arquivo",
+      "tooMany": "Há arquivos demais esperando aqui",
+      "tooManyNext": "Responda aos arquivos que esperam por você e peça ao seu contato para enviar de novo."
+    },
     "gone": "Este arquivo não está mais aqui",
     "noRoom": "Sem espaço no dispositivo do contato",
     "noRoomHere": "Sem espaço neste dispositivo",
@@ -200,6 +212,7 @@
     "adminOnly": "Só o admin pode fazer isso",
     "adminPicture": "Só o admin pode alterar a foto do grupo",
     "adminRename": "Só o admin pode renomear o grupo",
+    "adminRotate": "Só o admin pode renovar o segredo do grupo",
     "adminShares": "Só o admin pode compartilhar um link do grupo",
     "alreadyJoining": "Você já está entrando neste grupo",
     "alreadyMember": "Este contato já é membro",
@@ -499,6 +512,12 @@
     "usdtReverted": "A transação foi revertida",
     "usdtRevertedNext": "Nenhum token foi enviado; o gas foi gasto."
   },
+  "relayOnly": {
+    "keepsTurn": "Ocultar meu IP precisa deste servidor TURN",
+    "keepsTurnNext": "Desligue primeiro e depois remova o servidor.",
+    "needsTurn": "Adicione um servidor TURN antes",
+    "needsTurnNext": "Salve um acima e depois ligue isto."
+  },
   "relays": {
     "atLeastOne": "Informe pelo menos um endereço de relay",
     "notAddress": "Não é um endereço de relay: {{address}}",
@@ -528,6 +547,7 @@
     "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar.",
     "noAddress": "O endereço do seu contato para esse transporte ainda não é conhecido",
     "noAddressNext": "Reconecte uma vez por WebRTC para trocá-lo.",
+    "noAddressWait": "Chega quando o contato abrir esta conversa no app.",
     "noOverlap": "Suas escolhas de transporte não combinam",
     "noOverlapNext": "Ligue a Alternativa ou escolha o mesmo transporte nos dois lados.",
     "noneConnected": "Nenhum transporte conseguiu conectar",

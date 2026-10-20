@@ -3,10 +3,12 @@
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
-    "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées"
+    "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées",
+    "rowMoved": "Maintenant à la place {{place}} sur {{count}}"
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
+    "message": "Audio",
     "pause": "Mettre l'audio en pause",
     "play": "Lire l'audio",
     "position": "Position dans l'audio",
@@ -26,6 +28,8 @@
   "connecting": "connexion",
   "createdHere": "Vous avez créé cette discussion",
   "deleteArrivingFileHint": "Supprimé uniquement ici. Le fichier cesse d'arriver ; votre contact verra l'envoi annulé.",
+  "deleteForEveryone": "Supprimer pour tous",
+  "deleteForEveryoneHint": "Supprimé aussi sur les appareils de votre contact ou du groupe. Une application plus ancienne affiche « Message supprimé » à la place ; une copie que quelqu'un a gardée reste la sienne.",
   "deleteMessage": "Supprimer le message",
   "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie.",
   "deleteSendingFileHint": "Supprimé uniquement ici. L'envoi s'arrête ; votre contact ne recevra pas le fichier.",
@@ -176,6 +180,7 @@
     "messages": "{{count}} messages",
     "noChats": "Aucune discussion pour l’instant",
     "noMatch": "Aucune discussion de ce nom",
+    "partial": "{{sent}} sur {{count}} envoyés",
     "pick": "Choisissez-en jusqu’à {{count}}",
     "search": "Rechercher des discussions",
     "select": "Sélectionner",
@@ -237,9 +242,9 @@
   "menu": {
     "continueNew": "Continuer dans une nouvelle discussion",
     "hold": "Retenir les messages…",
+    "more": "Plus…",
+    "moreTitle": "Plus d’options",
     "moveDown": "Descendre",
-    "moveFirst": "Déjà en premier",
-    "moveLast": "Déjà en dernier",
     "moveUp": "Monter",
     "pin": "Épingler la discussion",
     "refresh": "Actualiser",
@@ -274,6 +279,11 @@
     "retry": "Renvoyer"
   },
   "noMessages": "Aucun message",
+  "nowPlaying": {
+    "close": "Arrêter et fermer",
+    "label": "En cours de lecture",
+    "open": "Afficher dans la discussion"
+  },
   "offline": "hors ligne",
   "online": "en ligne",
   "options": "Options",

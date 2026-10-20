@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 import "./site.css";
 import { OG_IMAGE, X_HANDLE } from "@/lib/pageMeta";
@@ -131,17 +130,24 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
-        {/* Scenes only hold the screen when scripts run; without them every step reads in order. Narrow windows and touch devices read them as cards (data-orient, data-touch, stage.tsx useCards). */}
-        <Script id="js-flag" strategy="beforeInteractive">
-          {"var d=document.documentElement;d.classList.add('js');try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}"}
-        </Script>
+        {/* Both head scripts are plain inline scripts, run by the browser while it reads the head: next/script's
+            beforeInteractive is only queued (self.__next_s) until the JS chunks arrive, so on a slow connection the
+            page painted its no-script layout first and re-formed under a reader who had started scrolling
+            (e2e/js-flag-slow.spec.ts). */}
+        {/* Scenes only hold the screen when scripts run; without them every step reads in order. Narrow windows and touch devices read them as cards (data-orient, data-touch, stage.tsx useCards).
+            The page scrolls smoothly (site.css, html.landed) only from the reader's first touch, click, key or wheel. */}
+        <script
+          id="js-flag"
+          dangerouslySetInnerHTML={{ __html: "var d=document.documentElement;d.classList.add('js');try{var u=['wheel','touchstart','pointerdown','keydown'],k=function(){d.classList.add('landed');u.forEach(function(t){removeEventListener(t,k,true)})};u.forEach(function(t){addEventListener(t,k,{capture:true,passive:true})})}catch(e){}try{var q=function(m,f){var l=matchMedia(m);f(l.matches);l.addEventListener('change',function(e){f(e.matches)})};q('(prefers-reduced-motion: reduce)',function(v){d.classList.toggle('calm',v)});q('(max-width: 860px)',function(v){if(v)d.dataset.orient='portrait';else delete d.dataset.orient});q('(pointer: coarse)',function(v){if(v)d.dataset.touch='';else delete d.dataset.touch})}catch(e){}" }}
+        />
         {/* An invite link (ghostly.tools/#ghostly1…, WISP 801): its code leaves the address before any other
             script runs (and, pasted later, before any other history listener), so it is never in a referrer or
             the history. components/site/JoinLanding.tsx reads it. The site loads no analytics and sets no
             cookies (e2e/launch-checklist.spec.ts). */}
-        <Script id="invite-intake" strategy="beforeInteractive">
-          {"try{var t=function(){var h=location.hash;if(!/^#ghostly1/i.test(h))return;var v=h.slice(1);try{v=decodeURIComponent(v)}catch(e){}window.__ghostlyInvite=v;history.replaceState(history.state,'',location.pathname+location.search);dispatchEvent(new Event('ghostly-invite'))};t();addEventListener('popstate',t);addEventListener('hashchange',t)}catch(e){}"}
-        </Script>
+        <script
+          id="invite-intake"
+          dangerouslySetInnerHTML={{ __html: "try{var t=function(){var h=location.hash;if(!/^#ghostly1/i.test(h))return;var v=h.slice(1);try{v=decodeURIComponent(v)}catch(e){}window.__ghostlyInvite=v;history.replaceState(history.state,'',location.pathname+location.search);dispatchEvent(new Event('ghostly-invite'))};t();addEventListener('popstate',t);addEventListener('hashchange',t)}catch(e){}" }}
+        />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

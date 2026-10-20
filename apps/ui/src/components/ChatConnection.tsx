@@ -1,6 +1,7 @@
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useCopyKey } from "../hooks/useCopyKey";
+import { useFocusBack } from "../hooks/useFocusBack";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import { useId, useRef, useState, useSyncExternalStore, type FocusEvent } from "react";
@@ -176,12 +177,16 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const close = () => { if (root.current?.open) { root.current.open = false; trigger.current?.focus(); } };
   useOutsideDismiss(root, menuOpen, close);
   // Focus gone to a control outside (a Tab past its end): it closes and leaves the focus there. On a phone the panel
-  // covers the messages, and the control would be under it. A click on its text moves the focus nowhere: it stays.
+  // covers the messages, and the control would be under it. A press on its text (a click, a drag to select a relay)
+  // moves the focus nowhere, or to what holds the panel (the page's <main tabIndex={-1}>, App.tsx): it stays.
   const focusLeft = (e: FocusEvent<HTMLElement>) => {
-    if (!root.current?.open || !(e.relatedTarget instanceof Node) || root.current.contains(e.relatedTarget)) return;
+    if (!root.current?.open || !(e.relatedTarget instanceof Node) || root.current.contains(e.relatedTarget) || e.relatedTarget.contains(root.current)) return;
     root.current.open = false; setMenuOpen(false);
   };
+  // The choice or button pressed is disabled while its work runs, which drops the focus to the page: it gets it back.
+  const focusBack = useFocusBack(busy);
   async function run(action: () => Promise<unknown>, fail = setError) {
+    focusBack();
     setBusy(true); fail("");
     // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
     try { await action(); } catch (e) { fail(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }

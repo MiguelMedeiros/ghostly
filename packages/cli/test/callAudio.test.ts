@@ -1,6 +1,6 @@
 import { createSocket } from "node:dgram";
 import { describe, expect, it, vi } from "vitest";
-import { CallAudio, type RtpTrack } from "../src/calls/audio";
+import { CallAudio, type OpusCodec, type RtpTrack } from "../src/calls/audio";
 import { callIceServers, CallMedia, callUsesTurn, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
@@ -288,6 +288,49 @@ function handLoop() {
     restore(): void { vi.unstubAllGlobals(); vi.restoreAllMocks(); },
   };
 }
+
+// A daemon in three calls or more at once: each call's encoder and decoder keep to their own memory. opusscript's PCM
+// views started at twice their block's address, over other codecs' blocks: once ended calls' blocks were taken again,
+// audio turned to noise and the module threw ("memory access out of bounds").
+describe("several calls' Opus codecs at once", () => {
+  it("each call's audio is what one codec alone makes, while calls end and new ones start beside it", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    const rate = 48000, samples = rate / 50, length = 200;
+    const frames = Array.from({ length }, (_, i) => tone(300 + 7 * (i % 100), rate, 20));
+    // Now and then a packet is lost: the decoder conceals it (an empty packet), which writes far more than a frame.
+    const lost = (i: number) => i % 25 === 24;
+    const hear = (decoder: OpusCodec, packet: Buffer, i: number) => decoder.decode(lost(i) ? Buffer.alloc(0) : packet);
+    const lone = (() => {
+      const encoder = stack.opus(rate), decoder = stack.opus(rate);
+      const out = frames.map((frame, i) => { const packet = encoder.encode(frame, samples); return { packet, pcm: hear(decoder, packet, i) }; });
+      encoder.delete?.(); decoder.delete?.();
+      return out;
+    })();
+    let seed = 7;
+    const next = () => (seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31);
+    const wrong: string[] = [];
+    const say = (where: string, error: unknown) => wrong.push(`${where}: ${error instanceof Error ? error.message : String(error)}`);
+    const start = () => ({ encoder: stack.opus(rate), decoder: stack.opus(rate), at: 0 });
+    const end = (call: ReturnType<typeof start>, where: string) => { try { call.encoder.delete?.(); call.decoder.delete?.(); } catch (error) { say(`${where} delete`, error); } };
+    const calls = Array.from({ length: 6 }, start);
+    for (let round = 0; round < 60 && wrong.length < 5; round++) {
+      // 20 ms ticks, interleaved as the calls' are.
+      for (let tick = 0; tick < 20; tick++) calls.forEach((call, n) => {
+        if (call.at === length) { end(call, `round ${round} call ${n}`); calls[n] = call = start(); }
+        const i = call.at++;
+        try {
+          const packet = call.encoder.encode(frames[i], samples);
+          if (!packet.equals(lone[i].packet) || !hear(call.decoder, packet, i).equals(lone[i].pcm)) wrong.push(`round ${round} call ${n} frame ${i}: differs`);
+        } catch (error) { say(`round ${round} call ${n} frame ${i}`, error); }
+      });
+      // One to three calls end, and as many start: they take the blocks just freed, in their own order.
+      for (let k = 1 + (next() % 3); k > 0; k--) { const n = next() % calls.length; end(calls[n], `round ${round} call ${n}`); calls[n] = start(); }
+    }
+    calls.forEach((call, n) => end(call, `last call ${n}`));
+    expect(wrong).toEqual([]);
+  });
+});
 
 describe("a call's audio through Opus", () => {
   for (const rate of [48000, 16000] as const) {

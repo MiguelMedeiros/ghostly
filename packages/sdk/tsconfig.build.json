@@ -13,6 +13,7 @@
     "moduleDetection": "force",
     "strict": true,
     "skipLibCheck": true,
+    "types": ["vite/client"],
     "declaration": true,
     "emitDeclarationOnly": true,
     "stripInternal": true,
