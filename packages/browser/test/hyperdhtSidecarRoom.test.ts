@@ -69,7 +69,10 @@ it("a text sent in the middle of a file reaches a slow contact in under a second
   const send = (frame: { text: string } | { bytes: string }, size: number) => {
     expect(buffered + size).toBeLessThanOrEqual(budget);
     buffered += size;
-    sidecar.write({ type: "send", endpoint: 1, id, seq: ++seq, ...frame }, () => { buffered -= size; more(); });
+    // The host's answer reaches the page as a message of its own, after what the sidecar said before it. A pipe write
+    // the kernel took at once calls back in the same turn: freed there, the page wrote on without reading `full` (up to
+    // 1.5 MiB at a time), and the sidecar's socket could pass what a channel may hold.
+    sidecar.write({ type: "send", endpoint: 1, id, seq: ++seq, ...frame }, () => setImmediate(() => { buffered -= size; more(); }));
   };
   const bytes = Buffer.from(chunk).toString("base64");
   const more = () => { while (offset < file && !full && buffered < budget / 4) { send({ bytes }, chunk.length); offset += chunk.length; } };
