@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
+import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, JOIN_GIVE_UP_MS, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
 import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
@@ -328,6 +328,9 @@ export class Communities {
   private readonly knockAt = new Map<string, number>();
   /** Joiners: how many others had a knock still being refreshed in the record I last read (they wait with me). */
   private readonly knockingWith = new Map<string, number>();
+  /** Since when this run knocks with nobody answering (`JOIN_GIVE_UP_MS`), and the joins it gave up (`Groups.giveUpJoin`). */
+  private readonly knockingSince = new Map<string, number>();
+  private readonly gaveUp = new Set<string>();
   /** Joiners: the knock record a knock read whose write the relays refused, and when it was read (`knock`). */
   private readonly knockRead = new Map<string, { n: number; knocks: Knock[]; at: number }>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
@@ -418,7 +421,7 @@ export class Communities {
     const live = this.live.get(group.id);
     const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
     const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
-      ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
+      ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}), ...(this.gaveUp.has(group.id) && { unanswered: true }) } : undefined;
     // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
     if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
     if (!live) return [];
@@ -466,7 +469,8 @@ export class Communities {
     if (!link) throw new Error("This is not a link to a group");
     const existing = this.stored.get(link.g);
     const live = this.live.get(link.g);
-    if (existing?.joining && existing.joining.host === link.host) return link.g;
+    // Opened again while joining: a join nobody answered (`JOIN_GIVE_UP_MS`) knocks again.
+    if (existing?.joining && existing.joining.host === link.host) { await this.knockAgain(link.g); return link.g; }
     if (live) {
       const s = live.session;
       // What this device holds may be stale (it was removed while its app was closed): never taken for the answer.
@@ -505,6 +509,7 @@ export class Communities {
   /** `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`). */
   private async startJoining(link: GroupEntryLink, seedB64: string, since: number, check = false): Promise<void> {
     this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g); this.knockRead.delete(link.g);
+    this.knockingSince.delete(link.g); this.gaveUp.delete(link.g);
     const before = this.stored.get(link.g)?.joining;
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     if (before && before.linkId !== linkId) await this.host.closeEdge(before.linkId);
@@ -515,6 +520,23 @@ export class Communities {
     this.host.emit();
     traceJoin(link.g, "join.start");
     void this.knock(group, since).catch(() => {});
+  }
+
+  /** A link join nobody answered (`JOIN_GIVE_UP_MS`) knocks again, as when the link was opened: Try again. */
+  async knockAgain(groupId: string, now = this.now()): Promise<void> {
+    const group = this.stored.get(groupId);
+    if (!group?.joining || !this.gaveUp.delete(groupId)) return;
+    this.knockingSince.set(groupId, now);
+    this.lastKnock.delete(groupId); this.knocked.delete(groupId); this.knockRead.delete(groupId);
+    await this.reopenEntry(group.joining);
+    this.host.emit();
+    void this.knock(group, now).catch(() => {});
+  }
+
+  /** The joiner's side of the link's entry session, opened again where it is gone (the same key, so the same session). */
+  private async reopenEntry(joining: NonNullable<StoredGroup["joining"]>): Promise<void> {
+    if ([...this.host.entries(joining.g).values()].includes(joining.linkId)) return;
+    await this.host.openEntry({ g: joining.g, host: joining.host }, "guest", joining.seedB64, joining.host);
   }
 
   /** The check is over (answered, or nobody was at the door): the group stays as it is here. */
@@ -679,6 +701,8 @@ export class Communities {
     dropMarks(this.marks, groupId);
     this.knockingWith.delete(groupId);
     this.knockRead.delete(groupId);
+    this.knockingSince.delete(groupId);
+    this.gaveUp.delete(groupId);
     this.lineOrder.forget(MESSAGE_LINK(groupId));
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
@@ -704,10 +728,23 @@ export class Communities {
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
-      if (group.joining && (this.knocking(group, live) || group.joining.check)) {
+      if (group.joining && (this.knocking(group, live) || group.joining.check) && !this.gaveUp.has(group.id)) {
         const knocking = this.knocking(group, live), waited = now - group.joining.since;
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
         const answered = this.host.linkReady(group.joining.linkId, 2) || !!this.host.linkSeen?.(group.joining.linkId);
+        const since = this.knockingSince.get(group.id);
+        if (since === undefined || answered) this.knockingSince.set(group.id, now);
+        // The first tick of a run: the entry session a join gave up in the run before is back.
+        if (since === undefined) await this.reopenEntry(group.joining).catch(() => {});
+        // Nobody answered for an hour of this run: the knocks stop, and the entry session with them, until Try again.
+        else if (knocking && !answered && now - since > JOIN_GIVE_UP_MS) {
+          this.gaveUp.add(group.id);
+          countWaitingJoin(this.host, group.id, now, false);
+          traceJoin(group.id, "join.unanswered");
+          await this.host.closeEdge(group.joining.linkId).catch(() => {});
+          this.host.emit();
+          continue;
+        }
         // Nobody answering: less often the longer it waits, at one pace with the app's other joins (`joinKnockWait`).
         const every = joinKnockWait(waited, this.timings, countWaitingJoin(this.host, group.id, now, knocking && !answered && waited > this.timings.patienceMs));
         // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
@@ -1735,6 +1772,7 @@ export class Communities {
         this.knocked.delete(g);
         this.knockAt.delete(g);
         this.knockingWith.delete(g);
+        this.knockingSince.delete(g);
         this.knockRead.delete(g);
         await this.host.closeEdge(linkId);
         await this.reconcile(g, live, now);
