@@ -239,9 +239,10 @@ Safety rules the CLI enforces:
 - **Real money.** Wallets default to Testnet. A Mainnet spend needs `--network mainnet --confirm-real`; without the
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
-  `chat request`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`,
-  `sendGroupFile` caption and payment memos of `sendPayment`, `requestPayment`, `requestGroupPayment` and `askToPay`
-  through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
+  `chat request`, the comment of `pay` to a Lightning address, and the engine's own `sendMessage`,
+  `sendGroupMessage`, `editMessage`, `forwardMessages`, `sendGroupFile` caption, payment memos of `sendPayment`,
+  `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo and
+  `lnurlInvoice`'s comment through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
   unless `--force`.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
