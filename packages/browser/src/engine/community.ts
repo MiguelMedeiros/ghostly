@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, arrivalNow, cameAt, editKey, dropMarks, eventTime, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
+import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
 import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
@@ -705,12 +705,14 @@ export class Communities {
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
       if (group.joining && (this.knocking(group, live) || group.joining.check)) {
-        const waited = now - group.joining.since, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
-        // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
-        if (!this.knocking(group, live) && waited > CHECK_MS) await this.endCheck(group);
+        const knocking = this.knocking(group, live), waited = now - group.joining.since;
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
-        else if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId)
-          && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
+        const answered = this.host.linkReady(group.joining.linkId, 2) || !!this.host.linkSeen?.(group.joining.linkId);
+        // Nobody answering: less often the longer it waits, at one pace with the app's other joins (`joinKnockWait`).
+        const every = joinKnockWait(waited, this.timings, countWaitingJoin(this.host, group.id, now, knocking && !answered && waited > this.timings.patienceMs));
+        // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
+        if (!knocking && waited > CHECK_MS) await this.endCheck(group);
+        else if (!answered && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
         if (!live) continue;
       }
       if (!live) continue;
