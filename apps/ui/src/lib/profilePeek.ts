@@ -19,7 +19,7 @@ export const PEEK_EVENT = "profile-peek-updated";
 /** What a system notice about another profile opens: `profile:<id>`, a switch to it. */
 export const PROFILE_NOTICE = "profile:";
 /** Beside the registry, one per storage space; never under a profile's prefix, so no profile's scans take it for a chat. */
-const storeKey = () => `${registryKey().replace(/_/g, "-")}-peek`;
+export const storeKey = () => `${registryKey().replace(/_/g, "-")}-peek`;
 
 function readStore(): PeekStore {
   try {
