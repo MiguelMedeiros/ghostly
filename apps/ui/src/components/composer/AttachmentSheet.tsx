@@ -76,7 +76,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
             <div className="bg-black/40 flex items-center justify-center min-h-0">
               <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="max-w-full max-h-[55vh] object-contain" />
             </div>
-            <figcaption className="px-4 pt-2 text-xs text-text-muted truncate" data-testid="attachment-name">{single.name} · {formatFileSize(single.size)}</figcaption>
+            <figcaption className="px-4 pt-2 text-xs text-text-muted truncate" data-testid="attachment-name"><bdi>{single.name}</bdi> · {formatFileSize(single.size)}</figcaption>
           </figure>
         ) : (
           <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">
@@ -86,7 +86,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
                   : <div className={`${single ? "flex items-center gap-3 min-w-0" : "h-full flex flex-col items-center justify-center gap-1 p-2 text-center"} text-text-secondary`}>
                     <span className="shrink-0" aria-hidden="true"><DocumentGlyph /></span>
                     <span className={`min-w-0 ${single ? "" : "w-full"}`}>
-                      <span className="block text-xs text-text-primary truncate">{file.name}</span>
+                      <span dir="auto" className="block text-xs text-text-primary truncate">{file.name}</span>
                       <span className="block text-[11px] text-text-muted">{formatFileSize(file.size)}</span>
                     </span>
                   </div>}

@@ -18,6 +18,8 @@ const RANK: Record<GroupPayNote["state"], number> = { open: 0, sent: 1, closed: 
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 /** Notes of mine sent again to a member whose edge opens. */
 const RESEND = 32;
+/** Notes from others still waiting for their initiator, kept per group in memory only; the oldest go first. */
+export const WAITING = 256;
 export const NOTE_ID = (id: string) => `gpay:${id}`;
 
 /** A `group-pay` frame, strictly: anything else is dropped. */
@@ -163,6 +165,8 @@ export interface GroupPaymentsHost {
 
 export class GroupPayments {
   private readonly notes = new Map<string, Map<string, GroupPayNote>>();
+  /** Per group, the ids of others' notes still `undescribed`, oldest first. */
+  private readonly waiting = new Map<string, Set<string>>();
   private queue = Promise.resolve();
 
   constructor(private readonly host: GroupPaymentsHost) {}
@@ -232,7 +236,16 @@ export class GroupPayments {
   }
 
   private async write(groupId: string, me: string, note: GroupPayNote): Promise<void> {
-    this.notes.get(groupId)?.set(note.id, note);
+    const notes = this.notes.get(groupId);
+    notes?.set(note.id, note);
+    // Nothing removes a note nobody described, and any member can make up fresh ones: at most WAITING of them stay.
+    // Mine are not counted (my own payments bound them), so others' cannot push them out.
+    let waiting = this.waiting.get(groupId);
+    if (note.undescribed && !note.mine) {
+      if (!waiting) this.waiting.set(groupId, waiting = new Set());
+      waiting.add(note.id);
+      for (const id of waiting) { if (waiting.size <= WAITING) break; waiting.delete(id); notes?.delete(id); }
+    } else waiting?.delete(note.id);
     // Shown once the member it is about described it; what others said about it waits here until then.
     if (note.undescribed) return;
     const initiator = note.kind === "request" ? note.to : note.from;
