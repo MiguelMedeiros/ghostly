@@ -3,7 +3,7 @@ test("project links open outside the app without leaving Home", { tag: ["@featur
   const {page} = await peer("home-project-links");
   const home = page.url();
   await page.context().route("https://github.com/**",route=>route.fulfill({body:"Project destination"}));
-  for (const name of ["GitHub",/Version /]) {
+  for (const name of ["GitHub",/^v\d/]) {
     const link=page.getByRole("link",{name,exact:typeof name==="string"});
     const expected=await link.getAttribute("href");
     const popupPromise=page.waitForEvent("popup");

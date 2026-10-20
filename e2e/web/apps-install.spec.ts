@@ -200,7 +200,7 @@ test("on a phone the install screen and the app's screen show its whole title, o
   await expect(ana.page.getByTestId("app-install-confirm")).toBeVisible();
   expect(await whole("app-install")).toBe(true);
   await ana.page.getByTestId("app-install-confirm").click();
-  await ana.page.getByTestId("installed-app").getByRole("button", { name: `${title}: details` }).click();
+  await ana.page.getByTestId("installed-app").getByRole("button", { name: title }).click();
   await expect(ana.page.getByTestId("app-details")).toBeVisible();
   expect(await whole("app-details")).toBe(true);
 });
