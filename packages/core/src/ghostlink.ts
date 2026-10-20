@@ -3573,6 +3573,8 @@ export class GhostLink {
   }
   /** `task`'s file cannot be read: `changed` or `gone` goes in place of its bytes (nothing once it is no longer live, but its place frees). */
   failAppRange(task: AppRangeTask, error: "changed" | "gone"): void { this.appRanges.fail(task, error); }
+  /** Whether `task` still waits for an answer on this session (`AppRanges.holds`): one that does not needs none. */
+  holdsAppRange(task: AppRangeTask): boolean { return this.appRanges.holds(task); }
   /** An `ar-*` frame from the contact, on a session that agreed `app-ranges/1`. */
   private receiveAppRange(frame: Record<string, unknown>): void {
     const read = readAppRangeFrame(frame);

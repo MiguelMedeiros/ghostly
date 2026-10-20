@@ -301,6 +301,14 @@ export class AppRanges {
     this.take(task);
   }
 
+  /**
+   * Whether `task` is still this session's: serving, or cancelled and draining until it is settled. False once it was
+   * settled, or its app closed or the session ended, which free its place: an answer to it sends and frees nothing.
+   */
+  holds(task: AppRangeTask): boolean {
+    return this.draining.has(task as Serving) || this.serving.get(slot(task.app, task.request)) === task;
+  }
+
   /** Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end) and the file's size. */
   read(app: string, serve: string, offset: number, length: number): Promise<{ bytes: Uint8Array; size: number }> {
     appRangeGetFrame(app, serve, 0, offset, length);

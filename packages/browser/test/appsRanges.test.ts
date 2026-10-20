@@ -110,6 +110,35 @@ describe("the read lane in the engine", () => {
     expect(answers).toHaveBeenCalledTimes(1);
   });
 
+  // agents#1698: after the session's serves and requests ended (a reset), the contact numbers from 0 again. A page's late
+  // answer to the earlier session's ask must not go out as the new one's, and an ask no page ever answers must not stay
+  // in the engine's table for good.
+  it("an ask of a session that ended: its late answer sends nothing, the new ask under the same number gets its own bytes, and neither stays behind", async () => {
+    const { call, contact, server, id, ref, app, ranges } = await setup();
+    const inner = server.node as unknown as { appRanges: Map<string, unknown>; links: Map<string, { link?: { appRanges: { reset(): void } } }> };
+    const lane = (contact as unknown as { appRanges: { receiveData(...args: unknown[]): void; receiveAnswer(frame: unknown): void } }).appRanges;
+    const data = vi.spyOn(lane, "receiveData"), answers = vi.spyOn(lane, "receiveAnswer");
+    const raw = (frame: object) => (contact as unknown as { channel: { send(data: string): void } }).channel.send(JSON.stringify(frame));
+    const x = await call("appServe", { linkId: id, ref, file: "FileX0000000000000000a" }) as { serve: string };
+    raw({ t: "ar-get", a: app, s: x.serve, r: 0, o: 0, n: 10 });
+    raw({ t: "ar-get", a: app, s: x.serve, r: 1, o: 20, n: 10 });
+    await vi.waitFor(() => expect(ranges()).toHaveLength(2));
+    // The session's serves and requests end (as a resume or a re-dial ends them), and the app serves another file.
+    inner.links.get(id)!.link!.appRanges.reset();
+    const y = await call("appServe", { linkId: id, ref, file: "FileY0000000000000000a" }) as { serve: string };
+    raw({ t: "ar-get", a: app, s: y.serve, r: 0, o: 5000, n: 10 });
+    await vi.waitFor(() => expect(ranges()).toHaveLength(3));
+    const [old, , mine] = ranges().map(event => event.range);
+    expect(inner.appRanges.size, "the asks of the ended session, settled there, are not kept").toBe(1);
+    // The X read answers late, then Y's.
+    await call("appRangeAnswer", { linkId: id, app, request: old.request, bytes: new Uint8Array(10).fill(0x58), size: 100_000 });
+    await call("appRangeAnswer", { linkId: id, app, request: mine.request, bytes: new Uint8Array(10).fill(0x59), size: 200_000 });
+    await vi.waitFor(() => expect(answers).toHaveBeenCalledTimes(1));
+    expect(answers.mock.calls[0]![0]).toMatchObject({ t: "ar-end", r: 0, z: 200_000 });
+    expect(data.mock.calls.map(([, request, offset, bytes]) => [request, offset, [...bytes as Uint8Array][0]])).toEqual([[0, 5000, 0x59]]);
+    expect(inner.appRanges.size).toBe(0);
+  });
+
   it("serves only while the contact's app is open, and says why not", async () => {
     const { call, contact, contactGot, id, ref, app, appEvents } = await setup();
     contact.closeApp(app);

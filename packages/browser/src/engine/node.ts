@@ -5134,6 +5134,10 @@ export class GhostlyNode implements EngineImplementation {
    * ask again while the page still reads the first ask, whose answer must not go out as the second's.
    */
   private appRangeAsked(linkId: string, task: AppRangeTask): void {
+    // The chat's asks its session no longer holds (it ended, or the app closed) wait for nothing: an answer to one would
+    // send and free nothing. Dropped here, or a page that never answers them left them in this table for good (agents#1698).
+    const link = this.links.get(linkId)?.link;
+    for (const [key, held] of this.appRanges) if (key.startsWith(`${linkId} `) && (!link || !link.holdsAppRange(held))) this.appRanges.delete(key);
     const request = ++this.nextAppRangeAsk;
     this.appRanges.set(`${linkId} ${task.app} ${request}`, task);
     const { app, serve, file, offset, length } = task;
