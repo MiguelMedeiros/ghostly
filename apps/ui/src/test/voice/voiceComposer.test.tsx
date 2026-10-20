@@ -239,6 +239,20 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).toHaveBeenCalledOnce();
   });
 
+  it("still sends with Enter on the button a click left the focus on (Resume)", async () => {
+    await locked();
+    await wait(2_000);
+    const pause = screen.getByTestId("voice-pause");
+    fireEvent.click(pause);
+    // Resume, with the mouse: the press gives it the focus.
+    fireEvent.pointerDown(pause, mouse);
+    pause.focus();
+    fireEvent.click(pause);
+    expect(fireEvent.keyDown(pause, { key: "Enter" })).toBe(false);
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+  });
+
   it("deletes with Esc or the bin, and gives the microphone back", async () => {
     await locked();
     await wait(1_000);
