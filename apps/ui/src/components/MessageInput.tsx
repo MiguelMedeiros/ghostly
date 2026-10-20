@@ -30,6 +30,7 @@ import "./composer/composer.css";
 import { touchOnly } from "../lib/touchOnly";
 import { formatAmount } from "../lib/amount";
 import { problemLine } from "../lib/problemText";
+import { readingTime } from "../lib/readingTime";
 
 interface MessageInputProps {
   draftId?: string;
@@ -157,7 +158,7 @@ export function MessageInput({
   onEditLast,
   onScreen = true,
 }: MessageInputProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const phone = useIsMobile();
   const locked = useIsLocked();
   const [showPayment, setShowPayment] = useState(false);
@@ -193,6 +194,10 @@ export function MessageInput({
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastRef = useRef<HTMLDivElement>(null);
+  const toastMs = useRef(TOAST_DURATION);
+  /** The card is pointed at, or has the focus: its time waits. */
+  const toastHeld = useRef({ pointer: false, focus: false });
   const caretRef = useRef<number | null>(null);
   /**
    * Each Enter is a message of its own: its words leave the field at once and wait here, and they go one at a time, in
@@ -273,14 +278,34 @@ export function MessageInput({
     if (input && at !== null) { caretRef.current = null; input.setSelectionRange(at, at); }
   }, [text]);
 
-  const showToast = useCallback((msg: string) => {
+  /**
+   * The card goes; the focus on its × goes to the message field (in the attachment sheet, to the sheet), not to the
+   * page. On a touch screen the field would bring the keyboard up: there it stays where it falls.
+   */
+  const hideToast = useCallback(() => {
+    // First: the card's blur would start its time again.
+    const card = toastRef.current, at = document.activeElement;
+    if (card && at && card.contains(at) && !touchOnly()) (card.closest<HTMLElement>("[role='dialog']") ?? textareaRef.current)?.focus({ preventScroll: true });
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast(msg);
-    toastTimerRef.current = setTimeout(
-      () => setToast(null),
-      TOAST_DURATION,
-    );
+    toastTimerRef.current = null;
+    toastHeld.current = { pointer: false, focus: false };
+    setToast(null);
   }, []);
+
+  /** The card's time runs again, in full, unless it is pointed at or has the focus: it stays until it has been read. */
+  const runToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
+    if (toastHeld.current.pointer || toastHeld.current.focus) return;
+    toastTimerRef.current = setTimeout(hideToast, toastMs.current);
+  }, [hideToast]);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    // Long enough to read in the app's language: a line in Japanese or Chinese takes twice the 5 s and more.
+    toastMs.current = readingTime(msg, language, TOAST_DURATION);
+    runToast();
+  }, [language, runToast]);
 
   /**
    * What could not go comes back to the field, before what is typed there now: the failed words, then those that waited
@@ -668,8 +693,17 @@ export function MessageInput({
 
   // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
   const sheetOpen = !!attached && !locked;
+  // The card moves between the composer and the sheet, a new one: the pointer or the focus on the old one holds nothing.
+  useEffect(() => {
+    toastHeld.current = { pointer: false, focus: false };
+    if (toastRef.current) runToast();
+  }, [sheetOpen, runToast]);
   const toastBox = toast && (
-    <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
+    <div ref={toastRef} className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg"
+      onPointerEnter={() => { toastHeld.current.pointer = true; runToast(); }}
+      onPointerLeave={() => { toastHeld.current.pointer = false; runToast(); }}
+      onFocus={() => { toastHeld.current.focus = true; runToast(); }}
+      onBlur={(e) => { if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return; toastHeld.current.focus = false; runToast(); }}>
       <svg
         width="16"
         height="16"
@@ -688,10 +722,7 @@ export function MessageInput({
       </span>
       <button
         type="button"
-        onClick={() => {
-          setToast(null);
-          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        }}
+        onClick={hideToast}
         aria-label={t("common.close")}
         className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
       >
