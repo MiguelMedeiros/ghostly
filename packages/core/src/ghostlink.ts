@@ -190,6 +190,11 @@ export const ANSWERS_REFUSED_PAUSE_MS = 2_000;
 export const PAIRING_ATTEMPT_MS = 15_000;
 export const PAIRING_RETRY_MS = 3_000;
 const PAIRING_MAX_RETRY_MS = 30_000;
+/**
+ * How long a first pairing that has not gone live keeps a first pairing's dials (`firstPairing`): both sides, at
+ * `PAIRING_RETRY_MS`. Past it, a chat that only ever ran on the DHT dials as a saved contact's does.
+ */
+export const FIRST_PAIRING_PACE_MS = 10 * 60_000;
 /** A packet published this recently is fresh enough for whoever comes back to the chat. */
 const RECENTLY_PUBLISHED_MS = 5_000;
 /** An inviter that sees the joiner without its offer waits this long for one before offering itself. */
@@ -2792,7 +2797,7 @@ export class GhostLink {
    * anyway holds (a first pairing's role, a restart, WebRTC set aside). Its own dial, chosen by hand, is not retried.
    */
   private awaitsContactDial(): boolean {
-    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    const pairing = this.firstPairing();
     const role = pairing ? this.options.pairingProgress?.role : undefined;
     return !role && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.dialsPastRtc();
   }
@@ -3146,10 +3151,27 @@ export class GhostLink {
     this.maybeAutoConnect(this.presence);
   }
 
+  /**
+   * Still a first pairing, for its dials (`dialWait`, `awaitsContactDial`): not live yet (nor stopped for good), and
+   * not on the DHT, or on it only because a native stream dial failed, within `FIRST_PAIRING_PACE_MS`. That dial was
+   * the first contact between two apps that just read each other's records, and one that aborts in milliseconds (a
+   * hole punch on a lossy network) dropped the pairing to a saved contact's pace, the lower key alone dialling 20 s,
+   * 40 s, 80 s later: two first dials failing went live after 40 s, and not in 180 s at 15% loss (agents#1657). A
+   * WebRTC offer that connected nothing keeps the saved contact's pace: the other side answers each one, and offers at
+   * a pairing's pace kept it answering, never shown on the DHT.
+   */
+  private firstPairing(): boolean {
+    const progress = this.tracker && !this.tracker.done ? this.tracker.progress : undefined;
+    if (!progress) return false;
+    if (progress.stage !== "on-dht") return true;
+    if (progress.retryable === false || Date.now() - progress.startedAt > FIRST_PAIRING_PACE_MS) return false;
+    return !!(this.attempt ?? this.lastAttempt)?.failed.some(f => f.transport !== "webrtc/1");
+  }
+
   /** How long after the last automatic dial the next one may go. A first pairing tries again sooner: the contact just read the invite and is waiting. */
   private dialWait(): number {
     if (this.instantRetry) return INSTANT_FAIL_RETRY_MS;
-    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    const pairing = this.firstPairing();
     return pairing ? Math.min(PAIRING_RETRY_MS * 2 ** this.autoConnectFailures, PAIRING_MAX_RETRY_MS)
       : Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
   }
