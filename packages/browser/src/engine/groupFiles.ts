@@ -229,7 +229,7 @@ interface Want {
    */
   free?: Set<string>;
   /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
-  why?: "busy" | "damaged";
+  why?: "busy" | "day" | "damaged";
   /**
    * Holders that answered `busy` in this round: one of them in reach tells this device when its place frees (its
    * `group-have`), so members never heard of as holders are not asked meanwhile.
@@ -273,6 +273,7 @@ const ENDED_KEPT = 8;
 const WAITING_NOTES = {
   nobody: "Nobody you are connected to has this file yet",
   busy: "Its holders are busy; asking again soon",
+  day: "Its holders have shared all they can today; it comes when another member has it, or tomorrow",
   damaged: "It arrived damaged; ask again",
 } as const;
 /** Why a want stopped: every holder served bytes that are not the author's file. */
@@ -815,7 +816,8 @@ export class GroupFileDesk {
       kept.holders = kept.holders.filter(key => key !== peer);
       this.edgesById.get(linkId)?.gone.add(messageId);
     }
-    if (why === "busy") { want.why = "busy"; (want.busy ??= new Set()).add(peer); }
+    // Its day spent (agents#1672): said as such, not as "asking again soon", which held for up to a day.
+    if (why === "busy" || why === "day") { want.why = why; (want.busy ??= new Set()).add(peer); }
     want.tried.add(peer);
     want.holder = want.linkId = undefined;
     this.ask(kept);
@@ -877,7 +879,7 @@ export class GroupFileDesk {
   /**
    * Why this device does not serve a file now, or null when it does (WISP 503 § Asking, Serving limits): `refused` to
    * someone who could not read the announcement, `gone` when it is not here (`kept` undefined), `busy` when serving is
-   * off or full.
+   * off or full, `day` when this device served its bytes for the day (`serveBytesPerDay`).
    */
   private mayServe(edge: Edge, messageId: string, kept: Kept | undefined, ts: number | undefined): GroupWantRefusal | null {
     const membership = this.deps.membership(edge.groupId);
@@ -896,7 +898,7 @@ export class GroupFileDesk {
     const today = Math.floor(this.deps.now() / 86_400_000);
     if (this.served.day !== today) this.served = { day: today, bytes: 0 };
     const reserved = this.servingNow().reduce((sum, a) => sum + a.size, 0);
-    return this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay ? "busy" : null;
+    return this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay ? "day" : null;
   }
 
   /** Ends the served transfer that has held its place longest, once past `servePlaceMs`: false when none has. */

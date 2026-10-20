@@ -446,7 +446,7 @@ export interface FileTransferView {
    * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
    * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
    */
-  wait?: "nobody" | "busy" | "damaged";
+  wait?: "nobody" | "busy" | "day" | "damaged";
   /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }

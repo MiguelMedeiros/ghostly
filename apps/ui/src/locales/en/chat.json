@@ -140,6 +140,7 @@
     "busySize": "Busy, trying again soon · {{size}}",
     "cancelled": "Cancelled",
     "damaged": "Arrived damaged · {{size}}",
+    "daySpent": "Shared all they can today, comes from another member or tomorrow · {{size}}",
     "decline": "Decline",
     "declined": "Declined",
     "gone": "No longer available",
