@@ -264,6 +264,11 @@ export interface GroupSessionHooks {
    * here, and the leave is passed on as a member passes it. Absent: yes.
    */
   adminTurn?(): Promise<boolean>;
+  /**
+   * Whether message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: its frame is
+   * no longer handed to anyone (a catch-up, a member handing it on, a frame said again). Absent: none is.
+   */
+  removed?(id: string): boolean;
 }
 
 /**
@@ -1056,6 +1061,7 @@ export class GroupSession {
       // Still the newest I know: nothing says yet whether I was behind.
       if (!alone.has(ownKey(f)) || f.e >= this.epoch) continue;
       looked.add(ownKey(f));
+      if (this.isRemoved(f)) continue;
       const target = this.saidAgainEpoch(f);
       if (target === undefined) continue;
       const before = this.state.chain[f.e], key = epochKeys(this.secret(f.e)!, this.id, f.e).message;
@@ -1354,6 +1360,8 @@ export class GroupSession {
     if (text === null) return;
     // Saved below with the message, whichever way it goes.
     if (this.heardName(key, raw)) this.hooks.changed();
+    // Deleted for everyone (`hooks.removed`): it stays gone here, and is neither kept nor passed on.
+    if (this.isRemoved(raw)) { if (whole) { this.markSeen(raw); this.persistSoon(); } return; }
     const firstFrame = first && { ...raw, e: first.e, n: first.n };
     if (firstFrame && rosterHas(this.state.chain[first.e]?.m ?? [], this.myKey) && this.isDuplicate(firstFrame)) {
       // I read the first one: kept and passed on for those who could not, not shown twice.
@@ -1687,7 +1695,7 @@ export class GroupSession {
     // Counted once sent (`answers`), not here: an answer that takes this one's place before it goes still has them.
     const handed = this.leaversHanded.get(from);
     const kept = !asked.size && !this.state.leftMarks ? [] : this.kept().filter(f => {
-      if (!this.state.chain[f.e] || !rosterHas(this.state.chain[f.e].m, from) || !lacks(f)) return false;
+      if (!this.state.chain[f.e] || !rosterHas(this.state.chain[f.e].m, from) || !lacks(f) || this.isRemoved(f)) return false;
       if (asked.has(f.s)) return true;
       return !rosterHas(this.roster, f.s) && !handed?.has(frameKey(f)) && this.handsOn(f.s, f.e);
     });
@@ -1728,8 +1736,10 @@ export class GroupSession {
   }
   private ownLacked(to: string, frame: GroupSyncFrame): GroupMessageFrame[] {
     const lacks = missingIn(frame, to);
-    return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent));
+    return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
   }
+  /** A frame of a message deleted for everyone (`hooks.removed`): handed to nobody, its removal is what they get. */
+  private isRemoved(f: GroupMessageFrame): boolean { return !!this.hooks.removed?.(this.messageIdOf(f)); }
 
   // -- metadata (WISP 902 § Metadata) ---------------------------------------
 
