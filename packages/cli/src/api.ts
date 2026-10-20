@@ -450,7 +450,9 @@ const METHODS: Record<string, Method> = {
       if (!message) throw new CliError("not_found", `No message ${ref} of yours in this ${target.group ? "group" : "chat"}: only your own messages are deleted for everyone`);
       const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
-      return { [target.group ? "group" : "chat"]: target.id, deleted: message.id, everyone: true };
+      // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
+      // it (agents#1582).
+      return { [target.group ? "group" : "chat"]: target.id, messageId: message.id, deleted: message.id, everyone: true };
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
@@ -459,7 +461,7 @@ const METHODS: Record<string, Method> = {
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
-    return { chat: link.id, deleted: messageId };
+    return { chat: link.id, messageId, deleted: messageId, everyone: false };
   },
   async "chat.details"(ctx, params) {
     const link = chatOf(ctx, params);
