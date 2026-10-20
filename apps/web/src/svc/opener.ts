@@ -5,6 +5,7 @@
  */
 import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, MAX_RESPONSE_BYTES, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { callWindowOn } from "../../../ui/src/lib/serviceWindows";
 
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
@@ -13,7 +14,7 @@ export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
  * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * The label of one contact's app as this profile opens it: `viewerTag` (this side's key for the chat, so another
@@ -138,6 +139,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
+  // Drawn over everything, a call's windows too: not over a call on screen (one that comes later closes it).
+  if (callWindowOn()) throw new Error(options.words.callOn);
   const jar = new CookieJar();
   const view = document.createElement("div");
   view.id = VIEW_ID;
