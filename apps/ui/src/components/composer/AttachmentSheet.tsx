@@ -52,6 +52,16 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
   const paste = (e: ClipboardEvent) => {
     if (onPaste(e.clipboardData)) e.preventDefault();
   };
+  // The × that has the focus goes with its file when it is the last one (the rows are kept by place), and every ×
+  // goes once one file is left: the focus moves first, to the × before it, or to the caption, not to the page.
+  const removers = useRef<(HTMLButtonElement | null)[]>([]);
+  const remove = (i: number) => {
+    if (document.activeElement === removers.current[i]) {
+      if (files.length === 2) captionRef.current?.focus();
+      else if (i === files.length - 1) removers.current[i - 1]?.focus();
+    }
+    onRemove(i);
+  };
   const picture = (i: number) => broken.has(files[i]) ? undefined : pictures[i];
   const lost = (file: File) => setBroken((was) => new Set(was).add(file));
   const single = files.length === 1 ? files[0] : null;
@@ -81,7 +91,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
                     </span>
                   </div>}
                 {files.length > 1 && (
-                  <button type="button" onClick={() => onRemove(i)} aria-label={t("composer.removeFile", { name: file.name })} title={t("composer.removeFile", { name: file.name })}
+                  <button type="button" ref={(element) => { removers.current[i] = element; }} onClick={() => remove(i)} aria-label={t("composer.removeFile", { name: file.name })} title={t("composer.removeFile", { name: file.name })}
                     className="absolute top-1 end-1 w-7 h-7 rounded-full bg-black/60 text-white flex items-center justify-center cursor-pointer">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
                   </button>
