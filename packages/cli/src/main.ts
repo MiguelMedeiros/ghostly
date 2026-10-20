@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
-import { openSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
@@ -558,7 +558,13 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const probe = client ? client.call("status").catch(() => null) as Promise<{ version?: string } | null> : null;
     const stopped = client ? await stopDaemon(g, client, stopFor) : null;
     const before = (await probe)?.version ?? null;
-    const started = await startDetached(g, startFor);
+    let started: Awaited<ReturnType<typeof startDetached>>;
+    try { started = await startDetached(g, startFor); }
+    catch (error) {
+      // A start that failed after the stop leaves the profile with no daemon: the answer says so, and how to start one.
+      if (stopped === null || !(error instanceof CliError) || error.code === "timeout") throw error;
+      throw new CliError(error.code, `${error.message}. The daemon (process ${stopped}) was stopped: start it again with ghostly daemon --detach`, { ...error.details, stopped });
+    }
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
@@ -637,20 +643,36 @@ function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
-/** A daemon in the background, running this command's code, once its socket answers. */
+/**
+ * A daemon in the background, running this command's code, once its socket answers. A one-shot command (or a listen)
+ * that opened the profile in process holds it: the child would only log that. One that ends in a moment (a bot's
+ * `send` every 200 ms, which takes the profile in the gap of a restart) is waited for, and so is one that took it
+ * between the look and the child's start; one that still holds it at `seconds` is the answer, busy with its pid.
+ */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
-  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
-  // A one-shot command (or a listen) that opened the profile in process holds it: the child would only log that.
-  heldBy(g);
-  const log = openSync(g.paths.log, "a", 0o600);
+  const until = Date.now() + seconds * 1000;
+  for (;;) {
+    if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+    if (lockOwner(g.paths) === null) {
+      const started = await spawnDaemon(g, until);
+      if (started) return started;
+    }
+    if (Date.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - Date.now()))));
+  }
+}
+
+/** `startDetached`'s child, or null when another process took the profile ahead of it and there is time to try again. */
+async function spawnDaemon(g: Globals, until: number) {
+  const log = openSync(g.paths.log, "a", 0o600), logFrom = fstatSync(log).size;
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
+  closeSync(log); // the child has its own
   child.unref();
   const spawned = { error: null as Error | null };
   // A spawn that fails outright (EAGAIN, EMFILE) sets `exitCode` to the errno before the "error" event, so the loop below
   // ends on its own; the listener swallows the otherwise uncaught event and keeps the cause for the message.
   child.once("error", (error) => { spawned.error = error; });
-  const until = Date.now() + seconds * 1000;
   let client: DaemonClient | null = null;
   // Try at once, then every 200 ms, never past `until`: a small `--timeout` gives up near-immediately instead of always
   // waiting one 200 ms poll first (the first try finds no socket yet and returns at once). A child that exited or was
@@ -663,7 +685,11 @@ async function startDetached(g: Globals, seconds: number) {
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
   }
   if (!client) {
-    heldBy(g, child.pid); // another process took the profile between the check and the child's start
+    // Another process took the profile between the look and the child's start: it holds it still, or the child's
+    // answer in the log says so (a one-shot that already ended). Tried again while there is time.
+    const lost = !spawned.error && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom));
+    if (lost && Date.now() < until) return null;
+    heldBy(g, child.pid);
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
     if (child.exitCode === null && child.signalCode === null && child.pid !== undefined && processAlive(child.pid)) {
       throw new CliError("timeout", `The daemon (process ${child.pid}) is still starting; ghostly daemon status shows when it is up`, { pid: child.pid, log: g.paths.log });
@@ -672,6 +698,19 @@ async function startDetached(g: Globals, seconds: number) {
   }
   client.close();
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
+}
+
+/** Whether a daemon's answer written to the log from byte `from` on is `busy`: it found the profile taken. */
+function lostTheProfile(log: string, from: number): boolean {
+  let fd: number;
+  try { fd = openSync(log, "r"); } catch { return false; }
+  try {
+    const buffer = Buffer.alloc(64 * 1024);
+    const text = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, from)).toString("utf8");
+    return text.split("\n").some((line) => {
+      try { return (JSON.parse(line) as { error?: { code?: string } }).error?.code === "busy"; } catch { return false; }
+    });
+  } finally { closeSync(fd); }
 }
 
 /**
