@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
 import { connectDaemon } from "../src/client";
 import { profilePaths } from "../src/profiles";
@@ -23,10 +23,44 @@ let dht: { bootstrap: string; destroy(): Promise<void> };
 const running: Running[] = [];
 const alice = home("alice"), bob = home("bob");
 const sockets: Record<string, string> = {};
+/** Each profile's daemon, the last one started. */
+const daemons: Record<string, Running> = {};
 let env: NodeJS.ProcessEnv;
 /** Both daemons' link traces (packages/core/src/linkTrace.ts), one JSON line a step: what a slow test prints. */
 let trace = "";
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
+
+async function startDaemon(dir: string): Promise<void> {
+  const daemon = new Running(["--home", dir, "daemon"], env);
+  running.push(daemon);
+  daemons[dir] = daemon;
+  sockets[dir] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+}
+
+/**
+ * What a failed test prints: each daemon (running, or how it ended, and the end of what it wrote on stderr), each
+ * side's view of the chat, and both links' steps since the test started. On CI's ARM64 runner the pair once went off
+ * live mid-file for six tests in a row, and Alice's daemon then ended by a signal at `daemon stop`, with nothing more
+ * to tell a crash, a stalled daemon or a dropped link apart.
+ */
+async function whyFailed(since: number): Promise<string> {
+  const daemon = (dir: string) => {
+    const d = daemons[dir];
+    if (!d) return "none";
+    const state = d.child.exitCode !== null ? `exited ${d.child.exitCode}` : d.child.signalCode !== null ? `ended by ${d.child.signalCode}` : "running";
+    return `${d.name}: ${state}\n${d.stderr.slice(-4000)}`;
+  };
+  const view = async (dir: string, chat: string) => {
+    const shown = await as(dir, "chat", "show", chat);
+    if (shown.code !== 0) return `exit ${shown.code}: ${shown.stdout}${shown.stderr}`;
+    const { peer, live, transport, progress, wait, lastAttempt, history } = shown.json;
+    return JSON.stringify({ peer, live, transport, progress, wait, lastAttempt, history });
+  };
+  let steps: string[] = [];
+  try { steps = readFileSync(trace, "utf8").split("\n").filter((l) => l && (JSON.parse(l) as { t: number }).t >= since); } catch { /* no trace yet */ }
+  return `[failed] daemons:\nalice ${daemon(alice)}\nbob ${daemon(bob)}\nalice ${await view(alice, "bob")}\nbob ${await view(bob, "alice")}\n`
+    + `link steps since the test started (${steps.length}, the last 400):\n${steps.slice(-400).join("\n")}`;
+}
 
 /**
  * `listen` on `dir`'s daemon from its last event as of now: an event that comes while the process still starts is
@@ -68,6 +102,11 @@ afterAll(async () => {
   for (const relay of relays) relay.server.close();
 }, 30_000);
 
+beforeEach(({ onTestFailed }) => {
+  const since = Date.now();
+  onTestFailed(async () => console.log(await whyFailed(since)), 30_000);
+});
+
 describe("two headless peers", { timeout: 180_000 }, () => {
   let chatA = "", chatB = "";
 
@@ -81,11 +120,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
   });
 
   it("pair from an invite and go live", async () => {
-    for (const dir of [alice, bob]) {
-      const daemon = new Running(["--home", dir, "daemon"], env);
-      running.push(daemon);
-      sockets[dir] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
-    }
+    for (const dir of [alice, bob]) await startDaemon(dir);
     error(await as(alice, "daemon"), "busy", 1);
     const invite = ok(await as(alice, "invite", "create", "--label", "bob"));
     expect(invite.invite).toMatch(/^ghostly1/);
@@ -132,9 +167,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     ok(await as(alice, "chat", "transport", "bob", "webrtc"));
     await onWebrtc();
     const restartBob = async () => {
-      const daemon = new Running(["--home", bob, "daemon"], env);
-      running.push(daemon);
-      sockets[bob] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+      await startDaemon(bob);
       return Date.now();
     };
     const bothWays = async (tag: string) => {
@@ -526,9 +559,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
 
     // Started again: a file that arrived shows no transfer in the engine's state; its record still says it is done.
     ok(await as(bob, "daemon", "stop"));
-    const daemon = new Running(["--home", bob, "daemon"], env);
-    running.push(daemon);
-    sockets[bob] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+    await startDaemon(bob);
     expect((ok(await as(bob, "engine", "getState")).transfers as Record<string, unknown>)[incoming.id]).toBeUndefined();
     const listed = ok(await as(bob, "file", "list", "alice")).files as { file: { id: string }; transfer: { state: string } | null }[];
     expect(listed.find((f) => f.file.id === incoming.id)?.transfer).toMatchObject({ state: "done", size: 200_000 });
