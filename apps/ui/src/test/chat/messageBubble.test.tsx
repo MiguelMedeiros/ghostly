@@ -451,6 +451,11 @@ describe("MessageBubble: system lines", () => {
     expect(screen.getByText("Missed audio call").parentElement).not.toHaveTextContent("(");
   });
 
+  it("a line that stands for a burst of missed calls says how many (agents#992)", () => {
+    bubble({ sender: "system", text: "12 missed video calls", callEvent: { type: "call_missed", hasVideo: true, count: 12 } });
+    expect(screen.getByText("12 missed video calls")).toBeInTheDocument();
+  });
+
   it("shows no length for a call ended within its first second, rather than (0 s)", () => {
     bubble({ sender: "system", text: "Audio call ended", callEvent: { type: "call_ended", duration: 400 } });
     expect(screen.getByText("Audio call ended").parentElement).not.toHaveTextContent("(");

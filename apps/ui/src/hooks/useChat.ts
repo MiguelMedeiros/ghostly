@@ -16,8 +16,10 @@ import {
   loadSession,
   saveSession,
   addMessage,
+  addMissedCall,
   deleteMessage as deleteStoredMessage,
   getInviteCode,
+  uncountMissedCall as uncountStoredMissedCall,
   hasAnnouncedJoin,
   markJoinAnnounced,
 } from "../lib/storage";
@@ -563,6 +565,26 @@ export function useChat(params: ChatParams | null) {
     window.dispatchEvent(new Event("session-updated"));
   }, []);
 
+  /**
+   * A missed call's line, or one more call on the chat's last missed line (`addMissedCall`): the id of the line that
+   * says it.
+   */
+  const addMissedCallMessage = useCallback((msg: ChatMessage, options: { rang?: string; seen?: boolean }) => {
+    const updated = addMissedCall(sessionIdRef.current, msg, options);
+    if (!updated) return undefined;
+    setMessages([...updated.session.messages]);
+    window.dispatchEvent(new Event("session-updated"));
+    return updated.line;
+  }, []);
+
+  /** One call less on a line that counts several (`uncountMissedCall`). */
+  const uncountMissedCall = useCallback((line: string) => {
+    const updated = uncountStoredMissedCall(sessionIdRef.current, line);
+    if (!updated) return;
+    setMessages([...updated.messages]);
+    window.dispatchEvent(new Event("session-updated"));
+  }, []);
+
   const deleteMessage = useCallback((messageId: string) => {
     const updated = deleteStoredMessage(sessionIdRef.current, messageId);
     if (!updated) return;
@@ -610,6 +632,8 @@ export function useChat(params: ChatParams | null) {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    addMissedCallMessage,
+    uncountMissedCall,
     deleteMessage,
     pollCountdown,
   };

@@ -68,6 +68,7 @@
     "audioFailed": "No se pudo conectar la llamada de voz",
     "audioIncoming": "Llamada de voz entrante",
     "audioMissed": "Llamada de voz perdida",
+    "audioMissedMany": "{{count}} llamadas de voz perdidas",
     "audioStarted": "Llamada de voz iniciada",
     "audioUnanswered": "Llamada de voz sin respuesta",
     "videoCancelled": "Videollamada cancelada",
@@ -77,6 +78,7 @@
     "videoFailed": "No se pudo conectar la videollamada",
     "videoIncoming": "Videollamada entrante",
     "videoMissed": "Videollamada perdida",
+    "videoMissedMany": "{{count}} videollamadas perdidas",
     "videoStarted": "Videollamada iniciada",
     "videoUnanswered": "Videollamada sin respuesta"
   },
