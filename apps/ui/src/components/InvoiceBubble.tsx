@@ -41,6 +41,8 @@ function isSettled(id: string): boolean {
 function settledMoneyId(text: string): string {
   return Array.from(sha256(new TextEncoder().encode(text.trim())), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
+/** Told a mark's id when this device settles money, so every card of the same money says so at once. */
+const SETTLED_EVENT = "ghostly-settled-money";
 function markSettled(id: string) {
   try {
     const all = JSON.parse(localStorage.getItem(SETTLED_KEY) ?? "[]") as string[];
@@ -48,6 +50,22 @@ function markSettled(id: string) {
   } catch {
     // only a convenience
   }
+  window.dispatchEvent(new CustomEvent(SETTLED_EVENT, { detail: id }));
+}
+/**
+ * Whether this device settled the money `id` names, and a way to say it did. Another card of the same money (a token
+ * sent twice, or in two chats) settled here turns this one too: it offered Redeem still, and its press said "Already
+ * spent" for a token this device had just redeemed (agents#1588).
+ */
+function useSettled(id: string): [boolean, (settled: boolean) => void] {
+  const [settled, setSettled] = useState(() => isSettled(id));
+  useEffect(() => {
+    if (isSettled(id)) setSettled(true);
+    const heard = (event: Event) => { if ((event as CustomEvent<string>).detail === id) setSettled(true); };
+    window.addEventListener(SETTLED_EVENT, heard);
+    return () => window.removeEventListener(SETTLED_EVENT, heard);
+  }, [id]);
+  return [settled, setSettled];
 }
 
 const button =
@@ -138,7 +156,7 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
   const known = all?.getState()?.wallets;
   const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
   const id = useMemo(() => settledMoneyId(invoice.invoice.toLowerCase()), [invoice.invoice]);
-  const [paid, setPaid] = useState(() => isSettled(id));
+  const [paid, setPaid] = useSettled(id);
   // Handed to the mint, which has not settled it yet: paying again could pay twice.
   const [pending, setPending] = useState(false);
   // The invoice quoted rides with its quote: Paid is only ever kept for the invoice that was paid.
@@ -280,7 +298,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   const wallet = useWalletPlatform();
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
   const id = useMemo(() => settledMoneyId(value), [value]);
-  const [redeemed, setRedeemed] = useState(() => isSettled(id));
+  const [redeemed, setRedeemed] = useSettled(id);
   const [spent, setSpent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
@@ -378,7 +396,8 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
               } catch (e) {
                 // Spent is spent: nothing is left to redeem. The mint does not say who spent it (the contact, someone
                 // they sent it to, or this device on 1.3.2), so it reads spent, never Redeemed, and is not marked.
-                if (parseEngineError(rawError(e))?.code === "ecashAlreadySpent") setSpent(true);
+                // Unless this device redeemed it a moment ago, from another card of the same token: that is Redeemed.
+                if (parseEngineError(rawError(e))?.code === "ecashAlreadySpent") { if (isSettled(id)) setRedeemed(true); else setSpent(true); }
                 else setError(problemText(e, t));
               } finally {
                 setBusy(false);
