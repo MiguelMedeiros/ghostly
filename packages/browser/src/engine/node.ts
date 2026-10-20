@@ -2062,7 +2062,7 @@ export class GhostlyNode implements EngineImplementation {
     // What the limited start kept as it was stored: the files of groups this device no longer has go, as at a full start.
     await this.groups.files?.sweep((await db.getGroups()).map((group) => group.id)).catch(() => {});
     await this.leaveLimited(start.readAt ?? null).catch(() => {});
-    if (!this.options.singleDevice && !this.limitedMode && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
+    if (!this.options.singleDevice && !this.limitedMode && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet({ justRead: start.readAt !== undefined }).catch(() => {});
   }
 
   private readTurnWhileLimited(after = 30_000): void {
@@ -2083,7 +2083,7 @@ export class GhostlyNode implements EngineImplementation {
         }
         if (outcome && (outcome.kind === "start" || (outcome.kind === "go-on" && !outcome.restricted))) {
           await this.leaveLimited().catch(() => {});
-          if (!this.limitedMode && this.networkOn) void this.startDeviceSet().catch(() => {});
+          if (!this.limitedMode && this.networkOn) void this.startDeviceSet({ justRead: true }).catch(() => {});
           return;
         }
         this.readTurnWhileLimited();
@@ -6319,9 +6319,10 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * The active device's links to the other devices, and its stored turn record put again (WISP 06 § Publishing and
    * reading: "The active device puts its stored bytes at start"). This is also what completes an enrollment that a
-   * crash stopped after the record with the new device was stored and before it was put.
+   * crash stopped after the record with the new device was stored and before it was put. `justRead`: it starts on a good
+   * turn read made a moment before (the read at start, or limited mode's), which counts while it is fresh.
    */
-  private async startDeviceSet(): Promise<void> {
+  private async startDeviceSet({ justRead = false }: { justRead?: boolean } = {}): Promise<void> {
     if (this.shuttingDown) return;
     // This device's signing key, as its record names it: whose the profile's push subscription is (WISP 06 § Push and the phone).
     const own = await readDeviceRecord(databaseName()).catch(() => null);
@@ -6350,13 +6351,18 @@ export class GhostlyNode implements EngineImplementation {
     await recoverEnrollment(databaseName(), this.turnNetwork()).catch(() => false);
     await this.syncDeviceVerifier().catch(() => {});
     const keeper = await this.deviceLinks.turnKeeper();
-    const outcome = await keeper?.check(false);
-    if (outcome?.kind === "go-on" && !outcome.restricted) { this.noteGoodTurn(); await keeper?.stateVerifier().catch(() => null); }
-    // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
-    if (outcome?.kind === "gated" && !this.shuttingDown) {
-      const record = await readDeviceRecord(databaseName());
-      if (record) await this.stopReplaced(viewOf(record));
-      return;
+    // The start's read wrote, put and read back this device's record a moment ago: it is not read again (WISP 06 § When
+    // a device checks: one read at start; each one is a DHT look-up, and a `NetworkOnly` request per relay).
+    if (justRead && this.turnFresh()) await keeper?.stateVerifier().catch(() => null);
+    else {
+      const outcome = await keeper?.check(false);
+      if (outcome?.kind === "go-on" && !outcome.restricted) { this.noteGoodTurn(); await keeper?.stateVerifier().catch(() => null); }
+      // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
+      if (outcome?.kind === "gated" && !this.shuttingDown) {
+        const record = await readDeviceRecord(databaseName());
+        if (record) await this.stopReplaced(viewOf(record));
+        return;
+      }
     }
     // From now on the turn is read every 10 minutes while this device runs, and at once on another device's hint.
     this.watchActiveTurn();
