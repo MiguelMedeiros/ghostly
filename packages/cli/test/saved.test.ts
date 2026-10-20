@@ -44,6 +44,9 @@ describe("saved", () => {
     expect(node.saveMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1", remove: true });
     await expect(callApi(ctx, "saved.add", { chat: "Alice" })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(fake({ error: "That message is not in this chat" }).ctx, "saved.add", { chat: "Alice", message: "x" })).rejects.toMatchObject({ code: "not_found" });
+    // agents#1580: an unsave of an id that is neither saved nor in the chat (a typo) is not_found, with where the ids are.
+    await expect(callApi(fake({ error: "That message is not in this chat" }).ctx, "saved.remove", { chat: "Alice", message: "no-such-id" }))
+      .rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/^No saved message "no-such-id" in this chat \(ghostly saved list/) });
   });
 
   it("lists the saved messages with their chat or group and who wrote them", async () => {
