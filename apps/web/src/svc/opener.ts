@@ -9,8 +9,11 @@ import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, MAX_RESPONSE_BYTES, SERVICE_VIE
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
 
-/** What the opener says when there is no answer: the profile's language, from the app. */
-export interface OpenerWords { unreachable: string; failed: string; close: string }
+/**
+ * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
+ * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own.
+ */
+export interface OpenerWords { unreachable: string; failed: string; close: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * The label of one contact's app as this profile opens it: `viewerTag` (this side's key for the chat, so another
@@ -72,6 +75,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     const headers = request.headers.filter(([name]) => name.toLowerCase() !== "cookie");
     if (cookie) headers.push(["cookie", cookie]);
     const answer = await send({ method: request.method, path: request.path, headers, body: request.body ? new Uint8Array(request.body) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
+    const hostError = words.hostError(answer.headers);
+    if (hostError !== null) {
+      stop.abort();
+      post({ type: "error", status: answer.status, text: hostError });
+      return;
+    }
     const out: [string, string][] = [];
     for (const [name, value] of viewerResponseHeaders(answer.headers)) {
       if (name.toLowerCase() === "set-cookie") jar.take(value);
@@ -97,18 +106,46 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
 export const VIEW_ID = SERVICE_VIEW_ID;
 
 /**
+ * The mark on the history entry an open view adds, at the app's own address and with the router's state, so Back
+ * (Android's back gesture, the browser's) closes the view and leaves the app's route where it was.
+ */
+const ENTRY = "ghostlyServiceView";
+const isViewEntry = (state: unknown) => !!state && typeof state === "object" && (state as Record<string, unknown>)[ENTRY] === true;
+/** Set while a second open closes the first: the new view keeps the entry. */
+let handingOver = false;
+
+/**
+ * Back to the entry the view was opened on. Straight to it where the browser can (the Navigation API): the contact's
+ * app may have moved its own history, and once its frame is gone a plain Back lands on its steps and does nothing.
+ */
+function leaveViewEntry(): void {
+  type Going = { committed: Promise<unknown>; finished: Promise<unknown> };
+  type Navigation = { currentEntry: { index: number } | null; entries(): { key: string }[]; traverseTo(key: string): Going };
+  const navigation = (globalThis as { navigation?: Navigation }).navigation;
+  const here = navigation?.currentEntry;
+  const under = here ? navigation!.entries()[here.index - 1] : undefined;
+  if (!under) { history.back(); return; }
+  const going = navigation!.traverseTo(under.key);
+  going.committed.catch(() => {});
+  going.finished.catch(() => {});
+}
+
+/**
  * Shows a contact's app full screen over the app, on its own origin under `host`, with a bar to close it. One at a
  * time: opening another closes the one before.
  */
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords }): Promise<void> {
-  closeServiceView();
+  handingOver = true;
+  try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
   const jar = new CookieJar();
   const view = document.createElement("div");
   view.id = VIEW_ID;
   view.setAttribute("role", "dialog");
   view.setAttribute("aria-label", options.title);
-  view.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:var(--color-app-bg,#111)";
+  // Clear of a phone's notch and home indicator, its edges in the view's background: inside the frame the app cannot
+  // keep clear of them itself (`env(safe-area-inset-*)` is 0 there). The bar takes the top.
+  view.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--color-app-bg,#111)";
   const bar = document.createElement("div");
   bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:6px 8px;padding-top:max(6px,env(safe-area-inset-top));color:var(--color-text-primary,#eee);font:600 14px system-ui,sans-serif;border-bottom:1px solid var(--color-border,#333)";
   const close = document.createElement("button");
@@ -152,15 +189,21 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const end = () => {
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey);
+    removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
     view.remove();
     for (const el of shut) el.removeAttribute("inert");
     const active = document.activeElement;
     if (before?.isConnected && (!active || active === document.body)) before.focus({ preventScroll: true });
+    // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
+    if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
+  const onPop = () => { if (!isViewEntry(history.state)) end(); };
+  if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
   addEventListener("keydown", onKey);
+  addEventListener("popstate", onPop);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
   frame.src = `${origin}${BRIDGE_PAGE}`;

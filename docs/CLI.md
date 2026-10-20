@@ -99,9 +99,11 @@ One JSON object per line each way:
 A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
 connection.
 
-Every command's first line on the socket is a `daemon.hello` with a nonce, and nothing else goes until the answer
-proves, with the secret the daemon writes in the profile's folder (`daemon.secret`, 0600, new at every start), that
-it is the profile's daemon: on Windows the socket is a named pipe whose name another account could open first. What
+The daemon speaks first on the socket: a greeting that proves, with the secret it writes in the profile's folder
+(`daemon.secret`, 0600, new at every start), its pid and the time. A command writes nothing until that checks out,
+then a `daemon.hello` with a nonce, and nothing else until the answer proves the same over that nonce: on Windows the
+socket is a named pipe whose name another account could open first, and a privileged one could impersonate a client
+that writes to it. What
 cannot prove it is refused (`refused`); a daemon of an older release cannot either, and `ghostly daemon restart` stops
 it through the process that holds the profile and starts this release's.
 
@@ -131,11 +133,14 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
   cursor moves past its event: it is not run again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
+- A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
+  (`daemon stop`), it says so once on stderr and waits; it says again when a daemon answers, and goes on from the last
+  event it took.
 - A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
   ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
@@ -244,7 +249,9 @@ Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage),
 5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
 seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
-`details.method`). `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+`details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
+once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
+sent, so the daemon does not act on it when it wakes. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.
@@ -307,6 +314,9 @@ ghostly daemon --detach
 ghostly call auto on --from alice        # or: ghostly call answer alice, on each call.incoming event
 ghostly listen --type call.              # call.connected carries {"audio":{"socket":…,"rate":48000,…}}
 ```
+
+A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
+text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup.
 
 The audio contract, one Unix socket per call:
 

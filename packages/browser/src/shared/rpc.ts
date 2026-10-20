@@ -583,7 +583,10 @@ export type EngineImplementation = {
 
 export type EngineMethod = keyof EngineApi;
 
-/** A range the contact's app asks of a served file (`app-range`): answered with `appRangeAnswer`. */
+/**
+ * A range the contact's app asks of a served file (`app-range`): answered with `appRangeAnswer` under its `request`, the
+ * engine's own number for this ask (not the contact's on the wire, which it may ask again under once cancelled).
+ */
 export interface AppRangeAsk { app: string; request: number; serve: string; file: string; offset: number; length: number }
 type Params<M extends EngineMethod> = Parameters<EngineApi[M]> extends [infer P] ? P : undefined;
 
@@ -644,9 +647,11 @@ export type EngineEvent =
   | { kind: "state"; state: EngineState }
   /**
    * A chat's or group's history, whole; with `more`, only its newest page (a client attached with `newest`), the older
-   * rows not sent: the client asks for them (`HistoryRequest`).
+   * rows not sent: the client asks for them (`HistoryRequest`). `deleted`: the ids the engine deleted in a chat (its
+   * `deletedIds`), when it has any: a list does not say a row went, and a removal no page heard (the extension's engine
+   * runs with none open) would stay in a page's copy.
    */
-  | { kind: "messages"; linkId: string; messages: StoredMessage[]; more?: true }
+  | { kind: "messages"; linkId: string; messages: StoredMessage[]; more?: true; deleted?: string[] }
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }

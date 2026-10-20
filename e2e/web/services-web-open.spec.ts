@@ -91,10 +91,27 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
+    // An iPhone on its side (Chromium plays its safe area): ✕, the name and the app clear of the notch on either side
+    // and of the home indicator. The app cannot keep clear of them itself: `env(safe-area-inset-*)` is 0 in its frame.
+    // ✕ was at x=8 under the notch, and the frame ran edge to edge and to the bottom.
+    const viewport = person.page.viewportSize()!;
+    await person.page.setViewportSize({ width: 667, height: 375 });
+    const cdp = await person.page.context().newCDPSession(person.page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 47, bottom: 21, left: 47 } });
+    const outside = () => view.evaluate((v) => [v.querySelector("[data-testid=service-view-close]")!, v.querySelector("[data-testid=service-view-frame]")!, v.querySelector("span")!]
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.left < 47 || r.right > innerWidth - 47 || r.bottom > innerHeight - 21)
+      .map((r) => `${Math.round(r.left)}..${Math.round(r.right)} x ${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerWidth}x${innerHeight}`));
+    await expect.poll(outside).toEqual([]);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 0, bottom: 0, left: 0 } });
+    await person.page.setViewportSize(viewport);
+
     // Closed: gone, the chat is where it was, and the focus back on Open, not on the page's body.
+    const chat = person.page.url();
     await person.page.getByTestId("service-view-close").click();
     await expect(view).toHaveCount(0);
     await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    await expect(person.page).toHaveURL(chat);
     await expect(open).toBeFocused();
 
     // With the keyboard: Tab stays in the view, never on the chat hidden under it; Escape closes it, back on Open.
@@ -109,6 +126,15 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     await person.page.keyboard.press("Escape");
     await expect(view).toHaveCount(0);
     await expect(open).toBeFocused();
+    await expect(person.page).toHaveURL(chat);
+
+    // Opened again, Back (Android's back gesture, the browser's) closes it and leaves the chat as it was.
+    await open.click();
+    await expect(view).toBeVisible();
+    await person.page.goBack();
+    await expect(view).toHaveCount(0);
+    await expect(person.page).toHaveURL(chat);
+    await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
   } catch (error) {
     await bot.attachLogs(info);
     throw error;

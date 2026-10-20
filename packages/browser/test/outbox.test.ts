@@ -371,6 +371,48 @@ describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", 
   });
 });
 
+// agents#1693: each turn's 30 s escape (TURN_MS) was armed when the turn was queued, not when it began. Behind one slow
+// turn, every turn queued before its 30th second then started at once: a link drop with hundreds of texts awaiting
+// receipts ran 45 whole-chat reads together, and the daemon's heap went past 1 GB (the contact's died at 4 GB).
+describe("turns behind a slow one", () => {
+  /** `n` texts sent at once into a chat whose every read of its history takes `readMs`; the most reads at a time. */
+  async function burst(n: number, readMs: number) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
+      const wireId = `t${String(i).padStart(21, "0")}`;
+      return { linkId: "turns", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "datalink", delivery: "sending" };
+    });
+    let reading = 0, most = 0, reads = 0;
+    const read = async () => {
+      reading++; reads++; most = Math.max(most, reading);
+      await new Promise(done => setTimeout(done, readMs));
+      reading--;
+      return rows.map(row => ({ ...row }));
+    };
+    const store = { read, update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string) => {
+      const row = rows.find(r => r.id === id);
+      if (row && row.delivery !== "delivered") Object.assign(row, { delivery, deliveryError: error });
+    } };
+    // Receipts are awaited for a day: only the sends' own turns run here.
+    const box = new Outbox(store, async () => null, 86_400_000, undefined, { resender: { ready: () => true } });
+    const sends = rows.map(row => box.transmit(row.id));
+    await vi.advanceTimersByTimeAsync(n * (readMs + 1_000) + 60_000);
+    await Promise.all(sends);
+    return { most, reads };
+  }
+
+  it("a turn that outlives its 30 s lets one more start, not every turn queued behind it", async () => {
+    const { most, reads } = await burst(40, 35_000);
+    expect(reads).toBeGreaterThanOrEqual(40);
+    expect(most).toBeLessThanOrEqual(2);
+  }, 30_000);
+
+  it("turns shorter than 30 s run one at a time", async () => {
+    const { most } = await burst(40, 1_000);
+    expect(most).toBe(1);
+  }, 30_000);
+});
+
 describe("a chat with many queued messages and the contact away", () => {
   /** `n` queued DHT texts in a store that counts its reads of the whole chat, on fake timers; `ready`: whether the chat can carry text. */
   async function many(n: number, ready: boolean) {

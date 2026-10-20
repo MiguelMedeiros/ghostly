@@ -28,17 +28,17 @@ export const MAX_REMOVALS = 500;
 /** The removal of a message after its last edit `seq`: one past it, at most `MAX_REMOVAL_NUMBER`. */
 export const removalNumber = (seq: number | undefined) => Math.min((seq ?? 0) + 1, MAX_REMOVAL_NUMBER);
 
-/** How often a chat is read whole for the quotes of removed messages that were not here (`QuoteSweeps`). */
+/** How often a chat is read whole for the quotes of removed messages (`QuoteSweeps`). */
 export const QUOTE_SWEEP_MS = 10_000;
 
 /** Removed messages whose quotes go, by their id here: the reference a reply names each by (`replyRef`), if any. */
 export type RemovedQuotes = ReadonlyMap<string, string | undefined>;
 
 /**
- * The quotes of removed messages that were not here (never came, or deleted here first). The replies that quote one
- * are found by reading the chat whole, and a contact or a member can remove ids that never were, at its edit pace. So a
- * chat is read for them at most once a `QUOTE_SWEEP_MS`: the first at once, the ones that come meanwhile together when
- * the time is up.
+ * The quotes of removed messages, here or not (never came, or deleted here first). The replies that quote one are found
+ * by reading the chat whole, and a contact or a member can send and remove, or remove ids that never were, at its edit
+ * pace. So a chat is read for them at most once a `QUOTE_SWEEP_MS`: the first at once, the ones that come meanwhile
+ * together when the time is up.
  */
 export class QuoteSweeps {
   private readonly chats = new Map<string, { due: Map<string, string | undefined>; at: number; busy: boolean; timer?: ReturnType<typeof setTimeout> }>();

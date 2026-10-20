@@ -68,6 +68,7 @@
     "audioFailed": "Audio call couldn't connect",
     "audioIncoming": "Incoming audio call",
     "audioMissed": "Missed audio call",
+    "audioMissedMany": "{{count}} missed audio calls",
     "audioStarted": "Audio call started",
     "audioUnanswered": "Audio call, no answer",
     "videoCancelled": "Video call cancelled",
@@ -77,6 +78,7 @@
     "videoFailed": "Video call couldn't connect",
     "videoIncoming": "Incoming video call",
     "videoMissed": "Missed video call",
+    "videoMissedMany": "{{count}} missed video calls",
     "videoStarted": "Video call started",
     "videoUnanswered": "Video call, no answer"
   },
