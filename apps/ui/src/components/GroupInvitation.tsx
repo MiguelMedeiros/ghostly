@@ -4,6 +4,9 @@ import type { GroupView } from "@ghostly/browser/shared/types";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { Translate } from "../locales/translate";
+import { knownErrorParts, rawError } from "../lib/errorText";
+import type { Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /** How long the reason an answer did not go stays under Accept and Decline. */
 export const REFUSAL_SHOWN_MS = 8000;
@@ -62,9 +65,10 @@ export function focusPastRow(next: HTMLElement | null, pressed: Element | null, 
 export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const [refused, setRefused] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Problem | null>(null);
+  // One with words behind its ⓘ stays until the next press: they went from under a reader's eyes.
   useEffect(() => {
-    if (!refused) return;
+    if (!refused || refused.detail) return;
     const timer = setTimeout(() => setRefused(null), REFUSAL_SHOWN_MS);
     return () => clearTimeout(timer);
   }, [refused]);
@@ -86,12 +90,27 @@ export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, r
         (returnFocus ? returnFocus.current : rowOpen(group.id))?.focus();
       }
     } catch (error) {
-      const away = /not connected/i.test(error instanceof Error ? error.message : String(error));
-      const contact = group.invitation?.contact;
-      setRefused(!away ? t("sidebar.group.answerFailed") : contact ? t("sidebar.group.inviterAway", { contact }) : t("sidebar.group.inviterAwayUnknown"));
+      setRefused(refusal(error, group.invitation?.contact, t));
     } finally { setBusy(false); }
   };
   return { busy, refused, answer };
+}
+
+/**
+ * Why an answer did not go: the inviter's chat not live yet, by the inviter's name; a refusal the app knows (this app
+ * offline, or in limited mode) in its own words, as every other group action says it; anything else as a failure, its
+ * English behind the ⓘ. Offline and limited mode blamed the inviter, or said only "Try again" for an answer that never goes.
+ */
+function refusal(error: unknown, contact: string | undefined, t: Translate): Problem {
+  const raw = rawError(error);
+  if (/not connected/i.test(raw)) return { tone: "error", title: contact ? t("sidebar.group.inviterAway", { contact }) : t("sidebar.group.inviterAwayUnknown") };
+  const known = knownErrorParts(raw, t);
+  return known ? { tone: "error", ...known } : { tone: "error", title: t("sidebar.group.answerFailed"), ...(raw && { detail: raw }) };
+}
+
+/** The refusal under Accept and Decline. Its ⓘ is a button of its own: pressing it does not open a chat list's row. */
+export function InvitationRefusal({ refused, className }: { refused: Problem; className?: string }) {
+  return <div onClick={e => e.stopPropagation()} className={className}><Notice problem={refused} testId="group-answer-refused" /></div>;
 }
 
 /** Accept and Decline, small (a chat list row) or a thumb's height (the invitation's own page). */
@@ -129,7 +148,7 @@ export function GroupInvitationCard({ group, compact = false, returnFocus }: { g
   // Taken back by who sent it: who did, and what to do, where the invitation was.
   const taken = invitation.takenBack ? takenBackWords(group, t) : undefined;
   const line = taken ? <span data-testid="group-taken-back"><span className="block font-medium text-text-primary">{taken.title}</span>{taken.next}</span> : invitationLine(invitation, t);
-  const why = refused && <p role="status" data-testid="group-answer-refused" className="text-xs text-danger">{refused}</p>;
+  const why = refused && <InvitationRefusal refused={refused} />;
   if (compact) return <div data-testid="group-invitation" className="border-b border-border bg-surface-alt px-4 py-2 text-xs text-text-secondary">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="min-w-0">{line}</p>
