@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, expect, it, vi } from "vitest";
 import { createIdentity, type GhostLinkOptions } from "@ghostly/core";
-import { GhostlyNode } from "../src/engine/node";
+import { EDGES_FIRST_MAX_MS, GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import type { StoredLink } from "../src/shared/types";
 // covers: chat.paired.send
@@ -159,4 +159,59 @@ it("a start that goes offline between slices starts no more links", async () => 
   const live = [...(node as unknown as { links: Map<string, { link: unknown }> }).links.values()];
   expect(built.length).toBeLessThan(40);
   expect(live.filter((l) => l.link)).toHaveLength(0);
+}, 30000);
+
+/**
+ * agents#1637: the network back on a hub with 12 chats and 2 groups of 4. Its links started in one go: the chats'
+ * publishes took the relays' budget, the edges' answers to their members' offers were held back, and the members were
+ * back minutes later (0 of 10 cycles within 300 s), or not in that run. The edges start first, and the chats once the
+ * edges read their members and got their answers out, up to `EDGES_FIRST_MAX_MS`.
+ */
+async function networkBackWithEdges(edgeMs: number): Promise<{ edgesDoneAt: number; chatsAt: number[]; order: string[] }> {
+  await fortyChats(false);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {} });
+  await node.start();
+  type Live = { stored: { id: string; group?: string }; link: unknown };
+  const links = (node as unknown as { links: Map<string, Live> }).links;
+  // Two groups' edges, stored first as `this.links` holds them.
+  const chats = [...links.entries()];
+  links.clear();
+  const edges = ["edge-a", "edge-b", "edge-c"];
+  for (const id of edges) links.set(id, { ...chats[0][1], stored: { ...chats[0][1].stored, id, group: "g" }, link: null });
+  for (const [id, live] of chats) links.set(id, live);
+  const order: string[] = [];
+  const chatsAt: number[] = [];
+  let edgesDoneAt = Infinity;
+  const started = performance.now();
+  const startLink = (node as unknown as { startLink(id: string): void }).startLink.bind(node);
+  vi.spyOn(node as unknown as { startLink(id: string): void }, "startLink").mockImplementation((id: string) => {
+    order.push(id);
+    const live = links.get(id)!;
+    if (!live.stored.group) { chatsAt.push(performance.now() - started); return startLink(id); }
+    // The edge reads its member, makes its answer and gets it out in `edgeMs`.
+    const edge = { firstExchangeUnderWay: true, isDataLinkOpen: false, availableTransports: [], relayedTransports: [], allowsPayment: () => false, stop: async () => {} };
+    live.link = edge;
+    setTimeout(() => { edge.firstExchangeUnderWay = false; edgesDoneAt = Math.min(edgesDoneAt, performance.now() - started); }, edgeMs);
+  });
+  await node.updateSettings({ settings: { online: true } });
+  // The fake edges leave before the shutdown stops what it started.
+  for (const id of edges) links.delete(id);
+  return { edgesDoneAt, chatsAt, order };
+}
+
+it("the network turned on starts the groups' edges first, and the chats once the edges' answers are out", async () => {
+  const { edgesDoneAt, chatsAt, order } = await networkBackWithEdges(600);
+  console.log(`EDGES FIRST: edges' answers out at ${Math.round(edgesDoneAt)} ms, first chat started at ${Math.round(chatsAt[0])} ms`);
+  expect(order.slice(0, 3)).toEqual(["edge-a", "edge-b", "edge-c"]);
+  expect(chatsAt).toHaveLength(40);
+  expect(chatsAt[0]).toBeGreaterThanOrEqual(edgesDoneAt);
+  // Not much later: the chats go as soon as the edges are done.
+  expect(chatsAt[0]).toBeLessThan(edgesDoneAt + 400);
+}, 30000);
+
+it("the chats wait no longer than EDGES_FIRST_MAX_MS for edges whose answers do not get out", async () => {
+  const { chatsAt } = await networkBackWithEdges(60_000);
+  expect(chatsAt).toHaveLength(40);
+  expect(chatsAt[0]).toBeGreaterThanOrEqual(EDGES_FIRST_MAX_MS - 50);
+  expect(chatsAt[0]).toBeLessThan(EDGES_FIRST_MAX_MS + 1_000);
 }, 30000);
