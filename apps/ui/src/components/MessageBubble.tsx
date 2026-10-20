@@ -706,7 +706,8 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
                   after.current = neighbourOptions(ref.current);
                   confirmed();
                 }}
-                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                // Filled, as the other destructive confirmations: red on a pink fill read at 3.98:1 in the light theme.
+                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
