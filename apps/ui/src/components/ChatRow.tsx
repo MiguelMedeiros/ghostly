@@ -12,7 +12,7 @@ import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
-import { cardLine, showsCard } from "../lib/statusCards";
+import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
@@ -29,6 +29,7 @@ import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
 import type { WorkingEntry } from "../lib/working";
 import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
+import { REORDER_KEYS } from "../hooks/useRowReorder";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -151,7 +152,8 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
     <div className="flex-1 min-w-0">
       <div className="contact-row relative flex items-baseline gap-2">
         <span className="flex flex-1 min-w-0 items-center gap-1.5">
-          <span data-testid="chat-row-name" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
+          {/* In its own direction, on the box that cuts it: a Latin name in Arabic is cut at its end, not its start. */}
+          <span data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
           {marks}
         </span>
         {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-2">
@@ -173,10 +175,11 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
 /**
  * What opens the row from the keyboard: a button over the whole row, first in it, so Tab reaches every chat and group
  * and Enter or Space opens it (the click it makes is the row's own). The pointer goes through it to the row and to the
- * buttons laid over it, as before; its ring is the row's edge.
+ * buttons laid over it, as before; its ring is the row's edge. A row that can be put in order says so with its keys
+ * (Alt+↑/↓, hooks/useRowReorder.ts).
  */
-function RowOpen({ label, active, describedBy, testId }: { label: string; active: boolean; describedBy: string; testId: string }) {
-  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined}
+function RowOpen({ label, active, describedBy, testId, reorders }: { label: string; active: boolean; describedBy: string; testId: string; reorders?: boolean }) {
+  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} aria-keyshortcuts={reorders ? REORDER_KEYS : undefined}
     className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
@@ -285,7 +288,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
       className={`${rowClass(p.active, p.density)} ${p.reorder ? "select-none [-webkit-touch-callout:none]" : ""} ${p.reorder?.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg transition-none" : ""}`}>
       {p.reorder?.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={p.reorder.drop}
         className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
-      <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
+      <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} reorders={!!p.reorder?.props["data-reorder-id"]} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
         {p.face && <FaceCorner face={p.face} />}
@@ -312,7 +315,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
         )}
       </div>
       <RowText
-        name={<bdi>{p.label}</bdi>}
+        name={p.label}
         previewId={previewId}
         // Compact: the working mark right after the name, before the identities.
         marks={<>{p.density === "compact" && working}<ContactMarks peerKey={p.peerPubKey} /></>}
@@ -343,7 +346,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : payment ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? appCardLine(p.lastMessage.card, t) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
@@ -388,7 +391,7 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
   latest.current = onOpen;
   const open = useCallback(() => latest.current(), []);
   const time = group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined;
-  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} reorders={!!drag?.props["data-reorder-id"]} />;
   if (!drag) return row;
   // The drag is on a box around the row, so the row itself is drawn again only when the group changes.
   return (
@@ -401,8 +404,8 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
   );
 }
 
-const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number;
+const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt, reorders }: {
+  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
 }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
@@ -423,7 +426,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
-      <RowOpen testId="group-row-open" label={group.name || t("group.chat.unnamed")} active={active} describedBy={previewId} />
+      <RowOpen testId="group-row-open" label={group.name || t("group.chat.unnamed")} active={active} describedBy={previewId} reorders={reorders} />
       <div className="relative shrink-0">
         <GroupAvatar picture={group.picture} size={size} glyph={Math.round(size * 0.46)} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
       </div>

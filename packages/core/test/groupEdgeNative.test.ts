@@ -10,7 +10,7 @@ import { measureRecords } from "../src/pkarr";
 import { fromBase64Url } from "../src/bytes";
 import type { PairingState } from "../src/pairedSession";
 import type { NativeTransport, PairedTransport, TransportDescriptors } from "../src/pairedTransports";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, rtc, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, killRtc, rtc, useFakeWorld, yieldToLoop } from "./support/pairingWorld";
 import { NativeWorld } from "./support/nativeWorld";
 // covers: groups.native-links, groups.send
 
@@ -107,19 +107,22 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
       },
       // `offAfterFailure`: as the engine does (node.ts `edgeWithoutRtc`), an edge whose WebRTC attempt connected nothing
       // starts again as on an app with no WebRTC, its native endpoints up, for this run of the app.
-      onDirectEvidence: evidence => {
-        if (!options.offAfterFailure || !rtcOn || evidence === "open" || evidence === "closed") return;
-        rtcOn = false;
-        const old = result.link;
-        void old.stop(false).then(() => {
-          result.link = make();
-          result.link.start();
-          started = false;
-          startEndpoints();
-        });
-      },
+      onDirectEvidence: evidence => { if (evidence !== "open" && evidence !== "closed") withoutRtc(); },
+      // The same once this side's answered offer connected nothing in a few seconds.
+      onRtcStalled: () => withoutRtc(),
     },
   });
+  const withoutRtc = () => {
+    if (!options.offAfterFailure || !rtcOn) return;
+    rtcOn = false;
+    const old = result.link;
+    void old.stop(false).then(() => {
+      result.link = make();
+      result.link.start();
+      started = false;
+      startEndpoints();
+    });
+  };
   const quit = async () => {
     runs++; quitted = true;
     // Its goodbye is a packet out: time passes while it goes.
@@ -393,6 +396,55 @@ describe("a member whose edge went native once, back with WebRTC", () => {
       expect(published(pkarr, m, peer)).toEqual([]);
       expect(labels(pkarr, m)).not.toContain(LABEL.tr);
     }
+  }, 120_000);
+});
+
+/**
+ * A group's edge between two apps with WebRTC, live over it, when one member's network stops letting any direct
+ * connection through (a VPN comes on, 2026-10-16): its live connection dies, and every new offer is answered and
+ * connects nothing. That member's address is public (the VPN's exit), so the side that only answers says nothing about
+ * direct connections; the side that offers waited for ICE to give up (15 s in Chromium, the attempt's 90 s where the
+ * connection never says `failed`) before its edge went native, then for the `_tr` both ways. The member's group messages
+ * waited all that while, and an edge that bounced back to WebRTC waited it again. A chat's offer, answered and not
+ * connected `RACE_ANSWERED_MS` later, dials Iroh at once (`scheduleRace`): an edge's goes native as soon.
+ */
+describe("an open edge whose network stops letting direct connections through", () => {
+  for (const vpnDials of [true, false]) for (const iceGivesUpMs of [15_000, undefined]) it(`is live again over Iroh within 15 s of going down (${vpnDials ? "the member behind the VPN" : "the other member"} dials, ICE ${iceGivesUpMs ? `gives up after ${iceGivesUpMs / 1000} s` : "never says failed"})`, async () => {
+    // Every candidate is public (a STUN server answered through the VPN), as a browser's is there.
+    rtc.srflxAfterMs = 0; rtc.answerSrflxAfterMs = 0;
+    const group = toBase64Url(randomBytes(16));
+    let [one, two] = [createIdentity(), createIdentity()];
+    const edgeKey = (me: Identity, peer: Identity) => edgeParams(group, me.seed, me.pubKeyZ32, peer.pubKeyZ32).peerPubKeyZ32;
+    // `one` dials: its link key is the lower.
+    if (edgeKey(two, one) > edgeKey(one, two)) [one, two] = [two, one];
+    const [v, h] = vpnDials ? [one, two] : [two, one];
+    const vpn = member("vpn", group, v, h, { rtc: true, offAfterFailure: true });
+    const home = member("home", group, h, v, { rtc: true, offAfterFailure: true });
+    expect(await untilLive(vpn, home, 60_000)).toBeLessThan(60_000);
+    expect(liveOn(vpn)).toBe("webrtc/1");
+
+    // The VPN comes on: both ends' connections stop hearing each other, and nothing direct connects any more.
+    rtc.blocked = true; rtc.blockedFailsAfterMs = iceGivesUpMs; rtc.answerFailsAfterMs = iceGivesUpMs;
+    const mine = killRtc("vpn", 5_000);
+    killRtc("home", 5_000);
+    setTimeout(() => { for (const channel of mine) channel.dispatchEvent(new Event("close")); }, 5_000);
+    // Counted from when the dead connection is given up (`DISCONNECT_GRACE_MS` after it stopped hearing the other end, as
+    // in a chat), until the edge is live again.
+    const on = Date.now();
+    let down = 0, took = Infinity;
+    while (Date.now() - on < 4 * 60_000) {
+      if (!down && !vpn.link.groupsSupport && !home.link.groupsSupport) down = Date.now();
+      if (down && vpn.link.groupsSupport && home.link.groupsSupport && liveOn(vpn) === "iroh/1") { took = Date.now() - down; break; }
+      await run(250);
+    }
+    console.log(`GROUP_EDGE_NATIVE VPN on an open edge, ${vpnDials ? "it" : "the other member"} dials, ICE gives up after ${iceGivesUpMs ?? "never"}: down ${(down - on) / 1000} s after, live again ${took / 1000} s later`);
+    expect(took).toBeLessThan(15_000);
+    expect(liveOn(home)).toBe("iroh/1");
+    vpn.link.sendGroupFrame({ t: "group-msg", n: 1 });
+    home.link.sendGroupFrame({ t: "group-msg", n: 2 });
+    await run(1_000);
+    expect(home.frames).toContainEqual({ t: "group-msg", n: 1 });
+    expect(vpn.frames).toContainEqual({ t: "group-msg", n: 2 });
   }, 120_000);
 });
 

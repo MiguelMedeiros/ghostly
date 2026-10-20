@@ -101,6 +101,35 @@ test("on a phone a chat's header keeps the contact's whole name beside the conne
     await expect(page.getByRole("dialog", { name: "Connection options" })).toBeHidden();
     await expect(page.getByTestId("connection-options")).toBeFocused();
 
+    // The sheet in groups: what is done now, the conversation (the identities, the bot's Tasks), More…, and Delete chat
+    // apart. No Move up or Move down: a pinned chat's place is the list's. A separator is "—".
+    await page.getByTestId("chat-options").click();
+    const layout = (sheet: typeof menu) => sheet.locator("[data-menu-item], [role=separator]")
+      .evaluateAll(els => els.map(el => el.getAttribute("role") === "separator" ? "—" : (el as HTMLElement).dataset.testid ?? el.textContent));
+    await expect.poll(() => layout(menu)).toEqual(["call-video", "chat-search-open", "chat-mute-open", "chat-pin-toggle", "—", "chat-identity-badges", "chat-tasks", "—", "chat-more-open", "—", "Delete chat"]);
+    await expect(menu.getByTestId("chat-more-open")).toHaveText("More…");
+    await page.screenshot({ path: test.info().outputPath("phone-menu.png") });
+    // More…: a second sheet with the rarer rows, the first one focused; Escape gives the focus back to ⋮.
+    await menu.getByTestId("chat-more-open").click();
+    await expect(menu).toHaveCount(0);
+    const more = page.getByTestId("chat-more-menu");
+    await expect(more).toHaveAttribute("data-menu", "sheet");
+    await expect.poll(() => layout(more)).toEqual(["chat-folder-open", "chat-hold-open", "chat-refresh", "chat-tech-info"]);
+    await expect(more.getByTestId("chat-folder-open")).toBeFocused();
+    await page.waitForTimeout(400); // the sheet fades in: the picture after it
+    await page.screenshot({ path: test.info().outputPath("phone-more.png") });
+    await page.keyboard.press("Escape");
+    await expect(more).toHaveCount(0);
+    await expect(page.getByTestId("chat-options")).toBeFocused();
+    // Its rows open what they did: Hold messages….
+    await page.getByTestId("chat-options").click();
+    await menu.getByTestId("chat-more-open").click();
+    await more.getByTestId("chat-hold-open").click();
+    await expect(more).toHaveCount(0);
+    await expect(page.getByTestId("chat-hold")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("chat-hold")).toHaveCount(0);
+
     // A phone on its side has the room: every button is in the header again.
     await page.setViewportSize({ width: 844, height: 390 });
     for (const id of ["connection-options", ...MOVED]) await expect(page.getByTestId(id), id).toBeVisible();

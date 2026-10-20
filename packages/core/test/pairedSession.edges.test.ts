@@ -169,6 +169,7 @@ describe("paired session: offers a peer may not make", () => {
     ["a numeric capability", { capabilities: ["chat/1", 7] }],
     ["a numeric key", { key: 7 }],
     ["a key outside z-base-32", { key: "l".repeat(52) }],
+    ["a key respelled in its last character", { key: "y".repeat(51) + "b" }],
     ["a short nonce", { nonce: "a".repeat(42) }],
     ["a numeric nonce", { nonce: 7 }],
   ])("fails on an offer with %s", async (_, over) => {
@@ -213,6 +214,18 @@ describe("paired session: offers a peer may not make", () => {
     const own = JSON.parse(await vi.waitFor(() => { const f = h.sent.find(x => x.includes("pair-offer")); expect(f).toBeDefined(); return f!; }));
     h.inject(JSON.stringify({ ...own, nonce: "b".repeat(43) }));
     await failedWith(h.s, /Invalid participation key/);
+  });
+
+  it("fails on its own key reflected back in another spelling, before it signs or pins anything", async () => {
+    const h = lone({ trustOnFirstUse: true });
+    const own = JSON.parse(await vi.waitFor(() => { const f = h.sent.find(x => x.includes("pair-offer")); expect(f).toBeDefined(); return f!; }));
+    // The last character carries one bit of the key and four of padding: another padding, the same 32 bytes.
+    const z32 = "ybndrfg8ejkmcpqxot1uwisza345h769", last = z32.indexOf(own.key.at(-1));
+    const respelled = own.key.slice(0, 51) + z32[(last & 0b10000) | ((last + 1) & 0b01111)];
+    h.inject(JSON.stringify({ ...own, key: respelled, nonce: "b".repeat(43) }));
+    await failedWith(h.s, /Invalid participation key/);
+    expect(h.sent.some(f => f.includes("pair-proof"))).toBe(false);
+    expect(h.opts.pinPeer).not.toHaveBeenCalled();
   });
 
   it("fails on an offer without chat, or without the transport in use", async () => {

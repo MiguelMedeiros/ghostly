@@ -58,7 +58,9 @@ export function createIdentity(): Identity {
 export function publicKeyFromZ32(z32: string): Uint8Array {
   if (z32.length !== 52) throw new Error("Invalid public key: expected 52 z-base-32 characters");
   const bytes = fromZ32(z32);
-  if (bytes.length !== 32) throw new Error("Invalid public key length");
+  // One key, one spelling: a 52-character string whose four padding bits are not zero decodes to the same 32 bytes
+  // as the canonical one but is not it, and keys are compared as strings (WISP 02).
+  if (toZ32(bytes) !== z32) throw new Error("Invalid public key: not canonical z-base-32");
   return bytes;
 }
 

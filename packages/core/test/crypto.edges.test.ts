@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import {
-  bytesEqual, concatBytes, fromBase64, fromBase64Url, fromZ32, toBase64, toBase64Url, toZ32, utf8Decode, utf8Encode,
+  bytesEqual, concatBytes, fromBase64, fromBase64Url, fromZ32, isZ32Key, toBase64, toBase64Url, toZ32, utf8Decode, utf8Encode,
 } from "../src/bytes";
 import { decrypt, encrypt, generateEncryptionKey, tryDecrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify } from "../src/identity";
@@ -115,6 +115,23 @@ describe("identity", () => {
     expect(() => publicKeyFromZ32(key.slice(1))).toThrow("expected 52 z-base-32 characters");
     expect(() => publicKeyFromZ32(key + "y")).toThrow("expected 52 z-base-32 characters");
     expect(() => publicKeyFromZ32("0" + key.slice(1))).toThrow(/Invalid z-base-32 character/);
+  });
+
+  it("reads a key in only its one canonical spelling, though 52 characters can decode the same bytes", () => {
+    // The last character of a 52-character key carries one bit of the key and four zero padding bits. Of the 32
+    // letters, 16 decode to the same 32 bytes, and only the one with zero padding bits re-encodes to the key; the
+    // other 16 are another key's last bit, and one of those is canonical too. So 2 of 32 last characters make a
+    // canonical key: for all-"y" (32 zero bytes) they are "y" and "o".
+    const last = [..."ybndrfg8ejkmcpqxot1uwisza345h769"];
+    const canonical = last.filter(c => isZ32Key("y".repeat(51) + c));
+    expect(canonical).toEqual(["y", "o"]);
+    expect(isZ32Key("y".repeat(51) + "b")).toBe(false);
+    expect(() => publicKeyFromZ32("y".repeat(51) + "b")).toThrow(/not canonical/);
+    const real = createIdentity().pubKeyZ32;
+    expect(isZ32Key(real)).toBe(true);
+    expect(toZ32(publicKeyFromZ32(real))).toBe(real);
+    expect(isZ32Key(7)).toBe(false);
+    expect(isZ32Key("y".repeat(51))).toBe(false);
   });
 
   it("verifies only the exact message, under the signer's key", () => {

@@ -44,6 +44,9 @@ describe("Pubky PKDNS records", () => {
     const user = createIdentity().pubKeyZ32;
     expect(pubkyHomeserverOf(encodeSvcbPacket([{ name: `_other.${user}`, priority: 0, target: HOMESERVER }]), user)).toBeUndefined();
     expect(pubkyHomeserverOf(encodeSvcbPacket([{ name: `_pubky.${user}`, priority: 0, target: "homeserver.example.com" }]), user)).toBeUndefined();
+    // The homeserver's key respelled in its last character: the same bytes, but not a key its packet could be checked against.
+    const a = "ybndrfg8ejkmcpqxot1uwisza345h769", respelled = HOMESERVER.slice(0, 51) + a[a.indexOf(HOMESERVER[51]) ^ 1];
+    expect(pubkyHomeserverOf(encodeSvcbPacket([{ name: `_pubky.${user}`, priority: 0, target: respelled }]), user)).toBeUndefined();
     // Another key's _pubky record does not count for this one.
     expect(pubkyHomeserverOf(encodeSvcbPacket([{ name: `_pubky.${createIdentity().pubKeyZ32}`, priority: 0, target: HOMESERVER }]), user)).toBeUndefined();
   });

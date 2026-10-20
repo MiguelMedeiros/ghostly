@@ -8,7 +8,7 @@ import {
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
-import { CliError } from "./errors";
+import { CliError, localFileError } from "./errors";
 
 /*
  * The publisher tools of WISP 1200 (Apps · Publishing): `app init` writes a folder to start from, `app publish` bundles
@@ -309,8 +309,8 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
  */
 const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n:,-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
-/** Whether `path` is `dir` or anything under it. */
-const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return !rel.startsWith("..") && !isAbsolute(rel); };
+/** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
+const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
 
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
@@ -503,7 +503,7 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   let value: unknown;
   try { value = JSON.parse(readFileSync(indexPath, "utf8")); } catch (error) {
     if (error instanceof SyntaxError) throw new CliError("bad_request", `${indexPath} is not JSON: ${error.message}`);
-    throw error;
+    throw localFileError(error, indexPath) ?? error;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;

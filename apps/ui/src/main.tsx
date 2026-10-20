@@ -89,7 +89,7 @@ async function boot() {
   // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.
   restartWhenRestored();
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
-  addEventListener("ghostly-departing", () => host.announceDeparture());
+  addEventListener("ghostly-departing", () => host.announceDeparture({ quitting: true }));
 
   root.render(
     <StrictMode>

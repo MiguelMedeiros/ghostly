@@ -60,6 +60,16 @@ describe("picking", () => {
     await expect(cancelled).rejects.toThrow(/^cancelled: /);
   });
 
+  it("entry gives one link as the list does, null for an id the app does not keep", async () => {
+    const host = webLinkedFiles({ text: () => text, picker: async () => ({ files: [{ path: "Films/Up.mp4", file: file("abc", 7) }] }) });
+    const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    (await armed()).click();
+    const [picked] = await pick;
+    expect(await host.entry!(REF, picked!.id)).toEqual(picked);
+    expect(await host.entry!(REF, "b".repeat(22))).toBeNull();
+    expect(await host.entry!("pubkeyalpha/other", picked!.id)).toBeNull();
+  });
+
   it("a long app title with no space breaks inside the sheet, in its title and its note", async () => {
     const pick = webLinkedFiles({ text: () => text, picker: async () => null }).pick(REF, "ReaderForVeryLongFolderNamesAndFilesXYZ", { folder: true, accept: [] });
     const sheet = await shown("[data-testid=app-files-sheet]");

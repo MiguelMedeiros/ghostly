@@ -41,6 +41,11 @@ describe("GroupChat: what the header says", () => {
     expect(composer()).toBeEnabled();
   });
 
+  it("gives the group's name its own direction, so in Arabic a Latin name is cut at its end, not its start", () => {
+    openGroup(active({ name: "Neighbourhood book club" }));
+    expect(screen.getByTestId("group-name")).toHaveAttribute("dir", "auto");
+  });
+
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");
@@ -344,6 +349,24 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-forget")).toBeInTheDocument();
   });
 
+  it("removed while typing: the focus goes to the line that says so, not to the page, as the field turns off under it", async () => {
+    const { user } = openGroup(active());
+    await user.click(composer());
+    expect(composer()).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(composer()).toBeDisabled();
+    expect(screen.getByTestId("group-notice")).toHaveFocus();
+  });
+
+  it("the composer turned off while the focus is elsewhere leaves the focus where it is", async () => {
+    const { user } = openGroup(active());
+    await user.click(screen.getByTestId("group-options"));
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
   it("says how to come back when removed from a community, and a line when back in", async () => {
     openGroup(active({ profile: "community", status: "removed", statusReason: "You were removed from this group", canSend: false }),
       [stored({ id: "event:4:joined::1", event: "joined", text: "You joined again" })]);
@@ -487,6 +510,32 @@ describe("GroupChat: the options menu", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
+  });
+
+  it.each([["Leave", "group-leave", "leaveGroup"], ["Delete from this device", "group-forget", "forgetGroup"]] as const)(
+    "%s from the keyboard hands the focus to the next row of the list, or to New after the last", async (_, item, method) => {
+    // It was left on the page's body once home: the next Tab started again from the top.
+    const mine = active({ members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin", online: true })] });
+    const other = { ...mine, id: "group-2", name: "Others" };
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[mine, other], "group-2"], [[mine], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider><Sidebar /><Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on(method, () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-options").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId(item).focus();
+      await user.keyboard("{Enter}");
+      within(screen.getByTestId("group-leave-dialog")).getByTestId("group-leave-confirm").focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
   });
 
   it("keeps the admin from deleting the group while no member is online to become admin", async () => {

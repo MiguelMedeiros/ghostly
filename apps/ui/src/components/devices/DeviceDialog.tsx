@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { InfoButton } from "../layout/Section";
@@ -12,10 +12,15 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: stri
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  // The body mounts once the dialog is open. Before that it is hidden, so a field's autoFocus finds nothing to focus, and
+  // showModal() puts the focus on the first button, Close: a password typed with a space then closed the dialog. A layout
+  // effect, so the body is there before the first paint.
+  const [shown, setShown] = useState(false);
+  useLayoutEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;
     element.showModal();
+    setShown(true);
     return () => { element.close(); if (previous?.isConnected) previous.focus(); };
   }, []);
   return createPortal(
@@ -25,7 +30,7 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: stri
         <h2 id={`${id}-title`} className="text-base font-semibold min-w-0 break-words">{title}</h2>
         <button type="button" onClick={onClose} aria-label={t("common.close")} className="h-10 w-10 shrink-0 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
       </div>
-      <div className="space-y-3 text-sm">{children}</div>
+      <div className="space-y-3 text-sm">{shown && children}</div>
     </dialog>,
     document.body,
   );

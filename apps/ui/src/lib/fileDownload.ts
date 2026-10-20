@@ -54,14 +54,22 @@ export async function downloadFile(platform: ServicesPlatform, file: ChatFile, n
 export class Unconverted extends Error {}
 
 /**
+ * Thrown by an MP3 download when the converter's own file did not load (a deploy replaced it under a tab left open,
+ * offline before the worker kept it): neither the recording nor where it was to be saved is at fault.
+ */
+export class ConverterNotLoaded extends Error {}
+
+/**
  * A voice message converted to MP3 here (`voiceToMp3`, loaded when first asked for) and saved the same ways as
- * the original: the desktop app's save dialog, else a download. Throws `Unconverted` when the recording cannot be
- * converted.
+ * the original: the desktop app's save dialog, else a download. Throws `ConverterNotLoaded` when the converter does
+ * not load, `Unconverted` when the recording cannot be converted.
  */
 async function downloadMp3(platform: ServicesPlatform, file: ChatFile, name: string): Promise<"saved" | "cancelled" | "missing"> {
   const recording = await platform.getFile(file.id);
   if (!recording) return "missing";
-  const { voiceToMp3 } = await import("./voiceMp3");
+  const { voiceToMp3 } = await import("./voiceMp3").catch((error: unknown) => {
+    throw new ConverterNotLoaded(error instanceof Error ? error.message : String(error));
+  });
   const mp3 = await voiceToMp3(recording, file.voice?.duration).catch((error: unknown) => {
     throw new Unconverted(error instanceof Error ? error.message : String(error));
   });

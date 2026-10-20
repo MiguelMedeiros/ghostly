@@ -39,6 +39,10 @@ Clients MUST document where secrets persist and what export/backup exposes. Dele
 
 A lost participation key means loss of that participation unless an explicitly configured recovery policy exists. Initial proposal: re-invite/re-admit with a visible identity change, not silent account recovery via Nostr/Pubky. Compromise recovery without a trusted surviving key requires out-of-band confirmation. Rotation cannot retroactively hide ciphertext encrypted under a compromised old link secret.
 
+## Key encoding
+
+A participation key is the 32 bytes of an Ed25519 public key, written as 52 characters of z-base-32 (alphabet `ybndrfg8ejkmcpqxot1uwisza345h769`) that decode to those 32 bytes and encode back to the same string. The last character carries four padding bits that MUST be zero, so each key has exactly one spelling and implementations MAY compare keys as strings. A key in any other spelling is invalid wherever a key is read, including invites, offers, roster commits, capability records and signatures, and MUST be rejected there rather than normalised, so that one key can never appear as two contacts or two members. WISP 302 (Pubky) and WISP 310 (did:dht) require the same of the identifiers they carry.
+
 ## Compatibility, security and open decisions
 
 Legacy invites disclose one seed and the symmetric key; hiding the invite UI is not rotation. Do not describe that format as a consumable credential. Decide approved handshake primitives, key export UX, atomic durable rotation, rollback detection, multi-device policy and recovery before Proposed. The same Ed25519 key type across systems does not justify reusing secret bytes for other protocols.

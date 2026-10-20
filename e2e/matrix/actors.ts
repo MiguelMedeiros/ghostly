@@ -248,5 +248,9 @@ export async function newWalletDialog(actor: Actor, network: WalletNetwork): Pro
 /** The chat's Options menu, then one of its entries. */
 export async function chatOption(actor: Actor, testId: string): Promise<void> {
   await actor.page.getByTestId("chat-options").click();
+  // A phone's sheet has its rarer rows (Move to folder…, Hold messages…, Refresh, Tech Info) behind More….
+  const menu = actor.page.getByTestId("chat-options-menu");
+  await expect(menu).toBeVisible();
+  if (actor.phone && !(await menu.getByTestId(testId).count())) await menu.getByTestId("chat-more-open").click();
   await actor.page.getByTestId(testId).click();
 }

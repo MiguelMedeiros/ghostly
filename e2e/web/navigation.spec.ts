@@ -116,7 +116,7 @@ test("a deep link gets home under it: Back from it goes home, not out of the app
   await home(page);
 });
 
-test("a page of the menu whose file did not load says so in its place, and Try again or Reload shows it", { tag: ["@feature:app.navigation"] }, async ({ peer, browserName }) => {
+test("a page of the menu whose file did not load says so in its place, and Try again or Reload shows it", { tag: ["@feature:app.navigation"] }, async ({ peer }) => {
   // A page of the menu is a file of its own, asked for when it is first opened: the connection drops just then.
   let offline = true;
   const { page } = await peer("blip", {
@@ -155,16 +155,12 @@ test("a page of the menu whose file did not load says so in its place, and Try a
   await expect(notice).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { sameDocument?: boolean }).sameDocument)).toBe(true);
 
-  // The connection is back. Chromium keeps a failed import for as long as the page lives, so Try again still fails
-  // there (Firefox and Safari ask the server again, and show the page); Reload opens Settings.
+  // The connection is back: Try again asks the server again and shows Settings, in this page. Chromium kept a failed
+  // import for as long as the page lived up to Playwright 1.58's build, so there only Reload brought it.
   offline = false;
   await again.click();
-  if (browserName === "chromium") {
-    await expect(again).not.toHaveAttribute("aria-busy", "true");
-    await reload.click();
-  }
   await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
-  expect(await page.evaluate(() => (window as unknown as { sameDocument?: boolean }).sameDocument)).toBe(browserName === "chromium" ? undefined : true);
+  expect(await page.evaluate(() => (window as unknown as { sameDocument?: boolean }).sameDocument)).toBe(true);
   await expect(notice).toHaveCount(0);
   await expect(page.getByTestId("app-error")).toHaveCount(0);
   await expect(page.getByTestId("sidebar")).toBeVisible();

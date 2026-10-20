@@ -1,6 +1,6 @@
 import { createLink } from "@ghostly/core";
 import type { Page } from "@playwright/test";
-import { chat, expect, test, WAYBACK, type Peer } from "../support/fixtures";
+import { chat, expect, GIF, test, WAYBACK, type Peer } from "../support/fixtures";
 
 /**
  * A big chat left and opened again, as WhatsApp does it: left at its bottom, it opens at its bottom (with what came
@@ -9,7 +9,9 @@ import { chat, expect, test, WAYBACK, type Peer } from "../support/fixtures";
  */
 
 /** A picture 320 × 240, served late: it lays out after the chat has opened. */
-const PICTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#7c5cff"/></svg>`;
+const PICTURE = Buffer.from(GIF);
+PICTURE.writeUInt16LE(320, 6);
+PICTURE.writeUInt16LE(240, 8);
 
 /** A 1:1 chat of `count` messages straight into this browser's storage: texts, pictures, voice, video, audio, previews. */
 function seedChat(page: Page, count: number, label: string): Promise<string> {
@@ -105,7 +107,7 @@ test("a big chat opens again at its bottom or on the message it was left on", { 
   const bob = await peer("restore-bob");
   await bob.context.route(WAYBACK, async route => {
     await new Promise(done => setTimeout(done, 150 + Math.random() * 500));
-    await route.fulfill({ status: 200, contentType: "image/svg+xml", body: PICTURE });
+    await route.fulfill({ status: 200, contentType: "image/gif", body: PICTURE });
   });
   const a = await seedChat(bob.page, 320, "A");
   const b = await seedChat(bob.page, 320, "B");

@@ -239,3 +239,29 @@ describe("a reconnect with many cards due does not burst", () => {
     expect(t.contactLog[0].what).toBe("message first");
   }, 40_000);
 });
+
+describe("a contact that says edit/1 again and again", () => {
+  it("costs one look through the history, not one per time: the flips coalesce, and a card due since still goes after the gap", async () => {
+    const t = await setup({ rows: [floored("A", appCard)] });
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1), { timeout: 15_000 });
+    const channel = (t.contact as unknown as { channel: { send(frame: string): void } }).channel;
+    const offered = (t.contact as unknown as { sessionCapabilities: { announcement(): { c: string[] } } }).sessionCapabilities.announcement().c;
+    expect(offered).toContain("edit/1");
+    const reads = vi.spyOn(db, "getMessages");
+    const historyReads = () => reads.mock.calls.filter(([linkId]) => linkId === t.id).length;
+    const flips = 200;
+    for (let i = 0; i < flips; i++) {
+      channel.send(JSON.stringify({ t: "paired-capabilities", c: offered.filter(c => c !== "edit/1") }));
+      channel.send(JSON.stringify({ t: "paired-capabilities", c: offered }));
+    }
+    // A card that came due while the contact kept flipping: the look after the gap finds it.
+    await db.putMessage({ ...floored("T", taskCard), linkId: t.id });
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+    expect(t.view().sessionOffers?.peer).toContain("edit/1");
+    expect(historyReads()).toBeLessThanOrEqual(1);
+    await vi.waitFor(() => expect(t.contactEdits.map(e => e.id)).toEqual([WIRE("A"), WIRE("T")]), { timeout: 40_000, interval: 250 });
+    // The one look after the gap and the sending of what it found, whatever the number of flips.
+    expect(historyReads()).toBeLessThanOrEqual(5);
+    reads.mockRestore();
+  }, 60_000);
+});

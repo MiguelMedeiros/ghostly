@@ -33,7 +33,8 @@ const statusOf = (t: Translate, status: string) => {
 export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet: WalletPlatform; state: WalletState; backupNow?: boolean }) {
  const spark = state.spark;
  const { t } = useI18n();
- const { busy, error, run } = useRun();
+ // The button pressed is busy while it works and keeps the keys (`loading`, by the key `run` was given); the others wait.
+ const { busy, running, error, run } = useRun();
  const [action, setAction] = useState<Action>("receive");
  const [to, setTo] = useState(""), [amount, setAmount] = useState(""), [review, setReview] = useState<Review | null>(null);
  const [apiKey, setApiKey] = useState("");
@@ -54,7 +55,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
    <p className="text-text-primary">{t("wallet.spark.mainnetTitle")}</p>
    <Notice tone="warning">{t("wallet.spark.mainnetWarning")}</Notice>
    <input aria-label={t("wallet.spark.apiKey")} type="password" autoComplete="off" spellCheck={false} placeholder={t("wallet.spark.apiKey")} className={`${input} font-mono text-xs`} value={apiKey} onChange={e => setApiKey(e.target.value)} />
-   <Button variant="primary" className="w-full" data-testid="spark-mainnet-create" disabled={busy || !apiKey.trim()} onClick={() => void run(async () => { await wallet.sparkCreate({ network: "bitcoin", apiKey }); setApiKey(""); })}>{t("wallet.spark.openMainnet")}</Button>
+   <Button variant="primary" className="w-full" data-testid="spark-mainnet-create" disabled={busy || !apiKey.trim()} loading={running === "create"} onClick={() => void run(async () => { await wallet.sparkCreate({ network: "bitcoin", apiKey }); setApiKey(""); }, "create")}>{t("wallet.spark.openMainnet")}</Button>
    <Notice>{t("wallet.spark.orTestnet")}</Notice>
   </div>
   {error && <Notice problem={error} />}
@@ -74,9 +75,9 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     {to && (!kind || invoice?.token) && <Notice tone="warning" testId="spark-address-invalid">{invoice?.token ? t("wallet.spark.tokenInvoice") : mainnet ? t("wallet.spark.notMainnet") : t("wallet.spark.notRegtest")}</Notice>}
     {invoice && !invoice.token && invoice.amount !== undefined ? <p className="text-sm text-text-primary" data-testid="spark-invoice-summary">{fillNodes(invoice.memo ? t("wallet.spark.invoiceForMemo", { unit, memo: invoice.memo }) : t("wallet.spark.invoiceFor", { unit }), { amount: <span className="font-semibold tabular-nums">{formatAmount(invoice.amount, t.language)}</span> })}</p>
      : <Amount value={amount} onChange={setAmount} unit={unit} testId="spark-amount" />}
-    <Button variant="primary" className="w-full" data-testid="spark-review" disabled={busy || !!review || !spark.balance || !kind || !!invoice?.token || !sats} onClick={() => void run(async () => {
+    <Button variant="primary" className="w-full" data-testid="spark-review" loading={running === "review"} disabled={busy || !!review || !spark.balance || !kind || !!invoice?.token || !sats} onClick={() => void run(async () => {
      setReview(await wallet.preparePayment({ target: { method: "spark", network, provider: SPARK_PROVIDER, asset: "BTC", unit: "sat", address: to, expiresAt: Date.now() + 5 * 60 * 1000 }, amount: sats, feeCap: feeCap(sats), payee: to }));
-    })}>{spark.balance ? t("wallet.panel.review") : t("wallet.panel.noBalance")}</Button>
+    }, "review")}>{spark.balance ? t("wallet.panel.review") : t("wallet.panel.noBalance")}</Button>
     <Notice>{t("wallet.spark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => { setReview(null); setTo(""); setAmount(""); }} />}
@@ -98,9 +99,9 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
    <Row label={t("wallet.panel.network")} hint={mainnet ? t("wallet.spark.networkHintMainnet") : t("wallet.spark.networkHintRegtest")}><span className="text-sm text-text-secondary">{mainnet ? "Mainnet" : "Regtest"}</span></Row>
    {!mainnet && <Row label="Lightning" hint={breezIsLightning ? t("wallet.spark.lnHintOn") : t("wallet.spark.lnHint")}>
     {breezIsLightning ? <span className="text-sm text-text-secondary" data-testid="spark-lightning-on">{t("wallet.panel.inUse")}</span>
-     : <Button data-testid="spark-use-lightning" disabled={busy} onClick={() => void run(() => wallet.sparkUseForLightning())}>{t("wallet.spark.useForLightning")}</Button>}
+     : <Button data-testid="spark-use-lightning" disabled={busy} loading={running === "lightning"} onClick={() => void run(() => wallet.sparkUseForLightning(), "lightning")}>{t("wallet.spark.useForLightning")}</Button>}
    </Row>}
-   <BackupRows name="Spark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow}
+   <BackupRows name="Spark" busy={busy} running={running} run={run} canReplace={canReplace} focusFirst={backupNow}
     reveal={async () => (await wallet.sparkBackup()).mnemonic} exportBackup={pw => wallet.sparkExportBackup(pw)}
     restorePhrase={mnemonic => wallet.sparkCreate({ network, mnemonic })} restoreFile={(text, pw) => wallet.sparkRestoreBackup(text, pw)} />
    <Block><Notice>{t("wallet.spark.phraseNote")}</Notice></Block>

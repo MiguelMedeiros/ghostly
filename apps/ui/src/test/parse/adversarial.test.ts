@@ -131,6 +131,14 @@ describe("direction controls in links", () => {
   it("drops the invisible characters of what no URL parser takes", () => {
     expect(shownUrl("https://\u202eevil")).toBe("https://evil");
   });
+
+  it("shows the host a link opens, not a user part before it that reads as one", () => {
+    expect(shownUrl("https://www.paypal.com@evil.example/login")).toBe("https://evil.example/login");
+    expect(shownUrl("https://accounts.google.com.security-check.verify-session@evil.example/")).toBe("https://evil.example/");
+    expect(shownUrl("https://www.paypal.com:secret@evil.example")).toBe("https://evil.example/");
+    expect(shownUrl("https://a@b@evil.example/x")).toBe("https://evil.example/x");
+    expect(shownUrl("https://x.example/@alice")).toBe("https://x.example/@alice");
+  });
 });
 
 describe("long mentions", () => {

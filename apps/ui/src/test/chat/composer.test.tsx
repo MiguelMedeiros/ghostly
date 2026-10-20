@@ -586,6 +586,25 @@ describe("GIF search while the Internet Archive says to wait", () => {
     expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
   });
 
+  it("counts the wait down from the moment it is on screen", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => rateLimitPage());
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    // The very moment the wait shows, before the page has a chance to do anything else: what a loaded runner sees.
+    const shown = new Promise<void>((resolve) => {
+      const watch = new MutationObserver(() => { if (screen.queryByTestId("gif-busy-wait")) { watch.disconnect(); resolve(); } });
+      watch.observe(document.body, { childList: true, subtree: true });
+    });
+    const { user } = composer();
+    await user.click(smiley());
+    await shown;
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Try again in 0:20.");
+    act(() => { vi.advanceTimersByTime(20_000); });
+    expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("You can try again now.");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+  });
+
   it("keeps the wait across categories and panels, shows the GIFs it has, and asks nothing meanwhile", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {

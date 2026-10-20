@@ -250,6 +250,7 @@
     "youObject": "你"
   },
   "invoice": {
+    "alreadySpent": "已被花掉",
     "anyAmount": "任意金额",
     "checking": "检查中…",
     "confirmWhat": "{{amount}} sats（另加最多 {{fee}} 的手续费）",

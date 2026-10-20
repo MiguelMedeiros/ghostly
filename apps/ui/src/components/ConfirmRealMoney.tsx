@@ -21,7 +21,10 @@ export function ConfirmRealMoney({ what, busy, onSend, onBack }: { what: string;
     <div className="rounded-lg border border-danger/50 p-2 space-y-2 basis-full" data-testid="review-mainnet-confirm" role="group" aria-label={t("payments.confirmReal.label")}>
       <p className="text-xs text-text-primary m-0">{fillNodes(t("payments.confirmReal.text"), { money: <strong>{t("payments.confirmReal.money")}</strong>, what })}</p>
       <div className="flex gap-2 flex-wrap">
-        <button className={`${button} !bg-accent !text-on-accent`} data-testid="review-confirm-send" disabled={busy} onClick={() => { playCue("realmoney"); onSend(); }}>{t("payments.confirmReal.send")}</button>
+        {/* Busy, not disabled, while it sends: a disabled button drops the keys to the page, and they stay there when the
+            payment is refused. A press while busy does nothing. */}
+        <button className={`${button} !bg-accent !text-on-accent data-[loading]:opacity-80 data-[loading]:cursor-progress`} data-testid="review-confirm-send"
+          {...(busy ? { "aria-disabled": true, "aria-busy": true, "data-loading": true } : {})} onClick={() => { if (busy) return; playCue("realmoney"); onSend(); }}>{t("payments.confirmReal.send")}</button>
         <button ref={back} className={button} data-testid="review-confirm-back" disabled={busy} onClick={onBack}>{t("common.back")}</button>
       </div>
     </div>

@@ -154,7 +154,7 @@ describe("app publish", () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
     // A key the first run would make inside the folder: refused, and not made.
-    for (const inside of [join(dir, "publisher.key"), join(dir, "keys", "publisher.pem"), join(dir, ".publisher.key")]) {
+    for (const inside of [join(dir, "publisher.key"), join(dir, "keys", "publisher.pem"), join(dir, ".publisher.key"), join(dir, "..publisher.key"), join(dir, "..keys", "publisher.key")]) {
       const refusal = error(await ghostly(["app", "publish", dir, "--key", inside]), "refused", 1) as { message: string; details?: { reason?: string } };
       expect(refusal.details?.reason).toBe("private-key");
       expect(refusal.message).toContain("outside the app's folder");
@@ -221,6 +221,13 @@ describe("app publish", () => {
     const index = join(tmp(), "index.json");
     writeFileSync(index, "{}");
     expect(error(await ghostly(["store", "sign", index, "--key", join(keys, "store.key"), "--out", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
+    expect(existsSync(join(keys, "store.key"))).toBe(false);
+  }, 60_000);
+
+  it("names a store index that is a folder, as every other file option does", async () => {
+    const keys = tmp();
+    const folder = tmp();
+    expect(error(await ghostly(["store", "sign", folder, "--key", join(keys, "store.key")]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
     expect(existsSync(join(keys, "store.key"))).toBe(false);
   }, 60_000);
 });

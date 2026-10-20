@@ -146,6 +146,13 @@
     "cannotRetry": "Non è possibile riprovare con questo file",
     "clipboardUnavailable": "Impossibile leggere gli appunti",
     "clipboardUnavailableNext": "Allegalo con +.",
+    "floor": {
+      "noRoomNext": "Libera spazio, poi chiedi al tuo contatto di inviarlo di nuovo.",
+      "notInAWeek": "Non è arrivato entro una settimana",
+      "refused": "Questo dispositivo non ha potuto ricevere questo file",
+      "tooMany": "Troppi file in attesa qui",
+      "tooManyNext": "Rispondi ai file che ti aspettano, poi chiedi al tuo contatto di inviarlo di nuovo."
+    },
     "gone": "Questo file non è più qui",
     "noRoom": "Nessuno spazio sul dispositivo del tuo contatto",
     "noRoomHere": "Spazio esaurito su questo dispositivo",
@@ -203,6 +210,7 @@
     "adminOnly": "Solo l'admin può farlo",
     "adminPicture": "Solo l'admin può cambiare la foto del gruppo",
     "adminRename": "Solo l'admin può rinominare il gruppo",
+    "adminRotate": "Solo l'admin può rinnovare il segreto del gruppo",
     "adminShares": "Solo l'admin può condividere un link al gruppo",
     "alreadyJoining": "Stai già entrando in questo gruppo",
     "alreadyMember": "Questo contatto è già un membro",
@@ -502,6 +510,12 @@
     "usdtReverted": "La transazione è stata annullata",
     "usdtRevertedNext": "Nessun token è stato inviato; il gas è stato speso."
   },
+  "relayOnly": {
+    "keepsTurn": "Nascondi il mio IP richiede questo server TURN",
+    "keepsTurnNext": "Disattivalo prima, poi rimuovi il server.",
+    "needsTurn": "Aggiungi prima un server TURN",
+    "needsTurnNext": "Salvane uno qui sopra, poi attiva questa opzione."
+  },
   "relays": {
     "atLeastOne": "Inserisci almeno un indirizzo di relay",
     "notAddress": "Non è un indirizzo di relay: {{address}}",
@@ -531,6 +545,7 @@
     "listenerReleased": "In pausa per un'altra chat. Apri questa chat per riprendere.",
     "noAddress": "L'indirizzo del tuo contatto per questo trasporto non è ancora noto",
     "noAddressNext": "Riconnettiti una volta tramite WebRTC per scambiarlo.",
+    "noAddressWait": "Arriva quando il tuo contatto apre questa chat nella sua app.",
     "noOverlap": "Le vostre scelte di trasporto non coincidono",
     "noOverlapNext": "Attiva il Ripiego, o scegli lo stesso trasporto da entrambe le parti.",
     "noneConnected": "Nessun trasporto è riuscito a connettersi",
