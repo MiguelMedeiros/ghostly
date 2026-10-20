@@ -95,6 +95,7 @@ const POINT_TO_VOICE = [...DOCS, "packages/cli/README.md", "docs/CLI.md", "apps/
 describe("a ready voice agent", () => {
   for (const doc of POINT_TO_VOICE)
     it(`${doc} points to ghostly-voice-agent`, () => {
-      expect(readFileSync(resolve(ROOT, doc), "utf8").includes(VOICE_AGENT), `${doc} has no link to ${VOICE_AGENT}`).toBe(true);
+      const links = readFileSync(resolve(ROOT, doc), "utf8").match(/https:\/\/[^\s)"'`<>]+/g) ?? [];
+      expect(links, `${doc} has no link to ${VOICE_AGENT}`).toContain(VOICE_AGENT);
     });
 });
