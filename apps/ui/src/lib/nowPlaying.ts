@@ -182,6 +182,9 @@ const subscribe = (listener: () => void) => {
 /** What plays away from its bubble, for the bar: null when nothing does. */
 export const useNowPlaying = (): NowPlaying | null => useSyncExternalStore(subscribe, () => shown);
 
+/** Calls `listener` at each change, before the bar draws it (the bar still on the page as it goes). */
+export const onNowPlaying = (listener: (now: NowPlaying | null) => void): (() => void) => subscribe(() => listener(shown));
+
 /** Forgets everything (tests). */
 export function resetNowPlaying(): void {
   end();

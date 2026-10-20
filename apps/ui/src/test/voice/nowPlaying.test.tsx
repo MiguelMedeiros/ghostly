@@ -210,6 +210,20 @@ describe("a voice message playing as its chat goes", () => {
     expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "idle");
   });
 
+  it("played to its end with the focus on the bar, the focus goes on to what comes after it, not to the page's body", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />);
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const player = audio.players[0]!;
+    view.rerender(<Screen files={[file]} open={false} />);
+
+    screen.getByTestId("now-playing-play").focus();
+    act(() => endPlayback(player));
+    expect(bar()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chats" }));
+  });
+
   it("starting another stops the one playing on, and the bar goes", async () => {
     const [first, second] = [voiceFile(), voiceFile()];
     const view = renderApp(<Screen files={[first]} />);
