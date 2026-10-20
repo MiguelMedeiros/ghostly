@@ -100,6 +100,10 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       });
       return;
     }
+    // A group's link that does not read (a character lost): said as one, with what to do, not as "not an invite".
+    if (onJoinGroup && /(?:^|[\s/#<("'«“[])group[12]\//.test(value)) {
+      setError({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") }); setManual(true); return;
+    }
     const reading = readInvite(value);
     // A good code that adds a device (WISP 06), scanned from the active device with Join: it goes where such a code goes.
     if (!reading.ok && reading.reason === "device" && readDeviceInvite(value).ok) { joined.current = true; close(); offerDeviceLink(value.trim()); return; }

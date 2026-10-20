@@ -266,6 +266,7 @@
     "nobodyForLeave": "Nobody is online to take your leave",
     "nobodyForLeaveNext": "Try again in a moment.",
     "notALink": "This is not a link to a group",
+    "notALinkNext": "Ask for the link again: it may have lost a character when copied.",
     "notIn": "You are not in this group",
     "notYet": "You are not in this group yet",
     "nothingToSend": "Nothing to send",

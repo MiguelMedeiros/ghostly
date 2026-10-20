@@ -149,6 +149,7 @@
   },
   "link": {
     "broken": "Este link para um grupo não funciona",
+    "brokenNext": "Peça o link de novo: talvez tenha perdido um caractere ao ser copiado.",
     "copied": "Copiado",
     "copyFailed": "A cópia não funcionou. Selecione o link e copie.",
     "disable": "Desativar",

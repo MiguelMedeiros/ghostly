@@ -1,6 +1,6 @@
 import { bech32, bech32m } from "@scure/base";
 import { fromBase64Url, fromZ32, toBase64Url, toZ32 } from "./bytes";
-import { trimEndOf } from "./text";
+import { unwrapPasted } from "./text";
 import { generateEncryptionKey } from "./crypto";
 import { createIdentity, identityFromSeedB64 } from "./identity";
 import { DEVICE_INVITE_VERSION, INVITE_HRP, INVITE_MAX_LENGTH, INVITE_VERSION, type LinkParams } from "./invite";
@@ -66,8 +66,8 @@ export function encodeDeviceInvite(invite: DeviceInvite): string {
   return bech32m.encode(INVITE_HRP, [DEVICE_INVITE_VERSION, ...bech32m.toWords(payload)], false);
 }
 
-/** The code inside whatever was pasted or scanned: after the last `#`, trimmed. */
-const body = (input: string) => trimEndOf(input.trim().replace(/^.*#/, ""), ".,)!");
+/** The code inside whatever was pasted or scanned: the token in it (`unwrapPasted`), after its last `#`. */
+const body = (input: string) => unwrapPasted(input).replace(/^.*#/, "");
 
 /**
  * Reads a device code, pasted or scanned (bare, in capitals from a QR code, or after a `#`). `now` is in UNIX
