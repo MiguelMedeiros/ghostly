@@ -10,7 +10,8 @@
     ".": "./src/index.ts",
     "./miniApp": "./src/miniApp.ts",
     "./groupFiles": "./src/groupFiles.ts",
-    "./statusCards": "./src/statusCards.ts"
+    "./statusCards": "./src/statusCards.ts",
+    "./voice": "./src/voice.ts"
   },
   "scripts": {
     "test": "vitest run",
