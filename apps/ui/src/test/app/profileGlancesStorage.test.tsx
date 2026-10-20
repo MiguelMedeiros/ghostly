@@ -4,7 +4,7 @@ import { useProfileGlances } from "../../hooks/useProfileSwitcher";
 import { createProfile, prefixOf, registryKey, settingsKeyFor } from "../../lib/profiles";
 import type { ChatSession } from "../../lib/types";
 
-// covers: app.profiles
+// covers: profiles.switcher
 
 /**
  * Two windows of one origin, each running its own profile: every key the other window writes reaches this one as a
