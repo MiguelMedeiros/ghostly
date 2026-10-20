@@ -25,10 +25,11 @@ async function demoApp(): Promise<{ server: Server; port: number; seen: { method
       seen.push({ method: request.method ?? "", path: request.url ?? "", cookie: request.headers.cookie });
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "visit=1; Path=/; HttpOnly", "x-frame-options": "DENY" });
-        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><script src="/app.js"></script>`);
+        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
-        response.end(`fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
+        response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
+          fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
           .then((r) => r.json()).then((j) => { document.getElementById("out").textContent = JSON.stringify({ ...j, origin: location.origin, storage: (() => { try { return Object.keys(localStorage); } catch (e) { return "refused"; } })() }); });`);
       } else if (request.url?.startsWith("/api/echo")) {
         response.writeHead(200, { "content-type": "application/json" });
@@ -88,6 +89,9 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     expect(out.origin).not.toBe(appOrigin);
     expect(out.origin).toMatch(/^http:\/\/[ybndrfg8ejkmcpqxot1uwisza345h769]{32}\.localhost:\d+$/);
     expect(app.seen.map((r) => `${r.method} ${r.path}`)).toEqual(expect.arrayContaining(["GET /", "GET /app.js", "POST /api/echo?x=1"]));
+    // It opens no window of its own: one would be a tab on its origin, outliving the view and the lock.
+    await expect(demo.locator("#popup")).toHaveText("refused");
+    expect(app.seen.map((r) => r.path)).not.toContain("/popup");
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
