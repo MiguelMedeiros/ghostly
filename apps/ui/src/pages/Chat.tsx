@@ -82,6 +82,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { setChatFolder } from "../lib/chatFolders";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
+import { useOnline } from "../hooks/useOnline";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
 import { useSameValue } from "../hooks/useSameValue";
@@ -580,7 +581,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
 
   // The contact's app is closed but it shared how to wake it (WISP 401 § Wake-up push): a call wakes it, then rings.
-  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;
+  // Not offline (Ghostly's switch or the device): no wake-up goes out, and the buttons say why instead of "did not open".
+  const deviceOnline = useOnline();
+  const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop
+    && deviceOnline && engine.state?.settings.online !== false;
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
 
