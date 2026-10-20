@@ -414,6 +414,10 @@ ghostly listen --type call.                # call.incoming … call.connected {"
 node examples/call-echo.mjs greeting.wav   # a program that answers, greets, then echoes after 1 s
 ```
 
+A whole voice agent on this socket: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls with
+speech to text, Claude and text to speech, stops talking when the caller talks, and hands real work to another agent.
+Its `AGENTS.md` is the guide for an AI agent that sets it up.
+
 **The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `/tmp/ghostly-calls-<hash>/<call>.sock` (in a
 folder of yours alone, 0700) when that path is too long; `call start`, `call answer`, `call list` and the
 `call.connected` event name it. It carries raw PCM,
