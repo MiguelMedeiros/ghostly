@@ -495,6 +495,64 @@ describe("GroupChat: the options menu", () => {
     expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
   });
 
+  // One page for every group (Root.tsx): a refusal in one group's notice is about that group, not the next one opened.
+  describe("a refusal, then another group opened", () => {
+    const other = (patch: Partial<GroupView> = {}) => active({ id: "group-2", name: "Others", isAdmin: true, ...patch });
+    function Go() {
+      const navigate = useNavigate();
+      return <><button onClick={() => navigate("/group/group-1")}>one</button><button onClick={() => navigate("/group/group-2")}>two</button></>;
+    }
+    const open = (second: GroupView) => {
+      fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+      fakeEngine.update({ groups: [active({ isAdmin: true }), second] });
+      return renderApp(<><Go /><Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes></>, { route: "/group/group-1" });
+    };
+    const rotate = async (user: ReturnType<typeof open>["user"]) => {
+      await user.click(screen.getByTestId("group-options"));
+      await user.click(screen.getByTestId("group-rotate"));
+    };
+
+    it.each([
+      ["Rotate keys", "rotateGroup", rotate],
+      ["Share link", "enableGroupLink", async (user: ReturnType<typeof open>["user"]) => { await user.click(screen.getByTestId("group-share")); }],
+    ] as const)("%s refused in one group says nothing in the next", async (_, method, press) => {
+      const { user, engine } = open(other());
+      engine.on(method, () => { throw new Error("Bob is not reachable"); });
+      await press(user);
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
+      expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+      // Back in the first group, it is gone there too: the next refusal is said again by its own action.
+      await act(async () => screen.getByRole("button", { name: "one" }).click());
+      expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+    });
+
+    it("a group I was removed from keeps its own line", async () => {
+      const { user, engine } = open(other({ status: "removed", statusReason: "You were removed from this group", canSend: false, isAdmin: false }));
+      engine.on("rotateGroup", () => { throw new Error("Bob is not reachable"); });
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      const removed = screen.getByTestId("group-notice").textContent;
+      await act(async () => screen.getByRole("button", { name: "one" }).click());
+      await rotate(user);
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      expect(screen.getByTestId("group-notice")).toHaveTextContent(removed!);
+      expect(screen.getByTestId("group-notice")).not.toHaveTextContent("Bob is not reachable");
+    });
+
+    it("a refusal that comes after the group was left is not said in the one open now", async () => {
+      const { user, engine } = open(other());
+      let refuse: (e: Error) => void = () => {};
+      engine.on("rotateGroup", () => new Promise((_, reject) => { refuse = reject; }));
+      await rotate(user);
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      await act(async () => refuse(new Error("Bob is not reachable")));
+      expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
+      expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+    });
+  });
+
   it("deletes the group from this device only after confirming, and says it leaves the group", async () => {
     const { user, engine } = openGroup(active());
     engine.on("forgetGroup", () => undefined);
