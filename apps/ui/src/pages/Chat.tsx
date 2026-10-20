@@ -643,16 +643,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
     answer: holdForUnlock
       // The offer goes back to the engine for the chat the unlocked app opens, which answers it at once (lib/lockedRing).
-      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
+      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingCallSignal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
     if (holdForUnlock || callState !== "incoming") return;
-    const video = takeHandedCall(sessionId);
+    const video = takeHandedCall(sessionId, incomingCallSignal);
     if (video !== undefined) webrtc.acceptCall(video);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring; `webrtc` changes with every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
   // Under the lock it would only hold the keys: the lock screen shows the call instead.
   const locked = useIsLocked();
