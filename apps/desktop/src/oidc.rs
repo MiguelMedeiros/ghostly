@@ -13,9 +13,9 @@
 //! scheme), which brings it forward; the page asked with an `a.` state, and
 //! only the answer for the awaited state is taken ([`OidcState::answer`]).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io::{ErrorKind, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,7 +25,9 @@ const WAIT: Duration = Duration::from_secs(10 * 60);
 const MAX_REQUEST: usize = 32 * 1024;
 /// How long one connection has to send its whole request; the browser's arrives at once.
 const REQUEST_TIME: Duration = Duration::from_secs(5);
-/// Connections served at once, so a slow one never holds the browser's.
+/// Connections served at once, so a slow one never holds the browser's. Past this the oldest one that has not sent
+/// its whole request yet gives its place to the new one, and with none of those the new one is closed at once: so
+/// connections kept slow (any program on the machine can open them) never keep the browser's out.
 const CONNECTIONS: usize = 4;
 /// How often the listener and a connection's reads look at the time and the cancel.
 const POLL: Duration = Duration::from_millis(50);
@@ -307,8 +309,9 @@ fn state_of(answer: &str) -> Option<String> {
 }
 
 /// Serves the listener until an answer with `state` arrives, the wait ends, or it is cancelled. Its page is in
-/// `lang`. Up to [`CONNECTIONS`] connections are served at once, each with [`REQUEST_TIME`] for its request, so
-/// one that sends slowly neither holds the browser's nor keeps the wait from ending.
+/// `lang`. Up to [`CONNECTIONS`] connections are served at once, each with [`REQUEST_TIME`] for its request, and a
+/// new one takes the place of the oldest still sending its request, so ones that send slowly neither hold the
+/// browser's nor keep the wait from ending.
 pub fn serve(
     listener: &TcpListener,
     state: &str,
@@ -323,6 +326,9 @@ pub fn serve(
     let over = AtomicBool::new(false);
     let answer = Mutex::new(None);
     let serving = AtomicUsize::new(0);
+    // The connections that have not sent their whole request yet, oldest first.
+    let waiting = Mutex::new(VecDeque::<(u64, TcpStream)>::new());
+    let mut next = 0u64;
     let stop = || over.load(Ordering::SeqCst) || cancelled.load(Ordering::SeqCst);
     std::thread::scope(|scope| {
         let result = loop {
@@ -335,10 +341,6 @@ pub fn serve(
             if Instant::now() >= deadline {
                 break Err("Sign-in timed out. Try again.".into());
             }
-            if serving.load(Ordering::SeqCst) >= CONNECTIONS {
-                std::thread::sleep(POLL);
-                continue;
-            }
             let mut stream = match listener.accept() {
                 Ok((stream, _)) => stream,
                 Err(e) if e.kind() == ErrorKind::WouldBlock => {
@@ -347,15 +349,30 @@ pub fn serve(
                 }
                 Err(e) => break Err(e.to_string()),
             };
-            serving.fetch_add(1, Ordering::SeqCst);
-            let (host, answer, serving, over, stop) = (&host, &answer, &serving, &over, &stop);
+            let Ok(handle) = stream.try_clone() else {
+                continue;
+            };
+            if serving.fetch_add(1, Ordering::SeqCst) >= CONNECTIONS {
+                // Full. The oldest one's thread ends as soon as it is shut, so there is one more only for that moment.
+                let oldest = waiting.lock().unwrap().pop_front();
+                let Some((_, oldest)) = oldest else {
+                    serving.fetch_sub(1, Ordering::SeqCst);
+                    continue;
+                };
+                let _ = oldest.shutdown(Shutdown::Both);
+            }
+            let id = next;
+            next += 1;
+            waiting.lock().unwrap().push_back((id, handle));
+            let (host, answer, serving, waiting, over, stop) =
+                (&host, &answer, &serving, &waiting, &over, &stop);
             scope.spawn(move || {
                 let _ = stream.set_nonblocking(false);
                 let _ = stream.set_read_timeout(Some(POLL));
                 let until = deadline.min(Instant::now() + REQUEST_TIME);
-                if let Some((method, target, headers, body)) =
-                    read_request(&mut stream, until, stop)
-                {
+                let request = read_request(&mut stream, until, stop);
+                waiting.lock().unwrap().retain(|(at, _)| *at != id);
+                if let Some((method, target, headers, body)) = request {
                     // A page elsewhere reaching this port by a name that resolves here is refused.
                     if headers.get("host") != Some(host) {
                         respond(&mut stream, "400 Bad Request", "text/plain", "Bad request");
@@ -768,6 +785,38 @@ mod tests {
         assert!(took < Duration::from_secs(3), "answered after {took:?}");
         // Once the answer is taken, the slow connection is let go too.
         assert!(slow.join().unwrap() < Duration::from_secs(3));
+    }
+
+    #[test]
+    fn connections_sending_slowly_in_every_place_do_not_hold_the_browsers_answer() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let host = format!("127.0.0.1:{port}");
+        let cancelled = AtomicBool::new(false);
+        let slow: Vec<_> = (0..CONNECTIONS * 2)
+            .map(|_| trickle(port, Duration::from_secs(12)))
+            .collect();
+        let client = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            assert!(post(port, &host, &format!("#id_token=abc&state={STATE}"))
+                .starts_with("HTTP/1.1 200"));
+        });
+        let start = Instant::now();
+        let answer = serve(
+            &listener,
+            STATE,
+            "en",
+            Instant::now() + Duration::from_secs(30),
+            &cancelled,
+        )
+        .unwrap();
+        let took = start.elapsed();
+        client.join().unwrap();
+        assert_eq!(answer, format!("#id_token=abc&state={STATE}"));
+        assert!(took < Duration::from_secs(2), "answered after {took:?}");
+        for slow in slow {
+            assert!(slow.join().unwrap() < Duration::from_secs(3));
+        }
     }
 
     #[test]
