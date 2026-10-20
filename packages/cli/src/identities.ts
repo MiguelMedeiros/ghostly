@@ -14,7 +14,8 @@ import { CliError } from "./errors";
  *   `identity complete` takes what the tool printed. Between the two the draft lives in the daemon's memory.
  * - `publish` (a DNS record, a file on a domain): the same, and `complete` asks the engine to look it up.
  * - `in-app` (a Nostr signer over NIP-46, Pubky): one `identity add`, with the signer's fields; a link or code the
- *   signer waits on is reported as an `identity.approval` event and printed by the command.
+ *   signer waits on is reported as an `identity.approval` event, live only (never journaled or replayed), and printed
+ *   by the command.
  * - `redirect` (OpenID Connect), and the in-app signers that live in the page (a NIP-07 extension, an AT Protocol
  *   sign-in window), need a browser window: app only.
  */
@@ -102,10 +103,11 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       const signal = AbortSignal.timeout(num(params, "timeout", 300, { min: 5, max: 3600 }) * 1000);
       const proof = await signer.run({
         values, signal,
-        onAuthUrl: (url) => { ctx.hub.emit("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
+        // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
+        onAuthUrl: (url) => { ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, url }); },
         onProgress: (message) => { ctx.hub.emit("identity.progress", `identity.progress:${Date.now()}`, { provider: p.id, message }); },
         onApproval: (request) => {
-          if (request) ctx.hub.emit("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
+          if (request) ctx.hub.emitLive("identity.approval", `identity.approval:${Date.now()}`, { provider: p.id, ...(request.qr ? { qr: request.qr.value, label: request.qr.label } : {}), notes: request.notes ?? [] });
         },
       }, async (session) => {
         const { draftId, binding } = await begin(ctx, p, await session.subject(), params);

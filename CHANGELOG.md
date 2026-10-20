@@ -4,6 +4,39 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.5.2
+
+### Security
+
+- Chat: a message full of payment words next to web links no longer stalls the chat while it is read: the app checks them against the links once, in linear time.
+- Held messages: a storage address must be at a public host name, and the CLI connects to it only on public addresses, so a contact can no longer aim the pickup at a host on your own network.
+- Transports: a contact's transport-change messages can no longer make the app open many connections at once. The app reads at most 10 of them a minute from a contact and makes one switch connection per transport at a time.
+- Communities: opening a link to a community you are in sends your member key only to the community's own door, so another member can no longer learn your address with a link of its own.
+- Communities: a member remembers where a message said again was first said only when that place is in the community's history it knows.
+- Groups: a device keeps at most 256 payment notes per group that wait for the member they are about, and drops the oldest first.
+- CLI: `identity add` sends a signer's approval link only to the listeners connected at that moment, never to the event journal or a replay.
+- CLI: `call auto on --from` names a chat only by its id, its contact's key or your label for it. A chat found only by the contact's own name or a prefix of its id is refused.
+- HyperDHT relay (self-hosted): it closes every HyperDHT stream it holds for a client when that client leaves.
+- HyperDHT relay (self-hosted): a listen its HyperDHT node refuses closes that one server instead of ending the relay.
+- HyperDHT relay (self-hosted): an IPv6 client counts against the per-address limit by its /64, as in the push relay.
+
+### Fixed
+
+**Chat**
+
+- A file named in the other writing direction than the app (an Arabic name in English, an English one in Arabic) reads from its start: the file bubble cut its first words off with "…", and the attachment sheet showed "name · size" out of order.
+- When the now-playing bar goes by itself (the voice message or audio file played to its end, or another one started) while the keyboard focus is on it, the focus goes on to what comes after it, as with Close, instead of falling to the page.
+- When the voice recording bar closes under the keyboard focus (the bin, Discard, Esc, or a send from Resume), the focus goes to the mic instead of falling to the page.
+
+**Calls**
+
+- A call on Ghostly Desktop for Linux uses less CPU. The page no longer keeps an empty audio output open for the whole call: it cost 4 to 6% of a core and an extra PipeWire stream, for a sound that only ever plays in the app's own call engine.
+
+### For developers
+
+- CLI: `identity.approval` events go to live listeners only. They are not written to `events.jsonl` and no replay returns them (WISP 1100).
+- CLI: `call auto on --from` answers `bad_request`, naming the chat it found, when a name matches a chat only by its contact's own name or a prefix of its id (WISP 1100).
+
 ## 1.5.1
 
 ### Security

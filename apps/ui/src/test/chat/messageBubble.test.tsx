@@ -820,7 +820,7 @@ describe("MessageBubble: deleting", () => {
     const { user } = bubble({ sender: "me", text: "wrong chat" }, { onDelete, onDeleteForEveryone });
     await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete for everyone" }));
-    expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted from your contact's or the group's devices too.");
+    expect(screen.getByTestId("message-delete-menu").querySelector("p")).toHaveTextContent(/^Deleted from your contact's devices too\./);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onDeleteForEveryone).not.toHaveBeenCalled();
     await user.click(screen.getByTestId("message-options"));
@@ -832,6 +832,15 @@ describe("MessageBubble: deleting", () => {
     await user.click(screen.getByTestId("message-options"));
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted only here.");
+  });
+
+  it("Delete for everyone in a group says it goes from the members' devices, not a contact's", async () => {
+    const { user } = bubble({ sender: "me", text: "wrong group" }, { linkId: "group:g1", onDeleteForEveryone: vi.fn() });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-delete-everyone"));
+    const hint = screen.getByTestId("message-delete-menu").querySelector("p");
+    expect(hint).toHaveTextContent(/^Deleted from the members' devices too\./);
+    expect(hint).not.toHaveTextContent(/contact/);
   });
 
   it("offers no Delete for everyone on the contact's message, or while it still waits to be sent", async () => {

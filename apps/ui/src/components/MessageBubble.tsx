@@ -572,9 +572,11 @@ function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDeleteForEveryone?: () => void;
+  /** A group's message: Delete for everyone takes it off the members' devices, not a contact's. */
+  group?: boolean;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
   onReply?: () => void;
@@ -619,7 +621,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
   // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
   // keeps no copy of it, so the hint says what happens instead.
   const { transfer } = useTransfer(download?.file.id);
-  const deleteHint = confirm === "everyone" ? t("chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+  const deleteHint = confirm === "everyone" ? t(group ? "chat.deleteForEveryoneGroupHint" : "chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
   const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
   const trash = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
@@ -706,7 +708,8 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
                   after.current = neighbourOptions(ref.current);
                   confirmed();
                 }}
-                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                // Filled, as the other destructive confirmations: red on a pink fill read at 3.98:1 in the light theme.
+                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
@@ -1011,7 +1014,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     </div>
   ) : null;
   const menu = !choosing && (
-    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? onDeleteForEveryone : undefined} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
+    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? onDeleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
@@ -1114,7 +1117,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={onDeleteForEveryone} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={onDeleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
       {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}
