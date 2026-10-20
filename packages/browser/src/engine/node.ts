@@ -8089,21 +8089,24 @@ export class GhostlyNode implements EngineImplementation {
   private anchorCheckAt = 0;
 
   /**
-   * A group's edge whose native listener has been up `GROUP_ANCHOR_ANSWER_MS` with no session, and whose member's
-   * packet says it holds none there (or it is away): nobody answers it.
+   * A group's edge whose native listener has been up `GROUP_ANCHOR_ANSWER_MS` with no session, and whose member is there
+   * and says in its packet it holds none for it: nobody answers it. Not one whose member is away: no other edge would
+   * be answered either, and the one passed over gave its listener up and asked for none again once its member came
+   * back, whose texts then came only through another member (a hub with no WebRTC, 2026-10-20); nor did passing stop
+   * while every member was away, a listener moving from edge to edge every few minutes for nothing.
    */
   private unanswered(live: LiveLink, now: number): boolean {
     const link = live.link;
-    if (!link || link.isDataLinkOpen) return false;
+    if (!link || link.isDataLinkOpen || !live.presence.online) return false;
     const up = (Object.keys(this.nativeFactories) as NativeTransport[]).filter(t => link.availableTransports.includes(t)).map(t => live.nativeUpAt?.[t] ?? now);
     if (!up.length || now - Math.min(...up) < GROUP_ANCHOR_ANSWER_MS) return false;
-    return !this.chosenByPeer(live) || !live.presence.online;
+    return !this.chosenByPeer(live);
   }
 
   /**
    * Every few seconds, each group not on screen whose edges run native transports: the one edge it keeps has a
    * listener (or waits for one, `groupNativeWaiting`), and when its member has not answered it in
-   * `GROUP_ANCHOR_ANSWER_MS` (it is away, or it has no listener for it: all its own taken), the group keeps the next
+   * `GROUP_ANCHOR_ANSWER_MS` (it is there with no listener for it: all its own taken), the group keeps the next
    * one instead (hub, then admin, then the member heard from last), whose member answers the edge it keeps
    * (`chosenByPeer`). Not while any edge of the group is live: the group is reachable through it. Every other one passed
    * over lately too: the one it keeps stays, without its listener going back and forth.
