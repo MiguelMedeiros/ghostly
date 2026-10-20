@@ -813,9 +813,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // focus stays on the message, so Tab goes on from it.
   useFocusKept(rowRef);
   const openDetails = () => setDetails(true);
-  // A double click on a control in the message (a file's Accept, Pause or Save, a player's Play, a link) is that
-  // control's: two quick clicks on a button do not open the details too.
+  // A plain double or triple click is the words' own: it selects a word or the line, as anywhere else. Ctrl+double
+  // click (⌘ on a Mac) opens the details. On a control in the message (a file's Accept, Pause or Save, a player's
+  // Play, a link) it is that control's: two quick clicks on a button do not open the details too.
+  const detailsKey = (e: React.MouseEvent) => e.ctrlKey || e.metaKey;
   const detailsOnDoubleClick = (e: React.MouseEvent) => {
+    if (!detailsKey(e)) return;
     const control = (e.target as Element).closest("button, a, input, [role=button]");
     if (!control || !e.currentTarget.contains(control)) openDetails();
   };
@@ -920,8 +923,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
   } : {
     ref: rowRef, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
-    // The second click of a double click would select a word of the message under the details.
-    onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
+    // The second click of a Ctrl+double click would select a word of the message under the details.
+    onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1 && detailsKey(e)) e.preventDefault(); },
   };
   const selectBox = selection && (
     <span role="checkbox" aria-checked={selection.selected} aria-disabled={!selection.onToggle || undefined} aria-label={t("chat.forward.select")}

@@ -37,7 +37,7 @@ export function ReplyQuote({ quote }: { quote: QuoteView }) {
   return (
     <button type="button" data-testid="message-quote" data-state={quote.state} data-target={quote.targetId}
       onClick={(e) => {
-        // The bubble's own double click opens its details: a tap on the quote is only the jump.
+        // The bubble's own Ctrl+double click opens its details: a tap on the quote is only the jump.
         e.stopPropagation();
         if (!jumpToQuoted(quote.targetId)) setNotHere(true);
       }}

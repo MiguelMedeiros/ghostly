@@ -387,9 +387,11 @@ describe("MessageBubble: text", () => {
     expect(screen.queryByText("~Bob")).not.toBeInTheDocument();
   });
 
-  it("opens the message's details on a double click, and Escape closes them", async () => {
+  it("opens the message's details on a Ctrl+double click, and Escape closes them", async () => {
     const { user } = bubble({ text: "hi", sender: "me", meta: { dhtKey: "k".repeat(40), encryptedPayloadLength: 10, dnsRecords: ["a", "b"] } }, { peerAck: 1_800_000_000_000 });
+    await user.keyboard("{Control>}");
     await user.dblClick(screen.getByText("hi"));
+    await user.keyboard("{/Control}");
     const panel = await screen.findByTestId("message-details");
     expect(within(panel).getByTestId("message-details-kind")).toHaveTextContent("Text");
     expect(screen.getByTestId("message-details-keys-hint")).toBeInTheDocument();
