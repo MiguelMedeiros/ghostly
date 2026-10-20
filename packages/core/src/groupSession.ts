@@ -1323,8 +1323,12 @@ export class GroupSession {
     // One I took whole already (markSeen) is dropped, signed or not, before its signature costs a check: in a mesh, every
     // member a member back hears from hands it on. A copy taken stripped is not seen yet, and goes on to be checked.
     if (this.isDuplicate(raw)) return;
-    // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was.
-    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
+    // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was. Handed
+    // on with the author's `xs` holding, it is the author's whole frame: `xs` signs everything `sig` does and more
+    // (`messageSignedWhole`), so `sig` is not checked as well. Two checks per message were half of a catch-up's
+    // signature time, ~0.19 s of 256 messages at 1x CPU, ~1.1 s at 6x (agents#1656). No `xs`, or one that fails: `sig`.
+    const signedWhole = relayed && this.wholeSigned(raw);
+    if (!signedWhole && !verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.park(from, raw); return; }
     // Its replay window is gone (markSeen), even if a sparse set of secrets still holds its secret.
     if (raw.e < this.epoch - GROUP_LIMITS.secrets) return;
@@ -1335,7 +1339,7 @@ export class GroupSession {
     // member handing it on may have stripped (the mentions, the reply, the hop count): its text is shown, but it is
     // neither seen nor kept nor handed on, so a sync still asks for it and a whole copy completes it.
     const own = groupMessageId(raw.s, raw.e, raw.n);
-    const whole = !relayed || this.wholeSigned(raw);
+    const whole = !relayed || signedWhole;
     if (!whole) {
       if (this.provisional.has(own)) return;
       delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.fl; delete raw.o; delete raw.xs;
