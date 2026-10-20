@@ -533,8 +533,11 @@ export class CommunitySession {
   private known = new Map<string, CommunityCommit>();
   /** Commit hash → roster after it, for the window of the main branch and the side commits. */
   private rosters = new Map<string, Roster>();
-  /** Commit hash → roster after it, for a few main-branch commits older than the window that `couldRead` was asked about. */
-  private pastRosters = new Map<string, Roster>();
+  /**
+   * Who was in the roster after each main-branch commit, from one replay of the branch: key → the places where it came in
+   * and went out, in turn (an open last span while it is in). `through` commits are counted, the last one `top`.
+   */
+  private spans = { through: 0, top: "", roster: null as Roster | null, byKey: new Map<string, number[]>() };
   private mainIndex = new Map<string, number>();
   private pendingCommits = new Map<string, { from: string; commit: CommunityCommit; at: number }>();
   private pendingSecrets = new Map<string, { sealed: SealedSecret; at: number }>();
@@ -687,17 +690,28 @@ export class CommunitySession {
     const i = this.state.chain.length - 1 - (this.epoch - Number(e));
     const commit = Number.isSafeInteger(i) && i >= 0 ? this.state.chain[i] : undefined;
     const hash = commit && communityCommitHash(commit);
-    return !!hash && hash.startsWith(h) && rosterHas(this.pastRoster(i, hash), key);
+    return !!hash && hash.startsWith(h) && this.wasInAt(key, i);
   }
-  /** The roster after an old commit of the main branch, replayed and kept apart from the window's (a few, the latest asked). */
-  private pastRoster(i: number, hash: string): Roster {
-    const known = this.pastRosters.get(hash);
-    if (known) return known;
-    let roster: Roster | null = null;
-    for (let j = 0; j <= i && (j === 0 || roster); j++) roster = communityRoster(roster, this.state.chain[j]);
-    this.pastRosters.set(hash, roster ?? []);
-    for (const old of this.pastRosters.keys()) { if (this.pastRosters.size <= 8) break; this.pastRosters.delete(old); }
-    return roster ?? [];
+  /**
+   * Whether `key` was in the roster after the main branch's commit `i`. The branch is replayed once, as `rebuild` does (its
+   * leaves were checked when they were taken), and only further as it grows: again from the start only once it changed.
+   */
+  private wasInAt(key: string, i: number): boolean {
+    let s = this.spans;
+    if (s.through > 0 && this.mainIndex.get(s.top) !== s.through - 1) s = this.spans = { through: 0, top: "", roster: null, byKey: new Map() };
+    if (s.through <= i) {
+      for (; s.through <= i; s.through++) {
+        const before = new Set((s.roster ?? []).map(([k]) => k));
+        s.roster = s.through === 0 || s.roster ? communityRoster(s.roster, this.state.chain[s.through], true) : null;
+        const after = new Set((s.roster ?? []).map(([k]) => k));
+        for (const k of after) if (!before.has(k)) s.byKey.set(k, [...s.byKey.get(k) ?? [], s.through]);
+        for (const k of before) if (!after.has(k)) s.byKey.get(k)!.push(s.through);
+      }
+      s.top = communityCommitHash(this.state.chain[s.through - 1]);
+    }
+    const at = s.byKey.get(key) ?? [];
+    for (let j = 0; j < at.length; j += 2) if (at[j] <= i && (j + 1 >= at.length || i < at[j + 1])) return true;
+    return false;
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
   wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
