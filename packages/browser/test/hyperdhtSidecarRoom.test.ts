@@ -65,7 +65,7 @@ it("a text sent in the middle of a file reaches a slow contact in under a second
 
   // The page: frames the host has not taken, and a file's chunks while under a quarter of its budget and not `full`.
   const budget = 120 * KIB, chunk = new Uint8Array(16 * KIB).fill(7), file = 32 * 1024 * KIB;
-  let seq = 0, buffered = 0, offset = 0, full = false;
+  let seq = 0, buffered = 0, offset = 0, full = false, over = false;
   const send = (frame: { text: string } | { bytes: string }, size: number) => {
     expect(buffered + size).toBeLessThanOrEqual(budget);
     buffered += size;
@@ -74,6 +74,9 @@ it("a text sent in the middle of a file reaches a slow contact in under a second
   const bytes = Buffer.from(chunk).toString("base64");
   const more = () => { while (offset < file && !full && buffered < budget / 4) { send({ bytes }, chunk.length); offset += chunk.length; } };
   sidecar.on((line) => {
+    // Once the test is over, afterAll stops the contact first: the chunks still on their way to the sidecar then go to
+    // a closed connection, and each is an error by design (never a frame lost unseen).
+    if (over) return;
     if (line.type === "error") throw new Error(String(line.message));
     if (line.type === "full" || line.type === "room") { full = line.type === "full"; more(); }
   });
@@ -88,4 +91,5 @@ it("a text sent in the middle of a file reaches a slow contact in under a second
   expect((at as number) - sentAt).toBeLessThan(1_000);
   // The page was held back as the link is: before, it had handed the sidecar all 32 MiB within the 3 s.
   expect(offset).toBeLessThan(file);
+  over = true;
 }, 40_000);
