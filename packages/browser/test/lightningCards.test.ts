@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { lightningJournalWritten } from "../src/engine/paymentAdapters/providers/lightningService";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
@@ -22,7 +23,7 @@ import { walletRemoval } from "../src/shared/walletRemoval";
 
 const keys = async () => (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String).sort();
 const read = async (key: string) => wrap((await store(STORES.settings, "readonly")).get(key));
-const put = (key: string, value: unknown) => transact([STORES.settings], (s) => { s[STORES.settings].put(value, key); });
+const put = (key: string, value: unknown) => transact([STORES.settings], (s) => { s[STORES.settings].put(value, key); }).finally(lightningJournalWritten);
 const journal = (op: LightningOp) => put(`lightningOp-${op.direction}-${op.paymentHash}`, op);
 const hash = () => crypto.getRandomValues(new Uint8Array(32));
 
@@ -53,6 +54,7 @@ beforeEach(async () => {
   nodes.clear();
   await openDb();
   await transact([STORES.settings, STORES.intents, STORES.payments], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); s[STORES.payments].clear(); });
+  lightningJournalWritten();
 });
 afterEach(async () => { for (const r of registries.splice(0)) await r.stop(); vi.restoreAllMocks(); });
 

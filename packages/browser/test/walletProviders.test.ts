@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { lightningJournalWritten } from "../src/engine/paymentAdapters/providers/lightningService";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ONCHAIN_PROVIDER, type PaymentTarget } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
@@ -18,7 +19,7 @@ import { GhostlyNode } from "../src/engine/node";
 
 const settings = async () => wrap<unknown[]>((await store(STORES.settings, "readonly")).getAll());
 const keys = async () => (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String).sort();
-beforeEach(async () => { await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); }); });
+beforeEach(async () => { await transact([STORES.settings, STORES.intents], (s) => { s[STORES.settings].clear(); s[STORES.intents].clear(); }); lightningJournalWritten(); });
 
 /** A descriptor around one fake instance, so a test can drive it. */
 function lightningDescriptor(fake: FakeLightningProvider, extra: Partial<LightningProviderDescriptor> = {}): LightningProviderDescriptor & { received: unknown[] } {
@@ -203,6 +204,7 @@ describe("Lightning through the active source", () => {
   it("an interrupted spend is unknown after a restart, not retried", async () => {
     const { lightning } = await fakeSource();
     await transact([STORES.settings], (s) => { s[STORES.settings].put({ direction: "out", providerId: "fake-lightning", mode: "testnet", paymentHash: "ab", invoice: "x", amount: 1, expiresAt: 0, createdAt: 1, state: "sending" }, "lightningOp-out-ab"); });
+    lightningJournalWritten();
     await lightning.recover();
     expect((await lightning.list()).find((op) => op.paymentHash === "ab")).toMatchObject({ state: "unknown" });
     await lightning.stop();
