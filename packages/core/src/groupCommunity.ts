@@ -559,6 +559,11 @@ export class CommunitySession {
       send: (to, frame) => hooks.direct(to, frame),
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
       active: () => this.state.status === "active",
+      // A member whose app handles 1 or 2 frames a second asks again while the last answer still waits there: without
+      // a key, what was on its way went again (29-104 of 200 messages; 610 commit frames for 318 commits).
+      key: frame => frame.t === "group-msg" ? communityMessageId(frame.s, frame.e, frame.h, frame.n)
+        : frame.t === "group-commit" ? `commit:${communityCommitHash(frame.commit)}`
+        : frame.t === "group-secret" ? `secret:${frame.h}` : undefined,
     });
     this.rebuild();
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
