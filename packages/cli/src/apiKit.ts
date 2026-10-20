@@ -134,7 +134,7 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
  */
 export function findOwnNamedChat(links: readonly LinkView[], ref: string): LinkView {
   const chat = chatBy(links, ref);
-  if (chat.theirName) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label (ghostly chat list)`, { chat: chat.link.id, name: chat.link.peerNick ?? null, contact: chat.link.peerPubKeyZ32 });
+  if (chat.theirName) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label given here (ghostly chat rename <chat> <name>)`, { chat: chat.link.id, name: chat.link.peerNick ?? null, contact: chat.link.peerPubKeyZ32 });
   return chat.link;
 }
 

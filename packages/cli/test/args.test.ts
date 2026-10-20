@@ -286,6 +286,8 @@ describe("the argument parser", () => {
     usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
     expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
     expect(params("call auto", ["off"])).toEqual({ on: false });
+    // The help names what --from takes: a name the contact chose is refused there.
+    expect(COMMANDS["call auto"].options?.from.description).toMatch(/id.*key.*label.*chat rename/);
     // "" (an unset variable in a script) names no chat: before, it was a prefix of every id and took the only chat.
     usage("forward", ["bob", "m1", "--to", ""], "--to \"\" names no chat or group");
     usage("forward", ["bob", "m1", "--to", "alice", "--to", "group:"], "--to \"group:\" names no chat or group");

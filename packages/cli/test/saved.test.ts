@@ -12,11 +12,12 @@ const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Crew", cr
   members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }, { key: "hermes", role: "member", nick: "Hermes", online: true, missing: 0 }], ...fields }) as unknown as GroupView;
 const row = (linkId: string, id: string, patch: Partial<StoredMessage> = {}): StoredMessage => ({ linkId, id, text: `text of ${id}`, sender: "peer", timestamp: 1000, via: "datalink", ...patch });
 
-function fake(result: { error: string | null } = { error: null }, saved: SavedMessage[] = []) {
+function fake(result: { error: string | null } = { error: null }, saved: SavedMessage[] = [], rows: StoredMessage[] = saved.map((s) => s.message)) {
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice", peerNick: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
     saveMessage: vi.fn(async () => result),
     savedMessages: vi.fn(async () => saved),
+    getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return { ctx, node };
@@ -55,6 +56,23 @@ describe("saved", () => {
       ["g1", 30, "k:0:1", "text of k:0:1", "Hermes"],
       ["chat-one", 20, "peer_y", "text of peer_y", "Alice"],
     ]);
+  });
+
+  it("gives a saved reply whose original is gone as history does: not found, none of its text", async () => {
+    const quoting = (to: string, snippet: string) => ({ sender: "me" as const, replyTo: { id: "wire-" + to, snippet, from: "me" as const, messageId: to } });
+    const saved = [
+      { savedAt: 40, message: row("group:g1", "mine:1:1", quoting("mine:1:0", "group original secret")) },
+      { savedAt: 30, message: row("chat-one", "me_y", quoting("me_x", "the original secret text")) },
+      { savedAt: 20, message: row("chat-one", "me_z", quoting("peer_kept", "kept")) },
+    ];
+    const { ctx, node } = fake(undefined, saved, [...saved.map((s) => s.message), row("chat-one", "peer_kept")]);
+    const list = await callApi(ctx, "saved.list", {}) as { message: { id: string; replyTo?: Record<string, unknown> } }[];
+    const quote = (id: string) => list.find((s) => s.message.id === id)?.message.replyTo;
+    expect(quote("me_y")).toEqual({ id: "me_x", snippet: "", from: "me", found: false, deleted: true });
+    expect(quote("mine:1:1")).toMatchObject({ snippet: "", found: false, deleted: true });
+    expect(quote("me_z")).toMatchObject({ snippet: "kept", found: true });
+    // One row read per quoted original, in its own chat or group.
+    expect(node.getMessage.mock.calls.sort()).toEqual([["chat-one", "me_x"], ["chat-one", "peer_kept"], ["group:g1", "mine:1:0"]]);
   });
 
   it("opens the profile offline: nothing of it goes to a contact or a relay", () => {
