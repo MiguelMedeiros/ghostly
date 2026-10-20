@@ -178,7 +178,8 @@ describe("a voice note's waveform, measured from its file", () => {
     const path = join(dir, "noise.m4a");
     writeFileSync(path, Buffer.from("not a sound at all"));
     await expect(decodeWithFfmpeg(path, "ghostly-no-such-ffmpeg")).rejects.toThrow(/install ffmpeg/);
+    // ffmpeg reads it and finds no sound; without ffmpeg it could only not be measured.
     const result = await measureVoice(path);
-    expect(result).toEqual({ problem: expect.any(String) });
+    expect(result).toEqual({ problem: expect.any(String), ...(hasFfmpeg ? { notSound: true } : {}) });
   });
 });
