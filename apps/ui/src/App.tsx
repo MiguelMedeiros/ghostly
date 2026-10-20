@@ -27,6 +27,9 @@ import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { stopHeld } from "./lib/nowPlaying";
+import { groupRouteId } from "./lib/groups";
+import { sessionPeerKey } from "./lib/storage";
+import { useEngineValue } from "./lib/engineState";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -100,6 +103,33 @@ function useProfileNameSync() {
   useEffect(() => {
     if (engineNick !== undefined && engineNick !== nick) void engine.call("updateSettings", { settings: { nick } }).catch(() => {});
   }, [nick, engineNick]);
+}
+
+/**
+ * The chat or group on screen, as the route says, tells the engine (WISP 902 § Transports): its link keeps this device's
+ * native connections. From here, not from each page: a chat kept loaded off screen (on a call, running a mini-app) is
+ * the one on screen again when it comes back, after a group or another chat let go of theirs.
+ */
+function useOnScreenLink() {
+  const { pathname } = useLocation();
+  const session = chatRouteSession(pathname);
+  const groupId = groupRouteId(pathname);
+  // Read again as the state changes: a chat opened for the first time has its link once the engine made it.
+  const chatLink = useEngineValue(state => {
+    const peerKey = session ? sessionPeerKey(session) : undefined;
+    return peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.id : undefined;
+  });
+  const onScreen = groupId ? `group:${groupId}` : chatLink ?? null;
+  const told = useRef<string | null>(null);
+  useEffect(() => {
+    if (told.current === onScreen) return;
+    told.current = onScreen;
+    void engine.call("setActiveLink", { linkId: onScreen }).catch(() => {});
+  }, [onScreen]);
+  useEffect(() => () => {
+    if (told.current) void engine.call("setActiveLink", { linkId: null }).catch(() => {});
+    told.current = null;
+  }, []);
 }
 
 function useLoadedChats() {
@@ -186,6 +216,7 @@ export function App() {
   // Desktop: the computer stays awake for a handoff, and while the person keeps it so for a standby (WISP 06).
   useComputerAwake();
   const chats = useLoadedChats();
+  useOnScreenLink();
   const mainRef = useRef<HTMLElement>(null);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.

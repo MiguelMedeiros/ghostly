@@ -196,6 +196,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   setEngineMessages(session.id, engineIds(messages, since));
   // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
   const partial = !!session.older;
+  // Only the chat's newest page from the engine (the extension's pages, at attach): what it holds goes in, and the
+  // session keeps saying how many older ones it left out. Its whole history is asked for when the page and the session
+  // do not make it together (`reachesBack`): the stored copy would keep rows whose place is not known here for good.
+  const whole = engine.whole(linkId);
+  if (!whole && !reachesBack(session, messages)) engine.askWhole(linkId);
+  // A row of that page from before the first the session holds is one it left out (counted in `older`): not added again.
+  const heldFrom = !whole && partial ? firstHeld(session) : -Infinity;
   const before = partial ? storedSession(session.id) : null;
   const at = since ? placesOf(session.messages, since.messages) : new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
@@ -242,7 +249,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
       session.messages[i!] = next;
       dirty = true;
     }
-    if (previous || !mirrorable(message)) continue;
+    if (previous || !mirrorable(message) || message.timestamp <= heldFrom) continue;
     added.push(mapped());
   }
   if (moved) session.messages.sort((a, b) => a.timestamp - b.timestamp);
@@ -256,7 +263,7 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (added.length) {
     const before = session.messages.length;
     // The session read above, as stored (saved just now if a row changed).
-    const updated = addMessages(session.id, added, partial, session);
+    const updated = addMessages(session.id, added, partial && whole, session);
     if (updated) session.messages = updated.messages;
     if (session.messages.length !== before) changed = true;
   }
@@ -265,8 +272,26 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (dirty || added.length || changed) forget(session.id);
   const after = storedSession(session.id);
   mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
-  if (changed && partial && after === before) notifyWholeAgain();
+  if (changed && partial && whole && after === before) notifyWholeAgain();
   else if (changed) notifySessionsChanged();
+}
+
+/**
+ * Whether a chat's newest page from the engine and what its session holds make its whole history together. A session
+ * that left nothing out holds every row before the page if it starts at or before it (this page had the whole history
+ * already). One that left older rows out (`older`) must hold none from before the page but a call's line (never the
+ * engine's): where those rows are in the engine's history is not known here.
+ */
+function reachesBack(session: ChatSession, page: StoredMessage[]): boolean {
+  if (!page.length) return false;
+  const from = page[0].timestamp;
+  if (!session.older) return firstHeld(session) <= from;
+  return firstHeld(session) !== Infinity && session.messages.every((m) => m.timestamp >= from || !!m.callEvent);
+}
+
+/** The time of the oldest message a session holds that is not a call's line; none, Infinity. */
+function firstHeld(session: ChatSession): number {
+  return session.messages.find((m) => !m.callEvent)?.timestamp ?? Infinity;
 }
 
 /**

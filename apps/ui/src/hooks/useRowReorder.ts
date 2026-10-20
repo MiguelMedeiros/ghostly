@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 
 /*
  * Rows of a list put in another order by dragging, with pointer events alone: a mouse drags a row once it has moved a
@@ -9,7 +9,13 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type MouseEve
  * The same gesture also puts a row in a folder (`folders`): a part of the list marked `data-folder-drop` (a folder's
  * id, or nothing for the rows in no folder) takes a row dropped on it. A row held over another part than its own goes
  * there, wherever it is among the rows; held over its own part, it is put in order as before, if it can be.
+ *
+ * From the keyboard, Alt+↑ and Alt+↓ on a row that can be put in order (on its button, or anything else focused in it)
+ * move it one place among the rows of its part; the focus stays on it at its new place.
  */
+
+/** What a row that can be put in order says it answers, for a screen reader (`aria-keyshortcuts`). */
+export const REORDER_KEYS = "Alt+ArrowUp Alt+ArrowDown";
 
 /** How long a finger holds a row before it can be dragged. */
 export const REORDER_HOLD_MS = 400;
@@ -116,6 +122,8 @@ export function useRowReorder({ ids, enabled, onMove, folders, beside }: {
   latest.current = onMove;
   const drops = useRef(folders);
   drops.current = folders;
+  /** A row moved from the keys, and what had the focus in it: focused again once the row is drawn at its new place. */
+  const keyed = useRef<{ id: string; to: number; el: HTMLElement } | null>(null);
 
   const finish = useCallback((commit: boolean) => {
     const now = live.current;
@@ -146,6 +154,7 @@ export function useRowReorder({ ids, enabled, onMove, folders, beside }: {
 
   const onPointerDown = useCallback((e: PointerEvent<HTMLElement>) => {
     const el = e.currentTarget, id = el.dataset.reorderId ?? el.dataset.dragId;
+    keyed.current = null;
     if (live.current || !id || !e.isPrimary || (e.pointerType === "mouse" && e.button !== 0)) return;
     const control = e.target instanceof Element ? e.target.closest(CONTROLS) : null;
     if (control && control !== el && el.contains(control)) return;
@@ -271,11 +280,33 @@ export function useRowReorder({ ids, enabled, onMove, folders, beside }: {
   const groupOf = useCallback((id: string) => among.current?.(id) ?? ids, [ids]);
   const usable = enabled && ids.length > 1;
   const droppable = enabled ? folders?.rows : undefined;
+
+  // Alt+↑/↓: one place up or down among the rows of its part. Not from a menu the row opened (its keys are the menu's,
+  // and it says so by taking them), nor while a row is in the hand; at an end, nothing moves.
+  const onKeyDown = useCallback((e: ReactKeyboardEvent<HTMLElement>) => {
+    const el = e.currentTarget, id = el.dataset.reorderId;
+    if (!id || e.defaultPrevented || live.current || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    if (!(e.target instanceof HTMLElement) || !el.contains(e.target)) return;
+    const rows = groupOf(id), from = rows.indexOf(id), to = from + (e.key === "ArrowUp" ? -1 : 1);
+    if (from < 0) return;
+    e.preventDefault();
+    if (to < 0 || to >= rows.length) return;
+    keyed.current = { id, to, el: e.target };
+    latest.current(id, to);
+  }, [groupOf]);
+  // A row React moves to its new place may lose the focus on the way: it goes back to what had it.
+  useLayoutEffect(() => {
+    const now = keyed.current;
+    if (!now || groupOf(now.id).indexOf(now.id) !== now.to) return;
+    keyed.current = null;
+    if (now.el.isConnected && document.activeElement !== now.el) now.el.focus();
+  });
+
   const rowProps = useCallback((id: string) => {
     const reorders = usable && ids.includes(id) && groupOf(id).length > 1;
     if (!reorders && !droppable?.includes(id)) return {};
-    return { [reorders ? "data-reorder-id" : "data-drag-id"]: id, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart };
-  }, [usable, ids, groupOf, droppable, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart]);
+    return { [reorders ? "data-reorder-id" : "data-drag-id"]: id, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart, ...(reorders && { onKeyDown }) };
+  }, [usable, ids, groupOf, droppable, ref, onPointerDown, onClickCapture, onContextMenu, onDragStart, onKeyDown]);
 
   if (!drag || !enabled) return { rowProps };
   if (drag.target !== undefined) return { rowProps, dragging: drag.id, over: drag.target };

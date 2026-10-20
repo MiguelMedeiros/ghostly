@@ -92,7 +92,7 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
     <Button variant="primary" disabled={busy} loading={running === "provider"} onClick={() => void run(async () => { await use(network, { provider, explorer }); setCustom(false); }, "provider")}>{t("wallet.ark.useProvider")}</Button>
    </Block>}
    <Row label={t("wallet.panel.autoRenewal")} hint={network === "regtest" ? t("wallet.ark.renewalRegtest") : t("wallet.ark.renewalOpen")} value={network === "regtest" ? t("wallet.panel.off") : t("wallet.panel.on")} />
-   <BackupRows name="Ark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow}
+   <BackupRows name="Ark" busy={busy} running={running} run={run} canReplace={canReplace} focusFirst={backupNow}
     reveal={async () => (await wallet.arkBackup()).mnemonic} exportBackup={pw => wallet.arkExportBackup(pw)}
     restorePhrase={mnemonic => use(network, { provider: ark.provider, explorer: NETWORKS[network].explorer, mnemonic })} restoreFile={(text, pw) => wallet.arkRestoreBackup(text, pw)} /></>}
   </Section>}

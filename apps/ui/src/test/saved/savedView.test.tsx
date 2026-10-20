@@ -27,7 +27,7 @@ const state = {
   groups: [groupView({ id: "g1", name: "Crew", status: "active", canSend: true, members: [{ key: "me-key", me: true, nick: "Me" }, { key: "hermes-key", me: false, nick: "Hermes" }] as never })],
 };
 
-function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>, language?: "pt") {
+function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>, language?: "pt" | "zh") {
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Alice" });
   let current = rows;
   const rendered = renderApp(ui, { route: "/saved", language });
@@ -67,6 +67,13 @@ describe("the Saved view", () => {
     ], undefined, "pt");
     await waitFor(() => expect(texts()).toEqual(["🎤 Mensagem de voz (0:02)", "🎬 Vídeo (0:07)", "📎 notes.pdf"]));
     expect(within(screen.getAllByTestId("saved-row")[0]).getByTestId("saved-open")).toHaveAccessibleName("Abrir em Alice: 🎤 Mensagem de voz (0:02)");
+  });
+
+  it("says an app card as the card names it, in the app's language, not its English fallback with the bundle's link", async () => {
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/chess.ghostlyapp";
+    profile([saved(message("link-1", "peer_1", { text: `🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${url}`,
+      card: { kind: "app", id: "a".repeat(22), ref: "r".repeat(52), digest: "d".repeat(43), sequence: 1, title: "Chess", version: "1.2.0", url, opened: true } }))], undefined, "zh");
+    await waitFor(() => expect(texts()).toEqual(["🧩 应用：Chess 1.2.0"]));
   });
 
   it("opens a message's chat on the message", async () => {
