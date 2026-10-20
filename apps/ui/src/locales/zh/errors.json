@@ -242,6 +242,7 @@
     "forkedMember": "群组变更已暂停",
     "forkedNext": "管理员必须重建群组。",
     "full": "群组最多容纳 {{max}} 名成员",
+    "growMore": "另外 {{count}} 人",
     "growNeedsUpdates": "超过 {{max}} 人需要所有人先更新",
     "growNeedsUpdatesNext": "尚未更新：{{names}}。",
     "hubSetting": "此中继设置无法使用",
