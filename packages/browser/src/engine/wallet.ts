@@ -57,6 +57,8 @@ const SWAP_POLL_MS = 30_000;
 const SWAP_SLOW_POLL_MS = 600_000;
 /** How long a swap whose inputs were given back is still asked about, in case the mint made it after all. */
 const SWAP_WATCH_MS = 3_600_000;
+/** How many proofs of tokens refused as spent are remembered. */
+const SPENT_KEPT = 1_000;
 /** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
 /**
  * `attemptEndedAt`: when the approval's swap failed with no answer. `abandoned`: the mint proved the swap never
@@ -213,6 +215,11 @@ export class CashuWallet {
   private readonly failedFees = new Map<string, number>();
   /** Melt quotes that ended unpaid with proofs the mint read spent: ecash spent somewhere else, said as such. */
   private readonly spentAway = new Set<string>();
+  /**
+   * Proofs of tokens the mint read spent by something else (`mint secret`), the newest SPENT_KEPT: spent stays spent,
+   * so the same token sent again, under any id or encoding, is refused without asking the mint again.
+   */
+  private readonly spentTokens = new Set<string>();
   /** Per melt quote shown to the person: the invoice, its amount and the fee reserve the mint quoted. Only these are paid. */
   private readonly shownQuotes = new Map<string, { request: string; amount: number; feeReserve: number }>();
 
@@ -897,6 +904,7 @@ export class CashuWallet {
       if (swap?.finished) return { amount: swap.tx?.amount ?? 0, mint, fee: swap.tx?.fee ?? 0 };
       if (!swap) {
         const preview = await (await this.wallet(mint)).prepareSwapToReceive(token);
+        if (preview.inputs.some((p) => this.spentTokens.has(`${mint} ${p.secret}`))) throw engineError("ecashAlreadySpent");
         // The same coins in another token (another memo): one coin is one redeem, never another swap counted again.
         const redeeming = new Set(written.flatMap((s) => (swapOf(s).inputs ?? []).map((p) => p.secret)));
         if (preview.inputs.some((p) => redeeming.has(p.secret))) throw engineError("ecashBeingReceived");
@@ -968,6 +976,7 @@ export class CashuWallet {
       if (outcome.state === "done") return outcome;
       if (outcome.state === "never" && outcome.final) {
         await this.dropSwap(ended, outcome.gone);
+        if (swap.kind === "receive") this.rememberSpent(swap.mint, outcome.gone);
         // Said as what it is: the mint's own words for it vary from mint to mint.
         throw outcome.gone.size > 0 ? Object.assign(engineError("ecashAlreadySpent"), { cause: error }) : error;
       }
@@ -1069,6 +1078,18 @@ export class CashuWallet {
     });
     // Ecash of this wallet spent by something else: the rest of what it holds at that mint is asked about too.
     if (gone.size > 0 && inputs.length > 0) void this.recheck(swap.mint).catch(() => {});
+  }
+
+  private rememberSpent(mint: string, secrets: Set<string>): void {
+    for (const secret of secrets) {
+      const key = `${mint} ${secret}`;
+      this.spentTokens.delete(key);
+      this.spentTokens.add(key);
+    }
+    for (const oldest of this.spentTokens) {
+      if (this.spentTokens.size <= SPENT_KEPT) break;
+      this.spentTokens.delete(oldest);
+    }
   }
 
   /** The proofs a split reserved, as they are stored now. */
