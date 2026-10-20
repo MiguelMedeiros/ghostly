@@ -29,6 +29,7 @@
     "stopped": "Arrêté"
   },
   "window": {
+    "callOn": "Un appel est en cours. Terminez-le pour ouvrir {{app}}.",
     "elsewhere": "{{app}} a tenté de vous envoyer ailleurs, hors de ce que votre contact partage.",
     "failed": "La requête a échoué.",
     "notAnswering": "{{app}} ne répond pas sur la machine de votre contact. Demandez-lui de vérifier qu’il tourne.",
