@@ -45,9 +45,10 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
     setBusy(app.ref); setError(null);
     try {
       // Opened first: an app that cannot start here sends no card. Then the contact is told, with what to install.
-      await openApp(app.ref, linkId);
+      const shown = await openApp(app.ref, linkId);
       opened.current = true;
-      const failed = await sendAppCard(linkId, app, true);
+      // Already running in this chat, and shown again: the contact was told when it opened.
+      const failed = shown === "shown" ? null : await sendAppCard(linkId, app, true);
       if (failed) throw new Error(failed);
       onClose();
     } catch (e) { setError(appErrorText(e, t)); } finally {
