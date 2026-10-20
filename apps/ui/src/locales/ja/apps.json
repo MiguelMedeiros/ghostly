@@ -167,6 +167,7 @@
     "stoppedRemoved": "{{title}} を停止しました: {{store}} がこのバージョンを削除しました",
     "stoppedRevoked": "{{title}} を停止しました: 作者がこのバージョンを取り消しました",
     "with": "{{name}} との {{title}}",
-    "withName": "{{name}} と"
+    "withName": "{{name}} と",
+    "withSharing": "{{title}} · {{name}} とファイルを共有中"
   }
 }

@@ -167,6 +167,7 @@
     "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
     "stoppedRevoked": "{{title}} foi parado: o autor revogou esta versão",
     "with": "{{title}} com {{name}}",
-    "withName": "com {{name}}"
+    "withName": "com {{name}}",
+    "withSharing": "{{title}} · compartilhando um arquivo com {{name}}"
   }
 }

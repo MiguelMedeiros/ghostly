@@ -16,6 +16,7 @@
     "allow-app-close",
     "allow-app-open",
     "allow-app-post",
+    "allow-app-title",
     "allow-bitcoind-rpc",
     "allow-close-service-windows",
     "allow-create-keypair",
