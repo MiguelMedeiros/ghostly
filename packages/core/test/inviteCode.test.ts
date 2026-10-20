@@ -93,11 +93,12 @@ describe("an invite copied from the end of a sentence", () => {
     }
   });
 
-  it("loosens nothing else: other trailing characters, and a typo before the punctuation, are refused as before", () => {
+  it("loosens nothing else: words after the code, and a typo before the punctuation, are refused as before", () => {
     const typo = VECTOR.slice(0, 30) + (VECTOR[30] === "q" ? "p" : "q") + VECTOR.slice(31);
     expect(refusal(`${typo}.`)).toBe("typo");
-    expect(refusal(`${VECTOR}?`)).toBe("typo");
-    expect(refusal(`${VECTOR};`)).toBe("typo");
+    // "?" and ";" end sentences too (agents#1632): they read now, as "." does.
+    expect(readInviteCode(`${VECTOR}?`).ok).toBe(true);
+    expect(readInviteCode(`${VECTOR};`).ok).toBe(true);
     expect(refusal(`${VECTOR} see you`)).toBe("typo");
     expect(refusal(".")).toBe("not-ghostly");
   });
