@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, identityFromSeedB64, readStatusCard, type IncomingMessage, type PairingState } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { fileStore } from "../src/shared/idb";
 import { groupReply, pairedWireReply, receivedPairedReply, replyRef } from "../src/shared/replies";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -205,6 +206,22 @@ describe("a received reply in a long history", () => {
     const t = await keeper(linkId, history(linkId, i => ({ id: `peer_${wire(i)}` })));
     await t.store({ linkId, id: `peer_${"R".repeat(22)}`, text: "yes", sender: "peer", timestamp: Date.now(), via: "pkarr", replyTo: receivedPairedReply({ i: wire(7) }) });
     expect((await t.row(`peer_${"R".repeat(22)}`))?.replyTo).toEqual({ id: wire(7), snippet: "line 7", from: "peer", messageId: `peer_${wire(7)}` });
+    expect(t.whole()).toBe(0);
+  });
+
+  it("in a chat, finds a file of mine by its stored file: a reply to it, received or sent, reads no whole history", async () => {
+    const replyFor = (node: GhostlyNode, linkId: string, id: string) => (node as unknown as { replyFor(l: string, m: string): Promise<unknown> }).replyFor(linkId, id);
+    const linkId = `long-${crypto.randomUUID()}`, wire = (i: number) => `${"W".repeat(20)}${String(i).padStart(2, "0")}`, fileWire = "F".repeat(22), at = 1_700_000_001_000;
+    const file = { id: `${linkId}-out-${fileWire}`, name: "photo.jpg", size: 5, mime: "image/jpeg" };
+    await fileStore.put({ id: file.id, linkId, blob: new Blob([new Uint8Array(5)]), createdAt: 1, direction: "out", wireId: fileWire, metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: at } });
+    cleanup.push(() => fileStore.delete(file.id));
+    // My file's row goes by its time, as sending it keeps it; its wire id is its file id's tail.
+    const t = await keeper(linkId, [...history(linkId, i => ({ id: `peer_${wire(i)}` })), { linkId, id: `me_${at}`, text: "📎 photo.jpg", sender: "me", timestamp: at, via: "datalink", file }]);
+    await t.store({ linkId, id: `peer_${"R".repeat(22)}`, text: "nice photo", sender: "peer", timestamp: Date.now(), via: "datalink", replyTo: receivedPairedReply({ i: fileWire }) });
+    expect((await t.row(`peer_${"R".repeat(22)}`))?.replyTo).toMatchObject({ id: fileWire, from: "me", messageId: `me_${at}` });
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    cleanup.push(async () => { await node.shutdown(); });
+    expect(await replyFor(node, linkId, fileWire)).toMatchObject({ id: fileWire, messageId: `me_${at}` });
     expect(t.whole()).toBe(0);
   });
 });
