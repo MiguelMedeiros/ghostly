@@ -268,6 +268,26 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     await listen.stop();
   });
 
+  // Neither bot made a wallet: the contact offers no way of paying, and that is what both commands say, not "update".
+  it("pay or ask a contact that has no wallet: refused as no wallet yet, and the payment-bot example tells the person so", async () => {
+    const noWallet = { reason: "contact_no_wallet" };
+    expect(error(await as(alice, "chat", "pay", "bob", "5", "--network", "testnet"), "refused", 1)).toMatchObject({ details: noWallet, message: expect.stringContaining("Your contact has no wallet yet") });
+    const asked = error(await as(alice, "chat", "request", "bob", "21"), "refused", 1);
+    expect(asked).toMatchObject({ details: noWallet, message: expect.stringContaining("ghostly wallet create cashu") });
+    expect(asked.message).not.toMatch(/updated/);
+    const bot = spawn(process.execPath, [join(import.meta.dirname, "../examples/payment-bot.mjs")], { env: { ...process.env, GHOSTLY_SOCKET: sockets[alice] }, stdio: ["ignore", "pipe", "pipe"] });
+    try {
+      const listen = await listenTo(bob, "--type", "message.received");
+      await new Promise((r) => setTimeout(r, 1000));
+      ok(await as(bob, "send", "alice", "request 21", "--wait", "delivered"));
+      const reply = await listen.waitFor((l) => l.type === "message.received");
+      expect((reply.message as { text: string }).text).toBe("You have no wallet yet: make a Testnet Cashu wallet, then ask again.");
+      await listen.stop();
+    } finally {
+      bot.kill();
+    }
+  });
+
   it("show the contact this side is typing, and its stream says when it started and stopped", async () => {
     const listen = await listenTo(bob, "--type", "typing.started", "--type", "typing.stopped");
     expect(ok(await as(alice, "typing", "bob"))).toMatchObject({ chat: chatA, typing: true, live: true, sendTyping: true });

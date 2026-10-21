@@ -755,11 +755,31 @@ describe("paired payments", () => {
     const t = linkedPair([{ events: payEvents() }, { events: { onPaymentRequest } }], data => typeof data === "string" && data.includes('"paired-payments"'));
     await t.ready();
     expect(t.a.supportsPayments).toBe(false);
-    await expect(t.a.sendPaymentRequest(request)).rejects.toThrow(/does not support payments/);
+    await expect(t.a.sendPaymentRequest(request)).rejects.toThrow("Your contact has payments off in this chat, or needs an updated Ghostly");
     const send = vi.spyOn(t.ca, "send");
     t.a.sendPaymentResult({ id: "payment-1", ok: true });
     expect(send).not.toHaveBeenCalled();
     expect(onPaymentRequest).not.toHaveBeenCalled();
+  });
+
+  // The app's rule (Chat.tsx): a contact whose networks name no wallet offers no way until it makes one. Both ran the
+  // same release, and the refusal said they needed an updated Ghostly.
+  it("a contact with no wallet is refused as having no wallet yet; one with a wallet and nothing on, as off or older", async () => {
+    const t = linkedPair([{ events: payEvents(), paymentNetworks: {} }, { events: payEvents() }]);
+    await t.ready();
+    await t.settle("b");
+    const noWallet = await t.b.requirePaymentSupport().catch((e: unknown) => e);
+    expect(noWallet).toMatchObject({ engineCode: "contactNoWallet", message: "Your contact has no wallet yet: they need one to pay or be paid" });
+    expect(String(noWallet)).not.toMatch(/updated/);
+    // A wallet, and every way it has turned off in this chat: off here, or an app that cannot say more.
+    t.a.setPaymentNetworks({ cashu: ["testnet"] });
+    t.a.setPaymentMethods({ cashu: false });
+    await t.settle("b");
+    await expect(t.b.requirePaymentSupport()).rejects.toMatchObject({ engineCode: "contactNoPayments", message: "Your contact has payments off in this chat, or needs an updated Ghostly" });
+    // A wallet made and on: nothing refused.
+    t.a.setPaymentMethods({});
+    await t.settle("b");
+    await expect(t.b.requirePaymentSupport()).resolves.toBeUndefined();
   });
 
   it("a contact that turned all payments off is told apart from one that allows them", async () => {
