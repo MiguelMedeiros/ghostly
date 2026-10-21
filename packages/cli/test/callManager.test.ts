@@ -190,9 +190,12 @@ async function until<T>(check: () => T | undefined | false, ms = 15_000): Promis
   }
 }
 
-/** A program on a call's socket: what it hears, and a way to speak. */
-async function program(path: string): Promise<{ socket: Socket; heard: () => Buffer; ended: Promise<void> }> {
-  const socket = connect(path);
+/**
+ * A program on a call's socket: what it hears, and a way to speak. `halfOpen`: one that keeps its side open after EOF,
+ * as a program whose writer goes on when its reader stops.
+ */
+async function program(path: string, halfOpen = false): Promise<{ socket: Socket; heard: () => Buffer; ended: Promise<void> }> {
+  const socket = connect({ path, allowHalfOpen: halfOpen });
   const chunks: Buffer[] = [];
   socket.on("data", (d: Buffer) => chunks.push(d));
   const ended = new Promise<void>((resolve) => socket.on("end", () => resolve()));
@@ -310,6 +313,28 @@ describe("two call managers", { timeout: 60_000 }, () => {
     expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "hangup" });
     expect(a.calls.list()).toEqual([]);
     expect(existsSync(placed.audio.socket)).toBe(false);
+  });
+
+  it("a hang-up reaches the contact at once when the programs keep their sockets open after EOF", async () => {
+    const { a, b } = pairOfManagers();
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    const placed = await a.calls.start("chat-ab", {}) as { call: string; audio: { socket: string } };
+    const alice = await program(placed.audio.socket, true);
+    const [, connectedB] = await Promise.all([a, b].map((side) => until(() => side.events.find((e) => e.type === "call.connected"))));
+    const bob = await program((connectedB.audio as { socket: string }).socket, true);
+    await until(() => [a, b].every((side) => (side.calls.list()[0] as { stats?: { programConnected?: boolean } } | undefined)?.stats?.programConnected));
+
+    const start = Date.now();
+    await b.calls.hangup("chat-ba");
+    expect(Date.now() - start).toBeLessThan(500);
+    expect(b.events.find((e) => e.type === "call.ended")).toMatchObject({ reason: "hangup" });
+    expect(signalsOf(b, "h")).toHaveLength(1);
+    await bob.ended;
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await alice.ended;
+    expect(Date.now() - start).toBeLessThan(1000);
+    alice.socket.destroy();
+    bob.socket.destroy();
   });
 
   it("answers an app's video call saying it takes no picture (`vr: 0`), so the app sends none; a call with no video section says nothing", async () => {
