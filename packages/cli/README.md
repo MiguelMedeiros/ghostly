@@ -114,9 +114,9 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
 | `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
 | `chat list [--show-secret]`, `chat show <chat> [--show-secret]` | Chats, and one chat's connection: transports, last attempt, comparison code. A pending chat's `invite` prints as `<hidden>` without `--show-secret` |
-| `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact |
+| `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact. A contact that offers no way of paying is `refused`: `details.reason` `contact_no_wallet` (it has no wallet yet) or `contact_payments_off` (it has payments off in this chat, or an older app) |
 | `chat rename <chat> <name>`, `chat remove <chat> --yes` | Name it here; delete it (keys and history) here |
-| `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
+| `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request. Refused as `chat pay` is when the contact offers no way of paying |
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact. Live means a session that exists now, in this run of the daemon: a chat that was live before a restart counts once its contact answers again |

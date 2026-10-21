@@ -3834,7 +3834,10 @@ export class GhostLink {
     // Said at once: before, the dial below waited out its 90 s for an app that had said it was going.
     if (this.contactAway) throw engineError("contactAway");
     await this.connect();
-    if (!this.supportsPayments) throw new Error("This contact does not support payments. Both peers need an updated Ghostly.");
+    if (this.supportsPayments) return;
+    // As the app's chat says it: networks that name no wallet are a contact that offers no way until it makes one.
+    const networks = this.peerNetworks;
+    throw engineError(networks && !Object.keys(networks).length ? "contactNoWallet" : "contactNoPayments");
   }
 
   private requireLegacyCapabilities(): void {
