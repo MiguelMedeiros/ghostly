@@ -123,6 +123,11 @@ pub mod app_sandbox {
     }
 
     #[tauri::command]
+    pub fn app_focus() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
     pub fn app_open() -> Result<String, String> {
         Err(NOT_HERE.into())
     }

@@ -1032,6 +1032,21 @@ pub fn app_close<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), Str
     Ok(())
 }
 
+/// Brings an app window to the front (the Ghostly window only): the person opened the app again in a chat where
+/// it already runs, which shows its window rather than opening a second one.
+#[tauri::command]
+pub fn app_focus<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// The content rule list of an app window on macOS and Linux: every load blocked but the runner's own scheme.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const RULES_ID: &str = "ghostly-app-sandbox-1";
@@ -2199,6 +2214,31 @@ mod tests {
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
         assert_eq!(refused(app.handle(), &label), None);
+    }
+
+    /// Opened again in a chat where it runs: its window comes to the front. Only an app window, and one gone is
+    /// no error (it closed while the Ghostly window asked).
+    #[test]
+    fn an_app_window_is_brought_to_the_front_and_no_other_window() {
+        let app = app();
+        let request = OpenRequest {
+            app: "ana/chess".into(),
+            title: "Chess".into(),
+            entry: "<p>chess</p>".into(),
+            internet: false,
+            view: AppView::Chat,
+        };
+        let label = open(app.handle(), request).unwrap();
+        assert_eq!(app_focus(app.handle().clone(), label.clone()), Ok(()));
+        app_close(app.handle().clone(), label.clone()).unwrap();
+        assert_eq!(app_focus(app.handle().clone(), label), Ok(()));
+        for other in ["main", "svc-1", "app-"] {
+            assert_eq!(
+                app_focus(app.handle().clone(), other.into()),
+                Err("Not an app window".into()),
+                "{other}"
+            );
+        }
     }
 
     /// A profile switch or a reload replaces the page whose brokers answered the app windows: they must not stay
