@@ -831,7 +831,13 @@ mod tests {
         }
         // The Ghostly window's side of the broker: it opens app windows, answers them, brings them to the front, names
         // them and closes them; an app window does none of that.
-        for command in ["app_open", "app_post", "app_focus", "app_title", "app_close"] {
+        for command in [
+            "app_open",
+            "app_post",
+            "app_focus",
+            "app_title",
+            "app_close",
+        ] {
             assert!(registered().iter().any(|c| c == command), "{command}");
             assert!(may_call("main", command), "{command}");
             for label in ["app-1", "app-0123456789abcdef", "svc-1"] {
