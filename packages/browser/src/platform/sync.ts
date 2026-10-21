@@ -9,6 +9,7 @@ import {
   forgetInviteCode,
   forgetShownSession,
   getInviteCode,
+  getUnreadCount,
   isSessionKey,
   listShownSessions,
   loadSession,
@@ -21,6 +22,7 @@ import {
   updateSessionLabel,
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
+import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
@@ -186,6 +188,8 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     notifySessionsChanged();
     shown = sessionForPeer(link.peerPubKeyZ32);
     if (!shown) return;
+    // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
+    if (!getUnreadCount(shown)) clearChatNotification(shown.id);
   }
   // Changed here (its rows, its sort, what is added), never the one the other readers hold.
   const session: ChatSession = { ...shown, messages: shown.messages.slice() };
