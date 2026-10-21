@@ -80,26 +80,6 @@
   background: var(--cyan);
   transition: width 0.12s linear;
 }
-.ng-tab[aria-pressed="false"] .ng-tab-n {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  margin-right: 8px;
-  border-radius: 50%;
-  border: 1px solid var(--line-2);
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--dim);
-}
-.ng-tab[aria-pressed="true"] .ng-tab-n {
-  border-color: var(--cyan);
-  color: var(--cyan);
-}
-.ng-tab-bar {
-  display: none;
-}
 
 /* ── One scenario: phase caption, stage, sub-caption. Remounts per scenario,
    so it fades in; data-leaving fades it out (together a DUR.slow cross-fade). ── */
@@ -647,24 +627,8 @@
     animation: none !important;
     transition: none !important;
   }
-  .ng-tab-n {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  margin-right: 8px;
-  border-radius: 50%;
-  border: 1px solid var(--line-2);
-  font-family: var(--font-jetbrains), ui-monospace, monospace;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--dim);
-}
-.ng-tab[aria-pressed="true"] .ng-tab-n {
-  border-color: var(--cyan);
-  color: var(--cyan);
-}
-.ng-tab-bar {
+  /* A still has no progress to show. */
+  .ng-tab-bar {
     display: none;
   }
 }
