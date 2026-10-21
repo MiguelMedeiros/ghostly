@@ -342,7 +342,14 @@ export function GroupChat() {
     setSharing("created");
     navigate(location.pathname, { replace: true, state: navOnly(location.state) });
   }, [location.state, location.pathname, navigate]);
-  const [error, setError] = useState<Problem | null>(null);
+  // What an action here refused, with the group it was about: the page is one for every group, and another group opened
+  // shows that group's own notice, not this one's refusal (gone once it is left, as a reply is), nor one that comes after.
+  const [refused, setRefused] = useState<{ groupId: string; problem: Problem } | null>(null);
+  const error = refused?.groupId === groupId ? refused.problem : null;
+  useEffect(() => setRefused(null), [groupId]);
+  const openGroupId = useRef(groupId);
+  openGroupId.current = groupId;
+  const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
