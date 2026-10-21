@@ -85,10 +85,11 @@ export async function sendAppCard(linkId: string, app: InstalledAppView, opened:
 
 /**
  * Opens `app` in the 1:1 chat `linkId` and tells the contact with the "opened" card: the chat's + → Apps, and the
- * Apps page's chat picker for an app that runs in a chat. Opened first: an app that cannot start there sends no card.
+ * Apps page's chat picker for an app that runs in a chat. Opened first: an app that cannot start there sends no card,
+ * and one already running there, shown again, sends none either.
  */
 export async function openAppInChat(app: InstalledAppView, linkId: string, options?: OpenAppOptions): Promise<void> {
-  await openApp(app.ref, linkId, options);
+  if (await openApp(app.ref, linkId, options) === "shown") return;
   const failed = await sendAppCard(linkId, app, true);
   if (failed) throw new Error(failed);
 }

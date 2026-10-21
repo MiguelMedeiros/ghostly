@@ -211,10 +211,13 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
 
     // Opened again from the chat (its card, or + → Apps): the same app, not a new one.
     await user.click(within(app).getByTestId("mini-app-back"));
-    await act(() => open(REF, "link-1"));
+    let again: "shown" | void = undefined;
+    await act(async () => { again = await open(REF, "link-1"); });
     expect(app).toBeVisible();
     expect(started).toHaveLength(1);
     expect(frame.isConnected).toBe(true);
+    // Nothing new started: the contact is not told again.
+    expect(again).toBe("shown");
   });
 
   it("a full-screen app covers the whole chat at every width, with Back to it, and never sits beside it", async () => {
