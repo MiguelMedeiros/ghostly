@@ -4,6 +4,7 @@ import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSee
 import { GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
+import { STORES, fileStore, transact } from "../src/shared/idb";
 import type { AttentionEvent } from "../src/shared/rpc";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -20,7 +21,7 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolean; onMessageChanges?: NodeEvents["onMessageChanges"]; onMessages?: NodeEvents["onMessages"] } = {}) {
+async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolean; onMessageChanges?: NodeEvents["onMessageChanges"]; onMessages?: NodeEvents["onMessages"]; before?: (id: string) => Promise<void> } = {}) {
   const net = new FakeNativeNet();
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
@@ -52,6 +53,7 @@ async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolea
   });
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));
   cleanup.push(async () => { await contact.stop(false); await node.shutdown(); await db.deleteLink(id); });
+  await contactOptions.before?.(id);
   await node.start();
   node.setActiveLink({ linkId: id });
   const view = () => node.getState().links.find(l => l.id === id)!;
@@ -204,6 +206,32 @@ describe("reacting over the live link", () => {
     await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
     expect(reads()).toBe(1);
     whole.mockRestore();
+  });
+
+  it("a contact's reactions to my files and to payments, one right after another, each land as they come", async () => {
+    // A file of mine is `me_<its time>` here and goes by its own wire id on the wire, a payment by its id: past the first,
+    // each waited for the chat's next whole read, 10 s on, and was lost if the app stopped meanwhile.
+    const pictures = ["pictureWire01", "pictureWire02", "pictureWire03", "pictureWire04"];
+    const t = await setup({ before: async id => {
+      for (const [i, wire] of pictures.entries()) {
+        const file = { id: `${id}-out-${wire}`, name: `p${i}.png`, size: 10, mime: "image/png" };
+        await fileStore.put({ id: file.id, linkId: id, direction: "out", wireId: wire, createdAt: 1, metadata: { ...file, timestamp: 100 + i } });
+        await db.addMessage({ linkId: id, id: `me_${100 + i}`, text: file.name, sender: "me", timestamp: 100 + i, via: "datalink", file });
+      }
+      const paid = { id: "paymentOfMine01", linkId: id, kind: "payment", direction: "out", amount: 21, unit: "sat", state: "settled", createdAt: 200 } as const;
+      const asked = { ...paid, id: "requestToMe0001", kind: "request", direction: "in", state: "pending", createdAt: 201 } as const;
+      await transact([STORES.payments], s => { s[STORES.payments].put(paid); s[STORES.payments].put(asked); });
+      await db.addMessage({ linkId: id, id: "me_200", text: "⚡ 21 sats", sender: "me", timestamp: 200, via: "datalink", paymentId: paid.id });
+      await db.addMessage({ linkId: id, id: "peer_201", text: "⚡ Requested 21 sats", sender: "peer", timestamp: 201, via: "datalink", paymentId: asked.id });
+    } });
+    await t.agreed();
+    const named = [...pictures, "paymentOfMine01", "requestToMe0001"];
+    for (const [i, id] of named.entries()) {
+      expect(t.contact.sendReaction({ id, e: "❤️", n: 10 + i })).toBeNull();
+      await vi.waitFor(() => expect(t.receipts).toContain(10 + i));
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    await vi.waitFor(async () => expect((await t.messages()).map(m => m.reactions?.peer?.e)).toEqual(named.map(() => "❤️")), { timeout: 2_000 });
   });
 
   it("a reaction to a message not here yet waits for it", async () => {

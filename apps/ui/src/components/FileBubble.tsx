@@ -143,9 +143,13 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   };
 
   // A picture's box is there before it is: from the size its sender said, else from what this device found, else
-  // a placeholder while it looks. Nothing is reserved for a picture that will not show (failed, missing, awaiting
-  // consent), and one that says it is one size but loads as another is shown as it loaded.
-  const failedHere = transfer?.state === "failed" || missing || saveOnly || (loaded?.url === blobUrl && loaded?.ok === false);
+  // a placeholder while it looks. Nothing is reserved for a picture that will not show (failed, awaiting consent, too
+  // large to draw), and one that says it is one size but loads as another is shown as it loaded. One whose bytes are
+  // no longer here ("No longer available", "Not in this backup") keeps the box its sender's size gave it: it was laid
+  // out with it before the read found nothing, and dropped then, a row above the view shrank by its height mid-fling
+  // and the glide jerked 107-210 px back for a frame (agents#1682).
+  const gone = !!missing && !!file.image;
+  const failedHere = transfer?.state === "failed" || (missing && !gone) || saveOnly || (loaded?.url === blobUrl && loaded?.ok === false);
   const awaiting = transfer?.state === "transferring" && transfer.stage === "asking";
   const size = (found?.id === file.id ? found.size : undefined) ?? file.image ?? knownPictureSize(file.id);
   const box = !picture || failedHere || awaiting ? null
@@ -187,7 +191,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   return (
     <div ref={rootRef} className="min-w-[220px] max-md:min-w-[min(220px,68vw)] max-w-[min(330px,72vw)] rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" data-testid="file-bubble" data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       {box && (
-        <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"}
+        <div data-testid="file-picture" data-box={size ? "sized" : "placeholder"} {...(gone && { "data-gone": "" })}
           className={`rounded-[4px] overflow-hidden mb-1 ${blobUrl && loaded?.url === blobUrl ? "" : "bg-black/10"}`}
           style={{ width: box.width, maxWidth: "100%", aspectRatio: box.ratio }}>
           {blobUrl && (

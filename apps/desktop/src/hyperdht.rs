@@ -221,10 +221,10 @@ async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
                         let _ = reply.send(Ok(value["id"].clone()));
                     }
                 }
-                // The page counts a frame against its send budget until it hears this.
-                Some("sent") => {
-                    let sent = json!({"type":"sent", "id":value["id"], "seq":value["seq"]});
-                    gone = route.events.send(sent).is_err();
+                // The connection's socket is full, or has room again: the page holds a file back meanwhile.
+                Some(word @ ("full" | "room")) => {
+                    let held = json!({"type":word, "id":value["id"]});
+                    gone = route.events.send(held).is_err();
                 }
                 // A frame that could not go is never lost unseen: the page closes its channel.
                 Some("error") if value["command"] == "send" => {
@@ -454,9 +454,10 @@ pub async fn paired_hyperdht_connect(
         .ok_or("Invalid native connection ID".into())
 }
 /// One frame: `text`, or `bytes` (a binary message, WISP 103 § Frames, in base64), as the runtime takes it. Answered
-/// once queued for the runtime, in the order the page sends; the runtime's word comes on the page's channel under
-/// `seq`: `sent` once its socket has room for more (the page counts the frame against its send budget until then, so
-/// several are in flight and none waits a round trip to the runtime), `unsent` when it could not send it.
+/// once queued for the runtime, in the order the page sends (the page counts the frame against its send budget until
+/// then). The runtime's word comes on the page's channel: `full` once the connection's socket holds more than it
+/// should and `room` once it drained (nothing for a frame that found room), `unsent` under `seq` when it could not
+/// send one.
 #[tauri::command]
 pub async fn paired_hyperdht_send(
     state: State<'_, HyperState>,
@@ -676,8 +677,8 @@ mod tests {
                 "Frame exceeds transport budget"
             );
         }
-        // Answered once queued, without waiting for the runtime to write it: the runtime's `sent` reaches the page
-        // on its channel, so the page's next frame goes without a round trip to the runtime.
+        // Answered once queued, without waiting for the runtime to write it: the runtime says only when the socket is
+        // full (`full`, then `room`), on the page's channel, so a frame costs no round trip to the runtime.
         let first = sending(&app, id, 1, Some("x".repeat(60 * 1024)), None);
         tokio::time::timeout(Duration::from_secs(5), first)
             .await
@@ -921,11 +922,6 @@ mod runtime_tests {
             (&json!("frame"), &json!("hello"))
         );
         assert_eq!(frame["id"], incoming["id"]);
-        // The sender's page hears that it went, under the number it sent it with.
-        assert_eq!(
-            next(&mut page_a).await,
-            json!({"type":"sent", "id":connection, "seq":1})
-        );
         // A binary message, in base64 through the runtime and back.
         paired_hyperdht_send(
             app.state(),
@@ -942,11 +938,8 @@ mod runtime_tests {
             (&frame["type"], &frame["bytes"], &frame["id"]),
             (&json!("frame"), &json!("BAD/Cg=="), &incoming["id"])
         );
-        assert_eq!(
-            next(&mut page_a).await,
-            json!({"type":"sent", "id":connection, "seq":2})
-        );
-        // A frame the runtime cannot send is told to the page, not lost unseen.
+        // A frame the runtime cannot send is told to the page, not lost unseen; one that found room is answered by
+        // nothing (a word back for each cost a file a fifth of its speed).
         paired_hyperdht_send(app.state(), a.id, 999, 3, Some("nowhere".into()), None)
             .await
             .unwrap();
@@ -1015,10 +1008,6 @@ mod runtime_tests {
             (&json!("frame"), &incoming["id"])
         );
         assert_eq!(frame["text"].as_str(), Some(text.as_str()));
-        assert_eq!(
-            next(&mut page_a).await,
-            json!({"type":"sent", "id":connection, "seq":1})
-        );
         assert_eq!(pid(&app).await, Some(runtime));
         assert!(alive(runtime));
         for id in [a.id, b.id, c.id] {

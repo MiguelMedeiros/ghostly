@@ -599,6 +599,13 @@ export class RelayTransport implements PkarrTransport {
     }
   }
 
+  /** `PkarrTransport.publishHeld`: `publishDated`'s check before signing, for a payload signed elsewhere in this process. */
+  publishHeld(pubKeyZ32: string, options: PkarrRequestOptions = {}): DiscoveryBudgetError | null {
+    if (this.relays.length === 0) return null;
+    const held = this.publishWait(pubKeyZ32, asker(options, true));
+    return held ? new DiscoveryBudgetError(held.wait, `Publish held back on every relay: ${held.reasons.join("; ")}`) : null;
+  }
+
   /**
    * How long until some relay takes a publish of this asker, and why each holds it back; null when one would now. Walks the relays as `put` does,
    * without asking any: a relay the budget holds back gets its refused `take` (the asker's write then waits first in
@@ -1042,6 +1049,9 @@ export class RelayTransport implements PkarrTransport {
   }
 
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.readAt.get(pubKeyZ32); }
+
+  /** The last read of this key was answered 404 (`HEDGE_MISSING_MS`): a relay takes seconds to say so. */
+  lastReadMissing(pubKeyZ32: string): boolean { return this.missing.has(pubKeyZ32); }
 
   readHeldBackFor(pubKeyZ32: string): number | undefined {
     const held = this.heldBack.get(pubKeyZ32);

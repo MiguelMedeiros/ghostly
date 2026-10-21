@@ -5,6 +5,7 @@ import type { IceServer, PeerConnection, Track } from "node-datachannel";
 import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CANDIDATES, RTC_CONFIG, type CallIceServer, type CallSignal } from "@ghostly/core";
 import { CallAudio, type OpusCodec } from "./audio";
 import type { CallRate, PlaybackQueue } from "./pcm";
+import { envSwitch } from "../envSwitch";
 
 /**
  * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
@@ -19,7 +20,7 @@ export interface CallStack {
 let loading: Promise<CallStack | string> | null = null;
 
 /** opusscript's libopus in WebAssembly, the module its own wrapper drives. */
-interface OpusNative {
+export interface OpusNative {
   OpusScriptHandler: { new (rate: number, channels: number, application: number): OpusHandler; destroy_handler(handler: OpusHandler): void };
   _malloc(bytes: number): number;
   _free(pointer: number): void;
@@ -32,7 +33,14 @@ interface OpusHandler {
   _encoder_ctl(ctl: number, value: number): number;
 }
 
-const OPUS_APPLICATION_VOIP = 2048, OPUS_SET_BITRATE = 4002;
+const OPUS_APPLICATION_VOIP = 2048, OPUS_SET_BITRATE = 4002, OPUS_SET_INBAND_FEC = 4012, OPUS_SET_PACKET_LOSS_PERC = 4014;
+/**
+ * The loss the encoder plans for: with in-band FEC on, each packet carries a coarse copy of the one before, so the
+ * contact's app rebuilds an isolated lost packet from the next instead of concealing it. Off, a bot's voice at 10% loss
+ * was concealed 10% of the time at the app, 1.3% with it on, at the same bitrate (libopus takes it from the same 32 kb/s;
+ * agents#1741). Fixed: the CLI reads no RTCP receiver reports to learn the loss it sees.
+ */
+export const OPUS_EXPECTED_LOSS_PERCENT = 10;
 /** The largest packet a codec reads or writes (opusscript's MAX_PACKET_SIZE). */
 const MAX_PACKET_BYTES = 1276 * 3;
 /**
@@ -50,7 +58,7 @@ const MAX_PCM_OUT = (48_000 * 60) / 1000 * 2;
  * others started, one codec's audio landed on another's state: noise, then "memory access out of bounds" in every
  * call until the daemon restarted. The bytes in and out are the same as opusscript's.
  */
-function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
+export function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
   const handler = new native.OpusScriptHandler(rate, 1, OPUS_APPLICATION_VOIP);
   const pcm = native._malloc(PCM_ROOM_BYTES), packet = native._malloc(MAX_PACKET_BYTES);
   let deleted = false;
@@ -69,6 +77,10 @@ function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
       if (samples < 0) throw new Error(`Decode error: ${samples}`);
       return Buffer.from(native.HEAPU16.subarray(pcm / 2, pcm / 2 + Math.min(samples * 2, MAX_PCM_OUT)));
     },
+    fec(on) {
+      if (deleted) return;
+      if (handler._encoder_ctl(OPUS_SET_INBAND_FEC, on ? 1 : 0) < 0 || handler._encoder_ctl(OPUS_SET_PACKET_LOSS_PERC, on ? OPUS_EXPECTED_LOSS_PERCENT : 0) < 0) throw new Error("Encoder CTL error");
+    },
     // Once: a second delete would free blocks another codec may hold by then.
     delete() {
       if (deleted) return;
@@ -78,15 +90,16 @@ function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
       native._free(packet);
     },
   };
-  // What browsers send for speech; the default of the build is far more.
-  if (handler._encoder_ctl(OPUS_SET_BITRATE, 32_000) < 0) { codec.delete?.(); throw new Error("Encoder CTL error"); }
+  // What browsers send for speech; the default of the build is far more. In-band FEC, as the SDP says (`useinbandfec=1`).
+  if (handler._encoder_ctl(OPUS_SET_BITRATE, 32_000) < 0 || handler._encoder_ctl(OPUS_SET_INBAND_FEC, 1) < 0
+    || handler._encoder_ctl(OPUS_SET_PACKET_LOSS_PERC, OPUS_EXPECTED_LOSS_PERCENT) < 0) { codec.delete?.(); throw new Error("Encoder CTL error"); }
   return codec;
 }
 
 /** The media stack, or why calls are not available here (the reason the call buttons of the contact's app show). */
 export function loadCallStack(): Promise<CallStack | string> {
   return (loading ??= (async () => {
-    if (process.env.GHOSTLY_WEBRTC === "0") return "Calls are off on this headless Ghostly (GHOSTLY_WEBRTC=0)";
+    try { if (!envSwitch("GHOSTLY_WEBRTC", true)) return "Calls are off on this headless Ghostly (GHOSTLY_WEBRTC=0)"; } catch (error) { return (error as Error).message; }
     try {
       const ndc = (await import("node-datachannel")) as unknown as CallStack["ndc"] & { default?: CallStack["ndc"] };
       const lib = (ndc.PeerConnection ? ndc : ndc.default!) as CallStack["ndc"];
@@ -108,7 +121,7 @@ export function loadCallStack(): Promise<CallStack | string> {
  * apps' calls use them.
  */
 export function callIceServers(extra: readonly CallIceServer[] = [], env = process.env): (string | IceServer)[] {
-  const out: (string | IceServer)[] = env.GHOSTLY_STUN === "0" ? [] : (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
+  const out: (string | IceServer)[] = !envSwitch("GHOSTLY_STUN", true, env) ? [] : (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
   for (const server of callRtcConfig(extra).iceServers?.slice(RTC_CONFIG.iceServers?.length ?? 0) ?? []) {
     for (const url of [server.urls].flat()) {
       const m = /^(stun|turns?):([^:?\s]+)(?::(\d+))?(?:\?transport=(udp|tcp))?$/i.exec(url);

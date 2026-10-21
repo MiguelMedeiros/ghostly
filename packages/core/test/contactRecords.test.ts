@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createIdentity } from "../src/identity";
+import { createIdentity, identityFromSeed } from "../src/identity";
 import { createChatInvite } from "../src/invite";
 import { measureRecords } from "../src/pkarr";
 import { createContactLink } from "../src/contactLink";
@@ -76,15 +76,18 @@ describe("a contact link's request", () => {
 
 describe("the stamp", () => {
   it("a made stamp holds for its bits, link, key and day, and for nothing else", () => {
-    const stamp = makeStamp(link.linkKeyZ32, asker.pubKeyZ32, TODAY, 10);
-    expect(stampHolds(link.linkKeyZ32, asker.pubKeyZ32, TODAY, stamp, 10)).toBe(true);
-    expect(stampHolds(link.linkKeyZ32, asker.pubKeyZ32, TODAY + 1, stamp, 10)).toBe(false);
-    expect(stampHolds(link.linkKeyZ32, createIdentity().pubKeyZ32, TODAY, stamp, 10)).toBe(false);
-    expect(stampHolds(createContactLink().linkKeyZ32, asker.pubKeyZ32, TODAY, stamp, 10)).toBe(false);
+    // Fixed keys: with fresh random ones, another day, key or link has 10 zero bits by chance 1 time in 1024.
+    const fixedKey = (byte: number) => identityFromSeed(new Uint8Array(32).fill(byte)).pubKeyZ32;
+    const [linkKey, askerKey, otherKey, otherLink] = [1, 2, 3, 4].map(fixedKey);
+    const stamp = makeStamp(linkKey, askerKey, TODAY, 10);
+    expect(stampHolds(linkKey, askerKey, TODAY, stamp, 10)).toBe(true);
+    expect(stampHolds(linkKey, askerKey, TODAY + 1, stamp, 10)).toBe(false);
+    expect(stampHolds(linkKey, otherKey, TODAY, stamp, 10)).toBe(false);
+    expect(stampHolds(otherLink, askerKey, TODAY, stamp, 10)).toBe(false);
     // The first stamp with 10 bits rarely has 20.
-    const strong = makeStamp(link.linkKeyZ32, asker.pubKeyZ32, TODAY, 16);
-    expect(stampHolds(link.linkKeyZ32, asker.pubKeyZ32, TODAY, strong, 16)).toBe(true);
-    expect(stampHolds(link.linkKeyZ32, asker.pubKeyZ32, TODAY, stamp, 30)).toBe(false);
+    const strong = makeStamp(linkKey, askerKey, TODAY, 16);
+    expect(stampHolds(linkKey, askerKey, TODAY, strong, 16)).toBe(true);
+    expect(stampHolds(linkKey, askerKey, TODAY, stamp, 30)).toBe(false);
   });
 
   it("the paced stamp is the same stamp", async () => {

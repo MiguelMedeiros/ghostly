@@ -820,25 +820,49 @@ export function chatNamesForPeer(peerPubKeyB64: string): { label?: string; nick?
   return { label: known.label, nick: known.nick };
 }
 
+/** Per storage prefix, per chat's key: the stored text and what it counts, `after[i]` the unread from message `i` on. */
+const unreadCounts = new Map<string, Map<string, { raw: string; id?: string; older: number; after: number[] }>>();
+
 /**
  * Unread messages in the chats kept under a storage prefix: another profile's, read without starting it
- * (the account bar's switcher). Same count as the chat list's: messages since the last read one.
+ * (the account bar's switcher). Same count as the chat list's: messages since the last read one. A chat's stored copy
+ * is parsed again only when it changed.
  */
 export function unreadUnder(prefix: string): number {
   let unread = 0;
+  const known = unreadCounts.get(prefix);
+  const counts = new Map<string, { raw: string; id?: string; older: number; after: number[] }>();
   for (let i = 0; i < localStorage.length; i++) {
     try {
       const key = localStorage.key(i);
       if (!key?.startsWith(prefix) || key.slice(prefix.length).includes("_")) continue;
-      const session = JSON.parse(localStorage.getItem(key) ?? "null") as ChatSession | null;
-      if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) continue;
-      const read = parseInt(localStorage.getItem(`${prefix}read_${session.id}`) ?? "0", 10) || 0;
-      unread += unreadAfter(session.messages, read - (session.older ?? 0));
+      const raw = localStorage.getItem(key);
+      if (raw === null) continue;
+      let chat = known?.get(key);
+      if (chat?.raw !== raw) chat = countsOf(raw);
+      counts.set(key, chat);
+      if (!chat.id) continue;
+      const read = parseInt(localStorage.getItem(`${prefix}read_${chat.id}`) ?? "0", 10) || 0;
+      unread += chat.after[Math.min(Math.max(0, read - chat.older), chat.after.length - 1)]!;
     } catch {
       continue;
     }
   }
+  unreadCounts.set(prefix, counts);
   return unread;
+}
+
+/** A stored chat's unread counts from each message on; no `id` when the text is not a chat. */
+function countsOf(raw: string): { raw: string; id?: string; older: number; after: number[] } {
+  try {
+    const session = JSON.parse(raw) as ChatSession | null;
+    if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) return { raw, older: 0, after: [0] };
+    const after = new Array<number>(session.messages.length + 1).fill(0);
+    for (let i = session.messages.length - 1; i >= 0; i--) after[i] = after[i + 1]! + unreadWeight(session.messages[i]!);
+    return { raw, id: session.id, older: session.older ?? 0, after };
+  } catch {
+    return { raw, older: 0, after: [0] };
+  }
 }
 
 export function getLastReadCount(sessionId: string): number {
@@ -890,15 +914,93 @@ export function callLineCount(event: { count?: unknown } | undefined): number {
   return Math.min(count, MAX_CALL_LINE_COUNT);
 }
 
+/**
+ * How long after a chat's last missed call another missed call is counted on that line ("12 missed calls") instead of
+ * adding lines of its own: a contact who rings and hangs up over and over leaves one line (agents#992).
+ */
+export const MISSED_BURST_MS = 5 * 60_000;
+
+/** A missed call's line as the history keeps it, in English (worded in the person's language where it is drawn). */
+export function missedCallText(hasVideo: boolean | undefined, count: number): string {
+  const kind = hasVideo ? "video" : "audio";
+  return count > 1 ? `${count} missed ${kind} calls` : `Missed ${kind} call`;
+}
+
+/**
+ * Adds a missed call's line, or counts it on the chat's last line when that is a missed call of the same kind less
+ * than `MISSED_BURST_MS` old: then the call's own "Incoming call" line (`rang`, when it rang) goes too, so a burst of
+ * calls is one line. The line counted on must still be unread, unless the chat is on screen (`seen`): one the person
+ * read stays as it was read, and the next call starts a line of its own. `line`: the id of the line that says it.
+ * The call's own ids are remembered as deleted, so the same offer heard again (the app reopened) is not counted twice.
+ */
+export function addMissedCall(
+  sessionId: string,
+  message: ChatMessage,
+  { rang, seen = false }: { rang?: string; seen?: boolean } = {},
+): { session: ChatSession; line: string } | null {
+  const session = loadSession(sessionId);
+  if (!session) return null;
+  const known = new Set(session.deletedIds);
+  for (const m of session.messages) known.add(m.id);
+  if (known.has(message.id)) return { session, line: message.id };
+  const messages = session.messages;
+  let end = messages.length;
+  const rangAt = rang !== undefined && messages[end - 1]?.id === rang ? end - 1 : -1;
+  if (rangAt >= 0) end--;
+  const last = messages[end - 1];
+  const read = getLastReadCount(sessionId) - (session.older ?? 0);
+  const burst = last?.sender === "system" && last.callEvent?.type === "call_missed"
+    && !!last.callEvent.hasVideo === !!message.callEvent?.hasVideo
+    && message.timestamp >= last.timestamp && message.timestamp - last.timestamp < MISSED_BURST_MS
+    && (seen || end - 1 >= read);
+  if (!burst) {
+    const added = addMessage(sessionId, message);
+    return added && { session: added, line: message.id };
+  }
+  const count = Math.min(callLineCount(last.callEvent) + 1, MAX_CALL_LINE_COUNT);
+  messages[end - 1] = { ...last, timestamp: message.timestamp, text: missedCallText(last.callEvent!.hasVideo, count), callEvent: { ...last.callEvent!, count } };
+  // The first call's own Incoming line goes too, once its line counts more than it: the burst is one line.
+  const twin = last.id.startsWith("system_call_call_missed_") ? last.id.replace("system_call_call_missed_", "system_call_call_received_") : undefined;
+  const twinAt = twin !== undefined && messages[end - 2]?.id === twin ? end - 2 : -1;
+  const gone = [message.id];
+  let lastRead = getLastReadCount(sessionId);
+  for (const [at, id] of [[rangAt, rang], [twinAt, twin]] as const) {
+    if (at < 0 || id === undefined) continue;
+    messages.splice(at, 1);
+    gone.push(id);
+    // Unread is "messages since the last read one": a read line that goes takes its place in that count with it.
+    if ((session.older ?? 0) + at < lastRead) lastRead--;
+  }
+  session.deletedIds = [...(session.deletedIds ?? []), ...gone].slice(-MAX_DELETED_IDS);
+  session.lastSyncAt = Date.now();
+  saveSession(session);
+  if (lastRead !== getLastReadCount(sessionId)) setReadCount(sessionId, lastRead);
+  return { session, line: last.id };
+}
+
+/** Takes one call back off a line that counts several (a held call that rang after all): one less, at least one. */
+export function uncountMissedCall(sessionId: string, line: string): ChatSession | null {
+  const session = loadSession(sessionId);
+  const index = session?.messages.findIndex((m) => m.id === line) ?? -1;
+  const message = session?.messages[index];
+  if (!session || !message?.callEvent || callLineCount(message.callEvent) < 2) return null;
+  const count = callLineCount(message.callEvent) - 1;
+  const { count: _drop, ...event } = message.callEvent;
+  session.messages[index] = { ...message, text: missedCallText(event.hasVideo, count), callEvent: count > 1 ? { ...event, count } : event };
+  saveSession(session);
+  return session;
+}
+
 /** What a message adds to the unread count: a line of several missed calls, each of them (`callLineCount`). */
 function unreadAfter(messages: readonly ChatMessage[], read: number): number {
   let unread = 0;
   for (let i = Math.max(0, read); i < messages.length; i++) {
-    const message = messages[i]!;
-    if (countsAsUnread(message)) unread += message.callEvent ? callLineCount(message.callEvent) : 1;
+    unread += unreadWeight(messages[i]!);
   }
   return unread;
 }
+/** What a message adds to a chat's unread count: a call line as many calls as it holds. */
+const unreadWeight = (message: ChatMessage) => (countsAsUnread(message) ? (message.callEvent ? callLineCount(message.callEvent) : 1) : 0);
 
 export function getUnreadCount(session: ChatSession): number {
   // A session read without its older messages counts from its first one kept.

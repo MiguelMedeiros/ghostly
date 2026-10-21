@@ -107,12 +107,31 @@ describe("an opened service's host and link", () => {
     const { service, cookie } = await opened(async (request) => answer(200, request.path === "/own"
       ? [["content-type", "text/html"], ["content-security-policy", "default-src 'self'"], ["content-security-policy", "img-src *"]]
       : [["content-type", "text/html"]], ["<p>hi</p>"]));
-    expect(OPENED_SERVICE_CSP).toBe("connect-src 'self' https: wss:; form-action 'self' https:");
+    expect(OPENED_SERVICE_CSP).toBe("default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:");
     const page = await get(service, "/", { cookie });
     expect(page.headers["content-security-policy"]).toBe(OPENED_SERVICE_CSP);
     // Node joins repeated headers with ", ": each policy is still there, and a browser enforces every one.
     const own = await get(service, "/own", { cookie });
     expect(own.headers["content-security-policy"]).toBe(`default-src 'self', img-src *, ${OPENED_SERVICE_CSP}`);
+  });
+
+  it("the policy keeps pictures, frames and every other load off plain http too, and leaves inline scripts and styles working", () => {
+    const policy = new Map(OPENED_SERVICE_CSP.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...sources]) => [name, sources]));
+    // How a browser picks the list for each kind of load: the first directive present in its chain (CSP Level 3).
+    const chains: Record<string, string[]> = {
+      img: ["img-src", "default-src"], media: ["media-src", "default-src"], font: ["font-src", "default-src"],
+      frame: ["frame-src", "child-src", "default-src"], worker: ["worker-src", "child-src", "script-src", "default-src"],
+      object: ["object-src", "default-src"], manifest: ["manifest-src", "default-src"],
+      script: ["script-src-elem", "script-src", "default-src"], style: ["style-src-elem", "style-src", "default-src"],
+      connect: ["connect-src", "default-src"], form: ["form-action"],
+    };
+    for (const [load, chain] of Object.entries(chains)) {
+      const sources = policy.get(chain.find((name) => policy.has(name)) ?? "");
+      expect(sources, load).toBeDefined();
+      // Only its own origin, https/wss, inline and local data: no `*`, no http:, no host (127.0.0.1, a LAN address).
+      for (const source of sources!) expect(["'self'", "https:", "wss:", "data:", "blob:", "'unsafe-inline'", "'unsafe-eval'"], `${load}: ${source}`).toContain(source);
+    }
+    expect(policy.get("default-src")).toEqual(expect.arrayContaining(["'unsafe-inline'", "'unsafe-eval'"]));
   });
 });
 

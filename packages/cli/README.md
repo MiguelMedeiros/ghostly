@@ -149,7 +149,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `invite join [<invite-or-link> \| -] [--label <name>]` | Join a chat (your own invite is refused). The invite comes from stdin when none is given or `-`, out of `ps` and the shell's history; on the command line the CLI warns |
 | `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
 | `listen [--since seq] [--cursor file] [--type t]… [--turns] [--from <chat\|key>]… [--group <group>]… [--exec cmd] [--webhook url] [--print]` | The event stream; `--from` and `--group` an allowlist, `--turns` one `agent.turn` per message to answer ([Events](#events)) |
-| `message delete <chat\|group> <message> --everyone` | Deletes a message of yours for everyone (a text, a card, a file or a voice message; never a payment): it goes from this device at once and from every member's as the message's last edit, once they are back if they are away. An app from before this shows "🗑 Message removed" in its place. Without `--everyone`, only this device forgets it |
+| `message delete <chat\|group> <message> --everyone` | Deletes a message of yours for everyone (a text, a card, a file or a voice message; never a payment): it goes from this device at once and from every member's as the message's last edit, once they are back if they are away. An app from before this shows "🗑 Message removed" in its place. Without `--everyone`, only this device forgets it. Answers the chat or group, the message's `messageId` and `everyone` (`deleted` says the same id, kept for callers that read it) |
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
@@ -191,13 +191,15 @@ nothing, so put the options before `--` (`send bob --wait sent -- -1 today`).
 
 ### Voice notes
 
-`file send <chat> <path> --voice` sends an audio file as a voice note. Its length (`--voice <ms>`) and its 64
-waveform bars (`--peaks 0,40,…`, 0-255) may be given; whatever is not given is measured from the file with the
+`file send <chat> <path> --voice` sends an audio file as a voice note. Its length (`--voice <ms>`, 1 to 900000) and
+its 64 waveform bars (`--peaks 0,40,…`, 0-255, at most 128, only with `--voice`) may be given; whatever is not given is measured from the file with the
 app's own meter (`voicePeaksOf` in packages/core `voice.ts`: a reading every 50 ms, the loudest per bar), so the
 bars look like the app's recordings. WAV, Opus in WebM or Ogg and MP3 are decoded in the CLI (wasm, no native code);
 AAC in MP4/M4A and other kinds need `ffmpeg` on the PATH (`GHOSTLY_FFMPEG` names another). When the sound cannot be
-read, a note with a given length goes out flat with a warning on stderr (the socket API answers `warning`), and one
-without is refused (`bad_request`). `--voice` takes the next word only when it is a number.
+measured here (no `ffmpeg` for its kind), a note with a given length goes out flat with a warning on stderr (the socket
+API answers `warning`), and one without is refused (`bad_request`). A file that is not a voice note is refused with or
+without a length, naming why: empty, not audio (its type, or no sound a decoder finds in it), or longer than 15
+minutes. `--voice` takes the next word only when it is a number.
 
 ### Files a bot receives
 
@@ -232,7 +234,9 @@ arrives until it is back online.
 
 A daemon keeps running the code it started with. After upgrading the CLI, every command that goes through an older
 (or newer) daemon still answers, and says on stderr `ghostly: the daemon runs <version> and this command is
-<version>`. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
+<version>`. A daemon of a release before 1.5.0 cannot prove it is the profile's daemon (no
+[greeting](#the-socket-api)): commands are refused after 2 s, exit `1`, until `ghostly daemon restart`. A daemon of
+this release that is slow to answer (busy on a long task) is waited for, under each command's own deadline. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
 background, as `daemon --detach` does. A daemon kept by a service manager (systemd, launchd) is restarted with the
 service manager instead.
 
@@ -368,8 +372,8 @@ side that invited answers once.
 
 ## The socket API
 
-The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `/tmp/ghostly-<hash>/`, a
-folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
+The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `ghostly-<hash>/` in
+`$XDG_RUNTIME_DIR`, else `/tmp/ghostly-<uid>-<hash>/`, a folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
 `socket`, whether the daemon runs or not. One JSON object per line each way:
 
 ```json
@@ -414,8 +418,8 @@ ghostly listen --type call.                # call.incoming … call.connected {"
 node examples/call-echo.mjs greeting.wav   # a program that answers, greets, then echoes after 1 s
 ```
 
-**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `/tmp/ghostly-calls-<hash>/<call>.sock` (in a
-folder of yours alone, 0700) when that path is too long; `call start`, `call answer`, `call list` and the
+**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `ghostly-calls-<hash>/<call>.sock` in
+`$XDG_RUNTIME_DIR`, else in `/tmp/ghostly-calls-<uid>-<hash>/` (a folder of yours alone, 0700), when that path is too long; `call start`, `call answer`, `call list` and the
 `call.connected` event name it. It carries raw PCM,
 with no framing:
 
@@ -484,7 +488,8 @@ directly (every packet to both; reads from the DHT when every relay fails). Test
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
 turns WebRTC off, and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of it (the profile's own `iceServers`
 stay). A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
-`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
+`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it). These four switches take `0`/`false`/`off`/`no`
+(or `1`/`true`/`on`/`yes`), in any case; any other value stops the command with a usage error naming the variable.
 
 ### Private networks
 

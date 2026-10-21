@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, arrivalNow, cameAt, cameOrWritten, editKey, eventTime, mentionAt, mentionFields, noteCame, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
 import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
@@ -319,6 +319,8 @@ export class Communities {
   /** The latest message from another member, per group: what makes it unread in the list. */
   private readonly lastPeerMessageAt = new Map<string, number>();
   private readonly lastMentionAt = new Map<string, number>();
+  /** The maps above, and what moved them last (`markCame`, `unmark`). */
+  private readonly marks: GroupMarks = { lastMessageAt: this.lastMessageAt, lastPeerMessageAt: this.lastPeerMessageAt, lastMentionAt: this.lastMentionAt, by: new Map() };
   private readonly refused = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
   /** Joiners: groups whose knock is out (published), and the knock record it is in. */
@@ -379,15 +381,9 @@ export class Communities {
       this.stored.set(group.id, group);
       if (group.community) this.attach(group.community);
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
-      const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
-      if (last) this.lastMessageAt.set(group.id, last.timestamp);
-      // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
-      const peerAt = cameOrWritten(lastPeer?.timestamp, lastPeer ? group.came?.peer : undefined);
-      if (peerAt) this.lastPeerMessageAt.set(group.id, peerAt);
-      const mention = [...history].reverse().find(m => m.mentioned);
-      const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
-      if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      const history = await this.store.getMessages(MESSAGE_LINK(group.id));
+      loadMarks(this.marks, group, history);
+      this.host.loaded?.(group.id, history);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
@@ -398,6 +394,15 @@ export class Communities {
 
   /** A community as kept here, to change in place and save (`Groups.setPin`). */
   record(groupId: string): StoredGroup | undefined { return this.stored.get(groupId); }
+
+  /** What moved this group's marks last (`markCame`). */
+  markedBy(groupId: string): MarkedBy | undefined { return this.marks.by.get(groupId); }
+
+  /** A message deleted for everyone left this device: the marks it set go back (`unmark` in groups.ts). */
+  async unmark(groupId: string, removed: StoredMessage): Promise<void> {
+    const group = this.stored.get(groupId);
+    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed) && group) await this.store.putGroup(group);
+  }
 
   views(): GroupView[] {
     return [...this.stored.values()].flatMap(group => this.viewOf(group));
@@ -421,12 +426,13 @@ export class Communities {
     const ready = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
     const hubs = freshHubs(this.hubs(live), this.now()).map(h => h.key);
     // A name outlives its member's place in the roster, as in a private group: what someone who left wrote is still theirs.
-    const former = Object.entries(s.state.nicks).filter(([key]) => !rosterHas(s.roster, key));
+    const roster = s.roster, inRoster = new Set(roster.map(([key]) => key));
+    const former = Object.entries(s.state.nicks).filter(([key]) => !inRoster.has(key));
     return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
       ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
       canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
       community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
-      members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
+      members: roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
         nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
         online: key === s.myKey || ready(key), missing: s.missing(key) })) }];
   }
@@ -585,7 +591,12 @@ export class Communities {
     if (!live) { await this.forget(groupId); return; }
     const s = live.session;
     if (s.status !== "active" || s.others.length === 0) { await this.forget(groupId); return; }
-    const edges = [...this.host.edges(groupId).entries()].filter(([, id]) => this.host.linkReady(id, 2));
+    // Only an edge to someone still in the group carries the leave, and an admin's role on to its heir: the edge to a
+    // member just removed (kept open for its farewell) or one leaving reaches nobody who stays. Counted, an admin who
+    // removed the other member and left at once handed the role to a member it had no way to, which never got the
+    // commit nor the removal's secret: it could not write, and nobody opening the link got in (agents#1664).
+    const others = new Set(s.others);
+    const edges = [...this.host.edges(groupId).entries()].filter(([key, id]) => others.has(key) && this.host.linkReady(id, 2));
     if (!edges.length) throw new Error("Nobody in the group is connected right now to take your leave. Try again in a moment.");
     let next: string | undefined;
     if (s.isAdmin) {
@@ -665,9 +676,7 @@ export class Communities {
     if (live?.hub) await this.publishBeacon(groupId, live, this.now(), false).catch(() => {});
     this.live.delete(groupId);
     this.stored.delete(groupId);
-    this.lastMessageAt.delete(groupId);
-    this.lastPeerMessageAt.delete(groupId);
-    this.lastMentionAt.delete(groupId);
+    dropMarks(this.marks, groupId);
     this.knockingWith.delete(groupId);
     this.knockRead.delete(groupId);
     this.lineOrder.forget(MESSAGE_LINK(groupId));
@@ -696,12 +705,14 @@ export class Communities {
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
       if (group.joining && (this.knocking(group, live) || group.joining.check)) {
-        const waited = now - group.joining.since, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
-        // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
-        if (!this.knocking(group, live) && waited > CHECK_MS) await this.endCheck(group);
+        const knocking = this.knocking(group, live), waited = now - group.joining.since;
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
-        else if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId)
-          && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
+        const answered = this.host.linkReady(group.joining.linkId, 2) || !!this.host.linkSeen?.(group.joining.linkId);
+        // Nobody answering: less often the longer it waits, at one pace with the app's other joins (`joinKnockWait`).
+        const every = joinKnockWait(waited, this.timings, countWaitingJoin(this.host, group.id, now, knocking && !answered && waited > this.timings.patienceMs));
+        // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
+        if (!knocking && waited > CHECK_MS) await this.endCheck(group);
+        else if (!answered && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
         if (!live) continue;
       }
       if (!live) continue;
@@ -1836,17 +1847,18 @@ export class Communities {
         // so neither the history nor the list of groups follows a member's clock.
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
-        const file = m.file && this.files ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
+        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself. Not one of
+        // a message deleted for everyone that comes after its removal (`Groups.removed`): its row is not stored either.
+        const file = m.file && this.files && !this.stored.get(id)?.removedIds?.includes(m.id) ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) });
         placing(stored !== false);
+        // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645).
+        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return;
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
-        this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, came));
-        if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, came));
-        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(id, Math.max(this.lastPeerMessageAt.get(id) ?? 0, came));
+        markCame(this.marks, id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
@@ -1870,6 +1882,8 @@ export class Communities {
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(id) ?? true,
       adminTurn: () => this.host.adminTurn?.(id) ?? Promise.resolve(true),
+      // A message deleted for everyone (WISP 400 § Delete for everyone) is noted with the group (`Groups.removed`).
+      removed: messageId => !!this.stored.get(id)?.removedIds?.includes(messageId),
       relay: frame => { if (this.live.get(id)?.hub) for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
       // A catch-up answer goes a slice at a time, each once the member's app handled the last (`COMMUNITY_LIMITS.catchUpSlice`).
       ...(this.host.linkHandled && {

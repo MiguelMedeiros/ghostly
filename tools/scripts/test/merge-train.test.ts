@@ -996,33 +996,66 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 12]);
   });
 
-  it("lands a batch an older train opened (no commits in its mark) by the rebase merge of the batch", async () => {
+  it("closes a green batch whose mark names no commits, and lands nothing from it", async () => {
     const repo = fakeRepo();
     const build = repo.git.build;
     repo.git.build = async (base: string, prs: Pr[]) => ({ ...(await build(base, prs)), commits: undefined as never });
     repo.add(11);
     repo.add(12);
-    const b = (await repo.run()).inFlight;
+    const b = (await repo.run()).inFlight as number;
     repo.settle();
     const r = await repo.run();
-    expect(repo.merges).toEqual([`rebase #${b}`]);
-    expect(repo.landed).toEqual(["#11", "#12"]);
-    expect(repo.comments.get(11)!.at(-1)!.body).toBe(`Merged via #${b}.`);
-    // GitHub signs no rebase merge: nothing to read back, and the log says why these commits are not verified.
-    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: its mark names no commits (an older train opened it).`);
-    expect(r.log.join("\n")).not.toMatch(/VERIFIED/);
+    expect(repo.merges).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toEqual([b]);
+    expect(repo.comments.get(b)!.at(-1)!.body).toBe(
+      "Merge train: this batch's branch does not hold just the commits the train built (its mark does not name the commits the train built for it), so it closes; its pull requests go back to the line.",
+    );
   });
 
-  it("warns and lands by the rebase merge when GitHub does not list the commits the mark names", async () => {
+  it("closes a green batch when GitHub does not list the commits the mark names", async () => {
     const repo = fakeRepo();
     repo.add(11);
     repo.add(12);
-    const b = (await repo.run()).inFlight;
+    const b = (await repo.run()).inFlight as number;
     repo.settle();
     repo.made.clear();
     const r = await repo.run();
-    expect(repo.merges).toEqual([`rebase #${b}`]);
-    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: GitHub does not list the commits its mark names.`);
+    expect(repo.merges).toEqual([]);
+    expect(r.closed).toEqual([b]);
+    expect(repo.comments.get(b)!.at(-1)!.body).toMatch(/GitHub does not list exactly the commits its mark names/);
+  });
+
+  it("never merges a head someone pushed to the batch's branch and wrote into its body with no commits", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const b = (await repo.run()).inFlight as number;
+    // A writer pushes X to the batch's branch and rewrites the mark: dev's tip, head X, one pull request, no commits.
+    const p = repo.pulls.get(b)!;
+    p.sha = "X";
+    p.body = batchBody("dev", repo.tips.dev, "X", [repo.pulls.get(11)!], []);
+    repo.runs.set("X", green);
+    const r = await repo.run();
+    expect(repo.merges).not.toContain(`rebase #${b}`);
+    expect(repo.landed).not.toContain("#11");
+    expect(r.closed).toContain(b);
+    expect(repo.comments.get(11)?.at(-1)?.body).not.toBe(`Merged via #${b}.`);
+  });
+
+  it("never falls back to the rebase merge of a batch whose branch holds a commit its mark does not name", async () => {
+    const repo = fakeRepo();
+    repo.rules.bypass = false;
+    for (const n of [11, 12]) repo.add(n, { behind: true });
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    // GitHub lists one more commit on the batch than the train built (pushed on top, the mark kept as it was).
+    const listed = repo.gh.pullCommits;
+    repo.gh.pullCommits = async (n: number) => [...(await listed(n)), { sha: "X", commit: { message: "x (#12)", tree: { sha: "tree:X" } } }] as never;
+    const r = await repo.run();
+    expect(repo.merges).not.toContain(`rebase #${b}`);
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toContain(b);
   });
 
   it("lands an epic's batch by a fast-forward of exactly the tested commits", async () => {
@@ -2153,6 +2186,30 @@ describe("a green CI run planned for other files", () => {
     expect(repo.members()).toEqual([11]); // it bisects
   });
 
+  // agents#1585: a push dev moved past before its `changes` job ran gets the `tested` shape (ci-changes.mjs's
+  // supersededBy) on a tree no run tested, and that run counts as dev's green CI. It never speaks for a red batch: dev
+  // moved past that commit before the run was planned, so the batch built on it is rebuilt on the new tip (and a lone
+  // pull request rebased) before the base's CI is asked. Nobody is bisected or blamed on it.
+  it("rebuilds a red batch whose base ran the `tested` jobs because dev moved past it: nobody is bisected on it", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    await repo.run();
+    repo.runs.set("dev0", greenTested);
+    // A second push by hand landed on top of dev0: its full run is red, because of the first.
+    repo.tips.dev = "dev1";
+    repo.sitsOn.set("dev1", "dev0");
+    repo.runs.set("dev1", red);
+    repo.settle([11, 12]);
+    const r = await repo.run();
+    expect(r.failed).toEqual([]);
+    expect(repo.members()).toEqual([11, 12]);
+    expect(readState(repo.batch()!.body).baseSha).toBe("dev1");
+    // Red on dev1 too: it holds, as for any red base.
+    repo.settle([11, 12]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD .*itself is red/);
+  });
+
   it("still passes over a dev run that skipped more than a `tested` push does", async () => {
     const repo = fakeRepo();
     repo.add(11);
@@ -2392,8 +2449,9 @@ describe("a green pull request run that is not the pull request's own", () => {
   it("does not count a green run from before its base was changed, and counts the next one", async () => {
     const repo = fakeRepo();
     repo.add(21);
-    repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T01:00:00Z"));
-    repo.events.get(21)!.push({ event: "base_ref_changed", created_at: "2026-10-08T01:30:00Z" });
+    // Moved before it was queued (after, it leaves the line: see below).
+    repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-07T23:00:00Z"));
+    repo.events.get(21)!.unshift({ event: "base_ref_changed", created_at: "2026-10-07T23:30:00Z" });
     expect((await repo.run()).merged).toEqual([]);
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: its green CI run on its last commit ran before its base was changed/);
     // Closed and reopened: a run against this base.
@@ -2406,10 +2464,43 @@ describe("a green pull request run that is not the pull request's own", () => {
     for (const event of ["automatic_base_change_succeeded", "automatic_base_change_failed"]) {
       const repo = fakeRepo();
       repo.add(21);
-      repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T01:00:00Z"));
-      repo.events.get(21)!.push({ event, created_at: "2026-10-08T01:30:00Z" });
+      repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-07T23:00:00Z"));
+      repo.events.get(21)!.unshift({ event, created_at: "2026-10-07T23:30:00Z" });
       expect((await repo.run()).merged).toEqual([]);
       expect(repo.comments.get(21)![0].body).toMatch(/Waiting: its green CI run on its last commit ran before its base was changed/);
+    }
+  });
+
+  it("takes out one whose base changed after it was queued: `queue` vouched for its diff against the old base", async () => {
+    // Reviewed into epic/x (whose tip holds commits dev lacks), queued, flown alone there, then moved to dev: the same
+    // head against dev also lands what the epic held, which nobody reviewed.
+    const repo = fakeRepo();
+    repo.add(7, { base: "epic/x", behind: true });
+    await repo.run({ base: "epic/x" });
+    const rebasedHead = repo.alone(7)!.sha;
+    expect(repo.pulls.get(7)!.sha).toBe(rebasedHead);
+    repo.pulls.get(7)!.base = "dev";
+    repo.events.get(7)!.push({ event: "base_ref_changed", created_at: "2026-10-08T01:00:00Z" });
+    repo.runs.set(rebasedHead, prRunOf(repo, green, "fix-7", "2026-10-08T02:00:00Z"));
+    const pushes = repo.pushes.length;
+    const r = await repo.run();
+    expect(r.dropped).toEqual([7]);
+    expect(r.log.join("\n")).toMatch(/DROP #7 \(base changed since it was queued\)/);
+    expect(repo.pulls.get(7)!.labels).not.toContain(LABEL.queue);
+    expect(repo.comments.get(7)!.at(-1)!.body).toMatch(/base of this pull request changed after it was queued/);
+    expect(repo.pushes.length).toBe(pushes);
+    expect(repo.batch()).toBeUndefined();
+    expect(repo.landed).toEqual([]);
+    // GitHub's own move (its old base deleted) is a new base too; one queued again after the move stays.
+    for (const event of ["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]) {
+      const moved = fakeRepo();
+      moved.add(21);
+      moved.add(22);
+      moved.events.get(21)!.push({ event, created_at: "2026-10-08T01:00:00Z" });
+      moved.events.get(22)!.unshift({ event, created_at: "2026-10-07T23:00:00Z" });
+      const m = await moved.run();
+      expect(m.dropped).toEqual([21]);
+      expect(moved.landed).toEqual(["#22"]);
     }
   });
 
@@ -2914,6 +3005,145 @@ describe("building a batch with git", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
+
+  describe("a head whose rebase would land something other than the base merged with it", () => {
+    /** A repository with `dev` at "base" (a.txt, b.txt), and `make` builds the pull request's branch in it. */
+    const setup = (make: (git: (args: string[]) => string, write: (file: string, text: string) => void) => void) => {
+      const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+      const origin = join(root, "origin");
+      const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      const write = (file: string, text: string) => {
+        writeFileSync(join(origin, file), text);
+        git(["add", file]);
+      };
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      write("a.txt", "a\n");
+      write("b.txt", "b\n");
+      git(["commit", "-q", "-m", "base"]);
+      make(git, write);
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const pr = { number: 1, title: "fix: number 1", sha: git(["rev-parse", "HEAD"]) };
+      git(["checkout", "-q", "dev"]);
+      git(["clone", "-q", "origin", "clone"], root);
+      const clone = join(root, "clone");
+      // What the reviewed head makes of dev's tip, as the batch's squash merge (and GitHub's) makes it.
+      const merged = git(["merge-tree", "--write-tree", "dev", pr.sha]).split("\n")[0];
+      return { root, git, clone, pr, merged, layer: gitLayer({ cwd: clone }) };
+    };
+    const landsMerged = async ({ root, git, clone, pr, merged, layer }: ReturnType<typeof setup>) => {
+      try {
+        expect(await layer.rebase("dev", pr)).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "conflict" });
+        const built = await layer.build("dev", [pr]);
+        expect(built).toMatchObject({ applied: [1], dropped: [] });
+        expect(git(["rev-parse", `${built.sha}^{tree}`], clone)).toBe(merged);
+        layer.close();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    };
+
+    it("sends the batch way a branch that took a change back in a merge of the base, which its rebase would land", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          git(["checkout", "-q", "-b", "fix-1"]);
+          write("a.txt", "a, and a hidden change\n");
+          git(["commit", "-q", "-m", "the hidden change"]);
+          git(["checkout", "-q", "dev"]);
+          write("c.txt", "c\n");
+          git(["commit", "-q", "-m", "dev moves"]);
+          // The merge of dev puts a.txt back: the reviewed diff is only docs.md.
+          git(["checkout", "-q", "fix-1"]);
+          git(["merge", "-q", "--no-commit", "dev"]);
+          write("a.txt", "a\n");
+          write("docs.md", "docs\n");
+          git(["commit", "-q", "-m", "Merge branch 'dev' into fix-1"]);
+          git(["checkout", "-q", "dev"]);
+          write("d.txt", "d\n");
+          git(["commit", "-q", "-m", "dev moves again"]);
+          git(["checkout", "-q", "fix-1"]);
+        }),
+      );
+    }, 60_000);
+
+    it("sends the batch way a branch that made a change in a merge of the base, which its rebase would lose", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          git(["checkout", "-q", "-b", "fix-1"]);
+          write("notes.md", "notes\n");
+          git(["commit", "-q", "-m", "notes"]);
+          git(["checkout", "-q", "dev"]);
+          write("c.txt", "c\n");
+          git(["commit", "-q", "-m", "dev moves"]);
+          git(["checkout", "-q", "fix-1"]);
+          git(["merge", "-q", "--no-commit", "dev"]);
+          write("b.txt", "b, reviewed\n");
+          git(["commit", "-q", "-m", "Merge branch 'dev' into fix-1"]);
+          git(["checkout", "-q", "dev"]);
+          write("d.txt", "d\n");
+          git(["commit", "-q", "-m", "dev moves again"]);
+          git(["checkout", "-q", "fix-1"]);
+        }),
+      );
+    }, 60_000);
+
+    it("sends the batch way a branch that lands a change again after the base reverted it, which its rebase would skip", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          git(["checkout", "-q", "-b", "fix-1"]);
+          write("a.txt", "a, fixed\n");
+          git(["commit", "-q", "-m", "the fix"]);
+          // dev takes the same change and then reverts it: the rebase skips the branch's commit as already applied.
+          git(["checkout", "-q", "dev"]);
+          write("c.txt", "c\n");
+          git(["commit", "-q", "-m", "dev moves"]);
+          git(["cherry-pick", "fix-1"]);
+          git(["revert", "--no-edit", "HEAD"]);
+          git(["checkout", "-q", "fix-1"]);
+        }),
+      );
+    }, 60_000);
+
+    it("sends the batch way a branch that repeats a change the base has and then takes it back", async () => {
+      await landsMerged(
+        setup((git, write) => {
+          // dev lands the fix; the branch repeats it, takes it back, and adds docs: its diff is docs.md only.
+          write("a.txt", "a, fixed\n");
+          git(["commit", "-q", "-m", "the fix"]);
+          git(["checkout", "-q", "-b", "fix-1", "HEAD^"]);
+          write("a.txt", "a, fixed\n");
+          git(["commit", "-q", "-m", "the fix, again"]);
+          write("a.txt", "a\n");
+          write("docs.md", "docs\n");
+          git(["commit", "-q", "-m", "docs: a harmless doc change"]);
+        }),
+      );
+    }, 60_000);
+
+    it("still rebases a branch whose merge of the base holds nothing of its own", async () => {
+      const { root, git, clone, pr, merged, layer } = setup((git, write) => {
+        git(["checkout", "-q", "-b", "fix-1"]);
+        write("notes.md", "notes\n");
+        git(["commit", "-q", "-m", "notes"]);
+        git(["checkout", "-q", "dev"]);
+        write("c.txt", "c\n");
+        git(["commit", "-q", "-m", "dev moves"]);
+        git(["checkout", "-q", "fix-1"]);
+        git(["merge", "-q", "--no-edit", "dev"]);
+        git(["checkout", "-q", "dev"]);
+        write("d.txt", "d\n");
+        git(["commit", "-q", "-m", "dev moves again"]);
+        git(["checkout", "-q", "fix-1"]);
+      });
+      try {
+        const built = await layer.rebase("dev", pr);
+        expect(built).toMatchObject({ baseSha: git(["rev-parse", "dev"]), sha: expect.any(String) });
+        expect(git(["rev-parse", `${built.sha}^{tree}`], clone)).toBe(merged);
+        layer.close();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }, 60_000);
+  });
 });
 
 describe("a stalled request or git call", () => {

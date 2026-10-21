@@ -373,10 +373,14 @@ export function GroupChat() {
     // the rest comes in above it, into the page as the view goes up (useRowWindow). Not when the engine already sent this group's history, nor when the
     // group opens on a message further up, which must be there when it opens.
     const linkId = `group:${groupId}`;
-    if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
+    // Its whole history as the engine keeps it on this page: asked for once (the listener below hears it), then kept
+    // current with what changes in it. A group opened again reads nothing from the store, and its next message is a
+    // change, not its whole history read again.
+    const held = engine.history(linkId);
+    if (held) show(held);
+    else if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
       void engine.call("messagePage", { linkId }).then(page => { if (current && !whole) setLoaded({ groupId, list: page.messages }); }).catch(() => {});
     }
-    void engine.call("groupMessages", { groupId }).then(show).catch(() => {});
     const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
@@ -470,17 +474,20 @@ export function GroupChat() {
   const savedHere = useSavedIn(`group:${groupId}`);
   // The composer turned off under the focus (removed, left on another device, the group forked): the field goes disabled
   // and the browser drops the focus to the page. It goes to the line that says why, or to the ⋮ when there is none.
+  // Off for a moment on a group still active (a join, leave or removal past 16 members): nothing says why, and the
+  // composer gives the focus back itself once it is on again (`MessageInput`). Moved to ⋮, it stayed there and the next
+  // keys opened its menu (agents#1739).
   const noticeRef = useRef<HTMLDivElement>(null);
-  const canSend = !!group?.canSend;
+  const canSend = !!group?.canSend, active = group?.status === "active";
   const couldSend = useRef(canSend);
   useLayoutEffect(() => {
     const could = couldSend.current;
     couldSend.current = canSend;
-    if (!could || canSend) return;
+    if (!could || canSend || active) return;
     const at = document.activeElement;
     if (at && at !== document.body && !at.closest("[data-composer]")) return;
     (noticeRef.current ?? optionsRef.current)?.focus();
-  }, [canSend]);
+  }, [canSend, active]);
   if (!state) return null;
   const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>

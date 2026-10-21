@@ -85,8 +85,8 @@ it cleanly: it tells contacts it is going and removes its socket.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
-The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `/tmp/ghostly-<hash>/` when that
-path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `ghostly-<hash>/` in `$XDG_RUNTIME_DIR`,
+else `/tmp/ghostly-<uid>-<hash>/`, when that path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
 One JSON object per line each way:
 
 ```json
@@ -133,11 +133,14 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
   cursor moves past its event: it is not run again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
+- A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
+  (`daemon stop`), it says so once on stderr and waits; it says again when a daemon answers, and goes on from the last
+  event it took.
 - A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
   ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
@@ -246,7 +249,9 @@ Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage),
 5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
 seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
-`details.method`). `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+`details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
+once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
+sent, so the daemon does not act on it when it wakes. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.
@@ -343,7 +348,9 @@ A private network or a test sets `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desk
 relays are then the only ones from the very first publish, the profile's `relays` setting is not used, and the DHT is
 left out unless `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on
 loopback) pins the Iroh relays the same way, `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` the HyperDHT's bootstrap nodes,
-and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. The CLI's own tests run with all of them on
+and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. `GHOSTLY_DHT`, `GHOSTLY_STUN`, `GHOSTLY_WEBRTC`
+and `GHOSTLY_HUB` take `0`/`false`/`off`/`no` or `1`/`true`/`on`/`yes`, in any case; any other value is a usage error
+(exit 2) naming the variable, never a switch left on. The CLI's own tests run with all of them on
 loopback or nowhere (`packages/cli/test/support/network.ts`); `GHOSTLY_TEST_PUBLIC_NET=1` lets a run reach the public
 networks. A new profile publishes within seconds of its first run,
 so without the variable, set `relays` before the first `daemon`

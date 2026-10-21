@@ -104,7 +104,7 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
 
   // Uninstalled by the person: not offered again, on this page or after the app starts again.
   await expect(ana.page.getByTestId("installed-app-hint")).not.toContainText("Unknown publisher");
-  await ana.page.getByTestId("installed-app").getByRole("button", { name: "Chess: details" }).click();
+  await ana.page.getByTestId("installed-app").getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   await expect(details.getByTestId("app-publisher-name")).toHaveText("Publisher");
   await expect(details.getByTestId("app-store-line")).toHaveText("Comes with Ghostly");

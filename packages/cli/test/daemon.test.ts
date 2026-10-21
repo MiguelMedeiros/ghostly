@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Server } from "node:net";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
 import { greeting, newDaemonSecret, proof } from "../src/daemonProof";
+import { privateFolder } from "../src/privateFolder";
 import { createProfile, lockOwner, profilePaths } from "../src/profiles";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
@@ -33,6 +35,9 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const other = home("old-daemon");
     createProfile(other, "default");
     const { socket, dir: profileDir } = profilePaths(other, "default");
+    // Where a long temp folder puts the socket (macOS's /var/folders/…): in a folder of /tmp, made as the daemon makes it.
+    const outside = dirname(socket) !== profileDir;
+    if (outside) privateFolder(dirname(socket), "the test's daemon will not put its socket there");
     // A daemon of another release that has the greeting and the hello already: it proves itself, then answers as an
     // older one. It runs in this process, which holds the profile as a daemon does.
     const secret = newDaemonSecret(profileDir);
@@ -47,7 +52,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
         connection.write(JSON.stringify({ id, result: method === "status" ? { version: "0.0.1", profile: "default" } : { chats: [] } }) + "\n");
       });
     });
-    await new Promise<void>((r) => server.listen(socket, r));
+    await new Promise<void>((listening, failed) => { server.once("error", failed); server.listen(socket, listening); });
     try {
       const listed = await ghostly(["--home", other, "chat", "list"]);
       expect(ok(listed)).toEqual({ chats: [] });
@@ -56,7 +61,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       expect(methods).toEqual(["daemon.hello", "status", "chat.list"]);
     } finally {
       server.close();
-      rmSync(socket, { force: true });
+      rmSync(outside ? dirname(socket) : socket, { recursive: true, force: true });
     }
   });
 
@@ -246,5 +251,33 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       }
     }
     slow.server.close();
+  });
+
+  it("a listen through a daemon that stops says so once on stderr, waits, and says when a daemon answers again", async () => {
+    const orphan = home("listen-orphan");
+    ok(await ghostly(["--home", orphan, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
+    // From the journal's start: on a loaded host the listen subscribes after the invite's `chat.created` is out, and a
+    // live-only listen never sees it.
+    const listen = new Running(["--home", orphan, "listen", "--since", "0"], env);
+    const gone = "ghostly: the daemon of profile default stopped; waiting for it to start again (ghostly daemon --detach)\n";
+    const back = "ghostly: the daemon of profile default answers again\n";
+    try {
+      ok(await ghostly(["--home", orphan, "invite", "create", "--label", "first"], { env }));
+      const created = await listen.waitFor((l) => l.type === "chat.created");
+      ok(await ghostly(["--home", orphan, "daemon", "stop"], { env }));
+      const until = Date.now() + 15_000;
+      while (!listen.stderr.includes(gone) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+      // Once, however long the wait: a few more failed tries add nothing.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      expect(listen.stderr).toBe(gone);
+      expect(listen.child.exitCode).toBeNull();
+      ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
+      await listen.waitFor((l) => l.type === "daemon.started" && (l.seq as number) > (created.seq as number));
+      expect(listen.stderr).toBe(gone + back);
+    } finally {
+      await listen.stop();
+      await ghostly(["--home", orphan, "daemon", "stop"], { env });
+    }
   });
 });

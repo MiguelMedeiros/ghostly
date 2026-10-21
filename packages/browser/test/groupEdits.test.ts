@@ -335,6 +335,25 @@ describe("GroupEdits on its own", () => {
       edits.stop();
     });
 
+    // agents#1679: each window after the first read and sorted the group's whole history again. 7 edges with 256 edits
+    // to say read a history of 10,000 rows 112 times at a start, not 7.
+    it("reads the history once per edge that opens, not once a window", async () => {
+      vi.useFakeTimers();
+      const messages = edited(0, 3 * GROUP_EDIT_RESEND + 4);
+      const { edits, sent, tick } = setup([...messages, mine(99)]);
+      const host = (edits as unknown as { host: { messages(chat: string): Promise<StoredMessage[]> } }).host;
+      const read = host.messages.bind(host);
+      let reads = 0;
+      host.messages = chat => { reads++; return read(chat); };
+      await edits.resend("g1", carol);
+      await edits.resend("g1", bob);
+      for (let w = 0; w < 4; w++) { tick(GROUP_EDIT_RESEND_WINDOW_MS); await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS); }
+      for (const to of [carol, bob]) expect(ids(sent.filter(s => s.to === to)), "every edit, oldest first").toEqual(messages.map(m => m.id));
+      console.log(`EDIT RESEND: 2 edges, ${messages.length} edits each, ${reads} history reads`);
+      expect(reads).toBe(2);
+      edits.stop();
+    });
+
     it("hears my newest GROUP_EDIT_CATCH_UP at most when nothing is known of what it heard", async () => {
       vi.useFakeTimers();
       const messages = edited(0, GROUP_EDIT_CATCH_UP + 5);
@@ -468,6 +487,34 @@ describe("GroupEdits on its own", () => {
     carol.peer.online = true;
     await world.run(60_000);
     for (const m of [alice, carol]) expect(textOf(m.peer, messageId!)).toBeUndefined();
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it("a community: messages deleted for everyone while a member was away never reach it when it comes back, not even for a moment", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Crew");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id)), 10 * 60_000);
+    await world.run(20_000);
+    // Every row Carol's app stores, even one taken out again a moment later.
+    const stored: string[] = [];
+    const store = carol.edits.stored.bind(carol.edits);
+    vi.spyOn(carol.edits, "stored").mockImplementation(async m => { stored.push(m.id); await store(m); });
+    carol.peer.online = false;
+    await world.run(5_000);
+    const gone: string[] = [];
+    for (let i = 0; i < 3; i++) gone.push((await bob.peer.groups.send(id, `secret ${i}`)).messageId!);
+    await world.until(() => gone.every(m => !!textOf(alice.peer, m)), 60_000);
+    for (const m of gone) expect(await bob.edits.removeMine(id, m)).toMatchObject({ error: null });
+    await world.until(() => gone.every(m => alice.peer.groups.isRemoved(id, m)), 60_000);
+    carol.peer.online = true;
+    // Whoever catches her up hands her the removals, and not the lines they took out.
+    await world.until(() => gone.every(m => carol.peer.groups.isRemoved(id, m)), 3 * 60_000);
+    await world.run(60_000);
+    expect(stored.filter(m => gone.includes(m))).toEqual([]);
+    for (const m of gone) expect(textOf(carol.peer, m)).toBeUndefined();
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 });

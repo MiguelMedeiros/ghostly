@@ -2,7 +2,7 @@ import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalSto
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
-import { answerable, InvitationButtons, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
+import { answerable, InvitationButtons, InvitationRefusal, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
@@ -24,6 +24,7 @@ import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
 import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
+import { callLineCount } from "../lib/storage";
 import type { Translate } from "../locales/translate";
 import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
@@ -344,7 +345,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
-                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
+                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
                 : payment ?? appCardLine(p.lastMessage.card, t) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
@@ -449,7 +450,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
         {invitation?.takenBack && <div className="mt-1.5 flex gap-2"><TakenBackDelete busy={busy} answer={answer} /></div>}
         {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2"><InvitationButtons busy={busy} answer={answer} /></div>}
-        {invitation && refused && <p role="status" data-testid="group-answer-refused" className="mt-1 text-xs text-danger">{refused}</p>}
+        {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>
   );

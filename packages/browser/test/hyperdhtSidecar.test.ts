@@ -104,12 +104,11 @@ it("carries a frame that JSON makes six times longer, with every endpoint still 
   expect(JSON.stringify({ text }).length).toBeGreaterThan(6 * 60 * 1024);
   runtime.send({ type: "send", endpoint: 1, id: result.id, seq: 1, text });
   expect(await runtime.next({ type: "frame", endpoint: 2 })).toMatchObject({ id: incoming.id, text });
-  await runtime.next({ type: "sent", endpoint: 1, seq: 1 });
   expect(runtime.events.some(e => e.type === "closed" || e.type === "stopped")).toBe(false);
   expect(alive(runtime.child.pid!)).toBe(true);
 });
 
-it("answers each send once its socket has room, and a refused one with an error that names it", async () => {
+it("says once that a socket is full and once that it has room, nothing for a frame that fits, and names a refused one", async () => {
   // A link slower than the app sends: each frame waits 300 ms in the socket's buffer.
   const runtime = sidecar({ FAKE_ENDPOINT_DELAY_MS: "300" });
   runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
@@ -121,17 +120,19 @@ it("answers each send once its socket has room, and a refused one with an error 
   await runtime.next({ type: "open", endpoint: 2, incoming: true });
 
   const frame = "x".repeat(60 * 1024);
-  runtime.send({ type: "send", endpoint: 1, id: result.id, seq: 1, text: frame });
-  runtime.send({ type: "send", endpoint: 1, id: result.id, seq: 2, text: frame });
-  // The first fits in the socket's room and is answered at once; the second waits until the socket drained.
-  await runtime.next({ type: "sent", endpoint: 1, id: result.id, seq: 1 });
+  for (const seq of [1, 2, 3]) runtime.send({ type: "send", endpoint: 1, id: result.id, seq, text: frame });
+  // The first fits in the socket's room; the second fills it, and the host hears that once, before any frame left.
+  await runtime.next({ type: "full", endpoint: 1, id: result.id });
   expect(runtime.events.some(e => e.type === "frame")).toBe(false);
-  await runtime.next({ type: "sent", endpoint: 1, id: result.id, seq: 2 });
-  expect(runtime.events.filter(e => e.type === "frame" && e.endpoint === 2)).toHaveLength(2);
+  // Once it drained: `room`, after every frame reached the other end. A word back for each frame cost a file about
+  // a fifth of its speed on the Desktop.
+  await runtime.next({ type: "room", endpoint: 1, id: result.id });
+  expect(runtime.events.filter(e => e.type === "frame" && e.endpoint === 2)).toHaveLength(3);
+  expect(runtime.events.filter(e => e.endpoint === 1 && ["full", "room", "sent"].includes(e.type as string)).map(e => e.type)).toEqual(["full", "room"]);
 
   // A send the runtime cannot make is answered, under its number, not dropped unseen.
-  runtime.send({ type: "send", endpoint: 1, id: 999, seq: 3, text: "nowhere" });
-  expect(await runtime.next({ type: "error", endpoint: 1, seq: 3 })).toMatchObject({ command: "send", id: 999 });
+  runtime.send({ type: "send", endpoint: 1, id: 999, seq: 4, text: "nowhere" });
+  expect(await runtime.next({ type: "error", endpoint: 1, seq: 4 })).toMatchObject({ command: "send", id: 999 });
   expect(alive(runtime.child.pid!)).toBe(true);
 }, 15_000);
 
@@ -149,7 +150,6 @@ it("sends on a live connection while the same endpoint's dial is still waiting",
   runtime.send({ type: "send", endpoint: 1, id: incoming.id, seq: 1, text: "back" });
   runtime.send({ type: "close", endpoint: 1, id: 999 });
   expect(await runtime.next({ type: "frame", endpoint: 2 })).toMatchObject({ text: "back" });
-  await runtime.next({ type: "sent", endpoint: 1, seq: 1 });
   expect(runtime.events.some(e => e.type === "error" && e.endpoint === 1)).toBe(false);
   // The dial still ends as it would have.
   expect(await runtime.next({ type: "error", endpoint: 1, command: "connect" })).toMatchObject({ message: "peer not found" });
@@ -167,7 +167,7 @@ it("carries a burst of small frames read at once without stopping the endpoint",
   // A catch-up of 200 short messages, in one write: the runtime reads them in one go.
   const burst = Array.from({ length: 200 }, (_, n) => JSON.stringify({ type: "send", endpoint: 1, id: result.id, seq: n + 1, text: `m${n}` }) + "\n");
   runtime.child.stdin!.write(burst.join(""));
-  await runtime.next({ type: "sent", endpoint: 1, seq: 200 });
+  await runtime.next({ type: "frame", endpoint: 2, text: "m199" });
   expect(runtime.events.filter(e => e.type === "frame" && e.endpoint === 2).map(e => e.text)).toEqual(burst.map((_, n) => `m${n}`));
   expect(runtime.events.some(e => e.type === "stopped" || e.type === "closed")).toBe(false);
 }, 10_000);

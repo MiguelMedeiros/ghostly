@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_RANGES_CAPABILITY, type AppRangeTask, type GhostLink } from "@ghostly/core";
+import { Apps } from "../src/engine/apps";
 import type { EngineEvent } from "../src/shared/rpc";
 import { appsChat } from "./helpers/appsChat";
 // covers: apps.ranges.wire
@@ -108,6 +109,53 @@ describe("the read lane in the engine", () => {
     for (let r = 10; r < 14; r++) raw({ t: "ar-get", a: app, s: first.serve, r, o: 0, n: 1 });
     await vi.waitFor(() => expect(ranges()).toHaveLength(6));
     expect(answers).toHaveBeenCalledTimes(1);
+  });
+
+  // agents#1698: after the session's serves and requests ended (a reset), the contact numbers from 0 again. A page's late
+  // answer to the earlier session's ask must not go out as the new one's, and an ask no page ever answers must not stay
+  // in the engine's table for good.
+  it("an ask of a session that ended: its late answer sends nothing, the new ask under the same number gets its own bytes, and neither stays behind", async () => {
+    const { call, contact, server, id, ref, app, ranges } = await setup();
+    const inner = server.node as unknown as { appRanges: Map<string, unknown>; links: Map<string, { link?: { appRanges: { reset(): void } } }> };
+    const lane = (contact as unknown as { appRanges: { receiveData(...args: unknown[]): void; receiveAnswer(frame: unknown): void } }).appRanges;
+    const data = vi.spyOn(lane, "receiveData"), answers = vi.spyOn(lane, "receiveAnswer");
+    const raw = (frame: object) => (contact as unknown as { channel: { send(data: string): void } }).channel.send(JSON.stringify(frame));
+    const x = await call("appServe", { linkId: id, ref, file: "FileX0000000000000000a" }) as { serve: string };
+    raw({ t: "ar-get", a: app, s: x.serve, r: 0, o: 0, n: 10 });
+    raw({ t: "ar-get", a: app, s: x.serve, r: 1, o: 20, n: 10 });
+    await vi.waitFor(() => expect(ranges()).toHaveLength(2));
+    // The session's serves and requests end (as a resume or a re-dial ends them), and the app serves another file.
+    inner.links.get(id)!.link!.appRanges.reset();
+    const y = await call("appServe", { linkId: id, ref, file: "FileY0000000000000000a" }) as { serve: string };
+    raw({ t: "ar-get", a: app, s: y.serve, r: 0, o: 5000, n: 10 });
+    await vi.waitFor(() => expect(ranges()).toHaveLength(3));
+    const [old, , mine] = ranges().map(event => event.range);
+    expect(inner.appRanges.size, "the asks of the ended session, settled there, are not kept").toBe(1);
+    // The X read answers late, then Y's.
+    await call("appRangeAnswer", { linkId: id, app, request: old.request, bytes: new Uint8Array(10).fill(0x58), size: 100_000 });
+    await call("appRangeAnswer", { linkId: id, app, request: mine.request, bytes: new Uint8Array(10).fill(0x59), size: 200_000 });
+    await vi.waitFor(() => expect(answers).toHaveBeenCalledTimes(1));
+    expect(answers.mock.calls[0]![0]).toMatchObject({ t: "ar-end", r: 0, z: 200_000 });
+    expect(data.mock.calls.map(([, request, offset, bytes]) => [request, offset, [...bytes as Uint8Array][0]])).toEqual([[0, 5000, 0x59]]);
+    expect(inner.appRanges.size).toBe(0);
+  });
+
+  it("a version stopped here serves nothing, answers nothing and reads nothing (WISP 1200 § Takedowns)", async () => {
+    const { call, contact, id, ref, app, ranges } = await setup();
+    const served = await call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000", digest: "running" }) as { serve: string };
+    const reading = contact.readAppRange(app, served.serve, 0, 1_000);
+    await vi.waitFor(() => expect(ranges()).toHaveLength(1));
+    // Its publisher revokes the running version while the page is reading the contact's ask.
+    const runnable = vi.spyOn(Apps.prototype, "chatRunnable").mockRejectedValue(new Error("stopped: Its publisher revoked this version"));
+    await call("appRangeAnswer", { linkId: id, app, request: ranges()[0].range.request, bytes: FILM.subarray(0, 1_000), size: FILM.length });
+    expect(runnable).toHaveBeenCalledWith({ ref, digest: "running" });
+    expect(await settled(reading)).toEqual({ error: "gone" });
+    // Its serves ended with it: the contact's next ask is refused, and no page hears it.
+    expect(await settled(contact.readAppRange(app, served.serve, 0, 1))).toEqual({ error: "not-served" });
+    expect(ranges()).toHaveLength(1);
+    expect(await settled(call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000", digest: "running" }))).toEqual({ error: "stopped: Its publisher revoked this version" });
+    const theirs = contact.serveAppFile(app, "film") as { serve: string };
+    expect(await settled(call("appRemoteRead", { linkId: id, ref, serve: theirs.serve, offset: 0, length: 1, digest: "running" }))).toEqual({ error: "stopped: Its publisher revoked this version" });
   });
 
   it("serves only while the contact's app is open, and says why not", async () => {

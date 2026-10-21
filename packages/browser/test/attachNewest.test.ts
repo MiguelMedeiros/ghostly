@@ -33,6 +33,7 @@ vi.mock("../src/engine/node", () => ({
       const list = fake.stored.get(linkId) ?? [];
       return { messages: list.slice(-limit), more: list.length > limit };
     }
+    deletedIdsOf() { return []; }
     setActiveLink() {}
     appsCloseAll() {}
   },

@@ -219,9 +219,19 @@ export class CapsKeys {
     this.inviteKey = derive("envelope");
   }
 
+  /** The key sealed for each pinned contact: one X25519 per contact and link, not one per seal and open (agents#1087). */
+  private readonly pinned = new Map<string, Uint8Array>();
+
   private pinnedKey(peer: string): Uint8Array {
-    const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
-    return hkdf(sha256, shared, this.inviteKey, utf8Encode("ghostly-caps-participation/1"), 32);
+    let key = this.pinned.get(peer);
+    if (!key) {
+      const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
+      key = hkdf(sha256, shared, this.inviteKey, utf8Encode("ghostly-caps-participation/1"), 32);
+      // A link pins one contact; a few more (a re-pin, a device change) stay bounded.
+      if (this.pinned.size >= 4) this.pinned.delete(this.pinned.keys().next().value!);
+      this.pinned.set(peer, key);
+    }
+    return key;
   }
   private signable(from: string, to: string, body: unknown[]): Uint8Array { return utf8Encode(JSON.stringify(["ghostly-caps", from, to, body])); }
 

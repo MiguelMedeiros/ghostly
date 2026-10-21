@@ -11,6 +11,7 @@ const fake = vi.hoisted(() => ({
   engine: {
     state: null as { links: LinkView[] } | null,
     messages: new Map<string, StoredMessage[]>(),
+    deletedIds: new Map<string, readonly string[]>(),
     calls: [] as [string, unknown][],
     answers: {} as Record<string, unknown>,
     stateListeners: [] as (() => void)[],

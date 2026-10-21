@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
-import { closeServiceWindows, setServiceWindowsCloser } from "../../lib/serviceWindows";
+import { closeServiceWindows, hostErrorText, setServiceWindowsCloser } from "../../lib/serviceWindows";
+import { translatorFor } from "../../locales";
 import { SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -70,7 +71,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close" };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -94,6 +95,23 @@ describe("one request from the app, over the contact's link", () => {
       const { port, replies } = recorder();
       await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, async () => { throw error; }, new CookieJar(), words);
       expect(replies).toEqual([{ type: "error", status, text }]);
+    }
+  });
+
+  it("says the contact's machine answering for their app (`x-ghostly-error`) in the profile's words, from this side", async () => {
+    const t = translatorFor("ar");
+    const said = { ...words, hostError: (headers: readonly (readonly [string, string])[]) => hostErrorText(headers, "Demo", t) };
+    for (const [status, code, english, key] of [
+      [502, "unreachable", "The local service is not reachable.", "services.window.notAnswering"],
+      [504, "timeout", "The local service did not answer in time.", "services.window.tooSlow"],
+      [502, "redirect-blocked", "The service redirected outside of the shared target.", "services.window.elsewhere"],
+      [503, "busy", "Too many requests.", "services.window.failed"],
+    ] as const) {
+      const { port, replies } = recorder();
+      await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+        async () => answer(status, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", code]], [`${english}\n`]), new CookieJar(), said);
+      expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "Demo" }) }]);
+      expect(replies[0]!.type === "error" && replies[0]!.text).not.toContain(english);
     }
   });
 
@@ -143,6 +161,13 @@ describe("a contact's app shown over the app", () => {
     }
   });
 
+  it("opens no window of its own: one would be a tab on its origin, outliving the view and the lock", async () => {
+    await open("one");
+    const sandbox = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("sandbox")!.split(" ");
+    expect(sandbox).toContain("allow-scripts");
+    expect(sandbox.filter((flag) => flag.startsWith("allow-popups") || flag.startsWith("allow-top-navigation"))).toEqual([]);
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     setServiceWindowsCloser(closeServiceView);
     await open("one");
@@ -175,5 +200,45 @@ describe("a contact's app shown over the app", () => {
       app.remove();
       hidden.remove();
     }
+  });
+
+  describe("and Back (Android's back gesture, the browser's)", () => {
+    const CHAT = "#/chat/abc";
+    const ROUTER = { usr: null, key: "k1", idx: 3 };
+    /** Waits for the history to settle: a traversal answers with a popstate, or nothing if there is none. */
+    const settled = () => new Promise<void>((resolve) => { const done = () => { removeEventListener("popstate", done); resolve(); }; addEventListener("popstate", done); setTimeout(done, 200); });
+    const back = async () => { const pop = settled(); history.back(); await pop; };
+    afterEach(async () => { await settled(); });
+
+    it("closes the view and leaves the chat under it where it was", async () => {
+      history.pushState(ROUTER, "", CHAT);
+      await open("one");
+      await back();
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(location.hash).toBe(CHAT);
+      expect(history.state).toEqual(ROUTER);
+    });
+
+    it("has nothing of the view to step over once ✕ closed it: the app's next Back is its own", async () => {
+      history.pushState(ROUTER, "", CHAT);
+      const length = history.length;
+      await open("one");
+      const pop = settled();
+      (document.querySelector('[data-testid="service-view-close"]') as HTMLButtonElement).click();
+      await pop;
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(location.hash).toBe(CHAT);
+      expect(history.state).toEqual(ROUTER);
+      expect(history.length).toBe(length + 1); // the view's entry is only ahead now, as after any Back
+    });
+
+    it("is one step for one view, however many were opened in turn", async () => {
+      history.pushState(ROUTER, "", CHAT);
+      await open("one");
+      await open("two");
+      await back();
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(history.state).toEqual(ROUTER);
+    });
   });
 });

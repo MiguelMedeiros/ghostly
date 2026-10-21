@@ -31,6 +31,8 @@ export function asCliError(error: unknown): CliError {
   if (error instanceof Error && (error as { code?: unknown }).code === "unreachable") return new CliError("unavailable", error.message);
   const known = engineKnown(error);
   if (known) return known;
+  const full = noRoomError(error);
+  if (full) return full;
   const local = localFileError(error);
   if (local) return local;
   const unopened = profileOpenError(error);
@@ -67,6 +69,22 @@ function engineKnown(error: unknown): CliError | undefined {
 }
 
 /**
+ * A change the profile's store could not put on disk (`storage.ts` refuses its transaction with a QuotaExceededError;
+ * the engine's `committed` wraps it in its own words, the store's as the cause): `unavailable`, try again once there is
+ * room, in the store's words, which name the profile's folder. Before, a daemon on a full disk answered done.
+ */
+function noRoomError(error: unknown): CliError | undefined {
+  let said: string | undefined, found = false;
+  for (let at = error, depth = 0; at && typeof at === "object" && depth < 4; at = (at as { cause?: unknown }).cause, depth++) {
+    if ((at as { name?: unknown }).name !== "QuotaExceededError") continue;
+    found = true;
+    const message = (at as { message?: unknown }).message;
+    if (typeof message === "string" && message.startsWith("No room left")) said = message;
+  }
+  return found ? new CliError("unavailable", said ?? "No room left on the disk: free some space, then try again") : undefined;
+}
+
+/**
  * The profile's database did not open (the engine's `ProfileOpenError`, packages/browser/src/shared/idb.ts): `engine`
  * (exit 1) with the engine's own words, which name the versions when a newer ghostly stored it, and the reason and
  * the versions in `details` for a bot. Read by its shape: this module is also the thin client's, which loads no engine.
@@ -96,5 +114,11 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
   if (code === "ENAMETOOLONG") return new CliError("bad_request", `A name in ${where} is too long for this file system (at most 255 bytes)`);
+  // A full disk (or a quota) answered Node's raw "ENOSPC: no space left on device, write" as `engine`, naming nothing
+  // (agents#1710). `unavailable`: it works again once there is room, with nothing lost.
+  if (code === "ENOSPC" || code === "EDQUOT") {
+    const at = typeof path === "string" ? path : file;
+    return new CliError("unavailable", at ? `No room left for ${at}: free some space, then try again` : "No room left on the disk: free some space, then try again", { reason: "no_space", errno: code, ...(at && { path: at }) });
+  }
   return undefined;
 }

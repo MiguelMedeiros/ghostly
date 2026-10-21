@@ -56,10 +56,17 @@ export interface GroupsHost {
    * catch-up answer goes all at once.
    */
   linkHandled?(linkId: string): Promise<boolean | "late">;
+  /**
+   * Frames that came on the link and this app has not handled yet (`GhostLink.framesWaiting`): a phone with a long
+   * history is seconds behind what it received. Absent: none.
+   */
+  linkWaiting?(linkId: string): number;
   /** The link is open and both sides announced groups (`version` 2: community groups too). */
   linkReady(linkId: string, version?: number): boolean;
   /** Whether the link's connection is open, whatever the other app announces on it. Absent: not known. */
   linkOpen?(linkId: string): boolean;
+  /** A group's history as its load read it at start: what else the start keeps from it costs no second read. */
+  loaded?(groupId: string, history: StoredMessage[]): void;
   /** A name for a contact chat, for the invitation. */
   contactName(linkId: string): string | undefined;
   /** Member key → edge link id, for the edges of this group that exist. */
@@ -97,6 +104,11 @@ export interface GroupsHost {
    */
   publish(identity: Identity, records: GhostRecord[], background?: boolean, door?: boolean, back?: boolean): Promise<void>;
   resolve(pubKeyZ32: string, background?: boolean, door?: boolean, back?: boolean): Promise<GhostRecord[] | null>;
+  /**
+   * How long the relays' budget still holds back reads of this key (`PkarrTransport.readHeldBackFor`): then the read
+   * that just ended answered the packet already known, which may be old, not a relay's. Absent: reads are not held.
+   */
+  readHeldBackFor?(pubKeyZ32: string): number | undefined;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   /**
@@ -255,11 +267,90 @@ export function noteCame(group: Pick<StoredGroup, "came"> | undefined, came: num
 /** What `load` starts the unread marks from: the history's own times, or when its latest came if that was later. */
 export const cameOrWritten = (written: number | undefined, came: number | undefined): number | undefined =>
   written === undefined && came === undefined ? undefined : Math.max(written ?? 0, came ?? 0);
+/** Every key that was a member of the group at some epoch of its chain. */
+export function everMembers(session: Pick<GroupSession, "state">): Set<string> {
+  const keys = new Set<string>();
+  for (const commit of session.state.chain) if (commit) for (const [key] of commit.m) keys.add(key);
+  return keys;
+}
+
 /** The view's `lastPeerMessageAt`, when there is one. */
 export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
   const at = map.get(groupId);
   return at ? { lastPeerMessageAt: at } : {};
 };
+
+/** A group's marks for the list of groups, unread and the "@": as a mesh group's and a community's engines keep them. */
+export interface GroupMarks {
+  lastMessageAt: Map<string, number>; lastPeerMessageAt: Map<string, number>; lastMentionAt: Map<string, number>;
+  /** Per group, the message each mark was last moved by (`markedBy`): only a removal of one of them reads the history. */
+  by: Map<string, MarkedBy>;
+}
+/** The messages a group's marks were last moved by. */
+export interface MarkedBy { last?: string; peer?: string; mention?: string }
+
+/**
+ * A message came at `came`: the marks move to it (never back), and it is noted as the one that moved them (`unmark`
+ * reads the history again only for one of those).
+ */
+export function markCame(marks: GroupMarks, groupId: string, id: string, came: number, peer: boolean, mentioned: boolean): void {
+  const by = { ...marks.by.get(groupId) };
+  const move = (map: Map<string, number>) => { if (came < (map.get(groupId) ?? 0)) return false; map.set(groupId, came); return true; };
+  if (move(marks.lastMessageAt)) by.last = id;
+  if (mentioned && move(marks.lastMentionAt)) by.mention = id;
+  if (peer && move(marks.lastPeerMessageAt)) by.peer = id;
+  marks.by.set(groupId, by);
+}
+
+/** What `load` reads a group's marks from: the newest rows (`newestMarked`), and when its latest came if later (`came`). */
+export function loadMarks(marks: GroupMarks, group: Pick<StoredGroup, "id" | "came">, history: StoredMessage[]): void {
+  const { last, peer, mention } = newestMarked(history);
+  if (last) marks.lastMessageAt.set(group.id, last.timestamp);
+  // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
+  const peerAt = cameOrWritten(peer?.timestamp, peer ? group.came?.peer : undefined);
+  if (peerAt) marks.lastPeerMessageAt.set(group.id, peerAt);
+  const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
+  if (mentionAt) marks.lastMentionAt.set(group.id, mentionAt);
+  marks.by.set(group.id, { last: last?.id, peer: peer?.id, mention: mention?.id });
+}
+
+/** A group gone from this engine: its marks too. */
+export function dropMarks(marks: GroupMarks, groupId: string): void {
+  marks.lastMessageAt.delete(groupId); marks.lastPeerMessageAt.delete(groupId); marks.lastMentionAt.delete(groupId); marks.by.delete(groupId);
+}
+
+/** The newest rows `load` reads the marks from: a group's last message, last of a member's, last mentioning me. */
+export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; peer?: StoredMessage; mention?: StoredMessage } {
+  const said = history.filter(m => !m.event && !m.groupPay);
+  return { last: said[said.length - 1], peer: [...said].reverse().find(m => m.sender !== "me"), mention: [...history].reverse().find(m => m.mentioned) };
+}
+
+/**
+ * A message deleted for everyone (WISP 400 § Delete for everyone: a tombstone does not count as unread or move the
+ * chat): the marks it moved go back to the newest line still kept, as `load` reads them, and the record's `came` it
+ * raised goes too. A mark a newer line moved stays, and the history is read only when the message moved one
+ * (`markedBy`): removals go at the pace of edits. `history`: the group's rows, with it gone. True when `came` changed
+ * (the record is to be saved).
+ */
+export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: () => Promise<StoredMessage[]>, removed: StoredMessage): Promise<boolean> {
+  const by = marks.by.get(groupId);
+  if (!by || ![by.last, by.peer, by.mention].includes(removed.id)) return false;
+  const newest = newestMarked((await history()).filter(m => m.id !== removed.id));
+  const back = (map: Map<string, number>, row: StoredMessage | undefined) => { if (row) map.set(groupId, row.timestamp); else map.delete(groupId); };
+  let came = false;
+  if (by.last === removed.id) back(marks.lastMessageAt, newest.last);
+  if (by.peer === removed.id) {
+    back(marks.lastPeerMessageAt, newest.peer);
+    if (group?.came?.peer !== undefined) { group.came = { ...group.came, peer: undefined }; came = true; }
+  }
+  if (by.mention === removed.id) {
+    back(marks.lastMentionAt, newest.mention);
+    if (group?.came?.mention !== undefined) { group.came = { ...group.came, mention: undefined }; came = true; }
+  }
+  marks.by.set(groupId, { last: by.last === removed.id ? newest.last?.id : by.last, peer: by.peer === removed.id ? newest.peer?.id : by.peer,
+    mention: by.mention === removed.id ? newest.mention?.id : by.mention });
+  return came;
+}
 
 /**
  * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
@@ -269,6 +360,33 @@ export const peerMessageAt = (map: Map<string, number>, groupId: string): { last
  */
 export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
 const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
+/**
+ * A link join nobody answers (the link replaced or turned off, the group deleted, its admin's app gone) knocks less
+ * often the longer it waits, once past `patienceMs`: a fifth of the wait between knocks, up to this, but no longer than
+ * the joins waiting need (`JOIN_KNOCKS_PER_MINUTE`), and never sooner than `slowKnockMs`. Under `KNOCK_TTL_MS`, so an
+ * admin's app that comes back still finds the knock fresh. Every `slowKnockMs` for good, four such links took 27 of the
+ * app's 30 relay requests a minute, 20 minutes on (bug hunt 1019-0904, 2026-10-20).
+ */
+export const JOIN_KNOCK_WAIT_MAX_MS = 150_000;
+/** The knocks a minute that the link joins nobody answers take between them, an app's private groups and communities together. */
+export const JOIN_KNOCKS_PER_MINUTE = 2;
+/** A join counted as waiting (`countWaitingJoin`) and not counted again this long is gone (joined, given up, forgotten). */
+const WAITING_JOIN_SEEN_MS = 10_000;
+const waitingJoins = new WeakMap<object, Map<string, number>>();
+/** Counts the link join of `groupId` among the waiting ones of `host`'s app while `waiting`, or no longer: how many there are. */
+export function countWaitingJoin(host: object, groupId: string, now: number, waiting: boolean): number {
+  let joins = waitingJoins.get(host);
+  if (!joins) waitingJoins.set(host, joins = new Map());
+  if (waiting) joins.set(groupId, now); else joins.delete(groupId);
+  for (const [id, at] of joins) if (now - at > WAITING_JOIN_SEEN_MS) joins.delete(id);
+  return joins.size;
+}
+/** The wait between a joiner's knocks, `waited` after it opened the link, one of `joins` waiting (`JOIN_KNOCK_WAIT_MAX_MS`). */
+export function joinKnockWait(waited: number, timings: Pick<EntryTimings, "knockMs" | "slowKnockMs" | "patienceMs">, joins: number): number {
+  if (waited <= timings.patienceMs) return timings.knockMs;
+  const share = Math.round(joins * 60_000 / JOIN_KNOCKS_PER_MINUTE);
+  return Math.max(timings.slowKnockMs, Math.min(JOIN_KNOCK_WAIT_MAX_MS, Math.round(waited / 5), share));
+}
 /**
  * A knock still in the record is written again only once it is this old. Everyone holding the link writes the same
  * Pkarr record, so a knock is read back before it is repeated: one that is there and fresh costs a read, not a read
@@ -360,7 +478,8 @@ export const MESH_GOSSIP_MS = 60_000;
 export const MESH_GAP_AGAIN_MS = 10_000;
 /**
  * A member whose messages were just asked of another (`Groups.askOf`) is told where I am only once that one's answer
- * has come: no message of it for this long, or `MESH_SYNC_HOLD_MAX_MS` after it was asked. Told at once, its own
+ * has come: no message of it for this long and none of its frames still waiting to be handled here, or
+ * `MESH_SYNC_HOLD_MAX_MS` after it was asked with none waiting. Told at once, its own
  * answer raced the other's, which holds the same messages among everyone's in the order they were written, and a
  * member back in a group of five read each member's lines apart, the newest above older ones (WISP 902 § Catch-up).
  * A message of the answer is one written before the asking: what the member writes meanwhile is no reason to wait, so
@@ -432,6 +551,8 @@ export class Groups {
   private readonly lastPeerMessageAt = new Map<string, number>();
   /** The latest message that names me, per group (the chat list's "@" while it is unread). */
   private readonly lastMentionAt = new Map<string, number>();
+  /** The maps above, and what moved them last (`markCame`, `unmark`). */
+  private readonly marks: GroupMarks = { lastMessageAt: this.lastMessageAt, lastPeerMessageAt: this.lastPeerMessageAt, lastMentionAt: this.lastMentionAt, by: new Map() };
   private reconciling = Promise.resolve();
   /** Admin side: joiners with an entry session open, per group: member key → since when. */
   private readonly pendingEntries = new Map<string, Map<string, number>>();
@@ -575,20 +696,14 @@ export class Groups {
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
+      const history = await this.store.getMessages(MESSAGE_LINK(group.id));
       const framed = history.filter(m => m.frame);
       this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame!) })));
       // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`), not from its own record.
       if (group.state) this.attach(group.state, framed.map(m => m.frame!));
       if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
-      const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
-      if (last) this.lastMessageAt.set(group.id, last.timestamp);
-      // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
-      const peerAt = cameOrWritten(lastPeer?.timestamp, lastPeer ? group.came?.peer : undefined);
-      if (peerAt) this.lastPeerMessageAt.set(group.id, peerAt);
-      const mention = [...history].reverse().find(m => m.mentioned);
-      const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
-      if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      loadMarks(this.marks, group, history);
+      this.host.loaded?.(group.id, history);
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
     await this.files?.load(all.map(g => g.id));
@@ -637,7 +752,11 @@ export class Groups {
   }
 
   private pinned(view: GroupView): GroupView {
-    const pin = pinView(this.record(view.id)?.pin);
+    const record = this.record(view.id), kept = record?.pin;
+    // The pinned message was deleted for everyone: nothing of it stays, its pin neither (agents#1646). The pin is kept
+    // as it came, so the same pin said again (a catch-up) is no newer, and shown as unpinned.
+    const gone = !!kept?.id && !!record?.removedIds?.some(id => id === kept.id || id === kept.messageId);
+    const pin = pinView(gone ? { ...kept!, id: "", messageId: undefined } : kept);
     return pin ? { ...view, pin } : view;
   }
 
@@ -1017,9 +1136,7 @@ export class Groups {
     this.pendingEntries.delete(groupId);
     this.welcomed.delete(groupId);
     this.lingering.delete(groupId);
-    this.lastMessageAt.delete(groupId);
-    this.lastPeerMessageAt.delete(groupId);
-    this.lastMentionAt.delete(groupId);
+    dropMarks(this.marks, groupId);
     this.authorOrder.forget(groupId);
     this.lineOrder.forget(MESSAGE_LINK(groupId));
     await this.store.deleteGroup(groupId);
@@ -1143,7 +1260,25 @@ export class Groups {
       group.removedIds = [...(group.removedIds ?? []), messageId].slice(-MAX_REMOVED_IDS);
       await this.store.putGroup(group);
     }
+    // A community's catch-up no longer hands its frame to a member who was away.
+    this.communities.session(groupId)?.forget(messageId);
     await this.files?.forget(groupId, messageId);
+  }
+
+  /**
+   * A message deleted for everyone left this device (`removed`, the row as it was): the group's unread, "@" and place
+   * in the list go back to what they were without it (`unmark`), after a restart too.
+   */
+  /** Whether this message moved one of the group's marks last (`unmark` has something to do for it). */
+  movedMarks(groupId: string, messageId: string): boolean {
+    const by = (this.isCommunity(groupId) ? this.communities.markedBy(groupId) : this.marks.by.get(groupId)) ?? {};
+    return by.last === messageId || by.peer === messageId || by.mention === messageId;
+  }
+
+  async unmark(groupId: string, removed: StoredMessage): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.unmark(groupId, removed);
+    const group = this.stored.get(groupId);
+    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed) && group) await this.store.putGroup(group);
   }
 
   /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */
@@ -1364,9 +1499,10 @@ export class Groups {
         if (group.declined) { await this.declineOwed(group, now); if (!group.state) continue; }
         if (group.invitation?.takenBack && !group.state) { if (now - group.invitation.takenBack > LEFT_KEPT_MS) await this.forget(group.id, false); continue; }
         if (group.invitation?.entry && !group.state) {
-          const waited = now - group.createdAt, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
           // Once the admin's app is on the entry session, knocking only spends the relays' budget its signaling needs.
           const answered = this.host.linkReady(group.invitation.linkId) || !!this.host.linkSeen?.(group.invitation.linkId);
+          const waited = now - group.createdAt, joins = countWaitingJoin(this.host, group.id, now, !answered && waited > this.timings.patienceMs);
+          const every = joinKnockWait(waited, this.timings, joins);
           if (!answered && (now - (this.lastKnock.get(group.id) ?? 0) >= every || now >= (this.knockCheckAt.get(group.id) ?? Infinity))) await this.knock(group, now).catch(() => {});
           continue;
         }
@@ -1551,10 +1687,11 @@ export class Groups {
       return;
     }
     await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key, ts: now }, now)));
-    // Read back in a moment: another joiner writing at the same time may have replaced it.
+    // Read back in a moment: another joiner writing at the same time may have replaced it. Not once nobody has answered
+    // for `patienceMs`: such races come as a link is shared, and the read was a third of each knock nobody would answer.
     const rewrites = (this.knockRewrites.get(group.id) ?? 0) + 1;
     this.knockRewrites.set(group.id, rewrites);
-    if (rewrites <= KNOCK_VERIFIES) this.knockCheckAt.set(group.id, now + KNOCK_VERIFY_MS + gossipStart(key) % KNOCK_VERIFY_SPREAD_MS);
+    if (rewrites <= KNOCK_VERIFIES && now - group.createdAt <= this.timings.patienceMs) this.knockCheckAt.set(group.id, now + KNOCK_VERIFY_MS + gossipStart(key) % KNOCK_VERIFY_SPREAD_MS);
     traceJoin(group.id, "knock.published", { ms: Date.now() - started });
     if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
@@ -1565,10 +1702,16 @@ export class Groups {
     const knocks = readKnocks(entry.link, (await this.host.resolve(knockIdentity(entry.link).pubKeyZ32)) ?? []);
     traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length });
     let pending = this.pendingEntries.get(group.id);
+    let ever: Set<string> | undefined;
     for (const { key, ts } of knocks) {
       // A member let in whose welcome never reached it knocks again: its session opens again for the welcome (`rewelcome`).
       const again = this.unwelcomed(group, session, key);
       if (now - ts > KNOCK_TTL_MS || (rosterHas(session.roster, key) && !again) || this.refused.has(key) || pending?.has(key) || key === entry.link.host) continue;
+      // A member who left or was removed: its knock, from when it joined, stays in the record for up to `KNOCK_TTL_MS`,
+      // and a joiner's key is new for every join (`dialedKey`), so it is no one asking now. Answered, it opened an entry
+      // session nobody answers, which held one of the `MAX_PENDING_ENTRIES` places for `ENTRY_TIMEOUT_MS`: in a group
+      // members come and go by, the next person to open the link waited 1-3 minutes, not 3 s (agents#1667).
+      if (!again && (ever ??= everMembers(session)).has(key)) continue;
       // Sent its welcome again lately: its knock opens no session (and keeps the link's reads at their pace) until it may be again.
       if (again && this.rewelcomedLately(group.id, key)) continue;
       const entryIds = new Set(this.host.entries(group.id).values());
@@ -2136,12 +2279,16 @@ export class Groups {
 
   /**
    * Whether the answer of the member asked for someone's messages may still be coming: its edge up, asked under
-   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message of its answer (or the asking) under `MESH_SYNC_HOLD_MS` ago.
+   * `MESH_SYNC_HOLD_MAX_MS` ago, and a message of its answer (or the asking) under `MESH_SYNC_HOLD_MS` ago; or, however
+   * long ago, frames of its edge still waiting to be handled here. An app that handles a frame a second was still on the
+   * others' syncs ahead of that answer 1.5 s after the ask, and on its 200 messages three minutes after: the next member
+   * was asked for the same messages, and both handed them on.
    */
   private answering(groupId: string, { via, at }: { via: string; at: number }, now: number): boolean {
     const edge = this.host.edges(groupId).get(via);
-    if (!edge || !this.host.linkReady(edge) || now - at >= MESH_SYNC_HOLD_MAX_MS) return false;
-    return now - Math.max(at, this.lastHanded.get(groupId)?.get(via) ?? 0) < MESH_SYNC_HOLD_MS;
+    if (!edge || !this.host.linkReady(edge)) return false;
+    if ((this.host.linkWaiting?.(edge) ?? 0) > 0) return true;
+    return now - at < MESH_SYNC_HOLD_MAX_MS && now - Math.max(at, this.lastHanded.get(groupId)?.get(via) ?? 0) < MESH_SYNC_HOLD_MS;
   }
 
   /**
@@ -2431,6 +2578,7 @@ export class Groups {
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(state.id) ?? true,
       adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),
+      removed: id => this.isRemoved(state.id, id),
       save: async next => {
         const group = this.stored.get(state.id);
         // A save that was due when the group was forgotten (`GROUP_LIMITS.saveWithinMs`) is not one of the group joined again.
@@ -2463,8 +2611,9 @@ export class Groups {
         // so neither the history nor the list of groups follows a member's clock.
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
-        const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
+        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself. Not one of
+        // a message deleted for everyone that comes after its removal: its row is not stored, and its file stays away too.
+        const file = m.file && this.files && !this.isRemoved(state.id, m.id) ? await this.files.announced(state.id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }),
           ...(m.frame && { frame: m.frame }) };
@@ -2483,10 +2632,11 @@ export class Groups {
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
         // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
         if (!completed && stored !== false) this.authorOrder.placed(state.id, { ...row, at: this.now() }, placedAbove);
+        // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645). A member away when it was
+        // written and deleted got an "@" for a line it never sees.
+        if (stored === false && !completed && this.isRemoved(state.id, m.id)) { this.typings.messageFrom(state.id, m.sender); return; }
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
-        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
-        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
-        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
+        markCame(this.marks, state.id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
@@ -2497,9 +2647,10 @@ export class Groups {
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
-        void this.membershipChanged(state.id);
+        // A line the device had no room to keep is not one more error: the change itself is the session's.
+        this.membershipChanged(state.id).catch(() => {});
       },
-      metaChanged: (by, change, at) => { void this.metaChanged(state.id, session, by, change, at); },
+      metaChanged: (by, change, at) => { this.metaChanged(state.id, session, by, change, at).catch(() => {}); },
       // A catch-up answer goes a slice at a time, each once the member's app handled the last (`GROUP_LIMITS.catchUpSlice`).
       ...(this.host.linkHandled && {
         handled: (to: string) => {

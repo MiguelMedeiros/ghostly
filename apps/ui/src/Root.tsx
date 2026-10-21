@@ -229,7 +229,7 @@ function GroupLinkIntake() {
     if (!found) return;
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
-    if (link === null) setProblem({ tone: "error", title: t("group.link.broken") });
+    if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     else setCode(link);
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);

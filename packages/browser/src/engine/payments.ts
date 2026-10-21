@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, fromBase64Url, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { EngineError, RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, fromBase64Url, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { paymentAlias, paymentWireId } from "../shared/paymentIds";
@@ -22,7 +22,7 @@ import {
   type PaymentRequest,
   type PaymentResult,
 } from "@ghostly/core";
-import { STORES, store, wrap } from "../shared/idb";
+import { STORES, store, wrap, committed } from "../shared/idb";
 import { digestHex } from "./messageDetails";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
@@ -175,10 +175,81 @@ const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? l
 /** Federation ecash is counted in msats; a chat counts whole sats. */
 const fedimintSats = (msats: number) => Math.floor(msats / 1000);
 /**
- * Which notes these are, whatever the spelling: the Fedimint client drops whitespace anywhere and reads URL-safe or
- * standard base64, so the digest is of the bytes. Text that is no base64 is digested without its whitespace.
+ * The bytes of notes as the Fedimint client reads them (OOBNotes::from_str), whitespace already dropped: base32hex
+ * after a `fedimint` prefix in any case (least significant bits first, a short last group dropped), else URL-safe
+ * or standard base64. Undefined: no such text.
+ */
+function oobNotesBytes(text: string): Uint8Array | undefined {
+  const lower = text.toLowerCase();
+  if (lower.startsWith("fedimint")) {
+    const out: number[] = [];
+    let buffer = 0, bits = 0;
+    for (const ch of lower.slice(8)) {
+      const value = "0123456789abcdefghijklmnopqrstuv".indexOf(ch);
+      if (value < 0) { out.length = 0; bits = -1; break; }
+      buffer |= value << bits; bits += 5;
+      while (bits >= 8) { out.push(buffer & 0xff); buffer >>>= 8; bits -= 8; }
+    }
+    if (bits >= 0) return Uint8Array.from(out);
+  }
+  try { return fromBase64Url(text.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")); } catch { return undefined; }
+}
+/** A BigSize number (Fedimint's consensus integer) at `at`, and where what follows it starts. */
+function bigSize(bytes: Uint8Array, at: number): [number, number] {
+  const first = bytes[at];
+  const width = first === 0xfd ? 2 : first === 0xfe ? 4 : first === 0xff ? 8 : 0;
+  if (first === undefined || at + 1 + width > bytes.length) throw new Error("short");
+  let value = width ? 0 : first;
+  for (let i = 1; i <= width; i++) value = value * 256 + bytes[at + i]!;
+  return [value, at + 1 + width];
+}
+/**
+ * The signatures of the notes the federation redeems, sorted, each once: OOBNotes are a list of parts (tag, length,
+ * bytes) and the client takes the first Notes part (tag 0: tiers of amount, count, then 48-byte signature and 32-byte
+ * key per note). Undefined: the bytes are no OOBNotes.
+ */
+function oobNoteSignatures(bytes: Uint8Array): string[] | undefined {
+  try {
+    let [parts, at] = bigSize(bytes, 0);
+    let signatures: string[] | undefined;
+    for (; parts > 0; parts--) {
+      const [tag, sized] = bigSize(bytes, at);
+      const [length, start] = bigSize(bytes, sized);
+      const end = start + length;
+      if (end > bytes.length) return undefined;
+      if (tag === 0 && !signatures) {
+        const found = new Set<string>();
+        const part = bytes.subarray(0, end);
+        let [tiers, i] = bigSize(part, start);
+        for (; tiers > 0; tiers--) {
+          let count: number;
+          [, i] = bigSize(part, i);
+          [count, i] = bigSize(part, i);
+          if (i + count * 80 > end) return undefined;
+          for (; count > 0; count--, i += 80) found.add(hexOf(bytes.subarray(i, i + 48)));
+        }
+        if (i !== end || !found.size) return undefined;
+        signatures = [...found].sort();
+      }
+      at = end;
+    }
+    return at === bytes.length ? signatures : undefined;
+  } catch { return undefined; }
+}
+const hexOf = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+/**
+ * Which notes these are, whatever the encoding: the digest of the signatures of the notes the federation redeems, so
+ * reordered or repeated parts, an unknown part, notes reordered in a tier and base32 or base64 spellings all give the
+ * same one. Text that is no OOBNotes is digested as `fedimintBytesDigest` does.
  */
 export function fedimintNotesDigest(notes: string): string {
+  const text = notes.replace(/\s+/g, "");
+  const bytes = oobNotesBytes(text);
+  const signatures = bytes && oobNoteSignatures(bytes);
+  return signatures ? digestHex(`fedimint-notes:${signatures.join(",")}`) : fedimintBytesDigest(notes);
+}
+/** What earlier versions wrote down for notes: the digest of their base64 bytes, or of the text without its whitespace. */
+function fedimintBytesDigest(notes: string): string {
   const text = notes.replace(/\s+/g, "");
   try { return digestHex(toBase64Url(fromBase64Url(text.replace(/=+$/, "")))); } catch { return digestHex(text); }
 }
@@ -202,6 +273,9 @@ class PaymentBook extends Map<string, StoredPayment> {
     return this.shown ??= Object.fromEntries([...this].map(([id, { token: _token, ...view }]) => [id, view]));
   }
 }
+/** How many looks at the wallet's invoices a chat's "I paid your invoice" frames make every 3 s (`receiveInvoicePaid`). */
+export const INVOICE_LOOKS_PER_CHAT = 5;
+
 export class PaymentDesk {
   private readonly payments = new PaymentBook();
   private readonly paying = new Map<string, Promise<void>>();
@@ -926,9 +1000,11 @@ export class PaymentDesk {
       }
       const reason = error instanceof Error ? error.message : String(error);
       link?.sendPaymentResult({ id: payment.id, ok: false, error: reason });
-      // Said once in the chat (same id on a retransmission), so a refusal is never silent.
+      // Said once in the chat (same id on a retransmission), so a refusal is never silent. Spent ecash is said once
+      // per token: the same token sent again under new ids is the same refusal.
       const sats = parseSats(payment.amount.value, payment.amount.asset);
-      try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, text: `Could not receive ${sats === null ? "a payment" : `${sats.toLocaleString()} sats`}: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+      const spent = error instanceof EngineError && error.engineCode === "ecashAlreadySpent";
+      try { await this.host.storeMessage({ linkId, id: spent ? `peer_spent_${digestHex(token).slice(0, 32)}` : `peer_${payment.timestamp}_refused`, text: `Could not receive ${sats === null ? "a payment" : `${sats.toLocaleString()} sats`}: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
     }
   }
 
@@ -1071,6 +1147,8 @@ export class PaymentDesk {
   private readonly lastCheckFrom = new Map<string, number>();
   /** `receiveInvoicePaid`'s last look, by `<link id>:<invoice>`: only the last 3 seconds' are kept. */
   private readonly lastInvoiceCheck = new Map<string, number>();
+  /** The looks `receiveInvoicePaid` made for each chat in the last 3 s (at most `INVOICE_LOOKS_PER_CHAT`). */
+  private readonly invoiceLooks = new Map<string, number[]>();
 
   /**
    * "I paid it from another wallet": the contact's app is asked to look at its wallet now. Nothing here
@@ -1122,7 +1200,9 @@ export class PaymentDesk {
    * The contact says it paid an invoice of ours it found in the chat, with no request: a Receive-screen invoice is
    * held on a test mint until then (StoredQuote `held`), and that one alone is let go. A request's invoice is spoken
    * for by its own contact only (`receiveCheck`). Bounded: one look every 3 seconds per invoice of a chat, so two
-   * invoices paid one right after the other are both let go.
+   * invoices paid one right after the other are both let go, and `INVOICE_LOOKS_PER_CHAT` looks every 3 seconds per
+   * chat: the invoice is the contact's text, and a frame per text made each one a read of every invoice of the wallet
+   * (2,000 frames, 2,000 reads), each also walking every key of the last 3 s (agents#1586).
    */
   private async receiveInvoicePaid(linkId: string, link: PaymentLink, invoice: string): Promise<void> {
     if (!link.allowsPayment("lightning")) return;
@@ -1130,8 +1210,14 @@ export class PaymentDesk {
     const wanted = invoice.trim().toLowerCase();
     const key = `${linkId}:${wanted}`;
     if (now - (this.lastInvoiceCheck.get(key) ?? 0) < 3_000) return;
-    for (const [seen, at] of this.lastInvoiceCheck) if (now - at >= 3_000) this.lastInvoiceCheck.delete(seen);
+    const looks = (this.invoiceLooks.get(linkId) ?? []).filter((at) => now - at < 3_000);
+    if (looks.length >= INVOICE_LOOKS_PER_CHAT) { this.invoiceLooks.set(linkId, looks); return; }
+    this.invoiceLooks.set(linkId, [...looks, now]);
+    // Oldest first (each key is set again only once it went, at the end): the ones gone are at the front.
+    for (const [seen, at] of this.lastInvoiceCheck) { if (now - at < 3_000) break; this.lastInvoiceCheck.delete(seen); }
+    this.lastInvoiceCheck.delete(key);
     this.lastInvoiceCheck.set(key, now);
+    for (const [chat, times] of this.invoiceLooks) if (chat !== linkId && times.every((at) => now - at >= 3_000)) this.invoiceLooks.delete(chat);
     try {
       const quote = (await this.wallet.quotes()).find((q) => q.held && !q.paymentId && q.invoice.toLowerCase() === wanted);
       if (quote) await this.wallet.vouch(quote.invoice);
@@ -1460,10 +1546,11 @@ export class PaymentDesk {
     const network = this.fedimintOf(found.federation)?.federation(found.federation)?.network;
     if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`); return; }
     // The same notes under another id: answered from what is known, with no new line and no new redeem.
-    // Digested as the federation reads them (see fedimintNotesDigest); `spelled` finds what 1.3.2 wrote down.
+    // Digested as the federation reads them (see fedimintNotesDigest); `bytes` and `spelled` find what earlier versions wrote down.
     const digest = fedimintNotesDigest(notes);
+    const bytes = fedimintBytesDigest(notes);
     const spelled = digestHex(notes.trim());
-    const before = [...this.payments.values()].find((p) => (p.notesDigest === digest || p.notesDigest === spelled) && p.direction === "in" && p.kind === "payment");
+    const before = [...this.payments.values()].find((p) => (p.notesDigest === digest || p.notesDigest === bytes || p.notesDigest === spelled) && p.direction === "in" && p.kind === "payment");
     if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
     // The federation's network, read as the chat line reads it (unknown is test sats): every reader of the record says the same.
     await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
@@ -1758,7 +1845,7 @@ export class PaymentDesk {
 
   private async save(payment: StoredPayment): Promise<void> {
     this.payments.set(payment.id, payment);
-    await wrap((await store(STORES.payments, "readwrite")).put(payment));
+    await committed((await store(STORES.payments, "readwrite")).put(payment));
     this.host.onChange();
   }
 

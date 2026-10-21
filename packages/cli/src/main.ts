@@ -11,7 +11,7 @@ import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
 import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
 import {
@@ -80,11 +80,22 @@ export function versionWarning(daemon: unknown, cli: string): string | null {
  * Never fails, and has no deadline of its own: a daemon that does not answer is the command's own call to find out,
  * at the command's deadline, which closes the connection and ends this check with it. A deadline here ended every
  * command on a wedged daemon at 15 s with `unavailable` ("The daemon went away"), whatever its own `--timeout` said.
+ * A command with no deadline of its own waits for this check instead (15 s, session()), before it is sent.
  */
 async function warnVersion(client: DaemonClient): Promise<void> {
   const status = await client.call("status").catch(() => null) as { version?: unknown } | null;
   const warning = versionWarning(status?.version, VERSION);
   if (warning) process.stderr.write(warning + "\n");
+}
+
+/** Whether `promise` settles within `ms` (the timer keeps no process alive). */
+function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    timer.unref?.();
+    const settled = () => { clearTimeout(timer); resolve(true); };
+    promise.then(settled, settled);
+  });
 }
 
 /**
@@ -142,7 +153,7 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
  *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
- *  as it takes. */
+ *  as it takes, once the daemon has answered the version check sent ahead of it (session()). */
 const ANSWER_MS = 15_000;
 export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
   // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
@@ -175,7 +186,18 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
     // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
     // check's answer: a daemon that answered the command answered the check sent before it.
     const warned = warnVersion(client);
-    return { mode: "daemon", call: (m, p) => client.call(m, p, { timeoutMs: answerWithin(m, (p ?? {}) as Record<string, unknown>) }), close: async () => { await warned; client.close(); } };
+    const call = async (m: string, p?: unknown): Promise<unknown> => {
+      const timeoutMs = answerWithin(m, (p ?? {}) as Record<string, unknown>);
+      // A call with no deadline of its own (a send, a rename, an invite) goes only once the check is answered: a daemon
+      // that has not answered `status` in 15 s does not answer, and the call, never written, cannot happen when it
+      // wakes (a daemon stopped with Ctrl+Z reads its socket again on SIGCONT). It used to wait for ever with no word.
+      if (timeoutMs === undefined && !await settlesWithin(warned, ANSWER_MS)) {
+        client.destroy();
+        throw new CliError("timeout", `The daemon did not answer in ${ANSWER_MS / 1000} s; nothing was done: \`ghostly daemon restart\` starts a fresh one`, { method: m });
+      }
+      return client.call(m, p, { timeoutMs });
+    };
+    return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
   }
   const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openHost(g.paths, "one-shot", VERSION, options);
@@ -249,12 +271,34 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["version", "This CLI's version (also ghostly --version)"],
 ];
 
+/** A command's words before its arguments: "group send", "send", "engine". */
+const wordsOf = (usage: string) => usage.split(" ").filter((w) => /^[a-z][\w-]*$/.test(w)).slice(0, 2);
+
+/**
+ * `rows`, then each of `more` beside the rows of its first word: after the last of them (`group send` with the group
+ * commands, `identity add` with the identity ones), or at the end when none has that word. They were all appended after
+ * the table: `group send` 106 lines below the group block, `identity add` 60 below its own (agents#1606).
+ */
+function beside(rows: [string, string][], more: [string, string][]): [string, string][] {
+  const out = [...rows];
+  for (const row of more) {
+    const [first, second] = wordsOf(row[0]);
+    let at = -1;
+    if (second !== undefined) for (let i = out.length - 1; i >= 0; i--) if (wordsOf(out[i][0])[0] === first && wordsOf(out[i][0]).length > 1) { at = i; break; }
+    out.splice(at < 0 ? out.length : at + 1, 0, row);
+  }
+  return out;
+}
+
 function help(): string {
   const rows: [string, string][] = [
-    ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
-    ...Object.values(COMMANDS).filter((c) => c.method !== "events.replay").map((c) => [c.usage, c.summary] as [string, string]),
-    ...Object.values(TEXT_COMMANDS).map((c) => [c.usage, c.summary] as [string, string]),
-    ...SPECIAL.slice(7).map(([usage, summary]) => [usage, summary] as [string, string]),
+    ...beside([
+      ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
+      ...Object.values(COMMANDS).filter((c) => c.method !== "events.replay").map((c) => [c.usage, c.summary] as [string, string]),
+    ], [
+      ...Object.values(TEXT_COMMANDS).map((c) => [c.usage, c.summary] as [string, string]),
+      ...SPECIAL.slice(7).map(([usage, summary]) => [usage, summary] as [string, string]),
+    ]),
     [COMMANDS.events.usage, COMMANDS.events.summary],
   ];
   const width = 58;
@@ -501,12 +545,6 @@ async function runDaemon(g: Globals): Promise<void> {
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
 }
 
-/**
- * `daemon stop` and `restart` wait this long for the daemon's greeting: a daemon of an older release never greets, and
- * what does not prove itself is stopped as the process that holds the profile (`stopDaemon`), as the stop asked.
- */
-const STOP_GREETING_MS = 2_000;
-
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
@@ -525,7 +563,9 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "stop") {
     knownProfile(g);
     const stopFor = seconds(parsed, 20);
-    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
+    // A daemon of an older release never greets: what does not prove itself is stopped as the process that holds the
+    // profile (`stopDaemon`), as the stop asked. One of this release that greets late is busy: the stop's deadline waits.
+    const client = await connectDaemon(g.paths);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
@@ -533,7 +573,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
+    const client = await connectDaemon(g.paths);
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
@@ -698,12 +738,22 @@ async function listenCommand(argv: string[]): Promise<void> {
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
+  // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
+  // a restart would hand every event since again (agents#1710). How it stops is the branch's below.
+  let quit = (code: number): void => { process.exit(code); };
+  const cursorFailed = (error: unknown) => {
+    const failure = localFileError(error, cursor) ?? asCliError(error);
+    process.stderr.write(`ghostly: could not write the cursor ${cursor}: ${failure.message}. Stopped, so that no event is handed twice\n`);
+    print({ error: failure.toJSON() });
+    quit(EXIT[failure.code]);
+  };
   const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {
     return eventHandler({
       types, turns,
       exec: parsed.options.exec as string | undefined,
       webhook: parsed.options.webhook as string | undefined,
       cursor,
+      cursorFailed,
       // With a hook, events go to the hook; --print shows them too.
       print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
       write: (line) => process.stdout.write(line + "\n"),
@@ -725,9 +775,11 @@ async function listenCommand(argv: string[]): Promise<void> {
       if (!c) return null;
       try { return ((await c.call("chat.get", { chat }, { timeoutMs: ANSWER_MS })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
-    // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`).
-    const following = followDaemon(g.paths, client, handle, since);
+    // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`); a daemon gone
+    // longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that answers again.
+    const following = followDaemon(g.paths, client, handle, since, PAUSE_HOLD_MS, g.profile);
     const stop = () => { following.close(); process.exit(0); };
+    quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
     await following.subscribed;
     process.on("SIGINT", stop);
@@ -742,6 +794,10 @@ async function listenCommand(argv: string[]): Promise<void> {
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
+  quit = (code) => {
+    setTimeout(() => process.exit(code), 20_000).unref();
+    void served.close().then(() => host.close()).finally(() => process.exit(code));
+  };
   host.ctx.stop = stop;
   onStopSignals(stop);
   onReaderGone(stop);

@@ -380,10 +380,15 @@ const METHODS: Record<string, Method> = {
   /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
   async "saved.list"(ctx) {
     const { links, groups } = state(ctx);
-    return (await node(ctx).savedMessages()).map(({ savedAt, message }) => {
-      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: chatMessageJson(message, links.find((l) => l.id === message.linkId)) };
+    const saved = await node(ctx).savedMessages();
+    // A saved reply whose original is gone reads as history gives it: per chat or group, one read per quoted original.
+    const gone = new Map<string, Set<string>>();
+    for (const linkId of new Set(saved.map((s) => s.message.linkId))) gone.set(linkId, await originalsGone(ctx, linkId, saved.flatMap((s) => (s.message.linkId === linkId ? [s.message] : []))));
+    return saved.map(({ savedAt, message }) => {
+      const checked = (json: MessageJson) => quoteChecked(json, message, gone.get(message.linkId)!);
+      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
       const id = message.linkId.slice("group:".length);
-      return { group: id, savedAt, message: groupMessageJson(message, groups.find((g) => g.id === id)) };
+      return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
     });
   },
   /**
@@ -445,7 +450,9 @@ const METHODS: Record<string, Method> = {
       if (!message) throw new CliError("not_found", `No message ${ref} of yours in this ${target.group ? "group" : "chat"}: only your own messages are deleted for everyone`);
       const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
-      return { [target.group ? "group" : "chat"]: target.id, deleted: message.id, everyone: true };
+      // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
+      // it (agents#1582).
+      return { [target.group ? "group" : "chat"]: target.id, messageId: message.id, deleted: message.id, everyone: true };
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
@@ -454,7 +461,7 @@ const METHODS: Record<string, Method> = {
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
-    return { chat: link.id, deleted: messageId };
+    return { chat: link.id, messageId, deleted: messageId, everyone: false };
   },
   async "chat.details"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -835,6 +842,8 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
 async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
   const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
+  // An unsave whose id names neither a saved message nor one of the chat's (a typo): said, with where the ids are.
+  if (result.error && remove && /not in this chat/.test(result.error)) throw new CliError("not_found", `No saved message ${JSON.stringify(messageId)} in this chat (ghostly saved list shows the saved ones)`);
   if (result.error) throw new CliError(/not in this chat/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
 }

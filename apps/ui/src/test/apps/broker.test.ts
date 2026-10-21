@@ -867,8 +867,41 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(await ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
   });
 
+  // The contact's reads went one at a time: 4 asked at once took 4 round trips, and a stat waited for every 1 MiB
+  // read before it, where the read lane keeps 4 in flight (3.6x slower than the engine on a 120 ms contact).
+  it("remote.read and remote.stat asked at once all reach the contact before any answers", async () => {
+    const { host, broker, posted } = await cinema(["chat"]);
+    const asked: { offset: number; length: number; answer: (bytes: Uint8Array) => void }[] = [];
+    host.ranges!.read = (_link, _ref, _serve, offset, length) => new Promise((resolve) => {
+      asked.push({ offset, length, answer: (bytes) => resolve({ bytes, size: 64 * MINI_APP_LIMITS.remoteReadBytes }) });
+    });
+    const MiB = MINI_APP_LIMITS.remoteReadBytes;
+    for (let i = 0; i < 3; i++) broker.message({ id: 4_000 + i, type: "remote.read", args: [SERVE, { offset: i * MiB, length: MiB }] });
+    broker.message({ id: 4_003, type: "remote.stat", args: [SERVE] });
+    await vi.waitFor(() => expect(asked).toHaveLength(4));
+    expect(asked.map((a) => [a.offset, a.length])).toEqual([[0, MiB], [MiB, MiB], [2 * MiB, MiB], [0, 1]]);
+    asked[3]!.answer(new Uint8Array(1));
+    await vi.waitFor(() => expect(posted.map((p) => (p.message as { id: number }).id)).toContain(4_003));
+    for (const a of asked.slice(0, 3)) a.answer(new Uint8Array(MiB));
+    await vi.waitFor(() => expect(posted.filter((p) => [4_000, 4_001, 4_002].includes((p.message as { id: number }).id))).toHaveLength(3));
+  });
+
+  it("remote.read asked at once still keeps to the 16 MiB a second: the asks not answered yet count", async () => {
+    const { ask, host, broker } = await cinema(["chat"]);
+    const pending: (() => void)[] = [];
+    const MiB = MINI_APP_LIMITS.remoteReadBytes;
+    host.ranges!.read = () => new Promise((resolve) => { pending.push(() => resolve({ bytes: new Uint8Array(MiB), size: MiB })); });
+    const reads = MINI_APP_LIMITS.fileBytesPerSecond / MiB;
+    for (let i = 0; i < reads; i++) broker.message({ id: 5_000 + i, type: "remote.read", args: [SERVE, { offset: 0, length: MiB }] });
+    await vi.waitFor(() => expect(pending).toHaveLength(reads));
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "too-fast" });
+    for (const answer of pending) answer();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "too-fast" });
+  });
+
   // A contact that never answered an `ar-get` held the app's one read chain: its own files.read, files.list and
-  // files.serve waited for good behind it. The contact's reads wait for the contact only, still one at a time.
+  // files.serve waited for good behind it. The contact's reads wait for the contact only.
   it("a remote.read the contact never answers holds no read of the app's own", async () => {
     const { ask, host, broker, id } = await cinema();
     let reads = 0;
@@ -878,6 +911,6 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(await ask("files.read", [id, { offset: 0, length: 4 }])).toMatchObject({ ok: true });
     expect(await ask("files.list")).toMatchObject({ ok: true });
     expect(await ask("files.serve", [id])).toMatchObject({ ok: true });
-    expect(reads).toBe(1);
+    expect(reads).toBe(2);
   });
 });

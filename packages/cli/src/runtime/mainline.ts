@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
-  HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
-  type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
+  HEDGE_MISSING_MS, HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
+  type DiscoveryBudgetError, type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
 /**
@@ -89,10 +89,13 @@ export class Mainline {
   destroy(): Promise<void> { return new Promise((resolve) => this.dht.destroy(() => resolve())); }
 }
 
+/** Keys a `RelaysAndDht` remembers as found nowhere (`missing`). */
+const MISSING_KEPT = 256;
+
 /**
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
- * packet also goes to the DHT, and a read goes there when every relay is failing or the read failed for anything but
- * this app's own request budget (that is a wait, not an outage).
+ * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
+ * request budget held it back (the DHT has no budget). A background read the budget holds waits for it.
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -100,6 +103,11 @@ export class Mainline {
 export class RelaysAndDht implements PkarrTransport {
   readonly relays: RelayTransport;
   private lastVia: "relay" | "dht" = "relay";
+  /**
+   * Keys a hedged read found nowhere: the DHT said so before the relays' slow 404 came, so the next poll of the key
+   * hedges late too (`HEDGE_MISSING_MS`), not only once that 404 lands. The newest `MISSING_KEPT`.
+   */
+  private readonly missing = new Set<string>();
 
   constructor(private readonly dht: Mainline | null, relays: RelayTransportOptions = {}, private readonly pinned = false) {
     this.relays = new RelayTransport(relays);
@@ -157,13 +165,26 @@ export class RelaysAndDht implements PkarrTransport {
       // with the newer one on the DHT (bug hunt, 2026-10-17).
       const relays = this.relays.resolve(pubKeyZ32, options, false).then((packet) => ({ packet, failed: null as unknown }), (error: unknown) => ({ packet: null, failed: error }));
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const answered = await Promise.race([relays, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), HEDGE_MS); })]);
+      // A key whose last read found nothing: the relays take 3-5 s to say a key is not there
+      // (they ask the DHT themselves), and a hedge at HEDGE_MS made every poll of an unused invite's key a DHT lookup
+      // of its own (+47 in 10 min: agents#1595). Their own hedge waits as long (`RelayTransport`, `HEDGE_MISSING_MS`).
+      const hedgeAfter = this.relays.lastReadMissing(pubKeyZ32) || this.missing.has(pubKeyZ32) ? HEDGE_MISSING_MS : HEDGE_MS;
+      const answered = await Promise.race([relays, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), hedgeAfter); })]);
       clearTimeout(timer);
       // The relays have not answered within a hedge's time (one that takes requests and never answers held each read
       // for its 10 s timeout): the DHT is asked too.
-      if (!answered) return this.hedged(pubKeyZ32, relays, started);
+      if (!answered) {
+        const found = await this.hedged(pubKeyZ32, relays, started);
+        this.missing.delete(pubKeyZ32);
+        if (!found) { this.missing.add(pubKeyZ32); if (this.missing.size > MISSING_KEPT) this.missing.delete(this.missing.values().next().value!); }
+        return found;
+      }
       ({ packet: fromRelays, failed } = answered);
-      if (isDiscoveryBudgetError(failed)) throw failed;
+      // The relays' budget held the read back: the DHT, which has no budget and already has a contact's first
+      // envelope, is asked instead. Waiting for the relays' minute made each pairing past ~10 chats on working relays
+      // take 3-18 s (13-37 s on one relay), where DHT-only pairings take 0.1-2.8 s (agents#1715). Found nowhere there,
+      // or a background read, it is still a wait.
+      if (isDiscoveryBudgetError(failed)) return this.heldBack(pubKeyZ32, failed, options);
       if (failed instanceof RelaysFailedError) fromRelays = failed.kept;
       if (!failed) this.lastVia = "relay";
       if (!failed && !down()) return fromRelays;
@@ -178,6 +199,14 @@ export class RelaysAndDht implements PkarrTransport {
     }
   }
 
+  private async heldBack(pubKeyZ32: string, held: unknown, options: PkarrRequestOptions): Promise<SignedPacket> {
+    if (options.background) throw held;
+    const fromDht = await this.fromDht(pubKeyZ32).catch(() => null);
+    if (!fromDht) throw held;
+    this.lastVia = "dht";
+    return fromDht;
+  }
+
   private async fromDht(pubKeyZ32: string): Promise<SignedPacket | null> {
     const packet = await this.dht!.get(pubKeyZ32);
     if (packet) this.relays.sawTimestamp(pubKeyZ32, packet.timestampMicros);
@@ -185,21 +214,27 @@ export class RelaysAndDht implements PkarrTransport {
   }
 
   /**
-   * A read the relays are slow to answer, the DHT asked beside them: the first packet wins. The DHT finding none is
-   * the answer once a slow relay would have had its say (`SLOW_MS`, a relay fetching the packet from the DHT itself),
-   * or once the relays answered too. Both failing: the relays' reason.
+   * A read the relays are slow to answer, the DHT asked beside them. The relays' packet first is the answer, as without
+   * the hedge. The DHT's first waits for the relays until a slow relay would have had its say (`SLOW_MS`, a relay
+   * fetching the packet from the DHT itself), or until they answer, and the newer of the two is the answer: taken at
+   * once, the DHT's older copy won every read over a relay that took 2 s with the newer one (agents#1594). The DHT
+   * finding none is the answer once that time is up too, or once the relays answered. Both failing: the relays' reason.
    */
   private async hedged(pubKeyZ32: string, relays: Promise<{ packet: SignedPacket | null; failed: unknown }>, started: number): Promise<SignedPacket | null> {
     const dht = this.fromDht(pubKeyZ32).then((packet) => ({ packet, failed: null as unknown, via: "dht" as const }), (error: unknown) => ({ packet: null, failed: error, via: "dht" as const }));
     const viaRelays = relays.then((r) => ({ ...r, via: "relay" as const }));
     const first = await Promise.race([viaRelays, dht]);
-    if (first.packet) { this.lastVia = first.via; return first.packet; }
+    if (first.packet && first.via === "relay") { this.lastVia = "relay"; return first.packet; }
     const fromDht = await dht;
-    if (fromDht.packet) { this.lastVia = "dht"; return fromDht.packet; }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const slowAfter = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), Math.max(0, SLOW_MS - (Date.now() - started))); });
     const fromRelays = await Promise.race([viaRelays, slowAfter]);
     clearTimeout(timer);
+    if (fromDht.packet) {
+      const newer = newerPacket(fromRelays?.packet, fromDht.packet);
+      this.lastVia = newer === fromDht.packet ? "dht" : "relay";
+      return newer;
+    }
     if (fromRelays?.packet) { this.lastVia = "relay"; return fromRelays.packet; }
     if (!fromDht.failed) { this.lastVia = "dht"; return null; }
     if (!fromRelays) throw fromDht.failed;
@@ -218,6 +253,8 @@ export class RelaysAndDht implements PkarrTransport {
   /** A relay's answer only: a packet the DHT hands back when the relays are down may be older than one already read. */
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.relays.readAnsweredAt(pubKeyZ32); }
   readHeldBackFor(pubKeyZ32: string): number | undefined { return this.relays.readHeldBackFor(pubKeyZ32); }
+  /** With the DHT every packet goes there too, whatever the relays' budgets say: nothing is held. */
+  publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
 }
