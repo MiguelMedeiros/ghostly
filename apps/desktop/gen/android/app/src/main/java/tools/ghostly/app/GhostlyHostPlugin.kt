@@ -255,7 +255,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
               leftOut.put(name)
               continue
             }
-            folder.mkdirs()
+            SharedCopies.makeFolder(folder)
             val file = File(folder, name)
             val input = resolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
             val copied = input.use { from -> file.outputStream().use { copyAtMost(from, it, left, going) } }
