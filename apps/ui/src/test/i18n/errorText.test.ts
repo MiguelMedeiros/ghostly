@@ -697,6 +697,11 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText("Outcome unknown. Check the existing payment; do not send another.", translators.fr)).toContain("Résultat inconnu");
   });
 
+  it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {
+    expect(errorText("Your contact has no wallet yet: they need one to pay or be paid", translators.pt)).toBe("Seu contato ainda não tem carteira");
+    expect(errorText("Your contact has payments off in this chat, or needs an updated Ghostly", english)).toBe(english("chat.payments.offOrOld"));
+  });
+
   it("the values stay, and amounts are written the app's way", () => {
     expect(errorText("shop.example takes between 5 and 1,000,000 sats", translators.pt)).toBe("shop.example aceita de 5 a 1.000.000 sats");
     expect(errorText("Could not reach rpc.example", translators.pt)).toBe("Não foi possível acessar rpc.example");
