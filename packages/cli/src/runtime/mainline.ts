@@ -3,7 +3,7 @@ import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   HEDGE_MISSING_MS, HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
-  type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
+  type DiscoveryBudgetError, type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
 /**
@@ -253,6 +253,8 @@ export class RelaysAndDht implements PkarrTransport {
   /** A relay's answer only: a packet the DHT hands back when the relays are down may be older than one already read. */
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.relays.readAnsweredAt(pubKeyZ32); }
   readHeldBackFor(pubKeyZ32: string): number | undefined { return this.relays.readHeldBackFor(pubKeyZ32); }
+  /** With the DHT every packet goes there too, whatever the relays' budgets say: nothing is held. */
+  publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
 }

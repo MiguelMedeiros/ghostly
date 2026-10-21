@@ -342,7 +342,14 @@ export function GroupChat() {
     setSharing("created");
     navigate(location.pathname, { replace: true, state: navOnly(location.state) });
   }, [location.state, location.pathname, navigate]);
-  const [error, setError] = useState<Problem | null>(null);
+  // What an action here refused, with the group it was about: the page is one for every group, and another group opened
+  // shows that group's own notice, not this one's refusal (gone once it is left, as a reply is), nor one that comes after.
+  const [refused, setRefused] = useState<{ groupId: string; problem: Problem } | null>(null);
+  const error = refused?.groupId === groupId ? refused.problem : null;
+  useEffect(() => setRefused(null), [groupId]);
+  const openGroupId = useRef(groupId);
+  openGroupId.current = groupId;
+  const setError = (problem: Problem | null) => { if (openGroupId.current === groupId) setRefused(problem && { groupId, problem }); };
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null), shareRef = useRef<HTMLButtonElement>(null);
   const { settings } = useSettings();
   // Forward, and Select then Forward (WISP 400 § Forwards): a group's texts, to chats and other groups.
@@ -561,10 +568,13 @@ export function GroupChat() {
   const knockingAgain = !!group.invitation?.viaLink && !!group.status;
   const waitingWith = group.invitation?.waiting ?? 0;
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
+  // Nobody answered the link for an hour: the app stopped knocking, and Try again knocks again.
+  const linkUnanswered = !!group.invitation?.viaLink && !!group.invitation.unanswered;
   // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
   // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
   const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
+    : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
     : joiningText(stage, group.name, group.profile === "community", t);
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = messages.some(m => m.event === "joined" && !m.member && Date.now() - m.timestamp < JUST_JOINED_MS);
@@ -672,7 +682,9 @@ export function GroupChat() {
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
-            {knockedLong && <span data-testid="group-joining-stale" className="mt-1 block">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</span>}</p>
+            {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</span>}</p>
+          {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
+            className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
           <button data-testid="group-rejoin-cancel" onClick={() => void act(async () => { await engine.call("declineGroupInvitation", { groupId }); optionsRef.current?.focus(); })}
             className="min-h-11 shrink-0 rounded-lg px-3 text-xs text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.cancel")}</button>
@@ -686,7 +698,7 @@ export function GroupChat() {
       : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
-            <svg className={noLinks ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
+            <svg className={noLinks || linkUnanswered ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
           </div>
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
@@ -703,7 +715,9 @@ export function GroupChat() {
           {/* Others knocking too: a wait behind them, said as soon as it is known (a community lets people in a few at a time). */}
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
-          {knockedLong && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</p>}
+          {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</p>}
+          {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
+            className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
           <button onClick={() => { void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {}); nav.home(); }} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
         </div>

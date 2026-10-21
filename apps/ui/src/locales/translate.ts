@@ -23,10 +23,30 @@ function getNestedValue(obj: unknown, path: string): string {
   return typeof current === "string" ? current : path;
 }
 
+/** The plural categories a language's dictionary may give a counted string under, as `<key>_<category>`. */
+export const PLURAL_CATEGORIES = ["zero", "one", "two", "few", "many", "other"] as const;
+
+/**
+ * The count a string is said for: its `count`, or its only number (`{{minutes}}`). A string a language says otherwise
+ * per count (Arabic's dual for 2, its singular after 11-99) has `<key>_<category>` beside it, picked by
+ * Intl.PluralRules: one form for every count read "2 ملفات" and "32 ملفات" (agents#1614). Without such a key, the key.
+ */
+function pluralForm(dict: unknown, key: string, language: Language | undefined, params?: Record<string, string | number>): string | undefined {
+  if (!params) return undefined;
+  const numbers = Object.entries(params).filter(([, v]) => v !== "" && Number.isFinite(Number(v)));
+  const count = "count" in params ? Number(params.count) : numbers.length === 1 ? Number(numbers[0]![1]) : NaN;
+  if (!Number.isFinite(count)) return undefined;
+  let category: string;
+  try { category = new Intl.PluralRules(language ?? "en").select(count); } catch { return undefined; }
+  const form = `${key}_${category}`;
+  const value = getNestedValue(dict, form);
+  return value === form ? undefined : value;
+}
+
 /** The translator for one language's dictionary: a key missing from it reads as the key itself. */
 export function translateWith(dict: unknown, language?: Language): Translate {
   const t = (key: TranslationKey, params?: Record<string, string | number>) => {
-    let value = getNestedValue(dict, key);
+    let value = pluralForm(dict, key, language, params) ?? getNestedValue(dict, key);
     if (params) {
       for (const [k, v] of Object.entries(params)) value = value.replace(new RegExp(`{{${k}}}`, "g"), String(v));
     }

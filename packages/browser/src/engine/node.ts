@@ -157,6 +157,7 @@ import type {
   CardIndexRow,
   SavedMessage,
   MessagePage,
+  MessagePress,
   MessageReply,
   ReactionNote,
   MessageSend,
@@ -266,6 +267,12 @@ const ACTIVE_SLOT_RETRY_MS = 3_000;
  */
 export const NATIVE_HOLD_MS = 2 * 60_000;
 /**
+ * A chat paired in this run takes a held native listener as a chat in use does, until it has gone live once, for this
+ * long after the pairing (`LiveLink.pairedAt`): long enough for its failed-start retries (`retryNative`) to find a chat
+ * gone quiet for `NATIVE_HOLD_MS`.
+ */
+export const PAIRED_TAKES_MS = 10 * 60_000;
+/**
  * A group not on screen keeps one edge (`groupEdgesByRank`): when its listener has been up this long and the member
  * has not answered (no session, and its packet says it holds no listener here, or it is away), the group keeps the
  * next one instead (WISP 902 § Transports).
@@ -355,6 +362,13 @@ interface LiveLink {
   edgeSessionNoted?: boolean;
   /** A private group's edge: its Pkarr transport, which members carry packets for (WISP 902 § Signaling through members). */
   carried?: CarriedTransport;
+  /**
+   * A chat paired in this run (`pinPeer`) that has not gone live since: when it was paired. It takes a held native
+   * listener as a chat in use does (`ensureNativeEndpoints`), for `PAIRED_TAKES_MS`: it was in use only while its
+   * invite was on screen, and a CLI daemon's chat stopped being on screen once paired, so it never took one as the
+   * chats holding them went quiet (agents#1619).
+   */
+  pairedAt?: number;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
   /** A group's edge: when its native listener last came up, by transport (`groupAnchorsAnswered`). */
@@ -736,6 +750,9 @@ function membershipOf(group: GroupView | undefined): { me: string; members: Read
   return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
 }
 
+/** The wire part of the ids the payment desk gives a contact's payment, request or refusal line (`peer_<this>`). */
+const PAYMENT_LINE_ID = /^(?:\d+(?:_refused)?|spent_[0-9a-f]{32})$/;
+
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   /** Limited mode (`NodeOptions.limited`): on from the start until `leaveLimited()`. */
@@ -879,6 +896,13 @@ export class GhostlyNode implements EngineImplementation {
   private readonly cardEdits = new CardEditPacer();
   /** When each message's buttons were last pressed here (`pressButton`). */
   private readonly pressedAt = new Map<string, number>();
+  /**
+   * The presses taken on each message of mine with a `once` button (`resolveReply`), by chat and message id: each
+   * member's replies that pressed it and the button. Read from the history once, at the message's first press here,
+   * then added to as presses are taken (only `resolveReply` gives a row its press). Rows it names are read again
+   * before they refuse a press: one deleted since answers nothing.
+   */
+  private readonly cardPresses = new Map<string, Map<string, { id: string; button: string }[]>>();
   /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
   private readonly wakeLimiter = new WakeLimiter();
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
@@ -2604,7 +2628,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Saves a message on this device, or unsaves it (`engine/saved.ts`): nothing is sent. */
-  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): Promise<{ error: string | null }> {
+  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): Promise<{ error: string | null; removed?: boolean }> {
     return this.saved.save(params);
   }
 
@@ -3489,12 +3513,39 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (!original) return message;
     const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
-    // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. The history
-    // only says whether this person already answered with a `once` button, so it is read when there is such a press
-    // to check: a bot's buttons with no `once` among them take each press as a plain reply costs, however long the chat.
+    // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. Whether this
+    // person already answered with a `once` button is what the presses taken on that message say (`oncePress`): a bot's
+    // buttons with no `once` among them take each press as a plain reply costs, however long the chat.
     const pressed = buttonPress(resolved, original, []);
-    const press = pressed && messageButtons(original)?.buttons.some(b => b.once) ? buttonPress(resolved, original, history ?? await db.getMessages(message.linkId)) : pressed;
+    const press = pressed && messageButtons(original)?.buttons.some(b => b.once) ? await this.oncePress(resolved, original, history) : pressed;
     return press ? { ...resolved, press } : resolved;
+  }
+
+  /**
+   * A press on a message of mine with a `once` button: refused when this member's earlier press of it with a `once`
+   * button is still here. The history is read at the message's first press only (`cardPresses`); after that, a press
+   * reads that member's earlier presses of it alone, and none when there are none. 255 presses handed back at once
+   * in a 10k-message group read the history 255 times, 15.7 s on the CLI's store, before.
+   */
+  private async oncePress(reply: StoredMessage, original: StoredMessage, history?: StoredMessage[]): Promise<MessagePress | undefined> {
+    const key = `${reply.linkId}\n${original.id}`;
+    let presses = this.cardPresses.get(key);
+    if (!presses) {
+      const read = new Map<string, { id: string; button: string }[]>();
+      for (const row of history ?? await db.getMessages(reply.linkId)) {
+        if (row.sender !== "peer" || row.press?.messageId !== original.id) continue;
+        read.set(row.member ?? "", [...(read.get(row.member ?? "") ?? []), { id: row.id, button: row.press.button }]);
+      }
+      // Two first presses at once both read; the one kept first stays, so no press taken meanwhile is lost.
+      presses = this.cardPresses.get(key) ?? read;
+      this.cardPresses.set(key, presses);
+    }
+    const member = reply.member ?? "", card = messageButtons(original);
+    const earlier = (presses.get(member) ?? []).filter(p => p.id !== reply.id && card?.buttons.find(b => b.id === p.button)?.once).map(p => p.id);
+    const rows = (await db.getMessagesById(reply.linkId, earlier)).filter((row): row is StoredMessage => !!row);
+    const press = buttonPress(reply, original, rows);
+    if (press) presses.set(member, [...(presses.get(member) ?? []).filter(p => p.id !== reply.id), { id: reply.id, button: press.button }]);
+    return press;
   }
 
   /** A paired row's reply as it goes on the wire again (a resend, a hold). */
@@ -3602,6 +3653,10 @@ export class GhostlyNode implements EngineImplementation {
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
       const message = await db.getMessage(linkId, id);
+      // Not here yet, under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused`
+      // after it, `spent_` and a token's digest): never forgotten ahead, or a contact could hide the line of a payment
+      // or request it sends next, which a removal never takes (`canRemove`; agents#1587). No text or file has such an id.
+      if (!message && PAYMENT_LINE_ID.test(edit.id)) return true;
       if (!message || canRemove(message)) await this.forgetMessage(linkId, id, true);
       return true;
     }
@@ -3751,7 +3806,8 @@ export class GhostlyNode implements EngineImplementation {
           if (live && removal) {
             if (removal.e !== seq) return;
             live.stored = { ...live.stored, removals: live.stored.removals!.filter(r => r.id !== messageId) };
-            await db.patchLink(linkId, { removals: live.stored.removals });
+            // Relaxed: a confirmation lost to a power cut only says the removal again, which the contact takes once.
+            await this.writeDeletions(linkId, { removals: live.stored.removals }, true);
             return;
           }
           const updated = await db.patchMessage(linkId, messageId, current => {
@@ -4027,12 +4083,42 @@ export class GhostlyNode implements EngineImplementation {
     if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId, true); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
-    await db.patchLink(linkId, { removals: live.stored.removals });
-    await this.forgetMessage(linkId, messageId, true);
+    const written = this.writeDeletions(linkId, { removals: live.stored.removals });
+    // Its id to `deletedIds` goes in the same write of the chat's row (forgetMessage adds it before its first await).
+    const forgot = this.forgetMessage(linkId, messageId, true);
+    await written;
+    await forgot;
     const edits = this.editsFor(linkId);
     edits.edited(messageId);
     void edits.flush().catch(() => {});
     return { error: null };
+  }
+
+  /** A chat's row write of its removals and deleted ids waiting to go, by chat (`writeDeletions`). */
+  private readonly deletionWrites = new Map<string, { patch: Partial<StoredLink>; relaxed: boolean; done: Promise<void> }>();
+  /** The last such write of each chat, which the next one follows. */
+  private readonly deletionTail = new Map<string, Promise<void>>();
+
+  /**
+   * Writes a chat's `removals` and `deletedIds` to its row, merged with any other change of them not written yet: one
+   * write of the row for what a burst changed, not one per change. The row carries up to 500 removals on their way and
+   * the last 500 deleted ids, rewritten whole each time: a CLI daemon deleting 300 messages for everyone wrote 19.5 MB of
+   * journal and synced it 1,207 times, a removal and its id written apart, then each receipt again (agents#1572). The
+   * values are `live.stored`'s at the time of the call, so the newest of each field wins. `relaxed` (no disk sync of its
+   * own, `db.patchLink`) holds only while every change merged into the write is.
+   */
+  private writeDeletions(linkId: string, patch: Pick<Partial<StoredLink>, "removals" | "deletedIds">, relaxed = false): Promise<void> {
+    const waiting = this.deletionWrites.get(linkId);
+    if (waiting) { Object.assign(waiting.patch, patch); waiting.relaxed &&= relaxed; return waiting.done; }
+    const entry = { patch: { ...patch } as Partial<StoredLink>, relaxed, done: Promise.resolve() };
+    this.deletionWrites.set(linkId, entry);
+    entry.done = (this.deletionTail.get(linkId) ?? Promise.resolve()).catch(() => {}).then(() => {
+      this.deletionWrites.delete(linkId);
+      return db.patchLink(linkId, entry.patch, entry.relaxed);
+    });
+    this.deletionTail.set(linkId, entry.done);
+    void entry.done.catch(() => {}).then(() => { if (this.deletionTail.get(linkId) === entry.done) this.deletionTail.delete(linkId); });
+    return entry.done;
   }
 
   /**
@@ -4047,7 +4133,7 @@ export class GhostlyNode implements EngineImplementation {
       ...live.stored,
       deletedIds: [...(live.stored.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS),
     };
-    void db.patchLink(linkId, { deletedIds: live.stored.deletedIds });
+    void this.writeDeletions(linkId, { deletedIds: live.stored.deletedIds }).catch(() => {});
     void this.hold.forget(linkId, messageId).catch(() => {});
 
     const message = await db.getMessage(linkId, messageId);
@@ -7583,6 +7669,7 @@ export class GhostlyNode implements EngineImplementation {
           // listeners, as at start (`keepsNativeEndpoints`): an invite from before a restart had none, and a joiner
           // with no WebRTC found nothing to dial until someone wrote in the chat.
           if (!previous.pairedPeerKey) {
+            if (!live.stored.group) live.pairedAt = Date.now();
             if (!live.stored.group && live.stored.deliveryMode !== "dht") void this.ensureNativeEndpoints(stored.id);
             void live.caps?.update().catch(() => {}); live.caps?.refresh(true);
           }
@@ -7744,6 +7831,7 @@ export class GhostlyNode implements EngineImplementation {
           const was = live.dataLink;
           live.dataLink = state;
           if (state === "open") {
+            live.pairedAt = undefined;
             // Live again: the next time it is away, the first message may wake it at once.
             this.wakeLimiter.reset(linkId);
             void this.desk.replay(linkId).catch(() => {}).then(() => this.sendWaiting(linkId)).catch(() => {});
@@ -8324,10 +8412,12 @@ export class GhostlyNode implements EngineImplementation {
         || (!entry && !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key)))) return "no-slot";
       // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a browser).
       if (full || (!group && owners.length - groups >= NATIVE_SLOTS)) {
-        // Who may take one that is held: the chat in use (on screen, or a text going or coming in it), an edge of the
-        // group on screen, and the one edge a group keeps while it is not.
-        const taking = group || this.activeLinkId === linkId || inUse;
-        const mine = taking && (inUse || onScreen(live)) ? now : used(live);
+        // Who may take one that is held: the chat in use (on screen, or a text going or coming in it), one paired in this
+        // run and not live yet (as used when it was paired), an edge of the group on screen, and the one edge a group
+        // keeps while it is not.
+        const paired = !group && live.pairedAt !== undefined && now - live.pairedAt < PAIRED_TAKES_MS ? live.pairedAt : undefined;
+        const taking = group || this.activeLinkId === linkId || inUse || paired !== undefined;
+        const mine = taking && (inUse || onScreen(live)) ? now : Math.max(paired ?? 0, used(live));
         // First a group's edge past its group's one that carries no session, any chat taking it: the group stays
         // reachable through the one it keeps (mesh catch-up), and the edge waits for another.
         const groupVictim = !full ? undefined : owners.filter(other => other !== live && extra(other) && other.link?.canReleaseEndpoint(key))

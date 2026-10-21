@@ -2153,6 +2153,30 @@ describe("a green CI run planned for other files", () => {
     expect(repo.members()).toEqual([11]); // it bisects
   });
 
+  // agents#1585: a push dev moved past before its `changes` job ran gets the `tested` shape (ci-changes.mjs's
+  // supersededBy) on a tree no run tested, and that run counts as dev's green CI. It never speaks for a red batch: dev
+  // moved past that commit before the run was planned, so the batch built on it is rebuilt on the new tip (and a lone
+  // pull request rebased) before the base's CI is asked. Nobody is bisected or blamed on it.
+  it("rebuilds a red batch whose base ran the `tested` jobs because dev moved past it: nobody is bisected on it", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    await repo.run();
+    repo.runs.set("dev0", greenTested);
+    // A second push by hand landed on top of dev0: its full run is red, because of the first.
+    repo.tips.dev = "dev1";
+    repo.sitsOn.set("dev1", "dev0");
+    repo.runs.set("dev1", red);
+    repo.settle([11, 12]);
+    const r = await repo.run();
+    expect(r.failed).toEqual([]);
+    expect(repo.members()).toEqual([11, 12]);
+    expect(readState(repo.batch()!.body).baseSha).toBe("dev1");
+    // Red on dev1 too: it holds, as for any red base.
+    repo.settle([11, 12]);
+    expect((await repo.run()).log.join("\n")).toMatch(/HOLD .*itself is red/);
+  });
+
   it("still passes over a dev run that skipped more than a `tested` push does", async () => {
     const repo = fakeRepo();
     repo.add(11);

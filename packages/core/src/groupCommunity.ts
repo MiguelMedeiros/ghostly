@@ -987,12 +987,17 @@ export class CommunitySession {
    * within the window.
    */
   private async chooseBranch(): Promise<void> {
+    const status = this.state.status;
     const best = this.bestBranch();
     if (best.tip !== this.topHash) await this.adopt(best.tip);
     if (this.state.status === "lost" && rosterHas(this.roster, this.myKey)) { this.state.status = "active"; delete this.state.statusReason; }
     this.followEntry();
     this.pruneSide();
-    await this.persist();
+    // Saved at once only when my place in the group changed (removed, left, lost, back in); otherwise within a second, as
+    // messages are. Each commit of a catch-up saved the whole state: 1,000 commits were 1,051 whole-record writes, 241 MB
+    // of journal on the CLI store (agents#1767). A save lost to a crash is asked again at the next sync: the commits are on
+    // every hub.
+    if (this.state.status !== status) await this.persist(); else this.persistSoon();
     this.hooks.changed();
     await this.replayWaiting();
     await this.renewLasting();
@@ -1600,14 +1605,16 @@ export class CommunitySession {
         case "group-secret": {
           if (frame.to !== this.myKey || typeof frame.h !== "string") return false;
           const took = this.takeSecret(frame.h, frame.s);
-          if (took) { await this.persist(); this.hooks.changed(); await this.replayWaiting(); }
+          // Within a second, as a commit (agents#1767): a catch-up hands one per epoch.
+          if (took) { this.persistSoon(); this.hooks.changed(); await this.replayWaiting(); }
           return took;
         }
         case "group-secrets": {
           if (!Array.isArray(frame.secrets) || frame.secrets.length > COMMUNITY_LIMITS.secrets) return false;
           let took = false;
           for (const entry of frame.secrets as { h?: unknown; s?: unknown }[]) if (entry && typeof entry.h === "string") took = this.takeSecret(entry.h, entry.s) || took;
-          if (took) { await this.persist(); this.hooks.changed(); await this.replayWaiting(); }
+          // Within a second, as a commit (agents#1767): a catch-up hands one per epoch.
+          if (took) { this.persistSoon(); this.hooks.changed(); await this.replayWaiting(); }
           return false;
         }
         case "group-sync": await this.receiveSync(from, frame as unknown as CommunitySyncFrame); return false;

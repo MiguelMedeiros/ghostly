@@ -105,6 +105,33 @@ describe("editing my message", () => {
     expect(t.contactEdits).toHaveLength(2);
   });
 
+  // agents#1572: each deletion for everyone wrote the chat's whole row twice (its removal, then its id), and each
+  // receipt again: the row carries up to 500 removals and 500 ids. A CLI daemon deleting 300 wrote 19.5 MB of journal.
+  it("deleting many for everyone writes the chat's row once for each, its removal and its id together, and a burst of receipts once", async () => {
+    const t = await setup();
+    const ids: string[] = [];
+    for (let i = 0; i < 12; i++) ids.push((await t.node.sendMessage({ linkId: t.id, text: `n${i}` })).messageId!);
+    await vi.waitFor(async () => expect((await t.messages()).filter(m => ids.includes(m.id) && m.delivery === "delivered")).toHaveLength(12));
+    const rows = vi.spyOn(db, "patchLink");
+    const deletionRows = () => rows.mock.calls.filter(([id, patch]) => id === t.id && ("removals" in patch || "deletedIds" in patch));
+    for (const messageId of ids) expect(await t.node.removeMessage({ linkId: t.id, messageId })).toEqual({ error: null });
+    await vi.waitFor(() => expect(t.contactEdits.filter(e => e.rm)).toHaveLength(12), { timeout: 30_000 });
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === t.id)?.removals).toEqual([]), { timeout: 30_000 });
+    const wrote = deletionRows();
+    console.log(`DELETION ROW WRITES: 12 deletions, ${wrote.length} writes (${wrote.filter(([, p]) => "removals" in p && "deletedIds" in p).length} with both)`);
+    // One each for the 12 deletions, its removal and its id together (dev: 36, apart, then each receipt).
+    expect(wrote.length).toBeLessThanOrEqual(12 + 12);
+    const deleting = wrote.filter(([, patch]) => "deletedIds" in patch), receipts = wrote.filter(([, patch]) => !("deletedIds" in patch));
+    expect(deleting.length).toBe(12);
+    expect(deleting.every(([, patch, relaxed]) => "removals" in patch && !relaxed)).toBe(true);
+    // The receipts' writes, merged when they come together, have no disk sync of their own: a lost one only says it again.
+    expect(receipts.length).toBeLessThanOrEqual(12);
+    expect(receipts.every(([, , relaxed]) => relaxed === true)).toBe(true);
+    const stored = (await db.getLinks()).find(l => l.id === t.id)!;
+    expect(ids.every(id => stored.deletedIds?.includes(id))).toBe(true);
+    rows.mockRestore();
+  }, 40_000);
+
   it("deleting one for everyone leaves no line of it in the contact's reply here that quotes it", async () => {
     const t = await setup();
     const sent = await t.node.sendMessage({ linkId: t.id, text: "quote me" });
@@ -320,6 +347,18 @@ describe("the contact's edits", () => {
     expect(await t.contact.sendMessage("the next one", Date.now(), WIRE("G"))).toBeNull();
     await t.peerRow("the next one");
     expect((await t.messages()).map(m => m.text)).not.toContain("never shown");
+  });
+
+  // agents#1587: a removal sent ahead for the id a payment, request or refusal line takes hid that line when it came.
+  it("a removal before its message never takes a payment, request or refusal line's id ahead", async () => {
+    const t = await setup();
+    const ids = ["1790000000000", "1790000000001_refused", `spent_${"ab".repeat(16)}`];
+    for (const id of ids) expect(await t.contact.sendEdit({ id, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts.map(([id]) => id)).toEqual(ids));
+    const store = (t.node as unknown as { storeMessage(m: object): Promise<unknown> }).storeMessage.bind(t.node);
+    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `line ${i}`, sender: "peer", timestamp: 1_790_000_000_000 + i, via: "datalink", ...(i === 0 && { paymentId: "p1" }) });
+    expect((await t.messages()).filter(m => m.text.startsWith("line ")).map(m => m.text)).toEqual(["line 0", "line 1", "line 2"]);
+    expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
   });
 
   it("a removal leaves no line of its message in the replies here that quote it: each keeps its quote's id", async () => {

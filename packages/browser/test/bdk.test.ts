@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
-import { BdkOnchain, bdk, parseBdkSettings, type BdkStore } from "../src/engine/paymentAdapters/providers/bdk";
+import { ADDRESS_HOLD_MS, BdkOnchain, bdk, parseBdkSettings, type BdkStore } from "../src/engine/paymentAdapters/providers/bdk";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
 import { NothingSpentError, SourceConfigError, SourceUnreachableError, type ProviderSettings } from "../src/engine/paymentAdapters/providers/types";
 import { newBdkPhrase } from "../src/engine/paymentAdapters/providers/bdkPhrase";
@@ -218,6 +218,44 @@ describe("the BDK wallet", () => {
     esplora.requests.length = 0;
     await restored.sync(true);
     expect(esplora.requests.some((r) => r.startsWith("GET /scripthash/"))).toBe(true);
+  });
+
+  // agents#1634: each request revealed a new address; past 20 unpaid ones, a payment was not found from the phrase.
+  it("a payment after more unpaid requests than the restore's gap is still found from the phrase", async () => {
+    const s = settings();
+    const here = await open(s);
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    // 24 requests nobody pays, an hour and more apart.
+    const asked = new Set<string>();
+    for (let i = 0; i < 24; i++) { asked.add(await here.receiveAddress()); now += ADDRESS_HOLD_MS + 60_000; }
+    const paid = await here.receiveAddress();
+    esplora.fund(paid, 50_000);
+    await here.sync(true);
+    expect(await here.balance()).toEqual({ confirmed: 50_000, unconfirmed: 0 });
+    await here.close();
+    clock.mockRestore();
+    await transact([STORES.settings], (st) => { st[STORES.settings].clear(); });
+    const restored = await open(s);
+    expect(await restored.balance()).toEqual({ confirmed: 50_000, unconfirmed: 0 });
+    // Fewer addresses than requests: the unpaid ones were shown again once their hold was over.
+    expect(asked.size).toBeLessThan(20);
+  });
+
+  it("shows an address again only once it is held for nobody: within the hold, each request gets its own", async () => {
+    const provider = await open();
+    const shown = [];
+    for (let i = 0; i < 30; i++) shown.push(await provider.receiveAddress());
+    expect(new Set(shown).size).toBe(30);
+    // A paid one is never shown again, however long ago.
+    esplora.fund(shown[0], 1_000);
+    await provider.sync(true);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 2 * ADDRESS_HOLD_MS);
+    const later = [];
+    for (let i = 0; i < 30; i++) later.push(await provider.receiveAddress());
+    clock.mockRestore();
+    expect(later).not.toContain(shown[0]);
+    expect(later.filter((a) => shown.includes(a)).length).toBeGreaterThan(0);
   });
 
   it("reads the chain again when the server stumbles for a moment, as electrs does on a block it is still indexing", async () => {

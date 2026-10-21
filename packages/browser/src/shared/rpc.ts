@@ -402,7 +402,7 @@ export interface EngineApi {
    * Saves a message on this device, or unsaves it with `remove`: `linkId` a chat's link or `group:<id>`, `messageId` the
    * message's id here or, in a 1:1 chat, the id both sides know. Nothing is sent: the mark stays in this profile here.
    */
-  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): { error: string | null };
+  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): { error: string | null; removed?: boolean };
   /** This profile's saved messages from all its chats and groups, the last saved first, each as it is now. */
   savedMessages(): SavedMessage[];
   /** `admin`: the member a leaving admin handed the role to. */

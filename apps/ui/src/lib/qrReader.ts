@@ -1,3 +1,5 @@
+import { captureCamera } from "./mediaDevices";
+
 /**
  * Reading a QR code, shared by Join and the wallet's Send: from the camera, frame by frame, or from a picture (opened,
  * pasted or dropped). Scanned text is only data: each caller parses it as what it expects, never opens or runs it.
@@ -36,9 +38,8 @@ export async function readQrImage(file: Blob): Promise<string | null> {
 }
 
 /** The camera that faces away, for scanning; the caller stops its tracks. */
-export async function qrCamera(): Promise<MediaStream> {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
-  return navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+export function qrCamera(): Promise<MediaStream> {
+  return captureCamera({ video: { facingMode: { ideal: "environment" } }, audio: false });
 }
 
 /**
