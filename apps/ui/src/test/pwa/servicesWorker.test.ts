@@ -32,7 +32,7 @@ beforeEach(async () => {
   const scope = {
     location: new URL(`${ORIGIN}/ghostly-services-sw.js`),
     skipWaiting: async () => {},
-    clients: { claim: async () => {}, matchAll: async () => clients },
+    clients: { claim: async () => {}, matchAll: async () => clients, get: async (id: string) => clients.find((client) => client.id === id) },
     addEventListener: (type: string, listener: FetchListener) => { if (type === "fetch") onFetch = listener; },
   };
   vi.stubGlobal("self", scope);
