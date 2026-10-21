@@ -136,4 +136,9 @@ pub mod app_sandbox {
     pub fn app_post() -> Result<(), String> {
         Err(NOT_HERE.into())
     }
+
+    #[tauri::command]
+    pub fn app_title() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
 }

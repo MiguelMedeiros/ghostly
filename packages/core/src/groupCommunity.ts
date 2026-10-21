@@ -458,6 +458,11 @@ export interface CommunitySessionHooks {
    * the answer asks again. Absent: an answer goes all at once, as before 2026-10-07.
    */
   handled?(to: string): Promise<CatchUpHandled>;
+  /**
+   * Whether message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: a frame of it
+   * that comes (a catch-up, a hub passing it on) is not taken, kept or passed on. Absent: none is.
+   */
+  removed?(id: string): boolean;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -533,8 +538,11 @@ export class CommunitySession {
   private known = new Map<string, CommunityCommit>();
   /** Commit hash → roster after it, for the window of the main branch and the side commits. */
   private rosters = new Map<string, Roster>();
-  /** Commit hash → roster after it, for a few main-branch commits older than the window that `couldRead` was asked about. */
-  private pastRosters = new Map<string, Roster>();
+  /**
+   * Who was in the roster after each main-branch commit, from one replay of the branch: key → the places where it came in
+   * and went out, in turn (an open last span while it is in). `through` commits are counted, the last one `top`.
+   */
+  private spans = { through: 0, top: "", roster: null as Roster | null, byKey: new Map<string, number[]>() };
   private mainIndex = new Map<string, number>();
   private pendingCommits = new Map<string, { from: string; commit: CommunityCommit; at: number }>();
   private pendingSecrets = new Map<string, { sealed: SealedSecret; at: number }>();
@@ -687,17 +695,28 @@ export class CommunitySession {
     const i = this.state.chain.length - 1 - (this.epoch - Number(e));
     const commit = Number.isSafeInteger(i) && i >= 0 ? this.state.chain[i] : undefined;
     const hash = commit && communityCommitHash(commit);
-    return !!hash && hash.startsWith(h) && rosterHas(this.pastRoster(i, hash), key);
+    return !!hash && hash.startsWith(h) && this.wasInAt(key, i);
   }
-  /** The roster after an old commit of the main branch, replayed and kept apart from the window's (a few, the latest asked). */
-  private pastRoster(i: number, hash: string): Roster {
-    const known = this.pastRosters.get(hash);
-    if (known) return known;
-    let roster: Roster | null = null;
-    for (let j = 0; j <= i && (j === 0 || roster); j++) roster = communityRoster(roster, this.state.chain[j]);
-    this.pastRosters.set(hash, roster ?? []);
-    for (const old of this.pastRosters.keys()) { if (this.pastRosters.size <= 8) break; this.pastRosters.delete(old); }
-    return roster ?? [];
+  /**
+   * Whether `key` was in the roster after the main branch's commit `i`. The branch is replayed once, as `rebuild` does (its
+   * leaves were checked when they were taken), and only further as it grows: again from the start only once it changed.
+   */
+  private wasInAt(key: string, i: number): boolean {
+    let s = this.spans;
+    if (s.through > 0 && this.mainIndex.get(s.top) !== s.through - 1) s = this.spans = { through: 0, top: "", roster: null, byKey: new Map() };
+    if (s.through <= i) {
+      for (; s.through <= i; s.through++) {
+        const before = new Set((s.roster ?? []).map(([k]) => k));
+        s.roster = s.through === 0 || s.roster ? communityRoster(s.roster, this.state.chain[s.through], true) : null;
+        const after = new Set((s.roster ?? []).map(([k]) => k));
+        for (const k of after) if (!before.has(k)) s.byKey.set(k, [...s.byKey.get(k) ?? [], s.through]);
+        for (const k of before) if (!after.has(k)) s.byKey.get(k)!.push(s.through);
+      }
+      s.top = communityCommitHash(this.state.chain[s.through - 1]);
+    }
+    const at = s.byKey.get(key) ?? [];
+    for (let j = 0; j < at.length; j += 2) if (at[j] <= i && (j + 1 >= at.length || i < at[j + 1])) return true;
+    return false;
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
   wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
@@ -1444,6 +1463,29 @@ export class CommunitySession {
     this.persistSoon();
   }
 
+  /**
+   * Message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: its frame goes from
+   * the store, so no catch-up hands it to a member who was away (they get the removal, which stays). A frame said again
+   * (`reseal`) carries the first one's place inside: its author's are opened to tell.
+   */
+  forget(id: string): void {
+    const author = id.slice(0, id.indexOf(":"));
+    const kept = this.state.store.filter(f => f.s !== author || this.storedId(f) !== id);
+    if (kept.length === this.state.store.length) return;
+    this.state.store = kept;
+    this.persistSoon();
+  }
+
+  /** The id of the message a stored frame is, by its first place when it was said again (and I can open it). */
+  private storedId(f: CommunityMessageFrame): string {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    const plain = secret ? decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c) : null;
+    let parsed: unknown = null;
+    try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload: its own place */ }
+    const original = isObject(parsed) && parsed.o !== undefined ? readOriginal(parsed.o, f) : null;
+    return original ? communityMessageId(f.s, original.e, original.h, original.n) : communityMessageId(f.s, f.e, f.h, f.n);
+  }
+
   private keep(frame: CommunityMessageFrame): void {
     this.state.store.push(frame);
     let bytes = this.state.store.reduce((sum, f) => sum + f.c.length, 0);
@@ -1688,6 +1730,8 @@ export class CommunitySession {
     const firstAt = original && this.commitByShort(original.e, original.h);
     const readFirst = !!firstAt && rosterHas(this.rosterOf(firstAt.hash) ?? [], this.myKey);
     const id = communityMessageId(raw.s, first.e, first.h, first.n);
+    // Deleted for everyone (`hooks.removed`): it stays gone here, and is neither kept nor passed on.
+    if (this.hooks.removed?.(id)) { this.markSeen(raw); this.persistSoon(); return false; }
     // Or the group's state said again once more (`renewLasting`), its first past the window: the one kept here names it.
     if (original && ((readFirst && this.isDuplicate(first)) || this.keepsLasting(raw, id))) {
       // Kept in the first's place, so it outlives the first's commit.
@@ -1862,6 +1906,8 @@ export class CommunitySession {
       // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
       if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      // Deleted for everyone and still here (a removal taken by an app that kept the frame, before `forget`): their removal goes, not it.
+      if (this.hooks.removed?.(communityMessageId(stored.s, stored.e, stored.h, stored.n))) continue;
       if (!this.heardAfterOut(stored)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;

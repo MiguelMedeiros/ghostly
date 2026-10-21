@@ -40,6 +40,9 @@ describe("Send sorts what it was given", () => {
     expect(routeSend(`bitcoin:${address}?amount=0.0025&req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
     expect(routeSend(`bitcoin:?req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
     expect(routeSend(`bitcoin:?amount=abc&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    // A link with no address whose invoice asks another amount than the link: not the same payment.
+    expect(routeSend(`bitcoin:?amount=0.00001&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    expect(routeSend(`bitcoin:?amount=0.0025&lightning=${REGTEST_INVOICE}`).kind).toBe("invoice");
     // A req- parameter it does understand is no reason to refuse.
     expect(routeSend(`bitcoin:${address}?amount=0.0025&req-lightning=${REGTEST_INVOICE}&lightning=${REGTEST_INVOICE}`).kind).toBe("invoice");
   });

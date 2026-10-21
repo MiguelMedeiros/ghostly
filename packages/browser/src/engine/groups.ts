@@ -1272,6 +1272,8 @@ export class Groups {
       group.removedIds = [...(group.removedIds ?? []), messageId].slice(-MAX_REMOVED_IDS);
       await this.store.putGroup(group);
     }
+    // A community's catch-up no longer hands its frame to a member who was away.
+    this.communities.session(groupId)?.forget(messageId);
     await this.files?.forget(groupId, messageId);
   }
 
@@ -2624,6 +2626,7 @@ export class Groups {
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(state.id) ?? true,
       adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),
+      removed: id => this.isRemoved(state.id, id),
       save: async next => {
         const group = this.stored.get(state.id);
         // A save that was due when the group was forgotten (`GROUP_LIMITS.saveWithinMs`) is not one of the group joined again.
@@ -2656,8 +2659,9 @@ export class Groups {
         // so neither the history nor the list of groups follows a member's clock.
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
-        const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
+        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself. Not one of
+        // a message deleted for everyone that comes after its removal: its row is not stored, and its file stays away too.
+        const file = m.file && this.files && !this.isRemoved(state.id, m.id) ? await this.files.announced(state.id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }),
           ...(m.frame && { frame: m.frame }) };

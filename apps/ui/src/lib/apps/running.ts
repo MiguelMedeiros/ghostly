@@ -142,8 +142,11 @@ export function takeOpenRequest(linkId: string): OpenRequest | undefined {
   return Date.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
 }
 
-/** "Chess with Ana": a panel's name, and a Desktop app window's title. Only the title when opened alone. */
-export function appWithContact(title: string, linkId: string | null, t: Translate): string {
+/**
+ * "Chess with Ana": a panel's name, and a Desktop app window's title; "Chess · sharing a file with Ana" while it serves
+ * the contact a file (`serving`). Only the title when opened alone.
+ */
+export function appWithContact(title: string, linkId: string | null, t: Translate, serving = false): string {
   const contact = linkId ? appContact(linkId) : undefined;
-  return contact ? t("apps.view.with", { title, name: contact.name }) : title;
+  return contact ? t(serving ? "apps.view.withSharing" : "apps.view.with", { title, name: contact.name }) : title;
 }

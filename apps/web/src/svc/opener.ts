@@ -166,9 +166,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   const frame = document.createElement("iframe");
   frame.dataset.testid = "service-view-frame";
   frame.title = options.title;
-  // Its own origin keeps it from the app's storage. The sandbox keeps it, every frame in it and every window it
-  // opens (popups inherit it) from navigating the app's tab away.
-  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads");
+  // Its own origin keeps it from the app's storage. The sandbox keeps it and every frame in it from navigating the
+  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view.
+  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-modals allow-downloads");
   frame.setAttribute("allow", "fullscreen; clipboard-write");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.style.cssText = "flex:1;width:100%;border:0;background:#fff";

@@ -500,6 +500,11 @@ fn open_window<R: Runtime>(
     Ok(label)
 }
 
+/// An app window's title: the Ghostly window's words for it, and whose window it is, outside the page.
+fn window_title(title: &str) -> String {
+    format!("{title} (Ghostly)")
+}
+
 /// The window, with every layer that does not depend on the platform.
 fn window_builder<'a, R: Runtime>(
     app: &'a AppHandle<R>,
@@ -519,7 +524,7 @@ fn window_builder<'a, R: Runtime>(
         .size();
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
-        .title(format!("{title} (Ghostly)"))
+        .title(window_title(title))
         .on_navigation(move |to| {
             nav_app
                 .state::<AppSandboxState>()
@@ -1017,6 +1022,23 @@ pub fn app_post<R: Runtime>(
     message: Value,
 ) -> Result<(), String> {
     post(&app, &label, message)
+}
+
+/// Names an app window anew (the Ghostly window only): "Chess · sharing a file with Ana" while the app serves the
+/// contact a file (WISP 1200 § A read lane to the contact), as the web's panel header says it.
+#[tauri::command]
+pub fn app_title<R: Runtime>(
+    app: AppHandle<R>,
+    label: String,
+    title: String,
+) -> Result<(), String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    let window = app.get_webview_window(&label).ok_or("No app window")?;
+    window
+        .set_title(&window_title(&title))
+        .map_err(|e| e.to_string())
 }
 
 /// Closes an app window (the Ghostly window only): the broker stopped the app.

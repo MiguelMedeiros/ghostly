@@ -51,6 +51,15 @@ export function isServiceHostname(host: ServicesHost, hostname: string): boolean
   return dot > 0 && LABEL.test(hostname.slice(0, dot)) && hostname.slice(dot + 1) === host.suffix;
 }
 
+/**
+ * Whether the worker may pass a request on: only from a page framed under the bridge, where the view shows it. A tab
+ * or a window on the app's origin (opened by it, or by another site) never reaches the contact.
+ */
+export function fromView(request: { mode: string; destination: string }, client?: { type?: string; frameType?: string }): boolean {
+  if (request.mode === "navigate") return request.destination !== "document";
+  return client?.type !== "window" || client.frameType === "nested";
+}
+
 /** A request as the worker hands it on. `path` is the path and query on the app's origin, never a full URL. */
 export interface ServiceRequestMessage {
   type: "request";

@@ -40,7 +40,9 @@ function paste(target: Element | Document, data: Parameters<typeof transfer>[0])
   return fireEvent.paste(target, { clipboardData: transfer(data) });
 }
 
-const png = (name = "image.png", bytes = [137, 80, 78, 71]) => new File([new Uint8Array(bytes)], name, { type: "image/png" });
+/** A 1 x 1 PNG's header: the sheet draws a picture only once its header says its size. */
+const PNG = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0];
+const png = (name = "image.png", bytes = PNG) => new File([new Uint8Array(bytes)], name, { type: "image/png" });
 
 beforeEach(() => {
   onSend.mockReset().mockResolvedValue(null);
@@ -55,8 +57,8 @@ describe("a pasted picture or file", () => {
     const { user } = composer();
     expect(paste(field(), { files: [png()] })).toBe(false);
     const open = await screen.findByTestId("attachment-sheet");
-    expect(within(open).getByTestId("attachment-image")).toHaveAttribute("src", "blob:picture");
-    expect(within(open).getByTestId("attachment-name").textContent).toMatch(/^Pasted image \d{4}-\d\d-\d\d \d\d\.\d\d\.\d\d\.png · 4 B$/);
+    expect(await within(open).findByTestId("attachment-image")).toHaveAttribute("src", "blob:picture");
+    expect(within(open).getByTestId("attachment-name").textContent).toMatch(/^Pasted image \d{4}-\d\d-\d\d \d\d\.\d\d\.\d\d\.png · 29 B$/);
     // The caption has the keys: typing goes there straight away, and Enter sends.
     expect(within(open).getByTestId("attachment-caption")).toHaveFocus();
     await user.keyboard("boo, a ghost{Enter}");
@@ -66,7 +68,7 @@ describe("a pasted picture or file", () => {
     const [sent] = onSendFile.mock.calls[0];
     expect(sent.name).toMatch(/^Pasted image .*\.png$/);
     expect(sent.type).toBe("image/png");
-    expect([...new Uint8Array(await sent.arrayBuffer())]).toEqual([137, 80, 78, 71]);
+    expect([...new Uint8Array(await sent.arrayBuffer())]).toEqual(PNG);
     expect(onSendFile.mock.invocationCallOrder[0]).toBeLessThan(onSend.mock.invocationCallOrder[0]);
     expect(sheet()).toBeNull();
     // Back to writing.
@@ -211,17 +213,17 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
   afterEach(() => { fakeEngine.readClipboardFiles = undefined; });
 
   it("a picture only the platform could see opens the sheet and sends as a PNG", async () => {
-    fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, [137, 80, 78, 71, 13, 10, 26, 10], "image/png")]);
+    fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, PNG, "image/png")]);
     const { user } = composer();
     expect(paste(field(), {})).toBe(false);
     const open = await screen.findByTestId("attachment-sheet");
     // The sheet draws the picture a moment after it opens (its address is made once it is on screen).
-    expect((await within(open).findByTestId("attachment-name")).textContent).toMatch(/^Pasted image .*\.png · 8 B$/);
+    expect((await within(open).findByTestId("attachment-name")).textContent).toMatch(/^Pasted image .*\.png · 29 B$/);
     await user.click(within(open).getByTestId("attachment-send"));
     await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
     const [sent] = onSendFile.mock.calls[0];
     expect(sent.type).toBe("image/png");
-    expect([...new Uint8Array(await sent.arrayBuffer())]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    expect([...new Uint8Array(await sent.arrayBuffer())]).toEqual(PNG);
   });
 
   it("files copied in a file manager keep their names and get their types", async () => {
@@ -302,7 +304,7 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
     expect(screen.getAllByRole("alert")).toHaveLength(1);
     expect(huge.read).not.toHaveBeenCalled();
     // What was waiting still is.
-    expect(within(open).getByTestId("attachment-image")).toBeInTheDocument();
+    expect(await within(open).findByTestId("attachment-image")).toBeInTheDocument();
   });
 
   /** A read of the clipboard that ends when the test says so. */
@@ -376,11 +378,11 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
 
   it("a picture copied in a web browser opens the sheet with the picture the platform reads, not its address", async () => {
     for (const copy of [browserCopy(), firefoxCopy()]) {
-      fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, [137, 80, 78, 71], "image/png")]);
+      fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, PNG, "image/png")]);
       const { unmount } = composer();
       expect(paste(field(), copy)).toBe(false);
       const open = await screen.findByTestId("attachment-sheet");
-      expect((await within(open).findByTestId("attachment-name")).textContent).toMatch(/^Pasted image .*\.png · 4 B$/);
+      expect((await within(open).findByTestId("attachment-name")).textContent).toMatch(/^Pasted image .*\.png · 29 B$/);
       expect(field().value).toBe("");
       expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
       unmount();

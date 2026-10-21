@@ -1,4 +1,5 @@
 import { captureCamera } from "./mediaDevices";
+import { decodablePicture } from "./decodablePicture";
 
 /**
  * Reading a QR code, shared by Join and the wallet's Send: from the camera, frame by frame, or from a picture (opened,
@@ -24,6 +25,7 @@ export const QR_IMAGE_MAX = 12 * 1024 * 1024;
  */
 export async function readQrImage(file: Blob): Promise<string | null> {
   const jsQR = await qrDecoder();
+  if (!await decodablePicture(file)) throw new Error("This picture cannot be read here");
   const bitmap = await createImageBitmap(file);
   const decode = frameDecoder(jsQR);
   try {

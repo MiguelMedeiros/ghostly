@@ -332,8 +332,10 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
   it("names a Desktop app window after the app and the contact, and the app alone outside a chat", async () => {
     windowIs(false);
     panel();
-    const t = ((key: string, vars: Record<string, string>) => key === "apps.view.with" ? `${vars.title} with ${vars.name}` : key) as never;
+    const t = ((key: string, vars: Record<string, string>) => key === "apps.view.with" ? `${vars.title} with ${vars.name}` : key === "apps.view.withSharing" ? `${vars.title} · sharing a file with ${vars.name}` : key) as never;
     expect(appWithContact("Chess", "link-1", t)).toBe("Chess with Ana");
+    expect(appWithContact("Chess", "link-1", t, true)).toBe("Chess · sharing a file with Ana");
+    expect(appWithContact("Chess", null, t, true)).toBe("Chess");
     expect(appWithContact("Chess", null, t)).toBe("Chess");
     expect(appWithContact("Chess", "link-other", t)).toBe("Chess");
   });
