@@ -620,7 +620,9 @@ export class CallManager {
     this.stopEarly(call);
     call.early?.close();
     call.early = null;
-    await call.socket?.close();
+    // The program reads EOF now; one that keeps its side open does not hold the hang-up or call.ended (only a
+    // stopping daemon waits for it, below).
+    const closing = call.socket?.close();
     if (tell) {
       await this.send(call.chat, { t: "h", ts: this.stamp(call.chat) }).catch(() => {});
       if (!this.stopping) {
@@ -641,6 +643,7 @@ export class CallManager {
         ...(call.connectedAt !== null ? { duration: this.now - call.connectedAt } : {}),
       });
     }
+    if (this.stopping) await closing;
   }
 
   /** Refuses a call placed too soon after this side's last unanswered one in the chat (`CALL_PACE_MS`). */
