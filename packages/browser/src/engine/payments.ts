@@ -45,6 +45,8 @@ const OPEN_REQUESTS = 50;
  * settled, so nothing is said until it does (`onLightningResolved`). Kept until a minute after the invoice expires,
  * when the payee's wallet lets go of a held invoice anyway.
  */
+/** On-chain requests answered to asks, in an hour, across every chat (`onPaymentAsk`): each hands out an address. */
+export const ASKED_ONCHAIN_PER_HOUR = 10;
 interface InvoiceClaim { linkId: string; invoice: string; pending?: boolean; expiresAt: number }
 const INVOICE_CLAIMS_KEY = "invoicePaidClaims";
 const sameClaim = (a: InvoiceClaim, b: InvoiceClaim) => a.linkId === b.linkId && a.invoice.toLowerCase() === b.invoice.toLowerCase();
@@ -202,6 +204,9 @@ class PaymentBook extends Map<string, StoredPayment> {
     return this.shown ??= Object.fromEntries([...this].map(([id, { token: _token, ...view }]) => [id, view]));
   }
 }
+/** How many looks at the wallet's invoices a chat's "I paid your invoice" frames make every 3 s (`receiveInvoicePaid`). */
+export const INVOICE_LOOKS_PER_CHAT = 5;
+
 export class PaymentDesk {
   private readonly payments = new PaymentBook();
   private readonly paying = new Map<string, Promise<void>>();
@@ -717,6 +722,11 @@ export class PaymentDesk {
     this.lastAskFrom.set(linkId, now);
     const open = [...this.payments.values()].filter((p) => p.linkId === linkId && p.kind === "request" && p.direction === "out" && p.state === "pending" && p.ask).length;
     if (open >= 5 || !/^[1-9]\d{0,15}$/.test(ask.amount.value)) return;
+    // An on-chain answer hands out an address of the wallet, which its sync reads from then on: at most
+    // ASKED_ONCHAIN_PER_HOUR in an hour across every chat and community member, whoever asks. Forty members asking
+    // five times each handed out 200 (agents#1633). The person's own Request is not counted, nor bounded.
+    if (ask.method === "bitcoin" && [...this.payments.values()].filter((p) => p.kind === "request" && p.direction === "out" && p.ask
+      && p.target?.method === "bitcoin" && now - p.createdAt < 3_600_000).length >= ASKED_ONCHAIN_PER_HOUR) return;
     if (ask.amount.asset !== (ask.method === "usdt" ? "usdtbase" : UNIT)) return;
     if (!allows(link, ask.method)) return;
     // Asked on a network this chat has off for that way of paying: no answer, as for a way that is off.
@@ -1073,6 +1083,8 @@ export class PaymentDesk {
   private readonly lastCheckFrom = new Map<string, number>();
   /** `receiveInvoicePaid`'s last look, by `<link id>:<invoice>`: only the last 3 seconds' are kept. */
   private readonly lastInvoiceCheck = new Map<string, number>();
+  /** The looks `receiveInvoicePaid` made for each chat in the last 3 s (at most `INVOICE_LOOKS_PER_CHAT`). */
+  private readonly invoiceLooks = new Map<string, number[]>();
 
   /**
    * "I paid it from another wallet": the contact's app is asked to look at its wallet now. Nothing here
@@ -1124,7 +1136,9 @@ export class PaymentDesk {
    * The contact says it paid an invoice of ours it found in the chat, with no request: a Receive-screen invoice is
    * held on a test mint until then (StoredQuote `held`), and that one alone is let go. A request's invoice is spoken
    * for by its own contact only (`receiveCheck`). Bounded: one look every 3 seconds per invoice of a chat, so two
-   * invoices paid one right after the other are both let go.
+   * invoices paid one right after the other are both let go, and `INVOICE_LOOKS_PER_CHAT` looks every 3 seconds per
+   * chat: the invoice is the contact's text, and a frame per text made each one a read of every invoice of the wallet
+   * (2,000 frames, 2,000 reads), each also walking every key of the last 3 s (agents#1586).
    */
   private async receiveInvoicePaid(linkId: string, link: PaymentLink, invoice: string): Promise<void> {
     if (!link.allowsPayment("lightning")) return;
@@ -1132,8 +1146,14 @@ export class PaymentDesk {
     const wanted = invoice.trim().toLowerCase();
     const key = `${linkId}:${wanted}`;
     if (now - (this.lastInvoiceCheck.get(key) ?? 0) < 3_000) return;
-    for (const [seen, at] of this.lastInvoiceCheck) if (now - at >= 3_000) this.lastInvoiceCheck.delete(seen);
+    const looks = (this.invoiceLooks.get(linkId) ?? []).filter((at) => now - at < 3_000);
+    if (looks.length >= INVOICE_LOOKS_PER_CHAT) { this.invoiceLooks.set(linkId, looks); return; }
+    this.invoiceLooks.set(linkId, [...looks, now]);
+    // Oldest first (each key is set again only once it went, at the end): the ones gone are at the front.
+    for (const [seen, at] of this.lastInvoiceCheck) { if (now - at < 3_000) break; this.lastInvoiceCheck.delete(seen); }
+    this.lastInvoiceCheck.delete(key);
     this.lastInvoiceCheck.set(key, now);
+    for (const [chat, times] of this.invoiceLooks) if (chat !== linkId && times.every((at) => now - at >= 3_000)) this.invoiceLooks.delete(chat);
     try {
       const quote = (await this.wallet.quotes()).find((q) => q.held && !q.paymentId && q.invoice.toLowerCase() === wanted);
       if (quote) await this.wallet.vouch(quote.invoice);

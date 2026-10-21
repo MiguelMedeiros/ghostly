@@ -128,6 +128,9 @@
       "knocked": "Knock left for the admin's app",
       "knockedCommunity": "Knock sent to the group"
     },
+    "tryAgain": "Try again",
+    "unanswered": "This link did not answer",
+    "unansweredBody": "Nobody let you in for an hour, so this app stopped knocking. The link may have been replaced or turned off: ask for the current one, or try again.",
     "waiting": "Waiting to be let in"
   },
   "leave": {
@@ -210,6 +213,7 @@
     "makeAdmin": "Hand over admin",
     "missing": "{{count}} missing",
     "missingHint": "Messages of this epoch that have not arrived yet",
+    "missingOne": "{{count}} missing",
     "needsBothHint": "Groups need both apps connected and updated",
     "needsUpdate": "Needs an updated Ghostly",
     "noContacts": "Every paired contact is already in, or you have none yet.",

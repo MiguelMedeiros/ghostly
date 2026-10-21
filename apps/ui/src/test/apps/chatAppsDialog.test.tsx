@@ -109,6 +109,17 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     expect(screen.getByTestId("chat-app-open")).toBeDisabled();
   });
 
+  it("an app already running in this chat is shown again, with no second card to the contact", async () => {
+    run = { status: "ok" };
+    const opener = vi.fn(async () => "shown" as const);
+    setAppOpener(opener);
+    const { user, onClose } = await dialog();
+    await user.click(screen.getByTestId("chat-app-open"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(opener).toHaveBeenCalledWith(REF, "link-1", {});
+    expect(sent).not.toHaveBeenCalled();
+  });
+
   it("an app that may run shows its tagline", async () => {
     run = { status: "ok" };
     await dialog();

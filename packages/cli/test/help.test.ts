@@ -59,6 +59,18 @@ describe("help", () => {
     expect(whole.stdout).not.toContain("packages/cli/");
   });
 
+  // agents#1606: `group send`/`group edit`, `identity add` and `call pipe` sat after the whole table, far from their own.
+  it("keeps each word's commands together in the whole list", async () => {
+    const lines = (await ghostly(["help"], { env: { GHOSTLY_HOME: home("help-order") } })).stdout.split("\n");
+    const commands = lines.filter((line) => /^ {2}[a-z]/.test(line)).map((line) => line.trim().split(/\s+/).slice(0, 2));
+    for (const word of ["group", "identity", "call"]) {
+      const at = commands.flatMap(([first, second], i) => (first === word && /^[a-z]/.test(second ?? "") ? [i] : []));
+      expect(at.length, word).toBeGreaterThan(3);
+      expect(at.at(-1)! - at[0], `${word}: ${at.join(" ")}`).toBe(at.length - 1);
+    }
+    for (const usage of ["group send", "group edit", "identity add", "call pipe"]) expect(commands.some(([a, b]) => `${a} ${b}` === usage), usage).toBe(true);
+  });
+
   it("a group's first word alone, or with a word it does not take, names the group's commands", async () => {
     const alone = await ghostly(["chat"]);
     expect(alone.code).toBe(2);

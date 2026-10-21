@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type MouseEvent as ReactMouseEvent } from "react";
-import { profileGlance, type ProfileGlance } from "../lib/profileData";
+import { changesGlance, profileGlance, recounted, type ProfileGlance } from "../lib/profileData";
 import { currentProfile, listProfiles, type ProfileEntry } from "../lib/profiles";
 import { PEEK_EVENT } from "../lib/profilePeek";
 
@@ -31,17 +31,36 @@ export function useProfileGlances(): { current: ProfileEntry; others: OtherProfi
   const [state, setState] = useState(() => ({ current: currentProfile(), others: listProfiles().filter((p) => p.id !== currentProfile().id).map((entry) => ({ entry }) as OtherProfile) }));
   useEffect(() => {
     let alive = true;
+    // The last load's number while it reads, 0 once its glances are in.
+    let loads = 0, reading = 0;
     const load = () => {
       const current = currentProfile();
       const entries = listProfiles().filter((p) => p.id !== current.id);
+      const mine = reading = ++loads;
       setState((old) => ({ current, others: entries.map((entry) => ({ entry, glance: old.others.find((o) => o.entry.id === entry.id)?.glance })) }));
       void Promise.all(entries.map(async (entry) => ({ entry, glance: await profileGlance(entry.id).catch(() => undefined) })))
-        .then((others) => { if (alive) setState({ current, others }); });
+        .then((others) => { if (alive && mine === reading) { reading = 0; setState({ current, others }); } });
+    };
+    // Another window's write: only one that can change another profile's glance (not each key typed in a draft); a
+    // chat or read mark recounts that profile's unread messages, without opening its database again.
+    const onStorage = (e: Event) => {
+      const key = e instanceof StorageEvent ? e.key : null;
+      const current = currentProfile().id;
+      const changes = listProfiles().filter((p) => p.id !== current).map((p) => ({ id: p.id, change: changesGlance(key, p.id) }));
+      const ids = new Set(changes.filter((c) => c.change === "unread").map((c) => c.id));
+      // A load still reading may have counted before this write: a new one counts after it.
+      if (changes.some((c) => c.change === "glance") || (ids.size && reading)) return load();
+      if (ids.size) setState((old) => ({ ...old, others: old.others.map((o) => (ids.has(o.entry.id) && o.glance ? { ...o, glance: recounted(o.entry.id, o.glance) } : o)) }));
     };
     load();
-    const events = ["profiles-updated", "settings-updated", "storage", PEEK_EVENT];
+    const events = ["profiles-updated", "settings-updated", PEEK_EVENT];
     for (const name of events) window.addEventListener(name, load);
-    return () => { alive = false; for (const name of events) window.removeEventListener(name, load); };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      alive = false;
+      for (const name of events) window.removeEventListener(name, load);
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
   const othersUnread = state.others.reduce((sum, o) => sum + (o.glance?.unread ?? 0), 0);
   const othersFresh = state.others.reduce((sum, o) => sum + (o.glance?.fresh ?? 0), 0);

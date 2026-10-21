@@ -17,17 +17,22 @@ const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
  */
 export function ghostlyHome(option?: string): string {
   if (option === "") throw new CliError("usage", "--home needs a folder");
-  return userPath(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")));
+  return userPath(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")), true);
 }
 
 /**
  * A path the CLI was given, made absolute. A `~` the shell left alone (`--home=~/bots`, a quoted variable, a unit
  * file's `Environment=` line) is the user's home, as the shell reads it: it was a folder named `~` in the current one.
- * `~user/…` is a usage error, not a guess at another user's home.
+ * `~user/…` is a usage error, not a guess at another user's home, unless it is there under this folder. Any other name
+ * that starts with `~` is a file here, as the shell and every other tool read it (`~notes.txt`, Office's
+ * `~$report.docx`, a new `~cursor`): all of them were refused (agents#1604). `home`: the profiles' folder, where a bare
+ * `~bob` that is not there is refused too, as a new profile would be made in a folder of that name.
  */
-export function userPath(path: string): string {
+export function userPath(path: string, home = false): string {
   if (path === "~" || path.startsWith("~/")) return join(homedir(), path.slice(1));
-  if (path.startsWith("~")) throw new CliError("usage", `${path}: ~user is not read here: write the folder in full`);
+  if (path.startsWith("~") && (home || path.includes("/")) && !existsSync(resolve(path))) {
+    throw new CliError("usage", `${path}: ~user is not read here: write the ${home || path.endsWith("/") ? "folder" : "path"} in full`);
+  }
   return resolve(path);
 }
 
