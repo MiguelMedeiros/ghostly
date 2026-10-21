@@ -71,12 +71,13 @@
 .ng-tabs-current {
   display: none;
 }
+/* Its own name: dev-steps.css, on the same page, registers --p as not inherited, which held this bar at 0. */
 .ng-tab-bar {
   position: absolute;
   left: 0;
   bottom: 0;
   height: 2px;
-  width: calc(var(--p, 0) * 100%);
+  width: calc(var(--ng-p, 0) * 100%);
   background: var(--cyan);
   transition: width 0.12s linear;
 }
