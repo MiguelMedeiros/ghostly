@@ -4,6 +4,63 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.5.4
+
+### Fixed
+
+**Android**
+
+- A file shared to Ghostly from another app when the phone's storage is already full now gets the same words as one that fills it partway through: the Share to… picker says there is no room on this device for it, and to free some space, then share it again, not that Ghostly could not read it.
+- When a share still copying into the Android app came in after a newer one whose only file was too large, could not be read or had no room, the Share to… picker showed the first share's files and no longer said the newer file was left out. It now says so.
+
+**Apps**
+
+- On a link slower than a contact's mini-app sends, the chat's texts no longer wait 0.5 to 2.3 seconds behind the app's data. An app now sends only while at most 64 KiB of its data has not yet reached the contact, and is told `too-fast` past that.
+
+**Chat**
+
+- In Arabic, counts now use the right grammatical form: "ملفان" for two files, "32 ملفًا" from 11 to 99 and "100 ملف" from 100 up, not "ملفات" for every number. This covers files shared to the app, forwarded and new messages, group members, people typing, the join queue and the wait after sending many files to a group.
+- When a contact turns their network back on, a chat whose first connection attempt fails at once (their app had not opened its connection point again yet) tries again 3 seconds later, not 40 seconds later. Before, that chat came back about 40 seconds after the others.
+- On Linux, when a contact deletes for everyone the texts you had not read yet, the chat's "New message" notification goes with them, as it does when you read the chat. It no longer stays and opens a chat with nothing new.
+- A chat paired while all native connection slots belong to chats used in the last 2 minutes now goes live by itself once one of those chats has been quiet for 2 minutes, as its error says. Before, on a CLI daemon (or a Desktop where you left the new chat), it stayed on the DHT until someone sent a message in it. This applies for its first 10 minutes or until it has been live once.
+- In a long chat, a contact's reply or pin on a picture, file or payment of yours, and a pin you make, show as quickly as one on a text. Before, each one read the chat's whole history from the store first.
+
+**Wallets**
+
+- A payment to a Testnet on-chain (BDK) request made after more than 20 unpaid requests is now found when the wallet is restored from its recovery phrase. Once 19 handed-out addresses are waiting unpaid, the wallet gives out one of them again (the one shown longest ago, and only after an hour) instead of a new address. Before, the restore stopped looking after 20 unused addresses in a row, and every address ever handed out was checked again at every sync.
+- The Testnet on-chain wallet now answers at most 10 contacts' or community members' "I want to pay you" asks per hour with a new on-chain address, across all chats. Before, each community member could make it hand out five addresses without you doing anything (200 in a group of 40), and the wallet checked each of them on the network every 15 seconds from then on. Requests you make yourself are not limited.
+- On the Linux desktop app, a picture of a QR pasted with Ctrl+V in a wallet's Send is read, as Join reads one: its invoice or address opens its review. Before, the paste did nothing and said nothing. A picture that is too large or cannot be read is said.
+
+**Calls**
+
+- On a phone in a video call, the notice that someone is sharing their screen now sits below your own camera picture when the camera is held upright, instead of covering its lower part.
+- In the CLI, a hang-up reaches the contact at once even when the bot's program keeps its audio socket open after the call ends. Before, `call hangup` waited 2 seconds and the contact heard silence on a call that still said connected for 2 to 4 seconds.
+
+**CLI**
+
+- The CLI's secret guard now also covers `ghostly engine preparePayment`, `fedimintInvoice` and `lnurlInvoice`, and the `--comment` of `ghostly pay` to a Lightning address. A memo or comment that looks like a recovery phrase or a private key stops with exit 5 unless `--force`, as `chat pay --memo` already did. Before, these paths sent it to the contact or the address's owner unchecked. `pay` gains `--force`.
+- `chat pay` and `chat request` to a contact that has no wallet yet are refused with `refused`, "Your contact has no wallet yet: they need one to pay or be paid", and `details.reason` `contact_no_wallet`. Before, both answered `engine`, "This contact does not support payments. Both peers need an updated Ghostly.", even when both ran the same release. A contact with payments off in the chat, or an older app, is `refused` with `contact_payments_off`. The payment-bot example tells the person in the chat they have no wallet yet, instead of passing on the update advice.
+- `ghostly daemon restart` (and `daemon --detach`) while a bot keeps running one-shot commands on the profile no longer stops the daemon and then fails `busy` (or "The daemon did not start"), leaving no daemon at all: a command that holds the profile for a moment is waited for, within `--timeout`. When the start does fail after the stop, the error says the daemon was stopped and to start it again with `ghostly daemon --detach`.
+
+**Groups**
+
+- When a community hub that carried many members closes its app, those members are back on another hub sooner: a member whose request was pushed out of that hub's full waiting list asks again right after the hub has read it, not 20 seconds later. Before, with 12 members cut off at once, 6 got back after 46 s; now all 12 are back within 33 s.
+- When a community hub closes its app, the hub its members ask next lets them in sooner when its relays briefly hold back its look at who is asking: it looks again as soon as the hold ends, not at its next turn up to 30 seconds later.
+- A group link nobody answers for an hour stops knocking: its row and its page say the link did not answer, with Try again, so a few links that were replaced, turned off or whose group is gone no longer read the relays for as long as the app runs. Try again, opening the link again or the app's next start knock again, for another hour.
+- A private group's connection to a member no longer loses its newest offer or answer when a relay refuses it as no newer than the copy it holds (`409 Conflict` in the console): the packet goes again at once, dated past that copy, and a connection that starts again (on a VPN, after WebRTC gave up) dates its packets past its last ones. Before, the connection could wait minutes for a later attempt to get through.
+- In a group's member list, the warning about a single message that has not arrived now uses the singular in French, Spanish and Italian ("1 manquant", "falta 1", "1 mancante"), not "1 manquants", "1 faltan" or "1 mancanti".
+- A refusal shown in a group's notice (Rotate keys, Share link) no longer stays on screen when you open another group from the side list, where it read as if it were about that group and hid that group's own line ("You were removed from this group").
+- A bot that asks a question with answer-once buttons in a long group no longer reads the group's whole history for every member's answer to check whether that member already answered: it reads it at the first answer only. Before, 255 answers handed back at once in a group of 10,000 messages took about 15 seconds to take in on the CLI instead of half a second.
+
+**Everywhere**
+
+- With two profiles open in two windows, a message sent or read in one no longer makes the other open the first profile's database again for its account switcher: it counts that profile's unread messages again and keeps its picture.
+- Starting the app read the state of every stored file one at a time, so chats and groups with many files held the chat list back. Each chat's and group's files are now read at once.
+
+**Website**
+
+- On the Developers page, the negotiation demo's scenario that is playing shows its progress as a growing line again. On a phone, each scenario dot is now a plain number in its centre. Before, three of the four dots showed a second ring with the number off centre.
+
 ## 1.5.3
 
 ### Security
