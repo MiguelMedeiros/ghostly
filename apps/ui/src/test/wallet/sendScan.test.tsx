@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bech32 } from "@scure/base";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
@@ -6,7 +6,7 @@ import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/t
 import { CashuWallet } from "../../components/wallet/CashuWallet";
 import { networkState } from "../../components/walletCardData";
 import { servicesPlatform, type LightningAddressInfo, type WalletPlatform, type WalletState } from "../../lib/platform";
-import { walletView } from "../fakeEngine";
+import { fakeEngine, walletView } from "../fakeEngine";
 import { liveMainnetInvoice, mint, REAL_MINT } from "../payments/fixtures";
 import { renderApp } from "../render";
 
@@ -90,6 +90,35 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     expect(await screen.findByTestId("wallet-error")).toBeInTheDocument();
     expect(screen.getByTestId("wallet-pay-review")).toBeInTheDocument();
     expect(screen.queryByTestId("wallet-send-result")).not.toBeInTheDocument();
+  });
+
+  it("a picture the Linux app's webview hides from a paste (Ctrl+V shows the page nothing) is read through the app", async () => {
+    qr.text = invoice;
+    const nothing = { files: [], types: [], items: [], getData: () => "" };
+    const shot = (size: number) => ({ name: null, size, mime: "image/png", read: vi.fn(async () => new Uint8Array([137, 80, 78, 71])), done: vi.fn() });
+    fakeEngine.readClipboardFiles = vi.fn(async () => [shot(4)]);
+    const quoteInvoice = vi.fn(async () => ({ quote: "q-4", mint: TEST_MINT, amount: 21, feeReserve: 0 }));
+    const { user } = show({ quoteInvoice });
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    fireEvent.paste(screen.getByTestId("wallet-pay-input"), { clipboardData: nothing });
+    expect(await screen.findByTestId("wallet-pay-review")).toHaveTextContent("Pay 21 test sats");
+    expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+    expect(quoteInvoice).toHaveBeenCalledWith(invoice, "cashu");
+  });
+
+  it("a picture read through the app that is too large, or a paste the app cannot read, is said", async () => {
+    const huge = { name: null, size: 64 * 1024 * 1024, mime: "image/png", read: vi.fn(async () => new Uint8Array()), done: vi.fn() };
+    fakeEngine.readClipboardFiles = vi.fn(async () => [huge]);
+    const { user } = show({});
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    fireEvent.paste(screen.getByTestId("wallet-pay-input"), { clipboardData: { files: [], types: [], items: [], getData: () => "" } });
+    expect(await screen.findByTestId("wallet-send-scan-error")).toHaveTextContent("Choose an image smaller than 12 MB.");
+    expect(huge.read).not.toHaveBeenCalled();
+    // A browser's "Copy image" (its HTML only) whose picture the app fails to read.
+    fakeEngine.readClipboardFiles = vi.fn(async () => { throw "Clipboard unavailable"; });
+    const copied = { files: [], types: ["text/html"], items: [], getData: (type: string) => type === "text/html" ? "<img src=\"https://example.com/qr.png\">" : "" };
+    fireEvent.paste(screen.getByTestId("wallet-pay-input"), { clipboardData: copied });
+    await waitFor(() => expect(screen.getByTestId("wallet-send-scan-error")).toHaveTextContent("Could not read"));
   });
 
   it("Paste: a Lightning address goes to its steps, whose amount shows the balance and a Max", async () => {

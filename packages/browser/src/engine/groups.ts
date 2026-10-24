@@ -381,6 +381,12 @@ export function countWaitingJoin(host: object, groupId: string, now: number, wai
   for (const [id, at] of joins) if (now - at > WAITING_JOIN_SEEN_MS) joins.delete(id);
   return joins.size;
 }
+/**
+ * A link join nobody answered for this long in a run stops: no knock, no entry session reading the relays, and its row
+ * says the link did not answer, with Try again (`Groups.accept`). The app's next start knocks again, for as long.
+ * Knocking for good, a few links nobody would answer kept taking the relays' minute from the person's chats.
+ */
+export const JOIN_GIVE_UP_MS = 60 * 60_000;
 /** The wait between a joiner's knocks, `waited` after it opened the link, one of `joins` waiting (`JOIN_KNOCK_WAIT_MAX_MS`). */
 export function joinKnockWait(waited: number, timings: Pick<EntryTimings, "knockMs" | "slowKnockMs" | "patienceMs">, joins: number): number {
   if (waited <= timings.patienceMs) return timings.knockMs;
@@ -569,6 +575,9 @@ export class Groups {
   /** Joiner side: when a knock just written is read back (`KNOCK_VERIFY_MS`); none once it was found there. */
   private readonly knockCheckAt = new Map<string, number>();
   /** Joiner side: knocks written in a row without one found in the record since (`KNOCK_VERIFIES`). */
+  /** Joiner side: since when this run knocks with nobody answering (`JOIN_GIVE_UP_MS`), and the joins it gave up. */
+  private readonly knockingSince = new Map<string, number>();
+  private readonly gaveUp = new Set<string>();
   private readonly knockRewrites = new Map<string, number>();
   /** Per group, members met over their admission a moment ago: their edge is opened expecting them. */
   private readonly justMet = new Map<string, Set<string>>();
@@ -777,7 +786,7 @@ export class Groups {
       return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
         invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
           ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
-          ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
+          ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(this.gaveUp.has(group.id) && { unanswered: true }) } : {}) } };
     }
     const nicks = session.state.nicks;
     const entry = session.isAdmin ? this.entryOf(group) : undefined;
@@ -920,8 +929,11 @@ export class Groups {
   }
 
   async accept(groupId: string): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.knockAgain(groupId);
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to accept");
+    // A link nobody answered: Try again knocks again.
+    if (group.invitation.entry && !group.state) return this.knockAgain(group);
     if (group.invitation.takenBack) throw new Error("This invitation was taken back");
     if (!this.host.linkReady(group.invitation.linkId)) throw new Error("The contact who invited you is not connected. Try again when they are.");
     const seedB64 = group.invitation.seedB64 ?? createIdentity().seedB64;
@@ -1374,6 +1386,8 @@ export class Groups {
     this.knocked.delete(groupId);
     this.knockCheckAt.delete(groupId);
     this.knockRewrites.delete(groupId);
+    this.knockingSince.delete(groupId);
+    this.gaveUp.delete(groupId);
     this.justMet.delete(groupId);
     this.welcomed.delete(groupId);
     this.lingering.delete(groupId);
@@ -1460,7 +1474,9 @@ export class Groups {
     if (!link) throw new Error("This is not a link to a group");
     if (this.isCommunity(link.g)) throw new Error("This group is joined with its current link");
     const existing = this.stored.get(link.g);
-    if (existing?.state?.status === "active" || existing?.invitation?.entry === link.host) return link.g;
+    if (existing?.state?.status === "active") return link.g;
+    // Opened again while joining: a join nobody answered (`giveUpJoin`) knocks again.
+    if (existing?.invitation?.entry === link.host) { if (!existing.state) await this.knockAgain(existing); return link.g; }
     if (existing?.invitation?.seedB64 && !existing.invitation.entry) throw new Error("You are already joining this group");
     // Opening a link never deletes what is kept or drops what a contact sent: a group I am out of (removed, forked) still
     // holds its history, and an invitation over a contact chat waits for my answer. Each is refused, and stays as it is.
@@ -1499,8 +1515,14 @@ export class Groups {
         if (group.declined) { await this.declineOwed(group, now); if (!group.state) continue; }
         if (group.invitation?.takenBack && !group.state) { if (now - group.invitation.takenBack > LEFT_KEPT_MS) await this.forget(group.id, false); continue; }
         if (group.invitation?.entry && !group.state) {
+          if (this.gaveUp.has(group.id)) continue;
           // Once the admin's app is on the entry session, knocking only spends the relays' budget its signaling needs.
           const answered = this.host.linkReady(group.invitation.linkId) || !!this.host.linkSeen?.(group.invitation.linkId);
+          const since = this.knockingSince.get(group.id);
+          if (since === undefined || answered) this.knockingSince.set(group.id, now);
+          // The first tick of a run: the entry session a join gave up in the run before is back.
+          if (since === undefined) await this.reopenEntry(group).catch(() => {});
+          else if (!answered && now - since > JOIN_GIVE_UP_MS) { await this.giveUpJoin(group, now); continue; }
           const waited = now - group.createdAt, joins = countWaitingJoin(this.host, group.id, now, !answered && waited > this.timings.patienceMs);
           const every = joinKnockWait(waited, this.timings, joins);
           if (!answered && (now - (this.lastKnock.get(group.id) ?? 0) >= every || now >= (this.knockCheckAt.get(group.id) ?? Infinity))) await this.knock(group, now).catch(() => {});
@@ -1669,6 +1691,32 @@ export class Groups {
     this.welcomed.delete(groupId);
     const invited = this.invited.get(groupId);
     for (const linkId of this.host.entries(groupId).values()) { invited?.delete(linkId); await this.host.closeEdge(linkId); }
+  }
+
+  /** Nobody answered the link for `JOIN_GIVE_UP_MS`: the knocks stop, and the entry session with them, until Try again. */
+  private async giveUpJoin(group: StoredGroup, now: number): Promise<void> {
+    this.gaveUp.add(group.id);
+    countWaitingJoin(this.host, group.id, now, false);
+    traceJoin(group.id, "join.unanswered");
+    await this.host.closeEdge(group.invitation!.linkId).catch(() => {});
+    this.host.emit();
+  }
+
+  /** A link join given up (`giveUpJoin`) knocks again, as when the link was opened: Try again. */
+  private async knockAgain(group: StoredGroup, now = this.now()): Promise<void> {
+    if (!this.gaveUp.delete(group.id)) return;
+    this.knockingSince.set(group.id, now);
+    this.lastKnock.delete(group.id); this.knocked.delete(group.id); this.knockRewrites.delete(group.id);
+    await this.reopenEntry(group);
+    this.host.emit();
+    void this.knock(group, now).catch(() => {});
+  }
+
+  /** The joiner's side of the link's entry session, opened again where it is gone (the same key, so the same session). */
+  private async reopenEntry(group: StoredGroup): Promise<void> {
+    const invitation = group.invitation!;
+    if ([...this.host.entries(group.id).values()].includes(invitation.linkId)) return;
+    await this.host.openEntry({ g: group.id, host: invitation.entry! }, "guest", invitation.seedB64!, invitation.entry!);
   }
 
   private async knock(group: StoredGroup, now = Date.now()): Promise<void> {
@@ -1927,7 +1975,7 @@ export class Groups {
         await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
-          this.lastKnock.delete(g); this.knocked.delete(g);
+          this.lastKnock.delete(g); this.knocked.delete(g); this.knockingSince.delete(g);
           // The entry session reaches the admin, which reaches every member: while it is kept (above), the edges about
           // to open signal through it too (WISP 902 § Signaling through members).
           if (this.host.linkReady(linkId, GROUP_VERSION_SIGNALS)) this.signals.keep(g, linkId);

@@ -45,6 +45,8 @@ const OPEN_REQUESTS = 50;
  * settled, so nothing is said until it does (`onLightningResolved`). Kept until a minute after the invoice expires,
  * when the payee's wallet lets go of a held invoice anyway.
  */
+/** On-chain requests answered to asks, in an hour, across every chat (`onPaymentAsk`): each hands out an address. */
+export const ASKED_ONCHAIN_PER_HOUR = 10;
 interface InvoiceClaim { linkId: string; invoice: string; pending?: boolean; expiresAt: number }
 const INVOICE_CLAIMS_KEY = "invoicePaidClaims";
 const sameClaim = (a: InvoiceClaim, b: InvoiceClaim) => a.linkId === b.linkId && a.invoice.toLowerCase() === b.invoice.toLowerCase();
@@ -791,6 +793,11 @@ export class PaymentDesk {
     this.lastAskFrom.set(linkId, now);
     const open = [...this.payments.values()].filter((p) => p.linkId === linkId && p.kind === "request" && p.direction === "out" && p.state === "pending" && p.ask).length;
     if (open >= 5 || !/^[1-9]\d{0,15}$/.test(ask.amount.value)) return;
+    // An on-chain answer hands out an address of the wallet, which its sync reads from then on: at most
+    // ASKED_ONCHAIN_PER_HOUR in an hour across every chat and community member, whoever asks. Forty members asking
+    // five times each handed out 200 (agents#1633). The person's own Request is not counted, nor bounded.
+    if (ask.method === "bitcoin" && [...this.payments.values()].filter((p) => p.kind === "request" && p.direction === "out" && p.ask
+      && p.target?.method === "bitcoin" && now - p.createdAt < 3_600_000).length >= ASKED_ONCHAIN_PER_HOUR) return;
     if (ask.amount.asset !== (ask.method === "usdt" ? "usdtbase" : UNIT)) return;
     if (!allows(link, ask.method)) return;
     // Asked on a network this chat has off for that way of paying: no answer, as for a way that is off.

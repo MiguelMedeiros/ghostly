@@ -20,8 +20,11 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
     : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members }) : t("sidebar.group.invitedByUnknown", { members });
 }
 
-/** Whether Accept and Decline are offered: not answered yet, or accepted with no answer from the inviter's app. Not once taken back. */
-export const answerable = (invitation: Invitation | undefined) => !!invitation && !invitation.takenBack && (!invitation.accepted || !!invitation.unanswered);
+/**
+ * Whether Accept and Decline are offered: not answered yet, or accepted with no answer from the inviter's app. Not once
+ * taken back, nor for a join through a link (a link nobody answered offers Try again, `LinkTryAgain`).
+ */
+export const answerable = (invitation: Invitation | undefined) => !!invitation && !invitation.takenBack && !invitation.viaLink && (!invitation.accepted || !!invitation.unanswered);
 
 /** Who took the invitation back, and what to do: the words of a taken-back invitation's page. */
 function takenBackWords(group: GroupView, t: Translate): { title: string; next: string } {
@@ -123,6 +126,13 @@ export function InvitationButtons({ busy, answer, large = false }: Pick<ReturnTy
     <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }}
       className={`rounded-lg text-text-secondary hover:bg-surface-hover disabled:opacity-40 ${size}`}>{t("chat.file.decline")}</button>
   </>;
+}
+
+/** A group link nobody answered for an hour: its row's action, Try again, knocks again (`acceptGroupInvitation`). */
+export function LinkTryAgain({ busy, answer }: Pick<ReturnType<typeof useInvitationAnswer>, "busy" | "answer">) {
+  const { t } = useI18n();
+  return <button disabled={busy} data-testid="group-link-retry" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }}
+    className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.join.tryAgain")}</button>;
 }
 
 /** A taken-back invitation's only action: Delete (it says nothing to whoever took it back). */

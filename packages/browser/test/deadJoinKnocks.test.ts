@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { Groups, JOIN_KNOCK_WAIT_MAX_MS, joinKnockWait, type GroupStore, type GroupsHost } from "../src/engine/groups";
+import { Groups, JOIN_GIVE_UP_MS, JOIN_KNOCK_WAIT_MAX_MS, joinKnockWait, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { KNOCK_TTL_MS, createIdentity, encodeCommunityLink, encodeGroupEntryLink, toBase64Url, type GhostRecord } from "@ghostly/core";
 import type { StoredGroup } from "../src/shared/types";
 // covers: groups.link.join, groups.community.join
 
 /**
  * A link whose admin never answers (the link replaced or turned off, the group deleted, the admin's app gone): the
- * joiner's knocks cost the relays less the longer it waits, and one pace is shared by all such joins of an app.
+ * joiner's knocks cost the relays less the longer it waits, and one pace is shared by all such joins of an app. After an
+ * hour of a run it stops, until Try again, the link opened again or the app's next start.
  */
 
 function memoryStore(): GroupStore {
@@ -24,6 +25,8 @@ function joiner() {
   const pkarr = new Map<string, GhostRecord[]>();
   const requests: { op: "resolve" | "publish"; key: string; at: number }[] = [];
   let clock = Date.now();
+  /** The entry sessions open: id, and the group with the key it is pinned to. */
+  const entries = new Map<string, { g: string; peer: string }>();
   const host = {
     sendOnLink: () => { throw new Error("nobody there"); },
     linkReady: () => false,
@@ -31,21 +34,26 @@ function joiner() {
     contactName: () => undefined,
     edges: () => new Map(),
     openEdge: async () => "edge",
-    closeEdge: async () => {},
-    openEntry: async (_link: unknown, _role: unknown, _seed: unknown, key: string) => `entry:${key.slice(0, 8)}`,
-    entries: () => new Map(),
+    closeEdge: async (linkId: string) => { entries.delete(linkId); },
+    openEntry: async (link: { g: string }, _role: unknown, _seed: unknown, key: string) => { const id = `entry:${link.g}`; entries.set(id, { g: link.g, peer: key }); return id; },
+    entries: (g: string) => new Map([...entries].filter(([, e]) => e.g === g).map(([id, e]) => [e.peer, id])),
     publish: async (identity: { pubKeyZ32: string }, records: GhostRecord[]) => { requests.push({ op: "publish", key: identity.pubKeyZ32, at: clock }); pkarr.set(identity.pubKeyZ32, records); },
     resolve: async (key: string) => { requests.push({ op: "resolve", key, at: clock }); return pkarr.get(key) ?? null; },
     edgeNick: () => undefined,
     storeMessage: async () => {},
     emit: () => {},
   } as unknown as GroupsHost;
-  const groups = new Groups(host, memoryStore());
+  const store = memoryStore();
+  const groups = new Groups(host, store);
   return {
-    groups, requests,
+    groups, requests, entries,
+    /** The app starts again: a new engine reads what was stored; the entry sessions stay as the app kept them. */
+    async restart() { this.groups = new Groups(host, store); await this.groups.load(); return this.groups; },
     get now() { return clock; },
     /** Ticks the engine every second for `ms`. */
-    async run(ms: number) { for (const end = clock + ms; clock < end;) { clock += 1_000; await groups.tick(clock); } },
+    async run(ms: number) { for (const end = clock + ms; clock < end;) { clock += 1_000; await this.groups.tick(clock); } },
+    /** Requests since `at`. */
+    since(at: number) { return requests.filter(r => r.at > at).length; },
     /** Requests a minute over the last `ms`. */
     perMinute(ms: number) { return requests.filter(r => r.at > clock - ms).length / (ms / 60_000); },
   };
@@ -97,5 +105,55 @@ describe("a link join nobody answers", () => {
     await bob.groups.joinByLink(deadCommunity());
     await bob.run(20 * 60_000);
     expect(bob.perMinute(10 * 60_000)).toBeLessThanOrEqual(4.5);
+  });
+});
+
+describe("a link join nobody answered for an hour", () => {
+  for (const [kind, dead] of [["private group", deadPrivate], ["community", deadCommunity]] as const) {
+    it(`stops knocking and reading, says so, and Try again knocks again (${kind})`, async () => {
+      const bob = joiner();
+      const id = await bob.groups.joinByLink(dead());
+      await bob.run(JOIN_GIVE_UP_MS - 60_000);
+      expect(bob.groups.views()[0].invitation?.unanswered).toBeUndefined();
+      await bob.run(2 * 60_000);
+      // Over: no knock, and its entry session is closed (its reads with it), while the row says the link did not answer.
+      const over = bob.now;
+      expect(bob.groups.views()[0].invitation).toMatchObject({ viaLink: true, unanswered: true });
+      expect(bob.entries.size).toBe(0);
+      await bob.run(30 * 60_000);
+      expect(bob.since(over)).toBe(0);
+      // Try again: the entry session is back and a knock goes at once.
+      await bob.groups.accept(id);
+      await bob.run(1_000);
+      expect(bob.groups.views()[0].invitation?.unanswered).toBeUndefined();
+      expect(bob.entries.size).toBe(1);
+      expect(bob.requests.some(r => r.op === "publish" && r.at >= over + 30 * 60_000)).toBe(true);
+    });
+  }
+
+  it("opening the link again knocks again", async () => {
+    const bob = joiner();
+    const code = deadPrivate();
+    await bob.groups.joinByLink(code);
+    await bob.run(JOIN_GIVE_UP_MS + 60_000);
+    expect(bob.groups.views()[0].invitation?.unanswered).toBe(true);
+    const at = bob.now;
+    await bob.groups.joinByLink(code);
+    await bob.run(1_000);
+    expect(bob.groups.views()[0].invitation?.unanswered).toBeUndefined();
+    expect(bob.requests.some(r => r.op === "publish" && r.at >= at)).toBe(true);
+  });
+
+  it("the app's next start knocks again, its entry session opened again", async () => {
+    const bob = joiner();
+    await bob.groups.joinByLink(deadPrivate());
+    await bob.run(JOIN_GIVE_UP_MS + 60_000);
+    expect(bob.entries.size).toBe(0);
+    const at = bob.now;
+    await bob.restart();
+    await bob.run(5_000);
+    expect(bob.entries.size).toBe(1);
+    expect(bob.groups.views()[0].invitation?.unanswered).toBeUndefined();
+    expect(bob.since(at)).toBeGreaterThan(0);
   });
 });

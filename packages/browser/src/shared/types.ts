@@ -312,7 +312,8 @@ export interface GroupView {
    * was created long before).
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
    * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
-   * while that chat was up: the answer is offered again.
+   * while that chat was up: the answer is offered again. Through a link (`viaLink`): nobody answered it for an hour of
+   * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
   invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
