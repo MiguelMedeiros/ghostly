@@ -37,6 +37,7 @@
     "ask": "Ask {{name}} for a link to it",
     "contactCannot": "{{name}}'s app can't run apps yet",
     "installed": "Installed",
+    "join": "Join",
     "label": "App: {{title}}",
     "needsOnline": "{{title}} needs you both online",
     "noLink": "No link to install from",

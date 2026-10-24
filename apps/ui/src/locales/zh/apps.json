@@ -37,6 +37,7 @@
     "ask": "向 {{name}} 要一个链接",
     "contactCannot": "{{name}} 的应用还不能运行小应用",
     "installed": "已安装",
+    "join": "加入",
     "label": "应用：{{title}}",
     "needsOnline": "{{title}} 需要你们都在线",
     "noLink": "没有可安装的链接",

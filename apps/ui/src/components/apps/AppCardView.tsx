@@ -14,7 +14,8 @@ import { appErrorCode, appErrorText } from "../../lib/apps/errors";
  * An app card in a 1:1 chat (WISP 405 § An app, WISP 1200 § Apps sent in a chat): "Ana opened Chess", drawn from its
  * own data and nothing else. Every field is the sender's claim: the title and version as the sender's, a generic icon,
  * the publisher's fingerprint from `ref`, "Not checked yet". Nothing is fetched to show it: the bundle is fetched,
- * checked and shown on the install screen only when the person presses "Install and open", and installing opens it in
+ * checked and shown on the install screen only when the person presses Join (not "Install": the card invites the person
+ * into the app their contact opened), and installing opens it in
  * this chat. Once the app is installed here, the card says Open and names the installed app (its checked title, version
  * and icon), whatever the card calls it. While the contact is not live it says the app needs
  * you both online. A version a store of the person's removed does not open; the warning offers "Run anyway" (WISP 1200
@@ -68,7 +69,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       {error && <p role="alert" className="text-xs text-danger" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {app ? <Button variant="primary" data-testid="app-card-open" onClick={() => open()}>{t("apps.page.open")}</Button>
-          : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.install.installOpen")}</Button>
+          : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
             : <span className="text-xs text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
         {app && removed && <Button data-testid="app-card-run-anyway" onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>
