@@ -489,6 +489,8 @@ export class Communities {
       // Removed (or its admission lost): let in again by whoever is at the door, with the same key at the door it
       // knows, else with a fresh one, as any joiner; the history here stays.
       if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, door ? s.state.seedB64 : dialedKey(link), this.now()); return link.g; }
+      // Anything else (forked): opening a link never deletes what is kept. Refused as a private group refuses it.
+      throw new Error("You are out of this group and its history is still here. Delete it from this device to join with a link.");
     }
     if (existing) await this.forget(link.g);
     await this.startJoining(link, dialedKey(link), this.now());
