@@ -7,7 +7,7 @@ import { APP_URL, STORE_URL, serveStore, testStore } from "../support/appStore";
  * The Apps page and the app card (WISP 1200 § Discovery, § Apps sent in a chat; WISP 405 § An app), on the e2e suite's
  * build (VITE_APPS_TEST). A store at a raw.githubusercontent.com URL, routed in the test: Ana adds it, installs Chess
  * from it, and opens it in her chat with Bob. Bob gets the card, which asks nothing of any host until he presses
- * "Install and open"; then the install screen, and Chess opens in the chat for him too.
+ * "Join"; then the install screen, and Chess opens in the chat for him too.
  */
 
 async function setNickname(peer: Peer, nick: string): Promise<void> {

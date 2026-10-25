@@ -37,6 +37,7 @@
     "ask": "Demandez un lien à {{name}}",
     "contactCannot": "L'app de {{name}} ne lance pas encore d'apps",
     "installed": "Installée",
+    "join": "Rejoindre",
     "label": "App : {{title}}",
     "needsOnline": "{{title}} a besoin que vous soyez en ligne tous les deux",
     "noLink": "Pas de lien pour l'installer",
