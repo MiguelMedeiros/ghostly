@@ -37,6 +37,7 @@
     "ask": "{{name}} にリンクを頼む",
     "contactCannot": "{{name}} のアプリはまだアプリを実行できません",
     "installed": "インストール済み",
+    "join": "参加",
     "label": "アプリ：{{title}}",
     "needsOnline": "{{title}} には二人ともオンラインである必要があります",
     "noLink": "インストール用のリンクがありません",
