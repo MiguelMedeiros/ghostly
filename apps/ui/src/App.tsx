@@ -212,7 +212,7 @@ export function App() {
   useAppCommands();
   const { t } = useI18n();
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
-  useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), ...deviceWakeWords(t) });
+  useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), online: t("pwa.wakeOnlineNotice", { name: "{name}" }), onlineUnnamed: t("pwa.wakeOnlineNoticeUnnamed"), ...deviceWakeWords(t) });
   // Desktop: the computer stays awake for a handoff, and while the person keeps it so for a standby (WISP 06).
   useComputerAwake();
   const chats = useLoadedChats();
