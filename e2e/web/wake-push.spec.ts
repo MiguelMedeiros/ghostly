@@ -275,6 +275,48 @@ test("a call to a closed web app wakes it with \"Incoming call\", and rings once
 });
 
 /**
+ * Online notices (WISP 401 § Wake-up push, revision 2026-10-27): Bo's switch is on by default, so his target asks Ana's
+ * app for them (`o`). Ana's app starts again while Bo's is closed: 30 seconds later it posts one online wake-up, which
+ * Bo's worker shows as "<Ana's name> is online", under a tag of its own.
+ */
+test("a contact's app starting again tells a closed web app it is online", { tag: ["@feature:push.wake.online"] }, async ({ peer }) => {
+  test.skip(deployed, "the push service stand-in routes the sender's own post");
+  test.setTimeout(6 * 60_000);
+  const keys = subscriptionKeys();
+  const [ana, bo] = await Promise.all([peer("ana"), peer("bo", { serviceWorkers: "allow" })]);
+  await bo.context.grantPermissions(["notifications"], { origin: new URL(bo.page.url()).origin });
+  await standInPushManager(bo.context, { p256dh: keys.p256dh, auth: keys.authB64 });
+  const posts = await pushService(ana.context);
+  await bo.page.reload();
+  await expect(bo.page.getByTitle("New Chat")).toBeVisible();
+  await link(ana, bo);
+  await connect(ana, bo);
+  for (const p of [ana, bo]) await connected(p);
+  await bo.page.goto("/#/settings");
+  await bo.page.getByTestId("settings-wake").click();
+  await expect(bo.page.getByTestId("settings-wake-online")).toBeChecked();
+  await expect.poll(() => anaHasTarget(ana.page), { timeout: 60_000 }).toBe(true);
+  const [row] = await wakeTable(bo.page);
+  await bo.page.close();
+  await away(ana);
+  expect(posts).toHaveLength(0);
+
+  // Ana's app starts again: once its chats had their 30 s to go live, one online wake-up, and only one.
+  await ana.page.reload();
+  await expect.poll(() => posts.length, { timeout: 90_000 }).toBe(1);
+  const pushed = readPush(posts[0]!, keys);
+  expect(JSON.parse(pushed)).toEqual({ wake: 1, k: row!.token, o: 1 });
+  expect(posts[0]!.headers().ttl).toBe("300");
+  await ana.page.reload();
+  await ana.page.waitForTimeout(40_000);
+  expect(posts).toHaveLength(1);
+
+  const worker = await workerConsole(bo.context);
+  await worker.deliver(pushed);
+  await expect.poll(() => worker.shown()).toEqual([{ body: expect.stringMatching(/^.+ is online$/), tag: expect.stringContaining("wake-online"), path: row!.path }]);
+});
+
+/**
  * A private group (WISP 902 · Group Mesh § Wake-up push): Bo shares his subscription with Ana on their edge, and a
  * message of Ana's that names him wakes his closed app; one that does not name him posts nothing. Muting the group
  * tells Ana's app to forget it.

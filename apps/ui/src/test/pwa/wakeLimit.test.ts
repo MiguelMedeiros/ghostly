@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WAKE_NOTICE_GAP_MS, wakeNoticeDue } from "../../../../web/src/sw/policy";
 import { resetWakeLimitMemory, takeWakeSlot } from "../../../../web/src/sw/wakeLimit";
 
-// covers: push.wake.notify, push.wake.call
+// covers: push.wake.notify, push.wake.call, push.wake.online
 
 /**
  * The push worker's own limit on wake-ups (apps/web/src/sw/sw.ts): a contact's app keeps to one wake-up per 5 minutes,
@@ -20,7 +20,9 @@ afterEach(() => {
 
 describe("when a wake-up may show", () => {
   it("the first one always; then one call per 30 s and one message per 5 minutes", () => {
-    expect(WAKE_NOTICE_GAP_MS).toEqual({ call: 30_000, message: 300_000 });
+    expect(WAKE_NOTICE_GAP_MS).toEqual({ call: 30_000, message: 300_000, online: 1_800_000 });
+    expect(wakeNoticeDue(T0, "online", T0 + 1_799_999)).toBe(false);
+    expect(wakeNoticeDue(T0, "online", T0 + 1_800_000)).toBe(true);
     expect(wakeNoticeDue(undefined, true, T0)).toBe(true);
     expect(wakeNoticeDue(T0, true, T0 + 29_999)).toBe(false);
     expect(wakeNoticeDue(T0, true, T0 + 30_000)).toBe(true);
@@ -47,6 +49,13 @@ describe("the worker's record of what it showed", () => {
     expect(await takeWakeSlot("", "tok-b", false, T0 + 60_000)).toBe(true);
     expect(await takeWakeSlot("work", "tok-a", false, T0 + 60_000)).toBe(true);
     expect(await takeWakeSlot("", "tok-a", false, T0 + 300_001)).toBe(true);
+  });
+
+  it("counts online notices apart: one every 30 minutes, never taking a message's turn", async () => {
+    expect(await takeWakeSlot("", "tok-o", "online", T0)).toBe(true);
+    expect(await takeWakeSlot("", "tok-o", false, T0 + 1)).toBe(true);
+    expect(await takeWakeSlot("", "tok-o", "online", T0 + 10 * 60_000)).toBe(false);
+    expect(await takeWakeSlot("", "tok-o", "online", T0 + 30 * 60_000)).toBe(true);
   });
 
   it("keeps it in IndexedDB, so a worker started afresh still knows", async () => {

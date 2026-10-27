@@ -3,7 +3,7 @@ import { p256 } from "@noble/curves/nist.js";
 import { fromBase64Url, toBase64Url, utf8Decode } from "../src/bytes";
 import { KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import {
-  DEVICE_WAKE_TTL_SECONDS, WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_INTERVAL_MS, WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
+  DEVICE_WAKE_TTL_SECONDS, WAKE_CALL_TTL_SECONDS, WAKE_CAPABILITY, WAKE_ONLINE_TTL_SECONDS, WAKE_INTERVAL_MS, WakeLimiter, deviceWakeRequest, newWakeToken, parseWakeFrame, readWake, readWakePayload, relayRequest, wakeFrame, wakeRequest, type WakeTarget,
 } from "../src/pairedWake";
 import { decryptPushPayload, generateVapidKeys } from "../src/webPush";
 
@@ -30,6 +30,16 @@ describe("sharing a push subscription with a contact", () => {
     const frame = JSON.parse(JSON.stringify(wakeFrame(target)));
     expect(frame.t).toBe("paired-wake");
     expect(parseWakeFrame(frame)).toEqual(target);
+  });
+
+  it("says whether this side wants online notices (`o`, on unless turned off); an older side's frame has none", () => {
+    const { target } = subscription();
+    const frame = JSON.parse(JSON.stringify(wakeFrame({ ...target, online: true })));
+    expect(frame.w.o).toBe(1);
+    expect(parseWakeFrame(frame)).toEqual({ ...target, online: true });
+    expect(wakeFrame(target).w).not.toHaveProperty("o");
+    expect(parseWakeFrame({ t: "paired-wake", w: { ...wakeFrame(target).w, o: 0 } })).toEqual(target);
+    expect(parseWakeFrame({ t: "paired-wake", w: { ...wakeFrame(target).w, o: "1" } })).toEqual(target);
   });
 
   it("null says: forget what I shared", () => {
@@ -85,6 +95,19 @@ describe("the wake-up itself", () => {
     expect(readWake(text)).toEqual({ token: target.token, kind: "device" });
     // The device flag wins over a call's: a device never rings another.
     expect(readWake(JSON.stringify({ wake: 1, k: target.token, c: 1, d: 1 }))?.kind).toBe("device");
+  });
+
+  it("an online notice (revision 2026-10-27) says so and nothing more, and lives five minutes: a stale \"online\" is worse than none", () => {
+    const { target, secret, auth } = subscription();
+    const request = wakeRequest(target, Date.now(), "online");
+    expect(request.headers.TTL).toBe(String(WAKE_ONLINE_TTL_SECONDS));
+    expect(WAKE_ONLINE_TTL_SECONDS).toBe(300);
+    const text = utf8Decode(decryptPushPayload(request.body, secret, auth));
+    expect(JSON.parse(text)).toEqual({ wake: 1, k: target.token, o: 1 });
+    expect(readWake(text)).toEqual({ token: target.token, kind: "online" });
+    // A call or a device flag wins: an online notice never hides one.
+    expect(readWake(JSON.stringify({ wake: 1, k: target.token, c: 1, o: 1 }))?.kind).toBe("call");
+    expect(readWake(JSON.stringify({ wake: 1, k: target.token, d: 1, o: 1 }))?.kind).toBe("device");
   });
 
   it("the receiver reads nothing else as a wake-up", () => {

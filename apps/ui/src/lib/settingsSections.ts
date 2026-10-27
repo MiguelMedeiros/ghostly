@@ -84,6 +84,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "notifications", label: "settings.cues.interface", words: "settings.cues.interfaceHint" },
   { section: "notifications", label: "settings.systemNotifications", words: "settings.searchWords.systemNotices" },
   { section: "notifications", label: "pwa.wake", words: "settings.searchWords.wake", needs: "wake" },
+  { section: "notifications", label: "pwa.wakeOnline", needs: "wake" },
   { section: "media", label: "settings.media.microphone", words: "settings.searchWords.microphone", needs: "media" },
   { section: "media", label: "settings.media.camera", words: "settings.searchWords.camera", needs: "media" },
   { section: "media", label: "settings.media.speaker", words: "settings.searchWords.speaker", needs: "media" },

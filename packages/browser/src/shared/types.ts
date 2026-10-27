@@ -32,6 +32,8 @@ export interface StoredLink {
   wakeToken?: string;
   /** Paired 1:1 chats: muted here, so the contact is told to forget this side's subscription until it is unmuted. */
   wakeMuted?: boolean;
+  /** Paired 1:1 chats: when this side last told the contact it came online (an online wake-up), for the 30-minute limit. */
+  onlineWokeAt?: number;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
@@ -1327,6 +1329,11 @@ export interface Settings {
    * `setWakeSubscription` clears this. Set by the engine only.
    */
   wakeRotate?: boolean;
+  /**
+   * False: contacts are not asked for an online notice when they come online while this app is closed (WISP 401 §
+   * Wake-up push, revision 2026-10-27). Absent: they are (the default). Only through `setWakeOnline`.
+   */
+  wakeOnline?: false;
   /**
    * Private groups muted here (WISP 902 · Group Mesh § Wake-up push): their members are told to forget this profile's
    * subscription, as a muted chat's contact is. Only through `setWakeMuted` with the group's `group:<id>`.

@@ -8,7 +8,7 @@ import { updateFailure } from "../lib/updateFailure";
 import { canInstall, isAppleMobile, isMacSafari, startInstall, useInstallState } from "../lib/installPrompt";
 import { browserPrompts, reconsiderPersist, requestPersist, useStorageProtection } from "../lib/storagePersistence";
 import { storageBreakdown, useDesktopStorage } from "../lib/desktopStorage";
-import { pushPlatform, pushUnavailable, setWake, useWakeOn } from "../lib/wakePush";
+import { pushPlatform, pushUnavailable, setWake, setWakeOnline, useWakeOn, useWakeOnline } from "../lib/wakePush";
 import { noticePlace, noticeSettings, notificationPermission, openNoticeSettings, requestNotifications, type NoticePermission } from "../lib/notifications";
 import { getVersion } from "@tauri-apps/api/app";
 import { NetworkSettings } from "../components/NetworkSettings";
@@ -116,6 +116,13 @@ export function Settings() {
     setWakeBusy(true);
     setWakeError("");
     try { await setWake(on); } catch (e) { setWakeError(problemLine(e, t)); } finally { setWakeBusy(false); }
+  };
+  // Online notices ride on the same subscription: the switch shows while one is shared, on by default.
+  const wakeOnline = useWakeOnline();
+  const [wakeOnlineError, setWakeOnlineError] = useState("");
+  const changeWakeOnline = async (on: boolean) => {
+    setWakeOnlineError("");
+    try { await setWakeOnline(on); } catch (e) { setWakeOnlineError(problemLine(e, t)); }
   };
   const isMobile = useIsMobile();
   const profile = currentProfile();
@@ -596,6 +603,12 @@ export function Settings() {
             hint={<span role="status" data-testid="settings-wake-hint">{wakeError || (wakeAway ? (wakeAwayDevice ? t("pwa.wakeAway", { device: wakeAwayDevice }) : t("pwa.wakeAwayUnnamed")) : t(wakeOn ? "pwa.wakeOnHint" : "pwa.wakeHint"))}</span>}>
             {wakeOn && <Button data-testid="settings-wake-rotate" disabled={wakeBusy} onClick={() => void changeWake(true)}>{t("pwa.wakeRotate")}</Button>}
             <Switch testId="settings-wake" label={t("pwa.wake")} checked={wakeOn} disabled={wakeBusy} onChange={(on) => void changeWake(on)} />
+          </Row>
+        )}
+        {canWake && wakeOnline.shared && (
+          <Row label={t("pwa.wakeOnline")} testId="settings-wake-online-row" info={t("pwa.wakeOnlineInfo")}
+            hint={<span role="status">{wakeOnlineError || t("pwa.wakeOnlineHint")}</span>}>
+            <Switch testId="settings-wake-online" label={t("pwa.wakeOnline")} checked={wakeOnline.on} onChange={(on) => void changeWakeOnline(on)} />
           </Row>
         )}
         {!canWake && pushUnavailable() && (

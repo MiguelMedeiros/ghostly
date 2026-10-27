@@ -47,7 +47,7 @@ import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
-import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
+import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WAKE_ONLINE_DELAY_MS, WAKE_ONLINE_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
@@ -1986,7 +1986,7 @@ export class GhostlyNode implements EngineImplementation {
     });
     if (this.shuttingDown) return;
     this.emitState();
-    if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
+    if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); this.announceOnline(); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
     // Mini-apps (WISP 1200): the default stores preloaded, and the update check, which asks nothing with no app installed.
     if (this.appsOn && !this.appsWireOnly) void this.appStore.start().catch(() => {});
@@ -2224,6 +2224,7 @@ export class GhostlyNode implements EngineImplementation {
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
+      this.announceOnline();
       void this.did.publishNow().catch(() => {});
     }
     this.emitState();
@@ -2401,6 +2402,7 @@ export class GhostlyNode implements EngineImplementation {
     this.shuttingDown = true;
     this.stopBegan();
     if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
+    clearTimeout(this.onlineTimer);
     this.appShelf?.stop();
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
     if (!quiet) this.depart({ quitting: options.quitting === true });
@@ -3109,7 +3111,50 @@ export class GhostlyNode implements EngineImplementation {
       await db.patchLink(linkId, { wakeToken: token });
       this.emitState();
     }
-    live.link.sendWake({ ...own, token });
+    // Unless turned off, the contact is asked to say when it comes online while this app is closed (`o`).
+    live.link.sendWake({ ...own, token, ...(this.settings.wakeOnline !== false && { online: true as const }) });
+  }
+
+  /**
+   * Whether paired contacts are asked for an online notice (Settings → Notifications, on by default). Each live one is
+   * told again now; one away hears it on its next session, and until then may still send one, which shows.
+   */
+  async setWakeOnline({ on }: { on: boolean }): Promise<void> {
+    if ((this.settings.wakeOnline !== false) === on) return;
+    this.settings = { ...this.settings, wakeOnline: false };
+    if (on) delete this.settings.wakeOnline;
+    await db.putSettings(this.settings);
+    for (const live of this.links.values()) if (live.stored.profile && !live.stored.group) await this.shareWake(live.stored.id);
+    this.emitState();
+  }
+
+  private onlineTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /**
+   * This app came online (it started, or its network came back): once the chats had `WAKE_ONLINE_DELAY_MS` to go live,
+   * the contacts still away that asked are told (`sayOnline`). A contact whose app is open goes live and is not pushed.
+   */
+  private announceOnline(): void {
+    clearTimeout(this.onlineTimer);
+    this.onlineTimer = setTimeout(() => { this.onlineTimer = undefined; this.sayOnline(); }, WAKE_ONLINE_DELAY_MS);
+  }
+
+  /**
+   * An online wake-up (WISP 401 § Wake-up push, revision 2026-10-27) to each paired contact that asked for one, whose
+   * chat is not live: at most one per contact per `WAKE_ONLINE_INTERVAL_MS`, counted across restarts, since a restart is
+   * what says it. Apart from the message wake-ups' limit, so it never holds one back. A muted chat's contact shared no
+   * target; a group's edge is never told.
+   */
+  private sayOnline(now = Date.now()): void {
+    if (!this.networkOn || this.shuttingDown) return;
+    for (const live of this.links.values()) {
+      const { id, peerWake: target, profile, group, onlineWokeAt } = live.stored;
+      if (!target?.online || !profile || group || live.link?.isDataLinkOpen) continue;
+      if (onlineWokeAt !== undefined && onlineWokeAt <= now && now - onlineWokeAt < WAKE_ONLINE_INTERVAL_MS) continue;
+      live.stored = { ...live.stored, onlineWokeAt: now };
+      void db.patchLink(id, { onlineWokeAt: now });
+      this.postWake(id, target, "online");
+    }
   }
 
   // ---------- wake-up push in private groups (WISP 902 · Group Mesh § Wake-up push) ----------
@@ -6260,6 +6305,7 @@ export class GhostlyNode implements EngineImplementation {
     // Only through setWakeSubscription, which checks it and gives every chat a new token.
     delete (settings as Partial<Settings>).wake;
     delete (settings as Partial<Settings>).wakeRotate;
+    delete (settings as Partial<Settings>).wakeOnline;
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
     delete (settings as Partial<Settings>).wakeRenew;
@@ -6360,6 +6406,7 @@ export class GhostlyNode implements EngineImplementation {
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
+      this.announceOnline();
       void this.did.publishNow().catch(() => {});
     } else if (wasOnline && this.networkOn && relayOnlyChanged) await this.restartLinksForRelayOnly();
     if (wasOnline && !this.networkOn) this.stopGroupEntries();

@@ -7,7 +7,7 @@ import { db } from "../src/engine/db";
 import { STORES, transact } from "../src/shared/idb";
 import type { StoredLink, WakeSubscription } from "../src/shared/types";
 
-// covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute, push.wake.group
+// covers: push.wake.exchange, push.wake.rate-limit, push.wake.send, push.wake.mute, push.wake.group, push.wake.online
 
 function stubLink(overrides: Record<string, unknown> = {}) {
   const session = { setActive: vi.fn(), pollNow: vi.fn(), setFastPoll: vi.fn() };
@@ -259,6 +259,105 @@ describe("waking a contact whose app is closed", () => {
     const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
     node.removeLink({ linkId: chat.id });
     await vi.waitFor(async () => expect(await saved(chat.id)).toBeUndefined());
+  });
+});
+
+describe("online notices: a contact whose app is closed hears that this one came online", () => {
+  const asked = () => { const made = contactTarget(); return { ...made, target: { ...made.target, online: true as const } }; };
+  const bodies = (calls: unknown[][], secret: Uint8Array, auth: Uint8Array) =>
+    calls.map(([request]) => JSON.parse(utf8Decode(decryptPushPayload((request as { body: Uint8Array }).body, secret, auth))) as Record<string, unknown>);
+
+  it("this side asks for them by default; turned off, every live contact is told again without it", async () => {
+    const node = engine();
+    const a = stubLink();
+    await addChat(node, a);
+    await node.setWakeSubscription({ subscription: browserSubscription().subscription });
+    await vi.waitFor(() => expect(a.sendWake).toHaveBeenCalledTimes(1));
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0].online).toBe(true);
+    await node.setWakeOnline({ on: false });
+    expect(a.sendWake).toHaveBeenCalledTimes(2);
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0]).not.toHaveProperty("online");
+    expect((await db.getSettings()).wakeOnline).toBe(false);
+    expect(node.getState().settings.wakeOnline).toBe(false);
+    // The settings patch cannot turn it back on behind the contacts' backs.
+    await node.updateSettings({ settings: { wakeOnline: undefined } as never });
+    expect(node["settings"].wakeOnline).toBe(false);
+    await node.setWakeOnline({ on: true });
+    expect((a.sendWake.mock.lastCall as unknown as [WakeTarget])[0].online).toBe(true);
+    expect(await db.getSettings()).not.toHaveProperty("wakeOnline");
+  });
+
+  it("an away contact that asked gets one, with its token and nothing else, living five minutes", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = asked();
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    node["sayOnline"]();
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    expect(bodies(pushSend.mock.calls, secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }]);
+    expect((pushSend.mock.calls[0] as unknown as [{ headers: Record<string, string> }])[0].headers.TTL).toBe("300");
+  });
+
+  it("none to a contact that did not ask (an older app, or switched off), a live one, a muted one, a group edge, or while offline", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: contactTarget().target });
+    await addChat(node, stubLink({ isDataLinkOpen: true }), { peerWake: asked().target });
+    // A chat the contact muted: its app said to forget the subscription.
+    await addChat(node, stubLink({ isDataLinkOpen: false }));
+    await addChat(node, stubLink({ isDataLinkOpen: false, groupsSupport: false }), { profile: undefined, group: "g", groupPeer: createIdentity().pubKeyZ32, peerWake: asked().target });
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+    await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: asked().target });
+    node["settings"] = { ...node["settings"], online: false };
+    node["sayOnline"]();
+    expect(pushSend).not.toHaveBeenCalled();
+  });
+
+  it("at most one per contact every 30 minutes, kept across a restart (a restart is what says it)", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: asked().target });
+    const t = Date.now();
+    node["sayOnline"](t);
+    node["sayOnline"](t + 60_000);
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    await vi.waitFor(async () => expect((await saved(chat.id))?.onlineWokeAt).toBe(t));
+    const restarted = engine({ pushSend });
+    await addChat(restarted, stubLink({ isDataLinkOpen: false }), (await saved(chat.id))!);
+    restarted["sayOnline"](t + 29 * 60_000);
+    expect(pushSend).toHaveBeenCalledTimes(1);
+    restarted["sayOnline"](t + 30 * 60_000);
+    expect(pushSend).toHaveBeenCalledTimes(2);
+  });
+
+  it("never holds back a message wake-up, nor is held back by one", async () => {
+    const pushSend = vi.fn(async () => 201);
+    const node = engine({ pushSend });
+    const { target, secret, auth } = asked();
+    const chat = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: target });
+    node["sayOnline"]();
+    await node.sendMessage({ linkId: chat.id, text: "hi" });
+    const other = asked();
+    const second = await addChat(node, stubLink({ isDataLinkOpen: false }), { peerWake: other.target });
+    await node.sendMessage({ linkId: second.id, text: "hi" });
+    node["sayOnline"]();
+    expect(bodies(pushSend.mock.calls.slice(0, 2), secret, auth)).toEqual([{ wake: 1, k: target.token, o: 1 }, { wake: 1, k: target.token }]);
+    expect(bodies(pushSend.mock.calls.slice(2), other.secret, other.auth)).toEqual([{ wake: 1, k: other.target.token }, { wake: 1, k: other.target.token, o: 1 }]);
+  });
+
+  it("is said a little after this app starts or comes back online, to those still away then", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const node = engine({ pushSend: vi.fn(async () => 201) });
+      const say = vi.spyOn(node as never, "sayOnline" as never).mockImplementation((() => {}) as never);
+      node["announceOnline"]();
+      node["announceOnline"]();
+      vi.advanceTimersByTime(29_999);
+      expect(say).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(say).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
   });
 });
 
