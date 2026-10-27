@@ -3,11 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { DevicesSection } from "../../components/devices/DevicesSection";
-import { handoffRunning, hasStandby, keepAwakeWanted, useComputerAwake } from "../../lib/keepAwake";
+import type { FileTransferView } from "@ghostly/browser/shared/types";
+import { filesMoving, handoffRunning, hasStandby, keepAwakeWanted, useComputerAwake } from "../../lib/keepAwake";
 import { useDeviceSet } from "../../lib/devices";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
-// covers: devices.keep-awake
+// covers: devices.keep-awake, files.keep-awake
 
 /*
  * "Keep this computer awake" (WISP 06 § User experience, Profile, Devices): on a Desktop with a standby device, a switch
@@ -32,6 +33,40 @@ describe("when the computer is kept awake", () => {
     expect(keepAwakeWanted(false, null, handoff("copying"))).toBe(true);
     expect(keepAwakeWanted(false, null, { ...handoff("settling"), role: "taker" })).toBe(true);
     for (const step of ["failed", "done", "offer"] as const) expect(handoffRunning(handoff(step))).toBe(false);
+  });
+});
+
+describe("a file on its way", () => {
+  const moving: FileTransferView = { state: "transferring", transferred: 10, size: 100, direction: "out", rate: 5 };
+
+  it("keeps the device awake while it moves, is copied, waits its turn or is checked; not while it waits or after", () => {
+    expect(filesMoving(undefined)).toBe(false);
+    expect(filesMoving({})).toBe(false);
+    expect(filesMoving({ a: moving })).toBe(true);
+    for (const stage of ["preparing", "queued", "verifying"] as const) expect(filesMoving({ a: { ...moving, stage } })).toBe(true);
+    // The contact away, a person to answer, paused: nothing comes of staying awake.
+    for (const stage of ["waiting", "asking", "paused"] as const) expect(filesMoving({ a: { ...moving, stage } })).toBe(false);
+    expect(filesMoving({ a: { ...moving, stalled: true } })).toBe(false);
+    expect(filesMoving({ a: { ...moving, state: "done", transferred: 100 } })).toBe(false);
+    expect(filesMoving({ a: { ...moving, state: "failed", error: "Cancelled" } })).toBe(false);
+    // One moving among finished and waiting ones is enough.
+    expect(filesMoving({ a: { ...moving, state: "done" }, b: { ...moving, stage: "waiting" }, c: moving })).toBe(true);
+  });
+
+  it("holds the Desktop's computer awake from the first file that moves until the last one ends", async () => {
+    const keepAwake = vi.fn(async (on: boolean) => on);
+    fakeEngine.keepAwake = keepAwake;
+    fakeEngine.on("deviceSet", () => ({ state: "single", devices: [] }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    renderHook(() => useComputerAwake());
+    await waitFor(() => expect(keepAwake).toHaveBeenLastCalledWith(false));
+    // A group's file and a chat's.
+    act(() => fakeEngine.update({ transfers: { "group-g-in-1": { ...moving, direction: "in" }, "l-out-2": { ...moving, stage: "queued" } } }));
+    await waitFor(() => expect(keepAwake).toHaveBeenLastCalledWith(true));
+    act(() => fakeEngine.update({ transfers: { "group-g-in-1": { ...moving, state: "done" }, "l-out-2": moving } }));
+    act(() => fakeEngine.update({ transfers: { "group-g-in-1": { ...moving, state: "done" }, "l-out-2": { ...moving, stage: "waiting" } } }));
+    await waitFor(() => expect(keepAwake).toHaveBeenLastCalledWith(false));
+    expect(keepAwake.mock.calls.filter(([on]) => on)).toHaveLength(1);
   });
 });
 
