@@ -259,6 +259,27 @@ describe("opening an app on Desktop", () => {
     await vi.waitFor(() => expect(host.calls.filter((c) => c.op === "chat.close")).toHaveLength(2));
   });
 
+  it("brings the app's window to the front when it is opened again in the same chat, and its chat closes once with it", async () => {
+    const { open, request, answer, calls, closed, host } = setup();
+    // A double click: both opens find the one window.
+    expect(await Promise.all([open(REF, LINK), open(REF, LINK)])).toEqual([undefined, "shown"]);
+    request("app-1", { id: 1, type: "writing", args: [] });
+    await answer("app-1", 1);
+    // Its card, or + → Apps, pressed while it runs.
+    expect(await open(REF, LINK)).toBe("shown");
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(1);
+    expect(calls.filter((c) => c.command === "app_focus")).toEqual([{ command: "app_focus", args: { label: "app-1" } }, { command: "app_focus", args: { label: "app-1" } }]);
+    // Another chat, or alone: a window of its own.
+    expect(await open(REF, "link-2")).toBeUndefined();
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(2);
+
+    closed("app-1");
+    await vi.waitFor(() => expect(host.calls.filter((c) => c.op === "chat.close" && c.linkId === LINK)).toHaveLength(1));
+    // Closed: the next open is a new window.
+    expect(await open(REF, LINK)).toBeUndefined();
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(3);
+  });
+
   it("tears down an app whose first word is not the runner's, and one that never starts", async () => {
     const { open, request, stops, calls } = setup();
     await open(REF, null);

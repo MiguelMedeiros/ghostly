@@ -37,6 +37,23 @@ Ghostly app (web, extension, desktop) through an invite, like any other contact.
 
 Read step 11 (safety) before you answer anyone.
 
+## How to behave in a chat
+
+Your owner sees what you do only through the chat, so on every message (a `turn`, step 5) from them:
+
+1. **React 👀 at once:** `ghostly react owner <messageId> 👀`, before anything else. It tells them you saw it.
+2. **Show what you are doing:** `ghostly typing owner --kind thinking --status "Reading the CI logs" --for 600`
+   (40 characters, no links). Change it at each step; a message you send ends it.
+3. **Answer, quoting their message:** `ghostly send owner --reply <messageId> --stdin`, your answer on stdin. Short:
+   the answer first, then a few bullets if needed.
+4. **A pure ack is a reaction:** if the whole answer is "ok", swap 👀 for a fitting emoji
+   (`ghostly react owner <messageId> 👍`, it replaces yours) instead of sending a message.
+5. **Ask with buttons when they must decide** (see "Buttons" below), and act on the press, never on the text.
+6. **Work that takes minutes gets a task card** (step 10), kept current, not a stream of status texts.
+
+In a group, the same with `ghostly group react <group> <messageId> 👀` and `ghostly group typing <group> --kind thinking`.
+`<messageId>` is the turn's `messageId`. The same rules as the owner skill's loop (`skills/ghostly/SKILL.md`).
+
 ## When to use
 
 - A person should be able to message the agent from the Ghostly app, and the agent should answer.
@@ -137,7 +154,7 @@ stored under, which its sender chose most of, is `untrusted.messageId`: an id is
 
 ### 6. Answer: `--stdin` and `--reply`
 
-A hook (`on-turn.sh`) that answers every turn as a reply:
+A hook (`on-turn.sh`) that reacts 👀, shows it is thinking and answers every turn as a reply:
 
 ```bash
 #!/usr/bin/env bash
@@ -145,6 +162,8 @@ set -euo pipefail
 turn="$(cat)"
 chat="$(jq -r '.chat // empty' <<<"$turn")"; group="$(jq -r '.group // empty' <<<"$turn")"
 id="$(jq -r .messageId <<<"$turn")"
+if [ -n "$chat" ]; then ghostly react "$chat" "$id" 👀 >/dev/null || true
+else ghostly group react "$group" "$id" 👀 >/dev/null 2>&1 || true; fi
 if [ -n "$chat" ]; then ghostly typing "$chat" --kind thinking --status "Thinking" --for 600 >/dev/null || true
 else ghostly group typing "$group" --kind thinking --status "Thinking" --for 600 >/dev/null 2>&1 || true; fi
 answer="$(my-agent <<<"$turn")"          # a model with no tools reads the turn as data (step 11)
@@ -354,8 +373,10 @@ ghostly service add docs http://127.0.0.1:8080     # a web app on this machine
 ghostly service share <service id> alice           # alice may open it; nobody else
 ```
 
-A call's audio is raw PCM on its own Unix socket, 48 kHz by default; see `examples/call-echo.mjs`. Making an identity
-proof needs a person who holds the key: leave that to the owner.
+A call's audio is raw PCM on its own Unix socket, 48 kHz by default; see `examples/call-echo.mjs`. To answer calls by
+voice, clone [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) rather than writing one: it listens, transcribes, asks Claude
+and speaks the reply (ElevenLabs), and its `AGENTS.md` walks an agent through the setup. Making an identity proof
+needs a person who holds the key: leave that to the owner.
 
 ## Rules the CLI enforces
 

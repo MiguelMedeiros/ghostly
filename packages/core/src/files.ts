@@ -36,6 +36,11 @@ export interface FileInfo {
   reply?: WireReply;
   /** How many times it has been forwarded (`fw`, WISP 401 § Forwards): files/2, files/3 and held items; older apps ignore it. */
   forwarded?: number;
+  /**
+   * The chat app id of the mini-app that sent this file ahead (`app`, WISP 1200 § Sending a film ahead): files/3 only;
+   * older apps ignore it and keep the file as any file.
+   */
+  app?: string;
 }
 
 /** Where a platform puts incoming bytes: memory, IndexedDB, disk. */

@@ -15,6 +15,7 @@
  * - While the app serves the contact a file (WISP 1200 § A read lane to the contact), its window's title says so
  *   (`app_title`): "Chess · sharing a file with Ana", where the web's panel header says it.
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
+ * - Opened again in the same chat (or alone again) while it runs, its window comes to the front (`app_focus`).
  */
 import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
@@ -67,6 +68,9 @@ export function forIpc(message: unknown): unknown {
 
 export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS, linkedFiles }: DesktopOpenerOptions): AppOpener {
   const brokers = new Map<string, Broker>();
+  /** The window of each app running, by chat and app: the same one opened again is brought to the front (as on the
+   * web), never a second window, whose close would close the app in the chat for the first one too. */
+  const windows = new Map<string, Promise<string>>();
   const early = new Map<string, { at: number; requests: unknown[] }>();
   void listen<{ label: string; request: unknown }>(APP_REQUEST_EVENT, ({ payload }) => {
     if (!payload || typeof payload.label !== "string") return;
@@ -97,10 +101,19 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     const entry = await host.entry(ref, options?.runAnyway === true);
     // Throws where this client has no runner for what the person granted.
     runnerFor(host, entry);
-    const label = await invoke<string>("app_open", {
+    // Open pressed twice before its window is there (a double click) gets here twice: the second waits for the first's.
+    const place = `${linkId ?? ""} ${ref}`;
+    const there = windows.get(place);
+    if (there) {
+      await invoke("app_focus", { label: await there }).catch(() => { /* it went meanwhile */ });
+      return "shown";
+    }
+    const opening = invoke<string>("app_open", {
       // A full-screen app's window opens at the Ghostly window's size; a chat app's is smaller, as it sits beside it.
       request: { app: entry.ref, title: windowTitle(entry.title, linkId, false), entry: entry.entry, internet: entry.permissions.includes("internet"), view: entry.view ?? "chat" },
     });
+    windows.set(place, opening);
+    const label = await opening.catch((e: unknown) => { windows.delete(place); throw e; });
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
     const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
@@ -115,6 +128,7 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
         if (timer) clearTimeout(timer);
         unregister();
         brokers.delete(label);
+        if (windows.get(place) === opening) windows.delete(place);
         void invoke("app_close", { label }).catch(() => { /* already gone */ });
         onStop?.(ref, reason);
       },

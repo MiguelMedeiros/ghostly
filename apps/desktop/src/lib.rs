@@ -113,6 +113,7 @@ macro_rules! commands {
         tauri::generate_handler![
             app_sandbox::app_broker,
             app_sandbox::app_close,
+            app_sandbox::app_focus,
             app_sandbox::app_open,
             app_sandbox::app_post,
             app_sandbox::app_title,
@@ -828,9 +829,15 @@ mod tests {
             assert!(!may_call("app-1", command), "{command}");
             assert!(may_call("main", command), "{command}");
         }
-        // The Ghostly window's side of the broker: it opens app windows, answers them, names them and closes them;
-        // an app window does none of that.
-        for command in ["app_open", "app_post", "app_title", "app_close"] {
+        // The Ghostly window's side of the broker: it opens app windows, answers them, brings them to the front, names
+        // them and closes them; an app window does none of that.
+        for command in [
+            "app_open",
+            "app_post",
+            "app_focus",
+            "app_title",
+            "app_close",
+        ] {
             assert!(registered().iter().any(|c| c == command), "{command}");
             assert!(may_call("main", command), "{command}");
             for label in ["app-1", "app-0123456789abcdef", "svc-1"] {

@@ -1,3 +1,4 @@
+import { captureCamera } from "./mediaDevices";
 import { decodablePicture } from "./decodablePicture";
 
 /**
@@ -39,9 +40,8 @@ export async function readQrImage(file: Blob): Promise<string | null> {
 }
 
 /** The camera that faces away, for scanning; the caller stops its tracks. */
-export async function qrCamera(): Promise<MediaStream> {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
-  return navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+export function qrCamera(): Promise<MediaStream> {
+  return captureCamera({ video: { facingMode: { ideal: "environment" } }, audio: false });
 }
 
 /**

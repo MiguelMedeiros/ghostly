@@ -128,6 +128,7 @@ const MEDIA_PROBLEM_TEXT = {
   unavailable: ["calls.mediaUnavailable", "calls.mediaUnavailableNext"],
   relay: ["calls.relayNoAnswer", "calls.relayNoAnswerNext"],
   relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
+  relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
 } as const;
 
 interface ChatProps {

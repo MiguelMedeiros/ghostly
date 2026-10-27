@@ -2,6 +2,7 @@ import { fromBase64Url, toBase64Url } from "./bytes";
 import { formatFileSize, sanitizeFileName, sanitizeMime, type FileInfo } from "./files";
 import { pairedReplyAuthor, readReply, wireReply } from "./replies";
 import { readForwarded } from "./forwards";
+import { isChatAppId } from "./pairedApps";
 import { parseVideoMeta } from "./video";
 import { parseImageMeta } from "./image";
 import { parseVoiceMeta } from "./voice";
@@ -17,7 +18,7 @@ import { parseVoiceMeta } from "./voice";
  *
  * Frames (authenticated JSON on the paired session):
  *
- *   sender → receiver  pf-offer {id,name,mime,size,ts,voice?,video?,image?,r?,paused?}  pf-data {id,offset,data}
+ *   sender → receiver  pf-offer {id,name,mime,size,ts,voice?,video?,image?,r?,fw?,app?,paused?}  pf-data {id,offset,data}
  *                      pf-sum {id,size,digest}  pf-abort {id}
  *   receiver → sender  pf-accept {id,offset}  pf-wait {id,why}  pf-got {id,offset}  pf-done {id}
  *                      pf-refuse {id,why,room?}
@@ -48,6 +49,12 @@ export const FILE_LIMITS = {
   minWindowBytes: 64 * 1024,
   /** How much longer than the shortest round trip seen a confirm may take, by the queue the files keep on the path. */
   queueMs: 50,
+  /**
+   * On a long path, the queue a confirm may show is this share of the shortest round trip, when that is more than `queueMs`.
+   * A relay's round trip wavers by more than 50 ms on its own: read as the files' queue, it held their window at its
+   * floor, 64 KiB per round trip (about 0.1 MiB/s at 600 ms), however fast the path.
+   */
+  queueOfBase: 0.5,
   /**
    * A shortest round trip no confirm has come close to for this long is measured again, with the queue drained
    * (`ChatFiles.paced`). A path that got longer mid-session (another route, a relay) read as a queue for good before, and
@@ -298,7 +305,8 @@ class FilePace {
 
   /**
    * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
-   * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
+   * busy with no more than `FILE_LIMITS.queueMs` of queue on it, or half its round trip on a long path
+   * (`FILE_LIMITS.queueOfBase`) (delay-based, as LEDBAT). Throughput is about
    * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
    * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
    * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
@@ -326,7 +334,8 @@ class FilePace {
     // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill. On a
     // shared uplink, the queue is read against the lowest round trip any of its chats saw.
     const base = Math.min(this.baseRtt, lowest);
-    const fits = Math.max((flight * (base + FILE_LIMITS.queueMs)) / rtt, rtt - base < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
+    const queueMs = Math.max(FILE_LIMITS.queueMs, base * FILE_LIMITS.queueOfBase);
+    const fits = Math.max((flight * (base + queueMs)) / rtt, rtt - base < queueMs / 2 ? 2 * flight : 0);
     // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
     const window = flight < this.window / 2 ? Math.max(this.window, fits) : fits;
     this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(floor, Math.round(window)));
@@ -569,7 +578,7 @@ export class ChatFiles {
 
   private offerFrame(record: FileTransferRecord, paused: boolean): Record<string, unknown> {
     const { file } = record;
-    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }), ...(file.reply && { r: wireReply(file.reply) }), ...(readForwarded(file.forwarded) && { fw: file.forwarded }), ...(paused && { paused: true }) };
+    return { t: "pf-offer", id: file.id, name: file.name, mime: file.mime, size: file.size, ts: file.timestamp, ...(file.voice && { voice: file.voice }), ...(file.video && { video: file.video }), ...(file.image && { image: file.image }), ...(file.reply && { r: wireReply(file.reply) }), ...(readForwarded(file.forwarded) && { fw: file.forwarded }), ...(isChatAppId(file.app) && { app: file.app }), ...(paused && { paused: true }) };
   }
 
   private announce(entry: Entry): void {
@@ -792,6 +801,8 @@ export class ChatFiles {
     if (reply) file.reply = reply;
     const forwarded = readForwarded(frame.fw);
     if (forwarded) file.forwarded = forwarded;
+    // Sent ahead by a mini-app: kept with the file, which is still taken as any file; a malformed one is dropped.
+    if (isChatAppId(frame.app)) file.app = frame.app;
     const paused = frame.paused === true;
     const existing = this.entries.get(key("in", id));
     if (existing) {

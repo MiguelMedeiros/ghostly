@@ -162,7 +162,7 @@ jobs:
       - name: App token
         id: token
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
@@ -176,7 +176,7 @@ jobs:
         id: token-read
         if: steps.token.outcome == 'failure'
         continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
@@ -189,7 +189,7 @@ jobs:
       - name: App token (no Actions read)
         id: token-checks
         if: steps.token.outcome == 'failure' && steps.token-read.outcome != 'success'
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.QUEUE_APP_ID }}
           private-key: ${{ secrets.QUEUE_APP_PRIVATE_KEY }}
