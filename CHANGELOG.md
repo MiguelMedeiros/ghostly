@@ -4,6 +4,70 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.6.0
+
+Files move at the speed of the path again (about ten times faster over a relay or mobile data), and the device stays awake while they do. Plus text selection by double click, Clear finished on the Tasks board, the Linux Desktop's camera back, and x401 credentials for bots. Android releases now come with an APK signed with Ghostly's own key.
+
+### Security
+
+**Everywhere**
+
+- The app and the CLI use zod 4.6.7: before 4.6.6, checking a very large list sent by someone else could use up the memory and stop the app (GHSA-mrhx-c7xc-m3w5).
+
+### For users
+
+**Chat**
+
+- While a file is being sent or received, in a chat or a group, the screen stays on and the Desktop app keeps the computer from sleeping, so the transfer does not stop halfway. A file waiting for your contact to come online, or paused, does not keep it awake.
+- A double click on a message's words selects a word, and a triple click the line, as anywhere else: it no longer opens the message's details. Ctrl+double click (⌘+double click on a Mac) opens them, as does Details in the message's ⋮ menu. Thanks @kenorb.
+- The Tasks board has Clear finished: it hides the done, failed and cancelled tasks on this device. A bot's next update of one brings it back.
+
+**Website**
+
+- ghostly.tools/llms.txt, the file an AI agent reads first, now says what a connected agent can do, how Ghostly keeps strangers from steering it (the allowlist, a contact's words as data, approvals by buttons, no wallet unless asked), the four commands that connect one, and where the security policy, advisories and signed releases are. /llms-full.txt adds the agent guides, the CLI's full command table and the security policy before the WISPs. Every page links llms.txt in its head and footer.
+
+### Fixed
+
+**Chat**
+
+- Deleting the chat a contact link request made takes the request back. Before, the app kept sending it and knocking for up to seven days, the person who shared the link could still read and accept it, and asking again through the link was refused.
+- A file sent to a contact over a long, uneven path (a relay, a phone's mobile data) no longer crawls at about 100 KB/s. Its speed follows the path again: about 1 MiB/s where a 600 ms round trip that varies by 200 ms gave 0.1 MiB/s before.
+- A right-click on a message or a folder's header opens its own ⋮ menu at the pointer. The desktop app no longer shows the webview's Back, Forward, Stop and Reload menu; fields, links and selected text keep their Copy and Paste menu. Thanks @kenorb.
+
+**Apps**
+
+- On Desktop, opening an app again in a chat where it already runs (its card, or + > Apps) brings its window to the front instead of opening a second one, and sends your contact no second "opened" card. Closing one of two windows left the other running but cut off: its moves did not go, and the contact's did not arrive.
+
+**Everywhere**
+
+- On the Linux Desktop, the composer's Camera, Scan QR in Join and Scan in a wallet's Send use the camera again: they take it the way Settings → Audio & video previews it. Before, each one only said the camera could not start or was unavailable, on a machine with a working webcam.
+
+**CLI**
+
+- `ghostly x401 credential add <file>` with an empty file now says "<path> is empty: it holds the SD-JWT VC the issuer sent", and `x401 credential add -` with nothing on stdin "Nothing on stdin: give the SD-JWT VC the issuer sent". Before, both answered "credential is required", the API's parameter name.
+- `ghostly x401 credential add <file>` with a file that is not there now answers `not_found` (exit 3, "No such file or folder: <path>"), and with a folder `bad_request` ("<path> is a folder: name a file"), as every other file the CLI reads. Before, both were a usage error with Node's own text.
+- `ghostly x401 credential add` says what became of a key this profile made when a credential bound to it is refused: it already holds another credential (one credential per key), it was dropped for a newer key, or it went with a removed credential. It used to say the profile never made that key. `x401 key new` prints the id of the key it drops past the 8 waiting as `dropped`.
+- `ghostly x401 credential add --label` keeps a label on one line: line breaks and tabs read as one space, as in a group's name. A label past 80 characters is refused with that rule. Before, it was cut at 80 without a word. The command's help names the limit.
+
+### For developers
+
+- An Android e2e run whose emulator is lost mid-run (about one run in three, during the received video test) fails in minutes with its results uploaded, instead of waiting for a device until the job's 60-minute timeout and ending cancelled with nothing to read. The run's logcat is streamed to the results while the specs run, so it holds the emulator's last lines, and the `adb` calls after the specs and in the Android smoke test have a time limit.
+- A file a mini-app sends ahead to the contact (WISP 1200 § Sending a film ahead) now carries the app's chat app id as `app` on its `files/3` offer, read and written in `@ghostly/core` and kept with the received file. Nothing sends one yet: a later change gives apps `ghostly.files.offer`.
+- The CLI's agent skills, its guides and the /cli and AI agents pages point to [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent), a public voice agent that answers Ghostly calls on the CLI (speech to text, Claude, text to speech): an agent clones it instead of writing its own, and its `AGENTS.md` takes it through the setup.
+- A minor update of Tauri or a Tauri plugin arrives as one Dependabot pull request, the cargo one, instead of an npm and a cargo pull request that each fail alone (the Tauri CLI refuses an npm package and its crate on different minor versions). Its npm side is committed on that pull request's branch by hand, as `.github/dependabot.yml` says.
+
+**Agents**
+
+- An agent set up from the copy prompt on ghostly.tools now reacts 👀 to each message at once and shows a "thinking" status while it works. The agent guide (`packages/cli/SKILL.md`) opens with "How to behave in a chat": 👀 at once, a status changed at each step, short answers that quote the message, 👍 instead of a message for a plain "ok", buttons for a decision. These are the owner skill's rules, which only that skill had before. The prompt and the Claude Code example (`examples/claude-code-agent.sh`) react 👀 too.
+
+**CLI**
+
+- A signed x401 request whose certificate chain ends with a cross-signed copy of a trusted root, as many servers send theirs, is no longer refused for leading to no trusted root: the chain stops at the first trusted root, as a browser's does.
+- The certificate check of a signed x401 request now honours what a certificate says about its own use: a CA's path length and DNS name constraints (the root's too), the leaf's key usage, an extended key usage that leaves servers out, and critical extensions it does not know. A CA constrained to other names, or one with no room left for another CA below it, can no longer stand behind a request for any host.
+- An x401 credential that is not valid yet (its `nbf` is in the future) is no longer offered to a verifier, who would refuse it; `x401 credential list` shows from when it is valid (`notBefore`).
+- A bot keeps x401 credentials: `ghostly x401 key new` makes a holder key for the issuer, `ghostly x401 credential add` keeps the SD-JWT VC it issued, and `list` and `remove` manage them. Claim values print only with `--show-secret`, and nothing is shared with contacts. Showing one to a website comes next.
+- An x401 answer to a request whose credential query is named `constructor`, `__proto__` or another name every JavaScript object has (valid DCQL) is built like any other, instead of failing.
+
 ## 1.5.5
 
 ### Security
