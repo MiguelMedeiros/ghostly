@@ -8,10 +8,13 @@ import type { FileInfo } from "../src/files";
  * `upBytesPerMs` (a queue with no end, as netem's), and each way takes `delayMs`. Every `sayEveryMs` the sender says
  * something else in the chat (a text, a ring) on the same channel; how long that takes to arrive is what is measured.
  * `delayMs` may change with the clock (the path moves), and `confirmed` is when each confirm reached the sender.
+ * `jitterMs`: each frame, each way, takes up to this much longer, drawn at random; a frame never passes the one before
+ * it (the session is a stream), so one held back holds back those behind it.
  */
-async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs: number | ((now: number) => number); sayEveryMs: number }) {
-  let now = 0, upFree = 0;
-  const delay = () => (typeof options.delayMs === "number" ? options.delayMs : options.delayMs(now));
+async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs: number | ((now: number) => number); sayEveryMs: number; jitterMs?: number }) {
+  let now = 0, upFree = 0, toB = 0, toA = 0, seed = 1;
+  const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+  const delay = () => (typeof options.delayMs === "number" ? options.delayMs : options.delayMs(now)) + (options.jitterMs ? random() * options.jitterMs : 0);
   const confirmed: { at: number; offset: number }[] = [];
   const events: { at: number; to: "a" | "b"; frame: Record<string, unknown>; said?: number }[] = [];
   const schedule = (event: (typeof events)[number]) => {
@@ -21,13 +24,14 @@ async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs
   };
   const uplink = (frame: Record<string, unknown>, bytes: number, said?: number) => {
     upFree = Math.max(now, upFree) + bytes / options.upBytesPerMs;
-    schedule({ at: upFree + delay(), to: "b", frame, said });
+    toB = Math.max(toB, upFree + delay());
+    schedule({ at: toB, to: "b", frame, said });
   };
   const records = new Map<string, FileTransferRecord>();
   const host = (name: "a" | "b"): ChatFilesHost => ({
     send: (frame) => {
       if (name === "a") uplink(JSON.parse(JSON.stringify(frame)) as Record<string, unknown>, JSON.stringify(frame).length);
-      else schedule({ at: now + delay(), to: "a", frame: JSON.parse(JSON.stringify(frame)) as Record<string, unknown> });
+      else { toA = Math.max(toA, now + delay()); schedule({ at: toA, to: "a", frame: JSON.parse(JSON.stringify(frame)) as Record<string, unknown> }); }
       return true;
     },
     sendData: (id, offset, data) => { uplink({ t: "pf-data", id, offset, data: Buffer.from(data).toString("base64url") }, data.length + 32); return true; },
@@ -106,6 +110,17 @@ describe("a file sent over a slow uplink", () => {
     // From a few seconds after the path is measured again (`FILE_LIMITS.baseProbeMs`) to the end.
     const after = rate(confirmed, 13_000, Infinity);
     expect(after, `${(after / 2 ** 20).toFixed(2)} MiB/s`).toBeGreaterThan((FILE_LIMITS.windowBytes / 0.12) * 0.8);
+  }, 60_000);
+
+  it("keeps its rate on a long path whose round trip wavers, as a relay's over a phone's link does", async () => {
+    // 30 Mbit/s, 300 ms each way and up to 200 ms more, at random. The waver read as the files' own queue: the window
+    // stayed at its floor, 64 KiB per round trip, about 0.1 MiB/s (what a phone saw sending to a contact on 5G).
+    const size = 8 * 1024 * 1024;
+    const { seconds, latencies } = await slowUplink({ size, upBytesPerMs: 30_000_000 / 8 / 1000, delayMs: 300, jitterMs: 200, sayEveryMs: 1_000 });
+    expect(size / seconds, `${(size / seconds / 2 ** 20).toFixed(2)} MiB/s`).toBeGreaterThan(0.5 * 2 ** 20);
+    // What the sender says meanwhile still takes about the path's own time: 300 to 500 ms, and half a round trip of queue at most.
+    const worst = Math.max(...latencies.map((l) => l.ms));
+    expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(500 + 400);
   }, 60_000);
 
   it("keeps a full window on a fast link with a long round trip", async () => {
