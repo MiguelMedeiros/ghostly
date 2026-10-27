@@ -1,21 +1,31 @@
-# Auto-translation of received messages (design, not built)
+# Auto-translation in chats (design, not built)
 
 Status: a design and a spike for review. Nothing here ships, and nothing on `dev` changes for users until the design is
 approved. The feature then lands slice by slice on an `epic/auto-translate` branch, behind a flag.
 
 ## What it does
 
-A switch in Settings, **Translate messages into <language>**, where <language> is the app's language. When it is on,
-a received text message in another language is translated on the device and shown in the app's language. The bubble
-says it was translated, and **Show original** shows the text as it was sent. It works the same in 1:1 chats and groups.
-Your own messages are never translated.
+Two directions, both on the device:
+
+- **Reading (received messages).** A switch in Settings, **Translate messages into <language>**, where <language> is
+  the app's language. When translation is on for a chat, a received text message in another language is translated
+  and shown in the app's language. The bubble says it was translated, and **Show original** shows the text as it was
+  sent. It works the same in 1:1 chats and groups. Your own messages are never translated in this direction.
+- **Per chat, both ways.** Each chat (1:1 or group) can be set to **On**, **Off**, or **As in Settings** (the default
+  for a chat that never chose). So a chat kept in English on purpose stays untranslated while the setting is on, and a
+  chat with an Italian friend is translated while the setting is off. See [Per chat](#per-chat).
+- **Writing (what I send), when I ask.** In a chat that has a language of its own, the composer can translate my draft
+  into that language. I see the translation before it goes, can edit it, or send the original instead. Nothing is
+  sent translated without being shown first, unless I turn on **Translate what I send** for that chat. See
+  [Outgoing translation](#outgoing-translation).
 
 Nothing leaves the device: no cloud service, no peer is asked to translate. The only network use is downloading a
 language model once, after asking.
 
-Auto-translation needs no wire or stored-format change, and so no WISP: it is a view of a message the app already
-has. The original text stays what is stored, sent on to your other devices, quoted, searched and backed up. The
-translation is a local cache that can be thrown away at any time.
+Neither direction needs a wire or stored-format change, and so no WISP. Reading is a view of a message the app already
+has: the original text stays what is stored, sent on to your other devices, quoted, searched and backed up, and the
+translation is a local cache that can be thrown away at any time. Writing produces an ordinary text message: what is
+sent is the translated text, exactly as if I had typed it.
 
 ## The engine
 
@@ -55,15 +65,17 @@ So the first version is Desktop only, behind the flag. Every other client shows 
 
 Each language pair is one model of 35-55 MB (see the table below), downloaded once and kept.
 
-- **Asked first.** Turning the switch on shows what is needed and its size ("Portuguese to English and back, 73 MB"),
-  with Download / Not now. Nothing downloads without that answer. A message in a language that has no model yet shows a
-  small **Translate (37 MB)** action in the bubble instead of a silent download.
+- **Asked first.** Turning the switch on (in Settings, or **On** for one chat) shows what is needed and its size
+  ("Portuguese to English and back, 73 MB"), with Download / Not now. Nothing downloads without that answer. A message
+  in a language that has no model yet shows a small **Translate (37 MB)** action in the bubble instead of a silent
+  download. The first **Translate** in the composer asks the same way for the reverse model it needs ("English to
+  Italian, 37 MB").
 - **Where:** in the app's data folder, `translation-models/<pair>/` (Desktop: next to the profile, not inside it, so
   every profile on the device shares it and backups never carry it).
 - **Checked:** every file against the SHA-256 that QVAC's registry pins (`expectedSize` + `sha256Checksum` per file).
   We ship that list in the app, so the source of the bytes does not have to be trusted.
 - **Removable:** Settings lists the downloaded pairs with their sizes and a Remove button each. Turning the switch off
-  offers to remove them all.
+  offers to remove the pairs no chat set to **On** still uses.
 - **From where (your call):** the bytes are the same everywhere; what differs is who sees the download.
   1. Mozilla's Firefox CDN over HTTPS (`firefox-settings-attachments.cdn.mozilla.net`, what Firefox itself fetches and
      what the addon's own fetcher uses). Mozilla's CDN sees an IP asking for "pt->en".
@@ -84,7 +96,8 @@ is undetermined, "kkkk não acredito 😂" came out as English, "lol no way 😂
 
 - No translation when the detector's top language is the app's language, is undetermined, or has a probability under
   0.5; and no translation for messages under 4 letters (after removing emoji, links, mentions and numbers).
-- Per chat, the last confident language is remembered and used for short messages in that chat.
+- Per chat, the last confident language of what the others write is remembered and used for short messages in that
+  chat. It is also the chat's language for [outgoing translation](#outgoing-translation), unless set by hand.
 - Code blocks, links, mentions, cashu tokens, invoices and other entity cards are never translated; only the text runs
   around them.
 - A detected language Bergamot has no model for shows nothing.
@@ -114,23 +127,91 @@ The app's 8 locales map to Bergamot like this. All 14 pairs to and from English 
   Portuguese at times ("aluguer", "estás"). A Brazilian reader understands it but notices. The app's Chinese is
   Simplified (`zh-CN`); the Bergamot zh models were not tried in the spike, so their script is still to be checked.
 
+## Per chat
+
+Each chat has a translation choice with three values:
+
+| Choice | Received messages in this chat | Stored |
+|---|---|---|
+| **As in Settings** (default) | Translated when the Settings switch is on | nothing (no key) |
+| **On** | Translated, even with the Settings switch off | `"on"` |
+| **Off** | Never translated, even with the Settings switch on | `"off"` |
+
+So the Settings switch is only the default for chats that never chose; a chat's own choice always wins. A chat set to
+**On** while Settings is off asks for its models the first time, as the Settings switch does.
+
+**The choice is this device's, not synced with the profile.** It is kept beside the chat's mute, pin and read mark
+(`lib/chatMute.ts` is the model: a localStorage key under the profile's prefix, `translate_<chat>`, where `<chat>` is
+the session id or `group:<id>`), and forgotten with the chat. Why not synced:
+
+- The Settings switch it overrides is this device's too (`ghostly_app_settings`, per profile and device), and so are
+  the models. A chat synced to **On** would mean a download question on a device that never asked for it, and nothing
+  at all on a client with no runtime (web, Android in v1).
+- The app has no synced record for UI preferences today: mute and pins are per device. Syncing this one alone would be
+  a new profile record between devices, a contract (and a WISP) for a view setting.
+- It matches mute, which people already set per device.
+
+The cost is setting it again on a second Desktop. If per-chat preferences are ever synced, mute and translation move
+together.
+
+## Outgoing translation
+
+The reverse direction, on request: my draft translated into the chat's language before I send it.
+
+- **The chat's language** is the language that chat translates from: the last confident language of what the others
+  write there (see [Source language](#source-language)), or one I set by hand in the chat's translation menu
+  ("Language of this chat: Italian (detected) · Change"). A chat with no confident language yet and none set has no
+  outgoing translation, and the composer shows nothing new.
+- **Shown before sending.** A **Translate** button in the composer (beside the send button) translates the draft and
+  opens a preview above the composer: "Italian" + the translated text, editable, with **Send translation**, **Send
+  original** and **Cancel** (back to the draft as typed). Translation runs on press, never on each keystroke. Editing
+  the original afterwards marks the preview stale ("Translate again").
+- **Translate what I send** (per chat, off by default, in the same menu): the send button translates and sends at once,
+  without the preview. Even then it falls back to the preview when the chat's language is not certain (a group with
+  several languages, below) or the draft's own language is undetermined. Like the per-chat choice, it is this device's.
+- **What the contact receives: only the translated text.** It is an ordinary text message; the original is not sent,
+  neither in the message nor as a "translated from" note. Sending the original as well would need a new message field
+  (a WISP and a wire change, read only by clients that know it), or would put both texts in the body, which every
+  older client would show as one long message. The original is kept on my side only: on this device, beside the
+  message, so my bubble says "Translated to Italian · Show original". My other devices get the message as sent (the
+  translation), without the line. Whether the contact should be told it was machine-translated is open question 7.
+- **Never translated:** a draft already in the chat's language (sent as is), and the parts kept out of received
+  translation (code blocks, links, mentions, tokens, invoices). Voice notes, files and pictures are not touched.
+- **Editing a sent translated message** edits the sent text (the translation), as typed; it is not retranslated.
+- **A group with several languages:** one message has one language; there is no translation per member (that would be
+  one message per language, a wire change). The group's language is the language of most of the others' last 20
+  confident messages, when it covers at least 60% of them. Below that, the group has no single language: **Translate**
+  first asks which one (the group's languages, most used first), and **Translate what I send** always shows the
+  preview there. A language set by hand for the group wins over the count.
+
 ## UI
 
 - **Settings, Appearance, right under Language** (`pages/Settings.tsx`; a `SETTINGS_INDEX` entry so search finds
   it): **Translate messages into <language>** (off by default), a boolean `translateMessages` in `AppSettings` beside
-  `linkPreviews` (`lib/settings.ts`). Below it: the downloaded languages with their sizes, and Remove.
+  `linkPreviews` (`lib/settings.ts`). Its hint says it is the default for chats that have not chosen. Below it: the
+  downloaded languages with their sizes, and Remove.
 - **In a bubble** (`components/MessageBubble.tsx`, shared by 1:1 chats and groups; received means
   `message.sender === "peer"`): the translated text in place of the `RichText` body, and under it a quiet line
   "Translated from Portuguese · Show original", styled like the existing `EditedMark`. Show original swaps the text in
   place (and back with "Show translation"); it is remembered per message for the session.
 - **While translating:** the original shows first, then the translation replaces it (no spinner; 20-50 ms on Desktop).
-- **Never translated:** own messages (from any of your devices), system lines, entity cards, and messages already in
-  the app's language.
-- **Per chat:** the chat's menu gets "Don't translate this chat" (some chats are deliberately in another language).
-- **Copy, reply, quote, forward, search:** act on the original text. Copy offers the translation as a second item.
+- **Never translated for reading:** own messages (from any of your devices), system lines, entity cards, and messages
+  already in the app's language.
+- **Per chat:** the chat's menu (1:1 and group, and the chat's info page) gets **Translation**, a small sheet with the
+  three choices ("As in Settings (Off)", "On", "Off"; the first names what Settings says now), the chat's language
+  with Change, and **Translate what I send**. A chat set to On or Off shows nothing else in its header; the choice is
+  only in the menu.
+- **Composer:** the **Translate** button shows in a chat whose translation is on (by its own choice or by Settings) and
+  that has a language other than the app's. The preview sits above the composer like the reply preview does, and the
+  draft stays in the composer until something is sent.
+- **My translated bubble:** "Translated to Italian · Show original" under my message, on the sending device only, in
+  the same quiet style.
+- **Copy, reply, quote, forward, search:** act on the original text of a received message, and on the sent text (the
+  translation) of mine. Copy offers the other text as a second item.
 - **Accessibility:** the screen reader reads the translated text, then "translated from Portuguese"; Show original is
-  a real button.
-- Both 1:1 chats and groups. In a group with several languages, each message is detected on its own.
+  a real button. The composer preview is a labelled region ("Translation to Italian"), announced when it is ready;
+  Send translation is the default action, so Enter sends what is shown.
+- Both 1:1 chats and groups. In a group with several languages, each received message is detected on its own.
 
 ## Cost and limits
 
@@ -148,6 +229,13 @@ Measured on Desktop Linux (see Spike). The pressure is RAM, not CPU:
 - **Battery (phones, later):** not measured. A phone CPU will be slower than this desktop one, and the 250 MB per
   model weighs more on a 4 GB phone than the CPU time does. Android waits for its own spike.
 - **Disk:** 35-55 MB per pair, shared by every profile on the device.
+- **Outgoing adds the reverse model.** Reading an Italian chat in an English app needs it -> en (37.1 MB); writing back
+  in Italian adds en -> it (36.5 MB), 73.6 MB in all. In a Portuguese app both directions pivot through English: it ->
+  en and en -> pt to read, pt -> en and en -> it to write, four models and 147.0 MB. The download question names the
+  direction it is for, so reading can be downloaded without writing.
+- **RAM with both directions:** still at most two models loaded. Reading and writing in the same chat use different
+  models, so switching between them unloads one and loads another: 33-48 ms per model from disk, once per switch, not
+  per message. A draft translates in 20-50 ms (31-69 ms through a pivot), on press only.
 
 ## Privacy and security
 
@@ -158,6 +246,14 @@ Measured on Desktop Linux (see Spike). The pressure is RAM, not CPU:
   sidecar runs with no network access needed (it never fetches; Ghostly downloads and checks the files).
 - The sidecar reads message text over stdio only; it is started by the app, not listening on a port.
 - A detected language is not shown to the sender and changes nothing on the wire.
+- The per-chat choices (On/Off, the chat's language, Translate what I send) are this device's, never synced and never
+  sent: the contact cannot tell whether I read their chat translated.
+- **Outgoing:** a draft goes to the local sidecar only, when I press Translate (or send, with Translate what I send
+  on). Only the translated text is sent. The original never leaves the device, not even to my other devices: it is kept
+  beside the sent message on this device, not in backups, and removed with the message (delete, delete for everyone,
+  a disappearing message's timer) or the chat. Losing it only loses the Show original line.
+- A machine translation goes out under my name. That is why it is shown before sending by default, and why Translate
+  what I send is per chat, off by default, and falls back to the preview whenever the target language is uncertain.
 
 ## Behind a flag
 
@@ -222,7 +318,17 @@ Other findings:
 4. New dependencies: `@qvac/translation-nmtcpp` and `bare-runtime` in a new `native/translation` package (Apache-2.0,
    both from Tether/Holepunch), and `@qvac/langdetect-text` (+ `tinyld`, MIT) in the UI. OK to add?
 5. Default off, opt-in per device (proposal), or on with the first-download question?
-6. "Don't translate this chat" in v1, or later?
+6. "Don't translate this chat" in v1, or later? **Decided:** in v1, and both ways: each chat is **As in Settings**,
+   **On** or **Off**, this device's choice like the Settings switch and mute (see [Per chat](#per-chat)). Outgoing
+   translation is in v1 too.
+7. Should the contact be told a message was machine-translated? v1 sends nothing (no wire change). Options for later:
+   an optional `translatedFrom` field in a WISP, which the contact's bubble shows as "Translated by the sender", or
+   nothing ever.
+8. The composer's **Translate** button: only in chats whose translation is on (proposal), or in every chat with a
+   language other than the app's (someone who reads Italian fine but writes it poorly)?
+9. A group's language: most of the others' last 20 messages at 60% or more (proposal), or always ask on the first
+   Translate in a group?
+10. The originals of my sent translations: device only and not in backups (proposal), or in backups too?
 
 ## Slices
 
@@ -239,8 +345,12 @@ is behind `VITE_TRANSLATE`.
 | 6 | A Settings switch turns translation of received messages on and lists the downloaded languages | apps/ui `settings.ts`, `Settings.tsx`, `settingsSections.ts`, 8 locales | 200 |
 | 7 | A received message shows its translation with Show original | apps/ui `MessageBubble.tsx` + translation cache hook, 8 locales | 250 |
 | 8 | Arrivals are translated in batches, only for messages on screen | apps/ui hook | 150 |
-| 9 | A chat can be set to never translate | apps/ui chat menu, per-chat setting, 8 locales | 120 |
-| 10 | The CLI adds a translation to received messages when asked | `native/translation` reuse, `packages/cli` (`--translate`, `translation` field) | 200 |
+| 9 | A chat can be set to translate On, Off or As in Settings, whatever Settings says | apps/ui `lib/chatTranslate.ts` (per-device key, like `chatMute.ts`), chat menu sheet, the bubble's rule, 8 locales | 180 |
+| 10 | A chat has a language: remembered from what the others write, or set by hand; a group's from most of its messages | apps/ui `lib/chatLanguage.ts` (pure count + key), the sheet's Change row, 8 locales | 150 |
+| 11 | The composer translates a draft into the chat's language and shows it, editable, before sending; or sends the original | apps/ui `Composer` preview (like the reply preview), group language picker, reverse-model download question, 8 locales | 300 |
+| 12 | My sent translation keeps its original on this device and shows Show original | apps/ui local originals store (by message id, removed with the message or chat), `MessageBubble.tsx`, 8 locales | 180 |
+| 13 | A chat can send translated without the preview (Translate what I send) | apps/ui per-chat key, send path with the fallbacks to the preview, 8 locales | 120 |
+| 14 | The CLI adds a translation to received messages when asked | `native/translation` reuse, `packages/cli` (`--translate`, `translation` field) | 200 |
 
 Contracts introduced (all local, none on the wire or in WISPs, each in its own slice):
 
@@ -249,10 +359,14 @@ Contracts introduced (all local, none on the wire or in WISPs, each in its own s
   -> `{ id, texts[] }` or `{ id, error }` (slice 3).
 - The pinned model list (pair -> file names, sizes, SHA-256) and the models folder `translation-models/<pair>/`
   (slice 5).
-- `AppSettings.translateMessages` in `ghostly_app_settings` (slice 6), and the per-chat opt-out key (slice 9).
-- The CLI's `--translate` flag and the optional `translation: { from, text }` field on received messages (slice 10:
-  public CLI output).
+- `AppSettings.translateMessages` in `ghostly_app_settings` (slice 6).
+- The per-chat keys under the profile's prefix, this device only: `translate_<chat>` = `"on"` | `"off"` (slice 9),
+  `translate_lang_<chat>` (a language set by hand, slice 10), `translate_send_<chat>` (slice 13).
+- The local originals of sent translations: message id -> `{ to, original }`, on this device, not synced, not in
+  backups (slice 12).
+- The CLI's `--translate` flag and the optional `translation: { from, text }` field on received messages (slice 14:
+  public CLI output). The CLI has no outgoing translation in v1.
 
 Slices 2 and 3 can be built in parallel; 4 needs 3; 5 needs 4; 6 needs 1 and 5; 7 and 8 need 2 and 6; 9 needs 7;
-10 needs 3. Slice 3 may run over 400 lines if the trimmed ggml fabric (open question 3) needs its own build step; it
+10 needs 2 and 9; 11 needs 5 and 10; 12 and 13 need 11; 14 needs 3. Slice 3 may run over 400 lines if the trimmed ggml fabric (open question 3) needs its own build step; it
 would then split into "the runtime package" and "its packaging".
