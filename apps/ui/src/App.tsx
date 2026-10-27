@@ -20,7 +20,7 @@ import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
-import { useComputerAwake } from "./lib/keepAwake";
+import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
@@ -136,8 +136,10 @@ function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
   // Every chat on a call or ringing: a second call ringing (or declined) while one is on must not unload the first.
   const [callSessions, setCallSessions] = useState<readonly string[]>([]);
-  // A call keeps the screen on (Screen Wake Lock, where there is one).
-  useWakeLock(callSessions.length > 0);
+  // A call keeps the screen on (Screen Wake Lock, where there is one), and so does a file on its way: a phone that
+  // sleeps stops it.
+  const filesMoving = useFilesMoving();
+  useWakeLock(callSessions.length > 0 || filesMoving);
   // And the profile on this device: a handoff waits for the call to end.
   useCallOnSync();
   // The call window hangs here instead of inside its chat, which may be off
@@ -213,7 +215,8 @@ export function App() {
   const { t } = useI18n();
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
   useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), ...deviceWakeWords(t) });
-  // Desktop: the computer stays awake for a handoff, and while the person keeps it so for a standby (WISP 06).
+  // Desktop: the computer stays awake for a handoff, while the person keeps it so for a standby (WISP 06), and while a
+  // file is on its way.
   useComputerAwake();
   const chats = useLoadedChats();
   useOnScreenLink();
