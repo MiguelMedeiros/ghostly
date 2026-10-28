@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Android 13 and up: asked when the person turns notifications on in Settings, never at start. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- A file moving with the app out of sight (TransferService.kt): a data-sync foreground service and a partial
+         wake lock, for as long as files move. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
@@ -63,6 +68,11 @@
                 <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".TransferService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <provider
           android:name="androidx.core.content.FileProvider"
