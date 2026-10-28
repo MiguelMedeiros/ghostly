@@ -228,6 +228,30 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-download")).toBeInTheDocument();
   });
 
+  it("a picture the player cannot decode (HEVC in Chromium: sound over black, no error) says so and offers Download", async () => {
+    show(video({ name: "IMG_0042.mov", mime: "video/quicktime" }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player") as HTMLVideoElement;
+    // Chromium loads the file and plays its sound: the picture is 0 × 0 and no frame is ever drawn.
+    Object.defineProperty(player, "videoWidth", { configurable: true, value: 0 });
+    fireEvent.loadedData(player);
+    expect(screen.queryByTestId("video-player")).toBeNull();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MOV). Download it to watch.");
+    expect(screen.getByTestId("video-download")).toBeInTheDocument();
+  });
+
+  it("a picture the player decodes goes on playing", async () => {
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player") as HTMLVideoElement;
+    Object.defineProperty(player, "videoWidth", { configurable: true, value: 1280 });
+    fireEvent.loadedData(player);
+    expect(screen.getByTestId("video-player")).toBe(player);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+  });
+
   // covers: files.video.stream
   it("too large to hand out as bytes (Desktop over 64 MiB): it plays from the platform's stream, and lets go of it", async () => {
     getFile.mockResolvedValue(null);

@@ -120,9 +120,11 @@ export function useComputerAwake(): void {
     window.addEventListener(DEVICE_SET_EVENT, seen);
     return () => { live = false; stop(); window.removeEventListener(DEVICE_SET_EVENT, seen); };
   }, [supported, setting]);
+  // Told again when files start or stop under a hold the devices keep: Android holds its "Sending files" service for
+  // files alone.
   useEffect(() => {
     if (!supported) return;
-    void host()?.keepAwake?.(wanted).catch(() => false);
-  }, [supported, wanted]);
-  useEffect(() => () => { if (supported) void host()?.keepAwake?.(false).catch(() => false); }, [supported]);
+    void host()?.keepAwake?.(wanted, files).catch(() => false);
+  }, [supported, wanted, files]);
+  useEffect(() => () => { if (supported) void host()?.keepAwake?.(false, false).catch(() => false); }, [supported]);
 }

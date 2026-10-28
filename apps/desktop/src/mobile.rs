@@ -3,7 +3,8 @@
 //! error) rather than "command not found". The stubs take no arguments: Tauri ignores the ones the page sends.
 //! - `hyperdht`: Desktop runs HyperDHT in a Node program, which a phone cannot start (native HyperDHT on Android is
 //!   its own piece of work, through Bare).
-//! - `keep_awake`: a phone keeps a call awake with a foreground service and a wake lock instead.
+//! - `keep_awake`: on Android, a foreground service and a wake lock while files move (android.rs), not the
+//!   computer's sleep assertion.
 //! - `share`: the macOS share sheet; Android's share sheet is the Android host's (android.rs), with Desktop's checks.
 //! - `viewer`, `app_sandbox`: a contact's app or an installed app in a window of its own. A mobile app has one
 //!   window.
@@ -44,10 +45,21 @@ pub mod hyperdht {
 }
 
 pub mod keep_awake {
-    /// Nothing held: `Ok(false)`, as on a desktop that has no way to hold the screen on.
-    #[tauri::command]
-    pub fn keep_awake() -> Result<bool, String> {
-        Ok(false)
+    /// Android: while a file moves (`files`), a foreground service keeps the app running out of sight (Android freezes
+    /// it otherwise, and the transfer with it); the device reasons hold nothing here. Elsewhere nothing held:
+    /// `Ok(false)`, as on a desktop that has no way to hold the screen on.
+    // Off the main thread: the Kotlin plugin is waited for.
+    #[tauri::command(async)]
+    #[allow(unused_variables)]
+    pub fn keep_awake(on: bool, files: Option<bool>) -> Result<bool, String> {
+        #[cfg(target_os = "android")]
+        {
+            crate::android::keep_awake(on && files.unwrap_or(false))
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            Ok(false)
+        }
     }
 }
 
