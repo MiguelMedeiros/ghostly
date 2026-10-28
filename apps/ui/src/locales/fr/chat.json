@@ -358,6 +358,10 @@
     "placeholder": "Rechercher dans ce chat"
   },
   "send": "Envoyer",
+  "sentTranslation": {
+    "copyOriginal": "Copier l'original",
+    "line": "Traduit en {{language}}"
+  },
   "services": {
     "add": "+ Ajouter une app",
     "canOpen": "Apps que vous pouvez ouvrir :",

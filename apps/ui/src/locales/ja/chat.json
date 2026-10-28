@@ -358,6 +358,10 @@
     "placeholder": "このチャットを検索"
   },
   "send": "送信",
+  "sentTranslation": {
+    "copyOriginal": "原文をコピー",
+    "line": "{{language}}に翻訳済み"
+  },
   "services": {
     "add": "+ アプリを追加",
     "canOpen": "開けるアプリ:",

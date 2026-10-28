@@ -26,6 +26,7 @@ import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
 import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
 import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
 import { groupChat } from "../lib/chatMute";
+import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
@@ -554,7 +555,7 @@ export function GroupChat() {
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
       onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend
-        ? () => { void engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).catch(() => {}); } : undefined}
+        ? () => { void engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).then(result => { if (!result.error) forgetSentOriginal(groupChat(groupId), m.id); }).catch(() => {}); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
       onSave={m.event ? undefined : () => void setSaved(`group:${groupId}`, m.id, savedHere.has(m.id)).catch(() => {})} saved={savedHere.has(m.id)} />;

@@ -502,6 +502,8 @@ export function deleteSession(sessionId: string): void {
     `${getPrefix()}mute_mentions_${sessionId}`,
     `${getPrefix()}translate_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
+    // The originals of what I sent translated (lib/sentOriginals.ts).
+    `${getPrefix()}sent_originals_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,
   ]) {

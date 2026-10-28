@@ -366,6 +366,10 @@
     "placeholder": "ابحث في هذه الدردشة"
   },
   "send": "إرسال",
+  "sentTranslation": {
+    "copyOriginal": "نسخ النص الأصلي",
+    "line": "مترجمة إلى {{language}}"
+  },
   "services": {
     "add": "+ إضافة تطبيق",
     "canOpen": "تطبيقات يمكنك فتحها:",
