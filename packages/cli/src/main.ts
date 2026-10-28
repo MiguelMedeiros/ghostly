@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
-import { here } from "./commands/shared";
+import { here, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -14,6 +14,7 @@ import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
 import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
+import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -28,6 +29,17 @@ const VERSION = packageJson.version;
  */
 const engineApi = () => import("./api");
 const engineHost = () => import("./host");
+
+/**
+ * `--translate <lang>`'s translator, or null (not asked; or the runtime is not there, said on stderr). Loaded only when
+ * asked: the app's message parser it reads costs every other command nothing.
+ */
+async function translatorFor(value: unknown, home: string): Promise<Translator | null> {
+  if (value === undefined) return null;
+  const { loadDetector, openTranslator, translateTarget } = await import("./translate");
+  const to = translateTarget(value)!;
+  return openTranslator({ home, to, detect: await loadDetector(), warn: (line) => process.stderr.write(line + "\n") });
+}
 
 interface Globals { home: string; profile: string; paths: ProfilePaths; pretty: boolean }
 
@@ -250,7 +262,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
-  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
+  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print] [--translate lang]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
     type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
@@ -258,6 +270,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),
     exec: o("string", "Run this command per event, the event as JSON on stdin"),
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
+    translate,
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
@@ -755,6 +768,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     since: { type: "number", description: "" }, cursor: { type: "string", description: "" }, type: { type: "list", description: "" },
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
     from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
+    translate: { type: "string", description: "" },
   });
   // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
   noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
@@ -776,6 +790,8 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
+  // Kept for the whole listen (a model loads once); its process ends with this one.
+  const translator = await translatorFor(parsed.options.translate, g.home);
   const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
   // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
   // a restart would hand every event since again (agents#1710). How it stops is the branch's below.
@@ -789,6 +805,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {
     return eventHandler({
       types, turns,
+      translate: translator?.event,
       exec: parsed.options.exec as string | undefined,
       webhook: parsed.options.webhook as string | undefined,
       cursor,
@@ -1008,6 +1025,8 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   }
   const params = command.params?.(parsed, args) ?? {};
   for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key];
+  // `events` and `chat history --translate`: added here, where the runtime is, to the answer the daemon gave.
+  const translator = await translatorFor(parsed.options.translate, g.home);
   // Evidence is read here, where the file is: the daemon runs elsewhere.
   if (command.method === "identity.complete") {
     if (params.evidenceFile) {
@@ -1044,6 +1063,10 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     }
     return result;
   }, { deferGroups: chatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  if (translator) {
+    try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
+    return;
+  }
   printAnswer(result);
 }
 
