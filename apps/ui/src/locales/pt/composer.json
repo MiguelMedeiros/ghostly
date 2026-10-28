@@ -75,5 +75,7 @@
   "takePhoto": "Tirar foto",
   "tooLong": "Longo demais para enviar ({{count}} caracteres, o limite é {{max}}).",
   "tooLongBytes": "Longo demais para enviar ({{bytes}} bytes, o limite é {{max}}). Encurte, ou envie como arquivo.",
-  "tooLongDht": "Longo demais para a DHT. Cabe quando vocês estiverem conectados direto."
+  "tooLongDht": "Longo demais para a DHT. Cabe quando vocês estiverem conectados direto.",
+  "videoConverting": "Convertendo {{name}} para MP4… {{percent}}",
+  "videoSentAsIs": "{{name}} foi enviado como está: este aparelho não consegue convertê-lo. Alguns celulares e computadores talvez só consigam baixá-lo."
 }
