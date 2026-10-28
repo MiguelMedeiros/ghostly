@@ -123,6 +123,17 @@ describe("a file sent over a slow uplink", () => {
     expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(500 + 400);
   }, 60_000);
 
+  it("takes the bandwidth on a short path whose round trip wavers on its own, as 5G's does", async () => {
+    // 50 Mbit/s, 15 ms each way and up to 100 ms more. The waver read as the files' own queue: the window stayed at its
+    // floor, 64 KiB per round trip, about 0.5 MiB/s, where a larger one carried several times as much in the same time.
+    const size = 16 * 1024 * 1024;
+    const { seconds, latencies } = await slowUplink({ size, upBytesPerMs: 50_000_000 / 8 / 1000, delayMs: 15, jitterMs: 100, sayEveryMs: 1_000 });
+    expect(size / seconds, `${(size / seconds / 2 ** 20).toFixed(2)} MiB/s`).toBeGreaterThan(1.5 * 2 ** 20);
+    // What the sender says meanwhile still takes about the path's own time (30 to 230 ms), and a trial's queue at most.
+    const worst = Math.max(...latencies.map((l) => l.ms));
+    expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(230 + FILE_LIMITS.trialQueueMs);
+  }, 60_000);
+
   it("keeps a full window on a fast link with a long round trip", async () => {
     // 1 Gbit/s, 50 ms each way: 1 MiB per round trip is about 10 MiB/s, and a small fixed window would cut it to a tenth.
     const size = 40 * 1024 * 1024;
