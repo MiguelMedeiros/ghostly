@@ -27,9 +27,9 @@ use tokio::{
 /// `translation-runtime/<version>/` under the app's data folder, `bare` and `runtime.mjs` at the top; an app that needs
 /// another version looks in another folder.
 pub const RUNTIME_VERSION: &str = "0.1.0";
-const RUNTIME_DIR: &str = "translation-runtime";
+pub const RUNTIME_DIR: &str = "translation-runtime";
 /// Beside the runtime, shared by every profile on this computer: `translation-models/<from>-<to>/`.
-const MODELS_DIR: &str = "translation-models";
+pub const MODELS_DIR: &str = "translation-models";
 
 pub const NOT_INSTALLED: &str = "Translation is not installed";
 /// The runtime's own words for a pair whose model is not on disk.
@@ -45,14 +45,14 @@ const MAX_LINE: usize = 1024 * 1024;
 const MAX_ANSWER: u64 = 4 * MAX_LINE as u64;
 
 /// How the runtime starts: the program, the script it runs and the models folder it is given.
-struct Program {
+pub struct Program {
     executable: PathBuf,
     script: PathBuf,
     models: PathBuf,
 }
 
 /// The runtime unpacked under the app's data folder, or `NOT_INSTALLED`.
-fn installed(data: &Path) -> Result<Program, String> {
+pub fn installed(data: &Path) -> Result<Program, String> {
     let root = data.join(RUNTIME_DIR).join(RUNTIME_VERSION);
     let executable = root.join(if cfg!(windows) { "bare.exe" } else { "bare" });
     let script = root.join("runtime.mjs");
@@ -161,6 +161,29 @@ impl Default for TranslateState {
 }
 
 impl TranslateState {
+    /// Asks a running runtime to leave now, as an idle one does: before its models are removed, which it may have
+    /// open. The next request starts it again.
+    pub async fn stop_now(&self) {
+        let runtime = self.runtime.lock().await.take();
+        if let Some(runtime) = runtime {
+            stop(runtime).await;
+        }
+    }
+
+    /// With its own app data folder, for another module's tests.
+    #[cfg(test)]
+    pub fn in_folder(data: PathBuf) -> Self {
+        Self {
+            data: Some(data),
+            ..Self::default()
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn running(&self) -> bool {
+        self.runtime.lock().await.is_some()
+    }
+
     fn spawn(&self, program: &Program) -> Result<Runtime, String> {
         let mut command = Command::new(&program.executable);
         command
