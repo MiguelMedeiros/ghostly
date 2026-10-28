@@ -416,6 +416,12 @@
     "sync": "同步"
   },
   "today": "今天",
+  "translated": {
+    "from": "译自{{language}}",
+    "showOriginal": "显示原文",
+    "showTranslation": "显示译文",
+    "translate": "翻译"
+  },
   "typeMessage": "输入消息...",
   "typing": "正在输入…",
   "typingRecording": "正在录音…",
