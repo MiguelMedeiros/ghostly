@@ -89,6 +89,9 @@
     "region": "Translation to {{language}}",
     "same": "Already in {{language}}",
     "sendOriginal": "Send original",
+    "sendSetting": "Translate what I send",
+    "sendSettingHint": "Sent at once, without the preview",
+    "sendTranslated": "Send translated into {{language}}",
     "sendTranslation": "Send translation",
     "stale": "The message changed",
     "working": "Translating…"

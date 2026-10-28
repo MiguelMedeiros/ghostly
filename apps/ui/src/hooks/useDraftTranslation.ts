@@ -46,8 +46,11 @@ export function useDraftTranslation({ config, appLanguage, onFailure }: {
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const failRef = useRef(onFailure); failRef.current = onFailure;
 
-  /** Translates `draft` (its group mentions `named`) into `to`. */
-  const translateInto = useCallback(async (to: string, draft: string, named: readonly GroupMention[] = []) => {
+  /**
+   * Translates `draft` (its group mentions `named`) into `to`. With `send`, the translation is handed to it as soon as
+   * it is made; the preview shows it only if `send` could not take it (false: the draft changed meanwhile).
+   */
+  const translateInto = useCallback(async (to: string, draft: string, named: readonly GroupMention[] = [], send?: (text: string) => boolean) => {
     if (!config) return;
     const source = draft.trim();
     const id = ++run.current;
@@ -62,7 +65,7 @@ export function useDraftTranslation({ config, appLanguage, onFailure }: {
     for (;;) {
       try {
         const text = await translateDraft(parts, (texts) => translate(pair, texts));
-        if (current()) setState({ step: "shown", to, source, text, same: false });
+        if (current() && !send?.(text)) setState({ step: "shown", to, source, text, same: false });
         return;
       } catch (cause) {
         if (!current()) return;

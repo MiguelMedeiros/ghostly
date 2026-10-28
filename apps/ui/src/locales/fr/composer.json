@@ -89,6 +89,9 @@
     "region": "Traduction en {{language}}",
     "same": "Déjà en {{language}}",
     "sendOriginal": "Envoyer l’original",
+    "sendSetting": "Traduire ce que j’envoie",
+    "sendSettingHint": "Envoyé aussitôt, sans l’aperçu",
+    "sendTranslated": "Envoyer traduit en {{language}}",
     "sendTranslation": "Envoyer la traduction",
     "stale": "Le message a changé",
     "working": "Traduction…"

@@ -26,6 +26,8 @@ import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNames
 import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import { useComposition } from "../hooks/useComposition";
+import { draftLanguage } from "../lib/translateDraft";
+import { useTranslatesWhatISend } from "../lib/chatTranslateSend";
 import "./composer/composer.css";
 import { touchOnly } from "../lib/touchOnly";
 import { formatAmount } from "../lib/amount";
@@ -237,6 +239,8 @@ export function MessageInput({
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
+  // Translate what I send, this chat's choice on this device (the Translation sheet).
+  const translatesSend = useTranslatesWhatISend(draftId);
   const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
@@ -403,6 +407,7 @@ export function MessageInput({
       }
       return;
     }
+    if (sendsTranslated && !previewOpen && sendTranslatedNow()) return;
     // The words leave the field now, with what goes with them (the members named, the preview), and wait their turn.
     await queue({ words: text, named: picker.compose(text), preview: linkPreview.preview ?? undefined });
   };
@@ -437,10 +442,11 @@ export function MessageInput({
     const named = carryMentions(text, picker.compose(text), words);
     // Already in that language: it goes as typed, with nothing to keep beside it. A draft holding a seed or a key is
     // not kept either, as it is not kept as a draft: only ecash is.
-    const kept = findSecret(shown.source);
-    const keepOriginal = !shown.same && (!kept || kept.kind === "cashu");
-    await queue({ words, named, preview: linkPreview.preview ?? undefined, ...(keepOriginal && { translated: { to: shown.to, original: shown.source } }) });
+    await queue({ words, named, preview: linkPreview.preview ?? undefined, ...(!shown.same && keepsOriginal(shown.source) && { translated: { to: shown.to, original: shown.source } }) });
   };
+
+  /** Whether a draft sent translated keeps its original: not one holding a seed or a key (ecash is kept, as drafts keep it). */
+  const keepsOriginal = (source: string) => { const found = findSecret(source); return !found || found.kind === "cashu"; };
 
   /**
    * The secret guard on the draft as typed, before any of it is translated: Cancel leaves it untranslated, Send anyway
@@ -451,6 +457,31 @@ export function MessageInput({
     const found = guardedDraft.current === draft ? null : findSecret(draft);
     if (found) { setSecret({ finding: found, translate: () => { guardedDraft.current = draft; translate(); } }); return; }
     translate();
+  };
+
+  /**
+   * Translate what I send: the draft goes translated, with no preview, when the chat has a single language and the
+   * detector is sure of the draft's. Unsure of either, the preview opens instead (asking which language in a group
+   * with several). False when the draft goes as typed: no words, or already in the chat's language.
+   */
+  const sendTranslatedNow = (): boolean => {
+    const to = translation?.language ?? null;
+    const source = text.trim(), named = picker.compose(text);
+    const from = translation?.detect ? draftLanguage(source, translation.detect, named) : null;
+    if (from === undefined || from === to) return false;
+    // Send already passed the guard on the draft: its translation does not ask again.
+    guardedDraft.current = source;
+    if (!to || from === null) { drafting.start(text, named); return true; }
+    void drafting.translateInto(to, text, named, (words) => {
+      // Changed while it was translated: the preview shows it, stale, rather than send what was not seen.
+      if (textRef.current.trim() !== source) return false;
+      const bytes = new TextEncoder().encode(words.trim()).length;
+      if ((maxBytes && bytes > maxBytes) || (textBytes && bytes > textBytes)) return false;
+      void queue({ words: words.trim(), named: carryMentions(source, named, words.trim()), preview: linkPreview.preview ?? undefined,
+        ...(keepsOriginal(source) && { translated: { to, original: source } }) });
+      return true;
+    });
+    return true;
   };
 
   const translateAgain = () => {
@@ -776,6 +807,7 @@ export function MessageInput({
   // Translate (beside Send): in a chat with a language other than the app's, or a group with several, for a draft.
   const canTranslate = !!translation && translateEnabled() && !edit && !recording && !!text.trim()
     && (translation.language ? translation.language !== language : !!translation.languages?.some((code) => code !== language));
+  const sendsTranslated = canTranslate && translatesSend;
   const translateLabel = translation?.language ? t("composer.translate.into", { language: languageName(translation.language, language) }) : t("composer.translate.button");
 
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
@@ -920,7 +952,7 @@ export function MessageInput({
             onActiveChange={(active) => { setRecording(active); if (active) closeAll(); onTyping?.(active, "recording"); }}
           />
         ) : <button
-          aria-label={t("composer.sendMessage")}
+          aria-label={sendsTranslated && translation?.language ? t("composer.translate.sendTranslated", { language: languageName(translation.language, language) }) : t("composer.sendMessage")}
           // The field keeps the focus: a tap on Send would take it (and on a phone close the keyboard) mid-conversation.
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => previewOpen ? submitTranslated() : handleSubmit()}

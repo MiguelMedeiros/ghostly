@@ -8,6 +8,7 @@ import { translateOffered } from "../lib/translateSettings";
 import { ChatLanguageMenu, ChatLanguageMenuItem } from "./ChatLanguage";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { useTranslateDownload } from "../hooks/useTranslateDownload";
+import { TranslateSendMenuItem } from "./chat/TranslateSendMenuItem";
 
 /*
  * A chat's translation, On, Off or As in Settings (apps/ui/src/lib/chatTranslate.ts): the row in the chat's ⋮ menu
@@ -87,6 +88,7 @@ function OpenTranslateMenu({ chat, open, onClose, anchorRef, onChosen, language 
       ))}
       <MenuSeparator />
       {language}
+      <TranslateSendMenuItem chat={chat} />
     </Menu>
   );
 }

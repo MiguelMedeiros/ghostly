@@ -501,6 +501,8 @@ export function deleteSession(sessionId: string): void {
     `${getPrefix()}mute_${sessionId}`,
     `${getPrefix()}mute_mentions_${sessionId}`,
     `${getPrefix()}translate_${sessionId}`,
+    // Translate what I send (lib/chatTranslateSend.ts).
+    `${getPrefix()}translate_send_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
     // The originals of what I sent translated (lib/sentOriginals.ts).
     `${getPrefix()}sent_originals_${sessionId}`,

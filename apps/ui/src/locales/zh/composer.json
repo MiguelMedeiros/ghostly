@@ -89,6 +89,9 @@
     "region": "{{language}}译文",
     "same": "已经是{{language}}",
     "sendOriginal": "发送原文",
+    "sendSetting": "翻译我发送的内容",
+    "sendSettingHint": "立即发送，不显示预览",
+    "sendTranslated": "翻译成{{language}}并发送",
     "sendTranslation": "发送译文",
     "stale": "消息已更改",
     "working": "正在翻译…"

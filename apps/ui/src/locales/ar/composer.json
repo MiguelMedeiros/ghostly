@@ -89,6 +89,9 @@
     "region": "الترجمة إلى {{language}}",
     "same": "الرسالة بالفعل بـ{{language}}",
     "sendOriginal": "إرسال الأصل",
+    "sendSetting": "ترجمة ما أرسله",
+    "sendSettingHint": "يُرسل فورًا، دون المعاينة",
+    "sendTranslated": "إرسال مترجَمًا إلى {{language}}",
     "sendTranslation": "إرسال الترجمة",
     "stale": "تغيّرت الرسالة",
     "working": "جارٍ الترجمة…"

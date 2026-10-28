@@ -103,7 +103,7 @@ describe("choosing from the chat's menu, in the Desktop app", () => {
     expect(screen.queryByTestId("group-options-menu")).not.toBeInTheDocument();
     const menu = screen.getByTestId("translate-menu");
     expect(menu).toHaveAccessibleName("Translation");
-    expect(rowTexts(menu)).toEqual(["As in Settings (Off)", "On", "Off"]);
+    expect(rowTexts(menu)).toEqual(["As in Settings (Off)", "On", "Off", "Translate what I send"]);
     expect(within(menu).getByTestId("translate-settings")).toHaveAttribute("aria-checked", "true");
 
     await user.click(within(menu).getByTestId("translate-on"));
@@ -123,7 +123,7 @@ describe("choosing from the chat's menu, in the Desktop app", () => {
     const { user } = openGroup(activeGroup(), "pt");
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("chat-translate-open"));
-    expect(rowTexts(screen.getByTestId("translate-menu"))).toEqual(["Como nos Ajustes (Desativada)", "Ativada", "Desativada"]);
+    expect(rowTexts(screen.getByTestId("translate-menu"))).toEqual(["Como nos Ajustes (Desativada)", "Ativada", "Desativada", "Traduzir o que eu envio"]);
   });
 
   it("is not in a build without translation", async () => {

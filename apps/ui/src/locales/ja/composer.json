@@ -89,6 +89,9 @@
     "region": "{{language}}への翻訳",
     "same": "すでに{{language}}です",
     "sendOriginal": "原文を送信",
+    "sendSetting": "送信するメッセージを翻訳",
+    "sendSettingHint": "プレビューなしですぐに送信",
+    "sendTranslated": "{{language}}に翻訳して送信",
     "sendTranslation": "翻訳を送信",
     "stale": "メッセージが変更されました",
     "working": "翻訳中…"

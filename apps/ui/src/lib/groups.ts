@@ -7,6 +7,7 @@ import { forgetChatLanguage } from "./chatLanguage";
 import { forgetChatMute, groupChat } from "./chatMute";
 import { forgetChatTranslate } from "./chatTranslate";
 import { forgetSentOriginals } from "./sentOriginals";
+import { forgetTranslateSend } from "./chatTranslateSend";
 import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
 import { transportName } from "./connection";
@@ -147,6 +148,7 @@ export function markGroupRead(groupId: string, at = Date.now()): void {
 export function forgetGroupLocal(groupId: string): void {
   setSessionDraft(`group:${groupId}`, "");
   try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
+  forgetTranslateSend(groupChat(groupId));
   forgetChatMute(groupChat(groupId));
   forgetChatTranslate(groupChat(groupId));
   forgetSentOriginals(groupChat(groupId));
