@@ -424,7 +424,7 @@ export function useChat(params: ChatParams | null) {
 
   const sendMessage = useCallback(
     // A preview needs a paired chat (WISP 401): these DHT-only messages go as plain text.
-    async (text: string, _extra?: { preview?: import("@ghostly/core").LinkPreview; replyTo?: string }): Promise<string | null> => {
+    async (text: string, extra?: { preview?: import("@ghostly/core").LinkPreview; replyTo?: string; onSent?: (messageId: string) => void }): Promise<string | null> => {
       if (burnedRef.current) return t("chat.compat.burned");
       if (!text.trim()) return null;
 
@@ -481,6 +481,7 @@ export function useChat(params: ChatParams | null) {
         if (kept === 0) {
           return t("chat.compat.overLimit");
         }
+        extra?.onSent?.(newMsg.id);
       } catch {
         setStatus("error");
         return t("chat.compat.sendFailed");
