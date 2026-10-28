@@ -1,0 +1,10 @@
+{
+  "choice": {
+    "off": "Off",
+    "on": "On",
+    "settings": "As in Settings ({{state}})"
+  },
+  "note": "Messages you receive here. Only on this device.",
+  "open": "Translation…",
+  "title": "Translation"
+}

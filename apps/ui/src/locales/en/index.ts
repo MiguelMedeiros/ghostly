@@ -7,6 +7,7 @@ import boot from "./boot.json";
 import calls from "./calls.json";
 import cards from "./cards.json";
 import chat from "./chat.json";
+import chatTranslate from "./chatTranslate.json";
 import common from "./common.json";
 import composer from "./composer.json";
 import connection from "./connection.json";
@@ -46,6 +47,7 @@ export default {
   calls,
   cards,
   chat,
+  chatTranslate,
   common,
   composer,
   connection,

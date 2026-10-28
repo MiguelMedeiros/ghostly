@@ -4,6 +4,7 @@ import { getPrefix, setSessionDraft } from "./storage";
 import { decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatMute, groupChat } from "./chatMute";
+import { forgetChatTranslate } from "./chatTranslate";
 import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
 import { transportName } from "./connection";
@@ -138,13 +139,14 @@ export function markGroupRead(groupId: string, at = Date.now()): void {
 
 /**
  * What this device keeps of a group beside the engine goes with it (left, deleted here, a join called off): what was
- * typed and not sent, the read mark, the mute and the folder, as a chat's go with the chat (storage.ts deleteSession).
+ * typed and not sent, the read mark, the mute, the translation choice and the folder, as a chat's go with the chat (storage.ts deleteSession).
  * A community keeps its id, so a draft left behind was in the field again after joining it again.
  */
 export function forgetGroupLocal(groupId: string): void {
   setSessionDraft(`group:${groupId}`, "");
   try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
   forgetChatMute(groupChat(groupId));
+  forgetChatTranslate(groupChat(groupId));
   setChatFolder(groupChat(groupId), undefined);
 }
 

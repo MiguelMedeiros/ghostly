@@ -80,6 +80,7 @@ import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
+import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
 import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
 import { setChatFolder } from "../lib/chatFolders";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
@@ -491,6 +492,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
+  const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
   // Off screen (another chat opened while this one stays loaded), its Tech info closes, as a message's details do (`ChatOnScreen`).
@@ -934,6 +936,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               )}
               <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              <TranslateMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowTranslate(true); }} />
               <MenuItem testId="chat-pin-toggle" onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
@@ -993,6 +996,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               {rarerRows(() => setShowMore(false))}
             </Menu>
             <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
+            <TranslateMenu chat={sessionId} open={showTranslate} onClose={() => setShowTranslate(false)} anchorRef={menuRef} />
             <ChatFolderMenu chat={sessionId} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
           </div>
         </div>
