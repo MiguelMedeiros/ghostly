@@ -189,6 +189,11 @@ Ghostly next.
     it("is in none of the repository's notes for 1.2", () => {
       const fragments = readFragments(root);
       expect(fragments.flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
+      // Once the repository is past 1.3.0 (1.6.0 shipped the first signed APK), an Android entry is an ordinary entry of
+      // the next release: no fragment waits for 1.3 any more, and a 1.1.x/1.2.x notes run no longer exists to keep it out of.
+      const guard = RELEASE_GUARDS.find((g: { about: string }) => g.about === "Android app");
+      const repository = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+      if (!guard || !versionBefore(repository, guard.from)) return;
       // Until 1.3.0 is cut, the Android entries wait in the folder as `release: 1.3`; the 1.3.0 bump takes them out.
       const waiting = fragments.some((f: { release?: string }) => f.release === "1.3");
       for (const version of ["1.1.8", "1.2.0", "1.2.1"]) {
