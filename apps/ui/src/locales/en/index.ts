@@ -8,6 +8,7 @@ import calls from "./calls.json";
 import cards from "./cards.json";
 import chat from "./chat.json";
 import chatLanguage from "./chatLanguage.json";
+import chatTranslate from "./chatTranslate.json";
 import common from "./common.json";
 import composer from "./composer.json";
 import connection from "./connection.json";
@@ -36,6 +37,7 @@ import settings from "./settings.json";
 import share from "./share.json";
 import sidebar from "./sidebar.json";
 import tabs from "./tabs.json";
+import translate from "./translate.json";
 import updates from "./updates.json";
 import wallet from "./wallet.json";
 
@@ -47,6 +49,7 @@ export default {
   cards,
   chat,
   chatLanguage,
+  chatTranslate,
   common,
   composer,
   connection,
@@ -75,6 +78,7 @@ export default {
   share,
   sidebar,
   tabs,
+  translate,
   updates,
   wallet,
 };

@@ -64,6 +64,8 @@ mod single_instance;
 mod test_support;
 #[cfg(desktop)]
 mod translate;
+#[cfg(desktop)]
+mod translate_models;
 mod turn_network;
 #[cfg(test)]
 mod turn_record;
@@ -74,7 +76,7 @@ mod viewer;
 
 use commands::AppState;
 #[cfg(mobile)]
-use mobile::{app_sandbox, hyperdht, keep_awake, share, translate, viewer};
+use mobile::{app_sandbox, hyperdht, keep_awake, share, translate, translate_models, viewer};
 use pkarr_network::Pkarr;
 use tauri::Manager;
 #[cfg(desktop)]
@@ -226,6 +228,9 @@ macro_rules! commands {
             paired_transport::paired_native_send,
             share::share_text,
             translate::translate_texts,
+            translate_models::translation_download,
+            translate_models::translation_remove,
+            translate_models::translation_status,
             unread_count::native_unread_count,
         ]
     };
@@ -288,6 +293,8 @@ pub fn run() {
         .manage(hyperdht::HyperState::default())
         // Translation on this computer, by the runtime downloaded with the first language model (none: not installed).
         .manage(translate::TranslateState::default())
+        // Its models and the runtime, downloaded only when the person says yes, each file checked against its pin.
+        .manage(translate_models::ModelsState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -680,6 +687,7 @@ mod tests {
             .manage(paired_transport::TransportState::default())
             .manage(hyperdht::HyperState::default())
             .manage(translate::TranslateState::default())
+            .manage(translate_models::ModelsState::default())
             .manage(oidc::OidcState::default())
             .manage(local_access::LocalAccess::default())
             .invoke_handler(only_main(commands!()))
