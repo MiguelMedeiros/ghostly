@@ -122,6 +122,7 @@
     "allow-share-text",
     "allow-system-bars",
     "allow-test-network",
+    "allow-translate-texts",
     "allow-turn-put",
     "allow-turn-read",
     "allow-turn-warm",

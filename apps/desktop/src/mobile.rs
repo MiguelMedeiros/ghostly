@@ -6,6 +6,8 @@
 //! - `keep_awake`: on Android, a foreground service and a wake lock while files move (android.rs), not the
 //!   computer's sleep assertion.
 //! - `share`: the macOS share sheet; Android's share sheet is the Android host's (android.rs), with Desktop's checks.
+//! - `translate`: Desktop runs the translation runtime under Bare, downloaded for the computer; a phone waits for its
+//!   own spike (docs/AUTO-TRANSLATE.md).
 //! - `viewer`, `app_sandbox`: a contact's app or an installed app in a window of its own. A mobile app has one
 //!   window.
 
@@ -79,6 +81,15 @@ pub mod share {
         {
             Ok(false)
         }
+    }
+}
+
+pub mod translate {
+    use super::NOT_HERE;
+
+    #[tauri::command]
+    pub fn translate_texts() -> Result<Vec<String>, String> {
+        Err(NOT_HERE.into())
     }
 }
 

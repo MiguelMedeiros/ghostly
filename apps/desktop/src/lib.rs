@@ -62,6 +62,8 @@ mod share;
 mod single_instance;
 #[cfg(test)]
 mod test_support;
+#[cfg(desktop)]
+mod translate;
 mod turn_network;
 #[cfg(test)]
 mod turn_record;
@@ -72,7 +74,7 @@ mod viewer;
 
 use commands::AppState;
 #[cfg(mobile)]
-use mobile::{app_sandbox, hyperdht, keep_awake, share, viewer};
+use mobile::{app_sandbox, hyperdht, keep_awake, share, translate, viewer};
 use pkarr_network::Pkarr;
 use tauri::Manager;
 #[cfg(desktop)]
@@ -223,6 +225,7 @@ macro_rules! commands {
             paired_transport::paired_native_close,
             paired_transport::paired_native_send,
             share::share_text,
+            translate::translate_texts,
             unread_count::native_unread_count,
         ]
     };
@@ -283,6 +286,8 @@ pub fn run() {
         .manage(ViewerState::default())
         .manage(app_sandbox::AppSandboxState::default())
         .manage(hyperdht::HyperState::default())
+        // Translation on this computer, by the runtime downloaded with the first language model (none: not installed).
+        .manage(translate::TranslateState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -674,6 +679,7 @@ mod tests {
             .manage(app_sandbox::AppSandboxState::default())
             .manage(paired_transport::TransportState::default())
             .manage(hyperdht::HyperState::default())
+            .manage(translate::TranslateState::default())
             .manage(oidc::OidcState::default())
             .manage(local_access::LocalAccess::default())
             .invoke_handler(only_main(commands!()))
@@ -740,6 +746,8 @@ mod tests {
         arguments["record"] = serde_json::json!(null);
         arguments["count"] = serde_json::json!(0);
         arguments["tag"] = serde_json::json!("x");
+        arguments["pair"] = serde_json::json!("pt-en");
+        arguments["texts"] = serde_json::json!([]);
         arguments
     }
 

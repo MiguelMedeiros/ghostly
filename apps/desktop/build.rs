@@ -110,6 +110,7 @@ const COMMANDS: &[&str] = &[
     "share_text",
     "system_bars",
     "test_network",
+    "translate_texts",
     "turn_put",
     "turn_read",
     "turn_warm",
