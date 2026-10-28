@@ -16,7 +16,7 @@ function prng(seed: number) {
   return () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
 }
 
-async function run(path: Path) {
+async function run(path: Path, mode: string) {
   let now = 0, upFree = 0, lastAtB = 0, lastAtA = 0, writeFree = 0;
   const random = prng(1798);
   // `wanderMs`: the extra delay wanders (a radio's scheduling, a relay's load), a new level every `wanderMs`, the same
@@ -67,8 +67,21 @@ async function run(path: Path) {
   const info: FileInfo = { id: "bench-file-1", name: "big.bin", mime: "application/octet-stream", size: path.size, timestamp: 1 };
   a.offer(info);
   const settle = async () => { for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve)); };
-  const pace = (a as unknown as { pace: { window: number; base: number; limit(floor: number): number } }).pace;
-  const perSecond: { s: number; bytes: number; window: number; limit: number; base: number }[] = [];
+  type Round = { rate: number; rtt: number };
+  type Trial = { window: number; before: Round };
+  const pace = (a as unknown as { pace: { window: number; base: number; held: number; last: Round; trial?: Trial; limit(floor: number): number; tried(...args: unknown[]): void } }).pace;
+  const perSecond: { s: number; bytes: number; window: number; limit: number; base: number; held: number }[] = [];
+  // The rate trials of the runs `VERBOSE` names, as they start and end.
+  if (VERBOSE.test(`${mode}: ${path.name}`)) {
+    const tried = pace.tried.bind(pace);
+    pace.tried = (...args: unknown[]) => {
+      const before = pace.trial;
+      tried(...args);
+      const round = (r: Round) => `${((r.rate * 1000) / MiB).toFixed(2)} MiB/s, ${Math.round(r.rtt)} ms`;
+      if (before && before !== pace.trial) console.info(`${(now / 1000).toFixed(2)}s trial of ${kib(before.window)}: ${round(pace.last)}, held ${kib(pace.held)}`);
+      if (pace.trial && pace.trial !== before) console.info(`${(now / 1000).toFixed(2)}s trial of ${kib(pace.trial.window)} from ${round(pace.trial.before)}`);
+    };
+  }
   let confirmed = 0, lastConfirmed = 0, nextTick = 1_000, nextSay = 1_500, started = -1, finished = -1;
   /** How long a text the sender says once a second, behind the file, takes to arrive. */
   const texts: number[] = [];
@@ -81,7 +94,7 @@ async function run(path: Path) {
       const nextEvent = events[0]?.at ?? Infinity, nextWrite = waiters[0]?.at ?? Infinity;
       if (nextTick <= Math.min(nextEvent, nextWrite)) {
         now = nextTick;
-        perSecond.push({ s: nextTick / 1000, bytes: confirmed - lastConfirmed, window: pace.window, limit: pace.limit(64 * 1024), base: pace.base });
+        perSecond.push({ s: nextTick / 1000, bytes: confirmed - lastConfirmed, window: pace.window, limit: pace.limit(64 * 1024), base: pace.base, held: pace.held });
         lastConfirmed = confirmed;
         nextTick += 1_000;
         continue;
@@ -137,8 +150,14 @@ const VERBOSE = new RegExp(process.env.GHOSTLY_FILES_BENCH_VERBOSE ?? "^$");
  * one file in flight.
  */
 const MODES: { name: string; knobs: Partial<Record<keyof typeof FILE_LIMITS, number>> }[] = [
-  { name: "1 MiB, 50 ms", knobs: { queueOfBase: 0 } },
+  { name: "1 MiB, 50 ms", knobs: { queueOfBase: 0, trialGain: 1 } },
+  // 1.6.0: by delay alone, no trials of a larger window.
+  { name: "by delay", knobs: { trialGain: 1 } },
   { name: "now", knobs: {} },
+  { name: "w1", knobs: { trialWindows: 1 } },
+  { name: "w4", knobs: { trialWindows: 4 } },
+  { name: "q50", knobs: { trialQueueMs: 50 } },
+  { name: "g15", knobs: { trialGain: 1.5, trialPaid: 1.2 } },
   // One file with the chat's whole window: twice as fast on long fast paths here, nothing on WebRTC under netem.
   { name: "2 MiB a file", knobs: { windowBytes: 2 * 1024 * 1024 } },
 ];
@@ -153,8 +172,8 @@ describe.skipIf(!process.env.GHOSTLY_FILES_BENCH)("file throughput between two p
   for (const mode of MODES) for (const path of PATHS) {
     it(`${mode.name}: ${path.name}`, async () => {
       Object.assign(FILE_LIMITS, mode.knobs);
-      const result = await run(path);
-      const lines = result.perSecond.filter((p) => p.s % 5 === 0 || p.s <= 3).map((p) => `${String(p.s).padStart(4)}s ${(p.bytes / MiB).toFixed(2).padStart(7)} MiB/s  window ${kib(p.window).padStart(6)} limit ${kib(p.limit).padStart(6)} base ${p.base === Infinity ? "-" : Math.round(p.base)} ms`);
+      const result = await run(path, mode.name);
+      const lines = result.perSecond.filter((p) => p.s % 5 === 0 || p.s <= 3).map((p) => `${String(p.s).padStart(4)}s ${(p.bytes / MiB).toFixed(2).padStart(7)} MiB/s  window ${kib(p.window).padStart(6)} limit ${kib(p.limit).padStart(6)} base ${p.base === Infinity ? "-" : Math.round(p.base)} ms held ${kib(p.held)}`);
       if (VERBOSE.test(`${mode.name}: ${path.name}`)) console.info(`${mode.name}: ${path.name}: ${(result.rate / MiB).toFixed(2)} MiB/s over ${result.seconds.toFixed(1)} s (${(result.confirmed / MiB).toFixed(1)} MiB), texts p50 ${result.textP50} p90 ${result.textP90} ms\n${lines.join("\n")}`);
       table.push(`${mode.name} ${path.name} | ${(result.rate / MiB).toFixed(2)} | ${((path.upBytesPerMs * 1000) / MiB).toFixed(1)} | ${result.seconds.toFixed(1)} | ${result.textP50}/${result.textP90}`);
     }, 600_000);
