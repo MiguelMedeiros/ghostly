@@ -1,0 +1,36 @@
+// The translation runtime, run by `bare runtime.mjs <models folder>`: the stdio protocol of protocol.mjs over QVAC's
+// Bergamot addon. Started by the app, not listening on any port, and it never fetches: the only files it reads are the
+// models under the folder it was given, by fixed names. Nothing it writes carries a message's text but the answers.
+import process from 'bare-process'
+import fs from 'bare-fs'
+import path from 'bare-path'
+import TranslationNmtcpp from '@qvac/translation-nmtcpp'
+import { createRuntime, lineReader } from './protocol.mjs'
+
+const root = Bare.argv[2]
+if (!root || !path.isAbsolute(root)) {
+  process.stderr.write('Usage: bare runtime.mjs <absolute models folder>\n')
+  Bare.exit(2)
+}
+
+// stdout carries the protocol only: a library's console.log goes to stderr.
+console.log = console.info = console.debug = (...args) => console.error(...args)
+const quiet = { error() {}, warn() {}, info() {}, debug() {} }
+
+async function open({ from, to, files }) {
+  const model = new TranslationNmtcpp({
+    files,
+    params: { srcLang: from, dstLang: to },
+    config: { modelType: TranslationNmtcpp.ModelTypes.Bergamot, beamsize: 1, normalize: 1, ...(files.pivotModel ? { pivotConfig: { beamsize: 1 } } : {}) },
+    logger: quiet,
+  })
+  await model.load()
+  return { translate: texts => model.runBatch(texts), close: () => model.destroy() }
+}
+
+const exists = file => { try { return fs.statSync(file).isFile() } catch { return false } }
+const runtime = createRuntime({ root, open, exists, join: path.join })
+const write = answer => { process.stdout.write(JSON.stringify(answer) + '\n') }
+process.stdin.on('data', lineReader(line => { runtime.handle(line).then(write) }, () => { runtime.tooLong().then(write) }))
+// The app closed our input: it is done with us.
+process.stdin.on('end', () => { runtime.close().finally(() => Bare.exit(0)) })
