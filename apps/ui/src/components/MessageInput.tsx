@@ -192,8 +192,13 @@ export function MessageInput({
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
   const textRef = useRef(text); textRef.current = text;
   const [toast, setToast] = useState<string | null>(null);
-  /** `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown. */
-  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean } | null>(null);
+  /**
+   * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
+   * `translate`: about the draft, before it is translated (what Send anyway does then).
+   */
+  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void } | null>(null);
+  /** The draft the guard was answered Send for before Translate: its translation does not ask again. */
+  const guardedDraft = useRef<string | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
   const [attached, setAttached] = useState<File[] | null>(null);
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
@@ -363,7 +368,8 @@ export function MessageInput({
           err = problemLine(e, t);
         }
         if (err) {
-          const failed = outbox.current.splice(0).map((o) => o.words);
+          // A translation comes back as the draft it was made from: sent from the field again, it would go as plain text.
+          const failed = outbox.current.splice(0).map((o) => o.translated?.original ?? o.words);
           if (mounted.current) showToast(err);
           giveBack(failed);
           return;
@@ -426,16 +432,30 @@ export function MessageInput({
     const bytes = new TextEncoder().encode(words).length;
     if (maxBytes && bytes > maxBytes) { showToast(t("composer.dhtTooLong", { bytes, max: maxBytes })); return; }
     if (textBytes && bytes > textBytes) { showToast(t("composer.tooLongBytes", { bytes: formatAmount(bytes, t.language), max: formatAmount(textBytes, t.language) })); return; }
-    const found = confirmed ? null : findSecret(words);
+    const found = confirmed || guardedDraft.current === shown.source ? null : findSecret(words);
     if (found) { setSecret({ finding: found, translated: true }); return; }
     const named = carryMentions(text, picker.compose(text), words);
-    // Already in that language: it goes as typed, with nothing to keep beside it.
-    await queue({ words, named, preview: linkPreview.preview ?? undefined, ...(!shown.same && { translated: { to: shown.to, original: shown.source } }) });
+    // Already in that language: it goes as typed, with nothing to keep beside it. A draft holding a seed or a key is
+    // not kept either, as it is not kept as a draft: only ecash is.
+    const kept = findSecret(shown.source);
+    const keepOriginal = !shown.same && (!kept || kept.kind === "cashu");
+    await queue({ words, named, preview: linkPreview.preview ?? undefined, ...(keepOriginal && { translated: { to: shown.to, original: shown.source } }) });
+  };
+
+  /**
+   * The secret guard on the draft as typed, before any of it is translated: Cancel leaves it untranslated, Send anyway
+   * translates it (and the translation does not ask again).
+   */
+  const guardThen = (translate: () => void) => {
+    const draft = text.trim();
+    const found = guardedDraft.current === draft ? null : findSecret(draft);
+    if (found) { setSecret({ finding: found, translate: () => { guardedDraft.current = draft; translate(); } }); return; }
+    translate();
   };
 
   const translateAgain = () => {
     const state = drafting.state;
-    if (state && state.step !== "choose") void drafting.translateInto(state.to, text, picker.compose(text));
+    if (state && state.step !== "choose") guardThen(() => void drafting.translateInto(state.to, text, picker.compose(text)));
   };
   /**
    * Enter (or Send) with the preview open: the translation shown goes; a stale one is translated again first, and
@@ -755,7 +775,7 @@ export function MessageInput({
 
   // Translate (beside Send): in a chat with a language other than the app's, or a group with several, for a draft.
   const canTranslate = !!translation && translateEnabled() && !edit && !recording && !!text.trim()
-    && (translation.language ? translation.language !== language : !!translation.languages?.length);
+    && (translation.language ? translation.language !== language : !!translation.languages?.some((code) => code !== language));
   const translateLabel = translation?.language ? t("composer.translate.into", { language: languageName(translation.language, language) }) : t("composer.translate.button");
 
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
@@ -828,7 +848,7 @@ export function MessageInput({
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} member={reply.member} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {previewOpen && <TranslatePreview state={drafting.state!} stale={translationStale(drafting.state, text)} disabled={disabled} onEdit={drafting.edit}
-        onChoose={(code) => void drafting.translateInto(code, text, picker.compose(text))} onAgain={translateAgain}
+        onChoose={(code) => guardThen(() => void drafting.translateInto(code, text, picker.compose(text)))} onAgain={translateAgain}
         onSendTranslation={() => void sendTranslation()} onSendOriginal={() => void handleSubmit()}
         onCancel={() => { drafting.close(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {linkPreview.draft && <LinkPreviewDraftCard draft={linkPreview.draft} onRemove={linkPreview.remove} />}
@@ -886,7 +906,7 @@ export function MessageInput({
 
         {canTranslate && (
           <button type="button" data-testid="composer-translate" aria-label={translateLabel} title={translateLabel}
-            onMouseDown={(e) => e.preventDefault()} onClick={() => drafting.start(text, picker.compose(text))} disabled={disabled}
+            onMouseDown={(e) => e.preventDefault()} onClick={() => guardThen(() => drafting.start(text, picker.compose(text)))} disabled={disabled}
             className="composer-icon-button self-center shrink-0"><TranslateIcon /></button>
         )}
         {/* Send button; the mic while there is nothing to send, as in WhatsApp */}
@@ -967,6 +987,7 @@ export function MessageInput({
           onCancel={() => setSecret(null)} onConfirm={() => {
             setSecret(null);
             if (secret.caption !== undefined) void sendCaption(secret.caption, true);
+            else if (secret.translate) secret.translate();
             else if (secret.translated) void sendTranslation(true);
             else void handleSubmit(true);
           }} />

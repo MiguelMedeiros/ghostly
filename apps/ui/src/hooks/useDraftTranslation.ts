@@ -85,8 +85,10 @@ export function useDraftTranslation({ config, appLanguage, onFailure }: {
   const start = useCallback((draft: string, named?: readonly GroupMention[]) => {
     if (!config) return;
     if (config.language) { void translateInto(config.language, draft, named); return; }
-    if (config.languages?.length) { run.current++; setState({ step: "choose", languages: config.languages }); }
-  }, [config, translateInto]);
+    // The app's own language is no choice: nothing would be translated.
+    const languages = config.languages?.filter((code) => code !== appLanguage) ?? [];
+    if (languages.length) { run.current++; setState({ step: "choose", languages }); }
+  }, [config, appLanguage, translateInto]);
 
   const close = useCallback(() => { run.current++; setState(null); }, []);
   /** The translation, edited in the preview. */

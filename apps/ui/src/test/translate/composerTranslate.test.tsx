@@ -5,6 +5,9 @@ import { TranslateError } from "../../desktop/translate";
 import type { ComposerTranslation } from "../../hooks/useDraftTranslation";
 import { renderApp } from "../render";
 
+const NSEC = "nsec1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqstywftw";
+const SEED = `${"abandon ".repeat(11)}about`;
+
 /** A translator that writes the words in capitals and says which pair it was asked for. */
 const capitals = () => vi.fn(async (pair: string, texts: string[]) => texts.map((text) => `${text.toUpperCase()} [${pair}]`));
 
@@ -177,5 +180,68 @@ describe("the composer's Translate", () => {
     await bare.user.type(bare.field, "see you tomorrow");
     await act(async () => { await bare.user.click(screen.getByTestId("composer-translate")); });
     expect(await screen.findByRole("alert")).toHaveTextContent("English to Italian is not downloaded");
+  });
+
+  it("asks the secret guard about the draft before translating it: Cancel translates nothing", async () => {
+    const translate = capitals();
+    const { user, field, onSend } = setup({ language: "it", translate });
+    await user.type(field, `my key ${NSEC}`);
+    await user.click(screen.getByTestId("composer-translate"));
+    expect(screen.getByRole("alertdialog", { name: "Send a Nostr private key?" })).toBeInTheDocument();
+    expect(translate).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("secret-guard-cancel"));
+    expect(translate).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("translate-preview")).not.toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("after Send anyway, translates the nsec's draft once, asks nothing more, and keeps no original of it", async () => {
+    const translate = capitals();
+    const { user, field, onSend } = setup({ language: "it", translate });
+    await user.type(field, `my key ${NSEC}`);
+    await user.click(screen.getByTestId("composer-translate"));
+    await user.click(screen.getByTestId("secret-guard-send"));
+    // The key is kept as typed in the translation.
+    expect(await screen.findByTestId("translate-text")).toHaveValue(`MY KEY [en-it] ${NSEC}`);
+    await user.type(field, "{Enter}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    // Sent translated, but nothing of the draft is kept beside it (a draft with a key is never stored).
+    expect(onSend).toHaveBeenCalledWith(`MY KEY [en-it] ${NSEC}`);
+  });
+
+  it("a seed in the draft is never translated without the guard asking first", async () => {
+    const translate = capitals();
+    const { user, field } = setup({ language: "it", translate });
+    await user.type(field, SEED);
+    await user.click(screen.getByTestId("composer-translate"));
+    expect(screen.getByRole("alertdialog")).toHaveAttribute("data-kind", "mnemonic");
+    expect(translate).not.toHaveBeenCalled();
+  });
+
+  it("a translation that fails to send gives the draft as typed back, and sent again it still keeps its original", async () => {
+    const translate = capitals();
+    const { user, field, onSend } = setup({ language: "it", translate });
+    onSend.mockResolvedValueOnce("Not connected" as never);
+    await user.type(field, "see you tomorrow");
+    await user.click(screen.getByTestId("composer-translate"));
+    await screen.findByTestId("translate-text");
+    await user.type(field, "{Enter}");
+    expect(await screen.findByText("Not connected")).toBeInTheDocument();
+    expect(field).toHaveValue("see you tomorrow");
+    await user.click(screen.getByTestId("composer-translate"));
+    await screen.findByTestId("translate-text");
+    await user.type(field, "{Enter}");
+    expect(onSend).toHaveBeenLastCalledWith("SEE YOU TOMORROW [en-it]", undefined, { translated: { to: "it", original: "see you tomorrow" } });
+  });
+
+  it("is not offered in a group whose only language is the app's, and the app's language is no choice", async () => {
+    const only = setup({ language: null, languages: ["en"], translate: capitals() });
+    await only.user.type(only.field, "see you tomorrow");
+    expect(screen.queryByTestId("composer-translate")).not.toBeInTheDocument();
+    only.unmount();
+    const { user, field } = setup({ language: null, languages: ["en", "it"], translate: capitals() });
+    await user.type(field, "see you tomorrow");
+    await user.click(screen.getByTestId("composer-translate"));
+    expect(screen.getAllByTestId("translate-choose").map((choice) => choice.dataset.language)).toEqual(["it"]);
   });
 });
