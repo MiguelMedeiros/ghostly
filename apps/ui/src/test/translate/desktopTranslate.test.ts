@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const tauri = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: tauri.invoke }));
 
-import { MAX_TEXTS, TranslateError, translateTexts } from "../../desktop/translate";
+import {
+  MAX_TEXTS, TranslateError, downloadBytes, downloadTranslation, removeTranslation, translateTexts, translationStatus,
+  type TranslationStatus,
+} from "../../desktop/translate";
 import { rawError } from "../../lib/errorText";
 
 /** The Desktop's translation, as the page asks Rust for it (apps/desktop/src/translate.rs). */
@@ -60,6 +63,70 @@ describe("translateTexts on Desktop", () => {
     vi.stubEnv("VITE_TRANSLATE", "");
     const error = await translateTexts("pt-en", ["Olá"]).catch((error: unknown) => error);
     expect((error as TranslateError).reason).toBe("off");
+    expect(tauri.invoke).not.toHaveBeenCalled();
+  });
+});
+
+/** The language models on this computer, as the page asks Rust for them (apps/desktop/src/translate_models.rs). */
+describe("translation downloads on Desktop", () => {
+  const status: TranslationStatus = {
+    runtime: false,
+    runtimeBytes: 52_000_000,
+    pairs: [
+      { pair: "en-pt", bytes: 32_378_513, downloaded: false },
+      { pair: "pt-en", bytes: 32_378_513, downloaded: false },
+      { pair: "en-es", bytes: 32_377_841, downloaded: true },
+    ],
+  };
+  beforeEach(() => {
+    tauri.invoke.mockReset();
+    tauri.invoke.mockResolvedValue(undefined);
+    vi.stubEnv("VITE_TRANSLATE", "1");
+  });
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it("asks Rust for the status, a pair's download and its removal", async () => {
+    tauri.invoke.mockResolvedValueOnce(status);
+    expect(await translationStatus()).toEqual(status);
+    await downloadTranslation("pt-en");
+    await removeTranslation("en-es");
+    expect(tauri.invoke.mock.calls).toEqual([
+      ["translation_status", undefined],
+      ["translation_download", { pair: "pt-en" }],
+      ["translation_remove", { pair: "en-es" }],
+    ]);
+  });
+
+  it("says when this computer has no runtime to download yet, and keeps Rust's words for the rest", async () => {
+    for (const [said, reason] of [
+      ["Translation is not available on this computer yet", "unavailable"],
+      ["The download did not match its checksum", "failed"],
+      ["The download did not finish", "failed"],
+      ["Unknown language pair", "failed"],
+    ] as const) {
+      tauri.invoke.mockRejectedValueOnce(said);
+      const error = await downloadTranslation("pt-en").catch((error: unknown) => error);
+      expect((error as TranslateError).reason, said).toBe(reason);
+      expect(rawError(error), said).toBe(said);
+    }
+  });
+
+  it("counts what a download takes: the pairs not here yet, and the runtime when it is not", () => {
+    expect(downloadBytes(status, ["pt-en", "en-pt"])).toBe(52_000_000 + 2 * 32_378_513);
+    expect(downloadBytes(status, ["pt-en", "en-es"])).toBe(52_000_000 + 32_378_513);
+    expect(downloadBytes({ ...status, runtime: true }, ["pt-en", "en-pt"])).toBe(2 * 32_378_513);
+    expect(downloadBytes({ ...status, runtime: true }, ["en-es"])).toBe(0);
+    // No runtime here and none to download: nothing to offer.
+    expect(downloadBytes({ ...status, runtimeBytes: null }, ["pt-en"])).toBeNull();
+    expect(downloadBytes({ ...status, runtime: true, runtimeBytes: null }, ["pt-en"])).toBe(32_378_513);
+  });
+
+  it("asks nothing in a build without translation (VITE_TRANSLATE)", async () => {
+    vi.stubEnv("VITE_TRANSLATE", "");
+    for (const call of [translationStatus, () => downloadTranslation("pt-en"), () => removeTranslation("pt-en")]) {
+      const error = await call().catch((error: unknown) => error);
+      expect((error as TranslateError).reason).toBe("off");
+    }
     expect(tauri.invoke).not.toHaveBeenCalled();
   });
 });

@@ -1,0 +1,11 @@
+{
+  "download": {
+    "body": "The languages come from Mozilla's servers, the ones Firefox translates with: they see that this computer asked for them. Translating then happens on this computer, and your messages never leave it.",
+    "download": "Download",
+    "engine": "The first download also brings the translation engine, from Ghostly's releases on GitHub.",
+    "notNow": "Not now",
+    "pair": "{{from}} to {{to}}, {{size}}",
+    "pairBack": "{{from}} to {{to}} and back, {{size}}",
+    "title": "Download translation?"
+  }
+}

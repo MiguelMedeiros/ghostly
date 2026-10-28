@@ -35,6 +35,7 @@ import settings from "./settings.json";
 import share from "./share.json";
 import sidebar from "./sidebar.json";
 import tabs from "./tabs.json";
+import translate from "./translate.json";
 import updates from "./updates.json";
 import wallet from "./wallet.json";
 
@@ -73,6 +74,7 @@ export default {
   share,
   sidebar,
   tabs,
+  translate,
   updates,
   wallet,
 };
