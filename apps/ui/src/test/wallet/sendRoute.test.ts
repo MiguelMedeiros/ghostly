@@ -74,4 +74,12 @@ describe("Send sorts what it was given", () => {
     expect(routeSend("lnbc-this-is-not-an-invoice").kind).toBe("unknown");
     expect(routeSend("https://example.com").kind).toBe("unknown");
   });
+
+  it("a token behind the cashu: URI scheme (cashu:, cashu://, web+cashu://) is the token, given on bare", () => {
+    for (const scheme of ["cashu:", "cashu://", "web+cashu://"]) {
+      expect(routeSend(` ${scheme}cashuBo2F0gaJhaUgA\n`)).toEqual({ kind: "token", text: "cashuBo2F0gaJhaUgA" });
+    }
+    expect(routeSend("cashu:").kind).toBe("unknown");
+    expect(routeSend("cashu:hello").kind).toBe("unknown");
+  });
 });
