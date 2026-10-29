@@ -358,6 +358,10 @@
     "placeholder": "在此聊天中搜索"
   },
   "send": "发送",
+  "sentTranslation": {
+    "copyOriginal": "复制原文",
+    "line": "已翻译为{{language}}"
+  },
   "services": {
     "add": "+ 添加应用",
     "canOpen": "你可以打开的应用：",

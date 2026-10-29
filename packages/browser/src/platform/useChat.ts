@@ -128,9 +128,12 @@ export const useChat: typeof Desktop.useChat = (params) => {
     return off;
   }, [linkId]);
 
-  /** `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies). */
+  /**
+   * `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies).
+   * `onSent`: told the id the engine stored the message under, once it did.
+   */
   const publish = useCallback(
-    async (message: ChatMessage, replyTo?: string): Promise<string | null> => {
+    async (message: ChatMessage, replyTo?: string, onSent?: (messageId: string) => void): Promise<string | null> => {
       if (!profile) {
         const updated = addMessage(sessionId, message);
         if (updated) setMessages([...updated.messages]);
@@ -141,7 +144,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
       }
       // A send that stored nothing (refused, or failed before the engine kept it): its sending row goes.
       const unsent = () => { if (profile) setPending((rows) => rows.filter((row) => row.id !== message.id)); };
-      let error: string | null, refused: boolean | undefined;
+      let error: string | null, refused: boolean | undefined, messageId: string | undefined;
       try {
         // Typing can be faster than the peer taking the link on; `ensureLink` is idempotent.
         const id =
@@ -153,7 +156,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
           unsent();
           return "Ghostly is still starting. Try again in a moment.";
         }
-        ({ error, refused } = await engine.call("sendMessage", {
+        ({ error, refused, messageId } = await engine.call("sendMessage", {
           linkId: id,
           text: message.text,
           timestamp: message.timestamp,
@@ -165,6 +168,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
         throw failure;
       }
       if (error) unsent();
+      else if (onSent) onSent(messageId ?? message.id);
       // Refused: the copy kept here for a legacy chat goes too, so it never shows as sent.
       if (refused && !profile) {
         const updated = deleteStoredMessage(sessionId, message.id);
@@ -210,7 +214,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [canAnnounce, linkId, sessionId, messages, announce]);
 
   const sendMessage = useCallback(
-    async (text: string, extra?: { preview?: LinkPreview; replyTo?: string }): Promise<string | null> => {
+    async (text: string, extra?: { preview?: LinkPreview; replyTo?: string; onSent?: (messageId: string) => void }): Promise<string | null> => {
       if (isBurned) return "Chat has been burned";
       const trimmed = text.trim();
       if (!trimmed) return null;
@@ -232,7 +236,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
             dnsRecords: open ? ["webrtc"] : ["_msgs", "_ts", "_ack", ...(nickRef.current ? ["_nick"] : [])],
             packetTimestamp: timestamp,
           },
-        }, profile ? extra?.replyTo : undefined);
+        }, profile ? extra?.replyTo : undefined, extra?.onSent);
       } catch (error) {
         return error instanceof Error ? error.message : "Failed to send message. Check your connection.";
       } finally {
