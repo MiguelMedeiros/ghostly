@@ -4,6 +4,21 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.6.1
+
+### Fixed
+
+**Android**
+
+- In the Android app, a file being sent or received stopped once the app went to the background or the screen turned off, and only went on when the app came back. It now keeps going, with a quiet "Sending and receiving files" notification until the last file is through.
+- Settings, About, Updates in the Android app no longer says "Could not check for updates" on every check. It now reads the newest version number from ghostly.tools, as the browser extension does, and says "Ghostly is up to date", or names the new version with a Download button that opens its APK.
+
+**Chat**
+
+- A file between two Desktops connected directly over Iroh is no longer held back by the connection's own receive window on a long path: about 6 MiB/s where a 150 ms round trip at 100 Mbit/s gave 5.25 MiB/s before.
+- A file sent to a contact over a short but uneven path (5G or Wi-Fi straight to them) no longer crawls at about 0.4 MiB/s. Its speed now follows what the path carries: about 1.3 MiB/s on a 50 Mbit/s path that gave 0.4 MiB/s before, with texts sent meanwhile as quick as they were.
+- A video this device cannot show the picture of (an iPhone's HEVC video in Chrome on Android, Vanadium or Linux) says it can't play here and offers Download, instead of playing its sound over a black player.
+
 ## 1.6.0
 
 Files move at the speed of the path again (about ten times faster over a relay or mobile data), and the device stays awake while they do. Plus text selection by double click, Clear finished on the Tasks board, the Linux Desktop's camera back, and x401 credentials for bots. Android releases now come with an APK signed with Ghostly's own key.
