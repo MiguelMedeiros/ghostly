@@ -98,7 +98,5 @@ export function languageChoices(languages: readonly string[]): string[] {
   return [...new Set([...languages, ...LANGUAGE_OPTIONS.map((option) => option.value)])];
 }
 
-/** A language's name in the app's language ("Italian", "italiano"), or its code when the browser has none. */
-export function languageName(code: string, appLanguage: Language): string {
-  try { return new Intl.DisplayNames([appLanguage], { type: "language", fallback: "none" }).of(code) ?? code; } catch { return code; }
-}
+/** A language's name in the app's language ("Italian", "italiano"): the one shared with Settings and the bubbles. */
+export { languageName } from "./documentLanguage";

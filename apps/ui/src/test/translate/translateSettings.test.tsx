@@ -19,11 +19,15 @@ import type { Language } from "../../lib/settings";
  * of the Desktop app shows any of it.
  */
 
+type Status = { runtime: boolean; runtimeBytes: number | null; pairs: { pair: string; bytes: number; downloaded: boolean }[] };
+/** What Desktop answers: `pairs` on disk, and a pinned pair that is not (Settings lists only the ones on disk). */
+const status = (pairs: { pair: string; bytes: number }[]): Status =>
+  ({ runtime: true, runtimeBytes: null, pairs: [...pairs.map((p) => ({ ...p, downloaded: true })), { pair: "it-en", bytes: 37 * 1024 * 1024, downloaded: false }] });
 const models = vi.hoisted(() => ({
-  translationStatus: vi.fn(async (): Promise<{ pairs: { pair: string; bytes: number }[] }> => ({ pairs: [] })),
-  removeTranslationPair: vi.fn(async (_pair: string): Promise<void> => {}),
+  translationStatus: vi.fn(async (): Promise<Status> => ({ runtime: true, runtimeBytes: null, pairs: [] })),
+  removeTranslation: vi.fn(async (_pair: string): Promise<void> => {}),
 }));
-vi.mock("../../desktop/translateStatus", () => models);
+vi.mock("../../desktop/translate", async (importOriginal) => ({ ...await importOriginal<typeof import("../../desktop/translate")>(), ...models }));
 // The UI tests alias every `@tauri-apps/api/*` to one stand-in: the rest of Settings asks Desktop's commands nothing useful.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined), listen: async () => () => {}, getVersion: async () => "0.4.0" }));
 
@@ -41,8 +45,8 @@ afterEach(() => {
   delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  models.translationStatus.mockReset().mockResolvedValue({ pairs: [] });
-  models.removeTranslationPair.mockReset().mockResolvedValue(undefined);
+  models.translationStatus.mockReset().mockResolvedValue(status([]));
+  models.removeTranslation.mockReset().mockResolvedValue(undefined);
 });
 
 describe("the translateMessages setting", () => {
@@ -125,7 +129,7 @@ describe("the switch, on Desktop with the flag", () => {
   });
 
   it("lists the downloaded languages with their sizes, whether the switch is on or off", async () => {
-    models.translationStatus.mockResolvedValue({ pairs: [{ pair: "pt-en", bytes: 37 * MB }, { pair: "ja-en", bytes: 54.8 * MB }] });
+    models.translationStatus.mockResolvedValue(status([{ pair: "pt-en", bytes: 37 * MB }, { pair: "ja-en", bytes: 54.8 * MB }]));
     renderSettings();
     const lines = await screen.findAllByTestId("settings-translate-pair");
     expect(lines.map((line) => line.textContent)).toEqual([expect.stringContaining("Japanese → English"), expect.stringContaining("Portuguese → English")]);
@@ -145,19 +149,19 @@ describe("the switch, on Desktop with the flag", () => {
   });
 
   it("Remove deletes that pair and the list reads the computer again", async () => {
-    models.translationStatus.mockResolvedValueOnce({ pairs: [{ pair: "pt-en", bytes: 37 * MB }, { pair: "en-pt", bytes: 36.4 * MB }] })
-      .mockResolvedValue({ pairs: [{ pair: "en-pt", bytes: 36.4 * MB }] });
+    models.translationStatus.mockResolvedValueOnce(status([{ pair: "pt-en", bytes: 37 * MB }, { pair: "en-pt", bytes: 36.4 * MB }]))
+      .mockResolvedValue(status([{ pair: "en-pt", bytes: 36.4 * MB }]));
     const { user } = renderSettings();
     const portuguese = (await screen.findAllByTestId("settings-translate-pair")).find((line) => line.textContent?.includes("Portuguese → English"))!;
     await user.click(within(portuguese).getByRole("button", { name: "Remove Portuguese → English" }));
-    expect(models.removeTranslationPair).toHaveBeenCalledWith("pt-en");
+    expect(models.removeTranslation).toHaveBeenCalledWith("pt-en");
     await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(1));
     expect(screen.getByTestId("settings-translate-pair")).toHaveTextContent("English → Portuguese");
   });
 
   it("a Remove that fails keeps the line and says what to do; the error's own words are behind the ⓘ", async () => {
-    models.translationStatus.mockResolvedValue({ pairs: [{ pair: "pt-en", bytes: 37 * MB }] });
-    models.removeTranslationPair.mockRejectedValue(new Error("Permission denied (os error 13)"));
+    models.translationStatus.mockResolvedValue(status([{ pair: "pt-en", bytes: 37 * MB }]));
+    models.removeTranslation.mockRejectedValue(new Error("Permission denied (os error 13)"));
     const { user } = renderSettings();
     const line = await screen.findByTestId("settings-translate-pair");
     await user.click(within(line).getByRole("button", { name: "Remove Portuguese → English" }));
@@ -169,7 +173,7 @@ describe("the switch, on Desktop with the flag", () => {
   });
 
   it("a list that cannot be read says so, with Try again", async () => {
-    models.translationStatus.mockRejectedValueOnce(new Error("Not available on this platform")).mockResolvedValue({ pairs: [{ pair: "pt-en", bytes: 37 * MB }] });
+    models.translationStatus.mockRejectedValueOnce(new Error("Not available on this platform")).mockResolvedValue(status([{ pair: "pt-en", bytes: 37 * MB }]));
     const { user } = renderSettings();
     const failed = await screen.findByTestId("settings-translate-unread");
     expect(failed).toHaveTextContent("Could not read the downloaded languages.");

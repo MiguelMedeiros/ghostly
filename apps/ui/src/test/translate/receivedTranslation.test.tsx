@@ -18,8 +18,10 @@ vi.mock("../../lib/translateDetector", () => ({
 
 import { MessageBubble } from "../../components/MessageBubble";
 import { TranslateError } from "../../desktop/translate";
+import { TRANSLATE_EVENT, chatTranslates } from "../../lib/chatTranslate";
 import { CueChat } from "../../lib/cues";
-import { BATCH_TEXTS, CHAT_TRANSLATE_EVENT, LONG_TEXT, forgetTranslations, translationOn } from "../../lib/translateReceived";
+import { loadSettings } from "../../lib/settings";
+import { BATCH_TEXTS, LONG_TEXT, forgetTranslations } from "../../lib/translateReceived";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -186,6 +188,7 @@ describe("arrivals are translated in batches, only near the screen", () => {
 
 describe("whether a chat translates", () => {
   it("a chat's own choice wins over Settings; a chat that never chose follows Settings", () => {
+    const translationOn = (chat: string) => chatTranslates(chat, loadSettings());
     settings(false);
     expect(translationOn("s1")).toBe(false);
     localStorage.setItem("ghostly_translate_s1", "on");
@@ -212,7 +215,7 @@ describe("whether a chat translates", () => {
     expect(runtime.translateTexts).not.toHaveBeenCalled();
     await act(async () => {
       localStorage.setItem("ghostly_translate_s1", "on");
-      window.dispatchEvent(new Event(CHAT_TRANSLATE_EVENT));
+      window.dispatchEvent(new Event(TRANSLATE_EVENT));
     });
     await seen(bubbles());
     await waitFor(() => expect(screen.getByTestId("message-text")).toHaveTextContent("Hi, how are you?"));

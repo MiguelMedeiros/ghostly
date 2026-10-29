@@ -3,6 +3,8 @@
     "body": "语言文件来自 Mozilla 的服务器（Firefox 翻译所用的服务器），它们会知道这台电脑请求了这些文件。之后翻译在这台电脑上进行，你的消息不会离开它。",
     "download": "下载",
     "engine": "首次下载还会从 GitHub 上的 Ghostly 发布版本获取翻译引擎。",
+    "failed": "语言没有下载成功",
+    "failedNext": "请重试。",
     "notNow": "以后再说",
     "pair": "{{from}}到{{to}}，{{size}}",
     "pairBack": "{{from}}与{{to}}互译，{{size}}",

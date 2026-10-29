@@ -1,5 +1,6 @@
 import type { Translate } from "../locales/translate";
-import type { DownloadedPair } from "../desktop/translateStatus";
+import type { TranslationPair } from "../desktop/translate";
+import { languageName } from "./documentLanguage";
 import { isDesktopApp } from "./externalLink";
 import { formatBytes, type Language } from "./settings";
 import { translateEnabled } from "./translateFlag";
@@ -15,13 +16,13 @@ export function translateOffered(userAgent = typeof navigator === "undefined" ? 
   return translateEnabled() && isDesktopApp() && !/Android/i.test(userAgent);
 }
 
-/** `code`'s name in `language` ("português" for `pt` in Portuguese), or the code where the runtime has no name for it. */
-export function languageName(code: string, language: Language): string {
-  try {
-    return new Intl.DisplayNames([language], { type: "language", fallback: "code" }).of(code) ?? code;
-  } catch {
-    return code;
-  }
+/**
+ * What turning translation on asks to download (docs/AUTO-TRANSLATE.md § Model download): the app's language to
+ * English and back ("Portuguese to English and back"), the models every other language goes through. Nothing for an
+ * app in English: the one it needs is the chat's language to English, and that comes from the chat.
+ */
+export function firstPairs(language: Language): { from: string; to: string; pairs: string[] } | null {
+  return language === "en" ? null : { from: language, to: "en", pairs: [`${language}-en`, `en-${language}`] };
 }
 
 /** One downloaded pair as Settings lists it: "Portuguese → English", "37 MB". */
@@ -39,7 +40,7 @@ const capital = (name: string, language: Language) => name.charAt(0).toLocaleUpp
  * The downloaded pairs, named in the app's language and sorted by those names: a list line starts with a capital
  * ("Português → inglês"). A pair whose name is not `<from>-<to>` with two different codes is not a pair: left out.
  */
-export function downloadedLanguages(pairs: readonly DownloadedPair[], t: Translate): PairLine[] {
+export function downloadedLanguages(pairs: readonly Pick<TranslationPair, "pair" | "bytes">[], t: Translate): PairLine[] {
   const language = t.language ?? "en";
   const lines: PairLine[] = [];
   for (const { pair, bytes } of pairs) {

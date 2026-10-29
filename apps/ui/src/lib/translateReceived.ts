@@ -1,6 +1,5 @@
 import { TranslateError, translateTexts } from "../desktop/translate";
 import type { Language } from "./settings";
-import { getPrefix } from "./storage";
 import { loadDetector } from "./translateDetector";
 import { translateFrom, type DetectLanguages } from "./translateWhich";
 import type { ChatMessage } from "./types";
@@ -11,52 +10,6 @@ import type { ChatMessage } from "./types";
  * the page. Only what bubbles on screen ask for is translated, in batches: messages that arrive or scroll in together go
  * as one request per language pair, never a whole history.
  */
-
-/** Sent on this page when a chat's own translation choice changes (another page of the app sees `storage`). */
-export const CHAT_TRANSLATE_EVENT = "chat-translate-updated";
-
-const chatKey = (chat: string) => `${getPrefix()}translate_${chat}`;
-const settingsKey = () => `${getPrefix()}app_settings`;
-
-/** The settings as last read, and their switch: a chat draws every bubble again, and they all ask. */
-let settingsRead: { raw: string | null; on: boolean } = { raw: null, on: false };
-
-/** Settings' Translate messages (`AppSettings.translateMessages`): off until turned on. */
-function settingOn(): boolean {
-  let raw: string | null;
-  try { raw = localStorage.getItem(settingsKey()); } catch { return false; }
-  if (raw !== settingsRead.raw) {
-    let on = false;
-    try { on = (JSON.parse(raw ?? "null") as { translateMessages?: unknown } | null)?.translateMessages === true; } catch { /* unreadable: off */ }
-    settingsRead = { raw, on };
-  }
-  return settingsRead.on;
-}
-
-/**
- * Whether received messages in `chat` (a session id, or `group:<id>`) are translated on this device: the chat's own
- * choice (`translate_<chat>`: "on" or "off") wins, and a chat that never chose follows Settings.
- */
-export function translationOn(chat: string): boolean {
-  let own: string | null = null;
-  try { own = localStorage.getItem(chatKey(chat)); } catch { /* storage unavailable: as in Settings */ }
-  return own === "on" ? true : own === "off" ? false : settingOn();
-}
-
-/** Calls `changed` when Settings or a chat's choice may have changed, on this page or in another page of the app. */
-export function watchTranslationOn(changed: () => void): () => void {
-  const stored = (event: StorageEvent) => {
-    if (!event.key || event.key === settingsKey() || event.key.startsWith(`${getPrefix()}translate_`)) changed();
-  };
-  window.addEventListener("settings-updated", changed);
-  window.addEventListener(CHAT_TRANSLATE_EVENT, changed);
-  window.addEventListener("storage", stored);
-  return () => {
-    window.removeEventListener("settings-updated", changed);
-    window.removeEventListener(CHAT_TRANSLATE_EVENT, changed);
-    window.removeEventListener("storage", stored);
-  };
-}
 
 /** At most this many texts per request: the spike's batch (30 in 0.3 s), so the first on screen do not wait long. */
 export const BATCH_TEXTS = 30;
@@ -238,10 +191,8 @@ export function showOriginal(messageId: string, original: boolean): void {
   changed();
 }
 
-/** A language's name in the app's language ("Portuguese" for `pt` in English), or its code where the browser has none. */
-export function languageName(code: string, language: Language): string {
-  try { return new Intl.DisplayNames([language], { type: "language" }).of(code) ?? code; } catch { return code; }
-}
+/** Moves on with every `forgetTranslations`: a bubble on screen asks again when it does. */
+export const translationRound = () => generation;
 
 /** Throws every translation and decision away, and asks again what was missing: after a model is downloaded or removed. */
 export function forgetTranslations(): void {

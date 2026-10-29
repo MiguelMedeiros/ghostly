@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useSettings } from "../../contexts/SettingsContext";
-import { removeTranslationPair, translationStatus, type DownloadedPair } from "../../desktop/translateStatus";
+import { removeTranslation, translationStatus, type TranslationPair } from "../../desktop/translate";
+import { languageName } from "../../lib/documentLanguage";
 import { rawError } from "../../lib/errorText";
-import { downloadedLanguages, languageName } from "../../lib/translateSettings";
+import { forgetTranslations } from "../../lib/translateReceived";
+import { downloadedLanguages } from "../../lib/translateSettings";
 import { Row } from "../layout";
+import { useTranslateDownload } from "../../hooks/useTranslateDownload";
 import { Button, Switch } from "../wallet/ui";
 
 /**
@@ -16,26 +19,29 @@ import { Button, Switch } from "../wallet/ui";
 export function TranslateSettings() {
   const { settings, updateTranslateMessages } = useSettings();
   const { t } = useI18n();
-  const [pairs, setPairs] = useState<DownloadedPair[]>([]);
+  const [pairs, setPairs] = useState<TranslationPair[]>([]);
   const [unread, setUnread] = useState<unknown>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState<{ pair: string; cause: unknown } | null>(null);
 
   const read = useCallback(async () => {
     try {
-      setPairs((await translationStatus()).pairs);
+      // Every pinned pair comes with its size: the list is the ones on disk.
+      setPairs((await translationStatus()).pairs.filter((pair) => pair.downloaded));
       setUnread(null);
     } catch (cause) {
       setUnread(cause);
     }
   }, []);
   useEffect(() => { void read(); }, [read]);
+  const { ask, question } = useTranslateDownload(() => void read());
 
   const remove = async (pair: string) => {
     setRemoving(pair);
     setFailed(null);
     try {
-      await removeTranslationPair(pair);
+      await removeTranslation(pair);
+      forgetTranslations();
       await read();
     } catch (cause) {
       setFailed({ pair, cause });
@@ -49,8 +55,13 @@ export function TranslateSettings() {
   return (
     <>
       <Row label={title} hint={t("settings.translate.hint")} info={t("settings.translate.info")} testId="settings-translate-row">
-        <Switch testId="settings-translate" label={title} checked={settings.translateMessages} onChange={(on) => updateTranslateMessages(on)} />
+        <Switch testId="settings-translate" label={title} checked={settings.translateMessages} onChange={(on) => {
+          updateTranslateMessages(on);
+          // Turned on with no language here: what it needs is asked before anything downloads.
+          if (on && unread === null && lines.length === 0) void ask(settings.language);
+        }} />
       </Row>
+      {question}
       {unread !== null ? (
         <Row label={t("settings.translate.downloaded")} hint={<span role="status">{t("settings.translate.unread")}</span>} info={rawError(unread)}
           testId="settings-translate-unread">

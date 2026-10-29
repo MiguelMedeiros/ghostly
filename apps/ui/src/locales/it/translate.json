@@ -3,6 +3,8 @@
     "body": "Le lingue arrivano dai server di Mozilla, gli stessi con cui traduce Firefox: vedono che questo computer le ha chieste. Poi la traduzione avviene su questo computer e i tuoi messaggi non lo lasciano mai.",
     "download": "Scarica",
     "engine": "Il primo download porta anche il motore di traduzione, dalle versioni di Ghostly su GitHub.",
+    "failed": "Le lingue non sono state scaricate",
+    "failedNext": "Riprova.",
     "notNow": "Non ora",
     "pair": "Da {{from}} a {{to}}, {{size}}",
     "pairBack": "Da {{from}} a {{to}} e ritorno, {{size}}",

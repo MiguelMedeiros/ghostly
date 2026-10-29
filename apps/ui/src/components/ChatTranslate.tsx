@@ -1,14 +1,15 @@
 import type { RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
-import { TRANSLATE_CHOICES, setChatTranslate, settingsTranslate, useChatTranslate, type ChatTranslateChoice } from "../lib/chatTranslate";
-import { translateEnabled } from "../lib/translateFlag";
+import { TRANSLATE_CHOICES, setChatTranslate, useChatTranslate, type ChatTranslateChoice } from "../lib/chatTranslate";
+import { translateOffered } from "../lib/translateSettings";
 import { Menu, MenuItem } from "./Menu";
+import { useTranslateDownload } from "../hooks/useTranslateDownload";
 
 /*
  * A chat's translation, On, Off or As in Settings (apps/ui/src/lib/chatTranslate.ts): the row in the chat's ⋮ menu
- * and the sheet of choices it opens. Nothing of it in a build without translation (lib/translateFlag.ts). `chat` is
- * a session id, or `groupChat(id)` for a group.
+ * and the sheet of choices it opens. Only where Settings offers translation (lib/translateSettings.ts: a
+ * `VITE_TRANSLATE` build of the Desktop app). `chat` is a session id, or `groupChat(id)` for a group.
  */
 
 function TranslateIcon() {
@@ -23,7 +24,7 @@ function TranslateIcon() {
 function useChoiceText() {
   const { t } = useI18n();
   const { settings } = useSettings();
-  const state = t(settingsTranslate(settings) ? "chatTranslate.choice.on" : "chatTranslate.choice.off");
+  const state = t(settings.translateMessages ? "chatTranslate.choice.on" : "chatTranslate.choice.off");
   return (choice: ChatTranslateChoice) => choice === "settings" ? t("chatTranslate.choice.settings", { state }) : t(`chatTranslate.choice.${choice}`);
 }
 
@@ -32,18 +33,25 @@ export function TranslateMenuItem({ chat, onChoose }: { chat: string; onChoose()
   const { t } = useI18n();
   const choice = useChatTranslate(chat);
   const choiceText = useChoiceText();
-  if (!translateEnabled()) return null;
+  if (!translateOffered()) return null;
   return <MenuItem testId="chat-translate-open" icon={<TranslateIcon />} hint={choiceText(choice)} onClick={onChoose}>{t("chatTranslate.open")}</MenuItem>;
 }
 
 type TranslateMenuProps = { chat: string; open: boolean; onClose(): void; anchorRef: RefObject<HTMLElement | null> };
 
-/** The three choices, the chat's own ticked. Choosing one sets it and closes the sheet. */
+/**
+ * The three choices, the chat's own ticked. Choosing one sets it and closes the sheet; On while the Settings switch is
+ * off asks for the models it needs, as the switch does. The question outlives the sheet.
+ */
 export function TranslateMenu(props: TranslateMenuProps) {
-  return props.open && translateEnabled() ? <OpenTranslateMenu {...props} /> : null;
+  const { settings } = useSettings();
+  const { ask, question } = useTranslateDownload();
+  if (!translateOffered()) return null;
+  const chosen = (choice: ChatTranslateChoice) => { if (choice === "on" && !settings.translateMessages) void ask(settings.language); };
+  return <>{props.open && <OpenTranslateMenu {...props} onChosen={chosen} />}{question}</>;
 }
 
-function OpenTranslateMenu({ chat, open, onClose, anchorRef }: TranslateMenuProps) {
+function OpenTranslateMenu({ chat, open, onClose, anchorRef, onChosen }: TranslateMenuProps & { onChosen(choice: ChatTranslateChoice): void }) {
   const { t } = useI18n();
   const choice = useChatTranslate(chat);
   const choiceText = useChoiceText();
@@ -57,7 +65,7 @@ function OpenTranslateMenu({ chat, open, onClose, anchorRef }: TranslateMenuProp
       {TRANSLATE_CHOICES.map(each => (
         <MenuItem key={each} testId={`translate-${each}`} checked={each === choice}
           icon={<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{each === choice && <polyline points="20 6 9 17 4 12" />}</svg>}
-          onClick={() => { setChatTranslate(chat, each); onClose(); }}>
+          onClick={() => { setChatTranslate(chat, each); onClose(); onChosen(each); }}>
           {choiceText(each)}
         </MenuItem>
       ))}

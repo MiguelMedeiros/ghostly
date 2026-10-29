@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useSyncExternalStore } from "react";
 import type { AppSettings } from "./settings";
 import { getPrefix } from "./storage";
 
@@ -49,30 +49,23 @@ export function translatesChat(choice: ChatTranslateChoice, settingsOn: boolean)
   return choice === "settings" ? settingsOn : choice === "on";
 }
 
-/**
- * The Settings switch, "Translate messages into <language>" (`AppSettings.translateMessages`, off unless turned on).
- * Read through `in` while the field is not in every build of AppSettings.
- */
-export function settingsTranslate(settings: AppSettings): boolean {
-  return "translateMessages" in settings && settings.translateMessages === true;
-}
-
 /** Whether received messages in this chat are translated now, by its choice and the Settings switch. */
 export function chatTranslates(chat: string, settings: AppSettings): boolean {
-  return translatesChat(chatTranslateChoice(chat), settingsTranslate(settings));
+  return translatesChat(chatTranslateChoice(chat), settings.translateMessages);
+}
+
+/** Calls `changed` when a chat's choice may have changed, on this page or in another page of the app. */
+export function watchChatTranslate(changed: () => void): () => void {
+  const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}translate_`)) changed(); };
+  window.addEventListener(TRANSLATE_EVENT, changed);
+  window.addEventListener("storage", stored);
+  return () => {
+    window.removeEventListener(TRANSLATE_EVENT, changed);
+    window.removeEventListener("storage", stored);
+  };
 }
 
 /** A chat's choice, kept current: redrawn when it changes here or in another page of the app. */
 export function useChatTranslate(chat: string): ChatTranslateChoice {
-  const [, redraw] = useReducer((n: number) => n + 1, 0);
-  useEffect(() => {
-    const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}translate_`)) redraw(); };
-    window.addEventListener(TRANSLATE_EVENT, redraw);
-    window.addEventListener("storage", stored);
-    return () => {
-      window.removeEventListener(TRANSLATE_EVENT, redraw);
-      window.removeEventListener("storage", stored);
-    };
-  }, []);
-  return chatTranslateChoice(chat);
+  return useSyncExternalStore(watchChatTranslate, () => chatTranslateChoice(chat));
 }

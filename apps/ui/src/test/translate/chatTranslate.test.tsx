@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { groupChat } from "../../lib/chatMute";
 import {
-  chatTranslateChoice, chatTranslates, setChatTranslate, settingsTranslate, translatesChat, TRANSLATE_CHOICES,
+  chatTranslateChoice, chatTranslates, setChatTranslate, translatesChat, TRANSLATE_CHOICES,
 } from "../../lib/chatTranslate";
 import { forgetGroupLocal } from "../../lib/groups";
 import { loadSettings, type AppSettings } from "../../lib/settings";
@@ -23,6 +23,8 @@ const settings = (on: boolean) => ({ ...loadSettings(), translateMessages: on })
 afterEach(() => {
   setStorageProfile("");
   vi.unstubAllEnvs();
+  delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
+  localStorage.clear();
 });
 
 describe("a chat's translation: On, Off or As in Settings", () => {
@@ -48,10 +50,12 @@ describe("a chat's translation: On, Off or As in Settings", () => {
     expect(chatTranslates("a", settings(true))).toBe(true);
   });
 
-  it("reads the Settings switch as off unless it is on", () => {
-    expect(settingsTranslate(loadSettings())).toBe(false);
-    expect(settingsTranslate(settings(true))).toBe(true);
-    expect(settingsTranslate({ ...loadSettings(), translateMessages: "yes" } as unknown as AppSettings)).toBe(false);
+  it("a chat that never chose follows the Settings switch as saved: off for a new profile", () => {
+    expect(chatTranslates("a", loadSettings())).toBe(false);
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ translateMessages: true }));
+    expect(chatTranslates("a", loadSettings())).toBe(true);
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ translateMessages: "yes" }));
+    expect(chatTranslates("a", loadSettings())).toBe(false);
   });
 
   it("ignores what it cannot read: Settings decides", () => {
@@ -85,8 +89,11 @@ function openGroup(group: GroupView, language?: "pt") {
 const activeGroup = () => groupView({ status: "active", epoch: 1, members: [{ key: key("m"), role: "member", me: true, online: true, missing: 0 }] });
 const rowTexts = (menu: HTMLElement) => within(menu).getAllByRole("menuitemcheckbox").map(b => b.querySelector("[data-menu-text]")?.textContent);
 
-describe("choosing from the chat's menu", () => {
-  beforeEach(() => { vi.stubEnv("VITE_TRANSLATE", "1"); });
+describe("choosing from the chat's menu, in the Desktop app", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_TRANSLATE", "1");
+    (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
+  });
 
   it("⋮ → Translation… → a choice: kept for the chat, ticked, and named under the row", async () => {
     const { user } = openGroup(activeGroup());
@@ -121,6 +128,14 @@ describe("choosing from the chat's menu", () => {
 
   it("is not in a build without translation", async () => {
     vi.stubEnv("VITE_TRANSLATE", "");
+    const { user } = openGroup(activeGroup());
+    await user.click(screen.getByTestId("group-options"));
+    expect(screen.getByTestId("chat-mute-open")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-translate-open")).not.toBeInTheDocument();
+  });
+
+  it("is not in the web app either, where Settings has no switch", async () => {
+    delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
     const { user } = openGroup(activeGroup());
     await user.click(screen.getByTestId("group-options"));
     expect(screen.getByTestId("chat-mute-open")).toBeInTheDocument();
