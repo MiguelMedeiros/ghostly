@@ -1842,12 +1842,14 @@ export class GroupSession {
   /**
    * Who made the change a statement brings me: its signer, when they were the admin all along since the statement I
    * held (or, with none, since I got in). A new admin signs again what the last one set (`metaFollowsChain`): to a
-   * member that missed that, it is no change of theirs it can tell apart, so nobody is named.
+   * member that missed that, it is no change of theirs it can tell apart, so nobody is named. With none held, theirs is
+   * one dated after the commit that made them the admin: what they sign again keeps its date.
    */
   private metaAuthor(before: GroupMeta | undefined, s: GroupMetaStatement): string | undefined {
     const chain = this.state.chain, from = before ? before.e : chain.findIndex(c => rosterHas(c.m, this.myKey));
-    for (let e = Math.max(0, from); e <= s.e; e++) if (rosterAdmin(chain[e].m) !== s.by) return undefined;
-    return s.by;
+    let moved: number | undefined;
+    for (let e = Math.max(0, from); e <= s.e; e++) if (rosterAdmin(chain[e].m) !== s.by) { if (before) return undefined; moved = e + 1; }
+    return moved === undefined || s.ts > chain[moved].ts ? s.by : undefined;
   }
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
@@ -1856,7 +1858,8 @@ export class GroupSession {
     this.pendingMeta = undefined;
     if (pending) await this.receiveMeta(pending.from, pending.frame);
     // Joiners accept only the current admin's statement: a new admin signs the picture again.
-    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, Date.now());
+    // Dated when it was set: a member holding nothing tells it from a change of mine by that (`metaAuthor`).
+    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.state.meta.ts);
   }
 
   private async fork(reason: string): Promise<void> {
