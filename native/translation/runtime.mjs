@@ -1,6 +1,7 @@
 // The translation runtime, run by `bare runtime.mjs <models folder>`: the stdio protocol of protocol.mjs over QVAC's
 // Bergamot addon. Started by the app, not listening on any port, and it never fetches: the only files it reads are the
 // models under the folder it was given, by fixed names. Nothing it writes carries a message's text but the answers.
+import process from 'bare-process'
 import fs from 'bare-fs'
 import path from 'bare-path'
 import TranslationNmtcpp from '@qvac/translation-nmtcpp'
@@ -30,15 +31,22 @@ async function open({ from, to, files }) {
 const exists = file => { try { return fs.statSync(file).isFile() } catch { return false } }
 const runtime = createRuntime({ root, open, exists, join: path.join })
 
-// stdin and stdout are read and written as plain file descriptors, not through bare-process's streams: on Windows
-// those neither read a request nor wrote a line when the app (or Node) started the runtime with piped stdio, so the
-// first request hung with nothing on stderr. A read and a blocking write of fds 0 and 1 work the same everywhere.
-const write = answer => {
-  const bytes = Buffer.from(JSON.stringify(answer) + '\n')
+// On Windows, bare-process's stdio streams neither read a request nor wrote a line when the app (or Node) started the
+// runtime with piped stdio, so the first request hung with nothing on stderr: there fds 0 and 1 are read and written
+// directly. Elsewhere the streams work, while a pending fs.read of fd 0 holds a threadpool worker and darwin-x64's
+// model load never finished with it, so the other platforms keep the streams.
+const windows = Bare.platform === 'win32'
+function write(answer) {
+  const line = JSON.stringify(answer) + '\n'
+  if (!windows) { process.stdout.write(line); return }
+  const bytes = Buffer.from(line)
   for (let at = 0; at < bytes.byteLength;) at += fs.writeSync(1, bytes, at, bytes.byteLength - at)
 }
 const take = lineReader(line => { runtime.handle(line).then(write) }, () => { runtime.tooLong().then(write) })
-async function readInput() {
+// The app closed our input: it is done with us.
+const done = () => { runtime.close().finally(() => Bare.exit(0)) }
+
+async function readFd() {
   const chunk = Buffer.alloc(64 * 1024)
   for (;;) {
     let read = 0
@@ -46,7 +54,11 @@ async function readInput() {
     if (read === 0) break
     take(Buffer.from(chunk.subarray(0, read)))
   }
-  // The app closed our input: it is done with us.
-  runtime.close().finally(() => Bare.exit(0))
+  done()
 }
-readInput()
+
+if (windows) readFd()
+else {
+  process.stdin.on('data', take)
+  process.stdin.on('end', done)
+}
