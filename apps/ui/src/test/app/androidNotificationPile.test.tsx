@@ -1,10 +1,14 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { PeekResult } from "@ghostly/browser/engine/profilePeek";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { AttentionFeedback } from "../../components/AttentionFeedback";
+import { useProfilePeek } from "../../hooks/useProfilePeek";
 import { MESSAGE_BURST_MS, resetCues } from "../../lib/cues";
 import { clearChatNotification, showPrivateNotification } from "../../lib/notifications";
+import { PEEK_PACE } from "../../lib/profilePeek";
+import { createProfile } from "../../lib/profiles";
 import { loadSettings, saveSettings } from "../../lib/settings";
 import { saveSession } from "../../lib/storage";
 import { refreshWindowAway } from "../../lib/windowAway";
@@ -111,6 +115,43 @@ describe("Android: one notification per chat", () => {
     await showPrivateNotification("call:chat-1:1", "Incoming call", "chat-1");
     expect(posted()[3]).not.toBe(posted()[2]);
     expect(posted()[3]).not.toMatch(/chat-1|call/);
+  });
+});
+
+/*
+ * "Check other profiles" tells of another profile's new messages. Each look that found one more chat waiting there
+ * used to post one more "New message in Work", under a new tag: the tray filled until the person switched profile.
+ * Now that profile has one notification, as a chat has: the next look replaces it.
+ */
+describe("Android: one notification per other profile", () => {
+  function Peeking() { useProfilePeek(); return null; }
+
+  it("looks that find new chats in Work replace one notification, which goes when Work's New goes", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "Date"] });
+    try {
+      const work = createProfile("Work");
+      fakeEngine.features = { ...fakeEngine.features, profiles: true };
+      saveSettings({ ...loadSettings(), profilePeek: { enabled: true, notify: true } });
+      let looks = 0;
+      // Each look, one more of Work's contacts has written.
+      let result = (): PeekResult => { looks++; return { status: "done", reads: looks, chats: Array.from({ length: looks }, (_, i) => ({ linkId: `c${i}`, peer: `peer-${i}`, peerSequence: 4, text: `t${i}`, held: 0 })) }; };
+      fakeEngine.on("peekProfile", () => result());
+      renderApp(<Peeking />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(PEEK_PACE.firstMs); });
+      for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(PEEK_PACE.baseMs * 2); });
+      expect(looks).toBeGreaterThanOrEqual(4);
+      expect(posted()).toHaveLength(looks);
+      const tags = [...new Set(posted())];
+      expect(tags).toHaveLength(1);
+      expect(tags[0]).not.toContain(work.id);
+      // Work runs on another device now: nothing is new there from here, and its notification goes.
+      result = () => ({ status: "standby", reads: 0, chats: [] });
+      await act(async () => { await vi.advanceTimersByTimeAsync(PEEK_PACE.baseMs * 2); });
+      expect(cleared()).toEqual(tags);
+    } finally {
+      fakeEngine.features = { ...fakeEngine.features, profiles: false };
+      vi.useRealTimers();
+    }
   });
 });
 
