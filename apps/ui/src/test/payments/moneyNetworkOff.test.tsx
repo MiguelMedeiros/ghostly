@@ -45,12 +45,13 @@ describe("a contact's Testnet invoice", () => {
 });
 
 describe("a contact's token of a test mint", () => {
-  it("with Testnet Cashu off in the chat, offers no Redeem and says Cashu is off here", async () => {
+  it("with Testnet Cashu off in the chat, offers no Redeem, not even before it is known, and says Cashu is off here", async () => {
     show(TOKEN, { cashu: ["mainnet"] });
+    // Read as soon as the token's card is drawn: Redeem is never offered first and taken away after.
     const card = await screen.findByTestId("cashu-token-bubble");
     expect(within(card).getByTestId("token-network")).toHaveTextContent("Test money");
     expect(within(card).queryByTestId("token-redeem")).not.toBeInTheDocument();
-    expect(screen.getByTestId("money-off")).toBeInTheDocument();
+    expect(await screen.findByTestId("money-off")).toBeInTheDocument();
   });
 
   it("with only Mainnet Cashu off, is still redeemed", async () => {

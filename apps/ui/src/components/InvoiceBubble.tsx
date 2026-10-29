@@ -294,8 +294,11 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
   );
 }
 
-/** `onNetwork`: told the token's network once its mint is read, which decides whether this chat takes it. */
-function CashuCard({ value, mine, off, onNetwork }: { value: string; mine: boolean; off: boolean; onNetwork: (network: WalletNetwork | undefined) => void }) {
+/**
+ * `offOn`: whether this chat takes Cashu on a network, asked with the token's own once its mint is read (never Redeem
+ * first, then gone). `onNetwork`: told that network, for the note under the card.
+ */
+function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boolean; offOn: (network: WalletNetwork | undefined) => boolean; onNetwork: (network: WalletNetwork | undefined) => void }) {
   const { t } = useI18n();
   const wallet = useWalletPlatform();
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
@@ -384,7 +387,7 @@ function CashuCard({ value, mine, off, onNetwork }: { value: string; mine: boole
       ) : spent ? (
         <span ref={redeemedLine} tabIndex={-1} className="text-text-primary/65 text-xs font-bold self-center focus:outline-none" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
       ) : (
-        wallet && !mine && !off && inspection.accepted && (
+        wallet && !mine && !offOn(network) && inspection.accepted && (
           <button
             className={button}
             {...working(busy)}
@@ -457,7 +460,7 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       <Fragment key={whatItPays(money)}>
-        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} onNetwork={setTokenNetwork} />
+        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
           : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={peerPubKey} />} />}
       </Fragment>
       {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
