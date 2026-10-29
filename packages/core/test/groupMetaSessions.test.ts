@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { fromBase64Url } from "../src/bytes";
 import { epochKeys } from "../src/groupCrypto";
@@ -15,6 +15,9 @@ function jpeg(side: number, fill = 0): string {
   return "data:image/jpeg;base64," + btoa(String.fromCharCode(0xff, 0xd8, ...app0, ...sof, 0xff, 0xda, 0x00, 0x02, fill, 0xff, 0xd9));
 }
 const RED = jpeg(128, 1), BLUE = jpeg(128, 2);
+/** A clock that moves only when told: the new admin's change comes after the commit that made them the admin. */
+function later(ms = 1000): void { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.now() + ms); }
+afterEach(() => { vi.useRealTimers(); });
 
 // -- group-mesh/1 -----------------------------------------------------------------------------------
 
@@ -291,10 +294,14 @@ describe("group name, group-mesh/1", () => {
     const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
     await alice.rename("Book club");
     await mesh.settle();
+    const set = alice.state.meta!.ts;
+    later();
     await alice.transferAdmin(bob.myKey);
     await mesh.settle();
     expect(carol.state.meta!.by).toBe(bob.myKey);
     expect(carol.name).toBe("Book club");
+    // Dated when Alice set it, before the commit that made Bob the admin: no change of his.
+    expect(carol.state.meta!.ts).toBe(set);
     await expect(alice.rename("Mine")).rejects.toThrow("Only the admin");
     await bob.rename("Reading club");
     await mesh.settle();
@@ -323,6 +330,22 @@ describe("group name, group-mesh/1", () => {
     expect(mesh.names.filter(n => n.at === carol.myKey).pop()).toEqual({ at: carol.myKey, by: bob.myKey, name: "Reading club" });
     // So is Alice's rename credited to Alice by a member that was there.
     expect(mesh.names).toContainEqual({ at: bob.myKey, by: alice.myKey, name: "Book club" });
+  });
+
+  it("after the admin role moves before anyone renamed it, the new admin's rename and picture are theirs to every member", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice), carol = await admit(mesh, alice);
+    await alice.transferAdmin(bob.myKey);
+    await mesh.settle();
+    later();
+    await bob.rename("Reading club");
+    await bob.setPicture(RED);
+    await mesh.settle();
+    for (const member of [alice, carol]) {
+      expect(mesh.names.filter(n => n.at === member.myKey)).toEqual([{ at: member.myKey, by: bob.myKey, name: "Reading club" }]);
+      expect(mesh.pictures.filter(p => p.at === member.myKey)).toEqual([{ at: member.myKey, by: bob.myKey, picture: RED }]);
+    }
   });
 
   it("an admin who signed the highest revision there is cannot leave the next admin unable to rename", async () => {
@@ -553,6 +576,21 @@ describe("group name, group-community/1", () => {
     const kept = clone(bob.saved);
     expect(JSON.parse(kept.meta!.body)).toMatchObject({ name: "Book club" });
     expect(new CommunitySession(kept, { save: async () => {}, broadcast: () => {}, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} }).name).toBe("Book club");
+  });
+
+  it("after the admin role moves before anyone renamed it, the new admin's rename is theirs to every member", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    later();
+    await bob.session.rename("Reading club");
+    await bob.session.setPicture(RED);
+    await net.settle();
+    expect([alice.session.name, carol.session.name]).toEqual(["Reading club", "Reading club"]);
+    for (const at of ["alice", "carol"]) expect(net.authors.filter(a => a.at === at)).toEqual([{ at, by: bob.session.myKey }, { at, by: bob.session.myKey }]);
   });
 
   it("a member away when the admin role moved is not told the new admin renamed it: the line names nobody", async () => {

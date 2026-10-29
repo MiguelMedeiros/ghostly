@@ -2070,18 +2070,19 @@ export class CommunitySession {
   /**
    * Who made the change a statement brings me (`at`: its commit's place on my main branch): its signer, when they were
    * the admin all along since the statement I held (or, with none, since I got in). A new admin signs again what the
-   * last one set (`metaFollowsChain`): to a member that missed that, it is no change of theirs it can tell apart.
+   * last one set (`metaFollowsChain`): to a member that missed that, it is no change of theirs it can tell apart. With
+   * none held, theirs is one dated after the commit that made them the admin: what they sign again keeps its date.
    */
   private metaAuthor(before: GroupMeta | undefined, s: GroupMetaStatement, at: number): string | undefined {
     const from = before ? this.mainIndex.get(before.h) : undefined;
-    let roster = before && from !== undefined ? this.rosterAt(before.h) ?? null : null, counted = from !== undefined;
+    let roster = before && from !== undefined ? this.rosterAt(before.h) ?? null : null, counted = from !== undefined, moved: number | undefined;
     for (let i = from ?? 0; i <= at; i++) {
       if (i !== from) roster = communityRoster(roster, this.state.chain[i]);
       if (!roster) return undefined;
       counted ||= rosterHas(roster, this.myKey);
-      if (counted && rosterAdmin(roster) !== s.by) return undefined;
+      if (counted && rosterAdmin(roster) !== s.by) { if (before) return undefined; moved = i + 1; }
     }
-    return s.by;
+    return moved === undefined || s.ts > this.state.chain[moved].ts ? s.by : undefined;
   }
 
   /**
@@ -2093,9 +2094,10 @@ export class CommunitySession {
     this.pendingMeta = undefined;
     if (pending && await this.receiveMeta(pending.from, pending.frame)) this.hooks.relay?.(pending.frame as GroupMetaFrame);
     // Joiners accept only the current admin's statement: a new admin signs the picture again. One under a commit off
-    // the main branch reaches no one (each waits for a chain that never comes): its admin signs it again too.
+    // the main branch reaches no one (each waits for a chain that never comes): its admin signs it again too. Dated
+    // when it was set: a member holding nothing tells it from a new admin's change by that (`metaAuthor`).
     const meta = this.state.meta;
-    if (this.isAdmin && meta && (meta.by !== this.myKey || !this.mainIndex.has(meta.h))) await this.publishMeta(meta.body, this.hooks.clock?.() ?? Date.now());
+    if (this.isAdmin && meta && (meta.by !== this.myKey || !this.mainIndex.has(meta.h))) await this.publishMeta(meta.body, meta.ts);
   }
 
   private async fork(reason: string): Promise<void> {
