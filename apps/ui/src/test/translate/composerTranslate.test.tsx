@@ -182,6 +182,15 @@ describe("the composer's Translate", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("English to Italian is not downloaded");
   });
 
+  it("on a computer with no translation runtime yet, the composer says translation is not installed", async () => {
+    const translate = vi.fn(async () => { throw new TranslateError("unavailable", "Translation is not available on this computer yet"); });
+    const { user, field } = setup({ language: "it", translate });
+    await user.type(field, "see you tomorrow");
+    await act(async () => { await user.click(screen.getByTestId("composer-translate")); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Translation is not installed on this computer.");
+    expect(field).toHaveValue("see you tomorrow");
+  });
+
   it("asks the secret guard about the draft before translating it: Cancel translates nothing", async () => {
     const translate = capitals();
     const { user, field, onSend } = setup({ language: "it", translate });

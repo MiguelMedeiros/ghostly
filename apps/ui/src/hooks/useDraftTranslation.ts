@@ -66,7 +66,9 @@ export function useDraftTranslation({ config, appLanguage, onFailure }: {
         return;
       } catch (cause) {
         if (!current()) return;
-        const reason = cause instanceof TranslateError && cause.reason !== "off" ? cause.reason : "failed";
+        const why = cause instanceof TranslateError ? cause.reason : "failed";
+        // No runtime for this computer yet reads like none installed: either way nothing here can translate.
+        const reason: DraftTranslationFailure = why === "off" ? "failed" : why === "unavailable" ? "not-installed" : why;
         // The reverse model, asked for the first time: downloaded, it runs again; "Not now" leaves the draft as it is.
         if (reason === "no-model" && !asked && config.askModel) {
           asked = true;
