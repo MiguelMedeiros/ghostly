@@ -6,6 +6,7 @@ import { SwapUnsettledError, type CashuPrepared, type CashuWallet } from "../src
 import { MintOperationError } from "@cashu/cashu-ts";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { BarkWallet } from "../src/engine/paymentAdapters/barkWallet";
+import type { BarkReceipts } from "../src/engine/paymentAdapters/bark";
 import type { UsdtWallet } from "../src/engine/paymentAdapters/usdtWallet";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
 import type { PendingSwap, StoredMessage, StoredPayment } from "../src/shared/types";
@@ -80,7 +81,8 @@ function setup(stored: StoredPayment[] = []) {
     check: vi.fn(async () => {}),
   };
   const arkWallet = { target: vi.fn(async () => ark()), adapter: { config: { provider: ARK, network: "mutinynet" }, received: vi.fn(async (): Promise<string | undefined> => undefined), verifyReceipt: vi.fn(async () => false) } };
-  const barkWallet = { target: vi.fn(async () => bark()), adapter: { config: { provider: BARK, network: "signet" }, received: vi.fn(async (): Promise<string | undefined> => undefined), sync: vi.fn(async () => {}) } };
+  const barkReceived = vi.fn((..._: Parameters<BarkReceipts>): string | undefined => undefined);
+  const barkWallet = { target: vi.fn(async () => bark()), adapter: { config: { provider: BARK, network: "signet" }, received: barkReceived, receipts: vi.fn(async () => barkReceived), sync: vi.fn(async () => {}) } };
   const usdtWallet = { target: vi.fn(async () => usdt()), adapter: { receipt: vi.fn(async (): Promise<{ settled?: boolean; failed?: boolean; error?: string }> => ({ settled: false })) } };
   const bitcoin = { requestTarget: vi.fn(async () => btc()), received: vi.fn<DeskBitcoin["received"]>(async () => undefined) };
   const desk = new PaymentDesk(wallet as unknown as CashuWallet, host, arkWallet as unknown as ArkWallet, usdtWallet as unknown as UsdtWallet, barkWallet as unknown as BarkWallet, lightning as DeskLightning, bitcoin);
@@ -1020,7 +1022,7 @@ describe("receipts that do not add up", () => {
     await desk.start();
     arkWallet.adapter.received.mockRejectedValue(new Error("indexer down"));
     arkWallet.adapter.verifyReceipt.mockRejectedValue(new Error("indexer down"));
-    barkWallet.adapter.received.mockRejectedValue(new Error("server down"));
+    barkWallet.adapter.receipts.mockRejectedValue(new Error("server down"));
     barkWallet.adapter.sync.mockRejectedValue(new Error("server down"));
     await desk.reconcileArkReceipts();
     await desk.reconcileBarkReceipts();
