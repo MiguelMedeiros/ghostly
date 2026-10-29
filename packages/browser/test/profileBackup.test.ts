@@ -5,6 +5,7 @@ import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { listProfiles } from "../../../apps/ui/src/lib/profiles";
 import { createProfileBackup, restoreHandoffBundle, restoreProfileBackup, writeProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
 import { memorySink } from "../src/backup/stream";
+import { forgetRatchets } from "../src/shared/restoredRows";
 // covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock, devices.push
 
 class FakeStorage {
@@ -105,6 +106,20 @@ it("a chat's ratchet (WISP 4xx) is in neither a backup nor a handoff; the rest o
   expect((await linkIn("stagedratchet"))?.ratchetState).toBeUndefined();
   const restored = await restoreProfileBackup(await createProfileBackup(null), undefined);
   expect((await linkIn(restored.id))?.ratchetState).toBeUndefined();
+});
+
+it("a restored headless profile drops every chat's ratchet, from a backup made before backups left it out", async () => {
+  await openDb();
+  await transact([STORES.links], (s) => {
+    s[STORES.links].put({ id: "kept", seedB64: "seed", peerPubKeyZ32: "peer", ratchetState: { v: 1 } });
+    s[STORES.links].put({ id: "plain", seedB64: "seed2", peerPubKeyZ32: "peer2" });
+  });
+  await forgetRatchets();
+  await forgetRatchets();
+  const db = await openDb();
+  const rows = await wrap(db.transaction(STORES.links, "readonly").objectStore(STORES.links).getAll()) as { id: string; ratchetState?: unknown }[];
+  expect(rows.filter((r) => r.id === "kept" || r.id === "plain").map((r) => [r.id, r.ratchetState])).toEqual([["kept", undefined], ["plain", undefined]]);
+  expect(rows.find((r) => r.id === "kept")).toMatchObject({ seedB64: "seed" });
 });
 
 it("a new profile's question for a name stays with it: neither a backup nor a handoff carries it", async () => {

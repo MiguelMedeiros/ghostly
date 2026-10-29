@@ -852,13 +852,11 @@ export class DhtDelivery {
     if (digest === this.state.lastDr) return "old";
     const ratchet = this.options.ratchet;
     if (!ratchet) return "none";
-    // Under the chat's one lock: opened, stored, and only then the ratchet's state saved. What this hands the content to
-    // (`message`, `reaction`, `receipt`) must not wait on the same lock (a held item sealed or opened): it would wait forever.
-    return ratchet.box.lock(async tx => {
-      let commit: ((order?: number) => Promise<void>) | undefined;
-      const opened = this.open(packet, box, sealed => { const o = tx.open("floor", sealed); commit = o?.commit; return o?.plaintext ?? null; });
-      return this.take(packet, box, opened, commit && { commit, digest });
-    });
+    // Opened with no lock held, stored, and only then the ratchet's state saved, under the chat's lock, on the state as it
+    // is by then (`RatchetBox.commitOpen`): what the content goes to may seal or open a held item, which takes that lock.
+    let sealed: Uint8Array | undefined;
+    const opened = this.open(packet, box, bytes => { const plain = ratchet.box.peek("floor", bytes); if (plain) sealed = bytes; return plain; });
+    return this.take(packet, box, opened, sealed && { commit: async order => { if (!await ratchet.box.commitOpen("floor", sealed!, order)) throw new Error("A ratcheted envelope no longer opens"); }, digest });
   }
   /** `ratchet`: the envelope was ratcheted; its state is saved once what it carried is stored, with its digest. */
   private async take(packet: SignedPacket, box: "invite" | "pinned", opened: ReturnType<DhtDelivery["open"]>, ratchet?: { commit(order?: number): Promise<void>; digest: string }): Promise<"none" | "old" | "new"> {
