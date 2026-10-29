@@ -136,6 +136,14 @@ const MEDIA_PROBLEM_TEXT = {
   relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
 } as const;
 
+/** Tech Info's Status (the engine's word for the link) in the reader's language. A word not here stays as it is. */
+const STATUS_TEXT = {
+  connecting: "chat.connecting",
+  online: "chat.online",
+  offline: "chat.offline",
+  error: "connection.state.discoveryUnavailable",
+} as const;
+
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
   sessionId: string;
@@ -1248,28 +1256,23 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.protocol")}>
-            <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
+            <TechInfoRow label={t("chat.tech.network")}
+              value={techInfo.peerToPeer ? t("chat.tech.networkPeerToPeer", { webrtc: "WebRTC DataChannel", pkarr: "Pkarr" }) : techInfo.protocol} />
             <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
             <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
             <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.sync")}>
-            <TechInfoRow label={t("chat.tech.status")} value={status} />
-            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
-            <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
+            <TechInfoRow label={t("chat.tech.status")} value={status in STATUS_TEXT ? t(STATUS_TEXT[status]) : status} />
+            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${Math.round(techInfo.currentPollInterval / 1000)}s`} />
             <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
             <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.ackStatus")}>
-            <TechInfoRow 
-              label={t("chat.tech.myAck")} 
-              value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
+            <TechInfoRow
+              label={t("chat.tech.peerAck")}
+              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")}
             />
-            <TechInfoRow 
-              label={t("chat.tech.peerAck")} 
-              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
-            />
-            <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
           </TechInfoSection>
         </div>
         </TechInfoDialog>
