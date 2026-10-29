@@ -466,9 +466,11 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const problem = checkAppRevokeStatement(statement);
   if (problem) throw refused("Not a revocation a client reads", { reason: "bad-revocation", detail: problem });
 
+  // Each revocation's signature is checked once: the held list's are not checked again when the new list is read back.
+  const checked = new Set<string>();
   let list: SignedAppRevocation[] = [];
   if (existsSync(listPath)) {
-    const held = readAppRevocations(new Uint8Array(readFileSync(listPath)));
+    const held = readAppRevocations(new Uint8Array(readFileSync(listPath)), checked);
     if (!held.ok) throw refused(`${listPath} is there and is not a valid ghostly-revoke.json: fix or move it first`, held);
     list = held.revocations;
   }
@@ -478,7 +480,7 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
     if (list.length >= APP_STATEMENT_LIMITS.revocations) throw refused(`${listPath} holds ${list.length} revocations already`, { reason: "bad-revocation", detail: `at most ${APP_STATEMENT_LIMITS.revocations}` });
     list = [...list, signed];
     const bytes = canonicalJsonBytes(list);
-    const check = readAppRevocations(bytes);
+    const check = readAppRevocations(bytes, checked);
     if (!check.ok) throw refused("The revocation list made is not valid", check);
     writeWhole(listPath, bytes);
   }
@@ -511,9 +513,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
 
   // The index this one follows, when the folder holds a signed one: a store is its key, so only that key signs over it.
   const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);
+  // Each revocation's signature is checked once, though the held index, the new one and its read-back all carry it.
+  const checked = new Set<string>();
   let held: AppStoreReading | null = null;
   if (existsSync(indexOut) && existsSync(sigOut)) {
-    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now);
+    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now, undefined, checked);
     if (read.ok) held = read.store;
   }
 
@@ -530,10 +534,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   }
   index.key = key.key;
 
-  const checked = checkAppStoreIndex(index, { strict: true });
-  if (!checked.ok) throw refused(`${indexPath} is not a valid store index`, checked);
-  const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer);
-  const read = readAppStore(indexBytes, sigBytes, now, key.key);
+  const valid = checkAppStoreIndex(index, { strict: true }, checked);
+  if (!valid.ok) throw refused(`${indexPath} is not a valid store index`, valid);
+  const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
+  const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
 
