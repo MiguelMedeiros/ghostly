@@ -26,9 +26,10 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
+type IceServers = { urls: string; username?: string; credential?: string }[];
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: { urls: string }[]; earlyAnswerMs?: number; callPaceMs?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: IceServers; earlyAnswerMs?: number; callPaceMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -36,7 +37,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
     return side;
   };
   const a = make("chat-ab"), b = make("chat-ba");
-  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: { urls: string }[] = []): CallEngine => ({
+  const engine = (me: Side, other: () => Side, heardAt: () => number, iceServers: IceServers = []): CallEngine => ({
     getState: () => ({ links: [me.link], settings: { iceServers } }) as unknown as EngineState,
     setCallSignal: async ({ signal }) => {
       me.signals.push(signal);
@@ -610,6 +611,65 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await a.calls.stopAll();
       await b.calls.stopAll();
     });
+  });
+
+  // Reported 2026-10-19: libjuice never gives a TURN allocation back (no Refresh with LIFETIME 0 when a connection
+  // closes), so each early answer held one on the server for 10 minutes, declined, missed and cancelled calls too, and
+  // a server with a per-user quota refused the next calls' relay.
+  it("with a TURN server in its settings, a call declined or missed asks it for nothing, and one answered gets its relay as it is answered and connects", async () => {
+    // A TURN server that answers nothing: it counts the Allocate requests sent to it.
+    const turn = createSocket("udp4");
+    let allocates = 0;
+    turn.on("message", (msg) => { if (msg.length >= 20 && msg.readUInt16BE(0) === 0x0003) allocates++; });
+    await new Promise<void>((bound) => turn.bind(0, "127.0.0.1", bound));
+    try {
+      await withEnv({ GHOSTLY_STUN: "0" }, async () => {
+        const counted = countingStack();
+        const iceServersB = [{ urls: `turn:127.0.0.1:${turn.address().port}`, username: "u", credential: "p" }];
+        const { a, b } = pairOfManagers({ b: counted, earlyAnswerMs: 300, callPaceMs: 0, iceServersB });
+
+        // Declined, after ringing past a few early answers' turns.
+        await a.calls.start("chat-ab", {});
+        await until(() => b.events.find((e) => e.type === "call.incoming"));
+        await new Promise((r) => setTimeout(r, 1000));
+        expect(counted.made(), "no connection was made while it rang").toBe(0);
+        await b.calls.hangup(undefined);
+        expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "rejected" });
+
+        // Missed: the caller gives up while it rings.
+        await a.calls.start("chat-ab", {});
+        await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2);
+        await new Promise((r) => setTimeout(r, 1000));
+        await a.calls.hangup(undefined);
+        expect(await until(() => b.events.filter((e) => e.type === "call.ended")[1])).toMatchObject({ reason: "missed" });
+        expect(counted.made()).toBe(0);
+        expect(allocates, "the TURN server was asked nothing").toBe(0);
+
+        // Answered: the answer's connection is made now, with the TURN server, and the call connects.
+        await new Promise((r) => setTimeout(r, 200));
+        await a.calls.start("chat-ab", {});
+        await until(() => b.events.filter((e) => e.type === "call.incoming").length === 3);
+        const logged: string[] = [];
+        const write = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => { logged.push(String(chunk)); return true; });
+        try {
+          await b.calls.answer(undefined, {});
+        } finally {
+          write.mockRestore();
+        }
+        expect(counted.made()).toBe(1);
+        await until(() => allocates > 0);
+        // It never answered: the daemon's log says the call has no relay, and why that can be.
+        expect(logged.join("")).toContain("no relay address: the TURN server refused the allocation or did not answer in time");
+        await until(() => a.calls.list()[0]?.state === "connected" && b.calls.list()[0]?.state === "connected").catch(diagnose(a, b));
+        await a.calls.hangup(undefined);
+        await until(() => b.events.filter((e) => e.type === "call.ended").length === 3);
+        await until(() => counted.open() === 0);
+        await a.calls.stopAll();
+        await b.calls.stopAll();
+      });
+    } finally {
+      turn.close();
+    }
   });
 
   it("calls that ring and hang up over and over, from one chat or many, make one early answer at a time per chat and MAX_EARLY_ANSWERS in all", async () => {
