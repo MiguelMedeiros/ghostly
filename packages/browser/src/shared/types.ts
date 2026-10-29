@@ -212,7 +212,8 @@ export interface StoredGroup {
   /**
    * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
    * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
-   * was to a group I was removed from, which stays.
+   * was to a group I was removed from, which stays; beside a join by the group's link opened after the decline (its
+   * `invitation`, then its `state`), which stays too.
    */
   declined?: { at: number; linkId: string };
   /**
