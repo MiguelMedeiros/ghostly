@@ -236,9 +236,13 @@ export class AppRanges {
 
   constructor(private readonly send: (frame: AppRangeFrame) => void, private readonly newServeId = () => toBase64Url(randomBytes(16)), private readonly now = Date.now) {}
 
-  /** Lets the contact's `app` read `file` on this session: the serve id to tell it. */
+  /**
+   * Lets the contact's `app` read `file` on this session: the serve id to tell it. A file the app serves already answers
+   * the id it has, so an app that serves again on each play holds one serve per file, not one per call.
+   */
   serve(app: string, file: string): string {
     if (!isChatAppId(app)) throw new Error("Not a chat app id");
+    for (const [served, serve] of this.serves) if (serve.app === app && serve.file === file) return served;
     let id = this.newServeId();
     while (this.serves.has(id)) id = this.newServeId();
     this.serves.set(id, { app, file });
