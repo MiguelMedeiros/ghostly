@@ -1964,8 +1964,10 @@ export class GhostlyNode implements EngineImplementation {
       // A finished one shows no transfer (a file with none reads as finished): a view for each would go into every state.
       for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !waiting.has(file.id)) this.transfers.set(file.id,
         file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
-      // files/3 transfers go on where they stopped, once the chat is live again.
-      this.fileDesk.restore(stored.id, storedFiles);
+      // files/3 transfers go on where they stopped, once the chat is live again. One that ended before is settled in its
+      // message, so the chat connecting reads nothing for it; only a sent one whose receipt never came is looked at then.
+      const unreceipted = new Set(messages.flatMap(m => m.sender === "me" && m.file && m.delivery !== "delivered" ? [m.file.id] : []));
+      this.fileDesk.restore(stored.id, storedFiles, unreceipted);
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
