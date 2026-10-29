@@ -25,10 +25,30 @@ pub const REMOVE_FAILED: &str = "The language could not be removed";
 
 /// The runtime's archive for each platform (Node's names: `linux-x64`, `darwin-arm64`, `win32-x64`…): its size and
 /// SHA-256. It is a release asset on a tag of its own, at `RUNTIME_URL` with `{version}` and `{platform}` filled in.
-/// Empty until `translation-runtime-v0.1.0` is published: its entries are added then, from the `.sha256` files
-/// `tools/scripts/prepare-translation-runtime.mjs` writes. A computer with no entry is told translation is not
-/// available on it yet.
-const RUNTIMES: &[(&str, u64, &str)] = &[];
+/// Copied from the `runtimes.txt` the `Translation runtime` workflow published with the release (`<platform> <size>
+/// <sha256>`), for `RUNTIME_VERSION`. A computer with no entry is told translation is not available on it yet.
+const RUNTIMES: &[(&str, u64, &str)] = &[
+    (
+        "linux-x64",
+        52_024_004,
+        "426825af4ba9c72b5480221f53f995b988c107b30b48797c97d3aa588c5fc7af",
+    ),
+    (
+        "darwin-arm64",
+        31_994_699,
+        "6f703dbfe2195069808a7a0bac3dce210a97c5a28d52f1095d95d60434a85e98",
+    ),
+    (
+        "darwin-x64",
+        33_361_513,
+        "8fb07a489e1a03a6ea9f38f652e63ea36352914678a2929d6e9adaf8495d3899",
+    ),
+    (
+        "win32-x64",
+        35_076_907,
+        "0d351d7caf069cb4e0fe4562a66a2abee425f59586e59763ea03f1e4481afdec",
+    ),
+];
 const RUNTIME_URL: &str = "https://github.com/MiguelMedeiros/ghostly/releases/download/translation-runtime-v{version}/ghostly-translation-runtime-{version}-{platform}.tar.gz";
 
 /// One file to download, and what it must be.
@@ -385,11 +405,19 @@ mod tests {
 
     #[test]
     fn a_runtime_comes_from_its_own_release_tag() {
-        for (platform, archive) in ModelsState::default().runtimes {
+        let runtimes = ModelsState::default().runtimes;
+        // Each platform the Desktop release builds (release.yml's build-tauri) has the archive it downloads.
+        let platforms: Vec<&str> = runtimes.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            platforms,
+            ["linux-x64", "darwin-arm64", "darwin-x64", "win32-x64"]
+        );
+        for (platform, archive) in runtimes {
             let name = format!("ghostly-translation-runtime-{RUNTIME_VERSION}-{platform}.tar.gz");
             assert_eq!(archive.name, name);
             assert_eq!(archive.url, format!("https://github.com/MiguelMedeiros/ghostly/releases/download/translation-runtime-v{RUNTIME_VERSION}/{name}"));
             assert_eq!(archive.sha256.len(), 64);
+            assert!(archive.size > 0);
         }
     }
 }
