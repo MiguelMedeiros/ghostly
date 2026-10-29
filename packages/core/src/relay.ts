@@ -683,6 +683,18 @@ export class RelayTransport implements PkarrTransport {
   }
 
   /**
+   * A payload every relay's budget held back while another path took it (the CLI's DHT): the publish is out, and each
+   * relay gets it once its budget frees a request for the same asker (`catchUpLater`), unless a newer packet of the key
+   * goes there first. Retried by the link instead, each try was signed and put on the DHT again (1-1.6 puts a minute per
+   * chat at budget, not one per 4 min). `timestamp`: its date when signed here; read from the payload otherwise.
+   */
+  putLater(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint | undefined, options: PkarrRequestOptions = {}): void {
+    const at = timestamp ?? options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
+    try { this.written.set(pubKeyZ32, readOwnRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
+    for (const relay of this.relays) this.catchUpLater(relay, pubKeyZ32, payload, at, asker(options, true));
+  }
+
+  /**
    * A payload signed in this process (a group edge's offer or answer, `CarriedTransport`) put on every relay, past what
    * a relay that answers 409 holds: that one is read, and the records go again at once, signed by `options.redate` dated
    * just past it, `left` times at most. A packet put here is the key's latest too: a publish dated here next

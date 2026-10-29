@@ -153,7 +153,9 @@ export class RelaysAndDht implements PkarrTransport {
     // Out on the DHT is out (a Pkarr relay reads the DHT for a key it has not got): a relay that takes the request and
     // never answers held each publish for its 10 s timeout, an invite's first among them, while the DHT took it in
     // milliseconds. The relays' copy finishes in the background. A budget's hold is said before any request goes, so
-    // it still wins this race: the caller tries again, and the relays take it when it frees (browser contacts read only them).
+    // it wins this race: once the DHT took the packet, that is out too, and the relays get it when their budget frees
+    // (`putLater`; browser contacts read only them). Said held back, the link signed it and put it on the DHT again in
+    // 0.25-4 s, at budget 1.5-2.2x the DHT puts of a DHT-only daemon.
     let refused: unknown;
     const tookIt = onDht.then(() => true, (error: unknown) => {
       refused = error;
@@ -168,7 +170,11 @@ export class RelaysAndDht implements PkarrTransport {
     try {
       await onRelays;
     } catch (error) {
-      if (isDiscoveryBudgetError(error)) throw error;
+      if (isDiscoveryBudgetError(error)) {
+        if (!(await tookIt)) throw error;
+        this.relays.putLater(pubKeyZ32, payload, timestamp, options);
+        return;
+      }
       // The relays failed: the DHT's answer is the publish's, and its refusal is said with theirs.
       if (!(await tookIt)) throw refused instanceof Error ? new Error(`${error instanceof Error ? error.message : String(error)}; ${refused.message}`, { cause: error }) : error;
     }
