@@ -4,11 +4,12 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
-  readAppRevocations, readAppStore, seedSigner, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
+  readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
+import { nativeEd25519 } from "./nativeEd25519";
 import { userPath } from "./profiles";
 
 /*
@@ -28,6 +29,9 @@ export const APP_BUNDLE_FILE = "app.ghostlyapp";
 export const APP_REVOKE_FILE = "ghostly-revoke.json";
 export const STORE_INDEX_FILE = "ghostly-store.json";
 export const STORE_SIG_FILE = "ghostly-store.sig";
+
+// Every signature the publisher tools check (bundles, revocation lists, store indexes) goes through Node's Ed25519 first.
+setAppSignatureFastPath(nativeEd25519);
 
 /** How long `app verify` waits for a URL, and how many redirects it follows (each checked as the first). */
 const FETCH_TIMEOUT_MS = 60_000;
