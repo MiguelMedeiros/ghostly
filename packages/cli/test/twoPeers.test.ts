@@ -697,7 +697,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     try {
       error(await as(alice, "service", "add", "outside", "http://example.com"), "refused", 1);
       const added = ok(await as(alice, "service", "add", "notes", `http://127.0.0.1:${(app.address() as AddressInfo).port}`));
-      const service = added.serviceId as string;
+      const service = added.service as string;
       ok(await as(alice, "service", "share", service, "bob"));
       const until = Date.now() + 60_000;
       let peer: { services: { id: string }[] } = { services: [] };
