@@ -395,13 +395,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Desktop's frontend as a release builds it: with translation (VITE_TRANSLATE, release.yml's TRANSLATE_FROM), so
+      # the bundle check below also requires what apps/ui/src/desktop/translate.ts asks of Rust. Not the extension's
+      # build, which refuses it, nor the web app's, which ships without it.
       - name: Build
         run: npm run build
+        env:
+          VITE_TRANSLATE: "1"
 
       # Seconds, and it is the one thing no other job would notice: see
       # tools/scripts/check-desktop-bundle.mjs. The real Desktop test is in e2e.yml.
       - name: Desktop build carries its Desktop wiring
         run: npm run check:desktop-bundle
+        env:
+          VITE_TRANSLATE: "1"
 
       - name: Build browser extension
         run: npm run build:extension

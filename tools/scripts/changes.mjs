@@ -53,6 +53,16 @@ export const RELEASE_GUARDS = [
     about: "Android app",
     entry: ({ group, body }) => group === "Android" || /\bAndroid app\b|\bAPK\b/i.test(body ?? ""),
   },
+  // No flag either: the Desktop app's builds carry auto-translation from TRANSLATE_FROM in .github/workflows/release.yml
+  // (the owner's decision, 2026-10-27), which `from` follows. "Translated" alone is the app's own words in a language,
+  // and the CLI's --translate ships with the CLI.
+  {
+    from: "1.7.0",
+    release: "1.7",
+    about: "auto-translation",
+    entry: ({ group, body }) =>
+      group !== "CLI" && /\bauto-?translat|\bTranslate (messages|what I send|button)\b|\bShow original\b|\btranslation (runtime|models?|build flag)\b/i.test(body ?? ""),
+  },
 ];
 
 /** The only front matter keys a fragment has: a misspelled `release` would otherwise leave its entry unheld. */
@@ -95,8 +105,7 @@ export function parseFragment(name, text, version) {
     if (version !== undefined && !versionBefore(version, guard.from)) continue;
     if (!guard.entry({ group, body })) continue;
     if (release === undefined || (releaseOk && versionBefore(release, guard.release))) {
-      const ships = guard.flag ? `it ships with ${guard.flag} from ${guard.from}` : `it is in no release before ${guard.from}`;
-      problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (${ships})`);
+      const ships = guard.flag ? `it ships with ${guard.flag} from ${guard.from}` : `it is in no release before ${guard.from}`;      problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (${ships})`);
     }
   }
   return { heading, group, body, release, problems };
