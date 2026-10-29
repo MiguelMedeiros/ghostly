@@ -6,6 +6,7 @@ import { paymentAlias, paymentWireId } from "../shared/paymentIds";
 import { networkLabel } from "./paymentAdapters/modeGate";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
 import type { BarkWallet } from "./paymentAdapters/barkWallet";
+import type { BarkAdapter, BarkReceipts } from "./paymentAdapters/bark";
 import type { FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import {
   ENDPOINT,
@@ -1419,13 +1420,19 @@ export class PaymentDesk {
     try {
       const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="bark");
       const bark=this.bark;
-      for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)])))await wallet.adapter?.sync().catch(()=>{});
+      // Each wallet's history is read once for all its open requests, after one sync.
+      const receipts=new Map<BarkAdapter,BarkReceipts|undefined>();
+      for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)]))) {
+        if(!wallet.adapter)continue;
+        await wallet.adapter.sync().catch(()=>{});
+        receipts.set(wallet.adapter,await wallet.adapter.receipts().catch(()=>undefined));
+      }
       for(const request of open) {
         if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bark")continue;
         const adapter=this.bark[walletNetworkOf(request.target.network)].adapter;
         if(!adapter || request.target.provider!==adapter.config.provider || request.target.network!==adapter.config.network)continue;
         const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bark" && p.kind==="request" && p.txid).map(p=>p.txid!));
-        const txid=await adapter.received(request.target.address,request.amount,request.createdAt,claimed).catch(()=>undefined);
+        const txid=receipts.get(adapter)?.(request.target.address,request.amount,request.createdAt,claimed);
         if(!txid)continue;
         await this.settleRequest(request,{txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});
