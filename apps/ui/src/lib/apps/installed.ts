@@ -64,6 +64,11 @@ export function useInstalledApp(ref: string | undefined): InstalledAppView | und
   return ref === undefined ? undefined : installed?.find((a) => a.ref === ref);
 }
 
+/** The installed apps as last read (null until a screen read them): for a line, not a hook. */
+export function installedApps(): readonly InstalledAppView[] | null {
+  return apps;
+}
+
 /**
  * The app card a person's app sends when they open (or share) an installed app in a 1:1 chat (WISP 405 § An app):
  * made from the app it installed and checked, never filled in by the person. Its `url` is where the installed version
