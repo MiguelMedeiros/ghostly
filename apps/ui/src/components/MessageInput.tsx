@@ -348,8 +348,13 @@ export function MessageInput({
   useEffect(() => { if (!text.trim() || editKey) closeTranslation(); }, [text, editKey, closeTranslation]);
   // The chat's translation turned off, or its language changed, while a preview was open: that preview is closed, so
   // Enter sends the draft again rather than wait on a translation nothing can make (ghostly-agents#1812).
-  const translationTarget = translation ? translation.language ?? `[${translation.languages?.join(",") ?? ""}]` : null;
-  useEffect(() => { closeTranslation(); }, [translationTarget, closeTranslation]);
+  // A group's list is ordered by use and recomputed as messages arrive, so it is compared as a set, and an open preview
+  // stays while the language it shows is still offered: a reorder or a new language must not drop a picked translation.
+  const offered = translation ? (translation.language ? [translation.language] : [...(translation.languages ?? [])].sort()).join(",") : null;
+  const shownTo = drafting.state && drafting.state.step !== "choose" ? drafting.state.to : null;
+  useEffect(() => {
+    if (offered === null || (shownTo !== null && !offered.split(",").includes(shownTo))) closeTranslation();
+  }, [offered, shownTo, closeTranslation]);
 
   /**
    * What could not go comes back to the field, before what is typed there now: the failed words, then those that waited

@@ -105,4 +105,20 @@ describe("a preview left open when the chat's translation goes away (ghostly-age
     rerender(<MessageInput onSend={onSend} translation={{ language: "fr" }} />);
     await waitFor(() => expect(screen.queryByTestId("translate-preview")).not.toBeInTheDocument());
   });
+
+  it("stays open, with the language picked, when a group's languages reorder or grow", async () => {
+    const onSend = vi.fn(async () => null);
+    const translation = (languages: string[]) => ({ language: null, languages });
+    const { user, rerender } = renderApp(<MessageInput onSend={onSend} translation={translation(["it", "fr"])} />);
+    await user.type(screen.getByRole("textbox"), "see you tomorrow");
+    await user.click(screen.getByTestId("composer-translate"));
+    await user.click(screen.getAllByTestId("translate-choose").find((choice) => choice.dataset.language === "it")!);
+    expect(await screen.findByTestId("translate-text")).toHaveValue("SEE YOU TOMORROW [en-it]");
+    rerender(<MessageInput onSend={onSend} translation={translation(["fr", "it"])} />);
+    rerender(<MessageInput onSend={onSend} translation={translation(["fr", "it", "es"])} />);
+    await act(async () => {});
+    expect(screen.getByTestId("translate-text")).toHaveValue("SEE YOU TOMORROW [en-it]");
+    rerender(<MessageInput onSend={onSend} translation={translation(["fr", "es"])} />);
+    await waitFor(() => expect(screen.queryByTestId("translate-preview")).not.toBeInTheDocument());
+  });
 });

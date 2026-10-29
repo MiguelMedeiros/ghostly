@@ -138,7 +138,7 @@ describe("a build or client without translation", () => {
     setChatTranslate("s1", "on");
     settings(true);
     vi.stubEnv("VITE_TRANSLATE", "");
-    const read = vi.spyOn(Storage.prototype, "getItem");
+    const read = vi.spyOn(localStorage, "getItem");
     renderApp(<Composer chat="s1" />);
     expect(offered()).toBeNull();
     expect(read.mock.calls.map(([key]) => key).filter((key) => /translate_/.test(key))).toEqual([]);
