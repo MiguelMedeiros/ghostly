@@ -368,6 +368,11 @@ const WALLETS: Record<string, Method> = {
   /** Which ways of paying this chat takes, per network (the chat's Accept switches). */
   async "chat.accept"(ctx, params) {
     const link = chatOf(ctx, params);
+    // No method: what it takes now, with nothing changed.
+    if (params.method === undefined) {
+      if (params.on !== undefined || params.networks !== undefined) throw new CliError("bad_request", "on and networks change one method: name it");
+      return { chat: link.id, methods: link.paymentMethods ?? null, networks: link.paymentNetworks ?? null };
+    }
     const method = oneOf(params, "method", CHAT_METHODS, "cashu");
     const on = bool(params, "on");
     const nets = params.networks === undefined ? undefined : (() => {

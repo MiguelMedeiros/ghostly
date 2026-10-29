@@ -205,6 +205,13 @@ describe("the argument parser", () => {
     expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
     expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
     expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat accept"], ["bob"])).toEqual({ chat: "bob" });
+    const accept = (...argv: string[]) => { const c = COMMANDS["chat accept"], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    // With no method it asks what the chat takes; --off or --networks there would change nothing without a word.
+    expect(accept("bob")).toEqual({ chat: "bob" });
+    expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
+    expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
+    expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
