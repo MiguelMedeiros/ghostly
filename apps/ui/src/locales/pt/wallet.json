@@ -59,6 +59,7 @@
     },
     "label": "backup pendente",
     "later": "Depois",
+    "line": "Faça backup da carteira {{wallet}}",
     "title": "Você tem dinheiro real em {{wallet}}"
   },
   "bark": {
@@ -765,6 +766,8 @@
     "send": "Enviar"
   },
   "unseen": {
+    "lineReal": "{{amount}} sats novos em {{wallet}}",
+    "lineTest": "{{amount}} sats de teste novos em {{wallet}}",
     "real": "{{place}}, {{amount}} sats novos",
     "test": "{{place}}, {{amount}} sats de teste novos"
   },
