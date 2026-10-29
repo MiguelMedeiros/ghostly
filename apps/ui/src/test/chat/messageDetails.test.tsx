@@ -99,6 +99,23 @@ describe("opening and closing", () => {
     await user.click(screen.getByTestId("message-details-backdrop"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
     expect(container.querySelector("[data-message-row]")).not.toHaveAttribute("data-details-open");
+    // Nothing focusable opened them: the focus goes to the message's ⋮, not to the page.
+    expect(document.activeElement).toBe(screen.getByTestId("message-options"));
+  });
+
+  it.each([["Escape", "{Escape}"], ["✕", null]])("opened from the message's ⋮ with the keys, %s gives the focus back to that ⋮", async (_, key) => {
+    fakeEngine.on("messageDetails", () => textView());
+    const { user } = bubble();
+    const options = screen.getByTestId("message-options");
+    act(() => options.focus());
+    await user.keyboard("{Enter}");
+    await user.click(within(screen.getByTestId("message-menu")).getByTestId("message-details"));
+    const panel = await screen.findByRole("dialog");
+    expect(panel.contains(document.activeElement)).toBe(true);
+    if (key) await user.keyboard(key);
+    else await user.click(screen.getByTestId("message-details-close"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(options);
   });
 
   it("a Ctrl+double click on a file's buttons is theirs: Accept, Pause and Cancel open no details; on the file's name it does", async () => {
