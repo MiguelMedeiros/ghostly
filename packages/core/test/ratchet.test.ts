@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+// covers: chat.ratchet
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeed } from "../src/identity";
 import { fromBase64Url, utf8Decode, utf8Encode } from "../src/bytes";
