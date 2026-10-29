@@ -83,9 +83,11 @@ export function forgetChatLanguage(chat: string): void {
 }
 
 /** A chat's language, kept current: redrawn when it is set here or in another page of the app. */
-export function useChatLanguage(chat: string, detected: readonly (string | null | undefined)[], group: boolean): ChatLanguage {
+export function useChatLanguage(chat: string, detected: readonly (string | null | undefined)[], group: boolean, enabled = true): ChatLanguage {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
+    // Disabled (a build or client without translation): nothing is watched, and nothing is read below.
+    if (!enabled) return;
     const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}${KEY}`)) redraw(); };
     window.addEventListener(CHAT_LANGUAGE_EVENT, redraw);
     window.addEventListener("storage", stored);
@@ -93,8 +95,8 @@ export function useChatLanguage(chat: string, detected: readonly (string | null 
       window.removeEventListener(CHAT_LANGUAGE_EVENT, redraw);
       window.removeEventListener("storage", stored);
     };
-  }, []);
-  return chatLanguageOf(detected, { group, setByHand: languageSetByHand(chat) });
+  }, [enabled]);
+  return chatLanguageOf(detected, { group, setByHand: enabled ? languageSetByHand(chat) : null });
 }
 
 /** What a chat's language can be set to: the languages its messages were in, then the app's own, each once. */

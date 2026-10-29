@@ -346,6 +346,10 @@ export function MessageInput({
   const closeTranslation = drafting.close;
   // The draft emptied (by hand, or given to an edit): nothing left to translate.
   useEffect(() => { if (!text.trim() || editKey) closeTranslation(); }, [text, editKey, closeTranslation]);
+  // The chat's translation turned off, or its language changed, while a preview was open: that preview is closed, so
+  // Enter sends the draft again rather than wait on a translation nothing can make (ghostly-agents#1812).
+  const translationTarget = translation ? translation.language ?? `[${translation.languages?.join(",") ?? ""}]` : null;
+  useEffect(() => { closeTranslation(); }, [translationTarget, closeTranslation]);
 
   /**
    * What could not go comes back to the field, before what is typed there now: the failed words, then those that waited

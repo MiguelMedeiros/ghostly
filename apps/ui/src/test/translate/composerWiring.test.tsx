@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /*
@@ -9,7 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /** The languages the detector was sure of, per chat, oldest first (what translateReceived.ts records). */
 const seen = vi.hoisted(() => new Map<string, string[]>());
-vi.mock("../../lib/translateReceived", () => ({ useChatDetections: (chat: string) => seen.get(chat) ?? [] }));
+vi.mock("../../lib/translateReceived", () => {
+  const none: string[] = [];
+  return { chatDetections: (chat: string) => seen.get(chat) ?? none, watchTranslations: () => () => {} };
+});
+/** The draft detector: one that is sure every draft is Spanish. */
+vi.mock("../../lib/translateDetector", () => ({ loadDetector: async () => () => [{ code: "es", probability: 0.99 }] }));
 
 import { useComposerTranslation } from "../../hooks/useComposerTranslation";
 import { setChatLanguage } from "../../lib/chatLanguage";
@@ -21,7 +26,10 @@ const settings = (translateMessages: boolean) =>
   localStorage.setItem("ghostly_app_settings", JSON.stringify({ language: "en", translateMessages }));
 
 function Composer({ chat }: { chat: string }) {
-  return <output data-testid="composer-translation">{JSON.stringify(useComposerTranslation(chat) ?? null)}</output>;
+  const translation = useComposerTranslation(chat);
+  return <output data-testid="composer-translation" data-detect={translation?.detect ? translation.detect("hola")[0]?.code : ""}>
+    {JSON.stringify(translation ?? null)}
+  </output>;
 }
 const offered = () => JSON.parse(screen.getByTestId("composer-translation").textContent!);
 
@@ -112,5 +120,28 @@ describe("the composer translates into the chat's language", () => {
     settings(true);
     renderApp(<Composer chat="s1" />);
     expect(offered()).toBeNull();
+  });
+});
+
+describe("the composer's translation reads the draft's language", () => {
+  it("with the same detector as received messages, once it has loaded", async () => {
+    setChatLanguage("s1", "it");
+    settings(true);
+    renderApp(<Composer chat="s1" />);
+    await waitFor(() => expect(screen.getByTestId("composer-translation")).toHaveAttribute("data-detect", "es"));
+  });
+});
+
+describe("a build or client without translation", () => {
+  it("reads none of a chat's translation keys", () => {
+    setChatLanguage("s1", "it");
+    setChatTranslate("s1", "on");
+    settings(true);
+    vi.stubEnv("VITE_TRANSLATE", "");
+    const read = vi.spyOn(Storage.prototype, "getItem");
+    renderApp(<Composer chat="s1" />);
+    expect(offered()).toBeNull();
+    expect(read.mock.calls.map(([key]) => key).filter((key) => /translate_/.test(key))).toEqual([]);
+    read.mockRestore();
   });
 });
