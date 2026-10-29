@@ -4,6 +4,44 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.7.0
+
+The Desktop app translates your chats on your own computer: messages you receive into your language, and what you send into your contact's, with nothing sent anywhere to do it. Plus iPhone videos that play everywhere, Android file transfers that keep going in the background, and `--translate` for the CLI.
+
+### For users
+
+**Chat**
+
+- On Desktop, a chat that translates and has a language of its own shows a Translate button beside Send. It translates your draft on this computer and shows it above the field, editable, before anything goes: Send translation (Enter), Send original or Cancel. Code, links, mentions, Cashu tokens and invoices stay as you typed them. In a group whose members write in several languages, it asks which one first.
+- The Desktop app (Linux, macOS, Windows) can translate the messages you receive into the app's language. Turn it on in Settings > Translate messages; it is off until you do, on each computer. Each chat and group can then be set to On, Off or As in Settings in its Translation menu, and given its language. A translated message says "Translated from Spanish" under it, and Show original brings back what was written. The languages download only when you say yes, and every file is checked before it is used. Translating happens on this computer: your messages are never sent anywhere for it, and your contacts are not told.
+- On Desktop, a message you sent translated says "Translated to Italian · Show original" under it, on the computer you sent it from. Show original swaps in what you typed, and a long press offers Copy original. What you typed stays on that computer: it is never sent, synced or put in a backup, and it goes with the message or the chat.
+- On Desktop, a chat can be set to **Translate what I send**, on this device only: Send then translates your message into the chat's language and sends it at once. When the chat's language or your message's is not certain, you see the translation first.
+- A video the other side may not be able to play is sent as an MP4 that plays everywhere. An iPhone video in H.264 is repackaged in a moment; an HEVC one is converted on devices that can do it, with its progress and a Cancel button above the message field. Where this device cannot convert it, the video is sent as it is and the app says so.
+- An iPhone `.mov` video you receive now plays in place on Android and other Chromium browsers when they can play it, instead of only offering a download.
+
+### Fixed
+
+**Android**
+
+- In the Android app, a file being sent or received stopped once the app went to the background or the screen turned off, and only went on when the app came back. It now keeps going, with a quiet "Sending and receiving files" notification until the last file is through.
+
+**Chat**
+
+- A chat opened right after bringing the app back from the background goes live in seconds again, instead of up to 20 seconds when the app had answered the contact while it was away.
+
+**Wallets**
+
+- The dot on Wallets no longer shows your whole balance as new sats each time the app starts.
+- A dot on Wallets, or on Settings on a phone, now leads to what it is about: the page says it in one line at the top
+  with Show to go there, and the network tab, the wallet card or the Switch profile row wears the same dot. New sats
+  stay marked until you have seen their network on the Wallets page; a backup to make stays until it is made.
+
+### For developers
+
+**CLI**
+
+- `ghostly listen`, `events` and `chat history` take `--translate <lang>`: a message a contact or a group member sent in another language carries `translation: {from, text}`, made on your machine by the same translation runtime and models the Desktop app downloads. Your own messages, files and text the language detector is not sure of stay as they are. Without the runtime, the command says so once and prints what it prints today.
+
 ## 1.6.1
 
 ### Fixed
