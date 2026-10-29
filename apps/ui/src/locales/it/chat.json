@@ -358,6 +358,10 @@
     "placeholder": "Cerca in questa chat"
   },
   "send": "Invia",
+  "sentTranslation": {
+    "copyOriginal": "Copia originale",
+    "line": "Tradotto in {{language}}"
+  },
   "services": {
     "add": "+ Aggiungi un'app",
     "canOpen": "App che puoi aprire:",
@@ -416,6 +420,12 @@
     "sync": "Sincronizzazione"
   },
   "today": "Oggi",
+  "translated": {
+    "from": "Tradotto, originale in {{language}}",
+    "showOriginal": "Mostra originale",
+    "showTranslation": "Mostra traduzione",
+    "translate": "Traduci"
+  },
   "typeMessage": "Scrivi un messaggio...",
   "typing": "sta scrivendo…",
   "typingRecording": "sta registrando un audio…",

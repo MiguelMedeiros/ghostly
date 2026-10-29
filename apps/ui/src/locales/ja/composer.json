@@ -76,6 +76,26 @@
   "tooLong": "長すぎて送信できません（{{count}} 文字、上限は {{max}}）。",
   "tooLongBytes": "長すぎて送信できません（{{bytes}} バイト、上限は {{max}}）。短くするか、ファイルとして送信してください。",
   "tooLongDht": "DHT には長すぎます。直接つながれば送れます。",
+  "translate": {
+    "again": "もう一度翻訳",
+    "button": "翻訳",
+    "cancel": "キャンセル",
+    "choose": "どの言語に翻訳しますか？",
+    "failed": "このメッセージを翻訳できませんでした。入力したまま送信するか、もう一度お試しください。",
+    "into": "{{language}}に翻訳",
+    "noModel": "{{from}}から{{to}}へのモデルがダウンロードされていないため、このメッセージは翻訳されませんでした。",
+    "notInstalled": "このコンピューターには翻訳がインストールされていません。",
+    "ready": "{{language}}への翻訳ができました",
+    "region": "{{language}}への翻訳",
+    "same": "すでに{{language}}です",
+    "sendOriginal": "原文を送信",
+    "sendSetting": "送信するメッセージを翻訳",
+    "sendSettingHint": "プレビューなしですぐに送信",
+    "sendTranslated": "{{language}}に翻訳して送信",
+    "sendTranslation": "翻訳を送信",
+    "stale": "メッセージが変更されました",
+    "working": "翻訳中…"
+  },
   "videoConverting": "{{name}} を MP4 に変換しています… {{percent}}",
   "videoSentAsIs": "{{name}} をそのまま送りました。このデバイスでは変換できません。一部のスマートフォンやパソコンではダウンロードしかできない場合があります。"
 }

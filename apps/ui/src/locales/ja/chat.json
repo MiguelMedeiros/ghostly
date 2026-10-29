@@ -358,6 +358,10 @@
     "placeholder": "このチャットを検索"
   },
   "send": "送信",
+  "sentTranslation": {
+    "copyOriginal": "原文をコピー",
+    "line": "{{language}}に翻訳済み"
+  },
   "services": {
     "add": "+ アプリを追加",
     "canOpen": "開けるアプリ:",
@@ -416,6 +420,12 @@
     "sync": "同期"
   },
   "today": "今日",
+  "translated": {
+    "from": "{{language}}から翻訳",
+    "showOriginal": "原文を表示",
+    "showTranslation": "翻訳を表示",
+    "translate": "翻訳する"
+  },
   "typeMessage": "メッセージを入力...",
   "typing": "入力中…",
   "typingRecording": "録音中…",

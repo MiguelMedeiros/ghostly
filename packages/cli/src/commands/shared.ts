@@ -36,7 +36,9 @@ export const groupWait: Record<string, OptionSpec> = {
   wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until an edge took it (default none)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
-export const net: OptionSpec = { type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
+/** `listen`, `events` and `chat history`: received messages with `translation: { from, text }` (translate.ts). */
+export const translate: OptionSpec = { type: "string", description: "Add a translation into this language (en, pt...) to received messages, made on this machine by the translation runtime" };
+export const net: OptionSpec ={ type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
 export const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };

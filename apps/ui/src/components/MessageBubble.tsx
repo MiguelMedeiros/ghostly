@@ -46,6 +46,9 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
+import { originalMentions, setShowsOriginal, showsOriginal, useSentOriginal, type SentOriginal } from "../lib/sentOriginals";
+import { languageName } from "../lib/documentLanguage";
+import { translateEnabled } from "../lib/translateFlag";
 import { pictureLinkRead, pictureLinkUrl, type PictureRead } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
@@ -53,6 +56,7 @@ import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { useInstalledApp } from "../lib/apps/installed";
 import { SavedIcon } from "./saved/SavedIcon";
+import { useTranslation, type ShownTranslation } from "../hooks/useTranslation";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -283,6 +287,53 @@ function EditedMark({ edit, group }: { edit: NonNullable<ChatMessage["edit"]>; g
       title={edit.pending ? t(group ? "chat.message.editPendingGroup" : "chat.message.editPending") : t("chat.message.editedAt", { time })}>
       {t("chat.message.edited")}
     </span>
+  );
+}
+
+/**
+ * "Translated from Portuguese · Show original" under a received text shown in the app's language, quiet as `EditedMark`;
+ * Show original swaps the text in place, and Show translation back. A message too long to be translated by itself
+ * has Translate instead.
+ */
+function TranslatedMark({ translation }: { translation: ShownTranslation }) {
+  const { t, dir } = useI18n();
+  const quiet = "text-[11px] leading-[16px] text-text-primary/65";
+  if (translation.long) {
+    return (
+      <div dir={dir} className={`mt-[2px] ${quiet}`}>
+        <button type="button" data-testid="message-translate" onClick={translation.translate} className="cursor-pointer hover:underline">
+          {t("chat.translated.translate")}
+        </button>
+      </div>
+    );
+  }
+  if (translation.text === undefined) return null;
+  return (
+    <div dir={dir} data-testid="message-translated" data-original={translation.original || undefined} className={`mt-[2px] italic ${quiet}`}>
+      <span>{t("chat.translated.from", { language: translation.language })}</span>
+      <span aria-hidden="true"> · </span>
+      <button type="button" data-testid="message-translated-toggle" onClick={translation.toggle} className="italic cursor-pointer hover:underline">
+        {t(translation.original ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Under a message I sent translated from this device (lib/sentOriginals.ts): "Translated to Italian · Show original",
+ * quiet like "edited". A screen reader reads the text, then the line; Show original is a button, and swaps the text in
+ * place (Show translation brings it back).
+ */
+function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; showing: boolean; onToggle: () => void }) {
+  const { t, language, dir } = useI18n();
+  return (
+    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] text-[11px] leading-[16px] text-text-primary/65 italic">
+      <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
+      <span aria-hidden="true"> · </span>
+      <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
+        {t(showing ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
+      </button>
+    </div>
   );
 }
 
@@ -857,6 +908,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
   const inGroup = !!linkId?.startsWith("group:");
+  // Mine, sent translated from this device: the original kept beside it. An edit changed the sent text, so the
+  // original no longer goes with it.
+  const sent = useSentOriginal(chat, message.id, translateEnabled() && isMe && !message.edit && !message.file && !message.paymentId);
+  const [showingOriginal, setShowingOriginal] = useState(() => !!chat && showsOriginal(chat, message.id));
+  const toggleOriginal = () => { const next = !showingOriginal; setShowingOriginal(next); if (chat) setShowsOriginal(chat, message.id, next); };
+  // The original in place of the sent text, with its own mention places: the message's are the translation's.
+  const original = sent && showingOriginal ? sent.original.trim() : undefined;
+  const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
   const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
@@ -919,6 +978,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     });
     return () => { shown = false; };
   }, [readHere]);
+  // A contact's or member's plain text, read in the app's language where the chat translates (docs/AUTO-TRANSLATE.md
+  // § UI): asked for once the bubble is near the screen. Never a picture, a card, money, a file or emoji alone.
+  const plainText = !isMe && !isSystem && contentType === "text" && !pressed && !money && !message.file && !message.paymentId && !showsCard(message.card) && !appCard && !isOnlyEmojis(message.text);
+  const translation = useTranslation(message, bubbleRef, plainText);
+  const translatedText = translation && !translation.original ? translation.text : undefined;
   // Read before (the chat opened again, the row drawn again): in the first frame, so nothing above a remembered place
   // grows after the view went back there.
   const linkPicture = readHere === null ? undefined : pictureRead?.link === readHere ? pictureRead.read : pictureLinkRead(readHere);
@@ -1250,12 +1314,15 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // What was written reads in its own direction (an English message in the Arabic app left to right, an Arabic
           // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
           <div className="clearfix" dir="auto" data-testid="message-body">
-            <RichText testId="message-text" text={message.text} sentAt={shownAt} mentions={message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            {/* A translation's words are its own: the original's mentions do not fall on them. */}
+            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            {translation && <TranslatedMark translation={translation} />}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
               <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
               <MessageLinkCards text={message.text} preview={message.preview} />
             </div>
+            {sent && <SentTranslationLine sent={sent} showing={showingOriginal} onToggle={toggleOriginal} />}
             {timestampEl}
           </div>
         )}
@@ -1269,7 +1336,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
         align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
-        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined} />}
+        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined}
+        onCopyOriginal={bar === "press" && copyable && sent ? () => void copyText(sent.original.trim()).catch(() => {}) : undefined} />}
       {detailsPanel}
     </div>
   );
