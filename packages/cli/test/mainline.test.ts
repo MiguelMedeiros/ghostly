@@ -191,6 +191,40 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     await expect(a.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
   }, 60_000);
 
+  // A publish the relays' budget held back went to the DHT, and was said held back all the same: the link published
+  // again in 0.25-4 s, a new signature and a new DHT put each time (1-1.6 puts a minute per chat at budget, not one per 4 min).
+  it("a publish the relays' budget holds back is out once the DHT takes it, and the relays get the newest when it frees", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = { down: false, packets: new Map<string, Uint8Array>() };
+      let relayPuts = 0;
+      const answer = relays(store);
+      const counted = ((input: RequestInfo | URL, init?: RequestInit) => { if (init?.method === "PUT") relayPuts++; return answer(input, init); }) as typeof fetch;
+      let dhtPuts = 0;
+      // A BEP44 put is a lookup then a put: ~100 ms on a loopback testnet, more on the public DHT.
+      const dht = { put: async () => { dhtPuts++; await new Promise((r) => setTimeout(r, 100)); return 8; }, get: async () => null } as unknown as Mainline;
+      const a = new RelaysAndDht(dht, { relays: RELAYS.slice(0, 1), fetch: counted, requestsPerMinute: 5, log: () => {} });
+      // The relay's minute spent on reads of other keys, as 20+ chats' polls spend it.
+      for (let i = 0; i < 10; i++) await a.resolve(createIdentity().pubKeyZ32).catch(() => {});
+      const me = createIdentity();
+      const outcomes: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const outcome = a.publish(me, [{ label: "_x", value: `v${i}` }]).then(() => "out", (e: unknown) => String(e));
+        await vi.advanceTimersByTimeAsync(200);
+        outcomes.push(await outcome);
+      }
+      expect(outcomes).toEqual(Array(5).fill("out"));
+      expect(dhtPuts).toBe(5);
+      expect(relayPuts, "held back on the relay").toBe(0);
+      // Browser contacts read only the relays: the newest packet goes there once the budget frees, once.
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(relayPuts).toBe(1);
+      expect((await a.relays.resolve(me.pubKeyZ32))?.records[0].value).toBe("v4");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("polls of a key nobody published, answered 404 slowly, do not each look it up on the DHT", async () => {
     const answer = relays({ down: false, packets: new Map() });
     const slow404 = (async (input: RequestInfo | URL, init?: RequestInit) => {
