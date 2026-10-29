@@ -211,7 +211,9 @@ export const SERVICE_METHODS: Record<string, Method> = {
     let url: URL;
     try { url = new URL(target); } catch { throw new CliError("bad_request", `Not a URL: ${target}`); }
     if (!(LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname))) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
-    return node(ctx).addService({ name: str(params, "name", true), target });
+    // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
+    const { serviceId } = node(ctx).addService({ name: str(params, "name", true), target });
+    return { service: serviceId, serviceId };
   },
   async "service.remove"(ctx, params) {
     const serviceId = serviceOf(ctx, params);
