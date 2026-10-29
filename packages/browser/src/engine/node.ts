@@ -2527,6 +2527,7 @@ export class GhostlyNode implements EngineImplementation {
 
   getState(): EngineState {
     const groups = this.groups.views();
+    const edges = this.edgesByMember();
     return {
       settings: this.settings,
       ...(this.limitedMode && { limited: true as const }),
@@ -2560,7 +2561,7 @@ export class GhostlyNode implements EngineImplementation {
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
       groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
-        const edge = member.me ? undefined : this.edgeView(group.id, member.key);
+        const edge = member.me ? undefined : this.edgeView(group.id, member.key, edges);
         return edge ? { ...member, edge } : member;
       }) })),
     };
@@ -2599,11 +2600,26 @@ export class GhostlyNode implements EngineImplementation {
     await this.communityPay.hello(groupId, member).catch(() => {});
   }
 
+  /**
+   * The groups' edges by group, then member: one pass over the links per state, not one per member of every group
+   * (communities' members, who have no edge, included).
+   */
+  private edgesByMember(): Map<string, Map<string, LiveLink>> {
+    const edges = new Map<string, Map<string, LiveLink>>();
+    for (const live of this.links.values()) {
+      const { group, groupPeer, groupEntry } = live.stored;
+      if (!group || !groupPeer || groupEntry) continue;
+      const members = edges.get(group) ?? new Map<string, LiveLink>();
+      if (!members.has(groupPeer)) members.set(groupPeer, live);
+      edges.set(group, members);
+    }
+    return edges;
+  }
+
   /** The edge of a group toward one member, as the group page shows it: what carries it and when the member was last heard. */
-  private edgeView(groupId: string, member: string): GroupEdgeView | undefined {
-    for (const live of this.links.values()) if (live.stored.group === groupId && live.stored.groupPeer === member && !live.stored.groupEntry)
-      return edgeView(live, Date.now(), this.groupNativeWaiting.has(live.stored.id));
-    return undefined;
+  private edgeView(groupId: string, member: string, edges = this.edgesByMember()): GroupEdgeView | undefined {
+    const live = edges.get(groupId)?.get(member);
+    return live && edgeView(live, Date.now(), this.groupNativeWaiting.has(live.stored.id));
   }
 
   /** A chat's or a group's history, as a page gets it (`withoutFrame`). */
