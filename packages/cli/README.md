@@ -509,7 +509,8 @@ gives no relay (a per-user quota reached, wrong credentials) logs `no relay addr
 
 The engine picks as the app does: WebRTC (libdatachannel), HyperDHT (native, in process), Iroh (the wasm build,
 relay only, as in the web app), and the DHT floor through the Pkarr relays in the settings and the Mainline DHT
-directly (every packet to both; reads from the DHT when every relay fails). Tests and private networks:
+directly (every packet to both; reads from the DHT when every relay fails, so `settings set readRelays`, the
+app's "Also use Pkarr relays", is refused). Tests and private networks:
 `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces its bootstrap routers,
 `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`

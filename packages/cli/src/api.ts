@@ -69,7 +69,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 
 /** Settings a command may change; the rest are the app's to manage. */
 export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
-  relays: "strings", irohRelays: "strings", hyperdhtRelay: "string", readRelays: "boolean",
+  relays: "strings", irohRelays: "strings", hyperdhtRelay: "string",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
   autoDownloads: "boolean", serveFiles: "boolean",
 };
@@ -212,6 +212,9 @@ const METHODS: Record<string, Method> = {
     for (const [key, value] of Object.entries(params)) {
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
+      // The app's "Also use Pkarr relays": the CLI reads the relays first whatever it says (README § Network), and a
+      // false taken with exit 0 changed nothing (bug hunt, 2026-10-19).
+      if (key === "readRelays") throw new CliError("bad_request", "readRelays is not a setting the CLI follows: it reads the Pkarr relays first, so a contact on the web app (relays only) is found, and the Mainline DHT when every relay fails");
       if (!kind) throw new CliError("bad_request", `${key} is not a setting the CLI changes (${Object.keys(SETTABLE).join(", ")})`);
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
