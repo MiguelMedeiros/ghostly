@@ -497,7 +497,10 @@ same setting chats use). A relay connects the calls no direct path can: a VPN th
 tunnel, a NAT that maps each destination apart. The media stays encrypted end to end; the relay sees both
 addresses and when and how much is sent. The CLI (libdatachannel) reaches TURN over UDP only: a `turns:` or
 `?transport=tcp` address stays in the setting for the apps, which use it, and `settings set` warns that the CLI does
-not. Behind a network that blocks UDP, the CLI has no relay.
+not. Behind a network that blocks UDP, the CLI has no relay. libdatachannel never gives a relay back when a call
+ends: the server holds it until its 10-minute lifetime runs out, so with a TURN server the CLI makes an incoming
+call's connection only when it is answered, and a call declined or missed costs the server nothing. A call the server
+gives no relay (a per-user quota reached, wrong credentials) logs `no relay address` in the daemon's log.
 
 ## Transports
 
