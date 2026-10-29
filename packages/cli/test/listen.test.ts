@@ -313,7 +313,7 @@ describe("the allowlist", () => {
 
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
-      if (method === "chat.get" && params.chat === "bob") return { id: "c1", peer: KEY };
+      if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
       if (method === "group.get" && params.group === "team") return { id: "g1" };
       throw new CliError("not_found", `No ${method} ${String(params.chat ?? params.group)}`);
     });
