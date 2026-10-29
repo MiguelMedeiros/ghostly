@@ -149,6 +149,19 @@ describe("the task commands", () => {
     expect(params("task send", send("--json", `{"step":"${"x".repeat(210)}","status":"weird"}`)).card).toMatchObject({ status: "weird" });
   });
 
+  it("refuse a card past 8 KiB in all as a usage error with its size, though each flag is within its own bound", () => {
+    // Before, 20 items of 200 CJK characters (3 bytes each) passed every flag and failed as bad_request (exit 1),
+    // "Status card: The card takes 12529 bytes; at most 8192", the whole card in its details.
+    const items = (n: number, text: string) => Array.from({ length: n }, () => ["--item", `done:${text}`]).flat();
+    const big = /^The card takes \d+ bytes, and holds at most 8192 in all \(a character past Latin takes 2 to 4\): give shorter or fewer --item, --step, --link or --json$/;
+    expect(() => params("task send", ["g1", "--title", "t", ...items(20, "日".repeat(200))])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(big), details: undefined }));
+    expect(() => params("task update", ["g1", "t", ...items(20, "日".repeat(200))])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(big) }));
+    expect(() => params("routine send", ["g1", "--name", "n", "--schedule", "s", "--json", JSON.stringify({ x: "日".repeat(3000) })])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/bytes, and holds at most 8192 in all .*--name, --schedule, --link or --json$/) }));
+    expect(() => params("usage send", ["g1", "--left", "5", "--json", JSON.stringify({ x: "日".repeat(3000) })])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/give shorter or fewer --json$/) }));
+    expect((params("task send", ["g1", "--title", "t", ...items(20, "x".repeat(200))]).card as { items: unknown[] }).items).toHaveLength(20);
+    expect((params("task send", ["g1", "--title", "t", ...items(11, "日".repeat(200))]).card as { items: unknown[] }).items).toHaveLength(11);
+  });
+
   it("start the groups' sessions even in a one-shot: the chat they name may be a group", () => {
     expect(chatOnly("task.send", { chat: "Sala" })).toBe(false);
     expect(chatOnly("chat.send", { chat: "Alice" })).toBe(true);
@@ -178,6 +191,9 @@ describe("task send", () => {
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", status: "paused" } })).rejects.toMatchObject({ code: "bad_request", message: /status is one of/ });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", pr: { url: "http://github.com/o/r/pull/1" } } })).rejects.toMatchObject({ code: "bad_request", message: /https/ });
     await expect(callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", items: Array.from({ length: 21 }, () => ({ text: "x" })) } })).rejects.toMatchObject({ code: "bad_request" });
+    // A card too big is said by its size, not echoed back whole.
+    const big = callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "x", step: "日".repeat(3000) } });
+    await expect(big).rejects.toMatchObject({ code: "bad_request", message: /^Status card: The card takes \d+ bytes; at most 8192$/, details: { bytes: expect.any(Number), max: 8192 } });
     expect(node.sendMessage).not.toHaveBeenCalled();
   });
 });
