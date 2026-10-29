@@ -378,8 +378,9 @@ body {
 }
 .nav[data-scrolled="true"] {
   background: rgba(6, 10, 16, 0.78);
-  backdrop-filter: blur(16px) saturate(140%);
+  /* -webkit- first: the build's minifier keeps only the last of the two, and Chromium reads only the standard one. */
   -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
   border-color: rgba(30, 41, 59, 0.7);
 }
 .nav-inner {
