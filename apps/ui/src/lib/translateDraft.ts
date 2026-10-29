@@ -105,20 +105,3 @@ export function draftLanguage(text: string, detect: DetectLanguages, mentions: r
   const code = baseCode(top.code);
   return code === "und" ? null : code;
 }
-
-/**
- * Keeps the original of a translation I sent, beside the message, on this device only (slice 12, `lib/sentOriginals.ts`).
- * TODO slice 12: replace with `keepSentOriginal` from `lib/sentOriginals.ts` once it is on the epic.
- */
-export function keepSentOriginal(_chat: string, _messageId: string, _sent: { to: string; original: string }): void {
-  // Nothing kept yet: the bubble's "Translated to … · Show original" comes with slice 12.
-}
-
-/** A language's name in the app's language ("italiano" for `it` in a Portuguese app); the code where it has none. */
-export function languageName(code: string, appLanguage: string): string {
-  try {
-    return new Intl.DisplayNames([appLanguage], { type: "language" }).of(code) ?? code;
-  } catch {
-    return code;
-  }
-}

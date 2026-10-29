@@ -34,7 +34,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
-import { keepSentOriginal } from "../lib/translateDraft";
+import { keepSentOriginal } from "../lib/sentOriginals";
 import { leftOn, useChatScroll } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";

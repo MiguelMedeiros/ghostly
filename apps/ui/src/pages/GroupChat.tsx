@@ -19,7 +19,7 @@ import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { routineStacks } from "../lib/statusCards";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
-import { keepSentOriginal } from "../lib/translateDraft";
+import { keepSentOriginal } from "../lib/sentOriginals";
 import type { SentTranslation } from "../components/MessageInput";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";

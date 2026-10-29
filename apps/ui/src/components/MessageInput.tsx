@@ -35,7 +35,8 @@ import { problemLine } from "../lib/problemText";
 import { readingTime } from "../lib/readingTime";
 import { TranslatePreview } from "./composer/TranslatePreview";
 import { translationStale, useDraftTranslation, type ComposerTranslation, type DraftTranslationFailure } from "../hooks/useDraftTranslation";
-import { carryMentions, languageName } from "../lib/translateDraft";
+import { languageName } from "../lib/documentLanguage";
+import { carryMentions } from "../lib/translateDraft";
 import { translateEnabled } from "../lib/translateFlag";
 import { isConvertibleVideo, prepareVideo, type PreparedVideo } from "../lib/videoSend";
 

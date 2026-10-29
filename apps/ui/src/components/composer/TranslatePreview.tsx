@@ -1,7 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import type { DraftTranslation } from "../../hooks/useDraftTranslation";
-import { languageName } from "../../lib/translateDraft";
+import { languageName } from "../../lib/documentLanguage";
 import { fitFieldHeight } from "./fieldHeight";
 
 const button = "rounded-full px-3 py-1.5 text-[13px] font-medium cursor-pointer border-0 transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
