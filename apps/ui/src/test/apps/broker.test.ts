@@ -867,8 +867,8 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
       clock.t += 25;
       const asked = next++;
       broker.message({ id: asked, type, args });
-      await vi.waitFor(() => expect(posted.at(-1)?.message.id).toBe(asked), { interval: 1 });
-      return posted.at(-1)!.message;
+      await vi.waitFor(() => expect(posted[posted.length - 1]?.message.id).toBe(asked), { interval: 1 });
+      return posted[posted.length - 1]!.message;
     };
     const ids = new Set<string>();
     for (let i = 0; i < 200; i++) ids.add((await play("files.serve", [id])).value as string);
@@ -889,7 +889,7 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
       await play("files.unserve", [again]);
       cycled.push(again);
     }
-    expect(await host.askRange(LINK, { app, request: 3, serve: cycled.at(-1)!, file: id, offset: 0, length: 1 })).toEqual({ app, request: 3, error: "gone" });
+    expect(await host.askRange(LINK, { app, request: 3, serve: cycled[cycled.length - 1]!, file: id, offset: 0, length: 1 })).toEqual({ app, request: 3, error: "gone" });
     let answered = false;
     void host.askRange(LINK, { app, request: 4, serve: cycled[0]!, file: id, offset: 0, length: 1 }).then(() => { answered = true; });
     await new Promise((resolve) => setTimeout(resolve, 20));

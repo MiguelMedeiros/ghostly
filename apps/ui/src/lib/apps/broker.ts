@@ -508,7 +508,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if ("error" in answer) refuse(answer.error);
         const { serve } = answer as { serve: string };
         const held = serving.get(serve);
-        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size, count: (held?.file === id ? held.count : 0) + 1 }));
+        const count = (held && held.file === id ? held.count : 0) + 1;
+        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size, count }));
         return { value: serve };
       }
       case "files.unserve": {
