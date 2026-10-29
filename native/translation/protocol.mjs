@@ -25,12 +25,12 @@ export function parsePair(pair) {
 }
 
 /**
- * The files one direct model reads, by Mozilla's names: a CJK target (or a CJK source into English) has a vocabulary
- * per side, every other pair one shared vocabulary.
+ * The files one direct model reads, by Mozilla's names: a CJK target has a vocabulary per side, every other pair (a
+ * CJK source into English included) one shared vocabulary.
  */
 export function modelFiles(from, to) {
   const pair = `${from}${to}`
-  const split = CJK.includes(to) || (CJK.includes(from) && to === 'en')
+  const split = CJK.includes(to)
   return {
     model: `model.${pair}.intgemm.alphas.bin`,
     srcVocab: split ? `srcvocab.${pair}.spm` : `vocab.${pair}.spm`,
