@@ -3,6 +3,7 @@ import type { ChatSession } from "./types";
 import type { AppSettings } from "./settings";
 import { activeProfileId, listProfiles, prefixOf, registryKey } from "./profiles";
 import { profileDatabase, profileLock, runningElsewhere } from "./profileData";
+import { clearChatNotification } from "./notifications";
 
 /*
  * Checking other profiles for new messages (WISP 04 § Checking other profiles). The running app asks its peer, now
@@ -39,8 +40,9 @@ export function peekFresh(profile: string): number {
   return Object.values(readStore()[profile]?.chats ?? {}).filter(waiting).length;
 }
 
-/** The profile runs now: its own engine fetches what waits, so what was seen from elsewhere is forgotten. */
+/** The profile runs now: its own engine fetches what waits, so what was seen from elsewhere is forgotten, its notice too. */
 export function clearPeek(profile: string): void {
+  clearChatNotification(`${PROFILE_NOTICE}${profile}`);
   const store = readStore();
   if (!(profile in store)) return;
   delete store[profile];
