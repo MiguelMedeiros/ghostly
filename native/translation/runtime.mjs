@@ -7,6 +7,10 @@ import path from 'bare-path'
 import TranslationNmtcpp from '@qvac/translation-nmtcpp'
 import { createRuntime, lineReader } from './protocol.mjs'
 
+const T0 = Date.now()
+const trace = what => { try { process.stderr.write(`[trace ${Date.now() - T0} ms] ${what}\n`) } catch {} }
+trace(`started argv=${JSON.stringify(Bare.argv)} stdin=${process.stdin?.constructor?.name} stdout=${process.stdout?.constructor?.name}`)
+setInterval(() => trace('alive'), 15000)
 const root = Bare.argv[2]
 if (!root || !path.isAbsolute(root)) {
   process.stderr.write('Usage: bare runtime.mjs <absolute models folder>\n')
@@ -24,13 +28,17 @@ async function open({ from, to, files }) {
     config: { modelType: TranslationNmtcpp.ModelTypes.Bergamot, beamsize: 1, normalize: 1, ...(files.pivotModel ? { pivotConfig: { beamsize: 1 } } : {}) },
     logger: quiet,
   })
+  trace('load start ' + JSON.stringify(files))
   await model.load()
-  return { translate: texts => model.runBatch(texts), close: () => model.destroy() }
+  trace('load done')
+  return { translate: async texts => { trace('runBatch start'); const r = await model.runBatch(texts); trace('runBatch done'); return r }, close: () => model.destroy() }
 }
 
 const exists = file => { try { return fs.statSync(file).isFile() } catch { return false } }
 const runtime = createRuntime({ root, open, exists, join: path.join })
-const write = answer => { process.stdout.write(JSON.stringify(answer) + '\n') }
+const write = answer => { trace('write ' + JSON.stringify(answer).length + ' chars'); process.stdout.write(JSON.stringify(answer) + '\n') }
+process.stdin.on('data', chunk => trace('stdin data ' + chunk.length))
+trace('listening')
 process.stdin.on('data', lineReader(line => { runtime.handle(line).then(write) }, () => { runtime.tooLong().then(write) }))
 // The app closed our input: it is done with us.
 process.stdin.on('end', () => { runtime.close().finally(() => Bare.exit(0)) })
