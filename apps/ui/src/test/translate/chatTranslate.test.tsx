@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { groupChat } from "../../lib/chatMute";
+import { languageSetByHand, setChatLanguage } from "../../lib/chatLanguage";
 import {
   chatTranslateChoice, chatTranslates, setChatTranslate, translatesChat, TRANSLATE_CHOICES,
 } from "../../lib/chatTranslate";
@@ -75,6 +76,14 @@ describe("a chat's translation: On, Off or As in Settings", () => {
     setChatTranslate(groupChat("g"), "off");
     forgetGroupLocal("g");
     expect(chatTranslateChoice(groupChat("g"))).toBe("settings");
+  });
+
+  it("a deleted 1:1 chat takes its hand-set language with it (ghostly-agents#1809)", () => {
+    saveSession(chat("b"));
+    setChatLanguage("b", "it");
+    expect(languageSetByHand("b")).toBe("it");
+    deleteSession("b");
+    expect(languageSetByHand("b")).toBeNull();
   });
 });
 
