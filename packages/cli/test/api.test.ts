@@ -890,8 +890,13 @@ describe("settings", () => {
     expect(JSON.stringify(capabilities)).not.toMatch(/fcm|AUTH|VK|SPACE/);
     await expect(callApi(ctx, "settings.set", { mints: [] })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
-    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
-    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"] });
+    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"] } });
+    // readRelays (the app's "Also use Pkarr relays") is refused with the reason: the CLI reads the relays first anyway.
+    node.updateSettings.mockClear();
+    for (const value of [false, true])
+      await expect(callApi(ctx, "settings.set", { readRelays: value })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("reads the Pkarr relays first") });
+    expect(node.updateSettings).not.toHaveBeenCalled();
     // ICE servers in WebRTC's form (urls a list) are taken; one without urls is a bad_request that says what to write.
     await callApi(ctx, "settings.set", { iceServers: [{ urls: ["stun:stun.example.org:3478", "stun:b.example.org"] }] });
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [{ urls: "stun:stun.example.org:3478, stun:b.example.org" }] } });
