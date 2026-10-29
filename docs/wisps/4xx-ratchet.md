@@ -70,7 +70,7 @@ Associated data: `"ghostly-ratchet/1" || lane byte || P_sender || P_recipient ||
 A receiver works on a copy of its state and keeps the copy only if the item opens and passes its path's own checks:
 
 1. Read the header. A version other than 1, or a lane other than the path's, is refused.
-2. Find the session by `sid`: the current one, the other one ([Sessions](#sessions)), or none (a session the contact started: step 7).
+2. Find the session by `sid`: the current one, one of the others ([Sessions](#sessions)), or none (a session the contact started: step 7).
 3. A hold item: if a key was kept for (`sid`, ratchet key, `n`), open with it and drop the key.
 4. If the ratchet key differs from the contact's one the session knows: check the bounds first (`n` and the hold keys to keep up to `pnHold`, [Bounds](#bounds)), then X25519 with this side's ratchet secret (or `x(P_self)` before its first step); a key that gives no secret (a low-order point) refuses the item. Keep the keys left of the contact's previous hold chain up to `pnHold`, step to read, pick a new secret, and step to send. The previous floor chain is dropped whole.
 5. On the lane's chain, an `n` below the next expected, or past the bound, is refused (on the floor it was read or replaced; a held one was kept in step 3). Step forward to `n`; a hold lane keeps each key stepped over, a floor lane does not.
@@ -85,19 +85,20 @@ A receiver works on a copy of its state and keeps the copy only if the item open
 | Held items a reader steps over at once | 512 | At most 64 items are held per contact at a time ([404](404-store-and-forward.md#lifecycle)) |
 | Hold keys kept | 512 per chat, the oldest dropped first | |
 | A kept key, and a session only received on | Dropped 8 days after last use | A held item lives seven days |
-| Retired session ids | The last 16 | So a replayed old item cannot start its session again |
+| Retired session ids | The last 16 | A reader does not try to open what its path refuses anyway ([Sessions](#sessions)) |
+| Sessions only opened with | 2 | |
 
 Floor keys stepped over are never kept: an envelope that was replaced unread is gone from the DHT, and a key kept for it would only help a thief who recorded it.
 
-A sender never seals past a reader's bound: when its current chain on a lane reaches it (4,096 floor envelopes or 512 held items without the turn passing, as when the contact has been away for long), it starts a new session for its next item, and keeps the old one as its other ([Sessions](#sessions)). Otherwise a reader back after the bound would refuse every envelope, never step, and so never make the sender step either.
+A sender never seals past a reader's bound: when its current chain on a lane reaches it (4,096 floor envelopes or 512 held items without the turn passing, as when the contact has been away for long), it starts a new session for its next item, and keeps the old one among its others ([Sessions](#sessions)). Otherwise a reader back after the bound would refuse every envelope, never step, and so never make the sender step either. What goes on the new session is on its first chains, protected by the participation keys alone until the turn passes ([Security](#security)).
 
 ## Sessions
 
-A side holds at most two sessions per chat: the **current** one, which it seals with, and an **other**, which it only opens with.
+A side holds per chat the **current** session, which it seals with, and at most two **others**, which it only opens with (past two, the one used least lately is retired).
 
 - **Start.** With no current session, the first item sealed starts one with a random `sid`.
-- **Both start at once.** Each side opens the other's first item under a session it did not know. A side whose current session has heard nothing yet keeps the session whose `sid` is larger (as 8 unsigned bytes) as its current one and the other as its other, so both settle on the same session once each has read the other, and what came under the losing one still opens.
-- **The contact starts anew.** A **floor** envelope under an unknown `sid` while the current session has heard the contact means the contact lost its state (a restore, a move to another device) or reached a bound. Its session becomes current, and the old one becomes the other, for what the contact sent before and is still on its way (held items). Only the floor says so, because it takes nothing older than what it took.
+- **Both start at once.** Each side opens the other's first item under a session it did not know. A side whose current session has heard nothing yet keeps the session whose `sid` is larger (as 8 unsigned bytes) as its current one and the other among its others, so both settle on the same session once each has read the other, and what came under the losing one still opens.
+- **The contact starts anew.** A **floor** envelope under an unknown `sid` while the current session has heard the contact means the contact lost its state (a restore, a move to another device) or reached a bound, or it is an envelope from before both settled, still in the contact's mailbox. So the session is kept among the others as *pending*, and becomes current only when a newer floor envelope comes under it too: the contact's latest word. The old current one stays among the others, for what the contact sent before and is still on its way (held items). Only the floor says so, because it takes nothing older than what it took.
 - **A late held item.** A held item under an unknown `sid` while the current session has heard the contact is opened, and its session forgotten: it may be an item of a session that lost when both started, picked up late, and switching to it would split the chat.
 - **Retired.** A session dropped (replaced, expired) has its `sid` retired, and an item under a retired `sid` is refused.
 
