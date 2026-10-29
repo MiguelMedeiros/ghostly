@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, ONCHAIN_PROVIDER, type GhostLink, type PaymentTarget } from "@ghostly/core";
-import { INVOICE_LOOKS_PER_CHAT, PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
+import { INVOICE_LOOKS_PER_CHAT, PaymentDesk, RAIL_LOOK_MS, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { StoredPayment, StoredQuote } from "../src/shared/types";
@@ -113,6 +113,25 @@ describe("the payee is asked to look", () => {
     await desk.onPayment("l", check([ENDPOINT.bitcoin, JSON.stringify({ check: true })], "r2"));
     expect(lightning.check).toHaveBeenCalledOnce();
     expect(bitcoin.received).not.toHaveBeenCalled();
+  });
+  it("a contact's checks of five requests on one rail make one look at the wallet every 10 s, whatever the request or chat", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const requests = ["r1", "r2", "r3", "r4", "r5"].map((id) => outgoing({ id, target: ark(`tark1${id}`) }));
+      const { desk, arkAdapter, bitcoin } = setup([...requests, outgoing({ id: "b1", target: btc() })]);
+      await desk.start();
+      const looks = () => arkAdapter.received.mock.calls.length / requests.length;
+      // A minute of frames, one a second for each request, each a new id: the wallet already looks every 10 s itself.
+      for (let second = 0; second < 60; second++) {
+        for (const request of requests) await desk.onPayment("l", { ...check([ENDPOINT.arkade, JSON.stringify({ check: true })], request.id), id: `c${second}${request.id}` });
+        vi.advanceTimersByTime(1_000);
+      }
+      console.log(`CHECK LOOKS: 300 frames in a minute, ${looks()} looks at the Ark wallet`);
+      expect(looks()).toBe(60_000 / RAIL_LOOK_MS);
+      // Another rail is its own wallet: its first check is looked at.
+      await desk.onPayment("l", { ...check([ENDPOINT.bitcoin, JSON.stringify({ check: true })], "b1"), id: "cb" });
+      expect(bitcoin.received).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
   });
   it("on-chain: the source is asked for a confirmed receive on the request's address, and the contact is told once it is there", async () => {
     const chain = { txid: "f".repeat(64), confirmations: 0 };
