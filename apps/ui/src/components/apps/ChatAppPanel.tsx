@@ -16,12 +16,13 @@ const NAME = "\u0001";
 
 /**
  * "with Ana", "sharing a file with Ana": only the name is cut when the line is too long, never the words around it,
- * wherever the language puts them ("Ana とファイルを共有中" would lose "sharing" after a long name).
+ * wherever the language puts them ("Ana とファイルを共有中" would lose "sharing" after a long name). Unless the words alone
+ * fill the line (a 320 px phone in Portuguese): they stop 4ch short of its end, cut, so a few letters of the name show.
  */
 function aroundName(text: string, name: string) {
   return text.split(NAME).flatMap((part, i) => [
     i > 0 && <bdi key={`name-${i}`} data-testid="mini-app-with-name" className="min-w-0 truncate">{name}</bdi>,
-    part && <span key={i} className="shrink-0 whitespace-pre">{part}</span>,
+    part && <span key={i} className="shrink-0 max-w-[calc(100%-4ch)] overflow-hidden text-ellipsis whitespace-pre">{part}</span>,
   ]);
 }
 
@@ -138,7 +139,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         <div className="min-w-0 flex-1 ms-1">
           <h2 data-testid="mini-app-title" dir="auto" className="m-0 text-[15px] font-semibold leading-tight text-text-primary truncate">{title}</h2>
           {/* While the app serves a file to the contact, the line says so (WISP 1200 § A read lane to the contact). */}
-          <p data-testid="mini-app-with" data-serving={app?.serving || undefined} className={`m-0 flex min-w-0 text-[12px] leading-tight whitespace-nowrap ${named ? "text-text-secondary" : "text-text-muted italic"}`}>
+          <p data-testid="mini-app-with" data-serving={app?.serving || undefined} className={`m-0 flex min-w-0 overflow-hidden text-[12px] leading-tight whitespace-nowrap ${named ? "text-text-secondary" : "text-text-muted italic"}`}>
             {aroundName(t(app?.serving ? "apps.view.sharingWith" : "apps.view.withName", { name: NAME }), name)}
           </p>
         </div>
