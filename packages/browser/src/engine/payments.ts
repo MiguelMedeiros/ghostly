@@ -277,6 +277,11 @@ class PaymentBook extends Map<string, StoredPayment> {
 }
 /** How many looks at the wallet's invoices a chat's "I paid your invoice" frames make every 3 s (`receiveInvoicePaid`). */
 export const INVOICE_LOOKS_PER_CHAT = 5;
+/**
+ * How often a contact's "I paid it from another wallet" makes an on-chain, Ark, Bark or Spark wallet look
+ * (`receiveCheck`): no more often than the wallet's own refresh, which runs the same look.
+ */
+export const RAIL_LOOK_MS = 10_000;
 
 export class PaymentDesk {
   private readonly payments = new PaymentBook();
@@ -1180,7 +1185,8 @@ export class PaymentDesk {
   /**
    * The contact says it paid one of our requests from another wallet: our wallet is asked now, and it alone
    * decides. A request already paid is said so again (the first answer may have been lost). Bounded: one
-   * look every 3 seconds per request.
+   * look every 3 seconds per Lightning request, and one every `RAIL_LOOK_MS` per other rail: 300 frames a minute
+   * about 5 Bark requests made 100 Bark server syncs and 500 history reads.
    */
   private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
@@ -1191,8 +1197,11 @@ export class PaymentDesk {
     if (!rail || rail === "usdt" || rail === "cashu" || rail === "fedimint" || payment.endpoint[0] !== (rail === "lightning" ? ENDPOINT.bolt11 : ENDPOINT_OF[rail])) return;
     if (request.state === "settled") { link.sendPaymentResult({ id: request.id, ok: true }); return; }
     const now = Date.now();
-    if (now - (this.lastCheckFrom.get(request.id) ?? 0) < 3_000) return;
-    this.lastCheckFrom.set(request.id, now);
+    // A Lightning look is at this request's invoice; any other looks at every open request of its rail, so one
+    // look per rail, whatever the request or chat, and no sooner than the wallet's own refresh.
+    const [key, every] = rail === "lightning" ? [request.id, 3_000] : [rail, RAIL_LOOK_MS];
+    if (now - (this.lastCheckFrom.get(key) ?? 0) < every) return;
+    this.lastCheckFrom.set(key, now);
     try {
       // The invoice it says it paid, when it is this request's: the only one a contact can speak for.
       if (rail === "lightning") await this.lightning[paymentNetwork(request)].check?.(payment.endpoint[1].trim().toLowerCase() === request.invoice?.toLowerCase() ? request.invoice : undefined);
