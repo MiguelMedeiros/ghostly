@@ -398,9 +398,18 @@ export class GroupEdits {
     }
   }
 
-  /** A group is forgotten, or the app stops: what was known of its members' edges goes with it. */
-  private dropResends(groupId?: string): void {
-    const of = (key: string) => groupId === undefined || key.startsWith(`${groupId}\n`);
+  /**
+   * A group's roster changed: what was known of the edges of members no longer in it goes (their last edge with it,
+   * which `resentOn` would keep in memory for as long as the app runs). Out of the group: all of it.
+   */
+  membersChanged(groupId: string): void {
+    const members = this.host.membership(groupId)?.members;
+    this.dropResends(groupId, members && (key => !members.has(key.slice(groupId.length + 1))));
+  }
+
+  /** A group is forgotten, or the app stops: what was known of its members' edges goes with it. `gone`: those keys alone. */
+  private dropResends(groupId?: string, gone?: (key: string) => boolean): void {
+    const of = (key: string) => groupId === undefined || (key.startsWith(`${groupId}\n`) && (!gone || gone(key)));
     for (const [key, timer] of this.resendTimers) if (of(key)) { clearTimeout(timer); this.resendTimers.delete(key); }
     for (const key of [...this.heard.keys()]) if (of(key)) this.heard.delete(key);
     for (const key of [...this.resendPace.keys()]) if (of(key)) this.resendPace.delete(key);
