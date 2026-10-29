@@ -157,10 +157,11 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (autoScan) void scan(); }, []);
-  const readImage = async (file?: File) => {
+  // `weighed`: a picture the app read from the clipboard, already checked there (`platformPastedImage`).
+  const readImage = async (file?: File, weighed = false) => {
     if (!file || busyRef.current || joined.current || closed.current) return;
     stop(); setError(null);
-    if (file.size > IMAGE_MAX) { setError({ tone: "error", title: t("join.imageSize") }); return; }
+    if (!weighed && file.size > IMAGE_MAX) { setError({ tone: "error", title: t("join.imageSize") }); return; }
     busyRef.current = true; setBusy(true);
     const current = generation.current;
     try {
@@ -188,12 +189,13 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     reading.then(found => {
       if (!ended()) return;
       if (found === "tooLarge") setError(said(t("join.imageSize")));
-      else if (found) void readImage(found);
+      else if (found === "tooManyPixels") setError(said(t("join.pastedTooLarge")));
+      else if (found) void readImage(found, true);
       // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
       else if (named) setError(said(t("join.imageFailed")));
     }, (cause: unknown) => {
       // In the dialog's own words: the composer's point at its +, which Join has none of.
-      if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.imageSize" : "join.imageFailed")));
+      if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed")));
     });
   };
   const droppedImage = (event: DragEvent) => {
