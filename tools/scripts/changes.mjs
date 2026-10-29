@@ -105,7 +105,8 @@ export function parseFragment(name, text, version) {
     if (version !== undefined && !versionBefore(version, guard.from)) continue;
     if (!guard.entry({ group, body })) continue;
     if (release === undefined || (releaseOk && versionBefore(release, guard.release))) {
-      const ships = guard.flag ? `it ships with ${guard.flag} from ${guard.from}` : `it is in no release before ${guard.from}`;      problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (${ships})`);
+      const ships = guard.flag ? `it ships with ${guard.flag} from ${guard.from}` : `it is in no release before ${guard.from}`;
+      problems.push(`${name}: an ${guard.about} entry says "release: ${guard.release}" (${ships})`);
     }
   }
   return { heading, group, body, release, problems };

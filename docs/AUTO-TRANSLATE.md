@@ -261,6 +261,8 @@ The UI has no runtime feature-flag system today. The precedent is a build-time v
 test apps and is refused in release builds (`apps/web/appsTestFlag.ts`). Proposal: `VITE_TRANSLATE=1`, the same way,
 gating the Settings row, the bubble line and the sidecar start. Release builds keep it off until the umbrella PR flips
 it. The work also lives on `epic/auto-translate` until then, so `dev` has no user-visible change either way.
+Flipped: release.yml sets it on the Desktop build of every tag from `TRANSLATE_FROM` (1.7.0) on; Android, the web
+app and the extension still refuse it (`apps/web/translateFlag.ts`).
 
 ## Spike
 

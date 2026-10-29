@@ -87,6 +87,11 @@ jobs:
         id: translate
         run: |
           version="${RELEASE_TAG#v}"
+          # sort -V puts any non-numeric version after the digits, so a tag that is not vX.Y.Z fails closed here.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$RELEASE_TAG is not vX.Y.Z"
+            exit 1
+          fi
           first="$(printf '%s\n' "$TRANSLATE_FROM" "$version" | sort -V | head -n 1)"
           if [ "$first" = "$TRANSLATE_FROM" ]; then translate=true; else translate=false; fi
           echo "translate=$translate" >> "$GITHUB_OUTPUT"

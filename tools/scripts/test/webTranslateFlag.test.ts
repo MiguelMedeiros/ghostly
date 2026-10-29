@@ -148,6 +148,7 @@ it("a release carries it from TRANSLATE_FROM on, decided by the tag's version", 
     };
     for (const tag of ["v1.6.0", "v1.6.1", "v1.6.10", "v1.2.0"]) expect(carries(tag), tag).toBe("translate=false\n");
     for (const tag of ["v1.7.0", "v1.7.1", "v1.10.0", "v2.0.0"]) expect(carries(tag), tag).toBe("translate=true\n");
+    for (const tag of ["vnightly", "vdev", "v1.7.0-rc.1", "v1.7.0rc1", "v1.7.0.1", ""]) expect(() => carries(tag), tag).toThrow();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
