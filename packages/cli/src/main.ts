@@ -211,9 +211,34 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
     };
     return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
   }
-  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host = await openHost(g.paths, "one-shot", VERSION, options);
+  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = await openOneShot(g, options);
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
+}
+
+/** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
+const HOLDER_WAIT_MS = 5_000;
+
+/**
+ * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
+ * terminal) is waited for: both used to fail at once, and a backgrounded send was lost unless the script checked its
+ * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step.
+ */
+async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Host> {
+  const { openHost } = await engineHost();
+  const until = Date.now() + HOLDER_WAIT_MS;
+  for (;;) {
+    try { return await openHost(g.paths, "one-shot", VERSION, options); }
+    catch (error) {
+      if (!(error instanceof CliError) || error.code !== "busy") throw error;
+      const left = until - Date.now();
+      if (left <= 0) {
+        const pid = error.details?.pid;
+        throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and was not free after ${HOLDER_WAIT_MS / 1000} s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(50 + Math.random() * 50, left)));
+    }
+  }
 }
 
 /**
@@ -1000,8 +1025,8 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
     return;
   }
-  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host = await openHost(g.paths, "one-shot", VERSION);
+  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = await openOneShot(g);
   const off = host.ctx.hub.onEvent(tell);
   try {
     const result = await callApi(host.ctx, "identity.add", params) as { done: boolean; draft?: string };
