@@ -1982,7 +1982,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transfersRestored = true;
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
-    // Links start in the order they are stored (`nativeStartOrder` ranks the chats among them).
+    // The chats first, most recently live first, then the group edges (`nativeStartOrder`).
     await this.startLinks(links.map(stored => stored.id), linkId => {
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     });
@@ -8542,7 +8542,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * The order saved chats start in, which is the order they take native listeners in (`NATIVE_SLOTS` per transport):
-   * the 1:1 chats written in, or live, most recently first; group links keep their places. In the order they were
+   * the 1:1 chats written in, or live, most recently first, then the group links in the order given. In the order they were
    * stored, an app with more paired chats than slots left a chat that was live a moment before with no listener, and a
    * contact with no WebRTC (the Linux Desktop) never reached it again (Omarchy, 2026-09-30: "On DHT · retrying live" for
    * minutes after both apps restarted). Not "live when this app last ran" first: a chat that heard its contact leave as
@@ -8551,6 +8551,10 @@ export class GhostlyNode implements EngineImplementation {
    * On an app with WebRTC, the chats whose contact has none (its capability record lists no `webrtc/1`: a Linux Desktop,
    * a CLI with WebRTC off) come first, each class in that order: they reach this app over a native transport or not
    * live at all, while a contact with WebRTC still has it when no listener is left here.
+   *
+   * The chats before every group link, whatever order they come in: leaving limited mode, the network back on and
+   * "Hide my IP" switched start the links in the engine's order, every private group's edges first, and with 10 mesh
+   * groups of 32 the chat about to be opened waited for 310 edges to derive their keys and seal their records.
    */
   private nativeStartOrder(linkIds: string[]): string[] {
     const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
@@ -8566,8 +8570,7 @@ export class GhostlyNode implements EngineImplementation {
       return Number(y.nativeOnly) - Number(x.nativeOnly) || y.recent - x.recent;
     });
     chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, ...rank.get(id) }));
-    let next = 0;
-    return linkIds.map(id => rank.has(id) ? chats[next++] : id);
+    return [...chats, ...linkIds.filter(id => !rank.has(id))];
   }
 
   /**
