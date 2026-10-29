@@ -577,4 +577,29 @@ describe("group name, group-community/1", () => {
     expect(net.authors.filter(a => a.at === "carol").pop()).toEqual({ at: "carol", by: bob.session.myKey });
     expect(net.authors).toContainEqual({ at: "bob", by: alice.session.myKey });
   });
+
+  for (const [tb, tc] of [[2000, 1000], [1000, 2000]] as const) it(`a rename made on a branch that loses a fork reaches everyone (Bob commits the leave at ${tb}, Carol at ${tc})`, async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    await alice.session.leave();
+    await net.settle();
+    net.members.delete("alice");
+    // Bob and Carol, apart, each commit Alice's leave; Bob renames on his branch.
+    net.members.delete("carol");
+    await bob.session.commitPendingLeaves(tb);
+    await bob.session.rename("Book club", tb + 500);
+    await net.settle();
+    net.members.set("carol", carol);
+    await carol.session.commitPendingLeaves(tc);
+    await net.settle();
+    await net.meet(bob, carol); await net.meet(bob, carol);
+    expect(bob.session.topHash).toBe(carol.session.topHash);
+    const dave = await net.admit(carol, "dave");
+    await net.meet(carol, dave); await net.meet(bob, dave);
+    expect([bob.session.name, carol.session.name, dave.session.name]).toEqual(["Book club", "Book club", "Book club"]);
+  });
 });
