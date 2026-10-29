@@ -209,6 +209,47 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     expect(lookups).toBeLessThanOrEqual(1);
   }, 60_000);
 
+  // agents#1638: a clock that ran ahead, set right, then a restart. Every DHT node held the key's packet dated by the
+  // fast clock and refused each put (302), and the CLI tried again every 4 s until the clock caught up.
+  it("after a restart, a publish the DHT refuses for a later-dated packet goes out dated past it, while every relay answers 500", async () => {
+    // A testnet of its own, small enough that every put reaches each node: on the shared one a put sometimes landed on
+    // a node that never held the older packet, and was taken there.
+    const net: Mainline[] = [];
+    const join = async () => {
+      const node = new Mainline({ bootstrap: net.length ? [`127.0.0.1:${net[0]!.address().port}`] : false, host: "127.0.0.1", timeoutMs: 5_000 });
+      await node.listening;
+      for (const other of net) { node.addNode("127.0.0.1", other.address().port); other.addNode("127.0.0.1", node.address().port); }
+      net.push(node); nodes.push(node);
+      return node;
+    };
+    const quit = async (node: Mainline) => { net.splice(net.indexOf(node), 1); await node.destroy(); };
+    for (let i = 0; i < 4; i++) await join();
+    const reader = await join();
+    const store = { down: true, packets: new Map<string, Uint8Array>() };
+    const me = createIdentity();
+    const ahead = BigInt(Date.now() + 2 * 3_600_000) * 1000n;
+    // Before the restart: dated two hours ahead. Then that app quits.
+    const old = await join();
+    const before = new RelaysAndDht(old, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    before.relays.sawTimestamp(me.pubKeyZ32, ahead);
+    await before.publish(me, [{ label: "_x", value: "fast clock" }]);
+    expect((await reader.get(me.pubKeyZ32))?.records[0].value).toBe("fast clock");
+    await quit(old);
+    // After it: the clock is right, and nothing remembers that date.
+    const restarted = await join();
+    const after = new RelaysAndDht(restarted, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    await after.publish(me, [{ label: "_x", value: "right clock" }]);
+    const onDht = await reader.get(me.pubKeyZ32);
+    expect(onDht?.records[0].value).toBe("right clock");
+    expect(onDht!.timestampMicros).toBeGreaterThan(ahead);
+    await quit(restarted);
+    // The held packet cannot be read: the publish fails, and says the DHT refused it, not only that the relays did.
+    const blind = await join();
+    blind.get = async () => null;
+    const third = new RelaysAndDht(blind, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    await expect(third.publish(me, [{ label: "_x", value: "again" }])).rejects.toThrow(/every relay.*; The DHT holds a later-dated packet/);
+  }, 60_000);
+
   it("a group's edge goes live while every relay answers 500, through the DHT, without a restart", async () => {
     const store = { down: true, packets: new Map<string, Uint8Array>() };
     const group = toBase64Url(randomBytes(16));
