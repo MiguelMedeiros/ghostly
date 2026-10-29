@@ -232,9 +232,18 @@ function unpacked() {
   expect(name).toBe(basename(archive));
   expect(sha256(readFileSync(archive))).toBe(pinned);
   const dir = mkdtempSync(join(tmpdir(), "ghostly-translation-runtime-"));
-  execFileSync("tar", ["-xzf", archive, "-C", dir]);
+  // The app runs Windows' own tar (System32 comes before PATH there). A job's bash puts Git's GNU tar first, which
+  // reads "D:\..." as a remote host and fails, so Windows names System32's.
+  const tar = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+  execFileSync(tar, ["-xzf", archive, "-C", dir]);
   return join(dir, basename(BUILT));
 }
+
+/** How long one request may take: a cold model on a slow CI runner (darwin-x64 took 85 s) stays under it. */
+const ANSWER_MS = 240_000;
+const started = Date.now();
+/** Each step's time goes to stderr, so a run that times out still shows how far it got. */
+const step = (what: string) => process.stderr.write(`[translation runtime test] ${what}, ${Date.now() - started} ms in\n`);
 
 /** Starts a runtime and returns `ask(request)`, which resolves to the answer with the request's id. */
 function start(dir: string) {
@@ -252,18 +261,34 @@ function start(dir: string) {
     }
   });
   const exited = new Promise<number | null>((resolve) => child.on("exit", resolve));
-  // A runtime that dies answers nothing: the request fails with what it said instead of waiting out the timeout.
+  // A runtime that dies answers nothing: the request fails with what it said instead of waiting out the timeout. One
+  // that hangs fails the same way after ANSWER_MS, before the test's own timeout, so the log says which request hung.
   const ask = (request: { id: number }) => new Promise((resolve, reject) => {
-    waiting.set(request.id, resolve);
-    void exited.then((code) => reject(new Error(`The runtime exited (${code}): ${err}`)));
+    const since = Date.now();
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`No answer to request ${request.id} in ${ANSWER_MS} ms; the runtime said: ${err}`));
+    }, ANSWER_MS);
+    waiting.set(request.id, (answer) => {
+      clearTimeout(timer);
+      step(`answer to request ${request.id} in ${Date.now() - since} ms`);
+      resolve(answer);
+    });
+    void exited.then((code) => {
+      clearTimeout(timer);
+      reject(new Error(`The runtime exited (${code}): ${err}`));
+    });
     child.stdin.write(JSON.stringify(request) + "\n");
   });
   return { ask, end: () => child.stdin.end(), exited, stderr: () => err };
 }
 
-it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`translates pt-en on this host (${PLATFORM}) with the runtime's archive and Mozilla's model`, { timeout: 120_000 }, async () => {
+it.skipIf(!existsSync(`${BUILT}.tar.gz`))(`translates pt-en on this host (${PLATFORM}) with the runtime's archive and Mozilla's model`, { timeout: 300_000 }, async () => {
+  step("start");
   await modelPtEn();
+  step("pt-en model ready");
   const dir = unpacked();
+  step("archive unpacked");
   const runtime = start(dir);
   // Nothing but the protocol's files, the addon's graph and `bare`: no GPU backend, no other platform, no bare-runtime.
   expect(readdirSync(dir).sort()).toEqual(["bare", "node_modules", "package-lock.json", "package.json", "protocol.mjs", "runtime.mjs"].map((name) => (name === "bare" && process.platform === "win32" ? "bare.exe" : name)).sort());
