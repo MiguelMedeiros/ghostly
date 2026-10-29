@@ -161,6 +161,23 @@ describe("chats", () => {
     expect(await list.allows({ seq: 2, id: "g", type: "group.message", at: 1, group: theirs.id } as GhostlyEvent)).toBe(false);
   });
 
+  it("listen --from takes a chat only by its id, its contact's key or a label given here, as call auto on --from", async () => {
+    // No chat is labelled "owner" here; Mallory calls herself that. Her chat never wakes the agent.
+    const owner = link("chatOwnerxxxxxxx", { peerNick: "Miguel" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
+    const ctx = { runtime: { server: { node: { getState: () => ({ links: [owner, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    await expect(allowlist(["owner"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/ghostly chat rename/), details: { chat: mallory.id, name: "owner", contact: mallory.peerPubKeyZ32 } });
+    await expect(allowlist(["chatMallory"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", details: { chat: mallory.id } });
+    // Its id, or the label this side gave it (any case), still names it.
+    const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
+    expect(await (await allowlist([owner.id], [], call, async () => null)).allows(event(owner.id))).toBe(true);
+    const labelled = link(owner.id, { peerNick: "Miguel", label: "Owner" });
+    const named = { runtime: { server: { node: { getState: () => ({ links: [labelled, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const list = await allowlist(["owner"], [], (method, params) => callApi(named, method, params), async () => null);
+    expect(await list.allows(event(owner.id))).toBe(true);
+    expect(await list.allows(event(mallory.id))).toBe(false);
+  });
+
   it("\"\" (and \"group:\" alone) names no chat and no group, even where it is a prefix of the only one's id", async () => {
     const bob = link("c7aoaukc3e99dm9c", { peerNick: "Bob" });
     const crew = { ...group, id: "aZT5wUR4UR5s9NsV4KUHZg", status: "active" } as unknown as GroupView;
