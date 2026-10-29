@@ -326,20 +326,15 @@ export const useChat: typeof Desktop.useChat = (params) => {
     myPubKey: link?.myPubKeyZ32 ?? "",
     peerPubKey: peerPubKey ?? "",
     encKeyPreview: encKeyB64 ? `${encKeyB64.slice(0, 8)}...${encKeyB64.slice(-4)}` : "",
-    pollCount: 0,
     currentPollInterval: poll?.interval ?? 0,
     republishInterval: 4 * 60_000,
     messageTtl: 300,
-    protocol:
-      link?.dataLink === "open"
-        ? "WebRTC DataChannel (peer to peer) · Pkarr for discovery"
-        : (state?.transport.protocol ?? ""),
+    protocol: state?.transport.protocol ?? "",
+    peerToPeer: link?.dataLink === "open",
     encryption: "NaCl secretbox (XSalsa20-Poly1305)",
     relays: state?.transport.relays ?? [],
     createdAt: createdAtRef.current,
-    myAck: 0,
     peerAck: link?.peerAck ?? 0,
-    sentBufferSize: 0,
   };
 
   return {
