@@ -33,6 +33,12 @@ const anyAmount = () => {
   return bech32.encode("lnbcrt", words, false);
 };
 const picture = () => new File([new Uint8Array([137, 80, 78, 71])], "qr.png", { type: "image/png" });
+/** A PNG's signature and header, saying `width` x `height`. */
+const pngHead = (width: number, height: number) => {
+  const head = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 0, 0, 0, 0, 0, 8, 6, 0, 0, 0]);
+  new DataView(head.buffer).setUint32(16, width); new DataView(head.buffer).setUint32(20, height);
+  return head;
+};
 
 function show(methods: Partial<WalletPlatform>, network: "testnet" | "mainnet" = "testnet", balance = 5_000) {
   const mints = network === "testnet" ? [mint(TEST_MINT, balance)] : [mint(REAL_MINT, balance)];
@@ -95,8 +101,9 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
   it("a picture the Linux app's webview hides from a paste (Ctrl+V shows the page nothing) is read through the app", async () => {
     qr.text = invoice;
     const nothing = { files: [], types: [], items: [], getData: () => "" };
-    const shot = (size: number) => ({ name: null, size, mime: "image/png", read: vi.fn(async () => new Uint8Array([137, 80, 78, 71])), done: vi.fn() });
-    fakeEngine.readClipboardFiles = vi.fn(async () => [shot(4)]);
+    // A 12 MP phone photo, 14 MB as the app's PNG: judged by its pixels, not its bytes.
+    const shot = (size: number) => ({ name: null, size, mime: "image/png", read: vi.fn(async (offset: number) => offset ? new Uint8Array() : pngHead(4032, 3024)), done: vi.fn() });
+    fakeEngine.readClipboardFiles = vi.fn(async () => [shot(13_985_607)]);
     const quoteInvoice = vi.fn(async () => ({ quote: "q-4", mint: TEST_MINT, amount: 21, feeReserve: 0 }));
     const { user } = show({ quoteInvoice });
     await user.click(screen.getByRole("tab", { name: "Send" }));
@@ -107,13 +114,21 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
   });
 
   it("a picture read through the app that is too large, or a paste the app cannot read, is said", async () => {
-    const huge = { name: null, size: 64 * 1024 * 1024, mime: "image/png", read: vi.fn(async () => new Uint8Array()), done: vi.fn() };
+    const huge = { name: "photo.png", size: 64 * 1024 * 1024, mime: "image/png", read: vi.fn(async () => new Uint8Array()), done: vi.fn() };
     fakeEngine.readClipboardFiles = vi.fn(async () => [huge]);
     const { user } = show({});
     await user.click(screen.getByRole("tab", { name: "Send" }));
-    fireEvent.paste(screen.getByTestId("wallet-pay-input"), { clipboardData: { files: [], types: [], items: [], getData: () => "" } });
+    const nothing = { files: [], types: [], items: [], getData: () => "" };
+    fireEvent.paste(screen.getByTestId("wallet-pay-input"), { clipboardData: nothing });
     expect(await screen.findByTestId("wallet-send-scan-error")).toHaveTextContent("Choose an image smaller than 12 MB.");
     expect(huge.read).not.toHaveBeenCalled();
+    // A picture the app made a PNG of is judged by its pixels: one of 10000 x 6000, by its header alone.
+    const vast = { name: null, size: 9_000_000, mime: "image/png", read: vi.fn(async () => pngHead(10_000, 6_000)), done: vi.fn() };
+    fakeEngine.readClipboardFiles = vi.fn(async () => [vast]);
+    fireEvent.paste(screen.getByTestId("wallet-pay-input"), { clipboardData: nothing });
+    await waitFor(() => expect(screen.getByTestId("wallet-send-scan-error")).toHaveTextContent("That picture is too large to read."));
+    expect(vast.read).toHaveBeenCalledTimes(1);
+    expect(vast.done).toHaveBeenCalledTimes(1);
     // A browser's "Copy image" (its HTML only) whose picture the app fails to read.
     fakeEngine.readClipboardFiles = vi.fn(async () => { throw "Clipboard unavailable"; });
     const copied = { files: [], types: ["text/html"], items: [], getData: (type: string) => type === "text/html" ? "<img src=\"https://example.com/qr.png\">" : "" };
