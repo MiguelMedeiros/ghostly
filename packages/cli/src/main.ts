@@ -82,10 +82,49 @@ function knownProfile(g: Globals): void {
 /** A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. */
 interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void> }
 
-/** Said on stderr when the daemon runs another release than this command (it started before an upgrade). */
+/** `1.2.3`, with an optional `v`, an optional `-beta.1` prerelease and an optional `+build` that never orders. */
+const RELEASE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/** Semver order: negative when `a` is the older release, positive when it is the newer, 0 the same; null when either is not one. */
+export function compareReleases(a: string, b: string): number | null {
+  const left = RELEASE.exec(a.trim()), right = RELEASE.exec(b.trim());
+  if (!left || !right) return null;
+  for (let i = 1; i <= 3; i++) {
+    const order = Number(left[i]) - Number(right[i]);
+    if (order !== 0) return order;
+  }
+  // A prerelease is older than its release; two of one release go field by field, numbers by value and before words.
+  if (left[4] === undefined || right[4] === undefined) return (left[4] === undefined ? 1 : 0) - (right[4] === undefined ? 1 : 0);
+  const l = left[4].split("."), r = right[4].split(".");
+  for (let i = 0; i < Math.min(l.length, r.length); i++) {
+    if (l[i] === r[i]) continue;
+    const ln = /^\d+$/.test(l[i]), rn = /^\d+$/.test(r[i]);
+    if (ln && rn) return Number(l[i]) - Number(r[i]);
+    if (ln !== rn) return ln ? -1 : 1;
+    return l[i] < r[i] ? -1 : 1;
+  }
+  return l.length - r.length;
+}
+
+/**
+ * Said on stderr when the daemon runs another release than this command. An older daemon started before an upgrade:
+ * `daemon restart` runs this release. A newer one means this command is the old one (a second install, a project's
+ * pinned copy): a restart from it would start the older release, so it is told to upgrade instead.
+ */
 export function versionWarning(daemon: unknown, cli: string): string | null {
   if (typeof daemon !== "string" || daemon === cli) return null;
-  return `ghostly: the daemon runs ${daemon} and this command is ${cli}: \`ghostly daemon restart\` runs the new code`;
+  const order = compareReleases(daemon, cli);
+  if (order === 0) return null;
+  const both = `ghostly: the daemon runs ${daemon} and this command is ${cli}`;
+  if (order === null) return `${both}: \`ghostly daemon restart\` runs this command's release`;
+  if (order > 0) return `${both}, older than the daemon: upgrade the CLI (\`npm install -g @ghostlytools/cli\`)`;
+  return `${both}: \`ghostly daemon restart\` runs the new code`;
+}
+
+/** Said on stderr when `daemon restart` stopped a newer release than the one it started (an older CLI ran it). */
+export function restartWarning(before: unknown, version: string): string | null {
+  if (typeof before !== "string" || !((compareReleases(before, version) ?? 0) > 0)) return null;
+  return `ghostly: the daemon ran ${before} and this restart started ${version}, an older release: upgrade the CLI (\`npm install -g @ghostlytools/cli\`) and run \`ghostly daemon restart\` again to go back`;
 }
 
 /**
@@ -625,6 +664,8 @@ async function daemonCommand(argv: string[]): Promise<void> {
       if (stopped === null || !(error instanceof CliError) || error.code === "timeout") throw error;
       throw new CliError(error.code, `${error.message}. The daemon (process ${stopped}) was stopped: start it again with ghostly daemon --detach`, { ...error.details, stopped });
     }
+    const older = restartWarning(before, VERSION);
+    if (older) process.stderr.write(older + "\n");
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }

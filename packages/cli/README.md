@@ -234,7 +234,10 @@ arrives until it is back online.
 
 A daemon keeps running the code it started with. After upgrading the CLI, every command that goes through an older
 (or newer) daemon still answers, and says on stderr `ghostly: the daemon runs <version> and this command is
-<version>`. A daemon of a release before 1.5.0 cannot prove it is the profile's daemon (no
+<version>`, then what to do: an older daemon is restarted (`ghostly daemon restart` runs the new code); a newer one
+means this command is the older CLI (a second install, a project's pinned copy), so it says to upgrade the CLI
+(`npm install -g @ghostlytools/cli`) and gives no restart advice, since a restart from it would start the older
+release. A `daemon restart` that does start an older release than the one it stopped says so on stderr. A daemon of a release before 1.5.0 cannot prove it is the profile's daemon (no
 [greeting](#the-socket-api)): commands are refused after 2 s, exit `1`, until `ghostly daemon restart`. A daemon of
 this release that is slow to answer (busy on a long task) is waited for, under each command's own deadline. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
 background, as `daemon --detach` does. A daemon kept by a service manager (systemd, launchd) is restarted with the
