@@ -358,6 +358,10 @@
     "placeholder": "Buscar nesta conversa"
   },
   "send": "Enviar",
+  "sentTranslation": {
+    "copyOriginal": "Copiar original",
+    "line": "Traduzido para {{language}}"
+  },
   "services": {
     "add": "+ Adicionar app",
     "canOpen": "Apps que você pode abrir:",

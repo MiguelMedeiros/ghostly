@@ -23,6 +23,7 @@ import {
   hasAnnouncedJoin,
   markJoinAnnounced,
 } from "../lib/storage";
+import { forgetSentOriginal } from "../lib/sentOriginals";
 
 const POLL_INTERVAL_ACTIVE = 2_000;
 const POLL_INTERVAL_IDLE = 8_000;
@@ -589,6 +590,7 @@ export function useChat(params: ChatParams | null) {
   const deleteMessage = useCallback((messageId: string) => {
     const updated = deleteStoredMessage(sessionIdRef.current, messageId);
     if (!updated) return;
+    forgetSentOriginal(sessionIdRef.current, messageId);
     setMessages([...updated.messages]);
     // The chat list keeps its own copy of the last message.
     window.dispatchEvent(new Event("session-updated"));

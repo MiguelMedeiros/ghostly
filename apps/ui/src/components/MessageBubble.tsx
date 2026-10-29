@@ -46,6 +46,9 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
+import { originalMentions, setShowsOriginal, showsOriginal, useSentOriginal, type SentOriginal } from "../lib/sentOriginals";
+import { languageName } from "../lib/documentLanguage";
+import { translateEnabled } from "../lib/translateFlag";
 import { pictureLinkRead, pictureLinkUrl, type PictureRead } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
@@ -311,6 +314,24 @@ function TranslatedMark({ translation }: { translation: ShownTranslation }) {
       <span aria-hidden="true"> · </span>
       <button type="button" data-testid="message-translated-toggle" onClick={translation.toggle} className="italic cursor-pointer hover:underline">
         {t(translation.original ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Under a message I sent translated from this device (lib/sentOriginals.ts): "Translated to Italian · Show original",
+ * quiet like "edited". A screen reader reads the text, then the line; Show original is a button, and swaps the text in
+ * place (Show translation brings it back).
+ */
+function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; showing: boolean; onToggle: () => void }) {
+  const { t, language, dir } = useI18n();
+  return (
+    <div dir={dir} data-testid="message-sent-translation" className="mt-[2px] text-[11px] leading-[16px] text-text-primary/65 italic">
+      <span>{t("chat.sentTranslation.line", { language: languageName(sent.to, language) })}</span>
+      <span aria-hidden="true"> · </span>
+      <button type="button" data-testid="message-show-original" aria-pressed={showing} onClick={onToggle} className="italic cursor-pointer hover:underline">
+        {t(showing ? "chat.translated.showTranslation" : "chat.translated.showOriginal")}
       </button>
     </div>
   );
@@ -887,6 +908,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const isSystem = message.sender === "system";
   const isAcked = isMe && (message.delivery ? message.delivery === "delivered" : peerAck >= message.timestamp);
   const inGroup = !!linkId?.startsWith("group:");
+  // Mine, sent translated from this device: the original kept beside it. An edit changed the sent text, so the
+  // original no longer goes with it.
+  const sent = useSentOriginal(chat, message.id, translateEnabled() && isMe && !message.edit && !message.file && !message.paymentId);
+  const [showingOriginal, setShowingOriginal] = useState(() => !!chat && showsOriginal(chat, message.id));
+  const toggleOriginal = () => { const next = !showingOriginal; setShowingOriginal(next); if (chat) setShowsOriginal(chat, message.id, next); };
+  // The original in place of the sent text, with its own mention places: the message's are the translation's.
+  const original = sent && showingOriginal ? sent.original.trim() : undefined;
+  const originalMarks = useMemo(() => original === undefined ? undefined : originalMentions(original, message.text, message.mentions), [original, message.text, message.mentions]);
   const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
@@ -1286,13 +1315,14 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           // one in the English app right to left), with the time at its end; the cards and the time keep the app's.
           <div className="clearfix" dir="auto" data-testid="message-body">
             {/* A translation's words are its own: the original's mentions do not fall on them. */}
-            <RichText testId="message-text" text={translatedText ?? message.text} sentAt={shownAt} mentions={translatedText === undefined ? message.mentions : undefined} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
+            <RichText testId="message-text" text={translatedText ?? original ?? message.text} sentAt={shownAt} mentions={translatedText !== undefined ? undefined : original !== undefined ? originalMarks : message.mentions} highlight={highlight} className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap" />
             {translation && <TranslatedMark translation={translation} />}
             {/* No box of its own: with no card the time still floats beside the last line of text. */}
             <div dir={dir} className="contents">
               <EntityCards text={message.text} mine={isMe} from={message.nick || peerNick || undefined} peerPubKey={peerPubKey} />
               <MessageLinkCards text={message.text} preview={message.preview} />
             </div>
+            {sent && <SentTranslationLine sent={sent} showing={showingOriginal} onToggle={toggleOriginal} />}
             {timestampEl}
           </div>
         )}
@@ -1306,7 +1336,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
         align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
-        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined} />}
+        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined}
+        onCopyOriginal={bar === "press" && copyable && sent ? () => void copyText(sent.original.trim()).catch(() => {}) : undefined} />}
       {detailsPanel}
     </div>
   );
