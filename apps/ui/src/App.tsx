@@ -16,6 +16,7 @@ import { useEngineNick } from "./hooks/useAvatars";
 import { useProfilePeek } from "./hooks/useProfilePeek";
 import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
+import { useWakeOnReturn } from "./hooks/useWakeOnReturn";
 import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { useGoneGroups } from "./hooks/useGoneGroups";
@@ -54,27 +55,6 @@ function useThemeColor() {
  * page that holds it, and so does the polling that would carry the hang-up.
  * The one on a call follows you to Settings as a small window instead.
  */
-/**
- * Coming back to the window or tab after a while: a laptop that slept, an app left in the background.
- * Chats look for their contacts now, and a connection that dropped meanwhile is dialled again at once.
- */
-function useWakeOnReturn() {
-  useEffect(() => {
-    let last = 0;
-    const wake = () => {
-      if (document.visibilityState !== "visible" || Date.now() - last < 5_000) return;
-      last = Date.now();
-      void engine.call("wake").catch(() => {});
-    };
-    // Back online (another network, a VPN up or down): discovery forgets the relays that failed on the old one.
-    const online = () => { last = Date.now(); void engine.call("wake", { network: true }).catch(() => {}); };
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", online);
-    return () => { document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); window.removeEventListener("online", online); };
-  }, []);
-}
-
 /**
  * The peer holds items for away contacts in this profile's S3 storage (WISP 404), the one set up under
  * Profile → Backups: whenever that changes, the peer is told, credentials and space alike, and told when
