@@ -6,7 +6,7 @@ import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { findChat, findOwnNamedChat } from "../apiKit";
 import { CliError } from "../errors";
 import { AudioSocket, audioSocketPath, clearAudioSockets } from "./audioSocket";
-import { CallMedia, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
+import { callIceServers, CallMedia, callUsesTurn, EarlyAnswer, loadCallStack, type CallStack, type MediaOptions } from "./media";
 import { DEFAULT_RATE, FRAME_MS, isCallRate, PlaybackQueue, type CallRate } from "./pcm";
 
 /**
@@ -330,9 +330,14 @@ export class CallManager {
   /**
    * The ringing call's answer, made now (`EarlyAnswer`): when the call is answered, its candidates have been gathered
    * and the answer goes at once. Made again every EARLY_ANSWER_MS while it rings; when it cannot be made, the answer makes its own.
+   * Not made with a TURN server in the profile's settings: libjuice never gives an allocation back (no Refresh with
+   * LIFETIME 0 when a connection closes), so each one held a relay on the server for 10 minutes, those of calls declined,
+   * missed and cancelled too, and a server with a per-user quota refused the next calls theirs. The answer allocates.
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
+    const iceServers = this.host.engine.getState().settings?.iceServers ?? [];
+    if (callUsesTurn(callIceServers(iceServers))) return;
     this.stopEarly(call);
     call.earlyTimer = setTimeout(() => this.prepare(call), this.host.earlyAnswerMs ?? EARLY_ANSWER_MS);
     call.earlyTimer.unref?.();
@@ -344,7 +349,7 @@ export class CallManager {
     const making: Making = {
       chat: call.chat,
       done: this.stack().then((stack) => EarlyAnswer.open(stack, offer, {
-        iceServers: this.host.engine.getState().settings?.iceServers ?? [],
+        iceServers,
         log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
       })).catch((error) => {
         // Not tried again while it rings: the answer makes its own connection, as it did before.
