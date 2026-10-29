@@ -10,7 +10,7 @@ import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinSer
 import type { Removal } from "../engine/removals";
 import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
-import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind, RatchetState } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { BackupReminders } from "./backupReminder";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
@@ -34,6 +34,11 @@ export interface StoredLink {
   wakeMuted?: boolean;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
+  /**
+   * Paired 1:1 chats: the ratchet of the DHT floor and held items (WISP 4xx). State of this device only: never in a
+   * backup or a handoff (`profileBackup.ts`), and dropped by a forced takeover (`raisedLink`).
+   */
+  ratchetState?: RatchetState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
   capsState?: CapsState;
   publicProfiles?: PublicProfile[];
