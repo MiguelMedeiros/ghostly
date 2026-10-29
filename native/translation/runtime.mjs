@@ -1,7 +1,6 @@
 // The translation runtime, run by `bare runtime.mjs <models folder>`: the stdio protocol of protocol.mjs over QVAC's
 // Bergamot addon. Started by the app, not listening on any port, and it never fetches: the only files it reads are the
 // models under the folder it was given, by fixed names. Nothing it writes carries a message's text but the answers.
-import process from 'bare-process'
 import fs from 'bare-fs'
 import path from 'bare-path'
 import TranslationNmtcpp from '@qvac/translation-nmtcpp'
@@ -9,7 +8,7 @@ import { createRuntime, lineReader } from './protocol.mjs'
 
 const root = Bare.argv[2]
 if (!root || !path.isAbsolute(root)) {
-  process.stderr.write('Usage: bare runtime.mjs <absolute models folder>\n')
+  console.error('Usage: bare runtime.mjs <absolute models folder>')
   Bare.exit(2)
 }
 
@@ -30,7 +29,24 @@ async function open({ from, to, files }) {
 
 const exists = file => { try { return fs.statSync(file).isFile() } catch { return false } }
 const runtime = createRuntime({ root, open, exists, join: path.join })
-const write = answer => { process.stdout.write(JSON.stringify(answer) + '\n') }
-process.stdin.on('data', lineReader(line => { runtime.handle(line).then(write) }, () => { runtime.tooLong().then(write) }))
-// The app closed our input: it is done with us.
-process.stdin.on('end', () => { runtime.close().finally(() => Bare.exit(0)) })
+
+// stdin and stdout are read and written as plain file descriptors, not through bare-process's streams: on Windows
+// those neither read a request nor wrote a line when the app (or Node) started the runtime with piped stdio, so the
+// first request hung with nothing on stderr. A read and a blocking write of fds 0 and 1 work the same everywhere.
+const write = answer => {
+  const bytes = Buffer.from(JSON.stringify(answer) + '\n')
+  for (let at = 0; at < bytes.byteLength;) at += fs.writeSync(1, bytes, at, bytes.byteLength - at)
+}
+const take = lineReader(line => { runtime.handle(line).then(write) }, () => { runtime.tooLong().then(write) })
+async function readInput() {
+  const chunk = Buffer.alloc(64 * 1024)
+  for (;;) {
+    let read = 0
+    try { read = await fs.read(0, chunk, 0, chunk.byteLength, -1) } catch { /* a broken input is an ended one */ }
+    if (read === 0) break
+    take(Buffer.from(chunk.subarray(0, read)))
+  }
+  // The app closed our input: it is done with us.
+  runtime.close().finally(() => Bare.exit(0))
+}
+readInput()
