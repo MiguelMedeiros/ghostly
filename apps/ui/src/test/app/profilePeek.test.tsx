@@ -148,7 +148,7 @@ describe("the look itself", () => {
     expect(fakeEngine.callsTo("peekProfile")).toEqual([{ profile: work.id, dbName: `ghostly_${work.id}` }]);
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(notices.show).toHaveBeenCalledOnce();
-    expect(notices.show.mock.calls[0]).toEqual([expect.stringMatching(/^peek-/), "New message in Work", `profile:${work.id}`]);
+    expect(notices.show.mock.calls[0]).toEqual([expect.stringMatching(/^peek-/), "New message in Work", `profile:${work.id}`, true]);
     // Muted in Work: new there, but quiet.
     localStorage.setItem(`${prefixOf(work.id)}mute_c1`, "forever");
     clearPeek(work.id);
