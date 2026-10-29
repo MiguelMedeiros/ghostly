@@ -1,4 +1,6 @@
+import { useSyncExternalStore } from "react";
 import { TranslateError, translateTexts } from "../desktop/translate";
+import { GROUP_WINDOW, chatLanguageOf, isGroupChat, languageSetByHand, type ChatLanguage } from "./chatLanguage";
 import type { Language } from "./settings";
 import { loadDetector } from "./translateDetector";
 import { translateFrom, type DetectLanguages } from "./translateWhich";
@@ -32,7 +34,7 @@ export interface Translation {
   long: boolean;
 }
 
-type Received = Pick<ChatMessage, "id" | "sender" | "text" | "file" | "paymentId" | "card" | "callEvent" | "systemEvent" | "mentions">;
+type Received = Pick<ChatMessage, "id" | "sender" | "text" | "file" | "paymentId" | "card" | "callEvent" | "systemEvent" | "mentions"> & Partial<Pick<ChatMessage, "timestamp">>;
 
 /** View key (app language, message, text) → the language it is translated from, or null: shown as it was sent. */
 const decided = new Map<string, string | null>();
@@ -44,8 +46,13 @@ const unavailable = new Set<string>();
 const wanted = new Set<string>();
 /** Messages shown as they were sent, by Show original: for the session. */
 const originals = new Set<string>();
-/** Per chat, the last language the others wrote with confidence: what a short message is taken to be in. */
-const chatLanguages = new Map<string, string>();
+/**
+ * Per chat, the language the detector was sure of in each of the others' latest messages (`GROUP_WINDOW` of them, by
+ * when they came): what lib/chatLanguage.ts counts.
+ */
+const detections = new Map<string, Map<string, { at: number; code: string }>>();
+/** Per chat, `detections` oldest first, as `chatDetections` gives them: the same array until they change. */
+const detectedViews = new Map<string, string[]>();
 const deciding = new Set<string>();
 /** Pair → texts waiting for the next request; `pending` holds them and the ones on their way. */
 const queue = new Map<string, Set<string>>();
@@ -134,6 +141,37 @@ async function translateBatch(pair: string, batch: string[]): Promise<void> {
   changed();
 }
 
+/** Keeps that the detector was sure `message` of `chat` is in `code`: the oldest goes past `GROUP_WINDOW`. */
+function detectedIn(chat: string, message: Received, code: string): void {
+  let seen = detections.get(chat);
+  if (!seen) detections.set(chat, seen = new Map());
+  if (seen.get(message.id)?.code === code) return;
+  seen.set(message.id, { at: message.timestamp ?? 0, code });
+  if (seen.size > GROUP_WINDOW) {
+    const [oldest] = [...seen].reduce((a, b) => (b[1].at < a[1].at ? b : a));
+    seen.delete(oldest);
+  }
+  detectedViews.delete(chat);
+  changed();
+}
+
+/** The languages the detector was sure of in `chat`'s latest received messages, oldest first. */
+export function chatDetections(chat: string): readonly string[] {
+  let view = detectedViews.get(chat);
+  if (!view) detectedViews.set(chat, view = [...(detections.get(chat)?.values() ?? [])].sort((a, b) => a.at - b.at).map((d) => d.code));
+  return view;
+}
+
+/** `chatDetections`, kept current: redrawn when a message on screen was detected. */
+export function useChatDetections(chat: string): readonly string[] {
+  return useSyncExternalStore(watchTranslations, () => chatDetections(chat));
+}
+
+/** The chat's one language (lib/chatLanguage.ts): set by hand, else what its received messages say. */
+export function chatLanguageNow(chat: string): ChatLanguage {
+  return chatLanguageOf(chatDetections(chat), { group: isGroupChat(chat), setByHand: languageSetByHand(chat) });
+}
+
 /**
  * A bubble of `chat` on screen (or a screenful away) asks for its message's translation into `language`: its language
  * is found once (translateWhich.ts), and its text goes in the next request. `asked`: a long message's Translate.
@@ -155,9 +193,9 @@ export function askTranslation(message: Received, chat: string, language: Langua
     if (!detect) return;
     let which: ReturnType<typeof translateFrom> = { from: null, detected: null };
     try {
-      which = translateFrom(message, { appLanguage: language, detect, canTranslate: (from) => usable(`${from}-${language}`), chatLanguage: chatLanguages.get(chat) });
+      which = translateFrom(message, { appLanguage: language, detect, canTranslate: (from) => usable(`${from}-${language}`), chatLanguage: chatLanguageNow(chat).language });
     } catch { /* a detector that throws translates nothing */ }
-    if (which.detected) chatLanguages.set(chat, which.detected);
+    if (which.detected) detectedIn(chat, message, which.detected);
     keep(decided, key, which.from);
     go(which.from);
     if (which.from) changed();
@@ -194,12 +232,22 @@ export function showOriginal(messageId: string, original: boolean): void {
 /** Moves on with every `forgetTranslations`: a bubble on screen asks again when it does. */
 export const translationRound = () => generation;
 
-/** Throws every translation and decision away, and asks again what was missing: after a model is downloaded or removed. */
-export function forgetTranslations(): void {
+/** Drops what the page has (`stores`) and what is on its way: the bubbles on screen ask again. */
+function restart(stores: readonly { clear(): void }[]): void {
   generation++;
   clearTimeout(timer);
   timer = undefined;
-  detecting = undefined;
-  for (const store of [decided, translated, unavailable, wanted, originals, chatLanguages, deciding, queue, pending, views]) store.clear();
+  for (const store of stores) store.clear();
   changed();
+}
+
+/** Throws every translation and decision away, and asks again what was missing: after a model is downloaded or removed. */
+export function forgetTranslations(): void {
+  detecting = undefined;
+  restart([decided, translated, unavailable, wanted, originals, detections, detectedViews, deciding, queue, pending, views]);
+}
+
+/** Decides again which language each message is in, keeping the translations: a chat's language was set by hand. */
+export function forgetDecisions(): void {
+  restart([decided, deciding, queue, pending, views]);
 }

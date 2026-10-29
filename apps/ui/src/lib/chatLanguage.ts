@@ -1,5 +1,6 @@
 import { useEffect, useReducer } from "react";
-import { LANGUAGE_OPTIONS, type Language } from "./settings";
+import { groupChat } from "./chatMute";
+import { LANGUAGE_OPTIONS } from "./settings";
 import { getPrefix } from "./storage";
 
 /*
@@ -49,6 +50,9 @@ export function chatLanguageOf(
       : count.get(top)!.n >= GROUP_SHARE * counted.length ? top : null;
   return { language, by: language ? "detected" : null, languages };
 }
+
+/** Whether `chat` is a group's (`groupChat(id)`): its language is counted as a group's. */
+export const isGroupChat = (chat: string) => chat.startsWith(groupChat(""));
 
 /** Sent on this page when a chat's language is set or cleared (another page of the app sees `storage`). */
 export const CHAT_LANGUAGE_EVENT = "chat-language-updated";

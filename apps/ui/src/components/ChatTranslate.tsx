@@ -1,9 +1,12 @@
-import type { RefObject } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
+import { isGroupChat } from "../lib/chatLanguage";
 import { TRANSLATE_CHOICES, setChatTranslate, useChatTranslate, type ChatTranslateChoice } from "../lib/chatTranslate";
+import { chatLanguageNow, useChatDetections } from "../lib/translateReceived";
 import { translateOffered } from "../lib/translateSettings";
-import { Menu, MenuItem } from "./Menu";
+import { ChatLanguageMenu, ChatLanguageMenuItem } from "./ChatLanguage";
+import { Menu, MenuItem, MenuSeparator } from "./Menu";
 import { useTranslateDownload } from "../hooks/useTranslateDownload";
 
 /*
@@ -40,18 +43,31 @@ export function TranslateMenuItem({ chat, onChoose }: { chat: string; onChoose()
 type TranslateMenuProps = { chat: string; open: boolean; onClose(): void; anchorRef: RefObject<HTMLElement | null> };
 
 /**
- * The three choices, the chat's own ticked. Choosing one sets it and closes the sheet; On while the Settings switch is
- * off asks for the models it needs, as the switch does. The question outlives the sheet.
+ * The three choices, the chat's own ticked, and the chat's language with Change (components/ChatLanguage.tsx).
+ * Choosing one sets it and closes the sheet. On asks for the models reading the chat's language takes; with no
+ * language known yet, it asks as the Settings switch does, and only while the switch is off. The question and the
+ * languages outlive the sheet.
  */
 export function TranslateMenu(props: TranslateMenuProps) {
+  const { chat, anchorRef } = props;
   const { settings } = useSettings();
   const { ask, question } = useTranslateDownload();
+  const [languages, setLanguages] = useState(false);
+  const detected = useChatDetections(chat);
   if (!translateOffered()) return null;
-  const chosen = (choice: ChatTranslateChoice) => { if (choice === "on" && !settings.translateMessages) void ask(settings.language); };
-  return <>{props.open && <OpenTranslateMenu {...props} onChosen={chosen} />}{question}</>;
+  const chosen = (choice: ChatTranslateChoice) => {
+    const { language } = chatLanguageNow(chat);
+    if (choice === "on" && (language || !settings.translateMessages)) void ask(settings.language, language);
+  };
+  const language = { chat, detected, group: isGroupChat(chat) };
+  return <>
+    {props.open && <OpenTranslateMenu {...props} onChosen={chosen} language={<ChatLanguageMenuItem {...language} onChoose={() => { props.onClose(); setLanguages(true); }} />} />}
+    <ChatLanguageMenu {...language} open={languages} onClose={() => setLanguages(false)} anchorRef={anchorRef} />
+    {question}
+  </>;
 }
 
-function OpenTranslateMenu({ chat, open, onClose, anchorRef, onChosen }: TranslateMenuProps & { onChosen(choice: ChatTranslateChoice): void }) {
+function OpenTranslateMenu({ chat, open, onClose, anchorRef, onChosen, language }: TranslateMenuProps & { onChosen(choice: ChatTranslateChoice): void; language: ReactNode }) {
   const { t } = useI18n();
   const choice = useChatTranslate(chat);
   const choiceText = useChoiceText();
@@ -69,6 +85,8 @@ function OpenTranslateMenu({ chat, open, onClose, anchorRef, onChosen }: Transla
           {choiceText(each)}
         </MenuItem>
       ))}
+      <MenuSeparator />
+      {language}
     </Menu>
   );
 }

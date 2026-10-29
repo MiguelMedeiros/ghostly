@@ -1,14 +1,15 @@
 import type { RefObject } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { chatLanguageOf, languageChoices, languageName, setChatLanguage, useChatLanguage, type ChatLanguage } from "../lib/chatLanguage";
-import { translateEnabled } from "../lib/translateFlag";
+import { forgetDecisions } from "../lib/translateReceived";
+import { translateOffered } from "../lib/translateSettings";
 import { Menu, MenuItem, MenuSeparator } from "./Menu";
 
 /*
  * A chat's language (apps/ui/src/lib/chatLanguage.ts) in the chat's Translation sheet: the row that names it, "Language
  * of this chat: Italian (detected) · Change", and the languages Change offers. `chat` is a session id, or
  * `groupChat(id)` for a group; `detected` the confident language of each of the others' messages, oldest first.
- * Nothing shows while the build has no translation (lib/translateFlag.ts).
+ * Only where Settings offers translation (lib/translateSettings.ts), as the sheet.
  */
 
 type ChatLanguageProps = { chat: string; detected: readonly (string | null | undefined)[]; group: boolean };
@@ -36,7 +37,7 @@ export function ChatLanguageMenuItem({ chat, detected, group, onChoose }: ChatLa
   const { t } = useI18n();
   const current = useChatLanguage(chat, detected, group);
   const text = useLanguageText();
-  if (!translateEnabled()) return null;
+  if (!translateOffered()) return null;
   return (
     <MenuItem testId="chat-language-open" icon={<LanguageIcon />} hint={`${text(current, group)} · ${t("chatLanguage.change")}`} onClick={onChoose}>
       {t("chatLanguage.title")}
@@ -53,14 +54,15 @@ type ChatLanguageMenuProps = ChatLanguageProps & {
  * chat's own languages first, then the app's.
  */
 export function ChatLanguageMenu(props: ChatLanguageMenuProps) {
-  return props.open && translateEnabled() ? <OpenChatLanguageMenu {...props} /> : null;
+  return props.open && translateOffered() ? <OpenChatLanguageMenu {...props} /> : null;
 }
 
 function OpenChatLanguageMenu({ chat, detected, group, open, onClose, anchorRef, align, portal }: ChatLanguageMenuProps) {
   const { t, language: app } = useI18n();
   const current = useChatLanguage(chat, detected, group);
   const text = useLanguageText();
-  const choose = (language: string | null) => { setChatLanguage(chat, language); onClose(); };
+  // A short message on screen is read in the chat's language: what it is in is decided again.
+  const choose = (language: string | null) => { setChatLanguage(chat, language); forgetDecisions(); onClose(); };
   return (
     <Menu testId="chat-language-menu" open={open} onClose={onClose} anchorRef={anchorRef} align={align} portal={portal} focusFirst label={t("chatLanguage.title")}>
       <div className="px-3 pb-1 pt-1.5 text-xs text-text-muted">

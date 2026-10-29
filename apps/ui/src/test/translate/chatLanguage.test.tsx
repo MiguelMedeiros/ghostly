@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { useRef, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatLanguageMenu, ChatLanguageMenuItem } from "../../components/ChatLanguage";
 import {
   GROUP_SHARE, GROUP_WINDOW, chatLanguageOf, forgetChatLanguage, languageChoices, languageName, languageSetByHand, setChatLanguage,
@@ -130,6 +130,10 @@ function Sheet({ chat, detected, group = false }: { chat: string; detected: read
 }
 
 describe("the sheet's Change row", () => {
+  // Desktop, where Settings offers translation (the web app has no sheet: translateWiring / chatLanguageWiring tests).
+  beforeEach(() => { (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {}; });
+  afterEach(() => { delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__; });
+
   it("shows nothing while the build has no translation", () => {
     const { container } = renderApp(<Sheet chat="s1" detected={["it"]} />);
     expect(container.textContent).toBe("");

@@ -25,6 +25,16 @@ export function firstPairs(language: Language): { from: string; to: string; pair
   return language === "en" ? null : { from: language, to: "en", pairs: [`${language}-en`, `en-${language}`] };
 }
 
+/**
+ * What reading a chat in `from` takes in an app in `to`: the pinned pair straight between them, or both legs through
+ * English when there is none (docs/AUTO-TRANSLATE.md § Languages). Nothing when they are the same.
+ */
+export function readingPairs(from: string, to: Language, pinned: readonly string[]): string[] {
+  if (from === to) return [];
+  const straight = `${from}-${to}`;
+  return from === "en" || to === "en" || pinned.includes(straight) ? [straight] : [`${from}-en`, `en-${to}`];
+}
+
 /** One downloaded pair as Settings lists it: "Portuguese → English", "37 MB". */
 export interface PairLine {
   pair: string;
