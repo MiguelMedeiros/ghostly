@@ -132,6 +132,21 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     for (const node of kept) expect(node).toHaveClass("shrink-0");
   });
 
+  it("in pt on a 320 px phone, the words that fill the line stop short of its end: some of the name shows, nothing runs under the buttons", async () => {
+    windowIs(true);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />, { language: "pt" });
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { serving: true }));
+    const line = within(screen.getByTestId("mini-app")).getByTestId("mini-app-with");
+    expect(line).toHaveTextContent("compartilhando um arquivo com Ana");
+    // The line clips: its words, cut if they must, leave 4ch of it to the name.
+    expect(line).toHaveClass("overflow-hidden");
+    const name = within(line).getByTestId("mini-app-with-name");
+    const words = [...line.children].filter((node) => node !== name);
+    for (const node of words) expect(node).toHaveClass("max-w-[calc(100%-4ch)]", "overflow-hidden", "text-ellipsis", "whitespace-pre");
+  });
+
   it("has the chat's look in its header: the app, with the contact, and the chat's connection", async () => {
     windowIs(false);
     panel();
