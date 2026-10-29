@@ -72,10 +72,11 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
       else onText(text.trim());
     } finally { if (current === generation.current) setBusy(false); }
   };
-  const image = async (file?: File) => {
+  // `weighed`: a picture the app read from the clipboard, already checked there (`platformPastedImage`).
+  const image = async (file?: File, weighed = false) => {
     if (!file) return;
     stop(); setError("");
-    if (file.size > QR_IMAGE_MAX) { setError(t("join.imageSize")); return; }
+    if (!weighed && file.size > QR_IMAGE_MAX) { setError(t("join.imageSize")); return; }
     setBusy(true);
     const current = generation.current;
     try {
@@ -102,11 +103,12 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
     reading.then((found) => {
       if (!ended()) return;
       if (found === "tooLarge") setError(t("join.imageSize"));
-      else if (found) void image(found);
+      else if (found === "tooManyPixels") setError(t("join.pastedTooLarge"));
+      else if (found) void image(found, true);
       // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
       else if (named) setError(t("join.imageFailed"));
     }, (cause: unknown) => {
-      if (ended()) setError(t(rawError(cause) === "That picture is too large to paste" ? "join.imageSize" : "join.imageFailed"));
+      if (ended()) setError(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed"));
     });
   };
 

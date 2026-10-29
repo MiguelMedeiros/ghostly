@@ -20,6 +20,7 @@
   "own": "This is your own invite. Share it with a contact; they join with it.",
   "paste": "Paste from clipboard",
   "pasteScreenshot": "Or paste a screenshot of the QR code.",
+  "pastedTooLarge": "That picture is too large to read. Paste a smaller one, or a screenshot of the QR.",
   "placeholder": "Paste invite…",
   "qrReaderNotLoaded": "The QR reader did not load. Check your connection, then try again.",
   "qrReaderReload": "The QR reader still did not load. Reload Ghostly to load it.",
