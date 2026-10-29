@@ -429,11 +429,15 @@ export class DhtDelivery {
     if (ratchet) return { records: [{ label, value: "A".repeat(sealedBytes(padded)), ttl: ENVELOPE_TTL }, ...hint], plaintext: full };
     return { records: [{ label, value: encrypt(full, recipient ? this.sealedKey(recipient) : this.key), ttl: ENVELOPE_TTL }, ...hint] };
   }
-  /** The records to publish for `body`: a ratcheted one sealed now, its state saved first (seal, save, send). */
-  private async sealed(body: Body, records: GhostRecord[]): Promise<GhostRecord[]> {
+  /**
+   * The records to publish: a ratcheted one sealed now, its state saved first (seal, save, send), from the plaintext
+   * the envelope was measured with.
+   */
+  private async sealed(envelope: { records: GhostRecord[]; plaintext?: string }): Promise<GhostRecord[]> {
+    const { records, plaintext } = envelope;
     if (records[0]?.label !== "_dr") return records;
-    const { plaintext } = this.envelope(body);
-    const sealed = await this.options.ratchet!.box.lock(tx => tx.seal("floor", utf8Encode(plaintext!)));
+    if (plaintext === undefined) throw new Error("A ratcheted envelope without its plaintext");
+    const sealed = await this.options.ratchet!.box.lock(tx => tx.seal("floor", utf8Encode(plaintext)));
     return [{ ...records[0], value: toBase64(sealed) }, ...records.slice(1)];
   }
   async start(): Promise<void> {
@@ -690,17 +694,17 @@ export class DhtDelivery {
    * The envelope with as many of this side's pending reactions as fit, oldest first: the packet's budget and what a
    * reader reads (`MAX_ENVELOPE_PLAINTEXT`) both bound it. The contact confirms up to the newest it carried.
    */
-  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, edit?: DhtEdit, forwarded?: number, file?: DhtFileElement): { body: Body; records: GhostRecord[]; reactions: number } {
+  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, edit?: DhtEdit, forwarded?: number, file?: DhtFileElement): { body: Body; records: GhostRecord[]; plaintext?: string; reactions: number } {
     const pending = (this.options.reactions?.() ?? []).slice(0, REACTION_LIMITS.dht);
     for (let count = pending.length; count > 0; count--) {
       const body = this.body(sequence, issued, expires, message, receipt, reply, pending.slice(0, count), edit, forwarded, file);
       try {
-        const records = this.records(body);
-        if (utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT) return { body, records, reactions: count };
+        const envelope = this.envelope(body);
+        if (utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT) return { body, ...envelope, reactions: count };
       } catch { /* one fewer */ }
     }
     const body = this.body(sequence, issued, expires, message, receipt, reply, [], edit, forwarded, file);
-    return { body, records: this.records(body), reactions: 0 };
+    return { body, ...this.envelope(body), reactions: 0 };
   }
   private async publish(force = false): Promise<void> {
     const now = Date.now();
@@ -736,7 +740,7 @@ export class DhtDelivery {
       receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1, next: now + backoff(receipt.attempts) } : this.state.receipt });
     this.sequence = sequence;
     // Ratcheted, the envelope is sealed only now, with the sequence saved: a key is never taken for one that does not go.
-    const records = await this.sealed(body, fittedEnvelope.records);
+    const records = await this.sealed(fittedEnvelope);
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
@@ -848,7 +852,8 @@ export class DhtDelivery {
     if (digest === this.state.lastDr) return "old";
     const ratchet = this.options.ratchet;
     if (!ratchet) return "none";
-    // Under the chat's one lock: opened, stored, and only then the ratchet's state saved.
+    // Under the chat's one lock: opened, stored, and only then the ratchet's state saved. What this hands the content to
+    // (`message`, `reaction`, `receipt`) must not wait on the same lock (a held item sealed or opened): it would wait forever.
     return ratchet.box.lock(async tx => {
       let commit: ((order?: number) => Promise<void>) | undefined;
       const opened = this.open(packet, box, sealed => { const o = tx.open("floor", sealed); commit = o?.commit; return o?.plaintext ?? null; });

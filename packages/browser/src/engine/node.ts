@@ -4742,12 +4742,14 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The chat's connection story, for paired chats (not group edges). */
   /**
-   * The chat's ratchet (WISP 4xx), made once per chat: its keys are read when used, so a contact pinned later is the one
-   * it seals to. Saved in the chat's row as `ratchetState`, which no backup or handoff takes along.
+   * The chat's ratchet (WISP 4xx), made once per chat: its keys are read from the chat's row when used (each start of
+   * the link has credentials of its own), so a contact pinned later is the one it seals to. Saved in the row as
+   * `ratchetState`, which no backup or handoff takes along.
    */
   private ratchetOf(linkId: string, live: LiveLink, credentials: PairingCredentials): RatchetBox {
     return live.ratchet ??= new RatchetBox(() => ({
-      seed: fromBase64Url(credentials.seedB64), self: identityFromSeedB64(credentials.seedB64).pubKeyZ32, peer: credentials.peerKey!,
+      seed: fromBase64Url(live.stored.participationSeed ?? credentials.seedB64), self: identityFromSeedB64(live.stored.participationSeed ?? credentials.seedB64).pubKeyZ32,
+      peer: live.stored.pairedPeerKey ?? credentials.peerKey!,
       rendezvous: [identityFromSeedB64(live.stored.seedB64).pubKeyZ32, live.stored.peerPubKeyZ32], secret: fromBase64Url(live.stored.encKeyB64),
     }), live.stored.ratchetState ?? emptyRatchetState(), async state => {
       await db.patchLink(linkId, { ratchetState: state });

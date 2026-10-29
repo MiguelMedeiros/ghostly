@@ -1148,6 +1148,33 @@ describe("messages kept in rows.db", () => {
     expect(await all(elsewhere.factory)).toEqual(values);
   });
 
+  it("a backup's store carries no chat's ratchet (WISP 4xx), and keeps the rest of the chat", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = store.factory.open("ghostly", 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore("links", { keyPath: "id" }); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await tx(d, ["links"], (s) => { s.links.put({ id: "chat", seedB64: "seed", ratchetState: { v: 1, skipped: [{ k: "a kept key" }] } }); });
+    d.close();
+    const exported = join(folder(), "store.bin");
+    await store.exportSnapshot(exported);
+    expect(readFileSync(exported).toString("latin1")).not.toContain("a kept key");
+    const copy = folder();
+    cpSync(exported, join(copy, "snapshot.bin"));
+    const elsewhere = await openPersistentIndexedDb(copy, { rowsOnDisk: () => false });
+    opened.push(elsewhere);
+    const links = await new Promise<unknown[]>((resolve, reject) => {
+      const request = elsewhere.factory.open("ghostly");
+      request.onsuccess = () => { const all = request.result.transaction("links").objectStore("links").getAll(); all.onsuccess = () => resolve(all.result); all.onerror = () => reject(all.error); };
+      request.onerror = () => reject(request.error);
+    });
+    expect(links).toEqual([{ id: "chat", seedB64: "seed" }]);
+  });
+
   it("moves a profile of format 1 with a journal after it (killed): the journal's overwrites and deletes reach rows.db and its indexes", async () => {
     const dir = folder();
     const old = await openPersistentIndexedDb(dir, { rowsOnDisk: () => false });
