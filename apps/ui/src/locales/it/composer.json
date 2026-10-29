@@ -95,5 +95,7 @@
     "sendTranslation": "Invia traduzione",
     "stale": "Il messaggio è cambiato",
     "working": "Traduzione in corso…"
-  }
+  },
+  "videoConverting": "Conversione di {{name}} in MP4… {{percent}}",
+  "videoSentAsIs": "{{name}} è stato inviato così com'è: questo dispositivo non riesce a convertirlo. Alcuni telefoni e computer potrebbero solo scaricarlo."
 }

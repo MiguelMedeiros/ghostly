@@ -37,6 +37,7 @@ import { TranslatePreview } from "./composer/TranslatePreview";
 import { translationStale, useDraftTranslation, type ComposerTranslation, type DraftTranslationFailure } from "../hooks/useDraftTranslation";
 import { carryMentions, languageName } from "../lib/translateDraft";
 import { translateEnabled } from "../lib/translateFlag";
+import { isConvertibleVideo, prepareVideo, type PreparedVideo } from "../lib/videoSend";
 
 interface MessageInputProps {
   draftId?: string;
@@ -212,6 +213,9 @@ export function MessageInput({
    */
   const [preparing, setPreparing] = useState<File[]>([]);
   const preparingKeys = useRef(new Set<string>());
+  /** A video being converted to H.264 MP4 before it goes (`prepareVideo`): how far, and its Cancel. */
+  const [converting, setConverting] = useState<{ file: File; progress?: number } | null>(null);
+  const conversion = useRef<AbortController | null>(null);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -595,11 +599,29 @@ export function MessageInput({
     try {
       for (const file of fresh) {
         setPreparing((was) => [...was, file]);
-        const err = await onSendFile(file).finally(() => {
+        const done = () => {
           preparingKeys.current.delete(fileKey(file));
           if (mounted.current) setPreparing((was) => was.filter((other) => other !== file));
-        });
+        };
+        // A video the receiver may not play goes as H.264 MP4; Cancel while it converts sends neither it nor the rest.
+        let prepared: PreparedVideo = { file };
+        if (isConvertibleVideo(file)) {
+          const stopper = new AbortController();
+          conversion.current = stopper;
+          setConverting({ file });
+          try {
+            prepared = await prepareVideo(file, { signal: stopper.signal, onProgress: (progress) => { if (mounted.current && !stopper.signal.aborted) setConverting({ file, progress }); } });
+          } catch {
+            done();
+            return false;
+          } finally {
+            if (conversion.current === stopper) conversion.current = null;
+            if (mounted.current) setConverting(null);
+          }
+        }
+        const err = await onSendFile(prepared.file).finally(done);
         if (err) { showToast(err); return false; }
+        if (prepared.asIs) showToast(t("composer.videoSentAsIs", { name: file.name }));
       }
       return true;
     } finally {
@@ -861,11 +883,24 @@ export function MessageInput({
       {t("composer.pasteReading")}
     </p>
   );
+  const convertingNow = converting && converting.file === preparing[0] ? converting : null;
   const preparingLine = preparing.length > 0 && !locked && (
-    <p role="status" data-testid="file-preparing" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
-      <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
-      <span className="min-w-0 truncate">{t("composer.filePreparing", { name: preparing[0]!.name })}</span>
-    </p>
+    <div className="flex items-center gap-3 animate-fade-in">
+      <p role="status" data-testid="file-preparing" className="m-0 flex min-w-0 items-center gap-2 text-[13px] text-text-secondary">
+        <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+        <span className="min-w-0 truncate">
+          {convertingNow?.progress !== undefined
+            ? t("composer.videoConverting", { name: preparing[0]!.name, percent: new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }).format(convertingNow.progress) })
+            : t("composer.filePreparing", { name: preparing[0]!.name })}
+        </span>
+      </p>
+      {convertingNow && (
+        <button type="button" data-testid="video-convert-cancel" onClick={() => conversion.current?.abort()}
+          className="shrink-0 cursor-pointer border-none bg-transparent p-0 text-[13px] font-medium text-accent hover:underline">
+          {t("common.cancel")}
+        </button>
+      )}
+    </div>
   );
 
   return (

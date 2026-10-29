@@ -95,5 +95,7 @@
     "sendTranslation": "翻訳を送信",
     "stale": "メッセージが変更されました",
     "working": "翻訳中…"
-  }
+  },
+  "videoConverting": "{{name}} を MP4 に変換しています… {{percent}}",
+  "videoSentAsIs": "{{name}} をそのまま送りました。このデバイスでは変換できません。一部のスマートフォンやパソコンではダウンロードしかできない場合があります。"
 }
