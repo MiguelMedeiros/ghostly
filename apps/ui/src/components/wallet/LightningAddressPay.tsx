@@ -146,9 +146,10 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         <span className="text-xs opacity-70 shrink-0">{unit}</span>
       </label>
       {amountField.hint && <p role="alert" className="text-xs m-0 text-danger-ink" data-testid="amount-unclear">{amountField.hint}</p>}
-      {holds !== undefined && <p className={`${muted} flex flex-wrap items-center gap-2`} data-testid="lnurl-balance">
-        {t("wallet.send.balance", { amount: formatAmount(holds, t.language), unit })}
-        {!fixed && max !== undefined && max >= info.minSat && <button type="button" className="rounded-md px-2 py-0.5 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => setAmount(String(max))}>{t("wallet.send.max")}</button>}
+      {/* The line's dim is its text's only: Max keeps full-strength ink and the panel's phone-sized target. */}
+      {holds !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} m-0 flex flex-wrap items-center gap-2`} data-testid="lnurl-balance">
+        <span className="opacity-70">{t("wallet.send.balance", { amount: formatAmount(holds, t.language), unit })}</span>
+        {!fixed && max !== undefined && max >= info.minSat && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => setAmount(String(max))}>{t("wallet.send.max")}</button>}
       </p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
