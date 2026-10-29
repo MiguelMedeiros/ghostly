@@ -226,15 +226,15 @@ export function verifyAppRevocation(revocation: SignedAppRevocation, checked?: A
 
 /**
  * Reads `ghostly-revoke.json`: canonical bytes holding a list of signed revocations. One that does not verify refuses the
- * file, as a store index's `revoked` does.
+ * file, as a store index's `revoked` does. With `checked`, a revocation it holds is not checked again.
  */
-export function readAppRevocations(bytes: Uint8Array): { ok: true; revocations: SignedAppRevocation[] } | { ok: false; reason: CanonicalJsonRefusal | AppRevocationRefusal; detail?: string } {
+export function readAppRevocations(bytes: Uint8Array, checked?: AppRevocationsChecked): { ok: true; revocations: SignedAppRevocation[] } | { ok: false; reason: CanonicalJsonRefusal | AppRevocationRefusal; detail?: string } {
   const read = readCanonicalJson(bytes);
   if (!read.ok) return read;
   if (!Array.isArray(read.value) || read.value.length > APP_STATEMENT_LIMITS.revocations) return { ok: false, reason: "bad-revocation", detail: "Not a list of at most 4096 revocations" };
   const revocations: SignedAppRevocation[] = [];
   for (const entry of read.value) {
-    const one = readAppRevocation(entry);
+    const one = readAppRevocation(entry, checked);
     if (!one.ok) return one;
     revocations.push(one.revocation);
   }
