@@ -55,6 +55,11 @@ export interface AppSettings {
    */
   linkPreviews: boolean;
   /**
+   * Received messages in another language are shown translated into `language`, on this device (docs/AUTO-TRANSLATE.md):
+   * the default for chats that have not chosen. Off until turned on; only a `VITE_TRANSLATE` Desktop build offers it.
+   */
+  translateMessages: boolean;
+  /**
    * Checking this device's other unlocked profiles for new messages (WISP 04 § Checking other profiles): `enabled`
    * absent follows the platform (on for Desktop, off for the web and the extension); `notify` shows a system notice.
    */
@@ -88,6 +93,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   chatListDensity: "compact",
   checkForUpdates: true,
   linkPreviews: true,
+  translateMessages: false,
 };
 
 const LANGUAGES: readonly Language[] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
@@ -139,6 +145,7 @@ export function loadSettings(): AppSettings {
       defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
       linkPreviews: parsed.linkPreviews !== false,
+      translateMessages: parsed.translateMessages === true,
     };
   } catch {
     return { ...DEFAULT_SETTINGS, language: browserLanguage() };

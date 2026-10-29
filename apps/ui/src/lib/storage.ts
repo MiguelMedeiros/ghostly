@@ -500,6 +500,7 @@ export function deleteSession(sessionId: string): void {
     `${getPrefix()}pin_${sessionId}`,
     `${getPrefix()}mute_${sessionId}`,
     `${getPrefix()}mute_mentions_${sessionId}`,
+    `${getPrefix()}translate_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,

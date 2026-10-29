@@ -49,10 +49,19 @@ describe("a pair", () => {
     for (const bad of ["pten", "pt-en-es", "pt-pt", "PT-en", "pt-", "-en", "../x-en", "pt-en/..", "p-en", 7, null, undefined]) expect(parsePair(bad), String(bad)).toBeNull();
   });
 
-  it("reads Mozilla's file names: one shared vocabulary, or one per side for Chinese, Japanese and Korean", () => {
+  it("reads Mozilla's file names: one shared vocabulary, or one per side into Chinese, Japanese and Korean", () => {
     expect(modelFiles("pt", "en")).toEqual({ model: "model.pten.intgemm.alphas.bin", srcVocab: "vocab.pten.spm", dstVocab: "vocab.pten.spm" });
     expect(modelFiles("en", "ja")).toEqual({ model: "model.enja.intgemm.alphas.bin", srcVocab: "srcvocab.enja.spm", dstVocab: "trgvocab.enja.spm" });
-    expect(modelFiles("zh", "en")).toEqual({ model: "model.zhen.intgemm.alphas.bin", srcVocab: "srcvocab.zhen.spm", dstVocab: "trgvocab.zhen.spm" });
+    expect(modelFiles("zh", "en")).toEqual({ model: "model.zhen.intgemm.alphas.bin", srcVocab: "vocab.zhen.spm", dstVocab: "vocab.zhen.spm" });
+  });
+
+  it("names exactly the files the Desktop app downloads for every pinned pair", () => {
+    const pinned: Record<string, { name: string }[]> = JSON.parse(readFileSync(join(SOURCE, "../../apps/desktop/src/translate_models.json"), "utf8"));
+    for (const [pair, files] of Object.entries(pinned)) {
+      const { from, to } = parsePair(pair)!;
+      const named = new Set(Object.values(modelFiles(from, to)));
+      expect([...named].sort(), pair).toEqual(files.map((f) => f.name).sort());
+    }
   });
 
   it("with English on one side is one model in its folder; with English on neither, two chained through English", () => {

@@ -424,6 +424,12 @@
     "sync": "المزامنة"
   },
   "today": "اليوم",
+  "translated": {
+    "from": "مترجمة من {{language}}",
+    "showOriginal": "عرض الأصل",
+    "showTranslation": "عرض الترجمة",
+    "translate": "ترجمة"
+  },
   "typeMessage": "اكتب رسالة...",
   "typing": "يكتب…",
   "typingRecording": "يسجل صوتًا…",

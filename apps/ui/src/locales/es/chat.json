@@ -416,6 +416,12 @@
     "sync": "Sincronización"
   },
   "today": "Hoy",
+  "translated": {
+    "from": "Traducido del {{language}}",
+    "showOriginal": "Ver original",
+    "showTranslation": "Ver traducción",
+    "translate": "Traducir"
+  },
   "typeMessage": "Escribe un mensaje...",
   "typing": "escribiendo…",
   "typingRecording": "grabando audio…",

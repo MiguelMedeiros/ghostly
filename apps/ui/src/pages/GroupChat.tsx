@@ -26,6 +26,7 @@ import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymen
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
+import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
 import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
 import { groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
@@ -329,6 +330,7 @@ export function GroupChat() {
   if (viewingPicture && !group?.picture) setViewingPicture(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
+  const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -663,6 +665,7 @@ export function GroupChat() {
               {/* Not on a group not joined: it has no member list yet, and nothing comes from it to mute. */}
               {!invited && <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>}
               {!invited && <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />}
+              {!invited && <TranslateMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowTranslate(true); }} />}
               {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
               {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
               {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
@@ -671,6 +674,7 @@ export function GroupChat() {
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
             </Menu>
             <MuteMenu chat={groupChat(group.id)} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} mentions />
+            <TranslateMenu chat={groupChat(group.id)} open={showTranslate} onClose={() => setShowTranslate(false)} anchorRef={menuRef} />
             <ChatFolderMenu chat={groupChat(group.id)} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
           </div>
         </div>
