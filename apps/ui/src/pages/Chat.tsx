@@ -14,7 +14,7 @@ import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
-import { takeOpenRequest, useChatApp, useOpenRequested } from "../lib/apps/running";
+import { takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
 import { openAppInChat } from "../lib/apps/installed";
 import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
@@ -482,7 +482,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx; a full-screen
   // app always is).
   const appHere = paired && appsOn && chatLink?.id ? chatLink.id : undefined;
-  const chatApp = useChatApp(appHere);
+  const appCovers = useChatAppCovers(appHere);
   // An app the person opened here from the Apps page (its chat picker): opened once this chat shows, as + → Apps opens
   // one. What went wrong shows in + → Apps.
   const [appsError, setAppsError] = useState<string | null>(null);
@@ -765,7 +765,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
-    <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
+    <div data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
       {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
       {webrtc.noAnswer && (
