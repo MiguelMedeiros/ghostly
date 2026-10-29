@@ -6,6 +6,7 @@ import type { EngineState, GroupJoinStage, GroupPayNote, GroupView, StoredMessag
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
+import { DaySections } from "../components/chat/DaySections";
 import { leftOn, leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
@@ -37,6 +38,7 @@ import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
+import { rowDays } from "../lib/chatDays";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatNamesForPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
@@ -413,6 +415,8 @@ export function GroupChat() {
   // A long group has a window of its rows in the page, never the whole history (useRowWindow, see Chat.tsx).
   const rowIds = useMemo(() => messages.map(m => m.id), [messages]);
   const rowWindow = useRowWindow(rowIds, groupId ?? "", { opensOn: leftOn(groupId ?? ""), heads: stackHeads });
+  // The day each row goes under, over the whole history (see Chat.tsx).
+  const days = useMemo(() => rowDays(messages.map(m => m.timestamp)), [messages]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
   // Always every message, in the page or not; a new list when the window moves (see Chat.tsx).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
@@ -739,7 +743,7 @@ export function GroupChat() {
           {reading && <div data-testid="group-reading" className="flex justify-center py-6 text-text-muted"><Spinner size={20} /></div>}
           {(() => {
             const drawn = messages.slice(rowWindow.from, rowWindow.to);
-            return drawn.map(m => {
+            return <DaySections rows={drawn} days={days} from={rowWindow.from} draw={m => {
               if (stackHeads.has(m.id)) return null;
               const run = stacks.get(m.id);
               if (!run) return row(m);
@@ -748,7 +752,7 @@ export function GroupChat() {
                 cards={run.map(r => r.card as RoutineCard)} {...authorProps(m)}>
                 {run.map((r, i) => { const head = authors.get(m.id); return row(r, head && { ...head, first: false, last: i === run.length - 1 }); })}
               </RoutineStack>;
-            });
+            }} />;
           })()}
         </div>
       </div>
