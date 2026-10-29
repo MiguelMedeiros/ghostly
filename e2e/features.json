@@ -920,6 +920,7 @@
     "apps/ui/src/hooks/useVoiceRing.ts": ["calls.speaking"],
     "apps/ui/src/hooks/useWakeCall.ts": ["push.wake.call"],
     "apps/ui/src/hooks/useWakeLock.ts": ["calls.wake-lock"],
+    "apps/ui/src/hooks/useWakeOnReturn.ts": ["chat.paired.reconnect"],
     "apps/ui/src/hooks/useWebRTC.ts": ["calls.*"],
     "apps/ui/src/index.css": ["*"],
     "apps/ui/src/lib/amount.ts": ["app.i18n","wallet.*","payments.*","chats.list.rows"],
