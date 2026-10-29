@@ -293,8 +293,8 @@ export const FILE_METHODS: Record<string, Method> = {
 
   /**
    * Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), a voice message under the one
-   * Ghostly makes for it as the apps' Download does (`voiceDownloadName`, never the sender's), or to `path`. Never over
-   * a file unless `force`.
+   * Ghostly makes for it as the apps' Download does (`voiceDownloadName`, never the sender's; "<name> (2)" when taken),
+   * or to `path`. Never over a file unless `force`.
    */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
@@ -306,11 +306,17 @@ export const FILE_METHODS: Record<string, Method> = {
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, stored.metadata.timestamp) : stored.metadata.name));
-    const flags = bool(params, "force") ? "w" : "wx";
-    let out;
-    try { out = await open(target, flags, 0o600); } catch (error) {
+    const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, stored.metadata.timestamp) : stored.metadata.name));
+    const force = bool(params, "force");
+    // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
+    // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
+    // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
+    const free = !force && !str(params, "path") && !!stored.metadata.voice;
+    const ext = extname(named), stem = named.slice(0, named.length - ext.length);
+    let target = named, out;
+    for (let n = 2; !out; n += 1) try { out = await open(target, force ? "w" : "wx", 0o600); } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
+      if (free && code === "EEXIST" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
       if ((code === "EEXIST" || code === "EISDIR") && (await stat(target).catch(() => undefined))?.isDirectory()) throw new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
       if (code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
