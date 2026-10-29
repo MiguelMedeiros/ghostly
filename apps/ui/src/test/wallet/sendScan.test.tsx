@@ -132,6 +132,11 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     expect(await screen.findByTestId("lnurl-balance")).toHaveTextContent("Balance: 700 test sats");
     await user.click(screen.getByTestId("lnurl-max"));
     expect(screen.getByTestId("lnurl-amount")).toHaveValue("700");
+    // Max is a phone-sized target like the panel's other buttons, its label at full strength (the line's dim is the text's).
+    const maxButton = screen.getByTestId("lnurl-max");
+    expect(maxButton.className).toContain("max-md:min-h-11");
+    expect(maxButton.className).toContain("min-h-6");
+    for (let at: HTMLElement | null = maxButton; at; at = at.parentElement) expect(at.className).not.toMatch(/\bopacity-70\b/);
   });
 
   it("an invoice with no amount, and a QR that is no payment, are said plainly", async () => {
