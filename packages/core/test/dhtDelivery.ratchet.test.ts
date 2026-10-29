@@ -6,7 +6,7 @@ import { DhtDelivery, DHT_RATCHET_STOPPED, emptyDhtDeliveryState, type DhtDelive
 import { createRelayPayload, parseRelayPayload, type SignedPacket } from "../src/pkarr";
 import { emptyRatchetState, RatchetBox, ratchetOpen, type RatchetKeys, type RatchetState } from "../src/ratchet";
 import type { PairingCredentials } from "../src/pairedSession";
-// covers: chat.dht.delivery, chat.dht.ratchet
+// covers: chat.dht.delivery, chat.ratchet
 
 const ratchetKeys = (params: LinkParams, credentials: PairingCredentials): RatchetKeys => ({
   seed: fromBase64Url(credentials.seedB64), self: identityFromSeedB64(credentials.seedB64).pubKeyZ32, peer: credentials.peerKey!,
