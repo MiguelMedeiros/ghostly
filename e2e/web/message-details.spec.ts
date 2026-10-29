@@ -59,13 +59,16 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   await say(alice, "how did this travel?");
   await expect(chat(bob).getByText("how did this travel?")).toBeVisible();
   // A plain double click on the words selects a word, a triple click the line, as anywhere else: no details.
+  // The bubble settles first: until the receipt its mark changes (and its width with it), so the words move.
+  await expect(rowOf(alice, "how did this travel?").getByTestId("message-delivery")).toHaveAttribute("data-delivery", "delivered");
   const words = rowOf(alice, "how did this travel?").getByTestId("message-text");
   const selected = () => alice.page.evaluate(() => window.getSelection()?.toString().trim());
-  const box = (await words.boundingBox())!;
-  await alice.page.mouse.dblclick(box.x + 4, box.y + box.height / 2);
-  expect(await selected()).toBe("how");
-  await alice.page.mouse.click(box.x + 4, box.y + box.height / 2, { clickCount: 3 });
-  expect(await selected()).toBe("how did this travel?");
+  // On the first word, where the words are at the moment of the click (a locator's click waits for them to hold still).
+  const first = async () => ({ x: 4, y: (await words.boundingBox())!.height / 2 });
+  await words.dblclick({ position: await first() });
+  await expect.poll(selected).toBe("how");
+  await words.click({ position: await first(), clickCount: 3 });
+  await expect.poll(selected).toBe("how did this travel?");
   await expect(panel(alice.page)).toHaveCount(0);
   // Ctrl+double click (⌘ on a Mac) opens them.
   await words.dblclick({ modifiers: ["ControlOrMeta"] });
