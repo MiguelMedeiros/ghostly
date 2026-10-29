@@ -232,7 +232,10 @@ function unpacked() {
   expect(name).toBe(basename(archive));
   expect(sha256(readFileSync(archive))).toBe(pinned);
   const dir = mkdtempSync(join(tmpdir(), "ghostly-translation-runtime-"));
-  execFileSync("tar", ["-xzf", archive, "-C", dir]);
+  // The app runs Windows' own tar (System32 comes before PATH there). A job's bash puts Git's GNU tar first, which
+  // reads "D:\..." as a remote host and fails, so Windows names System32's.
+  const tar = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+  execFileSync(tar, ["-xzf", archive, "-C", dir]);
   return join(dir, basename(BUILT));
 }
 
