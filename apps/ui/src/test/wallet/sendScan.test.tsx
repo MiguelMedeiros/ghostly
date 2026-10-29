@@ -18,8 +18,8 @@ vi.mock("../../lib/qrReader", async (original) => ({
   ...await original<typeof import("../../lib/qrReader")>(),
   readQrImage: async () => qr.text,
   qrCamera: async () => { if (qr.camera) return qr.camera; throw new Error("NotAllowedError"); },
-  qrDecoder: async () => () => null,
-  scanQrFrames: () => {},
+  qrFrameReader: () => Object.assign(async () => null, { ready: Promise.resolve(), close: () => {} }),
+  scanQrFrames: async () => {},
 }));
 vi.mock("../../lib/clipboard", async (original) => ({
   ...await original<typeof import("../../lib/clipboard")>(),
