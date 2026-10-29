@@ -1294,8 +1294,10 @@ export class PaymentDesk {
     if(!this.host.getLink(linkId)?.supportsUsdtPayments||request?.target?.method!=='usdt'||request.linkId!==linkId||request.direction!=='out'||request.kind!=='request'||payment.amount.asset!==request.unit||payment.amount.value!==String(request.amount))return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.direction!=='in'||existing.linkId!==linkId||existing.requestId!==request.id))return;
+    // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
+    if(existing){if(request.state==='settled')this.host.getLink(linkId)?.sendPaymentResult({id:request.id,ok:true});return;}
     let txid:string;try{txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
-    if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid)||existing?.state==='settled')return;
+    if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid))return;
     if(this.repeatedReceipt(this.host.getLink(linkId),request,payment.id))return;
     // One transaction pays one request, however its hash is spelled.
     txid=txid.toLowerCase();
@@ -1357,10 +1359,12 @@ export class PaymentDesk {
     if(!link?.supportsArkPayments || !request?.target || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
+    // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
+    if(existing){if(request.state==="settled")link.sendPaymentResult({id:request.id,ok:true});return;}
     if(parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     let txid:string;try {txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if([...this.payments.values()].some(p=>p.txid===txid && (p.linkId!==linkId || (p.kind==="request" ? p.id!==request.id : p.requestId!==request.id))))return;
-    if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid) || existing?.state==="settled")return;
+    if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid))return;
     if(this.repeatedReceipt(link,request,payment.id))return;
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Ark — checking provider`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
