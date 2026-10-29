@@ -391,6 +391,27 @@ describe("GroupEdits on its own", () => {
       expect(sent.slice(3)).toEqual(messages.slice(2).map(m => m.id));
       edits.stop();
     });
+
+    it("a member who left the roster: what was kept of its edge goes, the others' stays; out of the group, all of it", async () => {
+      const members = [me, bob, carol], edges = new Map([[bob, {}], [carol, {}]]);
+      const edits = new GroupEdits({
+        ...rows(edited(0, 3)), changed: () => {}, send: async () => null,
+        membership: () => members.length ? { me, members: new Set(members), community: false } : undefined,
+        edge: (_g, member) => edges.get(member),
+      });
+      const inner = edits as unknown as { resentOn: Map<string, unknown>; heard: Map<string, unknown>; resendPace: Map<string, unknown> };
+      const kept = () => [inner.resentOn, inner.heard, inner.resendPace].map(map => [...map.keys()].sort());
+      await edits.resend("g1", bob);
+      await edits.resend("g1", carol);
+      expect(kept()).toEqual(Array(3).fill([`g1\n${bob}`, `g1\n${carol}`].sort()));
+      members.splice(members.indexOf(carol), 1);
+      edits.membersChanged("g1");
+      expect(kept()).toEqual(Array(3).fill([`g1\n${bob}`]));
+      members.length = 0;
+      edits.membersChanged("g1");
+      expect(kept()).toEqual(Array(3).fill([]));
+      edits.stop();
+    });
   });
 
   it("a private group: the author removes its card and every member forgets it; handed on again, it stays gone", async () => {
