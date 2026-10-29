@@ -243,6 +243,13 @@ export const HANDLED_WAIT_MS = 10_000;
  * away (a phone that put it to sleep): the chat resumes as after a restart, not as a session the contact closed.
  */
 export const WAKE_LOST_MS = 10_000;
+/**
+ * Back in front after an absence, an answer this side made to the contact's offer while it was away, still connecting
+ * this long after the wake, is let go and the chat dials as a resume. A path that exists connects within a second or
+ * two; on a phone the app had answered from the background, the connection sat there until ICE gave up (15 s), and only
+ * then did the resume dial: a chat opened on return went live 21 s after the tap (Android emulator, 2026-10-29).
+ */
+export const WAKE_ANSWER_GRACE_MS = 3_000;
 
 export interface IncomingMessage {
   id?: string;
@@ -4743,6 +4750,12 @@ export class GhostLink {
       setTimeout(() => this.maybeKnockAnswering(epoch), 0);
       return;
     }
+    // Or its answer went out while it was away, and connects still: given a moment, then let go for the resume's dial.
+    if (this.dataLink.state === "connecting" && this.answeringEpoch === this.connectionEpoch) {
+      const epoch = this.connectionEpoch;
+      setTimeout(() => this.dropAnswerAfterWake(epoch), WAKE_ANSWER_GRACE_MS);
+      return;
+    }
     // Or it dialled at that close: its offer is out already, and becomes the resume's, so its knock goes now.
     const offered = this.offered;
     if (!offered || offered.resume || offered.epoch !== this.connectionEpoch || !this.offerOut && !this.dialing) return;
@@ -4752,6 +4765,14 @@ export class GhostLink {
     offered.woke = true;
     // Still gathering: the race is scheduled once it is out, and knocks then (`scheduleRace`).
     if (!this.dialing) setTimeout(() => this.maybeKnockEarly(offered.epoch), 0);
+  }
+
+  /** The answer of `epoch`, made while the app was away, has not connected since the wake: the resume dials instead. */
+  private dropAnswerAfterWake(epoch: number): void {
+    if (epoch !== this.connectionEpoch || this.channel || this.stopped || this.resuming !== "webrtc/1") return;
+    if (this.dataLink.state !== "connecting" || this.answeringEpoch !== epoch || this.offered?.epoch === epoch) return;
+    traceLink(this.myPubKeyZ32, "wake-answer-dropped", {});
+    this.dataLink.abandon();
   }
 
   /**
