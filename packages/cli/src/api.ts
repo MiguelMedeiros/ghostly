@@ -693,8 +693,9 @@ const METHODS: Record<string, Method> = {
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     const args = raw as Params | undefined;
     // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is not in 1.5: no app shows it, and the Desktop's
-    // own transports do not follow it yet. Nobody turns it on through here either, until the release that shows it.
-    if (method === "updateSettings" && args?.settings && typeof args.settings === "object" && "relayOnly" in args.settings) {
+    // own transports do not follow it yet. Nobody turns it on through here either, until the release that shows it;
+    // turning it off stays possible, for a profile an older CLI (whose engine took any key) turned it on in.
+    if (method === "updateSettings" && args?.settings && typeof args.settings === "object" && "relayOnly" in args.settings && (args.settings as Params).relayOnly !== false) {
       throw new CliError("bad_request", "relayOnly is not a setting yet: Hide my IP from contacts comes in a later release");
     }
     // Real money moves only on an explicit confirmation of this call (WISP 1100 § Mainnet).
