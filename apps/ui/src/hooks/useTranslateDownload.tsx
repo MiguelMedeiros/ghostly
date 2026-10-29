@@ -29,6 +29,9 @@ export function useTranslateDownload(downloaded?: () => void) {
     try { status = await translationStatus(); } catch { return; /* Settings says the list cannot be read */ }
     // Through English is two pairs one way: only the app's language to English and back is "and back".
     const wanted = first ? { ...first, back: true } : { from: chatLanguage!, to: language, back: false, pairs: readingPairs(chatLanguage!, language, status.pairs.map((p) => p.pair)) };
+    // A language with no pinned model (a detected `de`, say) has nothing to download: asking would fail forever.
+    const known = new Set(status.pairs.map((p) => p.pair));
+    if (!wanted.pairs.length || wanted.pairs.some((pair) => !known.has(pair))) return;
     const bytes = downloadBytes(status, wanted.pairs);
     if (!bytes) return;
     setProblem(null);

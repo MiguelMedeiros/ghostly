@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const desktop = vi.hoisted(() => ({
   downloaded: new Set<string>(),
   calls: [] as [string, unknown][],
+  runtime: true,
 }));
 const MB = 1024 * 1024;
 const PINNED: Record<string, number> = {
@@ -22,8 +23,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     desktop.calls.push([command, args]);
     switch (command) {
       case "translation_status":
-        return { runtime: true, runtimeBytes: 80 * MB, pairs: Object.entries(PINNED).map(([pair, bytes]) => ({ pair, bytes, downloaded: desktop.downloaded.has(pair) })) };
-      case "translation_download": desktop.downloaded.add(args!.pair!); return undefined;
+        return { runtime: desktop.runtime, runtimeBytes: 80 * MB, pairs: Object.entries(PINNED).map(([pair, bytes]) => ({ pair, bytes, downloaded: desktop.downloaded.has(pair) })) };
+      case "translation_download":
+        if (!(args!.pair! in PINNED)) throw `Unknown translation pair ${args!.pair}`;
+        desktop.downloaded.add(args!.pair!);
+        return undefined;
       case "translate_texts": {
         // A pair through English needs both of its models (Rust pivots).
         const [from, to] = args!.pair!.split("-");
@@ -94,6 +98,7 @@ beforeEach(() => {
   forgetTranslations();
   desktop.downloaded = new Set();
   desktop.calls = [];
+  desktop.runtime = true;
   (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
   vi.stubEnv("VITE_TRANSLATE", "1");
   vi.stubGlobal("IntersectionObserver", OnScreen);
@@ -199,6 +204,18 @@ describe("choosing On asks for the chat's own models", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
     expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument();
     expect(asked("translation_status")).toEqual([]);
+  });
+
+  it("asks nothing for a language with no pinned model, even with no runtime yet", async () => {
+    desktop.runtime = false;
+    settings("en", false);
+    setChatLanguage("s1", "de");
+    const { user } = renderApp(<Chat messages={[]} />);
+    await user.click(await screen.findByTestId("translate-on"));
+    await waitFor(() => expect(asked("translation_status").length).toBeGreaterThan(0));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument();
+    expect(asked("translation_download")).toEqual([]);
   });
 
   it("the pairs: straight when one is pinned or English is a side, else through English", () => {
