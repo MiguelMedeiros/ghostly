@@ -462,6 +462,12 @@ export const SPARE_INVITE_MIN_AGE_MS = 6_000;
 export const STARTUP_QUIET_MS = 15_000;
 /** At start, how long links start in one task before the page gets the thread back (`startNow`). */
 const START_SLICE_MS = 10;
+/**
+ * The network back (or limited mode left, or Hide my IP turned on): the most the chats wait for the groups' edges to
+ * read their members and get their answers out (`startLinks`, `edgesFirst`), and how often that is looked at.
+ */
+export const EDGES_FIRST_MAX_MS = 4_000;
+const EDGES_FIRST_STEP_MS = 100;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 /** How far before this clock a warm packet is dated (`warmKey`): further than a contact's clock is ever behind. */
 export const WARM_DATED_BACK_MS = 24 * 60 * 60_000;
@@ -2220,7 +2226,7 @@ export class GhostlyNode implements EngineImplementation {
       }
     } catch (error) { failure = error ?? new Error("The wallets did not start"); }
     if (this.networkOn) {
-      await this.startLinks([...this.links.keys()]);
+      await this.startLinks([...this.links.keys()], undefined, true);
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
@@ -6356,7 +6362,7 @@ export class GhostlyNode implements EngineImplementation {
         }),
       );
     } else if (!wasOnline && this.networkOn && await this.turnBeforeOnline()) {
-      await this.startLinks([...this.links.keys()]);
+      await this.startLinks([...this.links.keys()], undefined, true);
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
@@ -7582,7 +7588,7 @@ export class GhostlyNode implements EngineImplementation {
       live.status = "offline";
       live.dataLink = "idle";
     }));
-    await this.startLinks([...this.links.keys()]);
+    await this.startLinks([...this.links.keys()], undefined, true);
   }
 
   /**
@@ -7592,15 +7598,33 @@ export class GhostlyNode implements EngineImplementation {
    * offline until its turn. `started`: after each link started. Gone offline or shut down meanwhile: the links left
    * start with the network, if ever.
    */
-  private async startLinks(linkIds: string[], started?: (linkId: string) => void): Promise<void> {
+  private async startLinks(linkIds: string[], started?: (linkId: string) => void, edgesFirst = false): Promise<void> {
     const pause = pacer(START_SLICE_MS);
-    for (const linkId of this.nativeStartOrder(linkIds)) {
-      if (!this.networkOn || this.shuttingDown) break;
-      if (!this.links.has(linkId)) continue;
-      this.startLink(linkId);
-      started?.(linkId);
-      await pause();
+    const order = this.nativeStartOrder(linkIds);
+    const isEdge = (linkId: string) => !!this.links.get(linkId)?.stored.group;
+    // `edgesFirst`: the groups' links start first, and the chats once the edges' first reads are done and the answers
+    // they made went out, up to `EDGES_FIRST_MAX_MS`. Started at once, 12 chats' publishes took the relays' budget, a
+    // hub's edges' answers to their members' offers were held back (21 of 28 in the first 10 s), and the members were
+    // back minutes later, or not in that run (agents#1637). A start reads every chat's history first, which gave the
+    // edges that time before #3407; a restart of the app is left as it is.
+    const phases = edgesFirst ? [order.filter(isEdge), order.filter(id => !isEdge(id))] : [order];
+    for (const [phase, ids] of phases.entries()) {
+      if (phase > 0) await this.edgesUnderWay(phases[0]);
+      for (const linkId of ids) {
+        if (!this.networkOn || this.shuttingDown) return;
+        if (!this.links.has(linkId)) continue;
+        this.startLink(linkId);
+        started?.(linkId);
+        await pause();
+      }
     }
+  }
+
+  /** Until these edges' first exchanges are done (`firstExchangeUnderWay`), at most `EDGES_FIRST_MAX_MS`. */
+  private async edgesUnderWay(linkIds: string[]): Promise<void> {
+    const until = Date.now() + EDGES_FIRST_MAX_MS;
+    const underWay = () => linkIds.some(linkId => this.links.get(linkId)?.link?.firstExchangeUnderWay);
+    while (this.networkOn && !this.shuttingDown && Date.now() < until && underWay()) await new Promise(resolve => setTimeout(resolve, EDGES_FIRST_STEP_MS));
   }
 
   private startLink(linkId: string): void {
