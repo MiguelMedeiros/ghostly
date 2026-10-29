@@ -999,7 +999,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     : undefined;
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
-      picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
+      picture={contentType === "image"} onClose={() => setDetails(false)}
+      returnFocus={rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current} />
   );
   const rowProps = choosing ? {
     ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
