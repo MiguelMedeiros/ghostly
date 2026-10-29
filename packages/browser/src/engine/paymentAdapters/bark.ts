@@ -90,7 +90,16 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   onchainBalance() { return this.outside(async () => { await this.onchain.sync().catch(() => {}); return this.onchain.balance(); }); }
   /** On-chain coins of this wallet into Ark. They show as pending until the board confirms. */
   board() { return this.serial(() => this.wallet.boardAll()); }
-  sync() { return this.outside(() => this.wallet.sync()); }
+  /**
+   * Asks the Ark server what changed. One made in the last 3 s is not made again and one under way is shared, as
+   * BdkOnchain.sync: the wallet's refresh and the look at the chat requests it starts right after need one.
+   */
+  sync(): Promise<void> {
+    if (Date.now() - this.syncedAt < 3_000) return Promise.resolve();
+    return this.syncing ??= this.outside(() => this.wallet.sync()).then(() => { this.syncedAt = Date.now(); }).finally(() => { this.syncing = undefined; });
+  }
+  private syncedAt = 0;
+  private syncing?: Promise<void>;
   /**
    * How long until the first coin expires. A coin left past its expiry can be swept by the server, so the wallet
    * renews coins near it (maintenance); this is what the page shows so the person knows to open Ghostly in time.
