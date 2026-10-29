@@ -20,6 +20,7 @@
   "own": "Este convite é seu. Compartilhe com um contato; é ele quem entra com ele.",
   "paste": "Colar da área de transferência",
   "pasteScreenshot": "Ou cole uma captura de tela do QR code.",
+  "pastedTooLarge": "Essa imagem é grande demais para ler. Cole uma menor, ou uma captura de tela do QR.",
   "placeholder": "Cole o convite…",
   "qrReaderNotLoaded": "O leitor de QR não carregou. Verifique sua conexão e tente de novo.",
   "qrReaderReload": "O leitor de QR ainda não carregou. Recarregue o Ghostly para carregá-lo.",
