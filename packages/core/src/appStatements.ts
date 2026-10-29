@@ -103,15 +103,21 @@ export function setAppSignatureFastPath(check: AppSignatureFastPath | null): voi
   fastPath = check;
 }
 
-const GROUP_ORDER = ed25519.Point.Fn.ORDER;
+/** The group order L, little-endian: an S at or above it is refused by the strict check. */
+const GROUP_ORDER = Uint8Array.from([
+  0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+]);
 /** Whether each key seen lately is a canonical encoding of a point not of small order: a list repeats its publishers. */
 const keysFit = new Map<string, boolean>();
 
 function fastPathTakes(signature: Uint8Array, publicKey: Uint8Array): boolean {
   if (signature.length !== 64 || publicKey.length !== 32) return false;
-  let s = 0n;
-  for (let i = 63; i >= 32; i--) s = (s << 8n) | BigInt(signature[i]);
-  if (s >= GROUP_ORDER) return false;
+  let below = false;
+  for (let i = 31; i >= 0; i--) {
+    if (signature[32 + i] !== GROUP_ORDER[i]) { below = signature[32 + i] < GROUP_ORDER[i]; break; }
+  }
+  if (!below) return false;
   const id = toBase64Url(publicKey);
   let fit = keysFit.get(id);
   if (fit === undefined) {

@@ -58,7 +58,10 @@ describe("an app signature's fast path", () => {
     setAppSignatureFastPath((_sig, _msg, key) => { asked.push(toZ32(key)); return true; });
     for (const key of Object.values(badKeys)) expect(check(identitySig, key)).toBe(false);
     expect(check(withS(good, sOf(good) + L), publicKey)).toBe(false);
+    expect(check(withS(good, L), publicKey)).toBe(false);
     expect(asked).toEqual([]);
+    expect(check(withS(good, L - 1n), publicKey)).toBe(true);
+    asked.length = 0;
     expect(check(good, publicKey)).toBe(true);
     expect(asked).toEqual([toZ32(publicKey)]);
   });
