@@ -59,6 +59,7 @@
     },
     "label": "sauvegarde à faire",
     "later": "Plus tard",
+    "line": "Sauvegardez le portefeuille {{wallet}}",
     "title": "Vous avez de l'argent réel dans {{wallet}}"
   },
   "bark": {
@@ -765,6 +766,8 @@
     "send": "Envoyer"
   },
   "unseen": {
+    "lineReal": "{{amount}} nouveaux sats dans {{wallet}}",
+    "lineTest": "{{amount}} nouveaux sats de test dans {{wallet}}",
     "real": "{{place}}, {{amount}} nouveaux sats",
     "test": "{{place}}, {{amount}} nouveaux sats de test"
   },
