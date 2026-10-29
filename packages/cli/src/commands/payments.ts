@@ -1,12 +1,18 @@
 import { type Command, net, card, memo, confirmReal, force, sats, pairs } from "./shared";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "../words";
+import { CliError } from "../errors";
 
 /** Wallets and payments: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "chat accept": {
-    method: "chat.accept", usage: "chat accept <chat> <method> [--off] [--networks mainnet,testnet]", summary: "Which ways of paying a chat takes",
-    args: ["chat", "method"], words: { method: CHAT_METHODS }, options: { off: { type: "boolean", description: "Stop taking it" }, networks: { type: "string", description: "Comma-separated networks it is taken on" } },
-    params: ({ options }, a) => ({ chat: a.chat, method: a.method, on: options.off !== true, networks: typeof options.networks === "string" ? options.networks.split(",").map((n) => n.trim()).filter(Boolean) : undefined }),
+    method: "chat.accept", usage: "chat accept <chat> [<method> [--off] [--networks mainnet,testnet]]", summary: "Which ways of paying a chat takes (no method: the ones it takes now)",
+    args: ["chat", "method?"], words: { method: CHAT_METHODS }, options: { off: { type: "boolean", description: "Stop taking it" }, networks: { type: "string", description: "Comma-separated networks it is taken on" } },
+    params: ({ options }, a) => {
+      // Without a method it only answers what the chat takes: --off or --networks would be dropped without a word.
+      if (a.method === undefined && (options.off !== undefined || options.networks !== undefined)) throw new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]");
+      if (a.method === undefined) return { chat: a.chat };
+      return { chat: a.chat, method: a.method, on: options.off !== true, networks: typeof options.networks === "string" ? options.networks.split(",").map((n) => n.trim()).filter(Boolean) : undefined };
+    },
   },
   "chat pay": {
     method: "chat.pay", usage: "chat pay <chat> <sats> [--memo t] [--network testnet] [--confirm-real] [--force]", summary: "Send ecash to a contact (Mainnet needs --confirm-real)",

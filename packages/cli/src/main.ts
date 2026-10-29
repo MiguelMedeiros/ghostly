@@ -179,6 +179,8 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
   if (method === "engine.call") return typeof params.method === "string" && ENGINE_READS.includes(params.method);
   // `call auto` with no on|off says what auto-answer is.
   if (method === "call.auto") return params.on === undefined;
+  // `chat accept <chat>` with no method says what the chat takes.
+  if (method === "chat.accept") return params.method === undefined;
   return READS.has(method);
 }
 
