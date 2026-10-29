@@ -3,7 +3,7 @@ import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, createIdentity, edgePar
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Mainline, RelaysAndDht } from "../src/runtime/mainline";
-import { mainlineNetwork, pkarrRelays } from "../src/runtime/engine";
+import { hyperdhtNetwork, mainlineNetwork, pkarrRelays } from "../src/runtime/engine";
 import { error, ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.groups, core.relay-client
 
@@ -325,6 +325,12 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
     expect(mainlineNetwork({})).toEqual({ off: false });
   });
 
+  it("are refused when two are split by ';' or a space, as one URL they reached nobody", () => {
+    for (const relays of ["http://10.9.9.9:8080;http://10.9.9.8:8080", "http://10.9.9.9:8080 http://10.9.9.8:8080", "http://[fd00::1"]) {
+      expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: relays }), relays).toThrow(expect.objectContaining({ code: "usage", message: expect.stringContaining(JSON.stringify(relays)) }));
+    }
+  });
+
   it("are the only relays: the profile's relays setting does not replace them, and without a DHT they carry everything", async () => {
     const store = { down: false, packets: new Map<string, Uint8Array>() };
     const a = new RelaysAndDht(null, { relays: RELAYS, fetch: relays(store), log: () => {} }, true);
@@ -463,5 +469,26 @@ describe("a publish held before it is signed", () => {
     }
     expect(alone.publishHeld(id.pubKeyZ32)).toBeInstanceOf(DiscoveryBudgetError);
     expect(withDht.publishHeld(id.pubKeyZ32)).toBeNull();
+  });
+});
+
+describe("the bootstrap nodes (GHOSTLY_DHT_BOOTSTRAP, GHOSTLY_HYPERDHT_BOOTSTRAP)", () => {
+  // Without a port, a port past 65535 or with ';' between nodes, bittorrent-dht sent to port NaN from a timer and every
+  // command died with Node's RangeError stack; the others were looked up as names, and the profile had no DHT.
+  const bad = ["10.9.9.9", "10.9.9.9:6881;10.9.9.8:6881", "10.9.9.9:99999", "10.9.9.9:0", "udp://10.9.9.9:6881", "[fd00::1]:6881", "10.9.9.9 10.9.9.8", "10.9.9.9:6881 10.9.9.8:6881", "10.9.9.9:"];
+
+  it("are each host:port, a bad one a usage error naming the variable and the node", () => {
+    for (const nodes of bad) {
+      expect(() => mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: nodes }), nodes).toThrow(expect.objectContaining({ code: "usage", message: `GHOSTLY_DHT_BOOTSTRAP takes host:port nodes, comma-separated, not ${JSON.stringify(nodes)}` }));
+      expect(() => hyperdhtNetwork(nodes), nodes).toThrow(expect.objectContaining({ code: "usage", message: `GHOSTLY_HYPERDHT_BOOTSTRAP takes host:port nodes, comma-separated, not ${JSON.stringify(nodes)}` }));
+    }
+    expect(() => mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: "127.0.0.1:49502, 10.9.9.9" })).toThrow('not "10.9.9.9"');
+  });
+
+  it("take names and addresses with a port, a list all on loopback bound there", () => {
+    expect(mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: " router.bittorrent.com:6881 , 10.9.9.9:65535 ," })).toEqual({ off: false, bootstrap: ["router.bittorrent.com:6881", "10.9.9.9:65535"] });
+    expect(mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: "127.0.0.1:1,localhost:49502" })).toEqual({ off: false, bootstrap: ["127.0.0.1:1", "localhost:49502"], host: "127.0.0.1" });
+    expect(hyperdhtNetwork("node1.hyperdht.org:49737")).toEqual({ bootstrap: ["node1.hyperdht.org:49737"] });
+    expect(hyperdhtNetwork("")).toEqual({});
   });
 });
