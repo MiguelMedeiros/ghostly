@@ -16,6 +16,26 @@ describe("auto-translation's build switch", () => {
     expect(translateEnabled()).toBe(true);
   });
 
+  it("is off in the Android app even in a build made with it: Desktop only in the first version", () => {
+    vi.stubEnv("VITE_TRANSLATE", "1");
+    const agent = navigator.userAgent;
+    const as = (userAgent: string, tauri: boolean) => {
+      Object.defineProperty(navigator, "userAgent", { value: userAgent, configurable: true });
+      if (tauri) Object.assign(window, { __TAURI_INTERNALS__: {} });
+      else delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    };
+    try {
+      as("Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36", true);
+      expect(translateEnabled()).toBe(false);
+      as("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko)", true);
+      expect(translateEnabled()).toBe(true);
+      as("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36 Edg/129.0", true);
+      expect(translateEnabled()).toBe(true);
+    } finally {
+      as(agent, false);
+    }
+  });
+
   it("is not the e2e suite's mini-app switch", () => {
     vi.stubEnv("VITE_APPS_TEST", "1");
     expect(translateEnabled()).toBe(false);
