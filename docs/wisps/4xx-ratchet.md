@@ -47,12 +47,12 @@ All sizes in bytes. `HKDF` is HKDF-SHA256, `HMAC` is HMAC-SHA256, `"…"` is the
 - **A step.** `step(RK, dh) = HKDF(ikm = dh, salt = RK, info = "ghostly-ratchet/1 step", 64)`: the first 32 bytes are the next root key, the last 32 a chain key `CK`.
 - **Two lanes per step.** From one `CK`: `floor = HMAC(CK, "ghostly-ratchet/1 lane floor")` and `hold = HMAC(CK, "ghostly-ratchet/1 lane hold")`. Each lane counts its own messages from 0, so a lane where most messages are never read (the floor) does not leave gaps in the other.
 - **A chain.** Message `n` of a lane: `MK = HMAC(CK_n, 0x01)`, then `CK_{n+1} = HMAC(CK_n, 0x02)`, and `CK_n` is forgotten.
-- **A message.** `HKDF(ikm = MK, salt = 32 zero bytes, info = "ghostly-ratchet/1 message", 56)`: a 32-byte key and a 24-byte nonce for XChaCha20-Poly1305. The nonce is never sent. A key is used once, so its nonce is too ([Saving](#saving-state)).
+- **A message.** `HKDF(ikm = MK, salt = 32 zero bytes, info = "ghostly-ratchet/1 message", 56)`: a 32-byte key and a 24-byte nonce for XChaCha20-Poly1305. The nonce is never sent. A key is used once, so its nonce is too ([Saving state](#saving-state)).
 - **Starting.** The first side picks a random X25519 secret `D1` and at once steps: `(RK1, CK) = step(RK0, X25519(D1, x(P_peer)))`, sending lanes from `CK`; it reads the second side's first messages on lanes from `CK0 = HMAC(RK0, "ghostly-ratchet/1 initial")`, under `x(P_peer)`. The second side sends on lanes from `CK0`, naming `x(P_self)` as its key, until the first side's first message comes; that message names `D1`'s public key, and the second side steps as Signal's does: `step(RK0, X25519(x(P_self), D1))` to read, a new secret of its own, and `step` again to send. So either side may speak first.
 
 ## Wire
 
-A sealed item is `header (54) || ciphertext`, the ciphertext being XChaCha20-Poly1305 of the plaintext with its 16-byte tag, 70 bytes more than the plaintext in all.
+A sealed item is `header (50) || ciphertext`, the ciphertext being XChaCha20-Poly1305 of the plaintext with its 16-byte tag, 66 bytes more than the plaintext in all.
 
 | Bytes | Field |
 |---|---|
@@ -60,8 +60,7 @@ A sealed item is `header (54) || ciphertext`, the ciphertext being XChaCha20-Pol
 | 1 | Lane: `0x01` floor, `0x02` hold |
 | 8 | `sid`, the session |
 | 32 | The sender's current ratchet public key (X25519) |
-| 4 | `pnFloor`: how many floor messages the sender's previous sending chain used, big-endian |
-| 4 | `pnHold`: the same for the hold lane |
+| 4 | `pnHold`: how many held items the sender's previous sending chain used, big-endian (the floor needs no such count: its previous chain is dropped whole) |
 | 4 | `n`: this message's number on its lane's current chain, big-endian |
 
 Associated data: `"ghostly-ratchet/1" || lane byte || P_sender || P_recipient || header`, the participation keys as 32 raw bytes. A message sealed by one side cannot be opened as the other's, nor moved to the other lane or to another chat.
@@ -73,8 +72,8 @@ A receiver works on a copy of its state and keeps the copy only if the item open
 1. Read the header. A version other than 1, or a lane other than the path's, is refused.
 2. Find the session by `sid`: the current one, the other one ([Sessions](#sessions)), or none (a session the contact started: step 7).
 3. A hold item: if a key was kept for (`sid`, ratchet key, `n`), open with it and drop the key.
-4. If the ratchet key differs from the contact's one the session knows: keep the keys left of the contact's previous hold chain up to `pnHold` (within the bounds), step to read with this side's ratchet secret (or `x(P_self)` before its first step), pick a new secret, and step to send. The previous floor chain is dropped whole.
-5. On the lane's chain, an `n` below the next expected is refused (on the floor it was read or replaced; a held one was kept in step 3). Step forward to `n`; a hold lane keeps each key stepped over, a floor lane does not.
+4. If the ratchet key differs from the contact's one the session knows: check the bounds first (`n` and the hold keys to keep up to `pnHold`, [Bounds](#bounds)), then X25519 with this side's ratchet secret (or `x(P_self)` before its first step); a key that gives no secret (a low-order point) refuses the item. Keep the keys left of the contact's previous hold chain up to `pnHold`, step to read, pick a new secret, and step to send. The previous floor chain is dropped whole.
+5. On the lane's chain, an `n` below the next expected, or past the bound, is refused (on the floor it was read or replaced; a held one was kept in step 3). Step forward to `n`; a hold lane keeps each key stepped over, a floor lane does not.
 6. Open. If the tag fails, the copy is thrown away: nothing moved.
 7. An unknown `sid`, not retired: start that session as this side's role would, then steps 4 to 6. On success, which session wins is said in [Sessions](#sessions).
 
@@ -82,33 +81,39 @@ A receiver works on a copy of its state and keeps the copy only if the item open
 
 | Bound | Value | Why |
 |---|---|---|
-| Floor messages stepped over at once | 4,096 | A mailbox shows only its newest envelope, and an envelope goes about every four minutes; past this the envelope waits for the turn to pass (the reader's next envelope makes the sender step, and its next chain starts at 0) |
-| Hold messages stepped over at once | 512 | At most 64 items are held per contact ([404](404-store-and-forward.md#lifecycle)) |
+| Floor messages a reader steps over at once | 4,096 | A mailbox shows only its newest envelope, and an envelope goes about every four minutes: eleven days without the turn passing |
+| Held items a reader steps over at once | 512 | At most 64 items are held per contact at a time ([404](404-store-and-forward.md#lifecycle)) |
 | Hold keys kept | 512 per chat, the oldest dropped first | |
 | A kept key, and a session only received on | Dropped 8 days after last use | A held item lives seven days |
 | Retired session ids | The last 16 | So a replayed old item cannot start its session again |
 
 Floor keys stepped over are never kept: an envelope that was replaced unread is gone from the DHT, and a key kept for it would only help a thief who recorded it.
 
+A sender never seals past a reader's bound: when its current chain on a lane reaches it (4,096 floor envelopes or 512 held items without the turn passing, as when the contact has been away for long), it starts a new session for its next item, and keeps the old one as its other ([Sessions](#sessions)). Otherwise a reader back after the bound would refuse every envelope, never step, and so never make the sender step either.
+
 ## Sessions
 
 A side holds at most two sessions per chat: the **current** one, which it seals with, and an **other**, which it only opens with.
 
 - **Start.** With no current session, the first item sealed starts one with a random `sid`.
-- **Both start at once.** Each side opens the other's first item under a session it did not know. A side whose current session has heard nothing yet keeps the session whose `sid` is larger (as 8 unsigned bytes) as its current one, and the other as its other, so both settle on the same session once each has read the other.
-- **The contact starts anew.** An item under an unknown `sid` while the current session has heard the contact means the contact lost its state (a restore, a move to another device). Its session becomes current, and the old one becomes the other, for what the contact sent before and is still on its way (held items).
+- **Both start at once.** Each side opens the other's first item under a session it did not know. A side whose current session has heard nothing yet keeps the session whose `sid` is larger (as 8 unsigned bytes) as its current one and the other as its other, so both settle on the same session once each has read the other, and what came under the losing one still opens.
+- **The contact starts anew.** A **floor** envelope under an unknown `sid` while the current session has heard the contact means the contact lost its state (a restore, a move to another device) or reached a bound. Its session becomes current, and the old one becomes the other, for what the contact sent before and is still on its way (held items). Only the floor says so, because it takes nothing older than what it took.
+- **A late held item.** A held item under an unknown `sid` while the current session has heard the contact is opened, and its session forgotten: it may be an item of a session that lost when both started, picked up late, and switching to it would split the chat.
 - **Retired.** A session dropped (replaced, expired) has its `sid` retired, and an item under a retired `sid` is refused.
 
-The path's own replay checks come first: a floor envelope must carry a newer sequence than the last taken ([403](403-dht-text.md)) and a held item a sequence not taken ([404](404-store-and-forward.md)) before its state is kept, so a replayed envelope never moves the ratchet or switches a session.
+Replays are refused by the paths, not by the ratchet: a floor envelope must carry a newer sequence than the last taken ([403](403-dht-text.md)) and a held item a sequence not taken ([404](404-store-and-forward.md)) before its state is kept, so a replayed envelope never moves the ratchet or switches a session. The retired list (16 ids, lost with the state) only spares a reader opening what the path would refuse anyway.
 
 ## Saving state
 
-The state returned by sealing MUST be saved before the sealed bytes leave the device: a crash after sending and before saving would seal the next item with the same key and nonce. The state returned by opening is saved after the content is stored, so a crash in between reopens the same item. Measuring an item (does it fit the packet?) MUST NOT use a key: the length is the plaintext's plus 70.
+- **One lock per chat.** Every change to a chat's ratchet state, on either lane, is made under one lock, held from reading the state to saving the next one (for an open, until what it opened is stored). Two changes made from the same state, a seal and an open for instance, would save one over the other, roll the sending chain back, and seal the next item with a key and nonce already used.
+- **Seal, save, send.** The state returned by sealing MUST be saved before the sealed bytes leave the device: a crash after sending and before saving would seal the next item with the same key and nonce.
+- **Open, store, save.** The state returned by opening is saved after the content is stored, so a crash in between opens the same item again.
+- **Measuring.** Asking whether an item fits a packet MUST NOT use a key: the length is the plaintext's plus 66.
 
 ## The DHT floor
 
 - **Record.** After the pin, a ratcheted envelope's sealed bytes go in a `_dr` record, base64, in place of `_dm`; the plaintext is the same `JSON([body, signature])`, padded as today. The `_dmk` hint is unchanged. A packet carries one of `_dm` or `_dr`, never both. First-contact envelopes, before the pin, stay `_dm` under the invite's key.
-- **Room.** The seal is 30 bytes longer than today's (70 against nonce and tag, 40), so the padding target is 30 bytes lower, 40 characters of base64. Every packet of a mailbox still has one size. A text near 256 bytes with many escaped characters may no longer fit; as today, the reply's id and the hop count go first, and a text that still does not fit is held or waits for the live session.
+- **Room.** The seal is 26 bytes longer than today's (66 against nonce and tag, 40), so the padding target is 26 bytes lower, about 35 characters of base64. Every packet of a mailbox still has one size. A text near 256 bytes with many escaped characters may no longer fit; as today, the reply's id and the hop count go first, and a text that still does not fit is held or waits for the live session.
 - **Reading the same envelope again.** A reader reads more often than the contact publishes, and a key once used is gone, so a reader remembers a digest of the last `_dr` it took and reads it as already taken, without opening it.
 - **Every envelope is a message.** A keep-alive, a receipt or a mode change takes the next floor key like a text, so one look at a mailbox still does not tell them apart ([403](403-dht-text.md#what-a-mailbox-shows-revision-07)).
 
@@ -138,22 +143,22 @@ Plainly: **what was sent over the DHT or held cannot be opened again from the se
 
 What it gives:
 
-- **Forward secrecy per message** on both lanes: a floor envelope or held item, once opened and its key dropped, cannot be opened again with anything the device keeps, nor with a participation key stolen later.
-- **Recovery after a compromise:** someone who copied a device's ratchet state reads what comes until the turn passes twice; each step mixes a new X25519 secret they do not have.
+- **Forward secrecy per message** on both lanes, once the turn has passed both ways in a session: a floor envelope or held item, once opened and its key dropped, cannot be opened again with anything the device keeps, nor with a participation key stolen later.
+- **Recovery after a compromise:** someone who copied a device's ratchet state and stays passive reads what comes until the turn passes twice; each step mixes a new X25519 secret they do not have.
 
 What it does not give:
 
-- **The first messages of a session** (the first side's first chain, the second side's chain from the root) are protected only by the participation keys and the invite secret, as today, until the contact's first item comes back. Signal's first message has the same limit until its prekey is used.
+- **The first chains of a session.** The first side's first chain needs only the second side's participation key (and the invite secret, which both devices keep); the second side's chain from the root needs either participation key. Both last until the turn has passed both ways, which is exactly when the contact is away, and they come back with every new session (an upgrade, a restore, a bound reached). What goes on them has today's protection, no more. A signed X25519 prekey that rotates, in the capability record, would close this ([Open decisions](#open-decisions)).
 - **A thief of a participation key now**, not later, can start a session of its own and impersonate that side, as it could before. The ratchet makes stolen keys useless for the past, not for the future.
 - **Kept keys.** Hold keys kept for items not opened yet open those items, if stolen with the device.
 - **Metadata.** Headers are not encrypted: a reader of the mailbox learns the session id, when the turn passed (the ratchet key changes) and roughly how many envelopes went (`n`). The mailbox's other leaks are those of [403](403-dht-text.md#what-a-mailbox-shows-revision-07). Messages at rest on the device are as protected as the device's storage (S18).
 - **Groups** (mesh and community) keep their own epochs ([900](900-group-sessions.md)).
 
-Implementation notes: the tag is checked in constant time (`@noble/ciphers`); nothing branches on a secret before it is checked; an item that does not open costs at most two X25519 operations and the chain steps within the bounds above.
+Implementation notes: the tag is checked in constant time (`@noble/ciphers`); nothing branches on a secret before it is checked. Every bound is checked before any X25519 or chain step, so an item that does not open costs a few X25519 operations (more under an unknown `sid`, which starts a session to try) and at most the chain steps of the bounds above.
 
 ## Tech Info
 
-A chat's Tech Info SHOULD show one row, **Forward secrecy**: *On* once a lane is heard; *Off* otherwise, with the reason behind its ⓘ: the contact's app does not support it yet (its record lacks `ratchet/1`), or it starts with the next message. A live connection is forward secret either way, which the ⓘ says.
+A chat's Tech Info SHOULD show one row, **Forward secrecy**: *On* once the turn has passed both ways in the session this side seals with (it stepped on a ratchet key of the contact's with a ratchet secret of its own); *Off* otherwise, with the reason behind its ⓘ: the contact's app does not support it yet (its record lacks `ratchet/1`), or it starts once both sides have written. A live connection is forward secret either way, which the ⓘ says.
 
 ## Test vectors
 
@@ -165,19 +170,20 @@ From `packages/core/test/ratchet.test.ts`, every byte in hex. The participation 
 | Second side's participation key | `tkrq8zmwb8a3m9k15csu3q17qmfgqnp9dskbrg9uq1rydpyxp7qy` |
 | Rendezvous keys | `7ir1ttte48bcp4zjychjyscicrwi1j34mtt91ptsafdbjmr8g9eo`, `3kj4afafdba8diu5oxd96dz6orrqt5nfgbmi473go6ju8s64z36y` |
 | `RK0` for `sid = abd1938e708c91f3` | `f410f63e47a1197cfa2f4ae0961b25a79fdf5d38c60b2bff7aad2b898d0708e3` |
-| First to second, floor, `"hello"` | `0101abd1938e708c91f3ade5ec0474e27723700d837ac3ac14d08ca0cd1d6dc9d98cc6fe6a610069367e0000000000000000000000007fb640351c78a93bc3988c262eaf0d953a7b73278d` |
-| Second to first, floor, `"hi"` | `0101abd1938e708c91f33d63ca075dcd63457fb9512a7df8c00c0f16f8fd65aadc011211dcbfd31e251f0000000000000000000000009927c581d84cf44b1b56d354191d6ea8ce9d` |
-| First to second, hold, `"held"` (after one step each) | `0102abd1938e708c91f3fe4fb690c33193e0a541b8854cdbd57820511be7a331ea87f1f663328852a5440000000100000000000000004f6a11c2a451b08a3afb1b81a4396810165132eb` |
+| First to second, floor, `"hello"` | `0101abd1938e708c91f3ade5ec0474e27723700d837ac3ac14d08ca0cd1d6dc9d98cc6fe6a610069367e00000000000000007fb640351c34e105b2989b58044fd25f1dfbba9988` |
+| Second to first, floor, `"hi"` | `0101abd1938e708c91f33d63ca075dcd63457fb9512a7df8c00c0f16f8fd65aadc011211dcbfd31e251f00000000000000009927adc92e1f54d7484543e9210d6e7e896f` |
+| First to second, hold, `"held"` (after one step each) | `0102abd1938e708c91f3fe4fb690c33193e0a541b8854cdbd57820511be7a331ea87f1f663328852a54400000000000000004f6a11c22fbbb97156cfa23385a933089064b4bb` |
 
 ## Conformance
 
-Unit: the vectors; both sides speaking first; a key used once (an item opened twice is refused); a changed header, ciphertext or tag, a reflected item and the wrong lane refused; the floor stepping over replaced envelopes and never back, and its bound; held items in any order, from a chain the contact left, each once; every bound on kept keys; both sides starting at once settling on one session; a side that lost its state starting anew, and a replayed retired session refused. Engine: an older contact keeps plain envelopes and bundles; a lane heard refuses plain items; a re-read envelope is not opened twice; state saved before a publish or upload. End to end: two apps upgrade; an app without it falls back; held items opened out of order.
+Unit: the vectors; both sides speaking first; on only once the turn passed both ways, and a first chain opened from a participation key alone (the limit said above); a key used once (an item opened twice is refused); a changed header, ciphertext or tag, a reflected item, the wrong lane and a low-order ratchet key refused, without throwing; the floor stepping over replaced envelopes and never back, and a number past its bound refused before any step; a sender reaching a bound starting a new session the contact reads; held items in any order, from a chain the contact left, each once; every bound on kept keys; both sides starting at once settling on one session, with late held items of the losing one; a side that lost its state starting anew, and a replayed retired session refused. Engine: one lock per chat over both lanes; an older contact keeps plain envelopes and bundles; a lane heard refuses plain items; a re-read envelope is not opened twice; state saved before a publish or upload; measuring a packet takes no key. End to end: two apps upgrade; an app without it falls back; held items opened out of order.
 
 ## Open decisions
 
 - Encrypting the header (Signal's header encryption) would hide the session and the turn from a mailbox reader, at 40 more bytes of the floor's packet.
 - Ratcheting the manifest and pointer as well: each rewrite would take a key, and a reader that misses some would step over them like floor envelopes.
 - Whether a chat should refuse to send plain once both apps can, even before the first item came back (today the contact's own record decides).
+- A signed X25519 prekey in the capability record, rotated and its old secrets deleted after eight days, that each session would start against in the manner of X3DH, so the first chains no longer open with a participation key alone.
 
 ## Revision log
 
