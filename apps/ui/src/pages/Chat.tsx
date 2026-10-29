@@ -33,6 +33,8 @@ import { contactArrived } from "../lib/pairingProgress";
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
+import { useComposerTranslation } from "../hooks/useComposerTranslation";
+import { keepSentOriginal } from "../lib/translateDraft";
 import { leftOn, useChatScroll } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
@@ -205,6 +207,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     deleteMessage,
     setNick,
   } = useChat(params);
+  // The composer's Translate, in a chat that translates and has a language of its own.
+  const composerTranslation = useComposerTranslation(sessionId);
 
   // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
@@ -1115,12 +1119,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // A paired chat has no mentions; a link preview made in the composer goes with the text, and so does a reply.
         onSend={async (text, _mentions, extra) => {
           const answering = replyingRef.current;
-          const error = await sendMessage(text, answering ? { ...extra, replyTo: answering.id } : extra);
+          // A translation sent: its original is kept beside it, on this device only.
+          const { translated, ...rest } = extra ?? {};
+          const options = translated ? { ...rest, onSent: (id: string) => keepSentOriginal(sessionId, id, translated) } : extra;
+          const error = await sendMessage(text, answering ? { ...options, replyTo: answering.id } : options);
           if (!error && answering) replied(answering);
           // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
           return error && problemLine(error, t);
         }}
         reply={replyBar}
+        translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })

@@ -18,6 +18,9 @@ import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { routineStacks } from "../lib/statusCards";
+import { useComposerTranslation } from "../hooks/useComposerTranslation";
+import { keepSentOriginal } from "../lib/translateDraft";
+import type { SentTranslation } from "../components/MessageInput";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
@@ -432,10 +435,12 @@ export function GroupChat() {
     if (group && !windowAway()) clearChatNotification(`group:${group.id}`);
   }, [group?.id, group?.lastMessageAt, group, away]);
 
-  const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
+  /** `extra.translated`: a translation from the composer's preview, whose original is kept beside it on this device. */
+  const send = useCallback(async (text: string, mentions?: GroupMention[], extra?: { translated?: SentTranslation }): Promise<string | null> => {
     const answering = replyingRef.current;
     try {
-      const { error } = await engine.call("sendGroupMessage", { groupId, text, ...(mentions?.length && { mentions }), ...(answering && { replyTo: answering.id }) });
+      const { error, messageId } = await engine.call("sendGroupMessage", { groupId, text, ...(mentions?.length && { mentions }), ...(answering && { replyTo: answering.id }) });
+      if (!error && messageId && extra?.translated) keepSentOriginal(`group:${groupId}`, messageId, extra.translated);
       if (!error && answering) {
         if (replyingRef.current === answering) replyingRef.current = null;
         setReplyingTo(current => current === answering ? null : current);
@@ -445,6 +450,7 @@ export function GroupChat() {
     }
     catch (e) { return e instanceof Error ? problemLine(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
+  const composerTranslation = useComposerTranslation(`group:${groupId}`);
 
   // Files and voice messages (WISP 503): the 1:1 composer's, within the group's limit. The first thing sent after
   // Reply carries it, as a text does.
@@ -751,6 +757,7 @@ export function GroupChat() {
       {!noTimeline && forwarding.bar}
       {forwarding.dialog}
       {!joiningByLink && !invited && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} textBytes={16_384} recipient={group.name} mentions={mentions}
+        translation={composerTranslation}
         onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: messageSnippet(replyingTo, t),
           mine: replyingTo.sender === "me", ...(replyingTo.sender === "peer" && replyingTo.member && { member: replyingTo.member }), onCancel: () => setReplyingTo(null) } : undefined}
