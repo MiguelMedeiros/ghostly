@@ -16,6 +16,7 @@ import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
 import { takeOpenRequest, useChatApp, useOpenRequested } from "../lib/apps/running";
 import { openAppInChat } from "../lib/apps/installed";
+import { rowDays } from "../lib/chatDays";
 import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { appsComposerHint } from "../lib/apps/availability";
@@ -38,6 +39,7 @@ import { keepSentOriginal } from "../lib/sentOriginals";
 import { leftOn, useChatScroll } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
+import { DaySections } from "../components/chat/DaySections";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
 import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
@@ -589,6 +591,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // around the message it was left on, and more as the view goes up or down.
   const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
   const rowWindow = useRowWindow(rowIds, sessionId, { opensOn: leftOn(sessionId), heads: stackHeads });
+  // The day each row goes under, over the whole timeline: a day keeps one date whichever of its rows are in the page.
+  const days = useMemo(() => rowDays(timeline.map(row => row.kind === "message" ? row.message.timestamp : row.kind === "transport" ? row.entry.since ?? row.entry.at : row.entry.at)), [timeline]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
   // A notice (joined, a call) is not a message to count. Always every message, in the page or not; a new list when the
   // window moves, so the view is put back in the same commit, before a scroll can see the rows moved.
@@ -1090,7 +1094,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 {...forwarding.rowProps(row.message)}
               />
             );
-            return drawn.map(row => {
+            return <DaySections rows={drawn} days={days} from={rowWindow.from} draw={row => {
               if (row.kind !== "message") return draw(row);
               if (stackHeads.has(row.message.id)) return null;
               const run = stacks.get(row.message.id);
@@ -1098,7 +1102,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               return <RoutineStack key={`stack:${row.message.id}`} mine={row.message.sender === "me"} cards={run.map(m => m.card as RoutineCard)}>
                 {run.map(message => draw({ kind: "message", message }))}
               </RoutineStack>;
-            });
+            }} />;
           })()}
         </div>
       </div>
