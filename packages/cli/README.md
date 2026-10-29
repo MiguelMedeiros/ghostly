@@ -112,7 +112,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `call start <chat> [--rate 48000]`, `call answer [<chat\|call>] [--rate n]` | Voice calls (daemon): the result names the call's audio socket ([Calls](#calls)) |
 | `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
-| `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
+| `chat history <chat> [--limit n] [--before x] [--after x] [--translate lang]` | Messages, oldest first; `x` is a message id or a time in ms ([Translation](#translation)) |
 | `chat list [--show-secret]`, `chat show <chat> [--show-secret]` | Chats, and one chat's connection: transports, last attempt, comparison code. A pending chat's `invite` prints as `<hidden>` without `--show-secret` |
 | `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact. A contact that offers no way of paying is `refused`: `details.reason` `contact_no_wallet` (it has no wallet yet) or `contact_payments_off` (it has payments off in this chat, or an older app) |
 | `chat rename <chat> <name>`, `chat remove <chat> --yes` | Name it here; delete it (keys and history) here |
@@ -123,7 +123,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `daemon [--detach] [--timeout s]`, `daemon status [--timeout s]`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret] [--yes] [--force]`, `engine --list [--verbose]` | Any call of the app's engine; `--verbose` lists what each takes (`{ linkId, label }`, `?` for an optional key). A call given less than it takes is refused as `bad_request`. One that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`) needs `--yes`; `clearProfileData` answers what it removed and stops a daemon. One that sends a text that looks like a secret (`sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`) needs `--force` |
-| `events [--since seq]` | What the event journal holds, without following |
+| `events [--since seq] [--translate lang]` | What the event journal holds, without following ([Translation](#translation)) |
 | `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
 | `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk: to `--path`, or into `--dir` under the name its sender gave it, with a `_` first when that name starts with `-`, so no tool run in the folder takes it for an option (the answer's `path` is what was written). Never over a file without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first |
@@ -148,7 +148,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `invite create [--label <name>]` | A new chat's `ghostly1…` invite and its link |
 | `invite join [<invite-or-link> \| -] [--label <name>]` | Join a chat (your own invite is refused). The invite comes from stdin when none is given or `-`, out of `ps` and the shell's history; on the command line the CLI warns |
 | `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
-| `listen [--since seq] [--cursor file] [--type t]… [--turns] [--from <chat\|key>]… [--group <group>]… [--exec cmd] [--webhook url] [--print]` | The event stream; `--from` and `--group` an allowlist, `--turns` one `agent.turn` per message to answer ([Events](#events)) |
+| `listen [--since seq] [--cursor file] [--type t]… [--turns] [--from <chat\|key>]… [--group <group>]… [--exec cmd] [--webhook url] [--print] [--translate lang]` | The event stream; `--from` and `--group` an allowlist, `--turns` one `agent.turn` per message to answer, `--translate` a translation of received messages ([Events](#events), [Translation](#translation)) |
 | `message delete <chat\|group> <message> --everyone` | Deletes a message of yours for everyone (a text, a card, a file or a voice message; never a payment): it goes from this device at once and from every member's as the message's last edit, once they are back if they are away. An app from before this shows "🗑 Message removed" in its place. Without `--everyone`, only this device forgets it. Answers the chat or group, the message's `messageId` and `everyone` (`deleted` says the same id, kept for callers that read it) |
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
@@ -352,7 +352,7 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
 - `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile (or
   `group.mentioned`, `source: "group.mentioned"`, for a mention learned later):
   `{seq, id: "agent.turn:<source>:<chat | group>:<messageId>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
-  {text, name, messageId, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `messageId` is made here
+  {text, name, messageId, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}, translation?: {from, text}}}`. `messageId` is made here
   (`t_` and 32 hex digits) and every command that takes a message takes it; the id the message is stored under, which
   its sender chose most of, is `untrusted.messageId`. `press` (`{messageId, button, label,
   inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors
@@ -366,9 +366,26 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   apart, and the cursor stays before it until the bridge takes it. A 4xx or a redirect (not followed) passes the event
   as not taken.
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
+- `--translate <lang>`: received messages carry a translation ([Translation](#translation)).
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
 side that invited answers once.
+
+### Translation
+
+`listen`, `events` and `chat history` take `--translate <lang>` (an ISO 639 code: `en`, `pt`, `es`...). A message a
+contact or a member sent, in another language, then carries `translation: {from, text}` beside its `text`: `from` is
+the language it was written in. It is made on this machine by the translation runtime the Desktop app downloads; the
+CLI fetches nothing. Mine, files, payments, cards, the group's own lines, join notices, text the language detector is
+not sure of (a few letters on their own take the language the chat's others last wrote with confidence) and a language
+with no model stay as they are, without the field. With `--turns` it is `untrusted.translation`: the sender's words,
+as the text is.
+
+The runtime is found in the data folder (`--home`, `~/.ghostly` by default): `translation-runtime/<version>/` holds the
+unpacked runtime and `translation-models/<from>-<to>/` each model (a pair with English on neither side goes through
+English, so `es-en` and `en-pt` for Spanish to Portuguese). When the runtime is not there, the command says so in one
+line on stderr and prints what it prints without the flag. One runtime process serves a whole `listen` and ends with
+it. A message's text never goes to stderr or a log.
 
 ## The socket API
 

@@ -59,6 +59,7 @@
     },
     "label": "backup needed",
     "later": "Later",
+    "line": "Back up your {{wallet}} wallet",
     "title": "You have real money in {{wallet}}"
   },
   "bark": {
@@ -765,6 +766,8 @@
     "send": "Send"
   },
   "unseen": {
+    "lineReal": "{{amount}} new sats in {{wallet}}",
+    "lineTest": "{{amount}} new test sats in {{wallet}}",
     "real": "{{place}}, {{amount}} new sats",
     "test": "{{place}}, {{amount}} new test sats"
   },

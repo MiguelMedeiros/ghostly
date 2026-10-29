@@ -41,6 +41,11 @@ test("the first real money asks once for a backup; Later waits for the next rece
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(dot).toBeVisible();
   await expect(page.getByTestId("wallet-chip")).toHaveAttribute("aria-label", /backup needed$/);
+  // The dot's trail: one line at the top of the page, the Mainnet tab and the Cashu card wearing the dot too.
+  await expect(page.getByTestId("needs-you-item")).toHaveText(/Back up your Cashu wallet/);
+  await expect(page.getByTestId("wallet-network-mainnet").getByTestId("needs-you-dot")).toBeVisible();
+  await expect(page.getByTestId("wallet-card-cashu-mainnet").getByTestId("needs-you-dot")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("backup-reminder-trail.png") });
   await reminder.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("backup-reminder.png") });
   await reminder.getByTestId("row-info").click();

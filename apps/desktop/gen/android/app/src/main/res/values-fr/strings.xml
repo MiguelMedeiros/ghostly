@@ -1,5 +1,8 @@
 <resources>
     <string name="channel_messages">Messages</string>
+    <string name="channel_transfers">Transferts de fichiers</string>
+    <string name="transfer_title">Envoi et réception de fichiers</string>
+    <string name="transfer_text">Ghostly continue jusqu\'à ce qu\'ils soient arrivés.</string>
     <string name="webview_title">Mettez à jour Android System WebView</string>
     <string name="webview_text">Ghostly fonctionne dans Android System WebView, et celle de ce téléphone est trop ancienne (version %1$s ; Ghostly a besoin de la %2$d ou plus récente). Mettez-la à jour depuis le Play Store, puis rouvrez Ghostly.</string>
     <string name="webview_update">Mettre à jour</string>

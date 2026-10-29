@@ -302,6 +302,15 @@ export class DataLink {
   }
 
   /**
+   * Given up for a reason that is not the network's (an answer made while the app was away, `WAKE_ANSWER_GRACE_MS`):
+   * as `close`, with nothing learnt about direct connections from it.
+   */
+  abandon(): void {
+    this.answered = null;
+    this.reset();
+  }
+
+  /**
    * This side's offer went with no public candidate and was answered, or its answer went with none, and it came to
    * nothing: the next offer or answer gathers for as long as it takes.
    */

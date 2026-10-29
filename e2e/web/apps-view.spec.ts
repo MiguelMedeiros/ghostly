@@ -107,6 +107,9 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await expect(app).toBeVisible();
   await expect(app).toBeFocused();
   await expect(app).not.toHaveAttribute("aria-modal");
+  // The dialog stays until the contact was told (the app card): an Escape before that gives the focus back to its Open
+  // button, gone with it a moment later.
+  await expect(ana.page.getByTestId("chat-apps")).toHaveCount(0);
   await ana.page.keyboard.press("Escape");
   await expect(app).toBeHidden();
   await expect(input).toBeFocused();

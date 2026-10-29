@@ -75,5 +75,27 @@
   "takePhoto": "拍照",
   "tooLong": "内容过长，无法发送（{{count}} 个字符，上限为 {{max}}）。",
   "tooLongBytes": "内容过长，无法发送（{{bytes}} 字节，上限为 {{max}}）。请缩短，或作为文件发送。",
-  "tooLongDht": "对 DHT 来说太长。直接连接后即可发送。"
+  "tooLongDht": "对 DHT 来说太长。直接连接后即可发送。",
+  "translate": {
+    "again": "重新翻译",
+    "button": "翻译",
+    "cancel": "取消",
+    "choose": "翻译成哪种语言？",
+    "failed": "无法翻译此消息。可以按原样发送，或重试。",
+    "into": "翻译成{{language}}",
+    "noModel": "尚未下载{{from}}到{{to}}的模型，因此此消息未翻译。",
+    "notInstalled": "此电脑未安装翻译功能。",
+    "ready": "{{language}}译文已就绪",
+    "region": "{{language}}译文",
+    "same": "已经是{{language}}",
+    "sendOriginal": "发送原文",
+    "sendSetting": "翻译我发送的内容",
+    "sendSettingHint": "立即发送，不显示预览",
+    "sendTranslated": "翻译成{{language}}并发送",
+    "sendTranslation": "发送译文",
+    "stale": "消息已更改",
+    "working": "正在翻译…"
+  },
+  "videoConverting": "正在将 {{name}} 转换为 MP4… {{percent}}",
+  "videoSentAsIs": "已按原样发送 {{name}}：此设备无法转换它。部分手机和电脑可能只能下载它。"
 }

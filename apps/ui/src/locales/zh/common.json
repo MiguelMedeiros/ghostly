@@ -19,6 +19,11 @@
   "goHome": "返回首页",
   "loading": "加载中...",
   "moreInfo": "更多信息",
+  "needsYou": {
+    "mark": "需要查看",
+    "show": "查看",
+    "title": "等你处理"
+  },
   "save": "保存",
   "size": {
     "b": "{{n}} B",
