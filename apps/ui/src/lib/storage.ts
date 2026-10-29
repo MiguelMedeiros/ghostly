@@ -500,7 +500,14 @@ export function deleteSession(sessionId: string): void {
     `${getPrefix()}pin_${sessionId}`,
     `${getPrefix()}mute_${sessionId}`,
     `${getPrefix()}mute_mentions_${sessionId}`,
+    `${getPrefix()}translate_${sessionId}`,
+    // Translate what I send (lib/chatTranslateSend.ts).
+    `${getPrefix()}translate_send_${sessionId}`,
+    // The chat's language, when it was set by hand (lib/chatLanguage.ts).
+    `${getPrefix()}translate_lang_${sessionId}`,
     `${getPrefix()}draft_${sessionId}`,
+    // The originals of what I sent translated (lib/sentOriginals.ts).
+    `${getPrefix()}sent_originals_${sessionId}`,
     joinKey(sessionId),
     LEGACY_JOIN_PREFIX + sessionId,
   ]) {

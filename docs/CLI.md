@@ -129,6 +129,10 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
+- `--translate <lang>` (also on `events` and `chat history`) adds `translation: {from, text}` to a message a contact
+  or a member sent in another language, made on this machine by the translation runtime the Desktop downloads
+  (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
+  says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
   cursor moves past its event: it is not run again.

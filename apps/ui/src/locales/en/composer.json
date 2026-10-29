@@ -76,6 +76,26 @@
   "tooLong": "That is too long to send ({{count}} characters, the limit is {{max}}).",
   "tooLongBytes": "That is too long to send ({{bytes}} bytes, the limit is {{max}}). Shorten it, or send it as a file.",
   "tooLongDht": "Too long for the DHT. It fits once you're connected peer to peer.",
+  "translate": {
+    "again": "Translate again",
+    "button": "Translate",
+    "cancel": "Cancel",
+    "choose": "Translate into which language?",
+    "failed": "This message could not be translated. Send it as typed, or try again.",
+    "into": "Translate into {{language}}",
+    "noModel": "{{from}} to {{to}} is not downloaded, so this message was not translated.",
+    "notInstalled": "Translation is not installed on this computer.",
+    "ready": "Translation to {{language}} ready",
+    "region": "Translation to {{language}}",
+    "same": "Already in {{language}}",
+    "sendOriginal": "Send original",
+    "sendSetting": "Translate what I send",
+    "sendSettingHint": "Sent at once, without the preview",
+    "sendTranslated": "Send translated into {{language}}",
+    "sendTranslation": "Send translation",
+    "stale": "The message changed",
+    "working": "Translating…"
+  },
   "videoConverting": "Converting {{name}} to MP4… {{percent}}",
   "videoSentAsIs": "Sent {{name}} as it is: this device can't convert it. Some phones and computers may only be able to download it."
 }

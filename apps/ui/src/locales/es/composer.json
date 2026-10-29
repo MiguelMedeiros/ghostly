@@ -76,6 +76,26 @@
   "tooLong": "Es demasiado largo para enviarlo ({{count}} caracteres, el límite es {{max}}).",
   "tooLongBytes": "Es demasiado largo para enviarlo ({{bytes}} bytes, el límite es {{max}}). Acórtalo o envíalo como archivo.",
   "tooLongDht": "Demasiado largo para la DHT. Cabe cuando estéis conectados directamente.",
+  "translate": {
+    "again": "Traducir de nuevo",
+    "button": "Traducir",
+    "cancel": "Cancelar",
+    "choose": "¿A qué idioma traducir?",
+    "failed": "No se pudo traducir este mensaje. Envíalo tal como lo escribiste o inténtalo de nuevo.",
+    "into": "Traducir al {{language}}",
+    "noModel": "{{from}} a {{to}} no está descargado, así que este mensaje no se tradujo.",
+    "notInstalled": "La traducción no está instalada en este ordenador.",
+    "ready": "Traducción al {{language}} lista",
+    "region": "Traducción al {{language}}",
+    "same": "Ya está en {{language}}",
+    "sendOriginal": "Enviar original",
+    "sendSetting": "Traducir lo que envío",
+    "sendSettingHint": "Se envía al instante, sin la vista previa",
+    "sendTranslated": "Enviar traducido al {{language}}",
+    "sendTranslation": "Enviar traducción",
+    "stale": "El mensaje cambió",
+    "working": "Traduciendo…"
+  },
   "videoConverting": "Convirtiendo {{name}} a MP4… {{percent}}",
   "videoSentAsIs": "{{name}} se envió tal cual: este dispositivo no puede convertirlo. Algunos móviles y ordenadores quizá solo puedan descargarlo."
 }

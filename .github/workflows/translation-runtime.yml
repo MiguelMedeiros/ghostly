@@ -1,0 +1,188 @@
+name: Translation runtime
+
+# The translation runtime (native/translation: `bare`, QVAC's Bergamot addon and the stdio script) is not part of the
+# Desktop bundle: the app downloads it with the first language model, from a release on a tag of its own,
+# `translation-runtime-v<version>`, and checks it against the size and SHA-256 it pins (RUNTIMES in
+# apps/desktop/src/translate_models.rs). tools/scripts/prepare-translation-runtime.mjs builds only the platform it runs
+# on, so each platform the Desktop release ships (release.yml's build-tauri) builds its own here.
+#
+# Pushing a `translation-runtime-v*` tag builds and publishes it (docs/RELEASING.md, "The translation runtime"). A pull
+# request that changes what goes into the archive, or a run by hand, only builds it. release.yml does not run on that
+# tag: its `v*` matches tags that start with "v".
+
+on:
+  push:
+    tags:
+      - "translation-runtime-v*"
+  pull_request:
+    paths:
+      - "native/translation/**"
+      - "tools/scripts/prepare-translation-runtime.mjs"
+      - "tools/scripts/native-runtime-files.mjs"
+      - "tools/scripts/test/translationRuntime.test.ts"
+      - ".github/workflows/translation-runtime.yml"
+  workflow_dispatch:
+
+# The publishing job asks for more itself.
+permissions:
+  contents: read
+
+concurrency:
+  group: translation-runtime-${{ github.ref }}
+  # A newer push to a pull request replaces its build; a tag's run is never cancelled halfway through publishing.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Node's names (`process.platform`-`process.arch`), as the archive and RUNTIMES name them. No cross build:
+          # each runs on a runner of its own architecture.
+          - runner: ubuntu-22.04
+            platform: linux-x64
+          - runner: macos-latest
+            platform: darwin-arm64
+          - runner: macos-15-intel
+            platform: darwin-x64
+          - runner: windows-latest
+            platform: win32-x64
+
+    runs-on: ${{ matrix.runner }}
+    name: Build (${{ matrix.platform }})
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: |
+            package-lock.json
+            native/translation/package-lock.json
+
+      - name: Build the runtime's archive
+        run: node tools/scripts/prepare-translation-runtime.mjs
+
+      # The archive is named after the runner's own platform: a runner that is not what the matrix says (an arm64 image
+      # behind an Intel label, Node for the wrong architecture) would publish one platform's runtime under another's name.
+      - name: The archive is this platform's
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./native/translation/package.json').version")
+          archive="ghostly-translation-runtime-$version-$PLATFORM.tar.gz"
+          ls -la native/translation/dist
+          found=$(cd native/translation/dist && ls -1 -- *.tar.gz)
+          if [[ "$found" != "$archive" ]]; then
+            echo "::error::Expected only $archive, the build made: $found"
+            exit 1
+          fi
+          test -f "native/translation/dist/$archive.sha256"
+          cat "native/translation/dist/$archive.sha256"
+
+      # The archive starts and translates here, on its own platform, before anyone pins it: unpacked from the archive
+      # after its SHA-256 is checked, `bare runtime.mjs` translates pt-en with Mozilla's model (pinned by SHA-256).
+      - name: Install the test tools
+        run: npm ci
+
+      - name: The archive translates on this platform
+        run: npx vitest run --maxWorkers=2 -c tools/scripts/vitest.config.ts tools/scripts/test/translationRuntime.test.ts
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: translation-runtime-${{ matrix.platform }}
+          path: |
+            native/translation/dist/ghostly-translation-runtime-*-${{ matrix.platform }}.tar.gz
+            native/translation/dist/ghostly-translation-runtime-*-${{ matrix.platform }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # A tag only: the release with the four archives. It is a prerelease and never the repository's Latest: the Desktop
+  # updater reads the Latest release's latest.json, so this one must never take its place.
+  publish:
+    name: Publish the release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/translation-runtime-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The tag is the runtime's version
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./native/translation/package.json').version")
+          if [[ "translation-runtime-v$version" != "$TAG" ]]; then
+            echo "::error::native/translation/package.json is $version, the tag is $TAG: nothing published"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Download the archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: release-assets
+          pattern: "translation-runtime-*"
+          merge-multiple: true
+
+      # One line per platform, `<platform> <size> <sha256>`: what the pin pull request copies into RUNTIMES. Each
+      # archive's SHA-256 is computed again here and must be the one its build wrote beside it.
+      - name: List the archives
+        run: |
+          set -euo pipefail
+          cd release-assets
+          : > runtimes.txt
+          for platform in linux-x64 darwin-arm64 darwin-x64 win32-x64; do
+            archive="ghostly-translation-runtime-$VERSION-$platform.tar.gz"
+            sha256=$(sha256sum "$archive" | cut -d ' ' -f 1)
+            written=$(cut -d ' ' -f 1 "$archive.sha256")
+            if [[ "$sha256" != "$written" ]]; then
+              echo "::error::$archive is $sha256, its build wrote $written"
+              exit 1
+            fi
+            echo "$platform $(stat -c %s "$archive") $sha256" >> runtimes.txt
+          done
+          ls -la
+          if [[ $(ls -1 | wc -l) != 9 ]]; then
+            echo "::error::Expected the 4 archives, their 4 .sha256 files and runtimes.txt"
+            exit 1
+          fi
+          tee -a "$GITHUB_STEP_SUMMARY" < runtimes.txt
+
+      # A published runtime is never replaced: an app that pinned its SHA-256 would refuse the new archive. A fix is a
+      # new version.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::The release $TAG exists already: bump native/translation's version for a new runtime"
+            exit 1
+          fi
+          gh release create "$TAG" release-assets/* \
+            --verify-tag \
+            --prerelease \
+            --latest=false \
+            --title "Translation runtime $VERSION" \
+            --notes "The translation runtime the Desktop app downloads with its first language model (native/translation). Not an app release. runtimes.txt lists each platform's archive as \`<platform> <size> <sha256>\`."

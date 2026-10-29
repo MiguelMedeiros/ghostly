@@ -222,6 +222,20 @@
     "60": "1 hora"
   },
   "title": "Ajustes",
+  "translate": {
+    "downloaded": "Idiomas baixados",
+    "hint": "O padrão para as conversas que não escolheram",
+    "info": "Mensagens recebidas em outro idioma são traduzidas neste aparelho por um modelo de idioma baixado uma vez. Nenhum texto sai do aparelho, e seus contatos nunca ficam sabendo.",
+    "name": "Traduzir mensagens",
+    "none": "Nenhum idioma baixado",
+    "pair": "{{from}} → {{to}}",
+    "remove": "Remover",
+    "removeFailed": "Não foi possível remover. Tente de novo.",
+    "removeLabel": "Remover {{name}}",
+    "searchWords": "tradução, tradução automática, idiomas, modelos",
+    "title": "Traduzir mensagens para {{language}}",
+    "unread": "Não foi possível ler os idiomas baixados."
+  },
   "version": "Versão",
   "website": "Website"
 }

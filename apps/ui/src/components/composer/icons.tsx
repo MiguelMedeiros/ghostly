@@ -20,6 +20,11 @@ export const GifIcon = ({ size = 22 }: { size?: number }) => (
     <text x="12" y="15.2" textAnchor="middle" fill="currentColor" stroke="none" fontSize="7.5" fontWeight="700" fontFamily="system-ui, sans-serif">GIF</text></Line>
 );
 
+/** Translate: an "A" and a character, the sign apps use for it. */
+export const TranslateIcon = ({ size = 22 }: { size?: number }) => (
+  <Line size={size}><path d="M4 5h8M8 3v2M10.5 5c-.8 3.6-3.3 6.6-6.5 8M6 8.5c1.2 2 3 3.6 5 4.5" /><path d="m12.5 21 4-9 4 9M14 17.8h5" /></Line>
+);
+
 export const SearchIcon = () => <Line size={16} width={2}><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></Line>;
 
 /* The + menu's rows: solid glyphs, coloured by composer.css. */

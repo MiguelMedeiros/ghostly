@@ -18,13 +18,18 @@ import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { routineStacks } from "../lib/statusCards";
+import { useComposerTranslation } from "../hooks/useComposerTranslation";
+import { keepSentOriginal } from "../lib/sentOriginals";
+import type { SentTranslation } from "../components/MessageInput";
 import { GroupPaymentComposer } from "../components/GroupPaymentComposer";
 import { GroupPaymentCaption, GroupPaymentNote } from "../components/GroupPaymentNote";
 import { Menu, MenuItem, MenuSeparator } from "../components/Menu";
 import { openOnArrow } from "../lib/menuButton";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
+import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
 import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
 import { groupChat } from "../lib/chatMute";
+import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
@@ -326,6 +331,7 @@ export function GroupChat() {
   if (viewingPicture && !group?.picture) setViewingPicture(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
+  const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
   const [confirmForget, setConfirmForget] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -430,10 +436,12 @@ export function GroupChat() {
     if (group && !windowAway()) clearChatNotification(`group:${group.id}`);
   }, [group?.id, group?.lastMessageAt, group, away]);
 
-  const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
+  /** `extra.translated`: a translation from the composer's preview, whose original is kept beside it on this device. */
+  const send = useCallback(async (text: string, mentions?: GroupMention[], extra?: { translated?: SentTranslation }): Promise<string | null> => {
     const answering = replyingRef.current;
     try {
-      const { error } = await engine.call("sendGroupMessage", { groupId, text, ...(mentions?.length && { mentions }), ...(answering && { replyTo: answering.id }) });
+      const { error, messageId } = await engine.call("sendGroupMessage", { groupId, text, ...(mentions?.length && { mentions }), ...(answering && { replyTo: answering.id }) });
+      if (!error && messageId && extra?.translated) keepSentOriginal(`group:${groupId}`, messageId, extra.translated);
       if (!error && answering) {
         if (replyingRef.current === answering) replyingRef.current = null;
         setReplyingTo(current => current === answering ? null : current);
@@ -443,6 +451,7 @@ export function GroupChat() {
     }
     catch (e) { return e instanceof Error ? problemLine(e, t) : t("group.chat.sendFailed"); }
   }, [groupId, t]);
+  const composerTranslation = useComposerTranslation(`group:${groupId}`);
 
   // Files and voice messages (WISP 503): the 1:1 composer's, within the group's limit. The first thing sent after
   // Reply carries it, as a text does.
@@ -552,7 +561,7 @@ export function GroupChat() {
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
       onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend
-        ? () => { void engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).catch(() => {}); } : undefined}
+        ? () => { void engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).then(result => { if (!result.error) forgetSentOriginal(groupChat(groupId), m.id); }).catch(() => {}); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
       onSave={m.event ? undefined : () => void setSaved(`group:${groupId}`, m.id, savedHere.has(m.id)).catch(() => {})} saved={savedHere.has(m.id)} />;
@@ -657,6 +666,7 @@ export function GroupChat() {
               {/* Not on a group not joined: it has no member list yet, and nothing comes from it to mute. */}
               {!invited && <MenuItem onClick={() => { setShowMembers(true); closeMenu(); }}>{t("group.menu.members")}</MenuItem>}
               {!invited && <MuteMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />}
+              {!invited && <TranslateMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowTranslate(true); }} />}
               {!invited && <FolderMenuItem chat={groupChat(group.id)} onChoose={() => { closeMenu(); setShowFolders(true); }} />}
               {!noTimeline && !invited && <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>}
               {group.isAdmin && <MenuItem testId="group-rotate" onClick={() => void act(() => engine.call("rotateGroup", { groupId }))}>{t("group.menu.rotate")}</MenuItem>}
@@ -665,6 +675,7 @@ export function GroupChat() {
               <MenuItem danger testId="group-forget" onClick={() => { closeMenu(); setConfirmForget(true); }}>{t("group.menu.forget")}</MenuItem>
             </Menu>
             <MuteMenu chat={groupChat(group.id)} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} mentions />
+            <TranslateMenu chat={groupChat(group.id)} open={showTranslate} onClose={() => setShowTranslate(false)} anchorRef={menuRef} />
             <ChatFolderMenu chat={groupChat(group.id)} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
           </div>
         </div>
@@ -747,6 +758,7 @@ export function GroupChat() {
       {!noTimeline && forwarding.bar}
       {forwarding.dialog}
       {!joiningByLink && !invited && !forwarding.selecting && <MessageInput draftId={`group:${groupId}`} key={groupId} onSend={send} disabled={!group.canSend} maxLength={16_384} textBytes={16_384} recipient={group.name} mentions={mentions}
+        translation={composerTranslation}
         onTyping={group.profile === "mesh" ? onTyping : undefined}
         reply={replyingTo ? { key: replyingTo.id, name: nameOf(replyingTo.sender === "me" ? "me" : "peer", replyingTo.member), snippet: messageSnippet(replyingTo, t),
           mine: replyingTo.sender === "me", ...(replyingTo.sender === "peer" && replyingTo.member && { member: replyingTo.member }), onCancel: () => setReplyingTo(null) } : undefined}

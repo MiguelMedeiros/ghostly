@@ -104,11 +104,13 @@ type ReactionBarProps = {
    * a long press opens this bar instead.
    */
   onCopy?: () => void;
+  /** Copy original under Copy: a message I sent translated, whose original this device kept (lib/sentOriginals.ts). */
+  onCopyOriginal?: () => void;
   /** A Select button under Details: starts choosing messages with this one (to forward several, WISP 400 § Forwards). */
   onSelect?: () => void;
 };
 
-function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails, onCopy, onSelect }: ReactionBarProps) {
+function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, onDetails, onCopy, onCopyOriginal, onSelect }: ReactionBarProps) {
   const { t } = useI18n();
   const [more, setMore] = useState(false);
   useEffect(() => { if (!open) setMore(false); }, [open]);
@@ -145,6 +147,12 @@ function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, on
         <button type="button" data-testid="reaction-bar-copy" onClick={() => { onClose(); onCopy(); }}
           className="mt-1 w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
           {t("common.copy")}
+        </button>
+      )}
+      {onCopy && onCopyOriginal && (
+        <button type="button" data-testid="reaction-bar-copy-original" onClick={() => { onClose(); onCopyOriginal(); }}
+          className="w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
+          {t("chat.sentTranslation.copyOriginal")}
         </button>
       )}
       {onDetails && (

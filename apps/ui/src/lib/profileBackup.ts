@@ -18,6 +18,7 @@ import { assertUnlocked, identityKeysOf, profileIdentityKeys } from "./profileDa
 import { holdRestore, noteRestore, sweepInterruptedRestores, undoRestore } from "./restoreJournal";
 import { builtInNameBefore, currentProfile, isBuiltInName, listProfiles, namespaceOf, newProfileId, registerProfile, registryKey, storedProfileName, type ProfileEntry } from "./profiles";
 import { NAME_STEP_SUFFIX } from "./nameStep";
+import { SENT_ORIGINALS_SUFFIX } from "./sentOriginals";
 
 /** What a bundle says about the profile it holds, and the profile's local keys without its prefix. */
 interface ProfileHead {
@@ -258,6 +259,8 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
     if (handoff && (suffix === "lock_attempts" || suffix.startsWith("handoff_"))) continue;
     // A new profile's question for a name (NameStep) stays with it: a restored or added copy is not a new profile.
     if (suffix === NAME_STEP_SUFFIX) continue;
+    // The originals of what I sent translated never leave this device, not even to my other devices (lib/sentOriginals.ts).
+    if (suffix.startsWith(SENT_ORIGINALS_SUFFIX)) continue;
     if (suffix === "app_settings" && !handoff) {
       try { const settings = JSON.parse(value) as Record<string, unknown>; delete settings.backupS3; value = JSON.stringify(settings); } catch { /* kept as it is */ }
     }
