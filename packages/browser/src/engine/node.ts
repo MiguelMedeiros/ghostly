@@ -3141,6 +3141,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private groupMembersChanged(groupId: string): void {
     this.quietOutsideEdges(groupId);
+    this.groupEdits.membersChanged(groupId);
     const holders = this.settings.wakeHeldBy?.[groupId];
     if (!holders?.length) return;
     const members = this.membership(groupId)?.members;
@@ -3155,6 +3156,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   private groupHistoryGone(groupId: string): void {
     const linkId = `group:${groupId}`;
+    // Every way a group ends here comes by: what its edits kept of each edge goes, as with `forgetGroup`.
+    this.groupEdits.forget(groupId);
     this.newestAt.delete(linkId);
     this.lateAt.delete(linkId);
     for (const clock of this.clockLeads.keys()) if (clock.startsWith(`${linkId} `)) this.clockLeads.delete(clock);

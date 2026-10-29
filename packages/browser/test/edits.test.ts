@@ -748,6 +748,36 @@ describe("a received group edit or reaction reads its own group", () => {
   });
 });
 
+// A private group that ended here by Leave (or its tombstone's expiry, or a link join over it) kept every edge my edits
+// were said again on, a stopped GhostLink each (~35 KB), for as long as the app ran: only `forgetGroup` dropped them.
+describe("what my group edits kept of an edge", () => {
+  it("goes with a member who leaves the roster, and with the group whichever way it ends here", async () => {
+    const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, carol = createIdentity().pubKeyZ32;
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { view(groupId: string): unknown; host: { historyGone?(groupId: string): void; membersChanged?(groupId: string): void } };
+      groupEdits: { resend(groupId: string, to: string): Promise<void>; stop(): void; host: GroupEditsHost; resentOn: Map<string, unknown>; heard: Map<string, unknown>; resendPace: Map<string, unknown> };
+    };
+    let members = [me, bob, carol];
+    vi.spyOn(inner.groups, "view").mockImplementation(id => id === "g" || id === "h" ? { id, status: "active", myKey: me, isAdmin: false, members: members.map(key => ({ key })) } : undefined);
+    const host = inner.groupEdits.host, edges = new Map<string, object>();
+    vi.spyOn(host, "edge").mockImplementation((groupId, member) => { const key = `${groupId}\n${member}`; if (!edges.has(key)) edges.set(key, {}); return edges.get(key); });
+    vi.spyOn(host, "history").mockResolvedValue([]);
+    cleanup.push(async () => { inner.groupEdits.stop(); });
+    const kept = () => [...new Set([...inner.groupEdits.resentOn.keys(), ...inner.groupEdits.heard.keys(), ...inner.groupEdits.resendPace.keys()])].sort();
+    for (const [g, to] of [["g", bob], ["g", carol], ["h", bob]]) await inner.groupEdits.resend(g, to);
+    expect(kept()).toEqual([`g\n${bob}`, `g\n${carol}`, `h\n${bob}`].sort());
+    // Carol leaves g, which stays: her edge goes from what g's edits keep, Bob's stays.
+    members = [me, bob];
+    inner.groups.host.membersChanged!("g");
+    expect(kept()).toEqual([`g\n${bob}`, `h\n${bob}`].sort());
+    // I leave h (or its tombstone goes): its history goes, and every edge my edits kept for it.
+    inner.groups.host.historyGone!("h");
+    expect(kept()).toEqual([`g\n${bob}`]);
+  });
+});
+
 describe("deleting many of my group messages for everyone", () => {
   it("a removal on its way is read from the group's removals, not from the store: 200 in a row read each row once", async () => {
     // Removals go at the pace of edits (10 a window): each flush read every one still waiting from the store, where it is
