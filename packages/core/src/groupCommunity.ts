@@ -2084,13 +2084,18 @@ export class CommunitySession {
     return s.by;
   }
 
-  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
+  /**
+   * After the chain or my secrets moved: the waiting statement, and, if I became the admin, or my statement's commit
+   * went with a branch that lost a fork, the name and picture signed again as mine under the main branch.
+   */
   private async metaFollowsChain(): Promise<void> {
     const pending = this.pendingMeta;
     this.pendingMeta = undefined;
     if (pending && await this.receiveMeta(pending.from, pending.frame)) this.hooks.relay?.(pending.frame as GroupMetaFrame);
-    // Joiners accept only the current admin's statement: a new admin signs the picture again.
-    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.hooks.clock?.() ?? Date.now());
+    // Joiners accept only the current admin's statement: a new admin signs the picture again. One under a commit off
+    // the main branch reaches no one (each waits for a chain that never comes): its admin signs it again too.
+    const meta = this.state.meta;
+    if (this.isAdmin && meta && (meta.by !== this.myKey || !this.mainIndex.has(meta.h))) await this.publishMeta(meta.body, this.hooks.clock?.() ?? Date.now());
   }
 
   private async fork(reason: string): Promise<void> {
