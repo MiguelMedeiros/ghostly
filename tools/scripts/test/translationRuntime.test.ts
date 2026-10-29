@@ -240,7 +240,7 @@ function unpacked() {
 }
 
 /** How long one request may take: a cold model on a slow CI runner (darwin-x64 took 85 s) stays under it. */
-const ANSWER_MS = 240_000;
+const ANSWER_MS = 60_000;
 const started = Date.now();
 /** Each step's time goes to stderr, so a run that times out still shows how far it got. */
 const step = (what: string) => process.stderr.write(`[translation runtime test] ${what}, ${Date.now() - started} ms in\n`);

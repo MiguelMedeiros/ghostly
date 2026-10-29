@@ -1,14 +1,17 @@
 // The translation runtime, run by `bare runtime.mjs <models folder>`: the stdio protocol of protocol.mjs over QVAC's
 // Bergamot addon. Started by the app, not listening on any port, and it never fetches: the only files it reads are the
 // models under the folder it was given, by fixed names. Nothing it writes carries a message's text but the answers.
-import process from 'bare-process'
-import fs from 'bare-fs'
-import path from 'bare-path'
-import TranslationNmtcpp from '@qvac/translation-nmtcpp'
-import { createRuntime, lineReader } from './protocol.mjs'
-
 const T0 = Date.now()
+console.error('[trace console] body start')
+const { default: process } = await import('bare-process')
+console.error('[trace console] bare-process imported')
 const trace = what => { try { process.stderr.write(`[trace ${Date.now() - T0} ms] ${what}\n`) } catch {} }
+trace('stderr via bare-process works')
+const { default: fs } = await import('bare-fs')
+const { default: path } = await import('bare-path')
+const { createRuntime, lineReader } = await import('./protocol.mjs')
+trace('importing the addon')
+const { default: TranslationNmtcpp } = await import('@qvac/translation-nmtcpp')
 trace(`started argv=${JSON.stringify(Bare.argv)} stdin=${process.stdin?.constructor?.name} stdout=${process.stdout?.constructor?.name}`)
 setInterval(() => trace('alive'), 15000)
 const root = Bare.argv[2]
