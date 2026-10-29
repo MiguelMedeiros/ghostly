@@ -271,4 +271,29 @@ describe("stored files, wherever their bytes are", () => {
     expect(appended).toEqual([16 * 16384, 4 * 16384, 300 * 1024]);
     expect(storage.flush).toHaveBeenCalledWith("x-in-1");
   });
+
+  it("a close while a flush still writes stores the gathered part once, so a resumed file goes on from its true size", async () => {
+    // Like the CLI's files: the size is checked, then the bytes go at the end of the file.
+    let file = new Uint8Array(0);
+    const later = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const storage = {
+      append: vi.fn(async (_id: string, offset: number, bytes: Uint8Array) => {
+        await later();
+        if (offset !== file.length) throw new Error(`append at ${offset}, the file has ${file.length}`);
+        await later();
+        const grown = new Uint8Array(file.length + bytes.length);
+        grown.set(file); grown.set(bytes, file.length);
+        file = grown;
+      }),
+      flush: vi.fn(async () => {}), close: vi.fn(async () => {}),
+    } as unknown as FileBytes;
+    const appender = new FileAppender(storage, "x-in-2");
+    await appender.append(pattern(0, 300 * 1024));
+    for (let i = 0; i < 12; i++) await appender.append(pattern(300 * 1024 + i * 16384, 16384));
+    const flushed = appender.flush();
+    const closed = appender.close();
+    await Promise.all([flushed, closed]);
+    expect(appender.written).toBe(300 * 1024 + 12 * 16384);
+    expectBytes(file, pattern(0, 300 * 1024 + 12 * 16384));
+  });
 });
