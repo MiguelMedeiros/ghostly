@@ -64,6 +64,28 @@ describe("pin", () => {
   });
 });
 
+describe("chat show and group show say the pin", () => {
+  const ctxOf = (chatPin?: PinView, groupPin?: PinView) => ({
+    runtime: { server: { node: { getState: () => ({ links: [link("chat-one", { label: "Alice", ...(chatPin && { pin: chatPin }) })], groups: [group(groupPin && { pin: groupPin })], settings: {}, transport: {} }) as unknown as EngineState } }, paths: { name: "default" } },
+    hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test",
+  }) as unknown as ApiContext;
+
+  it("with the fields chat.pinned and group.pinned carry, or null when nothing is pinned", async () => {
+    const none = ctxOf();
+    expect(await callApi(none, "chat.get", { chat: "Alice" })).toMatchObject({ pin: null });
+    expect(await callApi(none, "group.get", { group: "Crew" })).toMatchObject({ pin: null });
+    const pinned = ctxOf({ id: "abc", by: "peer", at: 5, messageId: "me_abc" }, { id: "k:0:1", by: "k", at: 8 });
+    expect(await callApi(pinned, "chat.get", { chat: "Alice" })).toMatchObject({ pin: { messageId: "me_abc", ref: "abc", by: "peer", at: 5 } });
+    // Not here (yet): the id both sides know, and no row.
+    expect(await callApi(pinned, "group.get", { group: "Crew" })).toMatchObject({ pin: { messageId: null, ref: "k:0:1", by: "k", at: 8 } });
+    expect(await callApi(pinned, "group.list", {})).toMatchObject({ groups: [{ pin: { ref: "k:0:1" } }] });
+    // Unpinned: the engine keeps an empty id.
+    const unpinned = ctxOf({ id: "", by: "peer", at: 7 }, { id: "", by: "me", at: 9 });
+    expect(await callApi(unpinned, "chat.get", { chat: "Alice" })).toMatchObject({ pin: null });
+    expect(await callApi(unpinned, "group.get", { group: "Crew" })).toMatchObject({ pin: null });
+  });
+});
+
 describe("the stream's pins", () => {
   let dir: string;
   beforeAll(async () => { dir = mkdtempSync(join(tmpdir(), "ghostly-pins-")); await openPersistentIndexedDb(join(dir, "db")); });
