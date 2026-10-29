@@ -76,6 +76,34 @@ export function ReferenceMarkdown({
     };
     visit(tree);
   };
+  // On a phone a table of three or more columns stacks each row as a card (reader.css), so every cell carries its
+  // column's header as a label and the table says it may stack. Stacked, the boxes are blocks, so explicit roles keep
+  // it a table for a screen reader.
+  type HtmlNode = { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: HtmlNode[] };
+  const tableLabels = () => (tree: HtmlNode) => {
+    const text = (node: HtmlNode): string => node.value ?? node.children?.map(text).join("") ?? "";
+    const rows = (node: HtmlNode): HtmlNode[] =>
+      node.tagName === "tr" ? [node] : (node.children ?? []).flatMap((child) => (child.tagName === "table" ? [] : rows(child)));
+    const cells = (row: HtmlNode) => (row.children ?? []).filter((cell) => cell.tagName === "th" || cell.tagName === "td");
+    const visit = (node: HtmlNode) => {
+      if (node.tagName === "table") {
+        const [head, ...body] = rows(node);
+        const labels = head ? cells(head).map((cell) => text(cell).trim()) : [];
+        if (labels.length >= 3) {
+          node.properties = { ...node.properties, dataStack: "", role: "table" };
+          const role = (child: HtmlNode, value: string) => (child.properties = { ...child.properties, role: value });
+          node.children?.forEach((group) => (group.tagName === "thead" || group.tagName === "tbody") && role(group, "rowgroup"));
+          for (const row of [head, ...body]) {
+            role(row, "row");
+            cells(row).forEach((cell) => role(cell, cell.tagName === "th" ? "columnheader" : "cell"));
+          }
+          for (const row of body) cells(row).forEach((cell, index) => (cell.properties = { ...cell.properties, dataLabel: labels[index] ?? "" }));
+        }
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
   const heading = (Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") =>
     function Heading({ children, id }: { children?: ReactNode; id?: string }) {
       return (
@@ -98,14 +126,14 @@ export function ReferenceMarkdown({
     h4: heading("h4"),
     h5: heading("h5"),
     h6: heading("h6"),
-    table: ({ children }) => (
+    table: ({ node: _node, children, ...props }) => (
       <div
         className="reference-table"
         tabIndex={0}
         role="region"
         aria-label="Scrollable documentation table"
       >
-        <table>{children}</table>
+        <table {...props}>{children}</table>
       </div>
     ),
     pre: ({ children }) => {
@@ -129,6 +157,7 @@ export function ReferenceMarkdown({
   return (
     <Markdown
       remarkPlugins={[remarkGfm, headingIds]}
+      rehypePlugins={[tableLabels]}
       skipHtml
       components={components}
       urlTransform={(url) =>
