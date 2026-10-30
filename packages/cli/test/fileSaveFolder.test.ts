@@ -30,9 +30,23 @@ beforeAll(async () => {
     metadata: { name: "Setup.exe", size: 2, mime: "audio/webm", timestamp: 1_700_000_000_000, voice: { duration: 4_200, peaks: [] } },
     transfer: { state: "done", transferred: 2, size: 2 },
   } as never);
+  // Its sender claims a time past Date's end: files/3 takes any safe integer.
+  await fileStore.put({
+    id: "chat-one-in-far", linkId: "chat-one", blob: new Blob(["far"]), createdAt: 1_700_000_200_000, direction: "in",
+    metadata: { name: "far.webm", size: 3, mime: "audio/webm", timestamp: 8_700_000_000_000_000, voice: { duration: 1_000, peaks: [] } },
+    transfer: { state: "done", transferred: 3, size: 3 },
+  } as never);
 });
 
-const node = { getState: () => ({ links: [], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState };
+// The rows the chat shows: each at the place it came, the sender's claim kept beside it.
+const rows = [
+  { id: "peer_v", sender: "peer", timestamp: 1_700_000_005_000, sentAt: 1_700_000_000_000, file: { id: "chat-one-in-v" } },
+  { id: "peer_far", sender: "peer", timestamp: 1_700_000_100_000, file: { id: "chat-one-in-far" } },
+];
+const node = {
+  getState: () => ({ links: [], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
+  getMessages: async (linkId: string) => linkId === "chat-one" ? rows : [],
+};
 const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
 
 describe("file save to a folder", () => {
@@ -61,7 +75,8 @@ describe("file save to a folder", () => {
   it("a voice message goes into --dir under the name Ghostly makes for it, never the sender's", async () => {
     const folder = join(dir, "voice");
     mkdirSync(folder);
-    const name = voiceDownloadName("audio/webm", 1_700_000_000_000);
+    // Named from its row's time, as the apps' Download names it, not the time its sender says.
+    const name = voiceDownloadName("audio/webm", 1_700_000_005_000);
     expect(await callApi(ctx, "file.save", { file: "chat-one-in-v", dir: folder })).toMatchObject({ path: join(folder, name) });
     expect(readdirSync(folder)).toEqual([name]);
   });
@@ -85,6 +100,14 @@ describe("file save to a folder", () => {
     expect(readFileSync(join(folder, `${stem} (3).webm`), "utf8")).toBe("chat-one-in-vc");
     // A --path the user named is never renamed: there it is still a confirm.
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-vb", path: join(folder, name) })).rejects.toMatchObject({ code: "confirm" });
+  });
+
+  it("a voice message whose sender claims a time no date can hold is named from its row's time, never NaN", async () => {
+    const folder = join(dir, "far");
+    mkdirSync(folder);
+    const name = voiceDownloadName("audio/webm", 1_700_000_100_000);
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-far", dir: folder })).toMatchObject({ path: join(folder, name) });
+    expect(readdirSync(folder)).toEqual([name]);
   });
 
   it("an empty --path or --dir is a usage error", () => {
