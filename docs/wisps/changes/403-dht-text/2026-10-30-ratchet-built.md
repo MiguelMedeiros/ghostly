@@ -1,1 +1,1 @@
-The note on forward secrecy says that envelopes after the pin are sealed with keys used once between two apps that list `ratchet/1` ([4xx · Forward Secrecy](../../4xx-ratchet.md), now built). No wire change here.
+The note on forward secrecy says that envelopes after the pin are sealed with keys used once between two apps that list `ratchet/1` ([4xx · Forward Secrecy](../../4xx-ratchet.md), built on `dev`). No wire change here.
