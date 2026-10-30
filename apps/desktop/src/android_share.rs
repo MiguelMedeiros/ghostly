@@ -60,6 +60,7 @@ impl Incoming {
                 shared.left_out.splice(0..0, waiting.left_out);
                 shared.unread.splice(0..0, waiting.unread);
                 shared.no_room.splice(0..0, waiting.no_room);
+                shared.past_limit.splice(0..0, waiting.past_limit);
                 *held = Some(shared);
             }
             _ => *held = Some(shared),
@@ -124,10 +125,14 @@ mod tests {
     fn a_share_with_something_keeps_the_names_of_the_waiting_notice() {
         // An older share still copying is handed over after a newer one that was only a notice.
         let incoming = Incoming::default();
-        incoming.put(notice(&["VID_B.mp4"], &["DOC_B.pdf"]));
+        incoming.put(Shared {
+            past_limit: vec!["IMG_B33.jpg".into()],
+            ..notice(&["VID_B.mp4"], &["DOC_B.pdf"])
+        });
         incoming.put(Shared {
             left_out: vec!["VID_A2.mp4".into()],
             no_room: vec!["VID_A3.mp4".into()],
+            past_limit: vec!["IMG_A33.jpg".into()],
             ..photo()
         });
         assert_eq!(
@@ -136,6 +141,7 @@ mod tests {
                 left_out: vec!["VID_B.mp4".into(), "VID_A2.mp4".into()],
                 unread: vec!["DOC_B.pdf".into()],
                 no_room: vec!["VID_A3.mp4".into()],
+                past_limit: vec!["IMG_B33.jpg".into(), "IMG_A33.jpg".into()],
                 ..photo()
             })
         );
