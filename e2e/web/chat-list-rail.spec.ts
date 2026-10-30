@@ -69,7 +69,29 @@ test("folds the list to a rail of pictures, opens a chat from it with its unread
   await expect(page.getByTestId("chat-list")).toBeVisible();
 });
 
-test("a phone's list has no rail", { tag: ["@feature:chats.list.rail"] }, async ({ peer }) => {
+test("on the rail the list's notices still show, over the open page, and go back to the list when it unfolds", { tag: ["@feature:chats.list.rail"] }, async ({ peer }) => {
+  const { page, context } = await peer("ana", { viewport: { width: 1100, height: 800 } });
+  await page.getByTestId("chat-list-toggle").click();
+  await expect(page.getByTestId("chat-rail")).toBeVisible();
+
+  await context.setOffline(true);
+  try {
+    const banner = page.getByTestId("offline-banner");
+    await expect(banner).toBeVisible();
+    // Over the page, as wide as it: not squeezed into the rail's 72 px.
+    await expect(page.locator("main").getByTestId("offline-banner")).toBeVisible();
+    expect((await box(banner)).width).toBeGreaterThan(400);
+
+    await page.getByTestId("chat-list-toggle").click();
+    await expect(page.getByTestId("sidebar").getByTestId("offline-banner")).toBeVisible();
+    await expect(page.getByTestId("offline-banner")).toHaveCount(1);
+  } finally {
+    await context.setOffline(false);
+  }
+  await expect(page.getByTestId("offline-banner")).toHaveCount(0);
+});
+
+test("a phone's list has no rail",{ tag: ["@feature:chats.list.rail"] }, async ({ peer }) => {
   const { page } = await peer("phone", { viewport: { width: 390, height: 800 } });
   await expect(page.getByTestId("sidebar")).toBeVisible();
   await expect(page.getByTestId("chat-list-toggle")).toHaveCount(0);

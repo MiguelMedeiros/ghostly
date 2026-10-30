@@ -24,12 +24,9 @@ import { useI18n } from "../contexts/I18nContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
-import { OfflineBanner } from "./OfflineBanner";
-import { StorageFullBanner } from "./StorageFullBanner";
-import { LimitedBanner } from "./devices/LimitedStart";
+import { ListNotices } from "./ListNotices";
 import { InstallHint } from "./InstallApp";
 import { StorageKeeper } from "./StorageKeeper";
-import { UpdateBanner } from "./UpdateBanner";
 import {
   isSessionPinned,
   setSessionPinned,
@@ -437,12 +434,8 @@ export function Sidebar() {
         {!isMobile && <RailToggle ref={toggleRef} collapsed={false} onToggle={toggleCollapsed} />}
         </div>
       </div>
-      <UpdateBanner />
-      <OfflineBanner />
-      <StorageFullBanner />
-      <LimitedBanner />
+      <ListNotices />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
-      <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">
@@ -541,6 +534,8 @@ export function Sidebar() {
       </div>
       </>}
 
+      {/* Draws nothing, and on the rail too it asks to keep the data and takes back a restore stopped half way. */}
+      <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
       {/* Out of the list's branches: the installed app's #/new and #/scan open them on the rail too. */}
       {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
       {showNewFolder && <FolderNameDialog returnFocus={newMoreRef} onClose={() => setShowNewFolder(false)} onSave={name => { createFolder(name); setShowNewFolder(false); setSearch(""); }} />}

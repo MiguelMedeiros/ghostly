@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
+import { ListNotices } from "./components/ListNotices";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
 import { Chat } from "./pages/Chat";
@@ -180,6 +181,7 @@ export function App() {
   // Download automatically in groups, Wi-Fi only: the engine's switch follows the connection (WISP 503).
   useGroupDownloadsSync();
   const isMobile = useIsMobile();
+  const { settings } = useSettings();
   const { pathname } = useLocation();
   useViewportHeight();
   useThemeColor();
@@ -221,13 +223,15 @@ export function App() {
         <Sidebar />
         {/* Keyed as on a phone: a phone turned on its side (or back) keeps the open chat and page mounted, and the
             message field its focus and its keyboard. */}
-        {/* Two rows: a voice message playing on away from its chat (NowPlayingBar) over the open chat or page. A grid
-            rather than a wrapper around them, which would load the open chat again when the bar came. */}
-        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] min-w-0 focus:outline-none">
-          <NowPlayingBar key="playing" className="row-start-1" />
-          <Fragment key="chats">{chats("row-start-2 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
+        {/* Three rows: the list's notices when it is folded to a rail, which has no room for them, and a voice message
+            playing on away from its chat (NowPlayingBar), over the open chat or page. A grid rather than a wrapper
+            around them, which would load the open chat again when the bar came. */}
+        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_auto_minmax(0,1fr)] min-w-0 focus:outline-none">
+          {settings.chatListCollapsed && <div key="notices" className="row-start-1 flex flex-col min-w-0"><ListNotices /></div>}
+          <NowPlayingBar key="playing" className="row-start-2" />
+          <Fragment key="chats">{chats("row-start-3 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
           {!inChat && (
-            <div key="page" className="row-start-2 col-start-1 flex flex-col min-w-0 min-h-0">
+            <div key="page" className="row-start-3 col-start-1 flex flex-col min-w-0 min-h-0">
               <Outlet />
             </div>
           )}
