@@ -171,8 +171,9 @@ export const Ghost = memo(function Ghost({
         {/* A sleeping ghost's hem is still: a `d` morph lays out and repaints the whole page at every frame for as long
             as the ghost is on screen, and the footer's sleeper is on screen at the end of every page. So is a `still`
             one's: /brand's row of 7 moods laid out the page 120 times a second (189 ms of main thread a second). An awake
-            one's stirs three times when it appears and rests on the still hem (the last frame): the first screen of
-            /, /roadmap and /developers/agents laid out 60 times a second for as long as the reader stayed there. */}
+            one's stirs once when it appears and rests on the still hem (the last frame): the first screen of /, /roadmap
+            and /developers/agents laid out 60 times a second for as long as the reader stayed there, and three stirs
+            (9.6 s) still took a quarter of a phone's main thread for a visit's first 10 s. */}
         {[fill, `url(#sheen-${id})`].map((paint, i) => (
           <path key={i} d={STILL} fill={paint}>
             {!reduce && !closed && !still && (
@@ -180,7 +181,7 @@ export const Ghost = memo(function Ghost({
                 attributeName="d"
                 dur="3.2s"
                 begin={delay}
-                repeatCount="3"
+                repeatCount="1"
                 fill="freeze"
                 values={[...FRAMES, FRAMES[0]].join(";")}
                 calcMode="spline"
