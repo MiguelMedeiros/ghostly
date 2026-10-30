@@ -373,6 +373,12 @@ export class CashuWallet {
     return { url: normalized, name };
   }
 
+  /** What `view(network).balance` says, from the proofs alone: no swaps, no history. */
+  async balance(network?: WalletNetwork): Promise<number> {
+    const here = new Set(this.getMints(network));
+    return total((await this.allProofs()).filter((p) => here.has(p.mint) && !p.reserved));
+  }
+
   async balanceAt(mint: string): Promise<number> {
     return total((await this.allProofs()).filter((p) => p.mint === mint && !p.reserved));
   }
