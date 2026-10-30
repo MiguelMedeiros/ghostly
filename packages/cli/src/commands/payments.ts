@@ -1,4 +1,4 @@
-import { type Command, net, card, memo, confirmReal, force, sats, pairs } from "./shared";
+import { type Command, net, card, memo, confirmReal, force, sats, pageLimit, pairs } from "./shared";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "../words";
 import { CliError } from "../errors";
 
@@ -58,7 +58,7 @@ export const commands: Record<string, Command> = {
   },
   "wallet history": {
     method: "wallet.history", usage: "wallet history [--network testnet] [--limit n]", summary: "A network's wallet history, newest first",
-    options: { network: net, limit: { type: "number", description: "Entries (default 50)" } }, params: ({ options }) => ({ network: options.network, limit: options.limit }),
+    options: { network: net, limit: { type: "number", description: "Entries (default 50)" } }, params: ({ options }) => ({ network: options.network, limit: pageLimit(options) }),
   },
   "wallet list": {
     method: "wallet.list", usage: "wallet list [--network mainnet|testnet]", summary: "Wallets with their balances, and what New can make",
