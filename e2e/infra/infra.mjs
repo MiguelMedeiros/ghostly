@@ -99,6 +99,7 @@ const PROBES = {
   "Pubky testnet": async () => (await http(`${endpoints.pubky.pkarrRelay}/8pinxxgqs41n4aididenw5apqp1urfmzdztr8jt4abrkdn435ewo`)) && tcp(endpoints.pubky.httpRelay) && tcp(endpoints.pubky.homeserver),
   // The environment's own mint, whatever E2E_MINT_URL points the suite at.
   "Cashu mint": () => http(`${read("E2E_MINT_URL")}/v1/info`),
+  "Cashu mint on LND": () => http(`${endpoints.mintOnLnd}/v1/info`),
 };
 
 async function probe() {
@@ -144,6 +145,7 @@ const SEEDS = {
   nwc: ["e2e/support/nwc-regtest/regtest.mjs", "ready"],
   usdt: ["e2e/support/usdt-local.mjs", "ready"],
   fedimint: ["e2e/support/fedimint-regtest/regtest.mjs", "ready"],
+  mintLnd: ["e2e/support/mint-lnd-regtest/regtest.mjs", "ready"],
 };
 
 function node(args, env) {
