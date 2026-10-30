@@ -248,6 +248,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
       await rows.markRestoredWallet();
       // The files a light backup left out: their records say so, as in the app's restore.
       await rows.markLeftOutFiles(leftOutIn(restored));
+      // Its chats' ratchets stay with the profile it came from (WISP 4xx), a backup from before they were left out too.
+      await rows.forgetRatchets();
       await store.compact();
     } catch (error) {
       await store.close().catch(() => {});

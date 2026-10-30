@@ -1184,7 +1184,7 @@
     "packages/core/src/capsRecord.ts": ["chat.caps-record","chat.dht.*","chat.paired.reconnect"],
     "packages/core/src/clockWatch.ts": ["app.clock-off"],
     "packages/core/src/communityRendezvous.ts": ["groups.community.*","groups.protocol.community-topology"],
-    "packages/core/src/dhtDelivery.ts": ["chat.dht.*","invite.dht","invite.delivery-mode","core.peer-keys","chat.paired.offline-send","chat.paired.reconnect","delivery.hold.*","profiles.peek"],
+    "packages/core/src/dhtDelivery.ts": ["chat.dht.*","chat.ratchet","invite.dht","invite.delivery-mode","core.peer-keys","chat.paired.offline-send","chat.paired.reconnect","delivery.hold.*","profiles.peek"],
     "packages/core/src/dhtFiles.ts": ["chat.dht.*","files.*","chat.order"],
     "packages/core/src/didDht.ts": ["did.*"],
     "packages/core/src/directPath.ts": ["transport.direct-blocked"],

@@ -33,7 +33,7 @@ A session frame never goes through this profile: what a recorded live connection
 
 An app that implements this profile lists `ratchet/1` in its layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), beside `dht-text/1`. It is not in `pair-offer`: the live session does not carry it, and the offer's lists are full for older apps.
 
-- **Sending.** A side seals a floor envelope or a held item with the ratchet when the contact is pinned and either the contact's newest readable record lists `ratchet/1`, or this side has opened a ratcheted item from the contact (a lane is `heard`, below). Otherwise it seals as today.
+- **Sending.** A side seals a floor envelope or a held item with the ratchet when this side has opened a ratcheted item from the contact (a lane is `heard`, below), or when the contact is pinned, its newest readable record lists `ratchet/1`, and it has shown that it pinned this side too (an envelope of its sealed to this side was read, or a live session was had). Otherwise it seals as today. The last condition matters at first contact: a joiner pins its inviter from the invite, and a first envelope sealed with the ratchet would reach an inviter that cannot open it and so never pins the joiner.
 - **Upgrade of a chat that exists.** Nothing is migrated and no invite is needed: the first item sealed after both records list `ratchet/1` starts a session ([Sessions](#sessions)). Messages already in the chat stay as they were stored; what was recorded before the upgrade stays as open to a later key thief as it was.
 - **An older contact.** A contact whose record lacks `ratchet/1`, or that has no readable record, gets plain envelopes and bundles, exactly as today, and never a ratcheted one it could not read.
 
