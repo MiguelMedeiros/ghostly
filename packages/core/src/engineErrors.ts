@@ -25,6 +25,7 @@ export const ENGINE_ERRORS = {
   mintNotHttps: "Mints must use https",
   notEnoughSats: "Not enough sats in your wallet",
   notEnoughForFee: "Not enough sats in your wallet: {amount} sats leave room for the fee",
+  mintsNoAnyAmount: "None of your mints can pay an invoice with no amount",
   noSharedMint: "You share no mint with this contact",
   ecashAlreadySpent: "This ecash was already spent somewhere else",
   ecashBeingReceived: "This ecash is already being received",

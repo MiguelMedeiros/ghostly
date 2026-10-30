@@ -30,6 +30,8 @@
     "lightningFailed": "Lightning の支払いは完了しませんでした。",
     "mintHttps": "ミントは https を使う必要があります",
     "mintNotAccepted": "{{host}} の ecash は受け付けていません",
+    "mintsNoAnyAmount": "金額のない請求書を支払えるミントがありません",
+    "mintsNoAnyAmountNext": "金額付きのものを頼んでください。",
     "noAnswer": "{{host}} から応答がありませんでした",
     "noInvoice": "請求書を作成できるミントがありませんでした",
     "noMint": "ミントが設定されていません",

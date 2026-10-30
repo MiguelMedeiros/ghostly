@@ -362,7 +362,7 @@ export interface WalletPlatform {
   setPrimaryMint(url: string): Promise<void>;
   /** An invoice from the bound Lightning card (else the default for receiving); `via: "cashu"` asks the Cashu mints. */
   receiveLightning(amount: number, via?: "cashu"): Promise<{ quote?: string; invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
-  quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
+  quoteInvoice(invoice: string, via?: "cashu", amount?: number): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
   /**
    * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.

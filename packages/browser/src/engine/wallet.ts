@@ -1270,28 +1270,38 @@ export class CashuWallet {
 
   // -- Lightning out -----------------------------------------------------------
 
-  /** What paying this invoice would cost, from the first mint that can afford it. */
-  async quoteInvoice(invoice: string, network?: WalletNetwork): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
+  /**
+   * What paying this invoice would cost, from the first mint that can afford it. `chosen`: the sats the person typed for
+   * an invoice with no amount, the only way one is paid (WISP 203); only a mint that says it takes one is asked.
+   */
+  async quoteInvoice(invoice: string, network?: WalletNetwork, chosen?: number): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
     let lastError: unknown = new Error("Add a mint in Settings first");
     let mints = this.getMints(network);
     /** The most any mint asked could pay with its fee on top: a Max comes down to it. */
     let room = 0;
     const decoded = decodeBolt11(invoice);
     if (!decoded) throw new Error("That is not an invoice this wallet can pay");
-    if (decoded.amountSat === null) throw new Error("Invoices without an amount are not supported");
+    if (decoded.amountSat === null && chosen === undefined) throw new Error("Invoices without an amount are not supported");
+    // An invoice that names its amount is paid for that amount, whatever is asked.
+    if (decoded.amountSat !== null && chosen !== undefined) throw new Error(MINT_QUOTE_MISMATCH);
+    if (chosen !== undefined) assertAmount(chosen);
+    const expected = decoded.amountSat ?? chosen!;
     // A Bitcoin invoice may be real money: test sats pay one only through a mint whose Lightning is known to be fake.
     if (decoded.network === "bitcoin" && mints.some((mint) => mintNetwork(mint) === "testnet")) {
       mints = mints.filter((mint) => mintNetwork(mint) === "mainnet" || fakesLightning(mint));
       if (!mints.length) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     }
+    if (chosen !== undefined && mints.length) lastError = engineError("mintsNoAnyAmount");
     for (const mint of mints) {
       try {
         const wallet = await this.wallet(mint);
-        const quote = await wallet.createMeltQuoteBolt11(invoice.trim());
+        // cashu-ts leaves the amount out of the request for a mint that does not say it takes one: never asked here.
+        if (chosen !== undefined && !wallet.getMintInfo().supportsAmountless("bolt11", UNIT)) continue;
+        const quote = chosen === undefined ? await wallet.createMeltQuoteBolt11(invoice.trim()) : await wallet.createMeltQuoteBolt11(invoice.trim(), chosen * 1000);
         const amount = quote.amount.toNumber();
         const feeReserve = quote.fee_reserve.toNumber();
-        // The amount shown is the invoice's: a quote for another invoice or amount is never paid.
-        if (quoteMismatch(quote, decoded.invoice, decoded.amountSat)) throw new Error(MINT_QUOTE_MISMATCH);
+        // The amount shown is the invoice's, or the one chosen: a quote for another invoice or amount is never paid.
+        if (quoteMismatch(quote, decoded.invoice, expected)) throw new Error(MINT_QUOTE_MISMATCH);
         const balance = await this.balanceAt(mint);
         if (balance < amount + feeReserve) {
           room = Math.max(room, balance - feeReserve);

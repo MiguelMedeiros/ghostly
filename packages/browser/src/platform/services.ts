@@ -193,7 +193,7 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
     removeMint: (url, acceptLoss) => engine.call("walletRemoveMint", { url, ...(acceptLoss ? { acceptLoss } : {}) }),
     receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via, ...ln }),
-    quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via, ...ln }),
+    quoteInvoice: (invoice, via, amount) => engine.call("walletQuoteInvoice", { invoice, via, amount, ...ln }),
     lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values, ...ln }),
     lightningClearSource: () => engine.call("lightningClearSource", ln),
     lightningRetrySource: () => engine.call("lightningRetrySource", ln),

@@ -30,6 +30,8 @@
     "lightningFailed": "El pago Lightning no se completó.",
     "mintHttps": "Los mints deben usar https",
     "mintNotAccepted": "No se acepta ecash de {{host}}",
+    "mintsNoAnyAmount": "Ninguno de tus mints puede pagar una factura sin importe",
+    "mintsNoAnyAmountNext": "Pide una con el importe.",
     "noAnswer": "{{host}} no respondió",
     "noInvoice": "Ningún mint pudo crear una factura",
     "noMint": "No hay ningún mint configurado",
