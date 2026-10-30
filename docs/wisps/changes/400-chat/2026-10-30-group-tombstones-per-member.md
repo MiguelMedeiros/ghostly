@@ -1,0 +1,1 @@
+A group keeps the ids of messages deleted for everyone as before, 500 at most, but when that is full the oldest of the member who has the most goes, not the oldest of all. Before, a member who deleted for everyone many messages of their own (also ones never sent) pushed every other member's ids out, and a late copy of another member's deleted message could then be stored again.
