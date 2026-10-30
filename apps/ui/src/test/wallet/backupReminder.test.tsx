@@ -59,6 +59,25 @@ describe("the backup reminder on the Wallet page", () => {
     expect(engine.callsTo("walletBackupReminder")).toEqual([{ event: "later", wallet: "cashu:mainnet" }]);
   });
 
+  it("Later from the keyboard: the keys go to the next reminder's button, then to the network tab, never to the page", async () => {
+    const { user, engine } = openWallet(real({ "cashu:mainnet": funded(), "usdt:mainnet": funded() }));
+    engine.on("walletBackupReminder", () => undefined);
+    const first = (await screen.findByTestId("backup-reminder")).dataset.wallet!;
+    const next = first === "cashu:mainnet" ? "usdt:mainnet" : "cashu:mainnet";
+    screen.getByTestId("backup-reminder-later").focus();
+    await user.keyboard("{Enter}");
+    act(() => engine.update({ wallet: real({ [first]: { funded: 1, later: Date.now(), laterBalance: "5000000", laters: 1 }, [next]: funded() }) }));
+    expect(await screen.findByTestId("backup-reminder")).toHaveAttribute("data-wallet", next);
+    await waitFor(() => expect(screen.getByTestId("backup-reminder-go")).toHaveFocus());
+
+    screen.getByTestId("backup-reminder-later").focus();
+    await user.keyboard("{Enter}");
+    act(() => engine.update({ wallet: real({ "cashu:mainnet": { funded: 1, later: Date.now(), laterBalance: "50", laters: 1 }, "usdt:mainnet": { funded: 1, later: Date.now(), laterBalance: "5000000", laters: 1 } }) }));
+    await waitFor(() => expect(screen.queryByTestId("backup-reminder")).not.toBeInTheDocument());
+    const inView = screen.getByTestId("wallet-network-panel").dataset.network;
+    await waitFor(() => expect(screen.getByTestId(`wallet-network-${inView}`)).toHaveFocus());
+  });
+
   it("shows nothing once backed up, while put off, or for test coins", () => {
     const { engine } = openWallet(real({ "cashu:mainnet": { funded: 1, backedUp: 2 }, "usdt:mainnet": { funded: 1, later: Date.now(), laterBalance: "5000000", laters: 1 } }));
     expect(screen.queryByTestId("backup-reminder")).not.toBeInTheDocument();
