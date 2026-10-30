@@ -140,6 +140,10 @@ export class HoldEngine {
   /** Items can be held for this contact now: both switched it on, storage is set up and the contact is pinned. */
   canHold(linkId: string): boolean {
     const hold = this.state(linkId);
+    // Forward secrecy was on and the contact's app no longer says it has it (WISP 4xx § Downgrade): nothing is held, since
+    // it could not open a ratcheted item and nothing goes plain; it waits for the live session.
+    const ratchet = this.host.ratchet?.(linkId);
+    if (ratchet && ratchet.box.heardAny && !ratchet.peerSupports()) return false;
     return hold.enabled && !!hold.peerAllows && !!this.host.storage() && !!this.keysFor(linkId);
   }
   /** Ways of paying a request held for this contact may name: what its app allowed at the last session. */

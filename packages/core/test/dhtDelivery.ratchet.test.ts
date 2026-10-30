@@ -142,9 +142,12 @@ it("a joiner that pinned its inviter from the invite sends its first contact pla
   await vi.advanceTimersByTimeAsync(6_000);
   expect(h.messages[0].get(id(1))).toBe("first");
   expect(h.messages[1].get(id(2))).toBe("second");
-  // The joiner's first envelope is plain, under the invite's key; ratcheted ones follow once both pinned.
-  const joiner = h.published.find(p => !p.labels.includes("_dmk"));
-  expect(joiner?.labels).toContain("_dm");
+  // The joiner's first envelope (sealed to the inviter it pinned from the invite) is plain; ratcheted ones follow once
+  // both pinned.
+  const joinerMailbox = h.published.find(p => p.labels.includes("_dr"))!.key;
+  const joinerFirst = h.published.find(p => p.labels.includes("_dmk") && p.key !== joinerMailbox) ?? h.published.find(p => p.labels.includes("_dmk"));
+  expect(joinerFirst?.labels).toContain("_dm");
+  expect(joinerFirst?.labels).not.toContain("_dr");
   expect(h.published.some(p => p.labels.includes("_dr"))).toBe(true);
   await a.stop(); await b.stop();
 });
