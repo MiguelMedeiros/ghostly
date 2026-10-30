@@ -642,8 +642,9 @@ export interface NodeOptions {
    */
   deferGroups?: boolean;
   /**
-   * Leave the chats this run finds saved unstarted; a chat made in the run starts as usual: a headless one-shot that
-   * makes a new invite, whose records the saved chats' publishes would hold back for the relays' next minute.
+   * Leave the chats this run finds saved unstarted; a chat made or joined in the run starts as usual: a headless
+   * one-shot that makes or joins one chat, whose records the saved chats' publishes would hold back for the relays' next
+   * minute.
    */
   deferChats?: boolean;
   /**
@@ -2822,6 +2823,8 @@ export class GhostlyNode implements EngineImplementation {
     const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
     if (existing) {
       if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
+      // Joined again in a run that left the saved chats unstarted (`deferChats`): this one is the run's chat now.
+      if (this.deferredChats.delete(existing.stored.id) && this.networkOn) this.startLink(existing.stored.id);
       return { linkId: await this.existingLink(existing.stored.id) };
     }
     this.refuseOwnInvite(params);
