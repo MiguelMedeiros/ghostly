@@ -428,6 +428,8 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 13]);
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([expect.stringMatching(/could not fetch its head/)]);
+    // Its step back into line is `queue` again: the drop took `queue` off, so removing `queue:failed` alone leaves it out.
+    expect(repo.comments.get(12)![0].body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
   });
 
   it("finds the culprit of a red batch by halves, and lands everyone else", async () => {
@@ -712,6 +714,7 @@ describe("a run of the train", () => {
     expect(r.dropped).toEqual([12]);
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
     // Any other refusal is still the run's error.
     repo.git.push = async () => { throw new Error("Command failed: git push\nfatal: unable to access"); };
     repo.add(14);
@@ -1629,6 +1632,7 @@ describe("one pull request alone", () => {
     expect(r.inFlight).toBeNull();
     expect(repo.pulls.get(21)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(21)!.map((c) => c.body)).toEqual([expect.stringMatching(/changes a workflow \(\.github\/workflows\/ci\.yml\)/)]);
+    expect(repo.comments.get(21)![0].body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
     await repo.run();
     expect(tries).toBe(1);
     // A diff that lists no workflow (changed and changed back): the comment names the one GitHub refused.
@@ -1778,6 +1782,15 @@ describe("one pull request alone", () => {
     expect(repo.pushes).toEqual([]);
     expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/could not fetch its head/)]);
+    expect(repo.comments.get(11)![0].body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
+    // Doing what the comment says puts it back in line: a new head pushed, its CI green, and `queue` added again.
+    repo.missing.delete(11);
+    repo.pulls.get(11)!.sha = "h11b";
+    repo.runs.set("h11b", green);
+    repo.pulls.get(11)!.labels.push(LABEL.queue);
+    expect((await repo.run()).dropped).toEqual([]);
+    expect(repo.pulls.get(11)!.labels).not.toContain(LABEL.failed);
+    expect(repo.pushes).not.toEqual([]);
   });
 
   it("sends one that resolved its conflict in a merge of the base the batch way, where its head merges cleanly", async () => {
