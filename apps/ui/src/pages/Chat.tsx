@@ -404,10 +404,15 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     [deleteMessage, platform, peerKey],
   );
 
-  /** Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. */
-  const removeForEveryone = (messageId: string) => {
+  /**
+   * Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. One
+   * refused (limited mode) rejects, and the bubble says why under it.
+   */
+  const removeForEveryone = async (messageId: string): Promise<void> => {
     if (!chatLink) return;
-    void engine.call("removeMessage", { linkId: chatLink.id, messageId }).then(result => { if (!result.error) deleteMessage(messageId); }).catch(() => {});
+    const result = await engine.call("removeMessage", { linkId: chatLink.id, messageId });
+    if (result.error) throw new Error(result.error);
+    deleteMessage(messageId);
   };
 
   const wallet = platform?.wallet;
