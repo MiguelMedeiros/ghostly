@@ -2,6 +2,8 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageDetailsView } from "@ghostly/browser/shared/types";
 import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
+import { useState } from "react";
+import { ChatOnScreen } from "../../lib/chatOnScreen";
 import { buildDetails, formatBytes, formatDuration, pathWords } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { servicesPlatform } from "../../lib/platform";
@@ -97,6 +99,23 @@ describe("opening and closing", () => {
     await user.click(screen.getByTestId("message-details-backdrop"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
     expect(container.querySelector("[data-message-row]")).not.toHaveAttribute("data-details-open");
+    // Nothing focusable opened them: the focus goes to the message's ⋮, not to the page.
+    expect(document.activeElement).toBe(screen.getByTestId("message-options"));
+  });
+
+  it.each([["Escape", "{Escape}"], ["✕", null]])("opened from the message's ⋮ with the keys, %s gives the focus back to that ⋮", async (_, key) => {
+    fakeEngine.on("messageDetails", () => textView());
+    const { user } = bubble();
+    const options = screen.getByTestId("message-options");
+    act(() => options.focus());
+    await user.keyboard("{Enter}");
+    await user.click(within(screen.getByTestId("message-menu")).getByTestId("message-details"));
+    const panel = await screen.findByRole("dialog");
+    expect(panel.contains(document.activeElement)).toBe(true);
+    if (key) await user.keyboard(key);
+    else await user.click(screen.getByTestId("message-details-close"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.activeElement).toBe(options);
   });
 
   it("a Ctrl+double click on a file's buttons is theirs: Accept, Pause and Cancel open no details; on the file's name it does", async () => {
@@ -116,6 +135,29 @@ describe("opening and closing", () => {
     await detailsClick(moving.user, screen.getByTestId("file-pause"));
     await detailsClick(moving.user, screen.getByTestId("file-cancel"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+  });
+
+  // agents#1704: a chat on a call stays loaded, hidden, when a notification opens another: its details stayed over the
+  // other chat, with Tab caught in them.
+  it("close when their chat goes off screen, and nothing of them is left over the page", async () => {
+    fakeEngine.on("messageDetails", () => textView());
+    let show: (on: boolean) => void = () => {};
+    function Loaded() {
+      const [visible, setVisible] = useState(true);
+      show = setVisible;
+      return <ChatOnScreen.Provider value={visible}><div className={visible ? "" : "hidden"}><MessageBubble message={message()} peerPubKey="peer" onDelete={() => {}} /></div></ChatOnScreen.Provider>;
+    }
+    const { user } = renderApp(<Loaded />);
+    await detailsClick(user, screen.getByText("hello"));
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
+    act(() => show(false));
+    await waitFor(() => expect(screen.queryByTestId("message-details")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("message-details-backdrop")).not.toBeInTheDocument();
+    // Back on screen, they stay closed until asked again.
+    act(() => show(true));
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+    await detailsClick(user, screen.getByText("hello"));
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
   });
 
   it("the ⋮ menu has Details beside Delete, and Details opens them", async () => {

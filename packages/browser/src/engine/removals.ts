@@ -41,13 +41,13 @@ export type RemovedQuotes = ReadonlyMap<string, string | undefined>;
  * together when the time is up.
  */
 export class QuoteSweeps {
-  private readonly chats = new Map<string, { due: Map<string, string | undefined>; at: number; busy: boolean; timer?: ReturnType<typeof setTimeout> }>();
+  private readonly chats = new Map<string, { due: Map<string, string | undefined>; at: number; busy?: Promise<void>; timer?: ReturnType<typeof setTimeout> }>();
 
   constructor(private readonly sweep: (chat: string, removed: RemovedQuotes) => Promise<void>, private readonly now: () => number = Date.now) {}
 
   add(chat: string, id: string, ref: string | undefined): void {
     let state = this.chats.get(chat);
-    if (!state) this.chats.set(chat, state = { due: new Map(), at: -Infinity, busy: false });
+    if (!state) this.chats.set(chat, state = { due: new Map(), at: -Infinity });
     state.due.set(id, ref);
     this.next(chat);
   }
@@ -58,9 +58,18 @@ export class QuoteSweeps {
     this.chats.delete(chat);
   }
 
-  stop(): void {
-    for (const state of this.chats.values()) clearTimeout(state.timer);
+  /**
+   * The peer stops: what waits is swept now, after a sweep still running, not dropped. Nothing would look again at the
+   * next start, so the replies would keep the removed messages' lines for good.
+   */
+  async stop(): Promise<void> {
+    const chats = [...this.chats];
     this.chats.clear();
+    await Promise.allSettled(chats.map(async ([chat, state]) => {
+      clearTimeout(state.timer);
+      await state.busy;
+      if (state.due.size) await this.sweep(chat, state.due);
+    }));
   }
 
   private next(chat: string): void {
@@ -70,10 +79,9 @@ export class QuoteSweeps {
     if (wait > 0) { state.timer = setTimeout(() => { state.timer = undefined; this.next(chat); }, wait); return; }
     const removed = state.due;
     state.due = new Map();
-    state.busy = true;
     state.at = this.now();
-    void this.sweep(chat, removed).catch(() => {}).finally(() => {
-      state.busy = false;
+    state.busy = this.sweep(chat, removed).catch(() => {}).finally(() => {
+      state.busy = undefined;
       if (this.chats.get(chat) === state) this.next(chat);
     });
   }

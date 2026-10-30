@@ -118,6 +118,27 @@ describe("BIP 21 links", () => {
     expect(findMoney(`bitcoin:?ark=${ark}&req-amount=0.00005`)).toMatchObject({ type: "ark" });
   });
 
+  it("reads nothing as money in a link it cannot read: too long, an address it does not know", () => {
+    const padded = `bitcoin:${bcrt1q()}?amount=0.0025&req-somethingnew=1&label=${"x".repeat(4100)}&lightning=${REGTEST_INVOICE}`;
+    expect(findMoney(padded)).toBeNull();
+    expect(findMoney(`bitcoin:${bcrt1q()}?amount=0.0025&label=${"x".repeat(4100)}&lightning=${REGTEST_INVOICE}`)).toBeNull();
+    for (const address of [corrupt(bcrt1q()), "tsp1qqgste7k9hx0qftg6qmwlkqtwuy6cycyavzmzj85c6qdfhjdpdjtdgqjuexzk6"]) {
+      expect(findMoney(`bitcoin:${address}?amount=0.0025&req-somethingnew=1&lightning=${REGTEST_INVOICE}`)).toBeNull();
+      expect(findMoney(`bitcoin:${address}?amount=0.00001&lightning=${REGTEST_INVOICE}`)).toBeNull();
+      expect(findMoney(`bitcoin:${address}?lightning=${REGTEST_INVOICE}`)).toBeNull();
+    }
+    // A link it does read still wins over one it cannot, wherever they are.
+    expect(findMoney(`bitcoin:${corrupt(bcrt1q())} or bitcoin:${bcrt1q()}?amount=0.0025`)).toMatchObject({ type: "onchain", request: { address: bcrt1q(), amountSat: 250_000 } });
+  });
+
+  it("offers the invoice of a link with no address only for the link's amount", () => {
+    expect(findMoney(`bitcoin:?amount=0.00001&lightning=${REGTEST_INVOICE}`)).toBeNull();
+    const anyAmount = bech32.encode("lnbcrt", bech32.decode(REGTEST_INVOICE as `${string}1${string}`, false).words, false);
+    expect(findMoney(`bitcoin:?amount=0.00001&lightning=${anyAmount}`)).toBeNull();
+    expect(findMoney(`bitcoin:?amount=0.0025&lightning=${REGTEST_INVOICE}`)).toMatchObject({ type: "lightning", invoice: { amountSat: 250_000 } });
+    expect(findMoney(`bitcoin:?lightning=${REGTEST_INVOICE}`)).toMatchObject({ type: "lightning", invoice: { amountSat: 250_000 } });
+  });
+
   it("keeps a link it cannot fully read from being paid: unknown req- parameters, an unreadable amount", () => {
     expect(findMoney(`bitcoin:${BC1Q}?req-somethingnew=1`)).toMatchObject({ type: "onchain", request: { unsupported: ["req-somethingnew"] } });
     expect(findMoney(`bitcoin:${BC1Q}?amount=1e3`)).toMatchObject({ type: "onchain", request: { unsupported: ["amount"] } });

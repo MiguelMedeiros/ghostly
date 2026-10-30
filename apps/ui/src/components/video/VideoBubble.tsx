@@ -304,6 +304,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               onPause={() => releasePlayback(file.id)}
               onEnded={() => { resumeAt.current = 0; unload(); }}
               onError={refused}
+              // A picture it has no decoder for (HEVC in Chromium, Vanadium): no error, the sound plays over black.
+              onLoadedData={(event) => { if (event.currentTarget.videoWidth === 0) refused(); }}
             />
             {canTheater && (
               <button

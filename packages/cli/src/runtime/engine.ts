@@ -16,6 +16,7 @@ import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
+import { envSwitch } from "../envSwitch";
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -37,10 +38,26 @@ export interface Runtime {
  * for the Desktop's sidecar; a network all on loopback (the tests') is announced on loopback too.
  */
 export function hyperdhtNetwork(env = process.env.GHOSTLY_HYPERDHT_BOOTSTRAP): { bootstrap?: string[]; host?: string } {
-  const bootstrap = (env ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  const bootstrap = bootstrapNodes("GHOSTLY_HYPERDHT_BOOTSTRAP", env);
   if (!bootstrap.length) return {};
   const loopback = bootstrap.every((node) => /^(127\.0\.0\.1|localhost):\d+$/.test(node));
   return { bootstrap, ...(loopback ? { host: "127.0.0.1" } : {}) };
+}
+
+/**
+ * A bootstrap variable's nodes ("host:port,…"), each checked: a host without a port, a port past 65535 or `;` between
+ * nodes crashed every command from bittorrent-dht's timer (port NaN), and `udp://…`, `[v6]:port` or nodes split by
+ * spaces were looked up as names and left the profile with no DHT. IPv6 nodes are refused: neither bittorrent-dht nor
+ * dht-rpc reads them (both split host and port at the first ':').
+ */
+function bootstrapNodes(name: string, env: string | undefined): string[] {
+  const nodes = (env ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  const bad = nodes.find((node) => {
+    const port = /^[^\s:;/@[\]]+:(\d{1,5})$/.exec(node)?.[1];
+    return !port || Number(port) < 1 || Number(port) > 65535;
+  });
+  if (bad !== undefined) throw new CliError("usage", `${name} takes host:port nodes, comma-separated, not ${JSON.stringify(bad)}`);
+  return nodes;
 }
 
 /**
@@ -51,7 +68,8 @@ export function hyperdhtNetwork(env = process.env.GHOSTLY_HYPERDHT_BOOTSTRAP): {
 export function pkarrRelays(env = process.env): string[] | null {
   const relays = (env.GHOSTLY_PKARR_RELAYS ?? "").split(",").map((url) => url.trim()).filter(Boolean);
   if (!relays.length) return null;
-  const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url));
+  // Two relays split by ';' or a space were taken as one URL.
+  const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url) || /[\s;]/.test(url) || !URL.canParse(url));
   if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${JSON.stringify(bad)}`);
   return relays;
 }
@@ -74,7 +92,7 @@ export function irohRelays(env = process.env): string[] | null {
  * `GHOSTLY_STUN=0` leaves them out (a private network, or tests on one machine, where host candidates connect). The
  * profile's own `iceServers` stay.
  */
-export function publicStun(env = process.env): boolean { return env.GHOSTLY_STUN !== "0"; }
+export function publicStun(env = process.env): boolean { return envSwitch("GHOSTLY_STUN", true, env); }
 
 /** An RTC configuration without the apps' public STUN servers. */
 export function withoutPublicStun(config: RTCConfiguration | undefined): RTCConfiguration | undefined {
@@ -93,8 +111,8 @@ export function withoutPublicStun(config: RTCConfiguration | undefined): RTCConf
  * public DHT.
  */
 export function mainlineNetwork(env = process.env): { off: true } | { off: false; bootstrap?: string[]; host?: string } {
-  if (env.GHOSTLY_DHT === "0") return { off: true };
-  const bootstrap = (env.GHOSTLY_DHT_BOOTSTRAP ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  if (!envSwitch("GHOSTLY_DHT", true, env)) return { off: true };
+  const bootstrap = bootstrapNodes("GHOSTLY_DHT_BOOTSTRAP", env.GHOSTLY_DHT_BOOTSTRAP);
   if (!bootstrap.length && pkarrRelays(env)) return { off: true };
   if (!bootstrap.length) return { off: false };
   const loopback = bootstrap.every((node) => /^(127\.0\.0\.1|localhost):\d+$/.test(node));
@@ -107,7 +125,7 @@ export function mainlineNetwork(env = process.env): { off: true } | { off: false
  * `GHOSTLY_WEBRTC=0`, the CLI runs without WebRTC and says so.
  */
 async function installWebRtc(): Promise<boolean> {
-  if (process.env.GHOSTLY_WEBRTC === "0") return false;
+  if (!envSwitch("GHOSTLY_WEBRTC", true)) return false;
   try {
     const polyfill = await import("node-datachannel/polyfill");
     const scope = globalThis as unknown as Record<string, unknown>;
@@ -206,6 +224,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   // Read first: a mistyped one stops here, before anything opens.
   const pinned = pkarrRelays();
   const pinnedIroh = irohRelays();
+  const network = hyperdhtNetwork();
+  const dht = mainlineNetwork();
   const trace = process.env.GHOSTLY_LINK_TRACE;
   if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
   if (trace || options.logJoins) {
@@ -228,6 +248,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
       await rows.markRestoredWallet();
       // The files a light backup left out: their records say so, as in the app's restore.
       await rows.markLeftOutFiles(leftOutIn(restored));
+      // Its chats' ratchets stay with the profile it came from (WISP 4xx), a backup from before they were left out too.
+      await rows.forgetRatchets();
       await store.compact();
     } catch (error) {
       await store.close().catch(() => {});
@@ -258,8 +280,6 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     import("@ghostly/browser/engine/server"),
     import("../../../../native/transports/hyperdht/endpoint.mjs"),
   ]);
-  const network = hyperdhtNetwork();
-  const dht = mainlineNetwork();
   const mainline = dht.off ? null : new (await import("./mainline")).Mainline({ bootstrap: dht.bootstrap, host: dht.host });
   // `GHOSTLY_PKARR_RELAYS`: those relays only, in place before the engine publishes anything (the setting is not read).
   const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, pinned ? { relays: pinned } : {}, !!pinned) : null;
@@ -283,7 +303,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     // build's APPS_ENABLED says.
     apps: apps ? "wire" : false,
     // A daemon stays online: a hub of the large private groups it is in (WISP 902 · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
-    staysOnline: process.env.GHOSTLY_HUB !== "0",
+    staysOnline: envSwitch("GHOSTLY_HUB", true),
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
     pushSend: (request) => nodePushSend(request),

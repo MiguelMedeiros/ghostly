@@ -4,6 +4,7 @@
  * copy (a spreadsheet's cells, a document's paragraph) that carries a picture of itself beside its
  * text and HTML.
  */
+import { IMAGE_LIMITS, imageSize, previewable } from "@ghostly/core";
 import type { ClipboardFile } from "@ghostly/browser/host";
 import { servicesPlatform } from "./platform";
 
@@ -116,12 +117,17 @@ export function pasteShowsNothing(data: DataTransfer | null): boolean {
  */
 export function pasteIsPictureOnly(data: DataTransfer | null): boolean {
   if (!data || filesOf(data).length) return false;
+  // The plain text first, which costs nothing: a picture's copy has none (Chromium) or its address, one word (Firefox).
+  // Anything else is text, and the HTML is never read: WebKitGTK makes it again on every `getData`, 90 ms a MB, and a
+  // whole page copied was a read and a parse of its HTML on each paste, 0.1-0.9 s (agents#1575).
+  const plain = data.getData("text/plain").trim();
+  if (/\s/.test(plain)) return false;
   const html = data.getData("text/html");
-  if (!html) return false;
+  // One picture's HTML names one `<img`: no parse for anything else.
+  if (!html || (html.match(/<img\b/gi)?.length ?? 0) !== 1) return false;
   const body = new DOMParser().parseFromString(html, "text/html").body;
   const images = body.querySelectorAll("img");
   if (images.length !== 1 || body.textContent?.trim()) return false;
-  const plain = data.getData("text/plain").trim();
   return !plain || plain === images[0].getAttribute("src")?.trim() || plain === images[0].src;
 }
 
@@ -168,17 +174,28 @@ export function platformPastedFiles(): Promise<File[]> | null {
 
 /**
  * The clipboard's first picture as the platform reads it, for a place that takes one picture (Join's QR screenshot);
- * null where the paste event is the only way. Resolves to null when the clipboard holds no picture, and to "tooLarge"
- * for one over `max` bytes, which is not read. Whatever else was copied with it is not read either.
+ * null where the paste event is the only way. Resolves to null when the clipboard holds no picture, to "tooLarge" for a
+ * copied file over `max` bytes, and to "tooManyPixels" for a picture the platform made a PNG of (it has no name) whose
+ * header says more pixels than may be decoded here (`previewable`): neither is read past its header. The picture
+ * resolved has passed its check: the caller does not weigh its bytes again. That PNG is judged by its pixels,
+ * not its bytes, which say only how well it packed at the platform's quick level (a 12 MP phone photo came to 14 MB).
+ * Whatever else was copied with it is not read either.
  */
-export function platformPastedImage(max: number): Promise<File | "tooLarge" | null> | null {
+export function platformPastedImage(max: number): Promise<File | "tooLarge" | "tooManyPixels" | null> | null {
   const read = servicesPlatform?.readClipboardFiles();
   if (!read) return null;
   return read.then(async (clips) => {
     const image = clips.find((clip) => clipType(clip).startsWith("image/"));
     for (const clip of clips) if (clip !== image) clip.done?.();
     if (!image) return null;
-    if (image.size > max) { image.done?.(); return "tooLarge"; }
+    if (image.name !== null && image.size > max) { image.done?.(); return "tooLarge"; }
+    if (image.name === null) {
+      let head: Uint8Array;
+      try { head = await image.read(0, IMAGE_LIMITS.headBytes); } catch (cause) { image.done?.(); throw cause; }
+      // One whose header says no size is left to the reader's own check, which refuses it as a picture it cannot read.
+      const size = imageSize(head);
+      if (size && !previewable(size)) { image.done?.(); return "tooManyPixels"; }
+    }
     return (await readPlatformFiles([image]))[0] ?? null;
   });
 }

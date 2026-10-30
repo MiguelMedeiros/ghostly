@@ -284,9 +284,9 @@ const SHEET_SETTLE_MS = 500;
 /**
  * A sheet of the client's own: a title, a note, a second button and a first one whose click does `act`. Modal: Tab
  * and Shift+Tab go round its buttons, never to the app under it. It goes, answering null, when `signal` aborts (its
- * app stopped), or at once when it already has.
+ * app stopped), or at once when it already has. Desktop asks with it too, before the system's dialog (desktopFiles.ts).
  */
-function sheet(parts: { title: string; note?: string; secondary: string; primary: string; testId: string; act: () => Promise<unknown>; signal?: AbortSignal }): Promise<unknown> {
+export function sheet(parts: { title: string; note?: string; secondary: string; primary: string; testId: string; act: () => Promise<unknown>; signal?: AbortSignal }): Promise<unknown> {
   return new Promise((resolve) => {
     if (parts.signal?.aborted) return resolve(null);
     const back = document.createElement("div");

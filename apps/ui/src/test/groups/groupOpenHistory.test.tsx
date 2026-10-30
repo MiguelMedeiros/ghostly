@@ -18,7 +18,9 @@ import { renderApp } from "../render";
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: true, missing: 0, ...patch });
-const COUNT = 300;
+// More than a page (50), so the whole history is more than the page holds; small enough that a loaded machine draws each
+// open well within the timeout (300 rows and four opens took over 5 s there).
+const COUNT = 60;
 const tick = () => act(() => new Promise((resolve) => setTimeout(resolve, MESSAGE_CHANGES_TICK_MS * 2)));
 
 describe("a group opened again", () => {
@@ -37,12 +39,12 @@ describe("a group opened again", () => {
       return view;
     };
 
-    for (let i = 0; i < 3; i++) (await open()).unmount();
+    (await open()).unmount();
+    await open();
     const wholeReads = () => fakeEngine.callsTo("groupMessages").length + fakeEngine.historyAsks.filter((id) => id === linkId).length;
     expect(wholeReads()).toBe(1);
 
     // Its next message comes as a change of the history the page holds.
-    await open();
     act(() => fakeEngine.emit({ kind: "message-changes", linkId, messages: [row(COUNT)], deleted: [] }));
     expect(await screen.findByText(`Message ${COUNT}`)).toBeInTheDocument();
     expect(wholeReads()).toBe(1);

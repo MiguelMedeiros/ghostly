@@ -9,8 +9,11 @@ import type { LinkedFilesHost } from "../platform";
 /** How to open it. `runAnyway`: the person chose "Run anyway" for a version a store of theirs removed (never a revoked one). */
 export interface OpenAppOptions { runAnyway?: boolean }
 
-/** Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…). */
-export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<void>;
+/**
+ * Opens `ref` in the 1:1 chat `linkId`, or alone when it is null. Rejects when it cannot start (revoked, removed, no runner…).
+ * Resolves "shown" when it already ran there and was shown again: nothing new started, so the contact is not told again.
+ */
+export type AppOpener = (ref: string, linkId: string | null, options?: OpenAppOptions) => Promise<"shown" | void>;
 
 let opener: AppOpener | null = null;
 const listeners = new Set<() => void>();
@@ -20,7 +23,7 @@ export function setAppOpener(next: AppOpener | null): void {
   for (const listener of [...listeners]) listener();
 }
 
-export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<void> {
+export function openApp(ref: string, linkId: string | null = null, options: OpenAppOptions = {}): Promise<"shown" | void> {
   return opener ? opener(ref, linkId, options) : Promise.reject(new Error("Apps cannot run in this app"));
 }
 

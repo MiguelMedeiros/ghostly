@@ -253,7 +253,7 @@ describe("with the apps flag on", () => {
     expect(screen.getAllByTestId(/^mobile-tab-[a-z]+$/)).toHaveLength(5);
   });
 
-  it("draws a card from its own data and asks nothing of any host until Install", async () => {
+  it("draws a card from its own data and asks nothing of any host until Join", async () => {
     fakeEngine.on("appList", () => []).on("appPreview", () => preview()).on("appInstall", () => installed());
     const opener = vi.fn(async () => {});
     setAppOpener(opener);
@@ -270,6 +270,9 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(appCalls()).toEqual(["appBuiltIns", "appList"]));
     expect(fetches).toEqual([]);
 
+    // The card invites the person into the app their contact opened: it says Join, never Install.
+    expect(within(card).getByTestId("app-card-install")).toHaveTextContent(/^Join$/);
+    expect(card).not.toHaveTextContent(/install/i);
     await user.click(within(card).getByTestId("app-card-install"));
     expect(fakeEngine.callsTo("appPreview")).toEqual([{ card: { ref: REF, url: URL_, sequence: 7, digest: DIGEST } }]);
     const screenEl = await screen.findByTestId("app-install");

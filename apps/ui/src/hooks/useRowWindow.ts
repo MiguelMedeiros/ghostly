@@ -29,6 +29,32 @@ export function revealMessage(id: string): boolean {
   return event.detail.found;
 }
 
+/** Rows something opened from is open on (a picture open large, a message's details), each with how many hold it. */
+const holds = new Map<string, number>();
+
+/**
+ * Keeps a row in the page while something opened from it is open: rows coming or a page taken in never let it go, so
+ * what it opened (drawn by the row) stays open. `id` is its row's key (a message's id); none holds nothing. The hold
+ * ends when what this returns is called.
+ */
+export function holdRow(id: string | null | undefined): () => void {
+  if (!id) return () => {};
+  holds.set(id, (holds.get(id) ?? 0) + 1);
+  return () => {
+    const left = (holds.get(id) ?? 1) - 1;
+    if (left > 0) holds.set(id, left); else holds.delete(id);
+  };
+}
+
+/** Where a held row is among the rows `from` to `to` (exclusive), or -1. */
+function heldAt(ids: readonly string[], from: number, to: number): number {
+  for (const id of holds.keys()) {
+    const at = ids.indexOf(id);
+    if (at >= from && at < to) return at;
+  }
+  return -1;
+}
+
 /** What `useRowWindow` gives: the rows to draw and the ways to move them. */
 export interface RowWindow {
   /** Index of the first row to draw. */
@@ -100,7 +126,8 @@ function around(key: string, ids: readonly string[], at: number): State {
  * in a chat left open, a batch of thousands in one change, the engine's history after a stale copy), a view at the
  * bottom (`watch`) gets the last `OPEN_ROWS` in the same commit, never the whole batch: every row that goes is above it.
  * A view up from the bottom keeps its rows, and the window stops at the row it ended on: the ones below are not drawn
- * (the ↓ pill counts them). `useChatScroll` keeps the view where it was when rows come or go above it.
+ * (the ↓ pill counts them). `useChatScroll` keeps the view where it was when rows come or go above it. A row something
+ * is open from (`holdRow`) stays in the page whatever comes: the window keeps it, still within `MAX_ROWS`.
  *
  * `ids` are the rows' keys in order and `key` the timeline (another one starts over). `heads` maps a row folded into a
  * run (a bot's stacked routines) to the run's first row: the window never starts inside a run.
@@ -121,8 +148,12 @@ export function useRowWindow(ids: readonly string[], key: string, { opensOn, hea
   if (state.last === null && to - from > MAX_ROWS) {
     const was = now.current;
     const end = was.key === key && was.to > 0 && !atBottom.current() ? place(ids, was.ids[was.to - 1], was.to - 1) + 1 : ids.length;
-    // Up from the bottom: up to the row it ended on, the rows on screen kept. At the bottom: its last rows.
-    state = end < ids.length ? span(key, ids, Math.max(from, end - MAX_ROWS), end) : span(key, ids, ids.length - OPEN_ROWS, ids.length);
+    // Up from the bottom: up to the row it ended on, the rows on screen kept. At the bottom: its last rows, or from a
+    // held row above them (a picture open large from it) up to the most rows, the ones past them below the window.
+    const kept = end < ids.length ? -1 : heldAt(ids, from, to);
+    state = end < ids.length ? span(key, ids, Math.max(from, end - MAX_ROWS), end)
+      : kept >= 0 && kept < ids.length - OPEN_ROWS ? span(key, ids, kept, kept + MAX_ROWS)
+      : span(key, ids, ids.length - OPEN_ROWS, ids.length);
     from = state.firstAt;
     to = state.last === null ? ids.length : state.lastAt + 1;
   }
@@ -143,11 +174,14 @@ export function useRowWindow(ids: readonly string[], key: string, { opensOn, hea
       if (edge === "up") {
         if (from <= 0) return false;
         const start = Math.max(0, from - PAGE_ROWS);
+        // Never letting a held row go at the far edge.
+        if (heldAt(ids, start + MAX_ROWS, to) >= 0) return false;
         setHeld(span(key, ids, start, Math.min(to, start + MAX_ROWS)));
         return true;
       }
       if (to >= ids.length) return false;
       const end = Math.min(ids.length, to + PAGE_ROWS);
+      if (heldAt(ids, from, end - MAX_ROWS) >= 0) return false;
       setHeld(span(key, ids, Math.max(from, end - MAX_ROWS), end));
       return true;
     },

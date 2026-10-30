@@ -329,7 +329,7 @@ export class Outbox {
       const via = this.resender.via?.(message) ?? message.via;
       await this.store.update(id, "sending", undefined, { via, ...(manual ? { resendUntil: undefined } : {}) });
       message = { ...message, via, ...(manual ? { resendUntil: undefined } : {}) };
-      if (this.stopped) { await this.queue(message, "Connection closed. Delivery is unconfirmed."); return; }
+      if (this.stopped) { await this.queue({ ...message, delivery: "sending", deliveryError: undefined }, "Connection closed. Delivery is unconfirmed."); return; }
       // Install before send: a fast receipt must be able to cancel it.
       this.track(id, typeof this.timeoutMs === "number" ? this.timeoutMs : this.timeoutMs(message));
       this.sentUnder.set(id, this.opened);
@@ -531,7 +531,10 @@ export class Outbox {
     const sent = this.attempts.get(message.id) ?? 0;
     if (until <= now) return this.fail(message.id, `${reason} Not confirmed within ${days(this.policy.windowMs)}.`);
     if (sent >= this.policy.maxAttempts) return this.fail(message.id, `${reason} Sent ${sent} times without a receipt.`);
-    await this.store.update(message.id, "queued", reason, { resendUntil: until });
+    // A row already queued as it would be (a start finds them so) is not written again: on the engine a write marks
+    // the chat's history changed, and the CLI host's start then read each such chat whole.
+    if (message.delivery !== "queued" || message.deliveryError !== reason || message.resendUntil !== until)
+      await this.store.update(message.id, "queued", reason, { resendUntil: until });
     if (!this.stopped) this.schedule(message.id);
   }
 

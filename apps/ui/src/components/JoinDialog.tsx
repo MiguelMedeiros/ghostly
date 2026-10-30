@@ -13,7 +13,7 @@ import type { SessionKeys } from "../lib/storage";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { ReloadButton } from "./ui/ReloadButton";
-import { QR_IMAGE_MAX as IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrDecoder, qrReaderFailures, readQrImage, scanQrFrames } from "../lib/qrReader";
+import { QR_IMAGE_MAX as IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, qrReaderFailures, readQrImage, scanQrFrames } from "../lib/qrReader";
 
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A picture pasted or dropped on the
@@ -100,6 +100,10 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       });
       return;
     }
+    // A group's link that does not read (a character lost): said as one, with what to do, not as "not an invite".
+    if (onJoinGroup && /(?:^|[\s/#<("'«“[])group[12]\//.test(value)) {
+      setError({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") }); setManual(true); return;
+    }
     const reading = readInvite(value);
     // A good code that adds a device (WISP 06), scanned from the active device with Join: it goes where such a code goes.
     if (!reading.ok && reading.reason === "device" && readDeviceInvite(value).ok) { joined.current = true; close(); offerDeviceLink(value.trim()); return; }
@@ -135,30 +139,29 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     stop(); busyRef.current = true; setError(null); setOwn(null); setStarting(true);
     const current = generation.current;
     // The decoder loads while the camera starts.
-    const decoding = qrDecoder();
-    decoding.catch(() => {});
+    const decode = qrFrameReader();
     try {
       const camera = await qrCamera();
       if (current !== generation.current) { camera.getTracks().forEach(track => track.stop()); return; }
       stream.current = camera; setScanning(true); setStarting(false);
       const element = video.current!;
       element.srcObject = camera; await element.play();
-      const jsQR = await decoding;
       if (current !== generation.current || closed.current) return;
-      scanQrFrames(element, jsQR, () => current === generation.current, (data) => { accept(data); return joined.current; });
+      await scanQrFrames(element, decode, () => current === generation.current, (data) => { accept(data); return joined.current; });
     } catch (cause) {
       if (current !== generation.current) return;
       stop();
       setError(cause instanceof QrReaderNotLoaded ? readerFailed() : { tone: "error", title: t(onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable") }); setManual(true);
-    }
+    } finally { decode.close(); }
   };
   // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (autoScan) void scan(); }, []);
-  const readImage = async (file?: File) => {
+  // `weighed`: a picture the app read from the clipboard, already checked there (`platformPastedImage`).
+  const readImage = async (file?: File, weighed = false) => {
     if (!file || busyRef.current || joined.current || closed.current) return;
     stop(); setError(null);
-    if (file.size > IMAGE_MAX) { setError({ tone: "error", title: t("join.imageSize") }); return; }
+    if (!weighed && file.size > IMAGE_MAX) { setError({ tone: "error", title: t("join.imageSize") }); return; }
     busyRef.current = true; setBusy(true);
     const current = generation.current;
     try {
@@ -186,12 +189,13 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     reading.then(found => {
       if (!ended()) return;
       if (found === "tooLarge") setError(said(t("join.imageSize")));
-      else if (found) void readImage(found);
+      else if (found === "tooManyPixels") setError(said(t("join.pastedTooLarge")));
+      else if (found) void readImage(found, true);
       // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
       else if (named) setError(said(t("join.imageFailed")));
     }, (cause: unknown) => {
       // In the dialog's own words: the composer's point at its +, which Join has none of.
-      if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.imageSize" : "join.imageFailed")));
+      if (ended()) setError(said(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed")));
     });
   };
   const droppedImage = (event: DragEvent) => {
