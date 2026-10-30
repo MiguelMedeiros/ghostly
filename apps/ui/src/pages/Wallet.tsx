@@ -171,7 +171,8 @@ export function Wallet() {
     const amount = n === "mainnet" ? unseen.real : unseen.test;
     const card = cards.find((c) => c.network === n && c.rail === "cashu") ?? cards.find((c) => c.network === n);
     if (!amount || !card) return [];
-    const text = t(n === "mainnet" ? "wallet.unseen.lineReal" : "wallet.unseen.lineTest", { amount: formatAmount(amount, t.language), wallet: card.name });
+    const key = n === "mainnet" ? amount === 1 ? "wallet.unseen.lineRealOne" : "wallet.unseen.lineReal" : amount === 1 ? "wallet.unseen.lineTestOne" : "wallet.unseen.lineTest";
+    const text = t(key, { amount: formatAmount(amount, t.language), wallet: card.name });
     return [{ id: `sats:${n}`, text, clears: "seen" as const, show: () => goTo(card.id), card: card.id, network: n }];
   });
   const dueCard = due && cards.find((c) => c.id === due.id);
