@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "../hooks/useDismiss";
+import { holdRow } from "../hooks/useRowWindow";
 import { usePictureZoom } from "../hooks/usePictureZoom";
 import { useI18n } from "../contexts/I18nContext";
 
@@ -42,6 +43,8 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
       back?.focus({ preventScroll: true });
     };
   }, [returnFocus]);
+  // Opened from a message (a picture in it): its row stays in the page while this is open, however many come meanwhile.
+  useEffect(() => holdRow(returnFocus?.current?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId), [returnFocus]);
   return createPortal(
     // Escape is handled here, before the page's own handlers: a panel under the viewer (a contact's identities)
     // closes on Escape at the document, and must stay open when only the viewer goes.
