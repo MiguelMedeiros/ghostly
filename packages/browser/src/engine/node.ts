@@ -22,7 +22,7 @@ import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/provid
 import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
-import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED, testBuild } from '../shared/features';
+import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED, testBuild, testSwitch } from '../shared/features';
 import { RATCHET_CAPABILITY, RatchetBox, emptyRatchetState } from "@ghostly/core";
 import { APP_RANGE_LIMITS, chatAppId, isAppRef, isAppVersion, isServeId, publicKeyFromZ32, type AppFrameEvent, type AppRangeTask, type AppSendError } from "@ghostly/core";
 import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
@@ -1239,8 +1239,8 @@ export class GhostlyNode implements EngineImplementation {
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
-    // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
-    ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
+    // Tests shorten the lifetime to watch an item expire, in a test build only; it never lengthens it.
+    ttlMs: () => { const raw = testSwitch("ghostly-test-hold-ttl"); const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; },
     // The chat's ratchet (WISP 4xx), the same one its DHT floor seals with: one lock over both.
     ratchet: (linkId) => {
       const live = this.links.get(linkId), stored = live?.stored;
@@ -3654,9 +3654,9 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** A paired row's reply as it goes on the wire again (a resend, a hold). */
-  /** `localStorage["ghostly-test-no-edit"]`: this app offers no edit/1, as an older one (the e2e's old contact). Nothing else reads it. */
+  /** `localStorage["ghostly-test-no-edit"]`: this app offers no edit/1, as an older one (the e2e's old contact). A test build only. */
   private static testNoEdit(): boolean {
-    try { return typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-edit") === "1"; } catch { return false; }
+    return testSwitch("ghostly-test-no-edit") === "1";
   }
   /**
    * Whether the contact's capability record lists `ratchet/1` (WISP 4xx): the record read this run, or else the last one
