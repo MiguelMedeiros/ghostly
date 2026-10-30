@@ -1217,11 +1217,18 @@ export class GhostlyNode implements EngineImplementation {
       return null;
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
+    taken: (linkId, id) => db.hasMessage(linkId, `peer_${id}`),
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
     // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
     ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
+    // The chat's ratchet (WISP 4xx), the same one its DHT floor seals with: one lock over both.
+    ratchet: (linkId) => {
+      const live = this.links.get(linkId), stored = live?.stored;
+      if (!live || !stored?.profile || !stored.participationSeed || !stored.pairedPeerKey || GhostlyNode.testNoRatchet()) return undefined;
+      return { box: this.ratchetOf(linkId, live, { seedB64: stored.participationSeed, peerKey: stored.pairedPeerKey }), peerSupports: () => this.peerRatchets(live) };
+    },
   });
 
   /** x401 credentials (WISP 3xx): kept for websites the headless CLI calls, never shared with a contact. */
@@ -3627,6 +3634,17 @@ export class GhostlyNode implements EngineImplementation {
   /** `localStorage["ghostly-test-no-edit"]`: this app offers no edit/1, as an older one (the e2e's old contact). Nothing else reads it. */
   private static testNoEdit(): boolean {
     try { return typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-edit") === "1"; } catch { return false; }
+  }
+  /**
+   * Whether the contact's capability record lists `ratchet/1` (WISP 4xx): the record read this run, or else the last one
+   * kept with the chat (the run's is cleared while offline and on a restart of the chat's transports).
+   */
+  private peerRatchets(live: LiveLink): boolean {
+    return !!(live.caps?.peer ?? live.stored.capsState?.peer)?.capabilities.includes(RATCHET_CAPABILITY);
+  }
+  /** An e2e run playing an app from before forward secrecy (WISP 4xx): no ratchet/1, no ratchet, as that app. */
+  private static testNoRatchet(): boolean {
+    try { return typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-ratchet") === "1"; } catch { return false; }
   }
 
   private static wireReply(message: StoredMessage): WireReply | undefined {
@@ -7771,7 +7789,7 @@ export class GhostlyNode implements EngineImplementation {
         // show its name as a text.
         peerAcceptsFile: () => !!live.caps?.peer?.capabilities.includes(DHT_FILE_CAPABILITY),
         reactions: () => live.stored.reactionsOut ?? [],
-        ratchet: credentials ? { box: this.ratchetOf(linkId, live, credentials), peerSupports: () => !!live.caps?.peer?.capabilities.includes(RATCHET_CAPABILITY) } : undefined,
+        ratchet: credentials && !GhostlyNode.testNoRatchet() ? { box: this.ratchetOf(linkId, live, credentials), peerSupports: () => this.peerRatchets(live) } : undefined,
       } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback,
@@ -8136,7 +8154,7 @@ export class GhostlyNode implements EngineImplementation {
     return {
       versions: [1],
       transports: this.runnableTransports(live),
-      capabilities: ["chat/1", DHT_TEXT_CAPABILITY, DHT_FILE_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
+      capabilities: ["chat/1", DHT_TEXT_CAPABILITY, DHT_FILE_CAPABILITY, ...(GhostlyNode.testNoRatchet() ? [] : [RATCHET_CAPABILITY]), ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
         // A session live on a relay moves to a direct path (WISP 100): the contact knocks there at once.
         UPGRADE_CAPABILITY,
         // Edits on the DHT floor too (WISP 403 § Edits): an app from before would show one as a new message.

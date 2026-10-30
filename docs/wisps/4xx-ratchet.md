@@ -7,9 +7,9 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [404](404-store-and-forward.md), [03](03-capabilities.md), [05](05-backups.md), [06](06-devices.md) |
-| Implementation | Not built. Planned: the ratchet with these test vectors (`packages/core/src/ratchet.ts`), then the DHT floor, then held items, then a row in a chat's Tech Info, in the web app, the extension, Desktop and the CLI |
+| Implementation | `ratchet/1` in the web app, the extension, Desktop and the CLI: the ratchet with these test vectors (`packages/core/src/ratchet.ts`), the DHT floor (`dhtDelivery.ts`), held items (`storeForward.ts`, `engine/hold.ts`); state kept out of backups and handoffs. Unit tests; the Tech Info row and end-to-end tests follow |
 | Summary | What a chat sends while the contact is away, over the DHT or held, is sealed with keys used once: a key stolen later cannot open it. |
-| Availability | Planned |
+| Availability | Available |
 | Notes | 1:1 chats, when both apps have it; groups are not covered. A live connection already agrees fresh keys every time. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
@@ -33,7 +33,7 @@ A session frame never goes through this profile: what a recorded live connection
 
 An app that implements this profile lists `ratchet/1` in its layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), beside `dht-text/1`. It is not in `pair-offer`: the live session does not carry it, and the offer's lists are full for older apps.
 
-- **Sending.** A side seals a floor envelope or a held item with the ratchet when this side has opened a ratcheted item from the contact (a lane is `heard`, below), or when the contact is pinned, its newest readable record lists `ratchet/1`, and it has shown that it pinned this side too (an envelope of its sealed to this side was read, or a live session was had). Otherwise it seals as today. The last condition matters at first contact: a joiner pins its inviter from the invite, and a first envelope sealed with the ratchet would reach an inviter that cannot open it and so never pins the joiner.
+- **Sending.** A side seals a floor envelope or a held item with the ratchet when this side has opened a ratcheted item from the contact (a lane is `heard`, below), or when the contact is pinned, its newest readable record lists `ratchet/1`, and it has shown that it pinned this side too (an envelope of its sealed to this side was read, or a live session was had). Otherwise it seals as today. Held items need a pinned contact already ([404](404-store-and-forward.md#keys)), whose record is sealed for this side. The last condition matters at first contact: a joiner pins its inviter from the invite, and a first envelope sealed with the ratchet would reach an inviter that cannot open it and so never pins the joiner.
 - **Upgrade of a chat that exists.** Nothing is migrated and no invite is needed: the first item sealed after both records list `ratchet/1` starts a session ([Sessions](#sessions)). Messages already in the chat stay as they were stored; what was recorded before the upgrade stays as open to a later key thief as it was.
 - **An older contact.** A contact whose record lacks `ratchet/1`, or that has no readable record, gets plain envelopes and bundles, exactly as today, and never a ratcheted one it could not read.
 
@@ -110,9 +110,9 @@ Replays are refused by the paths, not by the ratchet: a floor envelope must carr
 
 ## Saving state
 
-- **One lock per chat.** Every change to a chat's ratchet state, on either lane, is made under one lock, held from reading the state to saving the next one (for an open, until what it opened is stored). Two changes made from the same state, a seal and an open for instance, would save one over the other, roll the sending chain back, and seal the next item with a key and nonce already used.
+- **One lock per chat.** Every change to a chat's ratchet state, on either lane, is made under one lock, held from reading the state to saving the next one. Two changes made from the same state, a seal and an open for instance, would save one over the other, roll the sending chain back, and seal the next item with a key and nonce already used.
 - **Seal, save, send.** The state returned by sealing MUST be saved before the sealed bytes leave the device: a crash after sending and before saving would seal the next item with the same key and nonce.
-- **Open, store, save.** The state returned by opening is saved after the content is stored, so a crash in between opens the same item again.
+- **Open, store, save.** An item is opened on the state as it is, with nothing saved, and its content stored with no lock held (storing may seal or open on the other lane). Then, under the lock, it is opened again on the state as it is by then, and that state saved; if it no longer opens (the same item taken meanwhile), nothing moves. A crash before the save opens the same item again.
 - **Measuring.** Asking whether an item fits a packet MUST NOT use a key: the length is the plaintext's plus 66.
 
 ## The DHT floor
