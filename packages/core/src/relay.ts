@@ -564,10 +564,11 @@ export class RelayTransport implements PkarrTransport {
    * which this client has not read (an inviter's warm packet under the key it gave its contact, from a clock ahead of
    * this one). That packet is read from that relay, and the records go again dated just past it, once. Without this
    * the packet was refused until this device's clock passed the other one's, however long that took, and on a relay
-   * that did take it, readers still preferred the later-dated empty packet of another relay.
+   * that did take it, readers still preferred the later-dated empty packet of another relay. `read`: how to learn the
+   * held packet's date where it is not a relay to ask (the CLI's DHT, whose nodes answer 302 for a later-dated packet).
    */
   async publishDated(identity: Identity, records: GhostRecord[],
-    put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string) => void) => Promise<void>,
+    put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string, read?: () => Promise<bigint | null>) => void) => Promise<void>,
     options: PkarrRequestOptions = {}, again = false, elsewhere = false): Promise<void> {
     const key = identity.pubKeyZ32;
     // Before the packet is signed and dated: a publish no relay takes now costs no signature, and moves no date on.
@@ -577,10 +578,10 @@ export class RelayTransport implements PkarrTransport {
     }
     const timestamp = this.nextTimestamp(key);
     let redated: Promise<boolean> | undefined;
-    const conflict = (relay: string) => {
+    const conflict = (relay: string, read?: () => Promise<bigint | null>) => {
       if (again || redated) return;
       redated = (async () => {
-        const held = await this.heldAt(relay, key, asker(options, true));
+        const held = read ? await read().catch(() => null) : await this.heldAt(relay, key, asker(options, true));
         // Not dated later than this one: the relay was still putting another packet. The caller tries again, as before.
         if (held === null || held < timestamp) return false;
         traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
@@ -597,6 +598,13 @@ export class RelayTransport implements PkarrTransport {
       const pending = redated as Promise<boolean> | undefined;
       if (!pending || !(await pending)) throw error;
     }
+  }
+
+  /** `PkarrTransport.publishHeld`: `publishDated`'s check before signing, for a payload signed elsewhere in this process. */
+  publishHeld(pubKeyZ32: string, options: PkarrRequestOptions = {}): DiscoveryBudgetError | null {
+    if (this.relays.length === 0) return null;
+    const held = this.publishWait(pubKeyZ32, asker(options, true));
+    return held ? new DiscoveryBudgetError(held.wait, `Publish held back on every relay: ${held.reasons.join("; ")}`) : null;
   }
 
   /**
@@ -672,6 +680,18 @@ export class RelayTransport implements PkarrTransport {
     const seq = options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
     if (options.signedAt === undefined || !options.redate) return this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
     await this.putRedated(pubKeyZ32, payload, seq, options, PAYLOAD_REDATES);
+  }
+
+  /**
+   * A payload every relay's budget held back while another path took it (the CLI's DHT): the publish is out, and each
+   * relay gets it once its budget frees a request for the same asker (`catchUpLater`), unless a newer packet of the key
+   * goes there first. Retried by the link instead, each try was signed and put on the DHT again (1-1.6 puts a minute per
+   * chat at budget, not one per 4 min). `timestamp`: its date when signed here; read from the payload otherwise.
+   */
+  putLater(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint | undefined, options: PkarrRequestOptions = {}): void {
+    const at = timestamp ?? options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
+    try { this.written.set(pubKeyZ32, readOwnRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
+    for (const relay of this.relays) this.catchUpLater(relay, pubKeyZ32, payload, at, asker(options, true));
   }
 
   /**

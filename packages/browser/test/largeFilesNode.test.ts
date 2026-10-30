@@ -563,6 +563,27 @@ it("the files that ended in an earlier run are not noted again when the chat con
   expect(await Promise.all(ids.map((id) => completedAt(t, id)))).toEqual(ended);
 }, 120_000);
 
+it("a chat connecting after a restart reads nothing for the files that ended before; a sent one whose receipt never came gets it", async () => {
+  const t = await setup();
+  await put(t, "before-0001", 20_000, 51);
+  await put(t, "before-0002", 20_000, 52);
+  t.offer("before-0003", 20_000);
+  const ids = ["me_51", "me_52", "peer_before-0003"];
+  await vi.waitFor(async () => expect(await Promise.all(ids.map((id) => completedAt(t, id)))).toEqual([expect.any(Number), expect.any(Number), expect.any(Number)]), { timeout: 20_000 });
+  await vi.waitFor(async () => expect((await fileStore.listForLink(t.id)).map((f) => f.wire3?.state)).toEqual(["done", "done", "done"]));
+  const fileIds = (await fileStore.listForLink(t.id)).map((f) => f.id);
+  // The app quit before me_52's receipt was written.
+  await db.patchMessage(t.id, "me_52", () => ({ delivery: "sent" }));
+  const files = vi.spyOn(fileStore, "get"), messages = vi.spyOn(db, "getMessage");
+  cleanup.push(async () => { files.mockRestore(); messages.mockRestore(); });
+  await t.restartApp();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const read = [...files.mock.calls.map(([id]) => id), ...messages.mock.calls.map(([, id]) => id)].filter((id) => fileIds.includes(id) || ids.includes(id));
+  files.mockRestore(); messages.mockRestore();
+  expect(new Set(read), "only the file that still owed its receipt is looked up").toEqual(new Set([`${t.id}-out-before-0002`, "me_52"]));
+  expect(await db.getMessage(t.id, "me_52")).toMatchObject({ delivery: "delivered" });
+}, 120_000);
+
 it("the transfers that finished leave the engine's state: after 100 small files each state carries no more of them than after a few", async () => {
   const t = await setup();
   const wireIds = Array.from({ length: 100 }, (_, i) => `many-${String(i).padStart(5, "0")}`);

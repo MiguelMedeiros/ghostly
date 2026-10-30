@@ -314,6 +314,8 @@ export class CommunityWorld {
       // A row given a place above another goes just before it; any other, to the end.
       storeMessage: async (message, _live, place) => {
         if (messages.some(m => m.id === message.id)) return false;
+        // As the node's: a member's message its author deleted for everyone stays gone.
+        if (message.linkId.startsWith("group:") && peer.groups?.isRemoved(message.linkId.slice("group:".length), message.id)) return false;
         const at = place === undefined ? -1 : messages.findIndex(m => m.id === places.get(place));
         if (at >= 0) messages.splice(at, 0, message);
         else messages.push(message);

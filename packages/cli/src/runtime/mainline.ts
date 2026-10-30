@@ -3,7 +3,7 @@ import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
   HEDGE_MISSING_MS, HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
-  type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
+  type DiscoveryBudgetError, type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
 /**
@@ -27,6 +27,17 @@ export interface MainlineOptions {
 
 const SIGNATURE = 64, TIMESTAMP = 8;
 const verify = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) => { try { return ed25519.verify(sig, message, key); } catch { return false; } };
+
+/**
+ * Every DHT node asked refused a put for holding a later-dated packet of the key (BEP44 error 302, "sequence number less
+ * than current"): one put by this key's earlier clock, ahead of this one, before a restart forgot its date.
+ */
+export class DhtRefusedError extends Error {
+  constructor(reason: string) {
+    super(`The DHT holds a later-dated packet of this key (${reason})`);
+    this.name = "DhtRefusedError";
+  }
+}
 
 /** A DHT node of this process: puts and gets Pkarr packets. */
 export class Mainline {
@@ -56,7 +67,8 @@ export class Mainline {
     const v = Buffer.from(payload.subarray(SIGNATURE + TIMESTAMP));
     return this.bounded(new Promise((resolve, reject) => {
       this.dht.put({ k, v, seq, sig }, (error, _hash, nodes) => {
-        if (error) reject(error); else if (!nodes) reject(new Error("No DHT node took the packet")); else resolve(nodes);
+        if (error) reject((error as Error & { code?: unknown }).code === 302 ? new DhtRefusedError(error.message) : error);
+        else if (!nodes) reject(new Error("No DHT node took the packet")); else resolve(nodes);
       });
     }));
   }
@@ -94,8 +106,8 @@ const MISSING_KEPT = 256;
 
 /**
  * The relays first, as the web app reaches Pkarr (its contacts read only the relays), and the DHT beside them: every
- * packet also goes to the DHT, and a read goes there when every relay is failing or the read failed for anything but
- * this app's own request budget (that is a wait, not an outage).
+ * packet also goes to the DHT, and a read goes there when every relay is failing, the read failed, or this app's own
+ * request budget held it back (the DHT has no budget). A background read the budget holds waits for it.
  *
  * `pinned`: the relays given are the only ones (`GHOSTLY_PKARR_RELAYS`, a private network): the profile's `relays`
  * setting does not replace them. With no DHT (`dht` null), the relays alone carry every packet.
@@ -129,7 +141,7 @@ export class RelaysAndDht implements PkarrTransport {
    * `timestamp`: the payload was just signed here (`publish`), dated so; its signature is not checked again on the way
    * to the relays. Without it (`publishPayload`, signed elsewhere) the relays' side checks it to read its date.
    */
-  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string) => void, timestamp?: bigint): Promise<void> {
+  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string, read?: () => Promise<bigint | null>) => void, timestamp?: bigint): Promise<void> {
     const toRelays = () => timestamp === undefined
       ? this.relays.publishPayload(pubKeyZ32, payload, options, conflict)
       : this.relays.putSigned(pubKeyZ32, payload, timestamp, options, conflict);
@@ -141,15 +153,30 @@ export class RelaysAndDht implements PkarrTransport {
     // Out on the DHT is out (a Pkarr relay reads the DHT for a key it has not got): a relay that takes the request and
     // never answers held each publish for its 10 s timeout, an invite's first among them, while the DHT took it in
     // milliseconds. The relays' copy finishes in the background. A budget's hold is said before any request goes, so
-    // it still wins this race: the caller tries again, and the relays take it when it frees (browser contacts read only them).
-    const tookIt = onDht.then(() => true, () => false);
+    // it wins this race: once the DHT took the packet, that is out too, and the relays get it when their budget frees
+    // (`putLater`; browser contacts read only them). Said held back, the link signed it and put it on the DHT again in
+    // 0.25-4 s, at budget 1.5-2.2x the DHT puts of a DHT-only daemon.
+    let refused: unknown;
+    const tookIt = onDht.then(() => true, (error: unknown) => {
+      refused = error;
+      // The DHT holds a later-dated packet of this key, as a relay that answers 409 does: its date is read there, and
+      // the records go again dated just past it (`publishDated`). After a clock that ran ahead was set right, a
+      // restarted CLI had every put refused, tried again every 4 s until the clock caught up (15 a minute per chat), and
+      // texts to a contact away stayed queued.
+      if (error instanceof DhtRefusedError) conflict?.("dht", () => this.fromDht(pubKeyZ32).then((packet) => packet?.timestampMicros ?? null));
+      return false;
+    });
     if (await Promise.race([onRelays.then(() => false, () => false), tookIt])) return;
     try {
       await onRelays;
     } catch (error) {
-      if (isDiscoveryBudgetError(error)) throw error;
-      // The relays failed: the DHT's answer is the publish's.
-      if (!(await tookIt)) throw error;
+      if (isDiscoveryBudgetError(error)) {
+        if (!(await tookIt)) throw error;
+        this.relays.putLater(pubKeyZ32, payload, timestamp, options);
+        return;
+      }
+      // The relays failed: the DHT's answer is the publish's, and its refusal is said with theirs.
+      if (!(await tookIt)) throw refused instanceof Error ? new Error(`${error instanceof Error ? error.message : String(error)}; ${refused.message}`, { cause: error }) : error;
     }
   }
 
@@ -180,7 +207,11 @@ export class RelaysAndDht implements PkarrTransport {
         return found;
       }
       ({ packet: fromRelays, failed } = answered);
-      if (isDiscoveryBudgetError(failed)) throw failed;
+      // The relays' budget held the read back: the DHT, which has no budget and already has a contact's first
+      // envelope, is asked instead. Waiting for the relays' minute made each pairing past ~10 chats on working relays
+      // take 3-18 s (13-37 s on one relay), where DHT-only pairings take 0.1-2.8 s (agents#1715). Found nowhere there,
+      // or a background read, it is still a wait.
+      if (isDiscoveryBudgetError(failed)) return this.heldBack(pubKeyZ32, failed, options);
       if (failed instanceof RelaysFailedError) fromRelays = failed.kept;
       if (!failed) this.lastVia = "relay";
       if (!failed && !down()) return fromRelays;
@@ -193,6 +224,14 @@ export class RelaysAndDht implements PkarrTransport {
       if (fromRelays) return fromRelays;
       throw failed ?? error;
     }
+  }
+
+  private async heldBack(pubKeyZ32: string, held: unknown, options: PkarrRequestOptions): Promise<SignedPacket> {
+    if (options.background) throw held;
+    const fromDht = await this.fromDht(pubKeyZ32).catch(() => null);
+    if (!fromDht) throw held;
+    this.lastVia = "dht";
+    return fromDht;
   }
 
   private async fromDht(pubKeyZ32: string): Promise<SignedPacket | null> {
@@ -241,6 +280,8 @@ export class RelaysAndDht implements PkarrTransport {
   /** A relay's answer only: a packet the DHT hands back when the relays are down may be older than one already read. */
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.relays.readAnsweredAt(pubKeyZ32); }
   readHeldBackFor(pubKeyZ32: string): number | undefined { return this.relays.readHeldBackFor(pubKeyZ32); }
+  /** With the DHT every packet goes there too, whatever the relays' budgets say: nothing is held. */
+  publishHeld(pubKeyZ32: string, options?: PkarrRequestOptions): DiscoveryBudgetError | null { return this.dht ? null : this.relays.publishHeld(pubKeyZ32, options); }
   onServerTime(listener: Parameters<RelayTransport["onServerTime"]>[0]): () => void { return this.relays.onServerTime(listener); }
   configure({ relays }: { relays: string[]; readRelays: boolean }): void { if (!this.pinned) this.relays.setRelays(relays); }
 }

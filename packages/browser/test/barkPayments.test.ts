@@ -3,6 +3,8 @@ import { ENDPOINT, type GhostLink, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { BarkWallet } from "../src/engine/paymentAdapters/barkWallet";
+import { BarkAdapter } from "../src/engine/paymentAdapters/bark";
+import { FakeBarkServer } from "./helpers/fakeBark";
 import type { StoredPayment } from "../src/shared/types";
 import { resetDb, rows, seed } from "./fakes";
 // covers: payments.bark.offer, payments.bark.send
@@ -11,7 +13,7 @@ beforeEach(() => resetDb());
 
 const provider = "https://ark.signet.2nd.dev";
 const target = (address = "tark1psrvfresh1"): PaymentTarget => ({ method: "bark", network: "signet", provider, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 60_000 });
-function setup(opts: { bark?: boolean; received?: (address: string, amount: number, since: number, claimed: ReadonlySet<string>) => Promise<string | undefined> } = {}) {
+function setup(opts: { bark?: boolean; received?: (address: string, amount: number, since: number, claimed?: ReadonlySet<string>) => string | undefined } = {}) {
   const sent: { kind: string; frame: Record<string, unknown> }[] = [];
   const link = {
     requirePaymentSupport: vi.fn(async () => {}), supportsBarkPayments: opts.bark ?? true, supportsArkPayments: true, supportsUsdtPayments: true, allowsPayment: () => true, supportsPayments: true,
@@ -21,9 +23,9 @@ function setup(opts: { bark?: boolean; received?: (address: string, amount: numb
     sendPaymentResult: vi.fn((frame: Record<string, unknown>) => { sent.push({ kind: "res", frame }); }),
   };
   let n = 0;
-  const received = vi.fn(opts.received ?? (async () => undefined));
+  const received = vi.fn(opts.received ?? (() => undefined));
   // The Testnet (signet) wallet holds the money; the Mainnet one, open beside it, has no wallet yet.
-  const bark = { network: "testnet", configured: true, target: vi.fn(async () => target(`tark1psrvfresh${++n}`)), adapter: { config: { provider, network: "signet" }, received, sync: vi.fn(async () => {}) } };
+  const bark = { network: "testnet", configured: true, target: vi.fn(async () => target(`tark1psrvfresh${++n}`)), adapter: { config: { provider, network: "signet" }, receipts: vi.fn(async () => received), sync: vi.fn(async () => {}) } };
   const mainnet = { network: "mainnet", configured: false, target: vi.fn(async () => { throw new Error("no Mainnet Bark wallet"); }), adapter: undefined };
   const host = { getLink: () => link as unknown as GhostLink, storeMessage: vi.fn(), onChange: vi.fn() };
   const wallets = { mainnet: mainnet as unknown as BarkWallet, testnet: bark as unknown as BarkWallet };
@@ -81,7 +83,7 @@ it("a receipt alone settles nothing: the request is paid when this wallet shows 
     { id: "r2", linkId: "l", kind: "request", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt, target: target("tark1psrvB") },
   ]);
   const payee = { arrived: undefined as string | undefined };
-  const { desk, received } = setup({ received: async (address, _amount, _since, claimed) => address === "tark1psrvA" && payee.arrived && !claimed.has(payee.arrived) ? payee.arrived : undefined });
+  const { desk, received } = setup({ received: (address, _amount, _since, claimed) => address === "tark1psrvA" && payee.arrived && !claimed.has(payee.arrived) ? payee.arrived : undefined });
   await desk.start();
   const payment = { id: "p1", requestId: "r1", timestamp: createdAt, amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.bark, JSON.stringify({ txid: "a".repeat(64) })] as [string, string] };
   await desk.onPayment("l", payment);
@@ -102,7 +104,7 @@ it("one receive is one received payment: a receipt under a new payment id adds n
   const createdAt = Date.now();
   seed("payments", [{ id: "r1", linkId: "l", kind: "request", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt, target: target("tark1psrvA") }]);
   const payee = { arrived: undefined as string | undefined };
-  const { desk } = setup({ received: async () => payee.arrived });
+  const { desk } = setup({ received: () => payee.arrived });
   await desk.start();
   const pay = (id: string) => desk.onPayment("l", { id, requestId: "r1", timestamp: createdAt, amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.bark, JSON.stringify({ txid: "a".repeat(64) })] });
   await pay("p1"); await pay("p2");
@@ -115,7 +117,7 @@ it("one receive is one received payment: a receipt under a new payment id adds n
 
 it("a request paid while the receipt was lost still settles, from the wallet alone", async () => {
   seed("payments", [{ id: "r1", linkId: "l", kind: "request", direction: "out", amount: 50, unit: "sat", state: "pending", createdAt: Date.now(), target: target("tark1psrvC") }]);
-  const { desk } = setup({ received: async () => "c".repeat(64) });
+  const { desk } = setup({ received: () => "c".repeat(64) });
   await desk.start();
   await desk.reconcileBarkReceipts();
   expect(desk.payment("r1")?.state).toBe("settled");
@@ -132,4 +134,23 @@ it("a settled Bark send is recorded, settles the request, and tells the contact"
   expect((sent[0].frame.endpoint as [string, string])[0]).toBe(ENDPOINT.bark);
   await desk.recordBark({ ...target(), id: "i2", linkId: "l", payee: "bob", amount: 1, fee: 0, feeCap: 1, createdAt: 3, state: "unknown" });
   expect(desk.payment("i2"), "nothing is said about a payment whose outcome is unknown").toBeUndefined();
+});
+
+it("a look at five open Bark requests syncs the server once and reads the wallet's history once, not once per request", async () => {
+  const server = new FakeBarkServer();
+  const adapter = await BarkAdapter.connect({ network: "signet", provider, explorer: "https://esplora.signet.2nd.dev", serverKey: server.key, walletId: "w1" }, "abandon ".repeat(11) + "about", { sdk: server.sdk() });
+  const createdAt = Date.now();
+  const addresses = [];
+  for (let i = 0; i < 5; i++) addresses.push(await adapter.requestAddress());
+  seed("payments", addresses.map((address, i): StoredPayment => ({ id: `r${i}`, linkId: "l", kind: "request", direction: "out", amount: 1_000, unit: "sat", state: "pending", createdAt, target: target(address) })));
+  const wallet = server.wallets.get("ghostly-bark-w1")!;
+  wallet.fund(1_000, wallet.addresses.indexOf(addresses[1]));
+  const { desk, bark } = setup();
+  Object.assign(bark, { adapter });
+  await desk.start();
+  const history = vi.spyOn(wallet, "history"), sync = vi.spyOn(wallet, "sync");
+  await desk.reconcileBarkReceipts();
+  console.log(`BARK LOOK: 5 open requests, ${sync.mock.calls.length} server syncs, ${history.mock.calls.length} history reads`);
+  expect([sync.mock.calls.length, history.mock.calls.length]).toEqual([1, 1]);
+  expect(["r0", "r1", "r2", "r3", "r4"].map((id) => desk.payment(id)?.state), "the one paid is still seen").toEqual(["pending", "settled", "pending", "pending", "pending"]);
 });

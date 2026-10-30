@@ -128,6 +128,9 @@
       "knocked": "Batida deixada para o app do admin",
       "knockedCommunity": "Batida enviada ao grupo"
     },
+    "tryAgain": "Tentar de novo",
+    "unanswered": "Este link não respondeu",
+    "unansweredBody": "Ninguém deixou você entrar em uma hora, então este app parou de bater. O link pode ter sido trocado ou desligado: peça o atual, ou tente de novo.",
     "waiting": "Aguardando para entrar"
   },
   "leave": {
@@ -210,6 +213,7 @@
     "makeAdmin": "Passar admin",
     "missing": "{{count}} faltando",
     "missingHint": "Mensagens desta época que ainda não chegaram",
+    "missingOne": "{{count}} faltando",
     "needsBothHint": "Grupos precisam dos dois apps conectados e atualizados",
     "needsUpdate": "Precisa de um Ghostly atualizado",
     "noContacts": "Todos os contatos pareados já estão no grupo, ou você ainda não tem nenhum.",

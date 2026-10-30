@@ -905,6 +905,38 @@ describe("LinkSession poll pacing", () => {
     await b.s.stop(false);
   });
 
+  // agents#1740: the edge to a member a hub just let in polled as plain fast reads, which the hub's admissions in a row
+  // had spent: 22-39 s before the newcomer could send, receive or leave.
+  it("an awaited peer's reads go as a resume's (the relays' floor) until its packet is read", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    a.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { resume?: boolean } | undefined;
+    expect(last()?.resume).toBeUndefined();
+    a.s.expectPeer(true);
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Not there yet: still awaited.
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Its packet read: a read like any other.
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    // A plain expectPeer (an entry session, a chat) never says so.
+    a.s.expectPeer();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
   it("never says so when it was not live when the app last ran", async () => {
     const { a, b } = pair({}, { getServices: () => [] });
     b.s.start();

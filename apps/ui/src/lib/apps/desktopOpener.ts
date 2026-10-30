@@ -12,7 +12,10 @@
  *   so a 16 MiB file is never base64 and JSON on this window's thread (32 ms each in Chromium).
  * - There is no frame load to count: the window loads once, and Rust refuses every navigation after it. The broker's
  *   second load is the answer to `writing`.
+ * - While the app serves the contact a file (WISP 1200 § A read lane to the contact), its window's title says so
+ *   (`app_title`): "Chess · sharing a file with Ana", where the web's panel header says it.
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
+ * - Opened again in the same chat (or alone again) while it runs, its window comes to the front (`app_focus`).
  */
 import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
@@ -32,8 +35,9 @@ export interface DesktopOpenerOptions {
   listen: Listen;
   /** The person's name in a chat, for an app granted `name`: what the contact was told, or none (`nameInChat`). */
   nameIn: (linkId: string) => string | undefined;
-  /** The app window's title: "Chess with Ana" in a chat (`appWithContact`), the app's name alone by default. */
-  windowTitle?: (title: string, linkId: string | null) => string;
+  /** The app window's title: "Chess with Ana" in a chat (`appWithContact`), "Chess · sharing a file with Ana" while it
+   * serves the contact a file, the app's name alone by default. */
+  windowTitle?: (title: string, linkId: string | null, serving: boolean) => string;
   onStop?: (ref: string, reason: AppStopReason) => void;
   view?: AppView;
   startTimeoutMs?: number;
@@ -64,6 +68,9 @@ export function forIpc(message: unknown): unknown {
 
 export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS, linkedFiles }: DesktopOpenerOptions): AppOpener {
   const brokers = new Map<string, Broker>();
+  /** The window of each app running, by chat and app: the same one opened again is brought to the front (as on the
+   * web), never a second window, whose close would close the app in the chat for the first one too. */
+  const windows = new Map<string, Promise<string>>();
   const early = new Map<string, { at: number; requests: unknown[] }>();
   void listen<{ label: string; request: unknown }>(APP_REQUEST_EVENT, ({ payload }) => {
     if (!payload || typeof payload.label !== "string") return;
@@ -94,10 +101,19 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     const entry = await host.entry(ref, options?.runAnyway === true);
     // Throws where this client has no runner for what the person granted.
     runnerFor(host, entry);
-    const label = await invoke<string>("app_open", {
+    // Open pressed twice before its window is there (a double click) gets here twice: the second waits for the first's.
+    const place = `${linkId ?? ""} ${ref}`;
+    const there = windows.get(place);
+    if (there) {
+      await invoke("app_focus", { label: await there }).catch(() => { /* it went meanwhile */ });
+      return "shown";
+    }
+    const opening = invoke<string>("app_open", {
       // A full-screen app's window opens at the Ghostly window's size; a chat app's is smaller, as it sits beside it.
-      request: { app: entry.ref, title: windowTitle(entry.title, linkId), entry: entry.entry, internet: entry.permissions.includes("internet"), view: entry.view ?? "chat" },
+      request: { app: entry.ref, title: windowTitle(entry.title, linkId, false), entry: entry.entry, internet: entry.permissions.includes("internet"), view: entry.view ?? "chat" },
     });
+    windows.set(place, opening);
+    const label = await opening.catch((e: unknown) => { windows.delete(place); throw e; });
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
     const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
@@ -107,10 +123,12 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
       view,
       post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
       byReference: true,
+      serving: (on) => { void invoke("app_title", { label, title: windowTitle(entry.title, linkId, on) }).catch(() => { /* the window went */ }); },
       stopped: (reason) => {
         if (timer) clearTimeout(timer);
         unregister();
         brokers.delete(label);
+        if (windows.get(place) === opening) windows.delete(place);
         void invoke("app_close", { label }).catch(() => { /* already gone */ });
         onStop?.(ref, reason);
       },

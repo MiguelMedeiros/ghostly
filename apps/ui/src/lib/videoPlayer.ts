@@ -11,12 +11,17 @@ export const videoFormat = (mime: string) => FORMATS[mime.split(";")[0]!.trim().
 
 /**
  * Whether this device plays the file's type. Only types served as themselves (`safeBlobType`) are candidates:
- * a `<video>` handed opaque bytes would refuse them on WebKit anyway.
+ * a `<video>` handed opaque bytes would refuse them on WebKit anyway. A `.mov` is tried wherever an MP4 plays:
+ * Chromium says no to QuickTime yet plays an H.264 one, and one whose picture it cannot decode (HEVC) is caught
+ * when it loads with no picture and offered as a Download.
  */
 export function canPlayVideo(mime: string): boolean {
   const type = safeBlobType(mime);
   if (!PLAYABLE_VIDEO.test(type) || typeof document === "undefined") return false;
-  try { return document.createElement("video").canPlayType(type) !== ""; } catch { return false; }
+  try {
+    const player = document.createElement("video");
+    return player.canPlayType(type) !== "" || (type === "video/quicktime" && player.canPlayType("video/mp4") !== "");
+  } catch { return false; }
 }
 
 /** Width and height of the box, from the video's own proportions. */

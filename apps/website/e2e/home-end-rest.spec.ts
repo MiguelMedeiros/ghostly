@@ -43,9 +43,22 @@ test("the end of the home runs no loop that is off screen", async ({ page }) => 
   await expect(page.locator(".pet")).toHaveAttribute("data-offscreen", "");
   await expect.poll(() => runningOffscreen(page)).toEqual([]);
 
-  // Back in view, they run again.
+  // Back in view, they run again, a few passes, then rest: a reader picking an installer under the title does not keep
+  // a restyle running every frame. Their clock is sped up 8 times; three 4 s passes would hold the test 12 s.
   await page.locator(".fin-title").scrollIntoViewIfNeeded();
-  const words = page.locator(".fin-title .text-gradient-animated").first();
-  await expect(words).not.toHaveAttribute("data-offscreen");
-  await expect.poll(() => words.evaluate((el) => el.getAnimations().map((a) => a.playState))).toContain("running");
+  const words = page.locator(".fin-title .text-gradient-animated");
+  await expect(words.first()).not.toHaveAttribute("data-offscreen");
+  const shifts = () =>
+    words.evaluateAll((els) =>
+      els.flatMap((el) =>
+        el.getAnimations().flatMap((a) => {
+          if (!(a instanceof CSSAnimation) || a.animationName !== "gradient-shift") return [];
+          a.playbackRate = 8;
+          return [a.playState];
+        }),
+      ),
+    );
+  await expect.poll(shifts).toContain("running");
+  // A finished pass without a fill leaves the element: nothing of it is left running.
+  await expect.poll(shifts, { timeout: 10_000 }).toEqual([]);
 });

@@ -30,6 +30,8 @@ ARG VITE_SERVICES_APP_ORIGIN=""
 ENV VITE_SERVICES_HOST=$VITE_SERVICES_HOST VITE_SERVICES_APP_ORIGIN=$VITE_SERVICES_APP_ORIGIN
 # The e2e suite's mini-app hook never goes into an image (apps/web/appsTestFlag.ts).
 ENV VITE_APPS_TEST=
+# Nor translation's switch while it is being built (apps/web/translateFlag.ts), with or without GHOSTLY_BUILD.
+ENV VITE_TRANSLATE=
 RUN npm run build -w @ghostly/web
 
 FROM nginx:1.30-alpine

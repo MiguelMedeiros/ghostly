@@ -71,8 +71,11 @@ function profileSource(database: string): HandoffSource {
       if (!file.blob && !file.bytes) continue;
       const source = await fileSource(file, database, false, async () => peer).catch(() => null);
       if (!source) continue;
-      // The stored digest when there is one (checked when the file was received or staged), else read and hashed once.
-      let sha = digests.get(file.id) ?? (typeof file.digest === "string" && DIGEST.test(file.digest) ? file.digest : undefined);
+      // The stored digest when there is one (checked when the file was received or staged), else read and hashed once. A
+      // group file's digest is its author's from the announcement on, before any byte came: until its bytes passed it
+      // (`done`), what is stored under it can be another file a member served whole, so it is read and hashed.
+      const checked = !file.group || file.direction === "out" || file.transfer?.state === "done";
+      let sha = digests.get(file.id) ?? (checked && typeof file.digest === "string" && DIGEST.test(file.digest) ? file.digest : undefined);
       if (!sha) { sha = await digestOf(source).catch(() => undefined); if (!sha) continue; }
       digests.set(file.id, sha);
       found.set(file.id, { file: { id: file.id, size: source.size, sha256: sha }, source });

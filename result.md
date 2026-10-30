@@ -1,27 +1,31 @@
-# obsolete
+# PR #3703: negotiation-tabs.spec.ts:19 timeout
 
-dev already fixes #952's case. A Desktop `files.pick` that the person keeps open longer than the old 60 s
-`ANSWER_TIMEOUT` no longer fails on dev.
+## Merge
+`git merge --no-edit origin/dev` (44 commits): a clean merge commit, no conflicts.
 
-- origin/dev's `apps/desktop/src/app_sandbox.rs` (from #2338, a9ce49c16) has `PICK_TIMEOUT = 30 min` (line 59), and
-  `app_broker` (lines 913-923) waits that long for `files.pick` and `ANSWER_TIMEOUT` (60 s) for everything else.
-- Nothing else on the path gives up sooner: the runner's `send` has no timer (its only `setTimeout`s are the
-  listener rethrow and the "Not ready" retry), `desktopFiles.ts` calls `linked_files_pick` without one, and
-  `linked_files_pick` blocks on the system dialog (`blocking_pick_files` / `blocking_pick_folder`) with no timeout.
-- Repro of #952's case on dev: I copied dev's `app_broker` wait (lines 913-923) verbatim into a scratch tokio crate,
-  ran it with the clock paused (`cargo run --offline`), had the broker answer after a delay, then deleted the crate:
+## Cause: the branch was incomplete; the spec found a real bug
+This is not a timing flake. The old spec failed on this branch 3/3 plain and 3/3 under CPU throttling (rate 4), every
+time with `Received: -1` after 45 s. A probe of the built site showed what happens. After a tab is clicked, it has
+`style="--p: 0.79"`, but its `.ng-tab-bar` is `display: block; width: 0px`.
 
-  ```
-  files.pick answered after 61 s -> answer
-  files.pick answered after 300 s -> answer
-  files.pick answered after 1740 s -> answer
-  files.pick answered after 1860 s -> No answer
-  storage.keys answered after 61 s -> No answer
-  ```
+`app/dev-steps.css` (loaded on /developers by ProtocolSteps) registers `@property --p { inherits: false; initial-value: 0 }`.
+The bar's `width: calc(var(--p, 0) * 100%)` therefore never inherits the tab's `--p`, so it is always 0 px wide. The
+branch's CSS fix (removing the top-level copy of `.ng-tab-bar { display: none }`) was needed but not enough. The line still
+never drew on any page that also loads dev-steps.css, which is /developers itself. That registration dates from the
+website's move to apps/website, so dev has the same bug.
 
-  A pick past 60 s gets its answer on dev. The branch is different only for a pick held open more than 30 minutes:
-  the branch waits forever, dev gives up. #2338 chose that bound on purpose ("as long as they take, within reason"),
-  so it is not #952's bug.
+## Fix
+- `components/dev/Negotiation.tsx`, `app/negotiation.css`: the progress is now `--ng-p`, matching the demo's `--ng-fade`.
+- `e2e/negotiation-tabs.spec.ts`: the test no longer depends on autoplay. It clicks the third tab (retrying until
+  hydration makes the click count and the tab is `aria-pressed`). A click plays that scenario and holds it for 12 s. The
+  test then polls the tab's own `--ng-p` together with the bar's drawn width (ratio > 0.2 once `--ng-p` > 0.3). What it
+  checks is unchanged: the bar of the scenario that plays is drawn.
 
-Nothing changed in the branch: no merge, no code edits, and no tests run, since there is nothing to fix. The CI
-failure was not looked into because the PR is being closed. The branch is 1141 commits behind origin/dev.
+Red before the fix: on the unfixed build, the new spec logic got `Received: 0` (`--p` above 0.3, bar 0 px wide).
+
+## Runs (website build, `--workers=2`)
+- `--repeat-each=10` on both negotiation-tabs specs (desktop + phone): **40/40 passed**. "Shows its progress" passed
+  10/10, about 3.8 s each.
+- `--repeat-each=10` under CDP `Emulation.setCPUThrottlingRate` 4 (a temp copy of the spec with a fixture that throttles,
+  removed afterwards): **20/20 passed**. "Shows its progress" passed 10/10, about 4.1 s each.
+- `npm test` in apps/website: 60/60. eslint on the changed files: clean. `npm run typecheck`: clean.
