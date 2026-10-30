@@ -118,6 +118,59 @@ test("1:1 reactions: add, change, the same one from the contact, take back; who 
   await expect(bobNote).toHaveText('Alice reacted 🎉 to "see you at one"', { timeout: 30_000 });
 });
 
+test("a message taller than the chat: the bar and the + panel open at the React button, in sight", { tag: ["@feature:chat.reactions"] }, async ({ peer }) => {
+  test.setTimeout(4 * 60_000);
+  const [alice, bob] = await Promise.all([peer("react-tall-alice"), peer("react-tall-bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  // Two screens of lines, one message: the React button beside its middle.
+  const lines = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join("\n");
+  await say(bob, lines);
+  const tall = alice.page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: "line 120" }).last();
+  await expect(tall).toBeVisible({ timeout: 60_000 });
+  const list = alice.page.locator("[data-message-list]");
+  const button = tall.getByTestId("message-react-action");
+  const listBox = (await list.boundingBox())!;
+  const bubble = (await tall.locator("[data-message-bubble]").boundingBox())!;
+  expect(bubble.height).toBeGreaterThan(listBox.height * 1.5);
+
+  /** Scrolls the list until the React button is `from` px under the list's top edge. */
+  const scrollButtonTo = async (from: number) => {
+    await button.evaluate((el, from) => {
+      const scroller = el.closest<HTMLElement>("[data-message-list]")!;
+      scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - from;
+    }, from);
+  };
+  const inside = async (testId: string) => {
+    const box = (await alice.page.getByTestId(testId).boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(listBox.y);
+    expect(box.y + box.height).toBeLessThanOrEqual(listBox.y + listBox.height);
+    // Beside the button, not at an edge of the bubble.
+    const at = (await button.boundingBox())!;
+    expect(Math.min(Math.abs(box.y + box.height - at.y), Math.abs(box.y - (at.y + at.height)))).toBeLessThan(16);
+  };
+
+  // The bubble's middle in sight (the bar above the button), then near the list's top (the bar below it) and its
+  // bottom (above it again).
+  for (const from of [listBox.height / 2, 30, listBox.height - 60]) {
+    await scrollButtonTo(from);
+    // On the button itself: hovering the row would scroll its middle into view.
+    await button.click();
+    await expect(alice.page.getByTestId("reaction-bar")).toBeVisible();
+    await inside("reaction-bar");
+    await alice.page.keyboard.press("Escape");
+    await expect(alice.page.getByTestId("reaction-bar")).toHaveCount(0);
+  }
+
+  // The + panel, too: in the list, by the button, as tall as the room there.
+  await scrollButtonTo(listBox.height / 2);
+  await button.click();
+  await alice.page.getByTestId("reaction-more").click();
+  await expect(alice.page.getByTestId("reaction-picker")).toBeVisible();
+  await inside("reaction-picker");
+});
+
 test("an app from before reactions gets nothing, and its contact's chip stays on their side", { tag: ["@feature:chat.reactions.wire"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
   const [alice, bob] = await Promise.all([peer("react-new"), peer("react-old")]);

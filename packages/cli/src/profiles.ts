@@ -1,4 +1,4 @@
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, linkSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, type Stats } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -137,33 +137,90 @@ export function selectProfile(home: string, name: string): void {
 /**
  * One process per profile: the daemon or a one-shot command. The lock holds the owner's pid; a lock whose
  * process is gone is taken over.
+ *
+ * The lock is a link to a file that already holds the pid, so it never exists empty (agents#1642): one made by
+ * `openSync` + `writeSync` was empty for a moment, and another process read that as nobody's and removed it under its
+ * owner. An empty lock younger than `EMPTY_LOCK_GRACE_MS` is still an older release's being written: busy. A stale
+ * lock is moved aside before it is removed, and only when what was moved is the file judged stale: one that vanished,
+ * or that another process made since, is no longer removed.
  */
 export function acquireLock(paths: ProfilePaths): () => void {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = openSync(paths.lock, "wx", 0o600);
-      writeSync(fd, String(process.pid));
-      closeSync(fd);
-      let released = false;
-      return () => {
-        if (released) return;
-        released = true;
-        try { if (readFileSync(paths.lock, "utf8").trim() === String(process.pid)) rmSync(paths.lock, { force: true }); } catch { /* gone already */ }
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  const mine = String(process.pid);
+  const draft = `${paths.lock}.${mine}`;
+  writeFileSync(draft, mine, { mode: 0o600 });
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (placeLock(draft, paths.lock, mine)) {
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          try { if (readFileSync(paths.lock, "utf8").trim() === mine) rmSync(paths.lock, { force: true }); } catch { /* gone already */ }
+        };
+      }
+      let seen: Stats;
+      try { seen = lstatSync(paths.lock); } catch { continue; }
       const owner = lockOwner(paths);
       if (owner !== null) throw new CliError("busy", `Profile ${paths.name} is in use by process ${owner}`, { pid: owner });
-      rmSync(paths.lock, { force: true });
+      if (seen.size === 0 && Date.now() - seen.mtimeMs < EMPTY_LOCK_GRACE_MS) break;
+      removeStaleLock(paths.lock, seen);
     }
+  } finally {
+    rmSync(draft, { force: true });
   }
   throw new CliError("busy", `Profile ${paths.name} is in use`);
 }
 
+/** How long an empty lock is taken for one an older release is still writing its pid into. */
+const EMPTY_LOCK_GRACE_MS = 1_000;
+
+/**
+ * Links `draft` (which holds `mine`) as the lock; false when there is a lock already. Where the file system has no
+ * hard links, the lock is made in place, as before.
+ */
+function placeLock(draft: string, lock: string, mine: string): boolean {
+  try {
+    linkSync(draft, lock);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") return false;
+    if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes(code ?? "")) throw error;
+  }
+  let fd: number;
+  try { fd = openSync(lock, "wx", 0o600); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+  writeSync(fd, mine);
+  closeSync(fd);
+  return true;
+}
+
+/**
+ * Removes the lock judged stale (`seen`): it is moved aside first, and removed only when what was moved is that same
+ * file and holds no live pid (a freed inode is soon reused). A lock another process made in the meantime is put back.
+ */
+function removeStaleLock(lock: string, seen: Stats): void {
+  const aside = `${lock}.stale.${process.pid}`;
+  try { renameSync(lock, aside); } catch { return; }
+  try {
+    const moved = lstatSync(aside);
+    if (moved.ino === seen.ino && moved.dev === seen.dev && holder(aside) === null && moved.size === seen.size) return;
+    try { linkSync(aside, lock); } catch { /* another lock is there already */ }
+  } finally {
+    rmSync(aside, { force: true });
+  }
+}
+
 /** The pid holding the profile, or null when nobody (or a process that is gone) does. */
 export function lockOwner(paths: ProfilePaths): number | null {
+  return holder(paths.lock);
+}
+
+function holder(file: string): number | null {
   let pid: number;
-  try { pid = Number(readFileSync(paths.lock, "utf8").trim()); } catch { return null; }
+  try { pid = Number(readFileSync(file, "utf8").trim()); } catch { return null; }
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try { process.kill(pid, 0); return pid; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM" ? pid : null; }
 }

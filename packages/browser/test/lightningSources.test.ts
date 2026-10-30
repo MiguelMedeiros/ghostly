@@ -31,7 +31,7 @@ afterEach(async () => { for (const s of services.splice(0)) await s.stop(); });
 
 function service(provider: LightningProvider = new FakeLightningProvider({ settleMs: 600_000 }), extra: Partial<LightningProviderDescriptor> = {}) {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-  const cashu = { view: async () => ({ balance: 7, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+  const cashu = { balance: async () => 7 } as unknown as CashuWallet;
   // Nothing secret to configure: no sealing (a 600k-round PBKDF2) on every set.
   const descriptor: LightningProviderDescriptor = { ...fakeLightning, fields: [], validate: undefined, create: async () => provider, ...extra };
   const lightning = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
@@ -191,7 +191,7 @@ describe("quoting an invoice to pay", () => {
     expect(pay).not.toHaveBeenCalled();
     await expect(lightning.quote(testInvoice({ sats: 10, prefix: "lntb" }))).resolves.toMatchObject({ amount: 10 });
     // The mints take it to the wallet, which refuses it unless a test mint pays (wallet.test.ts).
-    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://testnut.cashu.space", amount: 10, feeReserve: 1 })), view: async () => ({ balance: 100 }) };
+    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://testnut.cashu.space", amount: 10, feeReserve: 1 })), balance: async () => 100 };
     const mints = await ready(new CashuMintLightning(wallet as unknown as CashuWallet, "testnet"), { networks: ["testnet"] });
     await expect(mints.lightning.quote(testInvoice({ sats: 10, prefix: "lnbc" }))).resolves.toMatchObject({ mint: "https://testnut.cashu.space" });
     expect(wallet.quoteInvoice).toHaveBeenCalledWith(expect.stringMatching(/^lnbc10/), "testnet");
@@ -199,7 +199,7 @@ describe("quoting an invoice to pay", () => {
 
   it("names the Cashu mint that will pay when the source is the mints", async () => {
     const invoice = fakeInvoice(40, hash());
-    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://mint.example", amount: 40, feeReserve: 2 })), view: async () => ({ balance: 100 }) };
+    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://mint.example", amount: 40, feeReserve: 2 })), balance: async () => 100 };
     const mints = new CashuMintLightning(wallet as unknown as CashuWallet, "testnet");
     const { lightning } = await ready(mints, { networks: ["testnet"] });
     expect(await lightning.quote(invoice)).toMatchObject({ mint: "https://mint.example", feeReserve: 2, source: "fake-lightning" });
@@ -356,7 +356,7 @@ describe("a payment through the mints that the app was cut off from", () => {
       payQuote: vi.fn(async () => new Promise<boolean>(() => {})),
       meltQuoteState: vi.fn(async () => quoteState),
       meltInFlight: vi.fn(async () => inFlight),
-      view: async () => ({ balance: 100 }),
+      balance: async () => 100,
     };
     return { wallet, provider: new CashuMintLightning(wallet as unknown as CashuWallet, "testnet") };
   }

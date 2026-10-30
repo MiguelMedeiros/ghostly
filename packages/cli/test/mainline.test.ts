@@ -3,7 +3,7 @@ import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, createIdentity, edgePar
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Mainline, RelaysAndDht } from "../src/runtime/mainline";
-import { mainlineNetwork, pkarrRelays } from "../src/runtime/engine";
+import { hyperdhtNetwork, mainlineNetwork, pkarrRelays } from "../src/runtime/engine";
 import { error, ghostly, home, hyperdhtTestnet, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.groups, core.relay-client
 
@@ -191,6 +191,40 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     await expect(a.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
   }, 60_000);
 
+  // A publish the relays' budget held back went to the DHT, and was said held back all the same: the link published
+  // again in 0.25-4 s, a new signature and a new DHT put each time (1-1.6 puts a minute per chat at budget, not one per 4 min).
+  it("a publish the relays' budget holds back is out once the DHT takes it, and the relays get the newest when it frees", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = { down: false, packets: new Map<string, Uint8Array>() };
+      let relayPuts = 0;
+      const answer = relays(store);
+      const counted = ((input: RequestInfo | URL, init?: RequestInit) => { if (init?.method === "PUT") relayPuts++; return answer(input, init); }) as typeof fetch;
+      let dhtPuts = 0;
+      // A BEP44 put is a lookup then a put: ~100 ms on a loopback testnet, more on the public DHT.
+      const dht = { put: async () => { dhtPuts++; await new Promise((r) => setTimeout(r, 100)); return 8; }, get: async () => null } as unknown as Mainline;
+      const a = new RelaysAndDht(dht, { relays: RELAYS.slice(0, 1), fetch: counted, requestsPerMinute: 5, log: () => {} });
+      // The relay's minute spent on reads of other keys, as 20+ chats' polls spend it.
+      for (let i = 0; i < 10; i++) await a.resolve(createIdentity().pubKeyZ32).catch(() => {});
+      const me = createIdentity();
+      const outcomes: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const outcome = a.publish(me, [{ label: "_x", value: `v${i}` }]).then(() => "out", (e: unknown) => String(e));
+        await vi.advanceTimersByTimeAsync(200);
+        outcomes.push(await outcome);
+      }
+      expect(outcomes).toEqual(Array(5).fill("out"));
+      expect(dhtPuts).toBe(5);
+      expect(relayPuts, "held back on the relay").toBe(0);
+      // Browser contacts read only the relays: the newest packet goes there once the budget frees, once.
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(relayPuts).toBe(1);
+      expect((await a.relays.resolve(me.pubKeyZ32))?.records[0].value).toBe("v4");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("polls of a key nobody published, answered 404 slowly, do not each look it up on the DHT", async () => {
     const answer = relays({ down: false, packets: new Map() });
     const slow404 = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -207,6 +241,47 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     console.log(`MAINLINE slow 404: 4 reads, ${lookups} DHT lookups`);
     // The first read cannot know the key is missing: it hedges at 1.5 s. The next ones wait as the relays' hedge does.
     expect(lookups).toBeLessThanOrEqual(1);
+  }, 60_000);
+
+  // agents#1638: a clock that ran ahead, set right, then a restart. Every DHT node held the key's packet dated by the
+  // fast clock and refused each put (302), and the CLI tried again every 4 s until the clock caught up.
+  it("after a restart, a publish the DHT refuses for a later-dated packet goes out dated past it, while every relay answers 500", async () => {
+    // A testnet of its own, small enough that every put reaches each node: on the shared one a put sometimes landed on
+    // a node that never held the older packet, and was taken there.
+    const net: Mainline[] = [];
+    const join = async () => {
+      const node = new Mainline({ bootstrap: net.length ? [`127.0.0.1:${net[0]!.address().port}`] : false, host: "127.0.0.1", timeoutMs: 5_000 });
+      await node.listening;
+      for (const other of net) { node.addNode("127.0.0.1", other.address().port); other.addNode("127.0.0.1", node.address().port); }
+      net.push(node); nodes.push(node);
+      return node;
+    };
+    const quit = async (node: Mainline) => { net.splice(net.indexOf(node), 1); await node.destroy(); };
+    for (let i = 0; i < 4; i++) await join();
+    const reader = await join();
+    const store = { down: true, packets: new Map<string, Uint8Array>() };
+    const me = createIdentity();
+    const ahead = BigInt(Date.now() + 2 * 3_600_000) * 1000n;
+    // Before the restart: dated two hours ahead. Then that app quits.
+    const old = await join();
+    const before = new RelaysAndDht(old, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    before.relays.sawTimestamp(me.pubKeyZ32, ahead);
+    await before.publish(me, [{ label: "_x", value: "fast clock" }]);
+    expect((await reader.get(me.pubKeyZ32))?.records[0].value).toBe("fast clock");
+    await quit(old);
+    // After it: the clock is right, and nothing remembers that date.
+    const restarted = await join();
+    const after = new RelaysAndDht(restarted, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    await after.publish(me, [{ label: "_x", value: "right clock" }]);
+    const onDht = await reader.get(me.pubKeyZ32);
+    expect(onDht?.records[0].value).toBe("right clock");
+    expect(onDht!.timestampMicros).toBeGreaterThan(ahead);
+    await quit(restarted);
+    // The held packet cannot be read: the publish fails, and says the DHT refused it, not only that the relays did.
+    const blind = await join();
+    blind.get = async () => null;
+    const third = new RelaysAndDht(blind, { relays: RELAYS, fetch: relays(store), log: () => {} });
+    await expect(third.publish(me, [{ label: "_x", value: "again" }])).rejects.toThrow(/every relay.*; The DHT holds a later-dated packet/);
   }, 60_000);
 
   it("a group's edge goes live while every relay answers 500, through the DHT, without a restart", async () => {
@@ -248,6 +323,12 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
     expect(mainlineNetwork({ GHOSTLY_PKARR_RELAYS: "http://127.0.0.1:49501" })).toEqual({ off: true });
     expect(mainlineNetwork({ GHOSTLY_PKARR_RELAYS: "http://127.0.0.1:49501", GHOSTLY_DHT_BOOTSTRAP: "127.0.0.1:49502" })).toEqual({ off: false, bootstrap: ["127.0.0.1:49502"], host: "127.0.0.1" });
     expect(mainlineNetwork({})).toEqual({ off: false });
+  });
+
+  it("are refused when two are split by ';' or a space, as one URL they reached nobody", () => {
+    for (const relays of ["http://10.9.9.9:8080;http://10.9.9.8:8080", "http://10.9.9.9:8080 http://10.9.9.8:8080", "http://[fd00::1"]) {
+      expect(() => pkarrRelays({ GHOSTLY_PKARR_RELAYS: relays }), relays).toThrow(expect.objectContaining({ code: "usage", message: expect.stringContaining(JSON.stringify(relays)) }));
+    }
   });
 
   it("are the only relays: the profile's relays setting does not replace them, and without a DHT they carry everything", async () => {
@@ -388,5 +469,26 @@ describe("a publish held before it is signed", () => {
     }
     expect(alone.publishHeld(id.pubKeyZ32)).toBeInstanceOf(DiscoveryBudgetError);
     expect(withDht.publishHeld(id.pubKeyZ32)).toBeNull();
+  });
+});
+
+describe("the bootstrap nodes (GHOSTLY_DHT_BOOTSTRAP, GHOSTLY_HYPERDHT_BOOTSTRAP)", () => {
+  // Without a port, a port past 65535 or with ';' between nodes, bittorrent-dht sent to port NaN from a timer and every
+  // command died with Node's RangeError stack; the others were looked up as names, and the profile had no DHT.
+  const bad = ["10.9.9.9", "10.9.9.9:6881;10.9.9.8:6881", "10.9.9.9:99999", "10.9.9.9:0", "udp://10.9.9.9:6881", "[fd00::1]:6881", "10.9.9.9 10.9.9.8", "10.9.9.9:6881 10.9.9.8:6881", "10.9.9.9:"];
+
+  it("are each host:port, a bad one a usage error naming the variable and the node", () => {
+    for (const nodes of bad) {
+      expect(() => mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: nodes }), nodes).toThrow(expect.objectContaining({ code: "usage", message: `GHOSTLY_DHT_BOOTSTRAP takes host:port nodes, comma-separated, not ${JSON.stringify(nodes)}` }));
+      expect(() => hyperdhtNetwork(nodes), nodes).toThrow(expect.objectContaining({ code: "usage", message: `GHOSTLY_HYPERDHT_BOOTSTRAP takes host:port nodes, comma-separated, not ${JSON.stringify(nodes)}` }));
+    }
+    expect(() => mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: "127.0.0.1:49502, 10.9.9.9" })).toThrow('not "10.9.9.9"');
+  });
+
+  it("take names and addresses with a port, a list all on loopback bound there", () => {
+    expect(mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: " router.bittorrent.com:6881 , 10.9.9.9:65535 ," })).toEqual({ off: false, bootstrap: ["router.bittorrent.com:6881", "10.9.9.9:65535"] });
+    expect(mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: "127.0.0.1:1,localhost:49502" })).toEqual({ off: false, bootstrap: ["127.0.0.1:1", "localhost:49502"], host: "127.0.0.1" });
+    expect(hyperdhtNetwork("node1.hyperdht.org:49737")).toEqual({ bootstrap: ["node1.hyperdht.org:49737"] });
+    expect(hyperdhtNetwork("")).toEqual({});
   });
 });

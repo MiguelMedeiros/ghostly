@@ -161,6 +161,23 @@ describe("chats", () => {
     expect(await list.allows({ seq: 2, id: "g", type: "group.message", at: 1, group: theirs.id } as GhostlyEvent)).toBe(false);
   });
 
+  it("listen --from takes a chat only by its id, its contact's key or a label given here, as call auto on --from", async () => {
+    // No chat is labelled "owner" here; Mallory calls herself that. Her chat never wakes the agent.
+    const owner = link("chatOwnerxxxxxxx", { peerNick: "Miguel" }), mallory = link("chatMalloryxxxxx", { peerNick: "owner" });
+    const ctx = { runtime: { server: { node: { getState: () => ({ links: [owner, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    await expect(allowlist(["owner"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/ghostly chat rename/), details: { chat: mallory.id, name: "owner", contact: mallory.peerPubKeyZ32 } });
+    await expect(allowlist(["chatMallory"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", details: { chat: mallory.id } });
+    // Its id, or the label this side gave it (any case), still names it.
+    const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
+    expect(await (await allowlist([owner.id], [], call, async () => null)).allows(event(owner.id))).toBe(true);
+    const labelled = link(owner.id, { peerNick: "Miguel", label: "Owner" });
+    const named = { runtime: { server: { node: { getState: () => ({ links: [labelled, mallory], groups: [] }) } } } } as unknown as ApiContext;
+    const list = await allowlist(["owner"], [], (method, params) => callApi(named, method, params), async () => null);
+    expect(await list.allows(event(owner.id))).toBe(true);
+    expect(await list.allows(event(mallory.id))).toBe(false);
+  });
+
   it("\"\" (and \"group:\" alone) names no chat and no group, even where it is a prefix of the only one's id", async () => {
     const bob = link("c7aoaukc3e99dm9c", { peerNick: "Bob" });
     const crew = { ...group, id: "aZT5wUR4UR5s9NsV4KUHZg", status: "active" } as unknown as GroupView;
@@ -701,13 +718,23 @@ describe("the engine passthrough", () => {
     const { ctx, node } = fake();
     const updateSettings = vi.fn(async () => undefined);
     Object.assign(node, { updateSettings });
-    for (const relayOnly of [true, false]) {
+    for (const relayOnly of [true, "yes", null]) {
       await expect(callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly } } })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("relayOnly") });
     }
     await expect(callApi(ctx, "settings.set", { relayOnly: true })).rejects.toMatchObject({ code: "bad_request" });
     expect(updateSettings).not.toHaveBeenCalled();
     await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { sendTyping: false } } });
     expect(updateSettings).toHaveBeenCalledWith({ settings: { sendTyping: false } });
+  });
+
+  // A profile an older CLI (or a dev build) turned it on in kept it for good: false was refused too, and while it is on
+  // the TURN server it needs cannot be taken away either.
+  it("still turns Hide my IP from contacts off on a profile that has it on", async () => {
+    const { ctx, node } = fake();
+    const updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { updateSettings });
+    await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly: false } } });
+    expect(updateSettings).toHaveBeenCalledWith({ settings: { relayOnly: false } });
   });
 
   it("refuses a real-money confirmation it was not given", async () => {
@@ -880,8 +907,13 @@ describe("settings", () => {
     expect(JSON.stringify(capabilities)).not.toMatch(/fcm|AUTH|VK|SPACE/);
     await expect(callApi(ctx, "settings.set", { mints: [] })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
-    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
-    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"] });
+    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"] } });
+    // readRelays (the app's "Also use Pkarr relays") is refused with the reason: the CLI reads the relays first anyway.
+    node.updateSettings.mockClear();
+    for (const value of [false, true])
+      await expect(callApi(ctx, "settings.set", { readRelays: value })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("reads the Pkarr relays first") });
+    expect(node.updateSettings).not.toHaveBeenCalled();
     // ICE servers in WebRTC's form (urls a list) are taken; one without urls is a bad_request that says what to write.
     await callApi(ctx, "settings.set", { iceServers: [{ urls: ["stun:stun.example.org:3478", "stun:b.example.org"] }] });
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [{ urls: "stun:stun.example.org:3478, stun:b.example.org" }] } });

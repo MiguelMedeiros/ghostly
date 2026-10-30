@@ -1,4 +1,4 @@
-import { bytesEqual, fromBase64Url, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter, turnStatedVerifier, turnVerifierMark, type TurnRecord } from "@ghostly/core";
+import { NO_ATTEMPTS, bytesEqual, fromBase64Url, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter, turnStatedVerifier, turnVerifierMark, type TurnRecord } from "@ghostly/core";
 import type { DevicePatch, DeviceRecord } from "./state";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 
@@ -80,33 +80,50 @@ export function verifierStands(record: DeviceRecord, latest: TurnRecord | null):
 
 const sameName = (a: string, b: string) => a.normalize("NFC").trim().toLocaleLowerCase() === b.normalize("NFC").trim().toLocaleLowerCase();
 
+/** One try at a time on this device, whoever asks: tries sent at once would all be checked against the same count. */
+let tries: Promise<unknown> = Promise.resolve();
+export function oneTry<T>(work: () => Promise<T>): Promise<T> {
+  const run = tries.catch(() => {}).then(work);
+  tries = run;
+  return run;
+}
+
+/**
+ * The limits, then the lock password against the verifier the active device left, when the copy needs it. Run inside
+ * `oneTry`, on the record read there. As a pull is, the try is counted before the password is checked, and taken back
+ * when it is the right one. Throws `TakeoverRefusal`.
+ */
+export async function checkTakeoverPassword(ports: Pick<TakeoverPorts, "amend" | "proves" | "now">, record: DeviceRecord, password: unknown): Promise<void> {
+  const now = ports.now ?? Date.now;
+  // A device locked out is not even asked for the password.
+  const allowed = handoffAttemptAllowed(record.takeoverAttempts, now());
+  if (allowed !== "ok") throw new TakeoverRefusal(allowed, allowed === "locked-out" ? "Too many tries. Try again later." : "Too many tries on this device.", allowed === "locked-out" ? handoffRetryAfter(record.takeoverAttempts, now()) : undefined);
+  // A copy restored from a backup was opened with the backup's passphrase, which is the profile; a frozen copy needs the
+  // lock password.
+  if (record.copy !== "frozen" && !record.verifier) return;
+  if (!record.verifier) throw new TakeoverRefusal("no-password", "This device cannot check the profile's password yet.");
+  if (typeof password !== "string" || !password) throw new TakeoverRefusal("password", "Type the profile's password.");
+  await ports.amend({ takeoverAttempts: handoffAttemptFailed(record.takeoverAttempts, now()) });
+  if (!(await ports.proves(record.verifier, password).catch(() => false))) throw new TakeoverRefusal("password", "Wrong password.");
+  await ports.amend({ takeoverAttempts: record.takeoverAttempts ?? NO_ATTEMPTS });
+}
+
 /**
  * Checks the request and forces the takeover. Resolves to the keeper's outcome: `start` when this device is the active
  * one now (its record says `active`, with the raise to make before the engine starts), anything else when it is not.
  * Throws `TakeoverRefusal` before anything is written.
  */
 export async function forceTakeover(ports: TakeoverPorts, request: TakeoverRequest): Promise<TurnOutcome> {
-  const now = ports.now ?? Date.now;
-  const record = await ports.read();
-  if (!record || (record.state !== "standby" && record.state !== "superseded")) throw new TakeoverRefusal("state", "Only a device on standby takes over.");
-  if (!record.copy) throw new TakeoverRefusal("no-copy", "This device holds no copy of the profile. Use here moves it from the active device.");
-  // The limits first: a device locked out is not even asked for the password.
-  const allowed = handoffAttemptAllowed(record.takeoverAttempts, now());
-  if (allowed !== "ok") throw new TakeoverRefusal(allowed, allowed === "locked-out" ? "Too many tries. Try again later." : "Too many tries on this device.", allowed === "locked-out" ? handoffRetryAfter(record.takeoverAttempts, now()) : undefined);
-  // A copy restored from a backup was opened with the backup's passphrase, which is the profile; a frozen copy needs the
-  // lock password, checked against the verifier the active device left here.
-  if (record.copy === "frozen" || record.verifier) {
-    if (!record.verifier) throw new TakeoverRefusal("no-password", "This device cannot check the profile's password yet.");
-    if (typeof request.password !== "string" || !request.password) throw new TakeoverRefusal("password", "Type the profile's password.");
-    const right = await ports.proves(record.verifier, request.password).catch(() => false);
-    if (!right) {
-      await ports.amend({ takeoverAttempts: handoffAttemptFailed(record.takeoverAttempts, now()) });
-      throw new TakeoverRefusal("password", "Wrong password.");
-    }
-  }
-  const target = takeoverTarget(record);
-  if (target && (typeof request.name !== "string" || !sameName(request.name, target))) throw new TakeoverRefusal("name", `Type ${target} to confirm.`);
-  if (record.takeoverAttempts && (record.takeoverAttempts.total > 0 || record.takeoverAttempts.recent.length)) await ports.amend({ takeoverAttempts: handoffAttemptSucceeded() });
+  const { record, target } = await oneTry(async () => {
+    const record = await ports.read();
+    if (!record || (record.state !== "standby" && record.state !== "superseded")) throw new TakeoverRefusal("state", "Only a device on standby takes over.");
+    if (!record.copy) throw new TakeoverRefusal("no-copy", "This device holds no copy of the profile. Use here moves it from the active device.");
+    await checkTakeoverPassword(ports, record, request.password);
+    const target = takeoverTarget(record);
+    if (target && (typeof request.name !== "string" || !sameName(request.name, target))) throw new TakeoverRefusal("name", `Type ${target} to confirm.`);
+    if (record.takeoverAttempts && (record.takeoverAttempts.total > 0 || record.takeoverAttempts.recent.length)) await ports.amend({ takeoverAttempts: handoffAttemptSucceeded() });
+    return { record, target };
+  });
   const keeper = await ports.keeper();
   if (!keeper) throw new TakeoverRefusal("offline", "Go online to take over.");
   // After the read the takeover acts on, before anything is written: the last record there is to know.

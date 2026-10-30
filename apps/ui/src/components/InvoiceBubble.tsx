@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { MoneyQr } from "./MoneyQr";
-import { parseEngineError, type Bolt11Invoice, type LightningDestination } from "@ghostly/core";
+import { parseEngineError, type Bolt11Invoice, type LightningDestination, type PaymentMethodName } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { holdsLess, lightningNetworkFor } from "./walletCardData";
 import { NetworkTag, satsIn } from "./NetworkTag";
@@ -11,6 +11,7 @@ import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
 import { usePlatformValue, useWalletPlatform } from "../hooks/useServicesPlatform";
 import { servicesPlatform, type CashuInspection, type WalletNetwork } from "../lib/platform";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
+import { cardOn } from "../lib/chatPayments";
 import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
 import { moreMoneyMethod } from "../lib/parse/money-more";
@@ -293,10 +294,16 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
   );
 }
 
-function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: boolean }) {
+/**
+ * `offOn`: whether this chat takes Cashu on a network, asked with the token's own once its mint is read (never Redeem
+ * first, then gone). `onNetwork`: told that network, for the note under the card.
+ */
+function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boolean; offOn: (network: WalletNetwork | undefined) => boolean; onNetwork: (network: WalletNetwork | undefined) => void }) {
   const { t } = useI18n();
   const wallet = useWalletPlatform();
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
+  const tokenMint = inspection?.kind === "token" ? inspection.mint : undefined;
+  useEffect(() => onNetwork(tokenMint === undefined ? undefined : mintNetwork(tokenMint)), [tokenMint, onNetwork]);
   const id = useMemo(() => settledMoneyId(value), [value]);
   const [redeemed, setRedeemed] = useSettled(id);
   const [spent, setSpent] = useState(false);
@@ -380,7 +387,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
       ) : spent ? (
         <span ref={redeemedLine} tabIndex={-1} className="text-text-primary/65 text-xs font-bold self-center focus:outline-none" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
       ) : (
-        wallet && !mine && !off && inspection.accepted && (
+        wallet && !mine && !offOn(network) && inspection.accepted && (
           <button
             className={button}
             {...working(busy)}
@@ -428,18 +435,33 @@ function whatItPays(money: MoneyInText): string {
 const METHOD_NAME = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bark: "Bark", usdt: "USDT" } as const;
 
 /** Money pasted into the chat, shown as something a person can read and act on. */
-/** `peerPubKey`: the chat it is in, whose choice of ways of paying decides whether it can be paid or redeemed here. */
+/**
+ * `peerPubKey`: the chat it is in, whose choice of ways of paying, and of each one's networks, decides whether it can be
+ * paid or redeemed here: the card's way of paying on the card's own network (Testnet Lightning off, Mainnet on: a
+ * Testnet invoice is off here), as the composer and the engine decide.
+ */
 export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
   const { t } = useI18n();
-  const allowed = usePlatformValue(() => servicesPlatform?.getPeer(peerPubKey ?? "")?.paymentMethods);
+  const wallets = useWalletPlatform();
+  const chat = usePlatformValue(() => {
+    const peer = servicesPlatform?.getPeer(peerPubKey ?? "");
+    return peer ? { paymentMethods: peer.paymentMethods, paymentNetworks: peer.paymentNetworks } : undefined;
+  });
+  // A network not known yet (a token before its mint is read, USDT of another chain): only the way of paying decides.
+  const offHere = (method: PaymentMethodName, network: WalletNetwork | undefined) =>
+    !!chat && ((!!chat.paymentMethods && !chat.paymentMethods[method]) || (!!network && !cardOn(chat, method, network)));
+  const [tokenNetwork, setTokenNetwork] = useState<WalletNetwork>();
+  const state = wallets?.getState();
   const method = money.type === "cashu" ? "cashu" : money.type === "lightning" || money.type === "lnurl" ? "lightning" : moreMoneyMethod(money);
-  const off = !!allowed && !allowed[method];
+  const network = money.type === "lightning" ? lightningNetworkFor(state, money.invoice.network) : money.type === "lnurl" ? lightningNetworkFor(state)
+    : money.type === "cashu" ? tokenNetwork : money.type === "bolt12" ? money.offer.network : money.request.network;
+  const off = offHere(method, network);
   return (
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       <Fragment key={whatItPays(money)}>
-        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
-          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} peerPubKey={peerPubKey} />} />}
+        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
+          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={peerPubKey} />} />}
       </Fragment>
       {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>

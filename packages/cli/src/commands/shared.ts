@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
-import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl } from "@ghostly/core/statusCards";
+import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
@@ -110,6 +110,34 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   return seconds;
 }
 
+/** The ranges the API takes (api.ts, files.ts): the most minutes of a `--hold` (a week, HOLD_MAX_MINUTES), seconds. */
+export const HOLD_MINUTES = 10_080, WAIT_SECONDS = 3600, LONG_WAIT_SECONDS = 86_400, HISTORY_LIMIT = 10_000;
+
+/**
+ * A number flag out of the range the API takes: a usage error (exit 2) that names the flag, before the profile opens.
+ * Before, the API's own check answered once it had opened (a one-shot went online first), in its parameter's words
+ * ("hold must be a number from 0 to 10080", exit 1). The API keeps its check for socket callers.
+ */
+export function inRange(options: Parsed["options"], flag: string, what: string, min: number, max: number, whole = false): number | undefined {
+  const value = options[flag];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !(value >= min && value <= max) || (whole && !Number.isInteger(value)))
+    throw new CliError("usage", `--${flag} takes ${what} from ${min} to ${max}, not ${JSON.stringify(value)}`);
+  return value;
+}
+
+/** `--timeout` of a command that waits: seconds, up to an hour (a send, a card, a button) or a day (`chat wait`, a file). */
+export const timeout = (options: Parsed["options"], max = WAIT_SECONDS) => inRange(options, "timeout", "a number of seconds", 1, max);
+/** `--limit` of a history: messages per page. */
+export const pageLimit = (options: Parsed["options"]) => inRange(options, "limit", "a whole number", 1, HISTORY_LIMIT, true);
+
+/** `--since` of `events` and `listen`: a seq, a whole number from 0 (a negative one replayed a made-up gap first). */
+export function since(options: Parsed["options"]): number | undefined {
+  const value = options.since;
+  if (value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0)) throw new CliError("usage", `--since takes a seq from 0 up, not ${JSON.stringify(value)}`);
+  return value as number | undefined;
+}
+
 /**
  * A time given as digits: milliseconds. Unix seconds (from 1e9, 2001, up to 1e11, which as milliseconds would be 1970
  * to 1973) are refused with the milliseconds they mean: before, they were read as January 1970 without a word.
@@ -215,6 +243,18 @@ export function itemOf(value: string): { state: string; text: string } {
   return { state: word, text };
 }
 
+/**
+ * A card's fields past the bytes a card takes in all (`STATUS_CARD_LIMITS.bytes`, its JSON as UTF-8): a usage error
+ * (exit 2) with its size and what to cut. Every flag can be within its own bound and the card not: 20 items of 200
+ * characters past Latin (3 bytes each) take 12 KiB. Before, it failed as `bad_request` (exit 1), the whole card in it.
+ */
+function cardBytes(fields: Record<string, unknown>, flags: string): Record<string, unknown> {
+  const bytes = statusCardBytes(fields);
+  if (bytes > STATUS_CARD_LIMITS.bytes)
+    throw new CliError("usage", `The card takes ${bytes} bytes, and holds at most ${STATUS_CARD_LIMITS.bytes} in all (a character past Latin takes 2 to 4): give shorter or fewer ${flags}`);
+  return fields;
+}
+
 /** `--progress`, `--left`: a percent, or a usage error that names the flag. */
 function percent(options: Parsed["options"], flag: string): void {
   const value = options[flag];
@@ -270,7 +310,7 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   set("parent", options.parent);
   const links = cardLinks(options.link);
   if (links) fields.links = links;
-  return fields;
+  return cardBytes(fields, "--item, --step, --link or --json");
 }
 
 /**
@@ -340,7 +380,7 @@ export function routineFields(options: Parsed["options"]): Record<string, unknow
   if (next !== undefined) fields.nextRunAt = next;
   const links = cardLinks(options.link);
   if (links) fields.links = links;
-  return fields;
+  return cardBytes(fields, "--name, --schedule, --link or --json");
 }
 
 /** Options a routine command takes, beside `cardOptions`. */
@@ -361,7 +401,7 @@ export const taskOptions: Record<string, OptionSpec> = {
   progress: { type: "number", description: "Percent done, 0 to 100" },
   steps: { type: "string", description: "Steps done of total, like 2/5 (progress is worked out from them)" },
   step: { type: "string", description: "What it is doing now (200 characters)" },
-  item: { type: "list", description: "A step or log line, state:text with state pending, running, done, failed or skipped (text alone: pending). A lowercase word before the first colon must be one of them; pending:fix: x keeps the colon. The list replaces the card's (up to 20)" },
+  item: { type: "list", description: "A step or log line, state:text with state pending, running, done, failed or skipped (text alone: pending). A lowercase word before the first colon must be one of them; pending:fix: x keeps the colon. The list replaces the card's (up to 20; the card holds at most 8 KiB in all, and a character past Latin takes 2 to 4 bytes)" },
   branch: { type: "string", description: "The branch it works on" },
   "pr-url": { type: "string", description: "The pull request's https link" },
   "pr-number": { type: "number", description: "The pull request's number" },
@@ -399,7 +439,7 @@ export function usageFields(options: Parsed["options"]): Record<string, unknown>
   const resets = cardTime(options.resets, "resets");
   if (resets !== undefined) fields.resetsAt = resets;
   if (Array.isArray(options.also) && options.also.length) fields.windows = (options.also as string[]).map(usageWindowOf);
-  return fields;
+  return cardBytes(fields, "--json");
 }
 
 /** Options `usage send` takes. */

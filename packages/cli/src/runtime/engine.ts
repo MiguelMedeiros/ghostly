@@ -38,10 +38,26 @@ export interface Runtime {
  * for the Desktop's sidecar; a network all on loopback (the tests') is announced on loopback too.
  */
 export function hyperdhtNetwork(env = process.env.GHOSTLY_HYPERDHT_BOOTSTRAP): { bootstrap?: string[]; host?: string } {
-  const bootstrap = (env ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  const bootstrap = bootstrapNodes("GHOSTLY_HYPERDHT_BOOTSTRAP", env);
   if (!bootstrap.length) return {};
   const loopback = bootstrap.every((node) => /^(127\.0\.0\.1|localhost):\d+$/.test(node));
   return { bootstrap, ...(loopback ? { host: "127.0.0.1" } : {}) };
+}
+
+/**
+ * A bootstrap variable's nodes ("host:port,…"), each checked: a host without a port, a port past 65535 or `;` between
+ * nodes crashed every command from bittorrent-dht's timer (port NaN), and `udp://…`, `[v6]:port` or nodes split by
+ * spaces were looked up as names and left the profile with no DHT. IPv6 nodes are refused: neither bittorrent-dht nor
+ * dht-rpc reads them (both split host and port at the first ':').
+ */
+function bootstrapNodes(name: string, env: string | undefined): string[] {
+  const nodes = (env ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  const bad = nodes.find((node) => {
+    const port = /^[^\s:;/@[\]]+:(\d{1,5})$/.exec(node)?.[1];
+    return !port || Number(port) < 1 || Number(port) > 65535;
+  });
+  if (bad !== undefined) throw new CliError("usage", `${name} takes host:port nodes, comma-separated, not ${JSON.stringify(bad)}`);
+  return nodes;
 }
 
 /**
@@ -52,7 +68,8 @@ export function hyperdhtNetwork(env = process.env.GHOSTLY_HYPERDHT_BOOTSTRAP): {
 export function pkarrRelays(env = process.env): string[] | null {
   const relays = (env.GHOSTLY_PKARR_RELAYS ?? "").split(",").map((url) => url.trim()).filter(Boolean);
   if (!relays.length) return null;
-  const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url));
+  // Two relays split by ';' or a space were taken as one URL.
+  const bad = relays.find((url) => !/^https?:\/\/[^/\s]/i.test(url) || /[\s;]/.test(url) || !URL.canParse(url));
   if (bad) throw new CliError("usage", `GHOSTLY_PKARR_RELAYS takes http:// or https:// URLs, comma-separated, not ${JSON.stringify(bad)}`);
   return relays;
 }
@@ -95,7 +112,7 @@ export function withoutPublicStun(config: RTCConfiguration | undefined): RTCConf
  */
 export function mainlineNetwork(env = process.env): { off: true } | { off: false; bootstrap?: string[]; host?: string } {
   if (!envSwitch("GHOSTLY_DHT", true, env)) return { off: true };
-  const bootstrap = (env.GHOSTLY_DHT_BOOTSTRAP ?? "").split(",").map((node) => node.trim()).filter(Boolean);
+  const bootstrap = bootstrapNodes("GHOSTLY_DHT_BOOTSTRAP", env.GHOSTLY_DHT_BOOTSTRAP);
   if (!bootstrap.length && pkarrRelays(env)) return { off: true };
   if (!bootstrap.length) return { off: false };
   const loopback = bootstrap.every((node) => /^(127\.0\.0\.1|localhost):\d+$/.test(node));
@@ -181,11 +198,12 @@ function irohWasmBytes(): Buffer {
 }
 
 /**
- * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `offline` starts
- * no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join through a
- * group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
+ * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `deferChats` leaves
+ * the saved chats unstarted (a one-shot that makes or joins one); `offline` starts no chat or group and publishes nothing
+ * (a one-shot that only reads); `logJoins` says the steps of a join through a group's link on stderr (a daemon, whose
+ * log that is: `joinLog.ts`).
  */
-export interface RuntimeOptions { deferGroups?: boolean; offline?: boolean; logJoins?: boolean }
+export interface RuntimeOptions { deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean }
 
 /**
  * Starts the app's engine on this profile (WISP 1100 § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
@@ -207,6 +225,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   // Read first: a mistyped one stops here, before anything opens.
   const pinned = pkarrRelays();
   const pinnedIroh = irohRelays();
+  const network = hyperdhtNetwork();
+  const dht = mainlineNetwork();
   const trace = process.env.GHOSTLY_LINK_TRACE;
   if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
   if (trace || options.logJoins) {
@@ -259,8 +279,6 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     import("@ghostly/browser/engine/server"),
     import("../../../../native/transports/hyperdht/endpoint.mjs"),
   ]);
-  const network = hyperdhtNetwork();
-  const dht = mainlineNetwork();
   const mainline = dht.off ? null : new (await import("./mainline")).Mainline({ bootstrap: dht.bootstrap, host: dht.host });
   // `GHOSTLY_PKARR_RELAYS`: those relays only, in place before the engine publishes anything (the setting is not read).
   const transport = (mainline || pinned) ? new (await import("./mainline")).RelaysAndDht(mainline, pinned ? { relays: pinned } : {}, !!pinned) : null;
@@ -293,6 +311,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),
+    ...(options.deferChats ? { deferChats: true } : {}),
     ...(options.offline ? { offline: true } : {}),
     // Tests only: group links as an app from before native ones (test/groupCompat.test.ts).
     ...(process.env.GHOSTLY_TEST_WEBRTC_GROUP_LINKS === "1" ? { webrtcGroupLinks: true } : {}),

@@ -14,7 +14,7 @@ import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
-import { takeOpenRequest, useChatApp, useOpenRequested } from "../lib/apps/running";
+import { takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
 import { openAppInChat } from "../lib/apps/installed";
 import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
@@ -132,6 +132,14 @@ const MEDIA_PROBLEM_TEXT = {
   relay: ["calls.relayNoAnswer", "calls.relayNoAnswerNext"],
   relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
   relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
+} as const;
+
+/** Tech Info's Status (the engine's word for the link) in the reader's language. A word not here stays as it is. */
+const STATUS_TEXT = {
+  connecting: "chat.connecting",
+  online: "chat.online",
+  offline: "chat.offline",
+  error: "connection.state.discoveryUnavailable",
 } as const;
 
 interface ChatProps {
@@ -474,7 +482,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx; a full-screen
   // app always is).
   const appHere = paired && appsOn && chatLink?.id ? chatLink.id : undefined;
-  const chatApp = useChatApp(appHere);
+  const appCovers = useChatAppCovers(appHere);
   // An app the person opened here from the Apps page (its chat picker): opened once this chat shows, as + → Apps opens
   // one. What went wrong shows in + → Apps.
   const [appsError, setAppsError] = useState<string | null>(null);
@@ -757,7 +765,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
-    <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
+    <div data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
       {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
       {webrtc.noAnswer && (
@@ -1244,28 +1252,23 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.protocol")}>
-            <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
+            <TechInfoRow label={t("chat.tech.network")}
+              value={techInfo.peerToPeer ? t("chat.tech.networkPeerToPeer", { webrtc: "WebRTC DataChannel", pkarr: "Pkarr" }) : techInfo.protocol} />
             <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
             <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
             <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.sync")}>
-            <TechInfoRow label={t("chat.tech.status")} value={status} />
-            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
-            <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
+            <TechInfoRow label={t("chat.tech.status")} value={status in STATUS_TEXT ? t(STATUS_TEXT[status]) : status} />
+            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${Math.round(techInfo.currentPollInterval / 1000)}s`} />
             <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
             <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.ackStatus")}>
-            <TechInfoRow 
-              label={t("chat.tech.myAck")} 
-              value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
+            <TechInfoRow
+              label={t("chat.tech.peerAck")}
+              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")}
             />
-            <TechInfoRow 
-              label={t("chat.tech.peerAck")} 
-              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
-            />
-            <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
           </TechInfoSection>
         </div>
         </TechInfoDialog>

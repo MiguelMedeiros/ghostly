@@ -209,6 +209,12 @@ const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", 
 /** What the read lane answers an app with, as it is; anything else is `failed`. */
 const RANGE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["not-open", "not-served", "offline", "peer-closed", "changed", "gone"]);
 
+/**
+ * The serve ids an app ended that it still answers asks under. The engine holds at most 4 asks of an app's in flight,
+ * so one still on its way is under one of the last few ids ended; every id it was ever given grew with each serve.
+ */
+const ENDED_SERVES_KEPT = 16;
+
 function refusalOf(error: unknown): MiniAppErrorCode {
   if (error instanceof Refusal) return error.message;
   const code = error instanceof Error ? /^([a-z][a-z-]*): /.exec(error.message)?.[1] : undefined;
@@ -274,10 +280,13 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
   /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. */
   const ranges = () => (chatAllowed ? platform.ranges ?? null : null);
-  /** What this app serves on its chat's session now: serve id to the linked file and its size as listed. */
-  const serving = new Map<string, { file: string; size: number }>();
-  /** Every serve id this app was given: an ask under one it ended is still answered, so its place frees at once. */
-  const servedEver = new Set<string>();
+  /**
+   * What this app serves on its chat's session now: serve id to the linked file, its size as listed and the serves not
+   * unserved yet. The engine answers the same id for a file served again, so each serve needs its own unserve.
+   */
+  const serving = new Map<string, { file: string; size: number; count: number }>();
+  /** The last serve ids this app ended: an ask under one that was on its way is still answered, so its place frees at once. */
+  const ended: string[] = [];
   /** Says when the app starts or stops serving anything. */
   const servingChange = (change: () => void) => {
     const was = serving.size > 0;
@@ -309,11 +318,11 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       if ("d" in frame) { if (peer) event("chat.message", frame.d as MiniAppJson); return; }
       if (frame.o === "open") { peer = { version: frame.v }; event("chat.peer", { open: true, version: frame.v }); }
       // The contact's side closed (or the session went): every serve ended with it.
-      else { peer = null; servingChange(() => serving.clear()); event("chat.peer", { open: false }); }
+      else { peer = null; servingChange(() => serving.clear()); ended.length = 0; event("chat.peer", { open: false }); }
     });
     const lane = ranges(), files = linkedFiles();
     const asks = lane && files ? lane.onAsk((askLink, ask) => {
-      if (askLink !== linkId || ask.app !== appId || !servedEver.has(ask.serve)) return;
+      if (askLink !== linkId || ask.app !== appId || (!serving.has(ask.serve) && !ended.includes(ask.serve))) return;
       const serve = serving.get(ask.serve);
       // Ended meanwhile (unserved, or the app stopped): nothing to read, but the answer frees its place.
       if (serve?.file !== ask.file || phase === "stopped") { void lane.answer(linkId, { app: ask.app, request: ask.request, error: "gone" }).catch(() => {}); return; }
@@ -339,6 +348,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     phase = "stopped";
     alive.abort();
     servingChange(() => serving.clear());
+    ended.length = 0;
     unsubscribe?.();
     unsubscribe = null;
     if (chatOpened && launch.chat) void host.chat.close(launch.chat.linkId, launch.ref).catch(() => {});
@@ -497,8 +507,9 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const answer = await lane.serve(launch.chat!.linkId, launch.ref, id as string);
         if ("error" in answer) refuse(answer.error);
         const { serve } = answer as { serve: string };
-        servedEver.add(serve);
-        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size }));
+        const held = serving.get(serve);
+        const count = (held && held.file === id ? held.count : 0) + 1;
+        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size, count }));
         return { value: serve };
       }
       case "files.unserve": {
@@ -506,9 +517,14 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (!linkedFiles() || !lane || !launch.chat) return refuse("not-allowed");
         const serve = args[0];
         if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
-        let was = false;
-        servingChange(() => { was = serving.delete(serve as string); });
-        if (was) await lane.unserve(launch.chat!.linkId, serve as string);
+        const held = serving.get(serve as string);
+        if (held && held.count > 1) held.count--;
+        else if (held) {
+          servingChange(() => serving.delete(serve as string));
+          ended.push(serve as string);
+          if (ended.length > ENDED_SERVES_KEPT) ended.shift();
+          await lane.unserve(launch.chat!.linkId, serve as string);
+        }
         return {};
       }
       case "remote.read":
@@ -519,7 +535,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
         const { offset, length } = type === "remote.stat" ? { offset: 0, length: 1 } : readRange(args[1]);
         const read = await countedRemote(length, () => lane.read(launch.chat!.linkId, launch.ref, serve as string, offset, length), (got) => ("bytes" in got ? got.bytes.byteLength : 0));
-        if ("error" in read) refuse(RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
+        // The contact's limits (`busy`) are a wait: the app backs off and asks again, as for its own (agents#1766).
+        if ("error" in read) refuse(read.error === "busy" ? "too-fast" : RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
         const { bytes, size } = read as { bytes: Uint8Array; size: number };
         if (type === "remote.stat") return { value: { size } };
         if (bytes.byteLength > length) refuse("failed");

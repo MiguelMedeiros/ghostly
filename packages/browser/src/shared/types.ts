@@ -157,8 +157,8 @@ export interface StoredGroup {
    */
   invited?: Record<string, number>;
   /**
-   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, the newest
-   * `MAX_REMOVED_IDS`: a copy that comes again (a catch-up, a member handing it on) is not stored again.
+   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, `MAX_REMOVED_IDS` at
+   * most, each author's newest (`withRemovedId`): a copy that comes again (a catch-up, a member handing it on) is not stored again.
    */
   removedIds?: string[];
   /** My messages I deleted for everyone, their removal said to the members and again to an edge that opens (`engine/removals.ts`). */
@@ -198,14 +198,22 @@ export interface StoredGroup {
   /**
    * I left: the group is gone from the list and its history from the device. What is kept is the
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
-   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, and my
-   * signed leave (`bye`) that they carry to the admin.
+   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, which carry my
+   * signed leave (`bye`) to the admin. `bye` is kept without hubs too: opening the group's link again takes it along
+   * (`owedBye`).
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /**
+   * Left while the admin was away, then back by the group's link before it heard the leave: the signed leave of my old
+   * key, said to the admin on my new key's edge, so it takes the old key out (it was in every roster twice for good,
+   * agents#1652). Dropped once the old key is out of the roster, or a week after the leave.
+   */
+  owedBye?: GroupByeFrame;
+  /**
    * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
    * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
-   * was to a group I was removed from, which stays.
+   * was to a group I was removed from, which stays; beside a join by the group's link opened after the decline (its
+   * `invitation`, then its `state`), which stays too.
    */
   declined?: { at: number; linkId: string };
   /**

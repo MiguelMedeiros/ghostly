@@ -6,6 +6,7 @@ import { paymentAlias, paymentWireId } from "../shared/paymentIds";
 import { networkLabel } from "./paymentAdapters/modeGate";
 import type { ArkWallet } from "./paymentAdapters/arkWallet";
 import type { BarkWallet } from "./paymentAdapters/barkWallet";
+import type { BarkAdapter, BarkReceipts } from "./paymentAdapters/bark";
 import type { FedimintWallet } from "./paymentAdapters/fedimintWallet";
 import {
   ENDPOINT,
@@ -277,6 +278,11 @@ class PaymentBook extends Map<string, StoredPayment> {
 }
 /** How many looks at the wallet's invoices a chat's "I paid your invoice" frames make every 3 s (`receiveInvoicePaid`). */
 export const INVOICE_LOOKS_PER_CHAT = 5;
+/**
+ * How often a contact's "I paid it from another wallet" makes an on-chain, Ark, Bark or Spark wallet look
+ * (`receiveCheck`): no more often than the wallet's own refresh, which runs the same look.
+ */
+export const RAIL_LOOK_MS = 10_000;
 
 export class PaymentDesk {
   private readonly payments = new PaymentBook();
@@ -1180,7 +1186,8 @@ export class PaymentDesk {
   /**
    * The contact says it paid one of our requests from another wallet: our wallet is asked now, and it alone
    * decides. A request already paid is said so again (the first answer may have been lost). Bounded: one
-   * look every 3 seconds per request.
+   * look every 3 seconds per Lightning request, and one every `RAIL_LOOK_MS` per other rail: 300 frames a minute
+   * about 5 Bark requests made 100 Bark server syncs and 500 history reads.
    */
   private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
@@ -1191,8 +1198,11 @@ export class PaymentDesk {
     if (!rail || rail === "usdt" || rail === "cashu" || rail === "fedimint" || payment.endpoint[0] !== (rail === "lightning" ? ENDPOINT.bolt11 : ENDPOINT_OF[rail])) return;
     if (request.state === "settled") { link.sendPaymentResult({ id: request.id, ok: true }); return; }
     const now = Date.now();
-    if (now - (this.lastCheckFrom.get(request.id) ?? 0) < 3_000) return;
-    this.lastCheckFrom.set(request.id, now);
+    // A Lightning look is at this request's invoice; any other looks at every open request of its rail, so one
+    // look per rail, whatever the request or chat, and no sooner than the wallet's own refresh.
+    const [key, every] = rail === "lightning" ? [request.id, 3_000] : [rail, RAIL_LOOK_MS];
+    if (now - (this.lastCheckFrom.get(key) ?? 0) < every) return;
+    this.lastCheckFrom.set(key, now);
     try {
       // The invoice it says it paid, when it is this request's: the only one a contact can speak for.
       if (rail === "lightning") await this.lightning[paymentNetwork(request)].check?.(payment.endpoint[1].trim().toLowerCase() === request.invoice?.toLowerCase() ? request.invoice : undefined);
@@ -1284,8 +1294,10 @@ export class PaymentDesk {
     if(!this.host.getLink(linkId)?.supportsUsdtPayments||request?.target?.method!=='usdt'||request.linkId!==linkId||request.direction!=='out'||request.kind!=='request'||payment.amount.asset!==request.unit||payment.amount.value!==String(request.amount))return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.direction!=='in'||existing.linkId!==linkId||existing.requestId!==request.id))return;
+    // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
+    if(existing){if(request.state==='settled')this.host.getLink(linkId)?.sendPaymentResult({id:request.id,ok:true});return;}
     let txid:string;try{txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
-    if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid)||existing?.state==='settled')return;
+    if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid))return;
     if(this.repeatedReceipt(this.host.getLink(linkId),request,payment.id))return;
     // One transaction pays one request, however its hash is spelled.
     txid=txid.toLowerCase();
@@ -1347,10 +1359,12 @@ export class PaymentDesk {
     if(!link?.supportsArkPayments || !request?.target || request.linkId!==linkId || request.direction!=="out" || request.kind!=="request")return;
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
+    // A receipt already recorded, sent again (under a new time): its first frame said it; a paid one is answered again.
+    if(existing){if(request.state==="settled")link.sendPaymentResult({id:request.id,ok:true});return;}
     if(parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     let txid:string;try {txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if([...this.payments.values()].some(p=>p.txid===txid && (p.linkId!==linkId || (p.kind==="request" ? p.id!==request.id : p.requestId!==request.id))))return;
-    if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid) || existing?.state==="settled")return;
+    if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid))return;
     if(this.repeatedReceipt(link,request,payment.id))return;
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Ark — checking provider`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
@@ -1419,13 +1433,19 @@ export class PaymentDesk {
     try {
       const open=[...this.payments.values()].filter(r=>r.kind==="request" && r.direction==="out" && r.state==="pending" && r.target?.method==="bark");
       const bark=this.bark;
-      for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)])))await wallet.adapter?.sync().catch(()=>{});
+      // Each wallet's history is read once for all its open requests, after one sync.
+      const receipts=new Map<BarkAdapter,BarkReceipts|undefined>();
+      for(const wallet of new Set(open.map(r=>bark[walletNetworkOf(r.target!.network)]))) {
+        if(!wallet.adapter)continue;
+        await wallet.adapter.sync().catch(()=>{});
+        receipts.set(wallet.adapter,await wallet.adapter.receipts().catch(()=>undefined));
+      }
       for(const request of open) {
         if(request.kind!=="request" || request.direction!=="out" || request.state!=="pending" || request.target?.method!=="bark")continue;
         const adapter=this.bark[walletNetworkOf(request.target.network)].adapter;
         if(!adapter || request.target.provider!==adapter.config.provider || request.target.network!==adapter.config.network)continue;
         const claimed=new Set([...this.payments.values()].filter(p=>p.target?.method==="bark" && p.kind==="request" && p.txid).map(p=>p.txid!));
-        const txid=await adapter.received(request.target.address,request.amount,request.createdAt,claimed).catch(()=>undefined);
+        const txid=receipts.get(adapter)?.(request.target.address,request.amount,request.createdAt,claimed);
         if(!txid)continue;
         await this.settleRequest(request,{txid});
         for(const payment of this.payments.values())if(payment.kind==="payment" && payment.direction==="in" && payment.requestId===request.id && payment.state==="pending")await this.save({...payment,state:"settled",txid});

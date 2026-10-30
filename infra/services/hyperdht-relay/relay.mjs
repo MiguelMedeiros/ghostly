@@ -31,6 +31,10 @@ export const DEFAULT_LIMITS = Object.freeze({
   pingMs: 30_000,
   /** How long a connection may take to send its request (headers included) before it upgrades. */
   requestMs: 15_000,
+  /** How long the relay waits for a client's part of a handshake (a browser answers in one round trip). */
+  handshakeMs: 15_000,
+  /** Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. */
+  handshakes: 64,
 })
 
 /**
@@ -95,7 +99,7 @@ function clientDht(dht, limits, drop, gone, log) {
       if (prop === 'createServer') return (options, onconnection) => {
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
         watchIdle()
-        const server = target.createServer(options, onconnection)
+        const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
         const listen = server.listen.bind(server)
         server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone)).catch(error => {
           log('refused listen', error?.code ?? 'error')
@@ -110,7 +114,7 @@ function clientDht(dht, limits, drop, gone, log) {
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         watchIdle()
-        return hold(target.connect(publicKey, options))
+        return hold(target.connect(publicKey, { ...options, createHandshake: untracked(options?.createHandshake) }))
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
         drop('topic query'); throw new Error('Topic queries are not relayed')
@@ -139,6 +143,61 @@ function guardProtocol(protocol, drop) {
   }
 }
 
+const require = createRequire(import.meta.url)
+// Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
+const { HandshakeProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'handshake-proxy.js'))
+
+/**
+ * dht-relay 0.4.3 keeps every handshake it makes for a client (each dial, each connection one of its servers gets) in
+ * a map it frees only when the handshake is denied, and every signature it asks the client for in another it never
+ * frees: both grow for as long as the client's WebSocket stays open. A handshake is now in its map only while it
+ * waits for the client's answer, for at most `handshakeMs` and `handshakes` at once, and a signature only until it
+ * comes or `SIGN_MS` has passed. The map is there only to route those answers back.
+ */
+const untracked = create => create && ((...args) => {
+  const handshake = create(...args)
+  handshake._node._handshakes.delete(handshake._id)
+  return handshake
+})
+const roundTrip = original => function (payload) {
+  const handshakes = this._node._handshakes
+  const limits = this._node._limits ?? DEFAULT_LIMITS
+  if (handshakes.size >= limits.handshakes) return Promise.reject(new Error('Too many handshakes'))
+  handshakes.set(this._id, this)
+  let timer
+  return Promise.race([
+    original.call(this, payload),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => { this._onNoiseReply = null; reject(new Error('No handshake answer')) }, limits.handshakeMs)
+    }),
+  ]).finally(() => {
+    clearTimeout(timer)
+    if (handshakes.get(this._id) === this) handshakes.delete(this._id)
+  })
+}
+HandshakeProxy.prototype.send = roundTrip(HandshakeProxy.prototype.send)
+class Signatures extends Map {
+  set(id, { resolve }) {
+    const timer = setTimeout(() => this.delete(id), SIGN_MS)
+    timer.unref?.()
+    return super.set(id, { timer, resolve: signature => { this.delete(id); resolve(signature) } })
+  }
+  delete(id) {
+    clearTimeout(super.get(id)?.timer)
+    return super.delete(id)
+  }
+  clear() {
+    for (const id of [...this.keys()]) this.delete(id)
+  }
+}
+function bound(node, limits, gone) {
+  node._limits = limits
+  const signatures = new Signatures()
+  for (const [id, signature] of node._signatures) signatures.set(id, signature)
+  node._signatures = signatures
+  void gone.then(() => { signatures.clear(); node._handshakes.clear() })
+}
+
 /**
  * A dial sends its handshake through several DHT nodes at once (hyperdht's `findPeer` runs two in parallel, three
  * when it remembers the nodes of an earlier connection to that key), and each one brings back the server's reply.
@@ -148,10 +207,7 @@ function guardProtocol(protocol, drop) {
  * first to the same key through one relay (a contact reached again, or after a reload). A dialling handshake now
  * passes on its first reply only; the others get `null`, which hyperdht takes as "nothing to do".
  */
-const require = createRequire(import.meta.url)
-// Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
-const { HandshakeProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'handshake-proxy.js'))
-const recvHandshake = HandshakeProxy.prototype.recv
+const recvHandshake = roundTrip(HandshakeProxy.prototype.recv)
 HandshakeProxy.prototype.recv = function (payload) {
   if (!this._isInitiator) return recvHandshake.call(this, payload)
   if (this._received) return Promise.resolve(null)
@@ -219,6 +275,8 @@ export async function startRelay(options = {}) {
   await dht.ready()
 
   const clients = new Set()
+  // Each client's dht-relay session, for what it holds (`stats().held`).
+  const nodes = new Set()
   const perAddress = new Map()
   const stats = { accepted: 0, refused: 0, dropped: 0 }
   const origins = new Set(options.origins ?? [])
@@ -294,7 +352,12 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
-    void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => guardProtocol(node._protocol, drop))
+    void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => {
+      guardProtocol(node._protocol, drop)
+      bound(node, limits, gone)
+      nodes.add(node)
+      void gone.then(() => nodes.delete(node))
+    })
   }
 
   await new Promise((resolve, reject) => {
@@ -308,7 +371,11 @@ export async function startRelay(options = {}) {
     port,
     bootstrap,
     dht,
-    stats: () => ({ clients: clients.size, ...stats }),
+    stats: () => ({
+      clients: clients.size,
+      ...stats,
+      held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
+    }),
     async close() {
       for (const ws of clients) ws.terminate()
       await new Promise(resolve => { wss.close(); server.close(() => resolve()) })

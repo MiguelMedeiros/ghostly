@@ -313,7 +313,7 @@ describe("the allowlist", () => {
 
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
-      if (method === "chat.get" && params.chat === "bob") return { id: "c1", peer: KEY };
+      if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
       if (method === "group.get" && params.group === "team") return { id: "g1" };
       throw new CliError("not_found", `No ${method} ${String(params.chat ?? params.group)}`);
     });
@@ -503,6 +503,35 @@ describe("listen with an allowlist and --turns", () => {
     expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual(events.slice(0, MAX_BEHIND).map((e) => e.seq));
     feed.take(events[MAX_BEHIND]);
     expect(handle.behind()).toBe(1);
+  });
+
+  // agents#1597: events --type drops waited behind a webhook in flight, counted toward MAX_BEHIND and kept: an app's
+  // frames filled the bound behind a bridge that was down, and the feed paused with the one wanted event pending.
+  it("drops an event --type does not take as it comes: not behind a hook at work, not counted, and the cursor passes it after", async () => {
+    const lines: string[] = [];
+    let drain = () => {}, stuck = true;
+    const cursor = join(mkdtempSync(join(tmpdir(), "ghostly-listen-skip-")), "cursor");
+    const handle = eventHandler({ types: ["message.received"], print: true, cursor, write: (line) => { lines.push(line); return !stuck; }, drained: () => new Promise<void>((resolve) => { drain = resolve; }) });
+    const pause = vi.fn(), resume = vi.fn();
+    const feed = new Feed(handle, 3, pause, resume);
+    const wanted = received("c1", "one", "hi");
+    feed.take(wanted);
+    // 3,000 app frames of 32 KiB while the wanted text waits on its output.
+    const frames = Array.from({ length: 3_000 }, () => other("app.message", { chat: "c1", data: "x".repeat(32_000) }));
+    for (const frame of frames) feed.take(frame);
+    expect(handle.behind()).toBe(1);
+    expect(pause).not.toHaveBeenCalled();
+    // Nothing before the wanted text moved the cursor; once it is handled, the cursor passes the frames dropped after it.
+    expect(existsSync(cursor)).toBe(false);
+    stuck = false;
+    drain();
+    await handle.idle();
+    await vi.waitFor(() => expect(Number(readFileSync(cursor, "utf8").trim())).toBe(frames.at(-1)!.seq));
+    expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual([wanted.seq]);
+    // With nothing at work, a dropped event moves the cursor at once.
+    const late = other("app.message", { chat: "c1", data: "y" });
+    feed.take(late);
+    expect(Number(readFileSync(cursor, "utf8").trim())).toBe(late.seq);
   });
 
   it("--turns takes the place of --type", async () => {

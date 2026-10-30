@@ -603,7 +603,6 @@ export function useChat(params: ChatParams | null) {
     encKeyPreview: params
       ? params.encKeyB64.slice(0, 8) + "..." + params.encKeyB64.slice(-4)
       : "",
-    pollCount: pollCountRef.current,
     currentPollInterval:
       Date.now() - lastActivityRef.current > IDLE_THRESHOLD
         ? POLL_INTERVAL_IDLE
@@ -611,12 +610,11 @@ export function useChat(params: ChatParams | null) {
     republishInterval: REPUBLISH_INTERVAL,
     messageTtl: MESSAGE_TTL,
     protocol: "Mainline DHT (BEP44) — Direct UDP",
+    peerToPeer: false,
     encryption: "NaCl secretbox (XSalsa20-Poly1305)",
     relays: [],
     createdAt: sessionCreatedAtRef.current,
-    myAck: myAckRef.current,
     peerAck,
-    sentBufferSize: sentBufferRef.current.length,
   };
 
   return {

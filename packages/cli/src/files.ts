@@ -1,12 +1,12 @@
 import { openAsBlob } from "node:fs";
 import { access, constants, open, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
+import type { GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
@@ -32,6 +32,27 @@ const TYPES: Record<string, string> = {
 
 export function mimeOf(path: string, given?: string): string {
   return sanitizeMime(given ?? TYPES[extname(path).toLowerCase()] ?? "application/octet-stream");
+}
+
+/**
+ * The time a saved voice message is named from: its message's in the chat, as the apps' Download names it. The file's
+ * own time is what its sender says (any safe integer, past Date's end too), taken only when no message is there and
+ * a date can hold it; else when it was stored here.
+ */
+async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; createdAt: number; metadata?: { timestamp: number } }): Promise<number> {
+  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
+}
+
+/**
+ * The message of a chat or a group (`group:<id>`) that `test` picks: looked for among its newest first, where the one a
+ * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row.
+ */
+async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean): Promise<StoredMessage | undefined> {
+  const page = await node(ctx).messagePage({ linkId, limit: 200 });
+  const newest = page.messages.find(test);
+  if (newest || !page.more) return newest;
+  const group = linkId.startsWith("group:") ? linkId.slice("group:".length) : undefined;
+  return (group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(linkId)).find(test);
 }
 
 /** A chat's files as the timeline shows them, with where each transfer stands (`transferOf`, by file id). */
@@ -114,8 +135,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const mime = mimeOf(path, str(params, "mime"));
   const replyTo = str(params, "reply");
   if (replyTo) {
-    const messages = await node(ctx).groupMessages({ groupId: group.id });
-    if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this group, or cannot be replied to");
+    if (!await findMessage(ctx, `group:${group.id}`, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this group, or cannot be replied to");
   }
   // A send the group would refuse anyway (its files of the minute are taken, or this device is not in it) is refused
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
@@ -190,8 +210,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
     const replyTo = str(params, "reply");
     if (replyTo) {
-      const messages = await node(ctx).getMessages(link.id);
-      if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
+      if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
     }
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
     const source = await openAsBlob(path, { type: mime });
@@ -293,8 +312,8 @@ export const FILE_METHODS: Record<string, Method> = {
 
   /**
    * Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), a voice message under the one
-   * Ghostly makes for it as the apps' Download does (`voiceDownloadName`, never the sender's), or to `path`. Never over
-   * a file unless `force`.
+   * Ghostly makes for it as the apps' Download does (`voiceDownloadName`, never the sender's; "<name> (2)" when taken),
+   * or to `path`. Never over a file unless `force`.
    */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
@@ -306,11 +325,17 @@ export const FILE_METHODS: Record<string, Method> = {
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, stored.metadata.timestamp) : stored.metadata.name));
-    const flags = bool(params, "force") ? "w" : "wx";
-    let out;
-    try { out = await open(target, flags, 0o600); } catch (error) {
+    const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
+    const force = bool(params, "force");
+    // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
+    // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
+    // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
+    const free = !force && !str(params, "path") && !!stored.metadata.voice;
+    const ext = extname(named), stem = named.slice(0, named.length - ext.length);
+    let target = named, out;
+    for (let n = 2; !out; n += 1) try { out = await open(target, force ? "w" : "wx", 0o600); } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
+      if (free && code === "EEXIST" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
       if ((code === "EEXIST" || code === "EISDIR") && (await stat(target).catch(() => undefined))?.isDirectory()) throw new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
       if (code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);

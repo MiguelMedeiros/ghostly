@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY } from "./apiKit";
+import { CONTACT_KEY, namedByThem } from "./apiKit";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -71,14 +71,17 @@ export class Allowlist {
 
 /**
  * `--from` and `--group` as ids, resolved once at start: a contact key as that key (whatever any chat is named), else a
- * chat by id, prefix or name (`findChat`); a group by id, prefix or name. A name that later changes (or a contact who
- * renames themselves) moves nothing.
+ * chat by its id or a label this side gave it, as `call auto on --from` (`findOwnNamedChat`): a prefix of its id or the
+ * name its contact gave itself is refused, since another contact could call itself that; a group by id, prefix or name.
+ * A name that later changes (or a contact who renames themselves) moves nothing.
  */
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
-    if (CONTACT_KEY.test(ref)) keys.add(ref);
-    else chats.add(((await call("chat.get", { chat: ref })) as { id: string }).id);
+    if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
+    const chat = (await call("chat.get", { chat: ref })) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+    if (chat.id !== ref && chat.label?.toLowerCase() !== ref.toLowerCase()) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+    chats.add(chat.id);
   }
   for (const ref of groups) groupIds.add(((await call("group.get", { group: ref })) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);
@@ -303,13 +306,30 @@ export function eventHandler(options: ListenOptions): EventHandler {
   let chain = Promise.resolve();
   let behind = 0;
   let stopped = false;
+  /** The last event the cursor says, and the last one `--type` dropped while others were still being handled. */
+  let kept = -1, dropped = -1;
   const keep = (seq: number) => {
     if (!options.cursor) return;
     try { writeCursor(options.cursor, seq); } catch (error) { throw new CursorError(error); }
+    kept = Math.max(kept, seq);
+  };
+  /** The cursor past events dropped meanwhile, once nothing before them is left to handle. */
+  const keepDropped = () => {
+    if (behind > 0 || dropped <= kept) return;
+    try { keep(dropped); } catch (failed) {
+      if (!(failed instanceof CursorError) || !options.cursorFailed) return;
+      stopped = true;
+      options.cursorFailed(failed.error);
+    }
   };
   const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
     if (stopped) return;
+    // A type it was not asked for is dropped as it comes: not held behind a webhook or an --exec still at work, not
+    // counted toward MAX_BEHIND, not kept. An app's frames at 48 a second, each 32 KiB, filled the bound in 21 s behind
+    // a bridge that was down, ~32 MiB held to be dropped, and the feed paused with the one wanted event pending
+    // (agents#1597). The cursor passes it once the events before it are handled.
+    if (!matches(event, options.types)) { dropped = Math.max(dropped, seq); keepDropped(); return; }
     behind++;
     chain = chain.then(async () => {
       if (stopped) return;
@@ -347,7 +367,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
         stopped = true;
         options.cursorFailed(failed.error);
       }
-    }).finally(() => { behind--; });
+    }).finally(() => { behind--; keepDropped(); });
   };
   return Object.assign(handle, { behind: () => behind, idle: () => chain });
 }

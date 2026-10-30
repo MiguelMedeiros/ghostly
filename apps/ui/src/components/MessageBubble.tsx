@@ -31,6 +31,7 @@ import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
+import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
 import { callLineCount } from "../lib/storage";
@@ -870,6 +871,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const pressed = !!compactPress && isButtonPress(message);
   const money = useMemo(() => (message.paymentId || message.file || pressed || showsCard(message.card) ? null : findMoney(message.text)), [message.paymentId, message.file, pressed, message.card, message.text]);
   const [details, setDetails] = useState(false);
+  // Its row stays in the page while its details are open, however many messages come meanwhile.
+  useEffect(() => (details ? holdRow(message.id) : undefined), [details, message.id]);
   // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
   const appsOn = useAppsAvailable();
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
@@ -895,6 +898,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const [bar, setBar] = useState<"button" | "press" | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
   const reactRef = useRef<HTMLSpanElement>(null);
+  // The button's bar opens at the button, which is in sight where it was clicked: from the bubble's edges, a bubble
+  // taller than the list opened it out of sight. It lines up towards the bubble (the button is on the bubble's far
+  // side); a long press's bar keeps the bubble's own edge.
+  const barAlign = (bar === "button") === (message.sender === "me") ? "start" : "end";
   const press = useLongPress(onReact ? () => setBar("press") : onSelect ?? openDetails);
   // `names`: the names `reactionName` gives now, which can change while the function stays the same.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `names` is what `reactionName` answers
@@ -995,7 +1002,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     : undefined;
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
-      picture={contentType === "image"} onClose={() => setDetails(false)} returnFocus={rowRef.current} />
+      picture={contentType === "image"} onClose={() => setDetails(false)}
+      returnFocus={rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current} />
   );
   const rowProps = choosing ? {
     ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
@@ -1154,8 +1162,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         {!isMe && menu}
         {!isMe && onReply && <ReplyAction onReply={onReply} />}
         {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
-        {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
-          align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined} />}
+        {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bar === "button" ? reactRef : bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
+          align={barAlign} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined} />}
         {detailsPanel}
       </div>
     );
@@ -1334,8 +1342,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
       {!isMe && onReply && <ReplyAction onReply={onReply} />}
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
-      {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
-        align={isMe ? "end" : "start"} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
+      {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bar === "button" ? reactRef : bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
+        align={barAlign} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
         onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined}
         onCopyOriginal={bar === "press" && copyable && sent ? () => void copyText(sent.original.trim()).catch(() => {}) : undefined} />}
       {detailsPanel}

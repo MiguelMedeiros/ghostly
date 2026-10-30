@@ -205,6 +205,13 @@ describe("the argument parser", () => {
     expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
     expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
     expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat accept"], ["bob"])).toEqual({ chat: "bob" });
+    const accept = (...argv: string[]) => { const c = COMMANDS["chat accept"], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    // With no method it asks what the chat takes; --off or --networks there would change nothing without a word.
+    expect(accept("bob")).toEqual({ chat: "bob" });
+    expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
+    expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
+    expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
@@ -337,6 +344,31 @@ describe("the argument parser", () => {
       expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
       expect(params(name, [...argv])).toMatchObject({ rate: undefined });
     }
+    // A hold, a page or a wait out of the API's range: before, the API's own check answered once the profile had opened
+    // (a one-shot went online first), exit 1 in its parameter's words ("hold must be a number from 0 to 10080").
+    for (const hold of ["-5", "999999"]) usage("chat disconnect", ["bob", "--hold", hold], `--hold takes a number of minutes from 0 to 10080, not ${hold}`);
+    expect(params("chat disconnect", ["bob", "--hold", "0"])).toEqual({ chat: "bob", hold: 0 });
+    expect(params("chat disconnect", ["bob", "--hold", "10080"])).toEqual({ chat: "bob", hold: 10080 });
+    for (const [name, argv] of [["chat history", ["bob"]], ["group history", ["g1"]], ["wallet history", []]] as const) {
+      for (const limit of ["0", "-3", "2.5", "10001"]) usage(name, [...argv, "--limit", limit], `--limit takes a whole number from 1 to 10000, not ${limit}`);
+      expect(params(name, [...argv, "--limit", "10000"])).toMatchObject({ limit: 10000 });
+    }
+    for (const [name, argv] of [["chat wait", ["bob"]], ["file wait", ["f1"]], ["file save", ["f1", "--wait"]]] as const) {
+      for (const timeout of ["0", "999999"]) usage(name, [...argv, "--timeout", timeout], `--timeout takes a number of seconds from 1 to 86400, not ${timeout}`);
+      expect(params(name, [...argv, "--timeout", "86400"])).toMatchObject({ timeout: 86400 });
+    }
+    for (const [name, argv] of [
+      ["button press", ["bob", "m1", "yes"]], ["button update", ["bob", "m1", "--close"]], ["forward", ["bob", "m1", "--to", "alice"]],
+      ["routine send", ["bob", "--name", "Backup", "--schedule", "daily"]], ["routine update", ["bob", "r1"]],
+      ["task send", ["bob", "--title", "Build"]], ["task update", ["bob", "t1"]], ["usage send", ["bob", "--left", "40"]],
+    ] as const) {
+      for (const timeout of ["0", "3601"]) usage(name, [...argv, "--wait", "sent", "--timeout", timeout], `--timeout takes a number of seconds from 1 to 3600, not ${timeout}`);
+      expect(params(name, [...argv, "--timeout", "3600"])).toMatchObject({ timeout: 3600 });
+    }
+    usage("events", ["--since", "-1"], "--since takes a seq from 0 up, not -1");
+    usage("events", ["--since", "1.5"], "--since takes a seq from 0 up, not 1.5");
+    expect(params("events", [])).toEqual({ since: 0 });
+    expect(params("events", ["--since", "7"])).toEqual({ since: 7 });
     // A voice note's length or waveform out of range: before, the API answered after the profile opened (exit 1,
     // "voice must be a number from 1 to 9007199254740991" or one sentence for every case), and --peaks alone was dropped.
     const voice = "--voice takes a length in milliseconds from 1 to 900000 (15 minutes), not";

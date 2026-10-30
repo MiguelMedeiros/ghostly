@@ -2,7 +2,7 @@ import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
 import { CliError } from "../errors";
-import { type Command, here, reply } from "./shared";
+import { type Command, here, LONG_WAIT_SECONDS, reply, timeout } from "./shared";
 
 /**
  * `--voice [ms]` and `--peaks`: a length and a waveform a voice note takes, or a usage error (exit 2) that names the flag
@@ -37,7 +37,7 @@ export const commands: Record<string, Command> = {
     method: "file.save", usage: "file save [<chat>] <file> [--dir d | --path p] [--force] [--wait [--timeout s]]", summary: "Write a received file to disk (never over a file without --force; --wait: once it is all here)",
     args: ["chat?", "file"],
     options: {
-      dir: { type: "string", description: "Into this folder, under its own name" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" },
+      dir: { type: "string", description: "Into this folder, under its own name (a voice message: the name Ghostly makes for it, \"(2)\" when taken)" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" },
       wait: { type: "boolean", description: "Wait for the transfer to finish first" }, timeout: { type: "number", description: "Seconds --wait waits (default 300)" },
     },
     params: ({ options }, a) => {
@@ -48,7 +48,7 @@ export const commands: Record<string, Command> = {
       if (options.timeout !== undefined && options.wait !== true) throw new CliError("usage", "--timeout is how long --wait waits: not without --wait");
       return {
         chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: here(options.path), force: options.force === true,
-        wait: options.wait === true ? true : undefined, timeout: options.timeout,
+        wait: options.wait === true ? true : undefined, timeout: timeout(options, LONG_WAIT_SECONDS),
       };
     },
   },
@@ -60,6 +60,6 @@ export const commands: Record<string, Command> = {
   "file wait": {
     method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",
     args: ["chat?", "file"], options: { timeout: { type: "number", description: "Seconds (default 300)" } },
-    params: ({ options }, a) => ({ chat: a.chat, file: a.file, timeout: options.timeout }),
+    params: ({ options }, a) => ({ chat: a.chat, file: a.file, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },
 };

@@ -1,4 +1,4 @@
-import type { GroupView, LinkView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
+import type { GroupView, LinkView, MessageFile, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { StatusCard } from "@ghostly/core";
 
 /**
@@ -73,7 +73,16 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
   };
 }
 
-/** A chat's details: the summary plus what its connection panel shows. */
+/**
+ * What is pinned at the top of a chat or a group (WISP 400 § Pinned message), as `chat.pinned` / `group.pinned` say it:
+ * `messageId` the row here (null when it is not here), `ref` the id both sides know it by, `by` (`me`, `peer` or a
+ * member key) and `at`, when it came here. Null when nothing is pinned, or it was unpinned.
+ */
+export function pinJson(pin: PinView | undefined) {
+  return pin?.id ? { messageId: pin.messageId ?? null, ref: pin.id, by: pin.by, at: pin.at } : null;
+}
+
+/** A chat's details: the summary plus what its connection panel shows, and its pin. */
 export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
   return {
     ...chatJson(link, showSecret),
@@ -92,6 +101,7 @@ export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
     history: link.transportHistory ?? null,
     errors: link.transportErrors ?? null,
     comparisonCode: link.pairing?.code ?? null,
+    pin: pinJson(link.pin),
   };
 }
 
@@ -239,5 +249,6 @@ export function groupJson(group: GroupView, showSecret = false) {
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
     community: group.community ?? null,
     picture: !!group.picture,
+    pin: pinJson(group.pin),
   };
 }

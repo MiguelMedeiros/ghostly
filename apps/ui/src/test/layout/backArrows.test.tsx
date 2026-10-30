@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
 import { GroupChat } from "../../pages/GroupChat";
 import { PageHeader } from "../../components/layout/Page";
+import { LinkRow } from "../../components/layout/Section";
 import { ChatAppPanel } from "../../components/apps/ChatAppPanel";
 import { setChatApp } from "../../lib/apps/running";
 import type { RunningApp } from "../../lib/apps/broker";
@@ -25,10 +26,34 @@ const mirrored = (testId: string) => screen.getByTestId(testId).querySelector("s
 
 afterEach(() => setChatApp("link-1", null));
 
+// agents#1655: in Arabic every Settings and Profile row put its label at the far left, away from its icon on the
+// right, with the chevron pointing back (right). A row reads from the start edge, and its chevron points to the end.
+describe("A row that goes on, in a right-to-left language", () => {
+  it("Settings' and Profile's rows (LinkRow): the label starts at the start edge, the chevron is mirrored", () => {
+    renderApp(<LinkRow testId="row" label="المظهر" hint="السمة" onClick={() => {}} />);
+    const row = screen.getByTestId("row");
+    expect(row).toHaveClass("text-start");
+    expect(row).not.toHaveClass("text-left");
+    expect(mirrored("row")).toBe(true);
+  });
+});
+
 describe("Back arrows in a right-to-left language point to the start edge", () => {
   it("a page's header", () => {
     renderApp(<PageHeader title="Apps" />);
     expect(mirrored("page-back")).toBe(true);
+  });
+
+  // agents#1571: `-ml-2` pulled the Back button to the left in every language: in Arabic it sat 16 px from the right
+  // edge instead of 8, and the title ran 4 px into its box. Logical sides mirror with the page.
+  it("a page's header pulls Back to the start edge and its trailing controls to the end, with logical margins", () => {
+    renderApp(<PageHeader title="Apps" trailing={<button type="button">Edit</button>} />);
+    const back = screen.getByTestId("page-back").className.split(/\s+/);
+    expect(back).toContain("-ms-2");
+    expect(back.filter((c) => /^-?m[lr]-/.test(c))).toEqual([]);
+    const trailing = screen.getByRole("button", { name: "Edit" }).parentElement!.className.split(/\s+/);
+    expect(trailing).toContain("ms-auto");
+    expect(trailing.filter((c) => /^-?m[lr]-/.test(c))).toEqual([]);
   });
 
   it("a chat's header", async () => {

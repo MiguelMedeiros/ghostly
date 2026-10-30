@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
-import { here, translate } from "./commands/shared";
+import { here, since as sinceOf, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -82,10 +82,49 @@ function knownProfile(g: Globals): void {
 /** A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. */
 interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void> }
 
-/** Said on stderr when the daemon runs another release than this command (it started before an upgrade). */
+/** `1.2.3`, with an optional `v`, an optional `-beta.1` prerelease and an optional `+build` that never orders. */
+const RELEASE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/** Semver order: negative when `a` is the older release, positive when it is the newer, 0 the same; null when either is not one. */
+export function compareReleases(a: string, b: string): number | null {
+  const left = RELEASE.exec(a.trim()), right = RELEASE.exec(b.trim());
+  if (!left || !right) return null;
+  for (let i = 1; i <= 3; i++) {
+    const order = Number(left[i]) - Number(right[i]);
+    if (order !== 0) return order;
+  }
+  // A prerelease is older than its release; two of one release go field by field, numbers by value and before words.
+  if (left[4] === undefined || right[4] === undefined) return (left[4] === undefined ? 1 : 0) - (right[4] === undefined ? 1 : 0);
+  const l = left[4].split("."), r = right[4].split(".");
+  for (let i = 0; i < Math.min(l.length, r.length); i++) {
+    if (l[i] === r[i]) continue;
+    const ln = /^\d+$/.test(l[i]), rn = /^\d+$/.test(r[i]);
+    if (ln && rn) return Number(l[i]) - Number(r[i]);
+    if (ln !== rn) return ln ? -1 : 1;
+    return l[i] < r[i] ? -1 : 1;
+  }
+  return l.length - r.length;
+}
+
+/**
+ * Said on stderr when the daemon runs another release than this command. An older daemon started before an upgrade:
+ * `daemon restart` runs this release. A newer one means this command is the old one (a second install, a project's
+ * pinned copy): a restart from it would start the older release, so it is told to upgrade instead.
+ */
 export function versionWarning(daemon: unknown, cli: string): string | null {
   if (typeof daemon !== "string" || daemon === cli) return null;
-  return `ghostly: the daemon runs ${daemon} and this command is ${cli}: \`ghostly daemon restart\` runs the new code`;
+  const order = compareReleases(daemon, cli);
+  if (order === 0) return null;
+  const both = `ghostly: the daemon runs ${daemon} and this command is ${cli}`;
+  if (order === null) return `${both}: \`ghostly daemon restart\` runs this command's release`;
+  if (order > 0) return `${both}, older than the daemon: upgrade the CLI (\`npm install -g @ghostlytools/cli\`)`;
+  return `${both}: \`ghostly daemon restart\` runs the new code`;
+}
+
+/** Said on stderr when `daemon restart` stopped a newer release than the one it started (an older CLI ran it). */
+export function restartWarning(before: unknown, version: string): string | null {
+  if (typeof before !== "string" || !((compareReleases(before, version) ?? 0) > 0)) return null;
+  return `ghostly: the daemon ran ${before} and this restart started ${version}, an older release: upgrade the CLI (\`npm install -g @ghostlytools/cli\`) and run \`ghostly daemon restart\` again to go back`;
 }
 
 /**
@@ -124,6 +163,16 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
 }
 
 /**
+ * A command that makes a new chat and needs no other: a one-shot for it leaves the saved chats and the groups unstarted.
+ * Started, each saved chat put its records and its leave packet on the relays: from about ten that was the relays' 30
+ * requests a minute, and the new chat's waited behind them. A new invite took 21 s instead of under one, unpublished;
+ * a join waited its whole 60 s and left unpaired. A join of a saved chat starts that chat (the engine's `joinLink`).
+ */
+export function newChatOnly(method: string): boolean {
+  return method === "invite.create" || method === "invite.join";
+}
+
+/**
  * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
  * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
  * for its leave packet to be taken: 0.25 s became 3.3 s with a relay that takes 1.5 s, and 10 s with one that does not
@@ -140,6 +189,8 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
   if (method === "engine.call") return typeof params.method === "string" && ENGINE_READS.includes(params.method);
   // `call auto` with no on|off says what auto-answer is.
   if (method === "call.auto") return params.on === undefined;
+  // `chat accept <chat>` with no method says what the chat takes.
+  if (method === "chat.accept") return params.method === undefined;
   return READS.has(method);
 }
 
@@ -211,14 +262,40 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
     };
     return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
   }
-  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host = await openHost(g.paths, "one-shot", VERSION, options);
+  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = await openOneShot(g, options);
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
+}
+
+/** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
+const HOLDER_WAIT_MS = 5_000;
+
+/**
+ * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
+ * terminal) is waited for: both used to fail at once, and a backgrounded send was lost unless the script checked its
+ * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step.
+ */
+async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Host> {
+  const { openHost } = await engineHost();
+  const until = Date.now() + HOLDER_WAIT_MS;
+  for (;;) {
+    try { return await openHost(g.paths, "one-shot", VERSION, options); }
+    catch (error) {
+      if (!(error instanceof CliError) || error.code !== "busy") throw error;
+      const left = until - Date.now();
+      if (left <= 0) {
+        const pid = error.details?.pid;
+        throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and was not free after ${HOLDER_WAIT_MS / 1000} s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(50 + Math.random() * 50, left)));
+    }
+  }
 }
 
 /**
  * How a one-shot opens the profile: `deferGroups` when the command is about one 1:1 chat (`chatOnly`) and needs
- * nothing of the groups, `offline` when it only reads or changes only this device (`offlineCall`).
+ * nothing of the groups, `deferChats` too when it makes a new chat (`newChatOnly`), `offline` when it only reads or
+ * changes only this device (`offlineCall`).
  */
 async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
   const s = await session(g, options);
@@ -273,7 +350,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -600,6 +677,8 @@ async function daemonCommand(argv: string[]): Promise<void> {
       if (stopped === null || !(error instanceof CliError) || error.code === "timeout") throw error;
       throw new CliError(error.code, `${error.message}. The daemon (process ${stopped}) was stopped: start it again with ghostly daemon --detach`, { ...error.details, stopped });
     }
+    const older = restartWarning(before, VERSION);
+    if (older) process.stderr.write(older + "\n");
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
@@ -790,9 +869,9 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
+  const since = sinceOf(parsed.options) ?? readCursor(cursor);
   // Kept for the whole listen (a model loads once); its process ends with this one.
   const translator = await translatorFor(parsed.options.translate, g.home);
-  const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
   // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
   // a restart would hand every event since again (agents#1710). How it stops is the branch's below.
   let quit = (code: number): void => { process.exit(code); };
@@ -938,6 +1017,8 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   // `edit` names the message before the text.
   const [message, ...words] = spec.message ? rest : [undefined, ...rest];
   if (!target || (spec.message && !message)) throw new CliError("usage", `ghostly ${spec.usage}`);
+  // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
+  timeout(parsed.options);
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
   let text = words.join(" ");
   if (parsed.options.text !== undefined) {
@@ -1000,8 +1081,8 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
     return;
   }
-  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host = await openHost(g.paths, "one-shot", VERSION);
+  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = await openOneShot(g);
   const off = host.ctx.hub.onEvent(tell);
   try {
     const result = await callApi(host.ctx, "identity.add", params) as { done: boolean; draft?: string };
@@ -1062,7 +1143,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: newChatOnly(command.method), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;

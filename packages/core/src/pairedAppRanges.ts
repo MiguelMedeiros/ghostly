@@ -178,7 +178,7 @@ export function decodeAppRangeData(message: Uint8Array): { a: string; r: number;
 }
 
 /** Why a read of the contact's file failed, as the app hears it (a broker code). */
-export type AppRangeReadError = "not-served" | "changed" | "gone" | "offline" | "peer-closed" | "failed";
+export type AppRangeReadError = "not-served" | "changed" | "gone" | "busy" | "offline" | "peer-closed" | "failed";
 
 /** A request of the contact's to answer: read `length` bytes of `file` at `offset`, send them, then `finish`. */
 export interface AppRangeTask {
@@ -197,7 +197,9 @@ export interface AppRangeTask {
   readonly live: boolean;
 }
 
-interface Serving { app: string; request: number; serve: string; file: string; offset: number; length: number; live: boolean }
+interface Serving { app: string; request: number; serve: string; file: string; offset: number; length: number; live: boolean; charge?: Taken }
+/** An ask counted in `bytesPerSecond`: when, how many bytes, and whether it aged out of the second. */
+interface Taken { at: number; bytes: number; out?: true }
 
 interface Asking {
   app: string;
@@ -229,16 +231,26 @@ export class AppRanges {
   private readonly draining = new Set<Serving>();
   private readonly asking = new Map<string, Asking>();
   private readonly waiting = new Map<string, Asking[]>();
+  /**
+   * The size each serve of the contact said (its last `ar-end`), by app and serve id: an ask past it is cut to it. The
+   * server counts the bytes asked against its 32 MiB a second; an app reading small files with remote.read's 1 MiB
+   * length was refused `busy` from the 33rd read in a second, having moved about 1 MiB (agents#1766).
+   */
+  private readonly sizes = new Map<string, number>();
   private nextRequest = 0;
   /** The asks taken in the last second (when, how many bytes) and their sum: what `bytesPerSecond` counts. Kept across sessions. */
-  private readonly taken: { at: number; bytes: number }[] = [];
+  private readonly taken: Taken[] = [];
   private takenBytes = 0;
 
   constructor(private readonly send: (frame: AppRangeFrame) => void, private readonly newServeId = () => toBase64Url(randomBytes(16)), private readonly now = Date.now) {}
 
-  /** Lets the contact's `app` read `file` on this session: the serve id to tell it. */
+  /**
+   * Lets the contact's `app` read `file` on this session: the serve id to tell it. A file the app serves already answers
+   * the id it has, so an app that serves again on each play holds one serve per file, not one per call.
+   */
   serve(app: string, file: string): string {
     if (!isChatAppId(app)) throw new Error("Not a chat app id");
+    for (const [served, serve] of this.serves) if (serve.app === app && serve.file === file) return served;
     let id = this.newServeId();
     while (this.serves.has(id)) id = this.newServeId();
     this.serves.set(id, { app, file });
@@ -271,11 +283,12 @@ export class AppRanges {
     if (inFlight >= APP_RANGE_LIMITS.inFlight) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
     // Each ask is a read on this device, cancelled or not: past the bytes a second, nothing more is read.
     const at = this.now();
-    while (this.taken.length && this.taken[0]!.at <= at - 1000) this.takenBytes -= this.taken.shift()!.bytes;
+    while (this.taken.length && this.taken[0]!.at <= at - 1000) { const old = this.taken.shift()!; old.out = true; this.takenBytes -= old.bytes; }
     if (this.takenBytes + frame.n > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
-    this.taken.push({ at, bytes: frame.n });
+    const charge: Taken = { at, bytes: frame.n };
+    this.taken.push(charge);
     this.takenBytes += frame.n;
-    const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true };
+    const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true, charge };
     this.serving.set(slot(app, request), task);
     return task;
   }
@@ -288,7 +301,13 @@ export class AppRanges {
 
   /** Every byte of `task` was sent: `ar-end` goes with the file's size, unless the task was dropped meanwhile. */
   finish(task: AppRangeTask, size: number): void {
-    if (this.take(task)) this.send(appRangeEndFrame(task.app, task.request, size));
+    if (!this.take(task)) return;
+    // Read and sent whole: it counts what the file held from its offset, not the length asked. An app reading small
+    // files at remote.read's 1 MiB was refused `busy` from the 33rd read in a second, having moved ~1 MiB (agents#1766).
+    // A cancelled ask is never finished, and keeps counting the read it started.
+    const charge = (task as Serving).charge, sent = Math.max(0, Math.min(task.length, size - task.offset));
+    if (charge && !charge.out && charge.bytes > sent) { this.takenBytes -= charge.bytes - sent; charge.bytes = sent; }
+    this.send(appRangeEndFrame(task.app, task.request, size));
   }
 
   /** The file under `task` could not be read: `ar-err` goes in place of the rest, unless the task was dropped meanwhile. */
@@ -312,6 +331,8 @@ export class AppRanges {
   /** Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end) and the file's size. */
   read(app: string, serve: string, offset: number, length: number): Promise<{ bytes: Uint8Array; size: number }> {
     appRangeGetFrame(app, serve, 0, offset, length);
+    const size = this.sizes.get(`${app} ${serve}`);
+    if (size !== undefined && size > offset) length = Math.min(length, size - offset);
     return new Promise((resolve, reject) => {
       const ask: Asking = { app, serve, offset, length, chunks: [], got: 0, resolve, reject };
       const queue = this.waiting.get(app) ?? [];
@@ -337,10 +358,12 @@ export class AppRanges {
   receiveAnswer(frame: Extract<AppRangeFrame, { t: "ar-end" | "ar-err" }>): void {
     const ask = this.asking.get(slot(frame.a, frame.r));
     if (!ask) return;
-    if (frame.t === "ar-err") return this.settle(ask, (["not-served", "changed", "gone"] as const).find(code => code === frame.e) ?? "failed");
+    // `busy`: the server's limits, a wait (the app hears too-fast), not a failure.
+    if (frame.t === "ar-err") return this.settle(ask, (["not-served", "changed", "gone", "busy"] as const).find(code => code === frame.e) ?? "failed");
     // Fewer bytes than asked only at the end of the file, and none past it.
     if (ask.got !== Math.max(0, Math.min(ask.length, frame.z - ask.offset))) return this.settle(ask, "failed");
     this.settle(ask);
+    this.sizes.set(`${ask.app} ${ask.serve}`, frame.z);
     ask.resolve({ bytes: concatBytes(...ask.chunks), size: frame.z });
   }
 
@@ -352,10 +375,12 @@ export class AppRanges {
     for (const ask of this.waiting.get(app) ?? []) ask.reject(new Error(error));
     this.waiting.delete(app);
     for (const ask of this.asking.values()) if (ask.app === app) this.settle(ask, error);
+    for (const key of [...this.sizes.keys()]) if (key.startsWith(`${app} `)) this.sizes.delete(key);
   }
 
   /** The session ended: no serve id lasts into the next, and every request fails with `offline`. */
   reset(): void {
+    this.sizes.clear();
     const apps = new Set([...this.serves.values()].map(serve => serve.app).concat([...this.serving.values(), ...this.draining].map(task => task.app), [...this.waiting.keys()], [...this.asking.values()].map(ask => ask.app)));
     for (const app of apps) this.closeApp(app, "offline");
   }

@@ -28,6 +28,17 @@ export interface MainlineOptions {
 const SIGNATURE = 64, TIMESTAMP = 8;
 const verify = (sig: Uint8Array, message: Uint8Array, key: Uint8Array) => { try { return ed25519.verify(sig, message, key); } catch { return false; } };
 
+/**
+ * Every DHT node asked refused a put for holding a later-dated packet of the key (BEP44 error 302, "sequence number less
+ * than current"): one put by this key's earlier clock, ahead of this one, before a restart forgot its date.
+ */
+export class DhtRefusedError extends Error {
+  constructor(reason: string) {
+    super(`The DHT holds a later-dated packet of this key (${reason})`);
+    this.name = "DhtRefusedError";
+  }
+}
+
 /** A DHT node of this process: puts and gets Pkarr packets. */
 export class Mainline {
   private readonly dht: DHT;
@@ -56,7 +67,8 @@ export class Mainline {
     const v = Buffer.from(payload.subarray(SIGNATURE + TIMESTAMP));
     return this.bounded(new Promise((resolve, reject) => {
       this.dht.put({ k, v, seq, sig }, (error, _hash, nodes) => {
-        if (error) reject(error); else if (!nodes) reject(new Error("No DHT node took the packet")); else resolve(nodes);
+        if (error) reject((error as Error & { code?: unknown }).code === 302 ? new DhtRefusedError(error.message) : error);
+        else if (!nodes) reject(new Error("No DHT node took the packet")); else resolve(nodes);
       });
     }));
   }
@@ -129,7 +141,7 @@ export class RelaysAndDht implements PkarrTransport {
    * `timestamp`: the payload was just signed here (`publish`), dated so; its signature is not checked again on the way
    * to the relays. Without it (`publishPayload`, signed elsewhere) the relays' side checks it to read its date.
    */
-  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string) => void, timestamp?: bigint): Promise<void> {
+  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string, read?: () => Promise<bigint | null>) => void, timestamp?: bigint): Promise<void> {
     const toRelays = () => timestamp === undefined
       ? this.relays.publishPayload(pubKeyZ32, payload, options, conflict)
       : this.relays.putSigned(pubKeyZ32, payload, timestamp, options, conflict);
@@ -141,15 +153,30 @@ export class RelaysAndDht implements PkarrTransport {
     // Out on the DHT is out (a Pkarr relay reads the DHT for a key it has not got): a relay that takes the request and
     // never answers held each publish for its 10 s timeout, an invite's first among them, while the DHT took it in
     // milliseconds. The relays' copy finishes in the background. A budget's hold is said before any request goes, so
-    // it still wins this race: the caller tries again, and the relays take it when it frees (browser contacts read only them).
-    const tookIt = onDht.then(() => true, () => false);
+    // it wins this race: once the DHT took the packet, that is out too, and the relays get it when their budget frees
+    // (`putLater`; browser contacts read only them). Said held back, the link signed it and put it on the DHT again in
+    // 0.25-4 s, at budget 1.5-2.2x the DHT puts of a DHT-only daemon.
+    let refused: unknown;
+    const tookIt = onDht.then(() => true, (error: unknown) => {
+      refused = error;
+      // The DHT holds a later-dated packet of this key, as a relay that answers 409 does: its date is read there, and
+      // the records go again dated just past it (`publishDated`). After a clock that ran ahead was set right, a
+      // restarted CLI had every put refused, tried again every 4 s until the clock caught up (15 a minute per chat), and
+      // texts to a contact away stayed queued.
+      if (error instanceof DhtRefusedError) conflict?.("dht", () => this.fromDht(pubKeyZ32).then((packet) => packet?.timestampMicros ?? null));
+      return false;
+    });
     if (await Promise.race([onRelays.then(() => false, () => false), tookIt])) return;
     try {
       await onRelays;
     } catch (error) {
-      if (isDiscoveryBudgetError(error)) throw error;
-      // The relays failed: the DHT's answer is the publish's.
-      if (!(await tookIt)) throw error;
+      if (isDiscoveryBudgetError(error)) {
+        if (!(await tookIt)) throw error;
+        this.relays.putLater(pubKeyZ32, payload, timestamp, options);
+        return;
+      }
+      // The relays failed: the DHT's answer is the publish's, and its refusal is said with theirs.
+      if (!(await tookIt)) throw refused instanceof Error ? new Error(`${error instanceof Error ? error.message : String(error)}; ${refused.message}`, { cause: error }) : error;
     }
   }
 
