@@ -260,7 +260,7 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   console.log("Bark regtest evidence:", JSON.stringify({ funded, onchainTxid, boarded, walletSend, alice: await sats(alice), bob: await sats(bob), funder: JSON.parse(regtest("balance")).spendable_sat }));
 });
 
-test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.usdt.send", "@feature:payments.usdt.send"] }, async ({ peer }) => {
+test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.usdt.send", "@feature:wallet.usdt.send-scan", "@feature:payments.usdt.send"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_USDT_LOCAL !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_USDT_LOCAL=1");
   test.setTimeout(6 * 60_000);
   const config = USDT_LOCAL;
@@ -293,9 +293,13 @@ test("USDT: in, a Send from the wallet, a Send in the chat and a Request paid in
   await openWallet(alice, "usdt-testnet");
   await expect(tokens(alice)).toHaveText("10 TEST-USDT", { timeout: 30_000 });
 
-  // A Send from the wallet page, to Bob's address.
+  // A Send from the wallet page, from a picture of a payment link for the card's token to Bob, on the card's chain
+  // (EIP-681: the token's transfer): the scan fills his address. Its amount is read only for a chain whose USDT
+  // contract the app knows (Ethereum, Sepolia; lib/parse/money-usdt.ts), not this local one: it is typed.
   await alice.page.getByTestId("wallet-send").click();
-  await panel(alice).getByLabel("USDT recipient address").fill(address[bob.name]);
+  await alice.page.getByLabel("Choose image").setInputFiles(await qrPicture(alice.page, `ethereum:${config.token}@${config.chainId}/transfer?address=${address[bob.name]}&uint256=2000000`));
+  await expect(panel(alice).getByLabel("USDT recipient address")).toHaveValue(address[bob.name]);
+  await expect(panel(alice).getByLabel(/^Amount in/)).toHaveValue("");
   await panel(alice).getByLabel(/^Amount in/).fill("2");
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
