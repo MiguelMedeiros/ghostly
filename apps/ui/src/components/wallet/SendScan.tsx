@@ -7,7 +7,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { Notice } from "../ui/Notice";
 
 /**
- * How Send on the Lightning and Cashu cards is given what to pay, as a phone wallet is: Scan (the camera), Paste, or
+ * How Send on a wallet's card is given what to pay, as a phone wallet is: Scan (the camera), Paste, or
  * Choose image (a screenshot of a QR); a picture pasted or dropped anywhere in it (`children`: the card's field, where
  * one types) is read the same way. The text found goes to `onText` as is: the card sorts it.
  */
