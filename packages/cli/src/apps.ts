@@ -4,11 +4,12 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
-  readAppRevocations, readAppStore, seedSigner, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
+  readAppRevocations, readAppStore, seedSigner, setAppSignatureFastPath, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError, localFileError } from "./errors";
+import { nativeEd25519 } from "./nativeEd25519";
 import { userPath } from "./profiles";
 
 /*
@@ -28,6 +29,9 @@ export const APP_BUNDLE_FILE = "app.ghostlyapp";
 export const APP_REVOKE_FILE = "ghostly-revoke.json";
 export const STORE_INDEX_FILE = "ghostly-store.json";
 export const STORE_SIG_FILE = "ghostly-store.sig";
+
+// Every signature the publisher tools check (bundles, revocation lists, store indexes) goes through Node's Ed25519 first.
+setAppSignatureFastPath(nativeEd25519);
 
 /** How long `app verify` waits for a URL, and how many redirects it follows (each checked as the first). */
 const FETCH_TIMEOUT_MS = 60_000;
@@ -466,9 +470,11 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   const problem = checkAppRevokeStatement(statement);
   if (problem) throw refused("Not a revocation a client reads", { reason: "bad-revocation", detail: problem });
 
+  // Each revocation's signature is checked once: the held list's are not checked again when the new list is read back.
+  const checked = new Set<string>();
   let list: SignedAppRevocation[] = [];
   if (existsSync(listPath)) {
-    const held = readAppRevocations(new Uint8Array(readFileSync(listPath)));
+    const held = readAppRevocations(new Uint8Array(readFileSync(listPath)), checked);
     if (!held.ok) throw refused(`${listPath} is there and is not a valid ghostly-revoke.json: fix or move it first`, held);
     list = held.revocations;
   }
@@ -478,7 +484,7 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
     if (list.length >= APP_STATEMENT_LIMITS.revocations) throw refused(`${listPath} holds ${list.length} revocations already`, { reason: "bad-revocation", detail: `at most ${APP_STATEMENT_LIMITS.revocations}` });
     list = [...list, signed];
     const bytes = canonicalJsonBytes(list);
-    const check = readAppRevocations(bytes);
+    const check = readAppRevocations(bytes, checked);
     if (!check.ok) throw refused("The revocation list made is not valid", check);
     writeWhole(listPath, bytes);
   }
@@ -511,9 +517,11 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
 
   // The index this one follows, when the folder holds a signed one: a store is its key, so only that key signs over it.
   const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);
+  // Each revocation's signature is checked once, though the held index, the new one and its read-back all carry it.
+  const checked = new Set<string>();
   let held: AppStoreReading | null = null;
   if (existsSync(indexOut) && existsSync(sigOut)) {
-    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now);
+    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now, undefined, checked);
     if (read.ok) held = read.store;
   }
 
@@ -530,10 +538,10 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   }
   index.key = key.key;
 
-  const checked = checkAppStoreIndex(index, { strict: true });
-  if (!checked.ok) throw refused(`${indexPath} is not a valid store index`, checked);
-  const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer);
-  const read = readAppStore(indexBytes, sigBytes, now, key.key);
+  const valid = checkAppStoreIndex(index, { strict: true }, checked);
+  if (!valid.ok) throw refused(`${indexPath} is not a valid store index`, valid);
+  const { indexBytes, sigBytes } = await signAppStore(index as unknown as AppStoreIndex, key.signer, checked);
+  const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
 

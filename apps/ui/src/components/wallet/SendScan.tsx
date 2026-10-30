@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from
 import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../../lib/pastedFiles";
 import { readClipboardText } from "../../lib/clipboard";
 import { rawError } from "../../lib/errorText";
-import { QR_IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrDecoder, qrReaderFailures, readQrImage, scanQrFrames } from "../../lib/qrReader";
+import { QR_IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, qrReaderFailures, readQrImage, scanQrFrames } from "../../lib/qrReader";
 import { useI18n } from "../../contexts/I18nContext";
 import { Notice } from "../ui/Notice";
 
@@ -44,22 +44,20 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
   const scan = async () => {
     stop(); setError(""); setBusy(true);
     const current = generation.current;
-    const decoding = qrDecoder();
-    decoding.catch(() => {});
+    const decode = qrFrameReader();
     try {
       const camera = await qrCamera();
       if (current !== generation.current) { camera.getTracks().forEach((track) => track.stop()); return; }
       stream.current = camera; setScanning(true);
       const element = video.current!;
       element.srcObject = camera; await element.play();
-      const jsQR = await decoding;
       if (current !== generation.current) return;
-      scanQrFrames(element, jsQR, () => current === generation.current, (data) => { stop(); onText(data); return true; });
+      await scanQrFrames(element, decode, () => current === generation.current, (data) => { stop(); onText(data); return true; });
     } catch (cause) {
       if (current !== generation.current) return;
       stop();
       setError(cause instanceof QrReaderNotLoaded ? readerFailed() : t("wallet.send.cameraUnavailable"));
-    }
+    } finally { decode.close(); }
   };
   const paste = async () => {
     stop(); setError(""); setBusy(true);
@@ -72,10 +70,11 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
       else onText(text.trim());
     } finally { if (current === generation.current) setBusy(false); }
   };
-  const image = async (file?: File) => {
+  // `weighed`: a picture the app read from the clipboard, already checked there (`platformPastedImage`).
+  const image = async (file?: File, weighed = false) => {
     if (!file) return;
     stop(); setError("");
-    if (file.size > QR_IMAGE_MAX) { setError(t("join.imageSize")); return; }
+    if (!weighed && file.size > QR_IMAGE_MAX) { setError(t("join.imageSize")); return; }
     setBusy(true);
     const current = generation.current;
     try {
@@ -102,11 +101,12 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
     reading.then((found) => {
       if (!ended()) return;
       if (found === "tooLarge") setError(t("join.imageSize"));
-      else if (found) void image(found);
+      else if (found === "tooManyPixels") setError(t("join.pastedTooLarge"));
+      else if (found) void image(found, true);
       // Copied files with no picture among them are said, as a dropped one is; an empty clipboard stays quiet.
       else if (named) setError(t("join.imageFailed"));
     }, (cause: unknown) => {
-      if (ended()) setError(t(rawError(cause) === "That picture is too large to paste" ? "join.imageSize" : "join.imageFailed"));
+      if (ended()) setError(t(rawError(cause) === "That picture is too large to paste" ? "join.pastedTooLarge" : "join.imageFailed"));
     });
   };
 

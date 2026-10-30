@@ -468,6 +468,8 @@ export const SPARE_INVITE_MIN_AGE_MS = 6_000;
 export const STARTUP_QUIET_MS = 15_000;
 /** At start, how long links start in one task before the page gets the thread back (`startNow`). */
 const START_SLICE_MS = 10;
+/** How long the wallets' changes gather into one view of them (`walletChanged`). */
+const WALLET_CHANGE_MS = 50;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 /** How far before this clock a warm packet is dated (`warmKey`): further than a contact's clock is ever behind. */
 export const WARM_DATED_BACK_MS = 24 * 60 * 60_000;
@@ -980,15 +982,15 @@ export class GhostlyNode implements EngineImplementation {
    */
   // A balance read that found nothing new (`viewChanged` false, every 8-10 s) checks the receipts still waiting, and
   // leaves the wallet view as it is: making it again reads every review ever made.
-  private readonly usdtWallets = perNetwork((network) => new UsdtWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); }));
-  private readonly arkWallets = perNetwork((network) => new ArkWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileArkReceipts().catch(()=>{}); }));
-  private readonly barkWallets = perNetwork((network) => new BarkWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileBarkReceipts().catch(()=>{}); }));
+  private readonly usdtWallets = perNetwork((network) => new UsdtWallet(network, (viewChanged = true) => { if (viewChanged) this.walletChanged(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); }));
+  private readonly arkWallets = perNetwork((network) => new ArkWallet(network, (viewChanged = true) => { if (viewChanged) this.walletChanged(); void this.desk.reconcileArkReceipts().catch(()=>{}); }));
+  private readonly barkWallets = perNetwork((network) => new BarkWallet(network, (viewChanged = true) => { if (viewChanged) this.walletChanged(); void this.desk.reconcileBarkReceipts().catch(()=>{}); }));
   private readonly fedimintWallets = perNetwork((network) => new FedimintWallet(network, {
-    changed: () => void this.refreshWallet(),
+    changed: () => this.walletChanged(),
     // An invoice of a chat request was paid into the federation: the request is paid.
     received: (paymentId) => void this.desk.onLightningPaid({ paymentId }),
   }, () => (this.options.fedimintSdk ?? loadFedimintSdk)()));
-  private readonly sparkWallets = perNetwork((network) => new SparkWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileSparkReceipts().catch(()=>{}); }));
+  private readonly sparkWallets = perNetwork((network) => new SparkWallet(network, (viewChanged = true) => { if (viewChanged) this.walletChanged(); void this.desk.reconcileSparkReceipts().catch(()=>{}); }));
   /** What a call naming no network acts on (a caller from before wallets had their own): Mainnet. */
   private net(network?: WalletNetwork): WalletNetwork { return network === "testnet" ? "testnet" : "mainnet"; }
   /** The Fedimint wallet that joined this federation, whichever network it is on. */
@@ -1058,7 +1060,7 @@ export class GhostlyNode implements EngineImplementation {
     return this.settings.mints.filter((mint) => mintNetwork(mint) === wanted);
   }
   private readonly wallet = new CashuWallet((network) => this.networkMints(network), {
-    onChange: () => void this.refreshWallet(),
+    onChange: () => this.walletChanged(),
     // The mints settle their own invoices and payments; the Lightning journal learns it from here.
     onQuotePaid: (quote) => void this.lightnings[mintNetwork(quote.mint)].reportInvoicePaid(quote.invoice, { paymentId: quote.paymentId, mint: quote.mint }),
     onMeltResolved: (melt, paid) => void this.lightnings[mintNetwork(melt.mint)].reportPaymentResolved(melt.request, paid, { paymentId: melt.paymentId, mint: melt.mint }),
@@ -1083,13 +1085,13 @@ export class GhostlyNode implements EngineImplementation {
     hasMints: () => this.networkMints(network).length > 0,
     fetch: (...request) => (this.options.lnurlFetch ?? globalThis.fetch)(...request),
     events: {
-      changed: () => void this.refreshWallet(),
+      changed: () => this.walletChanged(),
       received: (op) => void this.desk.onLightningPaid(op),
       resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
     },
   }));
   /** On-chain Bitcoin of each network, through its active source: none until the person sets one up. */
-  private readonly bitcoins: PerNetwork<BitcoinService> = perNetwork((network) => new BitcoinService(network, () => this.providers().onchain, () => this.providerHost(network), () => { void this.refreshWallet(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); }));
+  private readonly bitcoins: PerNetwork<BitcoinService> = perNetwork((network) => new BitcoinService(network, () => this.providers().onchain, () => this.providerHost(network), () => { this.walletChanged(); void this.desk.reconcileBitcoinReceipts().catch(()=>{}); }));
   private readonly desk: PaymentDesk = new PaymentDesk(this.wallet, {
     onReviewedPaymentResult:async(id)=>{await this.reconcilePayment({id});},
     onReviewedPaymentRefused:async(id,reason,back)=>{
@@ -1811,12 +1813,42 @@ export class GhostlyNode implements EngineImplementation {
     }).catch(() => {}), 250);
   }
 
-  private async refreshWallet(): Promise<void> {
+  /** The wallets' view being made, and the one more run asked for while it is (see `refreshWallet`). */
+  private walletRefresh: Promise<void> | undefined;
+  private walletRefreshAgain: Promise<void> | undefined;
+  /**
+   * The wallets' view made again. Every wallet that changes asks for it: a start asked 11 times in its first seconds,
+   * each run reading every Cashu proof and every payment review ever made. A run in flight may have read
+   * before what the caller changed, so callers meanwhile share one more run after it: each still waits for a view made
+   * after it asked.
+   */
+  private refreshWallet(): Promise<void> {
+    if (!this.walletRefresh) {
+      const run = this.walletRefresh = this.refreshWalletNow().finally(() => { if (this.walletRefresh === run) this.walletRefresh = undefined; });
+      return run;
+    }
+    return this.walletRefreshAgain ??= this.walletRefresh.catch(() => {}).then(() => { this.walletRefreshAgain = undefined; return this.refreshWallet(); });
+  }
+
+  /** While `startWallets` opens the wallets: what they say changed is in the view it makes once they are open. */
+  private walletsOpening = false;
+  private walletChangeTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * A wallet says what it shows changed, and nobody waits for the view: the changes said within `WALLET_CHANGE_MS`
+   * make one view. Opening, the wallets and their sources say so a dozen times within 150 ms.
+   */
+  private walletChanged(): void {
+    if (this.walletsOpening || this.walletChangeTimer) return;
+    this.walletChangeTimer = setTimeout(() => { this.walletChangeTimer = undefined; if (!this.shuttingDown) void this.refreshWallet().catch(() => {}); }, WALLET_CHANGE_MS);
+  }
+
+  private async refreshWalletNow(): Promise<void> {
     const networks = {} as Record<WalletNetwork, NetworkWalletsView>;
     let everything: WalletTx[] = [];
     const awaiting = await this.readAwaiting();
+    const stored = await this.wallet.readStored();
     for (const network of WALLET_NETWORKS) {
-      const view = await this.wallet.view(network);
+      const view = await this.wallet.view(network, stored);
       everything = everything.concat(view.history);
       // A network's own story: test ecash is not mixed into the story of real money, nor the reverse.
       const history = view.history.filter((tx) => !tx.mint || mintNetwork(tx.mint) === network);
@@ -1988,7 +2020,7 @@ export class GhostlyNode implements EngineImplementation {
     this.transfersRestored = true;
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
-    // Links start in the order they are stored (`nativeStartOrder` ranks the chats among them).
+    // The chats first, most recently live first, then the group edges (`nativeStartOrder`).
     await this.startLinks(links.map(stored => stored.id), linkId => {
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
     });
@@ -2172,16 +2204,19 @@ export class GhostlyNode implements EngineImplementation {
     // is deleted: see walletNetworks.ts. The report names keys only.
     const migrated = await migrateWalletNetworks();
     if (migrated.moved.length || migrated.unreadable.length) console.info("[wallet] wallets moved to their network's key:", migrated.moved.map((m) => m.key).join(", ") || "none", migrated.unreadable.length ? `; left as they were: ${migrated.unreadable.join(", ")}` : "");
-    for (const network of WALLET_NETWORKS) {
-      await this.arkWallets[network].start();
-      await this.barkWallets[network].start();
-      await this.fedimintWallets[network].start();
-      await this.sparkWallets[network].start();
-      await this.usdtWallets[network].start();
-      await this.lightnings[network].start();
-      await this.bitcoins[network].start();
-    }
-    await this.desk.start();
+    this.walletsOpening = true;
+    try {
+      for (const network of WALLET_NETWORKS) {
+        await this.arkWallets[network].start();
+        await this.barkWallets[network].start();
+        await this.fedimintWallets[network].start();
+        await this.sparkWallets[network].start();
+        await this.usdtWallets[network].start();
+        await this.lightnings[network].start();
+        await this.bitcoins[network].start();
+      }
+      await this.desk.start();
+    } finally { this.walletsOpening = false; }
     await this.refreshWallet();
     this.wallet.start();
     void this.dropStaleReviews();
@@ -2428,6 +2463,7 @@ export class GhostlyNode implements EngineImplementation {
     this.resumeTimers.clear();
     if(this.paymentTimer)clearTimeout(this.paymentTimer);
     clearTimeout(this.awaitingTimer);
+    clearTimeout(this.walletChangeTimer);
     clearInterval(this.staleReviewTimer);
     if (this.spareTimer) clearTimeout(this.spareTimer);
     for (const timer of this.reactionTimers.values()) clearTimeout(timer);
@@ -8564,7 +8600,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * The order saved chats start in, which is the order they take native listeners in (`NATIVE_SLOTS` per transport):
-   * the 1:1 chats written in, or live, most recently first; group links keep their places. In the order they were
+   * the 1:1 chats written in, or live, most recently first, then the group links in the order given. In the order they were
    * stored, an app with more paired chats than slots left a chat that was live a moment before with no listener, and a
    * contact with no WebRTC (the Linux Desktop) never reached it again (Omarchy, 2026-09-30: "On DHT · retrying live" for
    * minutes after both apps restarted). Not "live when this app last ran" first: a chat that heard its contact leave as
@@ -8573,6 +8609,10 @@ export class GhostlyNode implements EngineImplementation {
    * On an app with WebRTC, the chats whose contact has none (its capability record lists no `webrtc/1`: a Linux Desktop,
    * a CLI with WebRTC off) come first, each class in that order: they reach this app over a native transport or not
    * live at all, while a contact with WebRTC still has it when no listener is left here.
+   *
+   * The chats before every group link, whatever order they come in: leaving limited mode, the network back on and
+   * "Hide my IP" switched start the links in the engine's order, every private group's edges first, and with 10 mesh
+   * groups of 32 the chat about to be opened waited for 310 edges to derive their keys and seal their records.
    */
   private nativeStartOrder(linkIds: string[]): string[] {
     const isChat = (id: string) => { const stored = this.links.get(id)?.stored; return !!stored && !stored.group; };
@@ -8588,8 +8628,7 @@ export class GhostlyNode implements EngineImplementation {
       return Number(y.nativeOnly) - Number(x.nativeOnly) || y.recent - x.recent;
     });
     chats.forEach((id, place) => traceLink(this.links.get(id)!.myPubKeyZ32, "native-order", { place, ...rank.get(id) }));
-    let next = 0;
-    return linkIds.map(id => rank.has(id) ? chats[next++] : id);
+    return [...chats, ...linkIds.filter(id => !rank.has(id))];
   }
 
   /**
