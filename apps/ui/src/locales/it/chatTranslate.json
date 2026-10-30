@@ -2,7 +2,7 @@
   "choice": {
     "off": "Disattivata",
     "on": "Attivata",
-    "settings": "Come nelle Impostazioni ({{state}})"
+    "settings": "Come nelle Opzioni ({{state}})"
   },
   "note": "I messaggi che ricevi qui. Solo su questo dispositivo.",
   "open": "Traduzione…",

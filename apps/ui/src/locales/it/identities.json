@@ -14,7 +14,7 @@
     "mutual": "Segue {{name}}, e {{name}} segue questo account",
     "notShown": "Non mostrata.",
     "notShownWhy": "Non mostrata: {{reason}}.",
-    "off": "I profili pubblici sono disattivati (Impostazioni → Sicurezza).",
+    "off": "I profili pubblici sono disattivati (Opzioni → Sicurezza).",
     "open": "Apri",
     "openIn": "Apri su {{network}}",
     "openPostIn": "Apri questo post su {{network}}",

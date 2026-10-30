@@ -17,7 +17,7 @@
     "wakeUnsupported": "Questo browser non può risvegliare Ghostly mentre è chiuso."
   },
   "cashu": {
-    "addMint": "Aggiungi prima un mint nelle Impostazioni",
+    "addMint": "Aggiungi prima un mint nelle Opzioni",
     "alreadyPaying": "Questa fattura è già in fase di pagamento",
     "amountTooHigh": "Gli importi oltre {{max}} sats non sono supportati",
     "backInWallet": "I sats sono tornati nel tuo portafoglio.",

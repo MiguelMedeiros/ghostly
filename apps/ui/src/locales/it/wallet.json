@@ -227,7 +227,7 @@
     "removeMintQuestion": "Rimuovere {{name}}?",
     "setAside": "{{amount}} {{unit}} messi da parte",
     "setAsideInfo": "Messi da parte per un pagamento che il mint non ha ancora confermato. Escono con il pagamento o tornano nel saldo appena il mint risponde.",
-    "settings": "Impostazioni",
+    "settings": "Opzioni",
     "testBalance": "{{amount}} sats di prova (senza valore)",
     "testMintInvoice": "In attesa del pagamento… I mint di prova segnano da soli ogni fattura come pagata, quindi questa conta solo quando un contatto la paga in una chat. Per avere subito sats di prova, usa Ottieni monete di prova qui sopra.",
     "tokenHint": "Hai ricevuto un token ecash? Incollalo in Invia.",
@@ -324,7 +324,7 @@
     "restoreFailed": "Ripristinate {{count}}; impossibile ripristinare: {{failed}}",
     "restoreNote": "Le federazioni restituiscono l'ecash dai backup che conservano per questa frase. I pagamenti ancora in corso tornano come sconosciuti.",
     "restorePhrase": "Ripristina dalla frase",
-    "sendAbout": "Le note sono ecash al portatore: chi ha il testo può riscattarlo, una volta. Se nessuno lo fa, riprendile (tornano anche da sole dopo una settimana). In una chat, paga invece con la carta Fedimint. Per pagare una fattura, rendi questa federazione la fonte Lightning (Impostazioni qui sotto) e usa la carta Lightning.",
+    "sendAbout": "Le note sono ecash al portatore: chi ha il testo può riscattarlo, una volta. Se nessuno lo fa, riprendile (tornano anche da sole dopo una settimana). In una chat, paga invece con la carta Fedimint. Per pagare una fattura, rendi questa federazione la fonte Lightning (Opzioni qui sotto) e usa la carta Lightning.",
     "show": "Mostra",
     "state": {
       "done": "completato",
@@ -372,7 +372,7 @@
       "title": "Carta"
     },
     "cashuMints": "i mint Cashu",
-    "cashuSettings": "Impostazioni Cashu",
+    "cashuSettings": "Opzioni Cashu",
     "commentFor": "Un commento per {{to}} (facoltativo)",
     "confirmWhat": "{{amount}} sats (più una commissione fino a {{fee}})",
     "connecting": "Connessione alla sorgente…",
@@ -514,7 +514,7 @@
     "recipient": "Indirizzo {{wallet}} del destinatario",
     "recipientPlaceholder": "Indirizzo {{wallet}} del destinatario",
     "review": "Rivedi il pagamento",
-    "settings": "Impostazioni",
+    "settings": "Opzioni",
     "testCoins": "{{network}} · monete di prova, senza valore",
     "testNetworks": "Le reti di prova usano monete senza valore.",
     "unlock": {
