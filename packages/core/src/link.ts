@@ -732,20 +732,8 @@ export class LinkSession {
 
   private async publishOnce(advertise: boolean, upkeep = false): Promise<number> {
     const rtcSignal = advertise ? this.rtcSignal : null;
-    const built = buildLinkRecords(
-      this.identity.pubKeyZ32,
-      {
-        messages: this.sentBuffer,
-        ackTimestamp: this.myAck,
-        nick: this.nick,
-        callSignal: this.callSignal,
-        rtcSignal,
-        services: advertise ? this.getServices() : undefined,
-        transports: advertise ? this.transports : null,
-      },
-      this.encKey,
-    );
     const started = Date.now();
+    let keptMessages: number;
     try {
       // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`). Written while this
       // link watches for a contact that went away, the packet is what that contact, back, looks for first (`watch`).
@@ -765,6 +753,24 @@ export class LinkSession {
       const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
         : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
       this.wroteInBackground = options?.background === true;
+      // No relay takes it now: refused before it is built, as before it is signed (`RelayTransport.publishDated`). With
+      // 200 chats on the web, the packets built for that were a quarter of the script of a page left alone.
+      const held = this.transport.publishHeld?.(this.identity.pubKeyZ32, options);
+      if (held) throw held;
+      const built = buildLinkRecords(
+        this.identity.pubKeyZ32,
+        {
+          messages: this.sentBuffer,
+          ackTimestamp: this.myAck,
+          nick: this.nick,
+          callSignal: this.callSignal,
+          rtcSignal,
+          services: advertise ? this.getServices() : undefined,
+          transports: advertise ? this.transports : null,
+        },
+        this.encKey,
+      );
+      keptMessages = built.keptMessages;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
@@ -790,7 +796,7 @@ export class LinkSession {
     traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, advertise });
     this.events.onPublish?.({ ms, rtc: !!rtcSignal, ...(signalOut && { signalOut }) });
     this.discoveryResult("publish");
-    return built.keptMessages;
+    return keptMessages;
   }
 
   /**
