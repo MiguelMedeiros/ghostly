@@ -8,10 +8,13 @@ import { renderApp } from "../render";
 
 // covers: wallet.onchain.send-scan
 
-const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null }));
+const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null, camera: null as MediaStream | null }));
 vi.mock("../../lib/qrReader", async (original) => ({
   ...await original<typeof import("../../lib/qrReader")>(),
   readQrImage: async () => qr.text,
+  qrCamera: async () => { if (qr.camera) return qr.camera; throw new Error("NotAllowedError"); },
+  qrFrameReader: () => Object.assign(async () => null, { ready: Promise.resolve(), close: () => {} }),
+  scanQrFrames: async () => {},
 }));
 vi.mock("../../lib/clipboard", async (original) => ({
   ...await original<typeof import("../../lib/clipboard")>(),
@@ -44,7 +47,7 @@ describe("what the Bitcoin card's Send was given", () => {
 });
 
 describe("Send on the Bitcoin card: scan, paste or picture", () => {
-  beforeEach(() => { qr.text = null; qr.clipboard = null; });
+  beforeEach(() => { qr.text = null; qr.clipboard = null; qr.camera = null; });
   const show = async () => {
     const state = walletView({ mode: "testnet", bitcoin: { mode: "testnet", status: "ready", network: "regtest", balance: 50_000, history: [], offered: [] } }) as WalletState;
     const rendered = renderApp(<BitcoinWalletPanel wallet={servicesPlatform!.wallet as WalletPlatform} state={state} />);
@@ -70,6 +73,17 @@ describe("Send on the Bitcoin card: scan, paste or picture", () => {
     await user.click(screen.getByTestId("wallet-send-paste"));
     expect(await screen.findByDisplayValue("bcrt1q6rhpng9evdsfnn833a4f4vej0asu6dk5srld6x")).toBeInTheDocument();
     expect(screen.getByTestId("bitcoin-amount")).toHaveValue("");
+  });
+
+  it("on a phone the camera runs as Send opens", async () => {
+    const track = { stop: vi.fn() };
+    qr.camera = { getTracks: () => [track] } as unknown as MediaStream;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)", onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+    vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    await show();
+    expect(await screen.findByTestId("wallet-send-scan-stop")).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 
   it("a link typed or pasted in the field is read the same way", async () => {
