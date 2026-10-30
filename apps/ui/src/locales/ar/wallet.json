@@ -767,9 +767,13 @@
   },
   "unseen": {
     "lineReal": "{{amount}} ساتوشي جديدة في {{wallet}}",
+    "lineRealOne": "{{amount}} ساتوشي جديد في {{wallet}}",
     "lineTest": "{{amount}} ساتوشي تجريبية جديدة في {{wallet}}",
+    "lineTestOne": "{{amount}} ساتوشي تجريبي جديد في {{wallet}}",
     "real": "{{place}}، {{amount}} sats جديدة",
-    "test": "{{place}}، {{amount}} sats تجريبية جديدة"
+    "realOne": "{{place}}، {{amount}} sat جديد",
+    "test": "{{place}}، {{amount}} sats تجريبية جديدة",
+    "testOne": "{{place}}، {{amount}} sat تجريبي جديد"
   },
   "usdt": {
     "approve": "لا يُرسل شيء حتى توافق على المراجعة.",
