@@ -29,6 +29,8 @@ class NativeChannel implements FrameChannel {
   /** HyperDHT: the runtime said the connection's socket is full, and not yet that it has room. */
   private full = false;
   private waiting: (() => void)[] = [];
+  /** The frame Rust holds for this connection's exit (`parting`). */
+  private last: string | null = null;
   bufferedAmount = 0;
   readonly sendBudget = 120 * 1024;
   /** HyperDHT's frames mark a binary message (WISP 103 § Frames), and its sidecar and Rust carry one; Iroh's take text only. */
@@ -64,6 +66,18 @@ class NativeChannel implements FrameChannel {
     this.queue = this.queue.then(async () => {
       if (!this.closed) await invoke("paired_hyperdht_send", { endpointId: this.endpointId(), connectionId: this.id, seq, ...frame });
     }).catch(() => this.close()).finally(() => { this.bufferedAmount -= data.length; this.wake(); });
+  }
+  /**
+   * Rust holds `frame` for this connection and sends it as the app exits, after whatever the page sent: the page may be
+   * gone by then (a logout ends WebKit's processes with the app). In order with the sends, and only when it changed.
+   */
+  parting(frame: string | null) {
+    if (this.closed || frame === this.last) return;
+    this.last = frame;
+    const command = this.kind === "iroh" ? "paired_native_parting" : "paired_hyperdht_parting";
+    this.queue = this.queue.then(async () => {
+      if (!this.closed) await invoke(command, { endpointId: this.endpointId(), connectionId: this.id, text: frame });
+    }).catch(() => {});
   }
   /** HyperDHT: the runtime's socket for this connection is full (`true`) or has room again. */
   held(full: boolean) {
