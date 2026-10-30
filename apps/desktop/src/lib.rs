@@ -1185,56 +1185,6 @@ mod tests {
         );
     }
 
-    /// agents#1069: an installed app's window (or a viewer) open when the Ghostly window closes. Tauri ends the app only
-    /// after its last window, so it ran on with no Ghostly window: the app's broker calls got no answer, and a new launch
-    /// was held until that window closed. The app exits with the Ghostly window, the other window open or not.
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn closing_the_ghostly_window_ends_the_app_with_an_installed_app_s_window_still_open() {
-        use std::sync::{Arc, Mutex};
-        use std::time::Duration;
-        let app = mock_builder()
-            .build(tauri::test::mock_context(tauri::test::noop_assets()))
-            .expect("app");
-        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
-            .build()
-            .unwrap();
-        let _chess = WebviewWindowBuilder::new(&app, "app-1", Default::default())
-            .build()
-            .unwrap();
-        let exited = Arc::new(Mutex::new(None::<bool>));
-        let into = exited.clone();
-        // On dev the loop never ends: after 3 s this ends it, and says the close did not.
-        let handle = app.handle().clone();
-        let timeout = exited.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_secs(3));
-            timeout.lock().unwrap().get_or_insert(false);
-            handle.exit(1);
-        });
-        app.run(move |app, event| match event {
-            tauri::RunEvent::Ready => main.close().unwrap(),
-            tauri::RunEvent::WindowEvent {
-                label,
-                event: tauri::WindowEvent::CloseRequested { api, .. },
-                ..
-            } => {
-                if let Some(window) = app.get_webview_window(&label) {
-                    on_close_requested(&window.as_ref().window(), &api);
-                }
-            }
-            tauri::RunEvent::ExitRequested { .. } => {
-                into.lock().unwrap().get_or_insert(true);
-            }
-            _ => {}
-        });
-        assert_eq!(
-            *exited.lock().unwrap(),
-            Some(true),
-            "the app exited with the Ghostly window, its app's window open"
-        );
-    }
-
     /// A logout, a shutdown or `kill <pid>` sends SIGTERM: the app is asked to exit (`app.exit`, where the page says
     /// goodbye as on the window's close), not ended on the spot with all of that skipped.
     #[cfg(target_os = "linux")]
@@ -1275,7 +1225,8 @@ mod tests {
         // Before the goodbye's wait: the window is already gone from the screen, and not yet closed.
         assert_eq!(what(&seen), ["hide"]);
         std::thread::sleep(Duration::from_millis(DEPART_MS + 300));
-        // The app goes with it, whatever other windows are open (agents#1069: an app's window kept it running).
+        // The app goes with it, whatever other windows are open (agents#1069: an app's window kept it running). Only
+        // this order is checked: the mock runtime's `request_exit` is unimplemented, so `app.exit` can't run in a test.
         assert_eq!(what(&seen), ["hide", "close", "exit"]);
         let all = seen.0.lock().unwrap().clone();
         assert!(all[1].1 >= Duration::from_millis(DEPART_MS), "{all:?}");
