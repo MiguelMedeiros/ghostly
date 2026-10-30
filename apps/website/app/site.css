@@ -1384,3 +1384,23 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
     opacity: 0.45;
   }
 }
+
+/* ── Print ───────────────────────────────────────── */
+/* A printed or saved-as-PDF page is the text alone. Fixed chrome repeats on every sheet, over the first and last
+   lines, so it does not print; and gradient words (the legal pages' titles, the home's closing line) clip a
+   background that print drops, so they print in one solid colour instead of not at all. */
+@media print {
+  .skip-link,
+  .nav,
+  .rail,
+  .boo,
+  .pet {
+    display: none !important;
+  }
+  .bg-clip-text,
+  .text-gradient-animated {
+    background: none !important;
+    color: #0b3b47 !important;
+    -webkit-text-fill-color: currentColor !important;
+  }
+}
