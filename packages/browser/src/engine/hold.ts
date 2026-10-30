@@ -1,3 +1,4 @@
+import type { RatchetBox } from "@ghostly/core";
 import { budgetRetryMs, decodeControl, fromBase64Url, isDiscoveryBudgetError, parseImageMeta, parseVideoMeta, parseVoiceMeta, HOLD_DATED_BACK_MS, HOLD_LIMITS, HoldKeys, HoldRefusedError, isHoldUrl, newHoldMailbox, pairedReplyAuthor, readForwarded, readManifest, readReply, sanitizeFileName, sanitizeMime, utf8Decode, utf8Encode, type HoldPointer, type PaymentMethodName, type PaymentRequest, type PkarrTransport, type ImageMeta, type VideoMeta, type VoiceMeta, type WireReply } from "@ghostly/core";
 import { heldName, manifestName, type HoldStore } from "../backup/storage";
 import type { HeldEntry, HoldState, LinkHoldView, StoredLink } from "../shared/types";
@@ -35,6 +36,11 @@ export interface HoldHost {
   now?: () => number;
   /** How long an item is held, when a test shortens it; never longer than the profile's seven days. */
   ttlMs?: () => number | undefined;
+  /**
+   * The chat's ratchet (WISP 4xx), shared with its DHT floor, and whether the contact's record lists `ratchet/1`. Absent:
+   * every item is sealed as before.
+   */
+  ratchet?(linkId: string): { box: RatchetBox; peerSupports(): boolean } | undefined;
 }
 
 /** How often the engine looks at its held items: expiry, renewals, the contact's pointer. */
@@ -280,7 +286,15 @@ export class HoldEngine {
       }
     } catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
     let bytes: Uint8Array;
-    try { bytes = keys.seal({ mailbox: hold.mailbox, seq: entry.seq, id: entry.id, ts: entry.ts, kind: entry.kind, meta, expires: entry.expires }, body); }
+    const item = { mailbox: hold.mailbox, seq: entry.seq, id: entry.id, ts: entry.ts, kind: entry.kind, meta, expires: entry.expires };
+    // Ratcheted (WISP 4xx) when the contact's record lists ratchet/1, or a ratcheted item of its opened here: sealed, its
+    // state saved, then uploaded. A retry after a crash seals it again with a new key.
+    const ratchet = this.host.ratchet?.(linkId);
+    try {
+      bytes = ratchet && (ratchet.box.heardAny || ratchet.peerSupports())
+        ? await keys.sealRatcheted(item, body, (plaintext) => ratchet.box.lock((tx) => tx.seal("hold", plaintext)))
+        : keys.seal(item, body);
+    }
     catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
     if (bytes.length > HOLD_LIMITS.maxBundleBytes) return fail(`An item held for an away contact is at most ${Math.round(HOLD_LIMITS.maxBundleBytes / 1024 / 1024)} MB.`);
     try { await storage.store.put(entry.name, bytes); }
@@ -472,7 +486,10 @@ export class HoldEngine {
       if (expires <= now) { await this.save(linkId, { ...this.state(linkId), inSeq: seq }); changed = true; continue; }
       try {
         // Every item must come from the mailbox its manifest names: one folder, one contact, one direction.
-        const { header, body } = keys.open(await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes)), { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox });
+        // A ratcheted item is opened with no lock held, stored, and only then its ratchet state saved (`commitOpen`).
+        const ratchet = this.host.ratchet?.(linkId);
+        const { header, body, ratcheted } = keys.open(await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes)), { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox,
+          ...(ratchet && { ratchet: (sealed: Uint8Array) => ratchet.box.peek("hold", sealed), refusePlain: ratchet.box.heard("hold") }) });
         if (header.seq !== seq || header.id !== id || header.kind !== kind) throw new HoldRefusedError("format", "The item does not match the manifest");
         // Stored before the sequence advances: a crash in between stores it again, which the id dedups.
         const held: HeldFacts = { seq, bytes, expires };
@@ -499,6 +516,7 @@ export class HoldEngine {
           if (frame?.t !== "pay-req") throw new HoldRefusedError("format", "Not a payment request");
           await this.host.receivePaymentRequest(linkId, { id: frame.id, timestamp: frame.ts, amount: { value: frame.v, asset: frame.u }, memo: frame.memo, endpoints: frame.e, ask: frame.a, network: frame.n });
         }
+        if (ratcheted && ratchet) await ratchet.box.commitOpen("hold", ratcheted);
         hold = await this.save(linkId, { ...this.state(linkId), inSeq: seq });
         changed = true;
       } catch (error) {
