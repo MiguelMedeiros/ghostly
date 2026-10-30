@@ -410,6 +410,42 @@ it("closes every HyperDHT stream it holds for a client when the client leaves: d
   await own.close();
 }, 90_000);
 
+it("holds a client's handshakes only while they wait on it, and its signatures only until they come", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const own = await startRelay({ testnet: 3, limits: { handshakeMs: 2_000 } });
+  const held = () => own.stats().held;
+  const [a, b] = await Promise.all([createRelayedHyperEndpoint(seed(), own.url), createRelayedHyperEndpoint(seed(), own.url)]);
+  let socket: WebSocket | undefined;
+  try {
+    // Dials that open, both ends on this relay: each made a handshake for the dialler and one for the listener.
+    for (let round = 0; round < 4; round++) {
+      const accepted = incoming(a);
+      const dialled = await b.connect(a.descriptor);
+      await accepted;
+      dialled.channel.close();
+    }
+    // Dials to keys nobody listens on.
+    for (let round = 0; round < 2; round++) await expect(b.connect({ ...b.descriptor, publicKey: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex") })).rejects.toThrow();
+    // a's listen was announced (b reached it), so the relay asked a for its signatures, and they came.
+    await vi.waitFor(() => expect(held()).toEqual({ handshakes: 0, signatures: 0 }), { timeout: 10_000 });
+
+    // A client that never answers its part of a handshake holds it only until `handshakeMs`.
+    socket = new WebSocket(own.url);
+    await new Promise(resolve => socket!.addEventListener("open", resolve));
+    const silent = new RelayedDHT(new WebSocketStream(true, socket), { custodial: false }) as unknown as { _protocol: Record<string, { send(m: unknown): void }>; connect(key: Uint8Array): { on(event: string, f: () => void): void } };
+    silent._protocol.noiseReply.send = () => {};
+    silent.connect(Buffer.from(a.descriptor.publicKey as string, "hex")).on("error", () => {});
+    await vi.waitFor(() => expect(held().handshakes).toBe(1), { timeout: 10_000 });
+    await vi.waitFor(() => expect(held().handshakes).toBe(0), { timeout: 5_000 });
+  } finally {
+    socket?.close();
+    await Promise.allSettled([a.close(), b.close()]);
+    await own.close();
+  }
+}, 90_000);
+
 it("carries a whole paired chat between two browsers with WebRTC off, pinned as on any transport", async () => {
   const invitation = createLink();
   const params = [invitation.mine, invitation.invite];
