@@ -3,7 +3,7 @@ import { parseLocalTarget } from "@ghostly/core";
 import { SERVICE_METHODS } from "../src/services";
 import { asCliError } from "../src/errors";
 import type { ApiContext } from "../src/apiKit";
-// covers: cli.errors
+// covers: headless.services
 
 /*
  * agents#894 (widened 2026-10-19): `service add` answered its own input mistakes with code `engine` (exit 1, "the engine
