@@ -29,6 +29,8 @@ export interface HoldHost {
   /** Returns why it was not kept (room, a reused id), or null when it was. */
   receiveFile(linkId: string, file: { wireId: string; name: string; size: number; mime: string; timestamp: number; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: WireReply; forwarded?: number }, bytes: Uint8Array, digest: string, held?: HeldFacts): Promise<string | null>;
   receivePaymentRequest(linkId: string, request: PaymentRequest): Promise<void>;
+  /** Whether an item with this wire id is stored here already (a text or a file; WISP 4xx § Held items). */
+  taken?(linkId: string, id: string): Promise<boolean>;
   changed(): void;
   fetch?: typeof fetch;
   /** Plain HTTP to this machine is a storage address too: the e2e suite's local server. Off in every shipped app. */
@@ -484,12 +486,17 @@ export class HoldEngine {
     for (const [seq, id, kind, bytes, url, expires] of entries) {
       if (stop) break;
       if (expires <= now) { await this.save(linkId, { ...this.state(linkId), inSeq: seq }); changed = true; continue; }
+      // A ratcheted item is opened with no lock held, stored, and only then its ratchet state saved (`commitOpen`): also
+      // when it is refused once opened, so its key goes and the chat counts as having heard the contact this way.
+      const ratchet = this.host.ratchet?.(linkId);
+      let ratcheted: Uint8Array | undefined, fetched: Uint8Array | undefined;
       try {
         // Every item must come from the mailbox its manifest names: one folder, one contact, one direction.
-        // A ratcheted item is opened with no lock held, stored, and only then its ratchet state saved (`commitOpen`).
-        const ratchet = this.host.ratchet?.(linkId);
-        const { header, body, ratcheted } = keys.open(await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes)), { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox,
+        fetched = await this.fetchBytes(url, Math.min(bytes, HOLD_LIMITS.maxBundleBytes));
+        const opened = keys.open(fetched, { maxBytes: HOLD_LIMITS.maxBundleBytes, now, mailbox,
           ...(ratchet && { ratchet: (sealed: Uint8Array) => ratchet.box.peek("hold", sealed), refusePlain: ratchet.box.heard("hold") }) });
+        const { header, body } = opened;
+        ratcheted = opened.ratcheted;
         if (header.seq !== seq || header.id !== id || header.kind !== kind) throw new HoldRefusedError("format", "The item does not match the manifest");
         // Stored before the sequence advances: a crash in between stores it again, which the id dedups.
         const held: HeldFacts = { seq, bytes, expires };
@@ -520,7 +527,13 @@ export class HoldEngine {
         hold = await this.save(linkId, { ...this.state(linkId), inSeq: seq });
         changed = true;
       } catch (error) {
-        if (error instanceof HoldRefusedError) {
+        const opened = ratcheted ?? (error instanceof HoldRefusedError ? error.ratcheted : undefined);
+        if (error instanceof HoldRefusedError && opened && ratchet) await ratchet.box.commitOpen("hold", opened).catch(() => {});
+        // A ratcheted item whose key is gone, already stored here: picked up before a crash that cut its sequence's save.
+        if (error instanceof HoldRefusedError && error.reason === "tampered" && fetched?.[4] === 2 && await this.host.taken?.(linkId, id)) {
+          await this.save(linkId, { ...this.state(linkId), inSeq: seq });
+          changed = true;
+        } else if (error instanceof HoldRefusedError) {
           await this.save(linkId, { ...this.state(linkId), inSeq: seq, refused: this.state(linkId).refused + 1, refusedSeqs: [...(this.state(linkId).refusedSeqs ?? []), seq].slice(-32) });
           this.errors.set(linkId, `Refused a held item from the contact: ${error.message}`);
           changed = true;

@@ -97,6 +97,8 @@ export interface HoldPointer {
 
 /** Why a bundle, manifest or pointer was refused. Never a reason to trust it a little. */
 export class HoldRefusedError extends Error {
+  /** The bytes the chat's ratchet opened, when it opened them before the item was refused: the caller commits them. */
+  ratcheted?: Uint8Array;
   constructor(readonly reason: "size" | "format" | "tampered" | "not-for-me" | "author" | "signature" | "digest" | "limits" | "expired" | "plain", message: string) {
     super(message);
   }
@@ -188,6 +190,15 @@ export class HoldKeys {
       try { plain = xsalsa20poly1305(this.sealKey, bytes.subarray(MAGIC.length + 1, MAGIC.length + 1 + NONCE)).decrypt(bytes.subarray(MAGIC.length + 1 + NONCE)); }
       catch { throw new HoldRefusedError("tampered", "The held item was changed or is not for this chat"); }
     }
+    try { return this.read(plain, ratcheted, expect, now); }
+    catch (error) {
+      // Opened, then refused: the ratchet's bytes go with the refusal, so the key is used up and the lane heard all the same.
+      if (error instanceof HoldRefusedError && ratcheted) error.ratcheted = ratcheted;
+      throw error;
+    }
+  }
+  /** The checks of `open` once the bundle is decrypted. */
+  private read(plain: Uint8Array, ratcheted: Uint8Array | undefined, expect: { mailbox?: string; loopback?: boolean; refusePlain?: boolean }, now: number): { header: HoldHeader; body: Uint8Array; ratcheted?: Uint8Array } {
     if (plain.length < 4) throw new HoldRefusedError("format", "Not a held item");
     const headerLength = new DataView(plain.buffer, plain.byteOffset, 4).getUint32(0);
     if (headerLength > 128 * 1024 || 4 + headerLength > plain.length) throw new HoldRefusedError("format", "Not a held item");

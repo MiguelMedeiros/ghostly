@@ -271,6 +271,19 @@ describe("store-and-forward engine", () => {
     }
   });
 
+  it("a ratcheted item refused once opened still uses its key and counts: a plain item from that contact is refused after", async () => {
+    const { a, b } = setup({ ratchet: { alice: true, bob: true } });
+    engines.push(a.engine, b.engine);
+    a.files.set("link-a-out-f1", { bytes: new Uint8Array(10).fill(1), name: "big.bin", size: 10, mime: "application/octet-stream" });
+    a.messages.set("me_f", { file: { name: "big.bin", size: 10, mime: "application/octet-stream" }, timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "file", id: "wire-file-1", messageId: "me_f", ref: "link-a-out-f1", bytes: 10, timestamp: 1000 });
+    b.refuseFiles = "no room for more files";
+    b.engine.start();
+    await vi.waitFor(() => expect(b.stored.hold!.inSeq).toBe(1));
+    expect(b.received).toHaveLength(0);
+    expect(b.box!.heard("hold")).toBe(true);
+  });
+
   it("holds a voice message with its length and waveform, and drops a description that is not one", async () => {
     const { a, b } = setup();
     engines.push(a.engine, b.engine);
