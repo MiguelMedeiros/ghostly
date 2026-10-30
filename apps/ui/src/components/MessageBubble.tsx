@@ -73,8 +73,11 @@ interface MessageBubbleProps {
   contactName?: string;
   /** Forgets this message on this device; a rejection is a delete refused (Cancel sending says it). Left out where a chat cannot be edited. */
   onDelete?: () => void | Promise<void>;
-  /** Deletes this message of mine from every member's device (WISP 400 § Delete for everyone). Left out where it can't. */
-  onDeleteForEveryone?: () => void;
+  /**
+   * Deletes this message of mine from every member's device (WISP 400 § Delete for everyone). Left out where it can't.
+   * A rejection is the delete refused (limited mode): said under the message, which stays.
+   */
+  onDeleteForEveryone?: () => void | Promise<void>;
   /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
   linkId?: string;
   /** Answers this message: its ⋮ says Reply, a pointer finds a reply button beside it, a finger swipes it right. */
@@ -958,6 +961,11 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     const link = engine.linkByPeer(peerPubKey);
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
+  /** Delete for everyone, confirmed: a refused one stays, with why under it, as a refused Send again. */
+  const deleteForEveryone = onDeleteForEveryone && (() => {
+    setRefused(null);
+    void Promise.resolve(onDeleteForEveryone()).catch(refuse(shown));
+  });
   const refusal = isMe && refused && refused.on === shown && (
     <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
   );
@@ -1103,7 +1111,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     </div>
   ) : null;
   const menu = !choosing && (
-    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? onDeleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
+    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? deleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
@@ -1206,7 +1214,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={onDeleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={deleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
       {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}
