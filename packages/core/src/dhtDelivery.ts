@@ -801,11 +801,13 @@ export class DhtDelivery {
     const peer = this.options.credentials.peerKey;
     let plaintext: string | null;
     if (ratcheted.length) {
-      // Ratcheted (WISP 4xx): only the pinned contact seals one, to this side. One that does not open says nothing.
-      if (!ratchet || !peer || sender !== peer) return null;
+      // Ratcheted (WISP 4xx): only the pinned contact seals one, to this side. One that does not open in the invite's
+      // mailbox is sealed to someone else, as a plain one below; in the pinned mailbox it says the contact pinned this side.
+      const closed = box === "invite" && sender ? { sealedToAnother: sender } : null;
+      if (!ratchet || !peer || sender !== peer) return closed;
       let opened: Uint8Array | null;
       try { opened = ratchet(fromBase64(ratcheted[0].value)); } catch { opened = null; }
-      if (!opened) return null;
+      if (!opened) return closed;
       try { plaintext = utf8Decode(opened); } catch { return null; }
     } else {
       // A ratcheted envelope of the contact's opened here: a plain one from it is refused from then on (WISP 4xx § Downgrade).
