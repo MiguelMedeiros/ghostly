@@ -7,10 +7,13 @@ import { renderApp } from "../render";
 
 // covers: wallet.spark.send
 
-const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null }));
+const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null, camera: null as MediaStream | null }));
 vi.mock("../../lib/qrReader", async (original) => ({
   ...await original<typeof import("../../lib/qrReader")>(),
   readQrImage: async () => qr.text,
+  qrCamera: async () => { if (qr.camera) return qr.camera; throw new Error("NotAllowedError"); },
+  qrFrameReader: () => Object.assign(async () => null, { ready: Promise.resolve(), close: () => {} }),
+  scanQrFrames: async () => {},
 }));
 vi.mock("../../lib/clipboard", async (original) => ({
   ...await original<typeof import("../../lib/clipboard")>(),
@@ -23,7 +26,7 @@ const INVOICE = "sparkrt1pgss87y4e569hncpt9649q5s6x7c3vv9lqwrjlucxfl3a3kk355a3pf
 const picture = () => new File([new Uint8Array([137, 80, 78, 71])], "qr.png", { type: "image/png" });
 
 describe("Send on the Spark card: scan, paste or picture", () => {
-  beforeEach(() => { qr.text = null; qr.clipboard = null; });
+  beforeEach(() => { qr.text = null; qr.clipboard = null; qr.camera = null; });
   const show = async () => {
     const state = walletView({ mode: "testnet", spark: { configured: true, locked: false, network: "regtest", address: ADDRESS, balance: 5_000, history: [] } }) as WalletState;
     const rendered = renderApp(<SparkWalletPanel wallet={servicesPlatform!.wallet} state={state} />);
@@ -57,6 +60,17 @@ describe("Send on the Spark card: scan, paste or picture", () => {
     qr.clipboard = ADDRESS;
     await user.click(screen.getByTestId("wallet-send-paste"));
     expect(await screen.findByTestId("spark-amount")).toHaveValue("");
+  });
+
+  it("on a phone the camera runs as Send opens", async () => {
+    const track = { stop: vi.fn() };
+    qr.camera = { getTracks: () => [track] } as unknown as MediaStream;
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)", onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+    vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    await show();
+    expect(await screen.findByTestId("wallet-send-scan-stop")).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 
   it("what is no Spark address is said, and cannot be reviewed", async () => {
