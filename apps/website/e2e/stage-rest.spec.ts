@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * The first screen of the pages with ghosts on stage settles once its entrance is over: a ghost's hem stirs a few
- * times when it appears and then rests. A hem morphed for good (SMIL on `d`) laid out and restyled the whole page at
+ * The first screen of the pages with ghosts on stage settles once its entrance is over: a ghost's hem stirs once when
+ * it appears and then rests. A hem morphed for good (SMIL on `d`) laid out and restyled the whole page at
  * every frame for as long as the reader stayed at the top (93-110 ms of main thread a second at 375 px, 362 ms on a 4x
  * slower phone). Measured with no pointer, so the pointer ghost stays out of it, and with the CSS loops stopped (the
  * blink, the bob, a talking mouth, the act's drift), so only the hem is measured.
@@ -16,8 +16,10 @@ for (const width of [375, 1280]) {
         await page.goto(path, { waitUntil: "networkidle" });
         await expect(page.locator("svg.ghost").first()).toBeVisible();
         await page.addStyleTag({ content: "*, *::before, *::after { animation: none !important; transition: none !important; }" });
-        // The entrance and the hem's three stirs (3.2 s each), plus the fonts and the observers.
-        await page.waitForTimeout(12_000);
+        // The entrance and the hem's one stir (3.2 s), plus the fonts and the observers: three stirs (9.6 s) kept a
+        // phone's main thread a quarter busy for a visit's first 10 s (2.1 s of the 6 s after load on /developers/agents
+        // at 4x CPU).
+        await page.waitForTimeout(5_000 - (await page.evaluate(() => performance.now())));
 
         const cdp = await page.context().newCDPSession(page);
         await cdp.send("Performance.enable");
