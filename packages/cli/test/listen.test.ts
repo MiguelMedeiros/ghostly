@@ -190,7 +190,8 @@ describe("hooks", () => {
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     const said = () => stderr.mock.calls.map(([text]) => String(text)).join("");
     try {
-      const handle = eventHandler({ types: [], print: false, write: () => {}, cursor, retryMs: 10, webhook: `http://127.0.0.1:${hookPort}/hook` });
+      // The bridge's token in the path and the query, as docs/CLI.md tells: stderr names the bridge by its origin only.
+      const handle = eventHandler({ types: [], print: false, write: () => {}, cursor, retryMs: 10, webhook: `http://127.0.0.1:${hookPort}/hook/s3cret?token=s3cret` });
       const events = [received("c1", "a", "one"), received("c1", "b", "two"), received("c1", "c", "three")];
       for (const event of events) handle(event);
       await vi.waitFor(() => expect(said()).toMatch(`is not answering: holding event ${events[0].seq}`));
@@ -204,8 +205,10 @@ describe("hooks", () => {
       expect(readFileSync(cursor, "utf8").trim()).toBe(String(events[2].seq));
       // Said once for the outage, and again when it is over; never "did not take".
       expect(said().match(/is not answering/g)).toHaveLength(1);
-      expect(said()).toMatch(`answers again: event ${events[0].seq} taken`);
+      expect(said()).toMatch(`ghostly: the webhook at http://127.0.0.1:${hookPort} is not answering: holding event ${events[0].seq}`);
+      expect(said()).toMatch(`ghostly: the webhook at http://127.0.0.1:${hookPort} answers again: event ${events[0].seq} taken`);
       expect(said()).not.toMatch("passed, not taken");
+      expect(said()).not.toMatch("s3cret");
     } finally {
       stderr.mockRestore();
       bridge.close();
@@ -268,14 +271,17 @@ describe("hooks", () => {
     await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
-      const handle = eventHandler({ types: [], print: false, write: () => {}, cursor, retryMs: 10, webhook: `http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook` });
+      const handle = eventHandler({ types: [], print: false, write: () => {}, cursor, retryMs: 10, webhook: `http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook/s3cret?token=s3cret` });
       const event = received("c1", "p", "poison");
       handle(event);
       await handle.idle();
       expect(asked).toBe(3);
-      // The bridge, what it answered, and that the event will not come again: a wrong path or a missing token is seen.
-      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(
-        `ghostly: the webhook at http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook answered 400: event ${event.seq} (message.received) passed, not taken (a 4xx or a redirect is not tried again)\n`);
+      // The bridge (its origin: a token in the path or query stays off stderr), what it answered, and that the event
+      // will not come again: a wrong path or a missing token is seen by its status.
+      const said = stderr.mock.calls.map(([text]) => String(text)).join("");
+      expect(said).toMatch(
+        `ghostly: the webhook at http://127.0.0.1:${(bridge.address() as AddressInfo).port} answered 400: event ${event.seq} (message.received) passed, not taken (a 4xx or a redirect is not tried again)\n`);
+      expect(said).not.toMatch("s3cret");
       expect(readFileSync(cursor, "utf8").trim()).toBe(String(event.seq));
     } finally {
       stderr.mockRestore();
