@@ -178,6 +178,7 @@ macro_rules! commands {
             hyperdht::paired_hyperdht_address,
             hyperdht::paired_hyperdht_close,
             hyperdht::paired_hyperdht_connect,
+            hyperdht::paired_hyperdht_parting,
             hyperdht::paired_hyperdht_send,
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
@@ -219,6 +220,7 @@ macro_rules! commands {
             paired_transport::paired_iroh_start,
             paired_transport::paired_iroh_stop,
             paired_transport::paired_native_close,
+            paired_transport::paired_native_parting,
             paired_transport::paired_native_send,
             share::share_text,
             unread_count::native_unread_count,
@@ -475,7 +477,29 @@ fn depart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
         return false;
     }
     let _ = page.eval("window.dispatchEvent(new Event('ghostly-departing'))");
+    part(app);
     true
+}
+
+/// What the page left to be said for it on its sessions as the app goes (a call's hang-up), said now by the
+/// transports themselves: a logout or a shutdown signals WebKit's processes with the app, and the page's own goodbye
+/// then never runs. Said again by the page, it is one the contact already heard (`PairedCalls.parting`, in core).
+fn part<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(transports) = app.try_state::<paired_transport::TransportState>() else {
+        return;
+    };
+    let transports = transports.inner().clone();
+    #[cfg(desktop)]
+    let hyperdht = app
+        .try_state::<hyperdht::HyperState>()
+        .map(|state| state.inner().clone());
+    tauri::async_runtime::spawn(async move {
+        #[cfg(desktop)]
+        if let Some(hyperdht) = hyperdht {
+            hyperdht.part().await;
+        }
+        transports.part().await;
+    });
 }
 
 /// A window asked to close. The Ghostly window on a Mac hides (`app_window`). On Linux and Windows its close ends the
@@ -525,7 +549,9 @@ fn hold_close(window: impl Closing) {
 /// A request to quit from outside the app (a logout or a shutdown sends SIGTERM, a terminal Ctrl+C SIGINT, a closed
 /// terminal SIGHUP): the first one runs `quit`, the app's `app.exit`, so it leaves as its window's close makes it
 /// leave: the page says goodbye (`on_run_event`), the native connections close and the app's notifications leave the
-/// desktop's list. A second one ends the process at once. The handlers are in place when this returns.
+/// desktop's list. A second SIGTERM or SIGINT ends the process at once; a SIGHUP after the first does not: a logout
+/// sends one right behind its SIGTERM (logind's SendSIGHUP), and it ended the exit just begun with the call it was
+/// hanging up. The handlers are in place when this returns.
 #[cfg(target_os = "linux")]
 fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
     use tokio::signal::unix::{signal, SignalKind};
@@ -553,6 +579,7 @@ fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
             };
             match quit.take() {
                 Some(quit) => quit(),
+                None if kind == SignalKind::hangup() => {}
                 None => std::process::exit(128 + kind.as_raw_value()),
             }
         }
@@ -1166,6 +1193,42 @@ mod tests {
         assert!(sent.success());
         quit.recv_timeout(std::time::Duration::from_secs(5))
             .expect("the app was asked to exit");
+    }
+
+    /// A logout sends SIGTERM and, right behind it, SIGHUP (logind's SendSIGHUP): the exit the first began goes on, as
+    /// it did not when the SIGHUP counted as a second request and ended the process there and then. A second SIGTERM
+    /// still does. Run in a process of its own (this test binary again), which those signals end.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_logout_s_sighup_behind_its_sigterm_leaves_the_exit_to_go_on() {
+        const CHILD: &str = "GHOSTLY_TEST_SIGNALS_CHILD";
+        let name = "tests::a_logout_s_sighup_behind_its_sigterm_leaves_the_exit_to_go_on";
+        let send = |signal: &str| {
+            std::process::Command::new("kill")
+                .args([signal, &std::process::id().to_string()])
+                .status()
+                .unwrap();
+        };
+        if std::env::var_os(CHILD).is_some() {
+            let (asked, quit) = std::sync::mpsc::channel();
+            exit_on_signals(move || asked.send(()).unwrap());
+            send("-TERM");
+            quit.recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the app was asked to exit");
+            send("-HUP");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            send("-TERM");
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1"])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        // 128 + SIGTERM: the second SIGTERM ended it. 128 + SIGHUP (129) was the SIGHUP.
+        assert_eq!(status.code(), Some(143), "{status:?}");
     }
 
     #[test]

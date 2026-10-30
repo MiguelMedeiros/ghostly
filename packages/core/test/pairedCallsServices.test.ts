@@ -273,6 +273,49 @@ describe("calls on a paired session (calls/1)", () => {
     expect(a.link.sessionOffers.peer).toBeNull();
     await expect(a.link.setCallSignal(hangUp())).rejects.toThrow("Calls need a live connection");
   });
+
+  it("hands the transport the call's hang-up, for it to say should the page be gone as the app exits (a logout)", async () => {
+    // The Desktop's native channel keeps what it is handed and Rust sends it as the app exits: a logout ends WebKit's
+    // processes with the app, and the contact's call stalled, then failed 16 s later.
+    let side!: FrameChannel;
+    const held: (string | null)[] = [];
+    const { a, b } = pair();
+    const connect = a.endpoint.connect;
+    a.endpoint.connect = async descriptor => {
+      const bound = await connect(descriptor);
+      side = bound.channel;
+      side.parting = frame => { held.push(frame); };
+      return bound;
+    };
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsCalls && b.link.supportsCalls).toBe(true));
+    // No call: nothing to say.
+    expect(held.filter(Boolean)).toEqual([]);
+
+    const o = offer();
+    await a.link.setCallSignal(o);
+    await vi.waitFor(() => expect(b.calls).toEqual([o]));
+    const parting = { t: "paired-call", s: JSON.stringify({ t: "h", ts: JSON.parse(o).ts + 1 }) };
+    expect(held.at(-1)).toBe(JSON.stringify(parting));
+    await b.link.setCallSignal(answer());
+    await vi.waitFor(() => expect(a.calls).toHaveLength(1));
+    expect(held.at(-1)).toBe(JSON.stringify(parting));
+
+    // The page is gone: the transport says it, and the contact hears the call end.
+    side.send(held.at(-1)!);
+    await vi.waitFor(() => expect(b.calls).toEqual([o, parting.s]));
+
+    // A call this side hung up itself leaves nothing to say; nor does its goodbye.
+    const again = offer();
+    await a.link.setCallSignal(again);
+    expect(JSON.parse(JSON.parse(held.at(-1)!).s)).toEqual({ t: "h", ts: JSON.parse(again).ts + 1 });
+    await a.link.setCallSignal(hangUp());
+    expect(held.at(-1)).toBeNull();
+    await a.link.setCallSignal(offer());
+    expect(held.at(-1)).not.toBeNull();
+    a.link.depart({ quitting: true });
+    expect(held.at(-1)).toBeNull();
+  });
 });
 
 describe("a live session giving its native listener to a chat in use", () => {

@@ -41,6 +41,8 @@ type Outgoing = (String, oneshot::Sender<()>);
 struct Socket {
     connection: Connection,
     tx: mpsc::Sender<Outgoing>,
+    /// The page's word for the app's exit on this connection (`paired_native_parting`), sent by `part`.
+    parting: Option<String>,
 }
 struct Peer {
     endpoint: Endpoint,
@@ -145,6 +147,7 @@ impl TransportState {
                     Socket {
                         connection: connection.clone(),
                         tx,
+                        parting: None,
                     },
                 ),
             );
@@ -181,6 +184,26 @@ impl TransportState {
     /// app hears a close at once (QUIC's CONNECTION_CLOSE) instead of timing out 30 s later, and
     /// starts watching for this app to come back. Bounded by `within`: exiting never waits on a
     /// relay that does not answer.
+    /// The app is about to exit: what the page left to be said on each connection (`paired_native_parting`, a call's
+    /// hang-up) goes now, after whatever it sent, so the contact hears it even when the page is gone (a logout ends
+    /// WebKit's processes with the app). Each goes once. Returns once every one is written on its stream.
+    pub async fn part(&self) {
+        let partings: Vec<_> = self
+            .inner
+            .lock()
+            .unwrap()
+            .sockets
+            .values_mut()
+            .filter_map(|(_, socket)| Some((socket.tx.clone(), socket.parting.take()?)))
+            .collect();
+        futures_util::future::join_all(partings.into_iter().map(|(tx, text)| async move {
+            let (written, done) = oneshot::channel();
+            if tx.send((text, written)).await.is_ok() {
+                let _ = done.await;
+            }
+        }))
+        .await;
+    }
     pub async fn shutdown(&self, within: Duration) {
         let peers = self.release(b"app exiting");
         let closing = close_all(peers);
@@ -403,6 +426,28 @@ pub async fn paired_native_send(
         .await
         .map_err(|_| "Connection closed")?;
     done.await.map_err(|_| "Connection closed".into())
+}
+/// The frame to send on this connection as the app exits (`TransportState::part`), in place of the one before; none
+/// takes it back.
+#[tauri::command]
+pub fn paired_native_parting(
+    state: State<'_, TransportState>,
+    connection_id: u64,
+    text: Option<String>,
+) -> Result<(), String> {
+    if text
+        .as_ref()
+        .is_some_and(|text| text.is_empty() || text.len() > wire::MAX_FRAME)
+    {
+        return Err("Frame exceeds transport budget".into());
+    }
+    let mut inner = state.inner.lock().unwrap();
+    let (_, socket) = inner
+        .sockets
+        .get_mut(&connection_id)
+        .ok_or("Connection closed")?;
+    socket.parting = text;
+    Ok(())
 }
 #[tauri::command]
 pub fn paired_native_close(state: State<'_, TransportState>, connection_id: u64) {
@@ -700,6 +745,67 @@ mod tests {
             .unwrap()
             .peers
             .is_empty());
+    }
+
+    /// The page left a call's hang-up for its exit and is gone by then (a logout): the app says it on the connection,
+    /// once, before the close. One taken back is not said; a connection that has none says nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn exiting_says_what_the_page_left_to_be_said_before_the_close() {
+        let (leaving, staying) = (app(), app());
+        let (alice, _, _) = start(&leaving, 5).await;
+        let (_bob, bob_address, bob_seen) = start(&staying, 6).await;
+        let (_carol, carol_address, carol_seen) = start(&staying, 7).await;
+        let to_bob = connect(&leaving, alice, &bob_address).await.unwrap();
+        let to_carol = connect(&leaving, alice, &carol_address).await.unwrap();
+        let from_alice = event(&bob_seen, kind("open")).await["id"].clone();
+        event(&carol_seen, kind("open")).await;
+
+        let hang_up = r#"{"t":"paired-call","s":"{\"t\":\"h\",\"ts\":1700000000001}"}"#;
+        for text in [String::new(), "x".repeat(wire::MAX_FRAME + 1)] {
+            assert_eq!(
+                paired_native_parting(leaving.state(), to_bob, Some(text)).unwrap_err(),
+                "Frame exceeds transport budget"
+            );
+        }
+        assert_eq!(
+            paired_native_parting(leaving.state(), 999, Some(hang_up.into())).unwrap_err(),
+            "Connection closed"
+        );
+        paired_native_parting(leaving.state(), to_bob, Some("an older one".into())).unwrap();
+        paired_native_parting(leaving.state(), to_bob, Some(hang_up.into())).unwrap();
+        paired_native_parting(leaving.state(), to_carol, Some(hang_up.into())).unwrap();
+        paired_native_parting(leaving.state(), to_carol, None).unwrap();
+        paired_native_send(leaving.state(), to_bob, "sent before".into())
+            .await
+            .unwrap();
+
+        // As the app goes: told when its exit is held for the page's goodbye, closed `DEPART_MS` later.
+        let state = leaving.state::<TransportState>();
+        state.part().await;
+        state.part().await;
+        event(&bob_seen, |e| e["text"] == hang_up).await;
+        state.shutdown(Duration::from_secs(2)).await;
+        event(&bob_seen, kind("closed")).await;
+        let frames: Vec<Value> = bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "frame")
+            .cloned()
+            .collect();
+        assert_eq!(
+            frames,
+            vec![
+                serde_json::json!({"type": "frame", "id": from_alice, "text": "sent before"}),
+                serde_json::json!({"type": "frame", "id": from_alice, "text": hang_up}),
+            ]
+        );
+        event(&carol_seen, kind("closed")).await;
+        assert!(!carol_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "frame"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
