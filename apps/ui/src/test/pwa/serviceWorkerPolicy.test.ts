@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
+import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
@@ -84,6 +84,25 @@ describe("what the build precaches", () => {
     const files = ["index.html", "version.json", "oidc-callback.html", "sw.js", "manifest.json", "icon-192.png",
       "assets/main-abc.js", "assets/main-abc.css", "assets/fedimint_bg-1.wasm", "assets/main-abc.js.map", "assets/main-abc.js"];
     expect(precacheList(files)).toEqual(["/", "/assets/main-abc.css", "/assets/main-abc.js", "/icon-192.png", "/manifest.json"]);
+  });
+
+  it("not the language detector, which only Desktop's translation loads: a chunk made of nothing else", () => {
+    const root = "/home/me/ghostly/node_modules";
+    const chunk = (fileName: string, ...moduleIds: string[]) => ({ type: "chunk", fileName, moduleIds });
+    const bundle = [
+      chunk("assets/main-abc.js", "/home/me/ghostly/apps/ui/src/main.tsx", `${root}/react/index.js`),
+      chunk("assets/langdetect-text-abc.js", `${root}/tinyld/dist/tinyld.heavy.node.js`, `${root}/@qvac/langdetect-text/index.js`),
+      chunk("assets/windows-abc.js", "C:\\ghostly\\node_modules\\@qvac\\langdetect-text\\index.js"),
+      // The app's own code bundled with it, or a package that only starts with the same name: kept.
+      chunk("assets/translate-abc.js", `${root}/@qvac/langdetect-text/index.js`, "/home/me/ghostly/apps/ui/src/lib/translateDetector.ts"),
+      chunk("assets/other-abc.js", `${root}/tinyld-other/index.js`),
+      chunk("assets/pubky-abc.js", `${root}/@synonymdev/pubky/index.js`),
+      { type: "asset", fileName: "assets/main-abc.css" },
+    ];
+    const leaveOut = desktopOnlyFiles(bundle);
+    expect(leaveOut).toEqual(["assets/langdetect-text-abc.js", "assets/windows-abc.js"]);
+    expect(precacheList(["index.html", ...bundle.map((file) => file.fileName)], leaveOut))
+      .toEqual(["/", "/assets/main-abc.css", "/assets/main-abc.js", "/assets/other-abc.js", "/assets/pubky-abc.js", "/assets/translate-abc.js"]);
   });
 });
 
