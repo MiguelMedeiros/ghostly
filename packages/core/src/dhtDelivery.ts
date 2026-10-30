@@ -340,10 +340,15 @@ export class DhtDelivery {
   /**
    * Whether an envelope to `recipient` is sealed with the ratchet: the contact is pinned and its record lists
    * `ratchet/1`, or a ratcheted envelope of its was opened here, after which nothing goes plain (WISP 4xx § Downgrade).
+   * And the contact pinned this side too (an envelope of its sealed to this side read, or a live session had): a joiner
+   * pins its inviter from the invite, and its first contact sealed with the ratchet would reach an inviter that has no key
+   * to open it with, and so never pins it.
    */
   private ratcheted(recipient: string | undefined): boolean {
     const ratchet = this.options.ratchet, peer = this.options.credentials.peerKey;
-    return !!ratchet && !!peer && recipient === peer && (ratchet.box.heardAny || ratchet.peerSupports());
+    if (!ratchet || !peer || recipient !== peer) return false;
+    if (ratchet.box.heardAny) return true;
+    return ratchet.peerSupports() && (!!this.state.peerPinned || !!this.state.wasLive);
   }
   /**
    * This side joined, and its inviter never answered (`DhtDeliveryState.unanswered`): no envelope of its newer than the
