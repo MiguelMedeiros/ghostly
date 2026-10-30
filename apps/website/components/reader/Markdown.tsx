@@ -3,6 +3,7 @@ import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import GithubSlugger from "github-slugger";
 import { resolveReferenceUrl } from "@/lib/references";
+import { ScrollRegion } from "./ScrollRegion";
 
 function textOf(node: ReactNode): string {
   return Children.toArray(node)
@@ -13,6 +14,17 @@ function textOf(node: ReactNode): string {
     )
     .join("");
 }
+type HastNode = { type: string; tagName?: string; value?: string; children?: HastNode[] };
+const hastText = (node: HastNode): string => node.value ?? node.children?.map(hastText).join("") ?? "";
+
+/** "Table: Field, Type, Meaning": what the table holds, from its header row. */
+function tableName(table?: HastNode) {
+  const find = (node: HastNode | undefined, tag: string) => node?.children?.find((c) => c.tagName === tag);
+  const row = find(find(table, "thead"), "tr");
+  const heads = (row?.children ?? []).filter((c) => c.tagName === "th").map((c) => hastText(c).trim()).filter(Boolean);
+  return heads.length ? `Table: ${heads.join(", ")}` : "Table";
+}
+
 function Diagram({ source }: { source: string }) {
   const labels = new Map<string, string>();
   const nodePattern = /(\w+)\[(?:"([^"]+)"|([^\]]+))\]/g;
@@ -126,15 +138,10 @@ export function ReferenceMarkdown({
     h4: heading("h4"),
     h5: heading("h5"),
     h6: heading("h6"),
-    table: ({ node: _node, children, ...props }) => (
-      <div
-        className="reference-table"
-        tabIndex={0}
-        role="region"
-        aria-label="Scrollable documentation table"
-      >
+    table: ({ node, children, ...props }) => (
+      <ScrollRegion as="div" className="reference-table" name={tableName(node as HastNode | undefined)}>
         <table {...props}>{children}</table>
-      </div>
+      </ScrollRegion>
     ),
     pre: ({ children }) => {
       const code = Children.toArray(children)[0];
@@ -143,7 +150,7 @@ export function ReferenceMarkdown({
         code.props.className === "language-mermaid"
       )
         return <Diagram source={textOf(code.props.children)} />;
-      return <pre tabIndex={0}>{children}</pre>;
+      return <ScrollRegion as="pre">{children}</ScrollRegion>;
     },
     a: ({ href, children }) => (
       <a href={href}>
