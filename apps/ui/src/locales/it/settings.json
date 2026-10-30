@@ -19,8 +19,8 @@
     "identities": "Prove di identità, il tuo DID e i dati Nostr",
     "profile": "Il tuo nome e la tua foto",
     "services": "Servizi condivisi",
-    "settings": "Impostazioni, schermata di blocco e rete",
-    "storage": "Impostazioni S3 e risveglio ad app chiusa"
+    "settings": "Opzioni, schermata di blocco e rete",
+    "storage": "Opzioni S3 e risveglio ad app chiusa"
   },
   "clearAllDataKeeps": "Restano: i tuoi wallet, i tuoi backup e gli altri profili.",
   "colorScheme": "Modalità",
@@ -56,7 +56,7 @@
   "defaultNickname": "Nome nelle chat",
   "defaultNicknameHint": "Usato quando avvii una nuova chat",
   "deleteAllChatsConfirm": "Eliminare tutte le {{count}} chat?",
-  "deleteAllChatsHint": "Messaggi e file vengono eliminati. Impostazioni e wallet restano.",
+  "deleteAllChatsHint": "Messaggi e file vengono eliminati. Opzioni e wallet restano.",
   "groupDownloads": {
     "always": "Sempre",
     "hint": "Messaggi vocali e file piccoli",
@@ -144,7 +144,7 @@
   "reduceMotion": "Riduci animazioni",
   "reduceMotionHint": "Meno animazioni. L'impostazione di sistema vale sempre.",
   "removePassword": "Rimuovi password",
-  "search": "Cerca nelle impostazioni",
+  "search": "Cerca nelle opzioni",
   "searchEmpty": "Nessuna impostazione trovata",
   "searchWords": {
     "account": "account",
@@ -195,7 +195,7 @@
   "storageParts": {
     "app": "Messaggi e dati dell'app: {{size}}",
     "files": "File ({{count}}): {{size}}",
-    "local": "Impostazioni: {{size}}",
+    "local": "Opzioni: {{size}}",
     "staged": "Copie in salvataggio: {{size}}"
   },
   "storagePartsNote": "Messaggi e dati dell'app contano tutti i profili di questo dispositivo. I file sono di questo profilo.",
@@ -221,7 +221,7 @@
     "30": "30 minuti",
     "60": "1 ora"
   },
-  "title": "Impostazioni",
+  "title": "Opzioni",
   "translate": {
     "downloaded": "Lingue scaricate",
     "hint": "L'impostazione predefinita per le chat che non hanno scelto",

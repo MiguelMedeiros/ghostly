@@ -39,11 +39,11 @@
   "reconnecting": "Riconnessione...",
   "rejected": "Chiamata rifiutata",
   "relayNoAnswer": "Il tuo relay non ha risposto",
-  "relayNoAnswerNext": "Controlla il server TURN in Impostazioni, Rete. Nascondi il mio IP non si connette mai in diretta.",
+  "relayNoAnswerNext": "Controlla il server TURN in Opzioni, Rete. Nascondi il mio IP non si connette mai in diretta.",
   "relayOnlyNow": "Chiamata terminata: Nascondi il mio IP è attivo",
   "relayOnlyNowNext": "Questa chiamata raggiungeva il tuo contatto in diretta. Richiama: passerà dal tuo relay.",
   "relayOnlyOff": "Le chiamate sono disattivate con Nascondi il mio IP",
-  "relayOnlyOffNext": "Le chiamate di questa app non possono ancora usare un relay. Disattivalo in Impostazioni, Rete per chiamare.",
+  "relayOnlyOffNext": "Le chiamate di questa app non possono ancora usare un relay. Disattivalo in Opzioni, Rete per chiamare.",
   "selfView": "Trascina per spostare, tira un angolo per ridimensionare, doppio clic per ripristinare",
   "share": {
     "blocked": "La condivisione dello schermo è bloccata",
