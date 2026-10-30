@@ -223,7 +223,9 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: gradient-shift 4s linear infinite;
+  /* Three passes, then the words rest: background-position is restyled on the main thread every frame. The
+     gradient is 200% wide and moves by 200%, so the resting frame is the first one, no jump. */
+  animation: gradient-shift 4s linear 3;
 }
 @keyframes gradient-shift {
   to {
