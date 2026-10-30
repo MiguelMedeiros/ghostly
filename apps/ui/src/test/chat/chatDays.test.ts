@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { byDay, dayLabel, dayOf, rowDays } from "../../lib/chatDays";
 import { translateWith } from "../../locales/translate";
 import en from "../../locales/en";
@@ -63,5 +63,18 @@ describe("a day's name", () => {
 
   it("is said in the interface's language", () => {
     expect(dayLabel(dayOf(at(2026, 10, 27)), today, "pt", t)).toBe("terça-feira, 27 de outubro");
+  });
+
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it("is written by one formatter per language for every day, again on every render", () => {
+    // A chat with a message a day: a hundred days in its page, all named again on each render.
+    const days = Array.from({ length: 100 }, (_, i) => dayOf(at(2024, 1, 1 + i)));
+    const name = () => days.map(day => dayLabel(day, today, "fr", t));
+    const first = name();
+    const built = vi.spyOn(Intl, "DateTimeFormat");
+    expect(name()).toEqual(first);
+    expect(built).not.toHaveBeenCalled();
+    expect(first[0]).toBe("lundi 1 janvier 2024");
   });
 });

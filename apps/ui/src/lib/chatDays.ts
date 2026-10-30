@@ -1,4 +1,6 @@
 import type { Translate } from "../locales/translate";
+import type { Language } from "./settings";
+import { formatAt } from "./time";
 
 /** The local midnight starting the day `at` is on. */
 export function dayOf(at: number): number {
@@ -44,12 +46,13 @@ export function byDay<R>(rows: readonly R[], days: readonly number[], from = 0):
 
 /**
  * How a day of a chat is named above its messages: Today, Yesterday, else its weekday and date, with the year when it is
- * not this year's, in the interface's language.
+ * not this year's, in the interface's language. One formatter per language and year or none: a chat with a message a day
+ * has a hundred days in its page, named again on each render.
  */
-export function dayLabel(day: number, today: number, language: string, t: Translate): string {
+export function dayLabel(day: number, today: number, language: Language, t: Translate): string {
   if (day === today) return t("chat.today");
   const yesterday = new Date(today);
   if (day === yesterday.setDate(yesterday.getDate() - 1)) return t("chat.yesterday");
   const year = new Date(day).getFullYear() !== new Date(today).getFullYear();
-  return new Intl.DateTimeFormat(language, { weekday: "long", day: "numeric", month: "long", ...(year && { year: "numeric" }) }).format(day);
+  return formatAt(day, { weekday: "long", day: "numeric", month: "long", ...(year && { year: "numeric" }) }, language);
 }
