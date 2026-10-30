@@ -134,6 +134,7 @@ function desktop() {
   const invoke = (async (command: string, args: Record<string, unknown> = {}) => {
     calls.push({ command, args });
     if (command === "app_open") return `app-${++labels}`;
+    if (command === "app_focused") return true;
     if (command === "linked_files_pick_cancel") { cleared++; return undefined; }
     if (command === "linked_files_pick") {
       const begun = cleared;

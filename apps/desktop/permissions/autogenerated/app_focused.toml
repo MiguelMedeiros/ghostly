@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-app-focused"
+description = "Enables the app_focused command without any pre-configured scope."
+commands.allow = ["app_focused"]
+
+[[permission]]
+identifier = "deny-app-focused"
+description = "Denies the app_focused command without any pre-configured scope."
+commands.deny = ["app_focused"]
