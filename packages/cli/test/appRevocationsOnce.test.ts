@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { canonicalJsonBytes, readAppBundle, readAppRevocations, seedSigner, signAppRevocation, toBase64Url, type SignedAppRevocation } from "@ghostly/core";
+import { canonicalJsonBytes, readAppBundle, readAppRevocations, seedSigner, setAppSignatureFastPath, signAppRevocation, toBase64Url, type SignedAppRevocation } from "@ghostly/core";
 import { revokeApp, signStore } from "../src/apps";
 // covers: apps.bundle, apps.store
 
@@ -11,7 +11,8 @@ import { revokeApp, signStore } from "../src/apps";
  * A publisher command checks each revocation's signature once per run, however many times it reads the list: the
  * revocations it read from the held file, and the ones it just wrote itself, are not verified again entry by entry.
  * Before, `app revoke` verified the held list twice and `store sign` every revocation three or four times, so 4095 of
- * them took 6 to 13 seconds. Ed25519 verifications are counted at noble, the only verifier the core uses.
+ * them took 6 to 13 seconds. Ed25519 verifications are counted at noble, with the CLI's faster Node check taken back so
+ * that noble sees every one.
  */
 
 const verifies = vi.hoisted(() => ({ count: 0 }));
@@ -56,7 +57,7 @@ async function revocations(ref: string, count: number, from = 0): Promise<Signed
 
 const HELD = 40;
 
-beforeEach(() => { verifies.count = 0; });
+beforeEach(() => { setAppSignatureFastPath(null); verifies.count = 0; });
 
 describe("a publisher command checks each revocation once per run", () => {
   it("app revoke verifies the held list once and, of the list it writes, only the new statement", async () => {
