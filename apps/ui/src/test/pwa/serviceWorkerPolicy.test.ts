@@ -104,6 +104,10 @@ describe("what the build precaches", () => {
     expect(precacheList(["index.html", ...bundle.map((file) => file.fileName)], leaveOut))
       .toEqual(["/", "/assets/main-abc.css", "/assets/main-abc.js", "/assets/other-abc.js", "/assets/pubky-abc.js", "/assets/translate-abc.js"]);
   });
+
+  it("not the language detector's worker either: an asset, so not one of those chunks", () => {
+    expect(precacheList(["assets/main-abc.js", "assets/translateDetector.worker-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
+  });
 });
 
 describe("a share target's form", () => {

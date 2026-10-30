@@ -58,18 +58,18 @@ describe("the members a translation names", () => {
 describe("the language a draft is written in", () => {
   const detect = (code: string, probability = 0.9): DetectLanguages => () => [{ code, probability }];
 
-  it("is the detector's, when it is sure", () => {
-    expect(draftLanguage("Tomorrow I can after six", detect("en"))).toBe("en");
-    expect(draftLanguage("Amanhã eu posso depois das seis", detect("pt-BR"))).toBe("pt");
+  it("is the detector's, when it is sure", async () => {
+    expect(await draftLanguage("Tomorrow I can after six", detect("en"))).toBe("en");
+    expect(await draftLanguage("Amanhã eu posso depois das seis", detect("pt-BR"))).toBe("pt");
   });
 
-  it("is unknown for a few letters, a guess it is not sure of, or undetermined", () => {
-    expect(draftLanguage("ok", detect("en"))).toBeNull();
-    expect(draftLanguage("lol no way 😂", detect("vo", 0.3))).toBeNull();
-    expect(draftLanguage("something long enough", detect("und"))).toBeNull();
+  it("is unknown for a few letters, a guess it is not sure of, or undetermined", async () => {
+    expect(await draftLanguage("ok", detect("en"))).toBeNull();
+    expect(await draftLanguage("lol no way 😂", detect("vo", 0.3))).toBeNull();
+    expect(await draftLanguage("something long enough", detect("und"))).toBeNull();
   });
 
-  it("is nothing at all for a draft with no words", () => {
-    expect(draftLanguage("https://example.com 42 😀", detect("en"))).toBeUndefined();
+  it("is nothing at all for a draft with no words", async () => {
+    expect(await draftLanguage("https://example.com 42 😀", detect("en"))).toBeUndefined();
   });
 });
