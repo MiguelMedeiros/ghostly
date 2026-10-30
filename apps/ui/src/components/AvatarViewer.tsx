@@ -73,7 +73,8 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
               style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem), 70dvh)`, height: "auto", ...zoomStyle }}
               className={`aspect-square rounded-2xl object-cover shadow-2xl max-md:rounded-xl ${zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`} />
           )}
-          <figcaption id={`${id}-name`} className="max-w-full truncate px-2 text-base font-medium text-white max-md:text-text-primary"><bdi>{name}</bdi></figcaption>
+          {/* `dir` on the box that cuts: the "…" goes at the name's own end, not at its start in the other direction. */}
+          <figcaption id={`${id}-name`} dir="auto" className="max-w-full truncate px-2 text-base font-medium text-white max-md:text-text-primary">{name}</figcaption>
         </figure>
       </div>
       <button type="button" aria-label={t("common.close")} data-testid="avatar-viewer-close" onClick={onClose}
