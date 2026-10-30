@@ -35,6 +35,7 @@
     "noMint": "No mint configured",
     "noTestMint": "This wallet has no test mint to ask for test coins",
     "notEnough": "Not enough sats in your wallet",
+    "notEnoughForFee": "Not enough sats in your wallet: {{amount}} leave room for the fee",
     "notPaid": "The payment didn't go through",
     "selectMint": "Select a configured mint",
     "testCoinsPending": "{{host}} hasn't sent the test coins yet",

@@ -35,6 +35,7 @@
     "noMint": "Nenhum mint configurado",
     "noTestMint": "Esta carteira não tem um mint de teste para pedir moedas de teste",
     "notEnough": "Sats insuficientes na sua carteira",
+    "notEnoughForFee": "Sats insuficientes na sua carteira: {{amount}} deixam espaço para a taxa",
     "notPaid": "O pagamento não foi concluído",
     "selectMint": "Selecione um mint configurado",
     "testCoinsPending": "{{host}} ainda não enviou as moedas de teste",
