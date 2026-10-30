@@ -421,6 +421,23 @@ const ENTRY_TIMEOUT_MS = 3 * 60_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 /** Messages deleted for everyone a group remembers, so a copy that comes again stays gone: as many as a chat's deleted ids. */
 export const MAX_REMOVED_IDS = 500;
+
+/**
+ * The removed ids with this one noted. Full, the oldest of the author who has the most goes (the one just noted's own on
+ * a tie): a member's removals of messages that are not here, as many as they like, push out only their own.
+ */
+export function withRemovedId(ids: readonly string[], messageId: string): string[] {
+  const next = [...ids, messageId];
+  if (next.length <= MAX_REMOVED_IDS) return next;
+  const authorOf = (id: string) => id.slice(0, Math.max(0, id.indexOf(":")));
+  const counts = new Map<string, number>();
+  for (const id of next) counts.set(authorOf(id), (counts.get(authorOf(id)) ?? 0) + 1);
+  let most = authorOf(messageId);
+  for (const [author, count] of counts) if (count > counts.get(most)!) most = author;
+  next.splice(next.findIndex(id => authorOf(id) === most), 1);
+  return next;
+}
+
 /**
  * A joiner whose entry session timed out (the relays failing, its app closed a moment) is answered again after this,
  * doubling with each timeout in a row up to `REFUSED_FOR_MS`: a slow network is no refusal.
@@ -1302,14 +1319,14 @@ export class Groups {
   }
 
   /**
-   * Its author deleted a message for everyone: noted so (the newest `MAX_REMOVED_IDS`, also when the message is not here
-   * yet, so it is taken as gone when it comes), and its file goes from this device.
+   * Its author deleted a message for everyone: noted so (`MAX_REMOVED_IDS` at most, each author's newest: `withRemovedId`;
+   * also when the message is not here yet, so it is taken as gone when it comes), and its file goes from this device.
    */
   async removed(groupId: string, messageId: string): Promise<void> {
     const group = this.record(groupId);
     if (!group) return;
     if (!group.removedIds?.includes(messageId)) {
-      group.removedIds = [...(group.removedIds ?? []), messageId].slice(-MAX_REMOVED_IDS);
+      group.removedIds = withRemovedId(group.removedIds ?? [], messageId);
       this.saveSoon(group);
     }
     // A community's catch-up no longer hands its frame to a member who was away.

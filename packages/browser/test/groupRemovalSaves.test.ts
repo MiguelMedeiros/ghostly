@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommunityWorld, type Peer } from "./communityWorld";
 import type { Removal } from "../src/engine/removals";
+import { MAX_REMOVED_IDS } from "../src/engine/groups";
 // covers: groups.catch-up, groups.community.catch-up
 
 /**
@@ -58,5 +59,18 @@ describe("removals in a group", { timeout: 120_000 }, () => {
     expect(writes()).toBe(1);
     await world.restart(alice);
     expect(alice.groups.removals(id)).toEqual([{ ...removal, pending: undefined }]);
+  });
+
+  it.each(["mesh", "community"] as const)("in a %s group: one member's many removals push out only their own, not another's", async (kind) => {
+    const { world, alice, id } = await groupOf(kind);
+    // Bob's removal came before his message (back from away): his late copy is to stay gone.
+    await alice.groups.removed(id, "bob:secret");
+    await alice.groups.removed(id, "carol:1");
+    // Dave removes for everyone more ids of his own, never sent, than the group keeps.
+    for (let i = 0; i < MAX_REMOVED_IDS + 50; i++) await alice.groups.removed(id, `dave:${i}`);
+    for (const kept of ["bob:secret", "carol:1", `dave:${MAX_REMOVED_IDS + 49}`]) expect(alice.groups.isRemoved(id, kept)).toBe(true);
+    expect(alice.groups.isRemoved(id, "dave:0")).toBe(false);
+    await world.restart(alice);
+    expect(alice.groups.isRemoved(id, "bob:secret")).toBe(true);
   });
 });

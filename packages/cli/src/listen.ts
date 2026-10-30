@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { CONTACT_KEY } from "./apiKit";
+import { CONTACT_KEY, namedByThem } from "./apiKit";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -71,14 +71,17 @@ export class Allowlist {
 
 /**
  * `--from` and `--group` as ids, resolved once at start: a contact key as that key (whatever any chat is named), else a
- * chat by id, prefix or name (`findChat`); a group by id, prefix or name. A name that later changes (or a contact who
- * renames themselves) moves nothing.
+ * chat by its id or a label this side gave it, as `call auto on --from` (`findOwnNamedChat`): a prefix of its id or the
+ * name its contact gave itself is refused, since another contact could call itself that; a group by id, prefix or name.
+ * A name that later changes (or a contact who renames themselves) moves nothing.
  */
 export async function allowlist(from: readonly string[], groups: readonly string[], call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>): Promise<Allowlist> {
   const chats = new Set<string>(), keys = new Set<string>(), groupIds = new Set<string>();
   for (const ref of from) {
-    if (CONTACT_KEY.test(ref)) keys.add(ref);
-    else chats.add(((await call("chat.get", { chat: ref })) as { id: string }).id);
+    if (CONTACT_KEY.test(ref)) { keys.add(ref); continue; }
+    const chat = (await call("chat.get", { chat: ref })) as { id: string; label?: string | null; peerName?: string | null; peer?: string };
+    if (chat.id !== ref && chat.label?.toLowerCase() !== ref.toLowerCase()) throw namedByThem(ref, { chat: chat.id, name: chat.peerName ?? null, contact: chat.peer });
+    chats.add(chat.id);
   }
   for (const ref of groups) groupIds.add(((await call("group.get", { group: ref })) as { id: string }).id);
   return new Allowlist(chats, keys, groupIds, peerOf);

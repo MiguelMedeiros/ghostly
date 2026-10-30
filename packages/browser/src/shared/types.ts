@@ -162,8 +162,8 @@ export interface StoredGroup {
    */
   invited?: Record<string, number>;
   /**
-   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, the newest
-   * `MAX_REMOVED_IDS`: a copy that comes again (a catch-up, a member handing it on) is not stored again.
+   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, `MAX_REMOVED_IDS` at
+   * most, each author's newest (`withRemovedId`): a copy that comes again (a catch-up, a member handing it on) is not stored again.
    */
   removedIds?: string[];
   /** My messages I deleted for everyone, their removal said to the members and again to an edge that opens (`engine/removals.ts`). */
