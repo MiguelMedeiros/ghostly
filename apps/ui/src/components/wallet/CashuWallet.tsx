@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
+import { parseEngineError, paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
 import { PaymentReview } from "../PaymentReview";
@@ -81,6 +81,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [payInput, setPayInput] = useState("");
   /** What the person chose to pay on an invoice with no amount: it goes with the text it was typed for. */
   const [payAmount, setPayAmount] = useState("");
+  /** Max was pressed and the amount not typed over: it comes down by the fee, as all the card holds leaves none for it. */
+  const maxed = useRef(false);
   /** Send was just opened, and nothing given to it yet: on a phone its camera starts (`SendScan`), once. */
   const [sendOpened, setSendOpened] = useState(false);
   /** Done after paying an address takes its panel away with the button pressed: the keys go to the emptied field. */
@@ -132,13 +134,29 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   // `chosen`: the amount typed for an invoice with no amount, which only the mints are asked.
   const quoteFor = (invoice: Bolt11Invoice, chosen?: number) => void run(async () => {
     setSendOpened(false);
-    const got = chosen === undefined ? await wallet.quoteInvoice(invoice.invoice, rail === "cashu" ? "cashu" : undefined) : await wallet.quoteInvoice(invoice.invoice, "cashu", chosen);
+    const got = chosen === undefined ? await wallet.quoteInvoice(invoice.invoice, rail === "cashu" ? "cashu" : undefined) : await quoteChosen(invoice.invoice, chosen);
     setQuoted(invoice); setQuote(got);
   }, "send");
+  // A Max comes down to what the mint says leaves room for its fee, known only once it is asked: twice at most, as a
+  // fee may grow a little. An amount typed is the person's: it is refused, never lowered.
+  const quoteChosen = async (invoice: string, chosen: number) => {
+    for (let sats = chosen, again = maxed.current ? 2 : 0; ; again--) {
+      try {
+        const got = await wallet.quoteInvoice(invoice, "cashu", sats);
+        setPayAmount(String(sats));
+        return got;
+      } catch (cause) {
+        const refusal = parseEngineError(cause instanceof Error ? cause.message : String(cause));
+        const room = refusal?.code === "notEnoughForFee" ? Number(refusal.values.amount) : 0;
+        if (!again || room <= 0 || room >= sats) throw cause;
+        sats = room;
+      }
+    }
+  };
   // A scanned, pasted or pictured invoice with its amount goes straight to its review, as a phone wallet does; anything
   // else fills the field, where it is shown, asked about or refused as typed text is.
   const given = (text: string) => {
-    setError(""); setNotice(""); setPayInput(text); setPayAmount("");
+    setError(""); setNotice(""); setPayInput(text); setPayAmount(""); maxed.current = false;
     const found = routeSend(text);
     if (found.kind === "invoice") quoteFor(found.invoice);
   };
@@ -299,7 +317,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               <SendScan onText={given} disabled={busy} scanOnOpen={sendOpened}>
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(t("wallet.cashu.redeemed", { amount: formatAmount(received, t.language), unit })); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); else if (route.kind === "no-amount" && chosen) quoteFor(route.invoice, chosen); }}>
                 <textarea ref={payField} data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} autoFocus={!touchOnly()}
-                  placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => { setPayInput(e.target.value); setPayAmount(""); }} />
+                  placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => { setPayInput(e.target.value); setPayAmount(""); maxed.current = false; }} />
                 {destination && <div className="bg-surface-alt rounded-xl p-3 text-text-primary" data-testid="wallet-lnurl"><LightningAddressPay key={destination} wallet={wallet} text={destination} via={rail === "cashu" ? "cashu" : undefined} onDone={() => { setPayInput(""); payField.current?.focus(); }} /></div>}
                 {pasted && (
                   <p className="text-text-primary text-sm" data-testid="wallet-pay-preview">
@@ -309,7 +327,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                     {pasted.expiresAt * 1000 < Date.now() && <span className="text-danger"> · {t("wallet.lightning.expired")}</span>}
                   </p>
                 )}
-                {choosing && <Amount value={payAmount} onChange={setPayAmount} unit={unit} testId="wallet-pay-amount" />}
+                {choosing && <Amount value={payAmount} onChange={(next) => { maxed.current = false; setPayAmount(next); }} unit={unit} testId="wallet-pay-amount" />}
+                {/* The line's dim is its text's only: Max keeps full-strength ink and a phone-sized target. */}
+                {choosing && <p className="text-xs m-0 flex flex-wrap items-center gap-2" data-testid="wallet-pay-balance">
+                  <span className="text-text-muted">{t("wallet.send.balance", { amount: formatAmount(state.balance, t.language), unit })}</span>
+                  {state.balance > 0 && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold text-text-primary bg-surface-alt hover:bg-border cursor-pointer disabled:opacity-40" disabled={busy} data-testid="wallet-pay-max" onClick={() => { setPayAmount(String(state.balance)); maxed.current = true; }}>{t("wallet.send.max")}</button>}
+                </p>}
                 {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && route.kind !== "invoice" && !chosen)}>
                   {busy ? t("wallet.cashu.working") : isToken ? t("wallet.cashu.redeem") : chosen ? t("wallet.cashu.payAmount", { amount: formatAmount(chosen, t.language), unit }) : pasted?.amountSat ? t("wallet.cashu.payAmount", { amount: formatAmount(pasted.amountSat, t.language), unit }) : t("wallet.lightning.pay")}
                 </Button>}
