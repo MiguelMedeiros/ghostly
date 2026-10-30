@@ -1069,6 +1069,18 @@ pub fn app_focus<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), Str
     Ok(())
 }
 
+/// Whether an app window has the focus (the Ghostly window only): a `files.pick` raises the Ghostly window with its
+/// sheet, so an app the person is not in asks nothing. A window gone has no focus.
+#[tauri::command]
+pub fn app_focused<R: Runtime>(app: AppHandle<R>, label: String) -> Result<bool, String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    Ok(app.get_webview_window(&label).is_some_and(|window| {
+        window.is_focused().unwrap_or(false) && !window.is_minimized().unwrap_or(false)
+    }))
+}
+
 /// The content rule list of an app window on macOS and Linux: every load blocked but the runner's own scheme.
 #[cfg(any(target_os = "macos", target_os = "linux", test))]
 const RULES_ID: &str = "ghostly-app-sandbox-1";
@@ -2253,8 +2265,13 @@ mod tests {
         let label = open(app.handle(), request).unwrap();
         assert_eq!(app_focus(app.handle().clone(), label.clone()), Ok(()));
         app_close(app.handle().clone(), label.clone()).unwrap();
-        assert_eq!(app_focus(app.handle().clone(), label), Ok(()));
+        assert_eq!(app_focus(app.handle().clone(), label.clone()), Ok(()));
+        assert_eq!(app_focused(app.handle().clone(), label), Ok(false));
         for other in ["main", "svc-1", "app-"] {
+            assert!(
+                app_focused(app.handle().clone(), other.into()).is_err(),
+                "{other}"
+            );
             assert_eq!(
                 app_focus(app.handle().clone(), other.into()),
                 Err("Not an app window".into()),
