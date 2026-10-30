@@ -767,9 +767,13 @@
   },
   "unseen": {
     "lineReal": "{{wallet}} に新しい {{amount}} sats",
+    "lineRealOne": "{{wallet}} に新しい {{amount}} sat",
     "lineTest": "{{wallet}} に新しいテスト用 {{amount}} sats",
+    "lineTestOne": "{{wallet}} に新しいテスト用 {{amount}} sat",
     "real": "{{place}}、新着 {{amount}} sats",
-    "test": "{{place}}、新着 {{amount}} テスト sats"
+    "realOne": "{{place}}、新着 {{amount}} sat",
+    "test": "{{place}}、新着 {{amount}} テスト sats",
+    "testOne": "{{place}}、新着 {{amount}} テスト sat"
   },
   "usdt": {
     "approve": "確認を承認するまで何も送られません。",

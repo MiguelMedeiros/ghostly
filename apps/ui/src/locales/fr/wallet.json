@@ -767,9 +767,13 @@
   },
   "unseen": {
     "lineReal": "{{amount}} nouveaux sats dans {{wallet}}",
+    "lineRealOne": "{{amount}} nouveau sat dans {{wallet}}",
     "lineTest": "{{amount}} nouveaux sats de test dans {{wallet}}",
+    "lineTestOne": "{{amount}} nouveau sat de test dans {{wallet}}",
     "real": "{{place}}, {{amount}} nouveaux sats",
-    "test": "{{place}}, {{amount}} nouveaux sats de test"
+    "realOne": "{{place}}, {{amount}} nouveau sat",
+    "test": "{{place}}, {{amount}} nouveaux sats de test",
+    "testOne": "{{place}}, {{amount}} nouveau sat de test"
   },
   "usdt": {
     "approve": "Rien n'est envoyé tant que vous n'avez pas approuvé la vérification.",
