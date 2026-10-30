@@ -6,7 +6,8 @@
 //! fine: their media runs in Rust, `native_call`). macOS asks the person itself (NSMicrophoneUsageDescription), and
 //! WebView2 answers from its own prompt.
 //!
-//! Only the app's own page, and only a microphone: a camera or a screen stays refused, as calls capture those in Rust.
+//! Only the app's own page, and only a microphone: a camera or a screen stays refused, as calls capture those in Rust
+//! (and so do the composer's photo and the QR scans: `captureCamera` in apps/ui/src/lib/mediaDevices.ts).
 
 /// Whether a user-media request is granted: a microphone alone, asked by the app's own page.
 #[cfg(any(target_os = "linux", test))]

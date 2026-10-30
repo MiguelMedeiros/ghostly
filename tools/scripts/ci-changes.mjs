@@ -43,6 +43,9 @@ export const WEBSITE_INPUTS = [
   "docs/CLI.md",
   "docs/AI-AGENTS.md",
   "packages/cli/SKILL.md",
+  "packages/cli/README.md",
+  // llms.test.mjs checks the install line against the CLI's package name.
+  "packages/cli/package.json",
   // Quoted on /developers: sync-references.mjs's excerpt().
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",

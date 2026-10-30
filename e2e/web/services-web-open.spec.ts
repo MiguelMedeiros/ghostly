@@ -25,10 +25,11 @@ async function demoApp(): Promise<{ server: Server; port: number; seen: { method
       seen.push({ method: request.method ?? "", path: request.url ?? "", cookie: request.headers.cookie });
       if (request.url === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8", "set-cookie": "visit=1; Path=/; HttpOnly", "x-frame-options": "DENY" });
-        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><script src="/app.js"></script>`);
+        response.end(`<!doctype html><title>Demo</title><h1 id="title">Hello from the demo</h1><p id="out">…</p><p id="popup">…</p><script src="/app.js"></script>`);
       } else if (request.url === "/app.js") {
         response.writeHead(200, { "content-type": "text/javascript" });
-        response.end(`fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
+        response.end(`document.getElementById("popup").textContent = window.open("/popup") ? "opened" : "refused";
+          fetch("/api/echo?x=1", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hello: "ghost" }) })
           .then((r) => r.json()).then((j) => { document.getElementById("out").textContent = JSON.stringify({ ...j, origin: location.origin, storage: (() => { try { return Object.keys(localStorage); } catch (e) { return "refused"; } })() }); });`);
       } else if (request.url?.startsWith("/api/echo")) {
         response.writeHead(200, { "content-type": "application/json" });
@@ -88,13 +89,56 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     expect(out.origin).not.toBe(appOrigin);
     expect(out.origin).toMatch(/^http:\/\/[ybndrfg8ejkmcpqxot1uwisza345h769]{32}\.localhost:\d+$/);
     expect(app.seen.map((r) => `${r.method} ${r.path}`)).toEqual(expect.arrayContaining(["GET /", "GET /app.js", "POST /api/echo?x=1"]));
+    // It opens no window of its own: one would be a tab on its origin, outliving the view and the lock.
+    await expect(demo.locator("#popup")).toHaveText("refused");
+    expect(app.seen.map((r) => r.path)).not.toContain("/popup");
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
+    // Another site that knows the app's origin posts a form to it while it is open, at the top and into a frame of its
+    // own: neither reaches the contact as this person (the worker forwards only the app's own frames' navigations).
+    const other = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><iframe name="inner"></iframe>
+        <form id="framed" method="post" target="inner" action="${out.origin}/api/steal?framed"><input name="a" value="1"></form>
+        <form id="top" method="post" action="${out.origin}/api/steal?top"><input name="a" value="1"></form>
+        <script>document.getElementById("framed").submit(); setTimeout(() => document.getElementById("top").submit(), 500);</script>`);
+    });
+    await new Promise<void>((done) => other.listen(0, "127.0.0.1", done));
+    const elsewhere = await person.page.context().newPage();
+    try {
+      await elsewhere.goto(`http://127.0.0.1:${(other.address() as AddressInfo).port}/`);
+      await elsewhere.waitForURL((at) => at.pathname === "/api/steal", { timeout: 30_000 });
+      await elsewhere.waitForLoadState("load");
+      await person.page.waitForTimeout(2_000);
+    } finally {
+      await elsewhere.close();
+      other.close();
+    }
+    expect(app.seen.filter((r) => r.path.startsWith("/api/steal"))).toEqual([]);
+    await expect(demo.locator("#title")).toHaveText("Hello from the demo");
+
+    // An iPhone on its side (Chromium plays its safe area): ✕, the name and the app clear of the notch on either side
+    // and of the home indicator. The app cannot keep clear of them itself: `env(safe-area-inset-*)` is 0 in its frame.
+    // ✕ was at x=8 under the notch, and the frame ran edge to edge and to the bottom.
+    const viewport = person.page.viewportSize()!;
+    await person.page.setViewportSize({ width: 667, height: 375 });
+    const cdp = await person.page.context().newCDPSession(person.page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 47, bottom: 21, left: 47 } });
+    const outside = () => view.evaluate((v) => [v.querySelector("[data-testid=service-view-close]")!, v.querySelector("[data-testid=service-view-frame]")!, v.querySelector("span")!]
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.left < 47 || r.right > innerWidth - 47 || r.bottom > innerHeight - 21)
+      .map((r) => `${Math.round(r.left)}..${Math.round(r.right)} x ${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerWidth}x${innerHeight}`));
+    await expect.poll(outside).toEqual([]);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 0, bottom: 0, left: 0 } });
+    await person.page.setViewportSize(viewport);
+
     // Closed: gone, the chat is where it was, and the focus back on Open, not on the page's body.
+    const chat = person.page.url();
     await person.page.getByTestId("service-view-close").click();
     await expect(view).toHaveCount(0);
     await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    await expect(person.page).toHaveURL(chat);
     await expect(open).toBeFocused();
 
     // With the keyboard: Tab stays in the view, never on the chat hidden under it; Escape closes it, back on Open.
@@ -109,6 +153,15 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     await person.page.keyboard.press("Escape");
     await expect(view).toHaveCount(0);
     await expect(open).toBeFocused();
+    await expect(person.page).toHaveURL(chat);
+
+    // Opened again, Back (Android's back gesture, the browser's) closes it and leaves the chat as it was.
+    await open.click();
+    await expect(view).toBeVisible();
+    await person.page.goBack();
+    await expect(view).toHaveCount(0);
+    await expect(person.page).toHaveURL(chat);
+    await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
   } catch (error) {
     await bot.attachLogs(info);
     throw error;

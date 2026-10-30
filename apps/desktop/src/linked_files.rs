@@ -423,15 +423,17 @@ impl LinkedFiles {
     }
 
     /// The Ghostly window's page starts again: the apps of the page before are gone, so every dialog they left up
-    /// keeps nothing when the person answers it (as `let_go`). It stays up, and its app still gets no other.
+    /// keeps nothing when the person answers it (as `let_go`). It stays up, and its app still gets no other. Called on
+    /// the main thread: it never waits for `writing` (a pick's links being written), only counts. A pick whose `add`
+    /// already checked `begin` comes before it.
     pub fn page_started(&self) {
-        let _writing = locked(&self.writing);
         for file in locked(&self.picking).iter() {
             self.clear(file.clone());
         }
     }
 
-    /// Counted with `writing` held, so a pick's `add` sees it or comes before it.
+    /// Counted with `writing` held where the links change on disk too (`forget` "all", `drop_space`), so a pick's
+    /// `add` sees it or comes before it.
     fn clear(&self, at: PathBuf) {
         *locked(&self.cleared).entry(at).or_default() += 1;
     }
@@ -454,18 +456,22 @@ impl LinkedFiles {
         begun: u64,
         picked: Vec<(String, PathBuf)>,
     ) -> Result<Vec<Entry>, String> {
-        let _writing = locked(&self.writing);
+        let cancelled =
+            || Err("cancelled: The app's files were let go while it picked".to_string());
+        let too_large = || Err("too-large: Too many files for one app".to_string());
         if self.begin(space, app)? != begun {
-            return Err("cancelled: The app's files were let go while it picked".into());
+            return cancelled();
         }
-        let mut links: Vec<Link> = self.load(space, app)?.live().cloned().collect();
-        if links.len() + picked.len() > MAX_ENTRIES {
-            return Err("too-large: Too many files for one app".into());
+        let count = picked.len();
+        if count > MAX_ENTRIES {
+            return too_large();
         }
-        let mut added = Vec::with_capacity(picked.len());
+        // Each file looked at and opened before every app's links are held: 100,000 of them (more on a network share)
+        // kept a page reload, and every other app's forget and pick, waiting.
+        let mut new = Vec::with_capacity(count);
+        let mut added = Vec::with_capacity(count);
         for (path, full) in picked {
-            // A file only, as `walk` keeps: opening a named pipe picked with the files waited for a writer for good,
-            // and every app's links with it.
+            // A file only, as `walk` keeps: opening a named pipe picked with the files waited for a writer for good.
             if !fs::metadata(&full).is_ok_and(|meta| meta.is_file()) {
                 continue;
             }
@@ -489,8 +495,17 @@ impl LinkedFiles {
                 modified,
                 available: true,
             });
-            links.push(link);
+            new.push(link);
         }
+        let _writing = locked(&self.writing);
+        if self.begin(space, app)? != begun {
+            return cancelled();
+        }
+        let mut links: Vec<Link> = self.load(space, app)?.live().cloned().collect();
+        if links.len() + count > MAX_ENTRIES {
+            return too_large();
+        }
+        links.append(&mut new);
         self.store(space, app, links)?;
         Ok(added)
     }
@@ -1254,6 +1269,51 @@ mod tests {
                 .len(),
             4
         );
+    }
+
+    // A page reload during a pick of 100,000 files waited on the GTK main thread until every file was opened.
+    #[test]
+    fn a_page_reload_does_not_wait_for_a_pick_being_kept() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let up = links.start_pick("ghostly", APP).unwrap();
+        // A pick's links being written, as long as that takes.
+        let writing = locked(&links.writing);
+        let (done, started) = std::sync::mpsc::channel();
+        let page = links.clone();
+        std::thread::spawn(move || {
+            page.page_started();
+            done.send(()).unwrap();
+        });
+        started
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the page reload waited for the pick");
+        drop(writing);
+        // Its dialog still keeps nothing.
+        assert!(links
+            .add("ghostly", APP, up.begun, walk(&root, &[]).unwrap())
+            .unwrap_err()
+            .starts_with("cancelled: "));
+    }
+
+    // Each file of a pick was looked at and opened with every app's links held, so another app's forget waited for them.
+    #[test]
+    fn a_pick_looks_at_its_files_before_it_holds_every_app_s_links() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let file = root.join("Up.mp4");
+        let picked = picked_files(vec![file.clone()], &[]);
+        let begun = links.begin("ghostly", APP).unwrap();
+        let writing = locked(&links.writing);
+        let picker = links.clone();
+        let pick = std::thread::spawn(move || picker.add("ghostly", APP, begun, picked));
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // Changed once the pick looked at it, while another change still held the links.
+        fs::write(&file, b"01234567890").unwrap();
+        drop(writing);
+        let added = pick.join().unwrap().unwrap();
+        assert_eq!(added[0].size, 10, "looked at before the links were free");
+        assert!(!links.list("ghostly", APP).unwrap()[0].available);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+import { RateWindow } from "./pairedEdits";
 import { checkedDescriptors, rankTransports, relayedTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 
 export interface TransportPolicy {
@@ -19,6 +20,11 @@ export interface SwitchPlan {
    */
   upgrade?: boolean;
 }
+/**
+ * The contact's policies read per window. A choice, a retry or a session's start each say one, so a handful a minute;
+ * every one read may plan a move this side dials. Past that only the newest waits, read once the window has room.
+ */
+export const POLICY_RECEIVE_LIMIT = 10, POLICY_RECEIVE_WINDOW_MS = 60_000;
 export const allowedTransports = (policy: TransportPolicy) => transportOrder(policy.available, policy.preferred, policy.fallback);
 
 function parsePolicy(raw: unknown): TransportPolicy | null {
@@ -58,6 +64,8 @@ export class TransportSwitch {
   private remoteReplaces = false;
   /** This side chose while no session was open: the next one begins with it as a choice. */
   private apart = false;
+  private readonly policiesRead = new RateWindow(POLICY_RECEIVE_LIMIT, POLICY_RECEIVE_WINDOW_MS);
+  private policyHeld: { frame: Record<string, unknown>; timer: ReturnType<typeof setTimeout> } | null = null;
   constructor(private readonly options: {
     key: string; peerKey: string;
     policy(): Omit<TransportPolicy, "revision" | "intent">;
@@ -183,7 +191,10 @@ export class TransportSwitch {
     if (this.options.key > this.options.peerKey) { this.revision++; this.announce(); }
     this.reconcile();
   }
-  stop(): void { this.clearPlan(); this.context = ""; this.remote = null; this.remoteReplaces = false; }
+  stop(): void {
+    if (this.policyHeld) clearTimeout(this.policyHeld.timer);
+    this.policyHeld = null; this.clearPlan(); this.context = ""; this.remote = null; this.remoteReplaces = false;
+  }
   private clearPlan(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null; this.plan = null; this.preparing = false; this.dialStarted = false;
@@ -301,6 +312,14 @@ export class TransportSwitch {
       const policy = parsePolicy(frame.policy);
       if (!policy || (this.remote && (policy.revision < this.remote.revision ||
         (policy.revision === this.remote.revision && JSON.stringify(policy) !== JSON.stringify(this.remote))))) return true;
+      if (!this.policiesRead.take()) {
+        if (this.policyHeld) this.policyHeld.frame = frame;
+        else this.policyHeld = { frame, timer: setTimeout(() => {
+          const held = this.policyHeld; this.policyHeld = null;
+          if (held) this.handle(held.frame);
+        }, this.policiesRead.wait()) };
+        return true;
+      }
       const changed = !this.remote || policy.revision !== this.remote.revision;
       this.remote = this.lastRemote = policy; this.remoteReplaces = frame.replaces === true; this.options.peer(policy);
       if (changed && this.plan && !this.preparing) this.clearPlan();

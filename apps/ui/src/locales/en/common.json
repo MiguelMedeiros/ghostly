@@ -19,6 +19,11 @@
   "goHome": "Go home",
   "loading": "Loading...",
   "moreInfo": "More info",
+  "needsYou": {
+    "mark": "needs a look",
+    "show": "Show",
+    "title": "Waiting for you"
+  },
   "save": "Save",
   "size": {
     "b": "{{n}} B",

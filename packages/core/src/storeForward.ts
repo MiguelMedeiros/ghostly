@@ -54,6 +54,9 @@ const SIG = /^[A-Za-z0-9_-]{86}$/;
 const MAGIC = utf8Encode("GHLD");
 const VERSION = 1;
 const NONCE = 24;
+/** A bundle sealed by the chat's ratchet (WISP 4xx § Held items). */
+const RATCHETED = 2;
+type HoldItem = { mailbox: string; seq: number; id: string; ts: number; kind: HoldKind; meta?: unknown; expires: number };
 
 export interface HoldFileMeta { name: string; size: number; mime: string }
 /** One held bundle as the manifest lists it: where to get it, and what to expect. */
@@ -94,7 +97,9 @@ export interface HoldPointer {
 
 /** Why a bundle, manifest or pointer was refused. Never a reason to trust it a little. */
 export class HoldRefusedError extends Error {
-  constructor(readonly reason: "size" | "format" | "tampered" | "not-for-me" | "author" | "signature" | "digest" | "limits" | "expired", message: string) {
+  /** The bytes the chat's ratchet opened, when it opened them before the item was refused: the caller commits them. */
+  ratcheted?: Uint8Array;
+  constructor(readonly reason: "size" | "format" | "tampered" | "not-for-me" | "author" | "signature" | "digest" | "limits" | "expired" | "plain", message: string) {
     super(message);
   }
 }
@@ -136,15 +141,26 @@ export class HoldKeys {
   }
 
   /** Seals one item for the contact: signed with my participation key, encrypted to our shared key. */
-  seal(item: { mailbox: string; seq: number; id: string; ts: number; kind: HoldKind; meta?: unknown; expires: number }, body: Uint8Array): Uint8Array {
+  seal(item: HoldItem, body: Uint8Array): Uint8Array {
+    const nonce = randomBytes(NONCE);
+    const box = xsalsa20poly1305(this.sealKey, nonce).encrypt(this.inner(item, body));
+    return concatBytes(MAGIC, new Uint8Array([VERSION]), nonce, box);
+  }
+  /**
+   * The same item as a version-2 bundle (WISP 4xx § Held items): the same plaintext, sealed by the chat's ratchet
+   * (`seal`, which saves the ratchet's state before it returns), so the bundle can be uploaded once this returns.
+   */
+  async sealRatcheted(item: HoldItem, body: Uint8Array, seal: (plaintext: Uint8Array) => Promise<Uint8Array>): Promise<Uint8Array> {
+    return concatBytes(MAGIC, new Uint8Array([RATCHETED]), await seal(this.inner(item, body)));
+  }
+  /** What a bundle seals: the header's length, the signed header, the body. */
+  private inner(item: HoldItem, body: Uint8Array): Uint8Array {
     const fields = [VERSION, this.from, this.to, this.me, this.peer, item.mailbox, item.seq, item.id, item.ts, item.kind, item.meta ?? null, bodyDigest(body), item.expires];
     const signature = toBase64Url(sign(utf8Encode(JSON.stringify(["ghostly-hold-bundle", fields])), this.seed));
     const header = utf8Encode(JSON.stringify([fields, signature]));
     const length = new Uint8Array(4);
     new DataView(length.buffer).setUint32(0, header.length);
-    const nonce = randomBytes(NONCE);
-    const box = xsalsa20poly1305(this.sealKey, nonce).encrypt(concatBytes(length, header, body));
-    return concatBytes(MAGIC, new Uint8Array([VERSION]), nonce, box);
+    return concatBytes(length, header, body);
   }
 
   /**
@@ -152,14 +168,37 @@ export class HoldKeys {
    * authenticated encryption, the header's shape, that it names this link, this contact and me, the
    * signature, the body digest and the limits of its kind. `loopback`: see `isHoldUrl`.
    */
-  open(bytes: Uint8Array, expect: { maxBytes?: number; mailbox?: string; now?: number; loopback?: boolean } = {}): { header: HoldHeader; body: Uint8Array } {
+  /**
+   * `ratchet`: opens a version-2 bundle's sealed bytes (WISP 4xx), without keeping anything; absent, one is from a newer
+   * Ghostly. `refusePlain`: a ratcheted item from this contact opened here, so a version-1 item other than the manifest is
+   * refused (WISP 4xx § Downgrade). `ratcheted` in the result: the bytes the ratchet opened, for the caller to commit once
+   * the item is stored.
+   */
+  open(bytes: Uint8Array, expect: { maxBytes?: number; mailbox?: string; now?: number; loopback?: boolean; ratchet?: (sealed: Uint8Array) => Uint8Array | null; refusePlain?: boolean } = {}): { header: HoldHeader; body: Uint8Array; ratcheted?: Uint8Array } {
     const now = expect.now ?? Date.now();
     if (bytes.length > (expect.maxBytes ?? HOLD_LIMITS.maxBundleBytes)) throw new HoldRefusedError("size", "The held item is larger than allowed");
-    if (bytes.length < MAGIC.length + 1 + NONCE + 16 + 4 || !MAGIC.every((b, i) => bytes[i] === b)) throw new HoldRefusedError("format", "Not a held item");
-    if (bytes[MAGIC.length] !== VERSION) throw new HoldRefusedError("format", "Held item from a newer Ghostly");
-    let plain: Uint8Array;
-    try { plain = xsalsa20poly1305(this.sealKey, bytes.subarray(MAGIC.length + 1, MAGIC.length + 1 + NONCE)).decrypt(bytes.subarray(MAGIC.length + 1 + NONCE)); }
-    catch { throw new HoldRefusedError("tampered", "The held item was changed or is not for this chat"); }
+    if (bytes.length < MAGIC.length + 1 + 16 + 4 || !MAGIC.every((b, i) => bytes[i] === b)) throw new HoldRefusedError("format", "Not a held item");
+    const version = bytes[MAGIC.length];
+    if (version !== VERSION && (version !== RATCHETED || !expect.ratchet)) throw new HoldRefusedError("format", "Held item from a newer Ghostly");
+    let plain: Uint8Array | null, ratcheted: Uint8Array | undefined;
+    if (version === RATCHETED) {
+      ratcheted = bytes.subarray(MAGIC.length + 1);
+      try { plain = expect.ratchet!(ratcheted); } catch { plain = null; }
+      if (!plain) throw new HoldRefusedError("tampered", "The held item was changed, is not for this chat, or was opened already");
+    } else {
+      if (bytes.length < MAGIC.length + 1 + NONCE + 16 + 4) throw new HoldRefusedError("format", "Not a held item");
+      try { plain = xsalsa20poly1305(this.sealKey, bytes.subarray(MAGIC.length + 1, MAGIC.length + 1 + NONCE)).decrypt(bytes.subarray(MAGIC.length + 1 + NONCE)); }
+      catch { throw new HoldRefusedError("tampered", "The held item was changed or is not for this chat"); }
+    }
+    try { return this.read(plain, ratcheted, expect, now); }
+    catch (error) {
+      // Opened, then refused: the ratchet's bytes go with the refusal, so the key is used up and the lane heard all the same.
+      if (error instanceof HoldRefusedError && ratcheted) error.ratcheted = ratcheted;
+      throw error;
+    }
+  }
+  /** The checks of `open` once the bundle is decrypted. */
+  private read(plain: Uint8Array, ratcheted: Uint8Array | undefined, expect: { mailbox?: string; loopback?: boolean; refusePlain?: boolean }, now: number): { header: HoldHeader; body: Uint8Array; ratcheted?: Uint8Array } {
     if (plain.length < 4) throw new HoldRefusedError("format", "Not a held item");
     const headerLength = new DataView(plain.buffer, plain.byteOffset, 4).getUint32(0);
     if (headerLength > 128 * 1024 || 4 + headerLength > plain.length) throw new HoldRefusedError("format", "Not a held item");
@@ -187,8 +226,10 @@ export class HoldKeys {
     // lifetime from now, give or take what the sender's clock is ahead.
     if ((expires as number) <= (ts as number) || (expires as number) > now + HOLD_LIMITS.ttlMs + HOLD_LIMITS.clockSkewMs) throw new HoldRefusedError("limits", "The held item's lifetime is out of bounds");
     const header: HoldHeader = { v: 1, from, to, author, recipient, mailbox, seq: seq as number, id, ts: ts as number, kind: kind as HoldKind, meta, digest, expires: expires as number };
+    // The manifest is always sealed as before; anything else from a contact whose items come ratcheted must be ratcheted.
+    if (!ratcheted && expect.refusePlain && kind !== "manifest") throw new HoldRefusedError("plain", "The held item was sealed without forward secrecy, which this chat no longer takes");
     checkKind(header, body, expect.loopback);
-    return { header, body };
+    return { header, body, ...(ratcheted && { ratcheted }) };
   }
 
   /** My pointer, as records to publish under `identity`. Throws when it cannot fit a packet. */
@@ -227,9 +268,14 @@ export class HoldKeys {
   }
 }
 
+/** Names only a local network answers (RFC 6762, RFC 8375, ICANN's .internal, and the usual router ones). */
+const LOCAL_SUFFIXES = ["localhost", "local", "internal", "lan", "home", "home.arpa", "localdomain", "intranet", "corp"];
+
 /**
  * A URL a bundle or manifest may be fetched from. The contact chose it and this device fetches it on its own, so it
- * is HTTPS, without a user or password, at a name or a public IPv4 address: never this machine or its network.
+ * is HTTPS, without a user or password, at a public name or a public IPv4 address: never this machine or its network.
+ * A name with no dot or under a local suffix is a local one. A public name may still resolve to a local address:
+ * where the host can resolve, its `fetch` refuses that too (the CLI's, packages/cli/src/runtime/holdFetch.ts).
  * `loopback` adds plain HTTP to this machine, for a test against a local server; no shipped app passes it.
  */
 export function isHoldUrl(value: unknown, loopback = false): value is string {
@@ -239,7 +285,7 @@ export function isHoldUrl(value: unknown, loopback = false): value is string {
   if (url.username || url.password) return false;
   const host = url.hostname.toLowerCase().replace(/\.$/, "");
   if (loopback && url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(host)) return true;
-  if (url.protocol !== "https:" || !host || host.startsWith("[") || host === "localhost" || host.endsWith(".localhost")) return false;
+  if (url.protocol !== "https:" || !host.includes(".") || host.startsWith("[") || LOCAL_SUFFIXES.some(s => host === s || host.endsWith(`.${s}`))) return false;
   // A URL's IPv4 host is always written as four decimal numbers, whatever form it was given in.
   return !/^\d+\.\d+\.\d+\.\d+$/.test(host) || isPublicAddress(Uint8Array.from(host.split("."), Number));
 }

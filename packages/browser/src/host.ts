@@ -130,9 +130,11 @@ export interface BrowserHost {
   /**
    * Keeps the computer from sleeping while idle, or lets it sleep again ("Keep this computer awake", WISP 06 § User
    * experience): the desktop app, so a phone can take the profile over while the person is out. Resolves to whether
-   * it is held now. Left out where the platform cannot (a web page, the extension).
+   * it is held now. Left out where the platform cannot (a web page, the extension). `files`: a file on its way is
+   * (one of) the reasons; the Android app holds only for that, a foreground service with its notification, as Android
+   * freezes an app out of sight otherwise.
    */
-  keepAwake?(on: boolean): Promise<boolean>;
+  keepAwake?(on: boolean, files: boolean): Promise<boolean>;
 }
 
 /** One approval's cookie session, outside the page: its cookies never reach the page, and `close` forgets them. */

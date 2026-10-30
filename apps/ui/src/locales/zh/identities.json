@@ -39,6 +39,7 @@
     "continue": "继续",
     "continueIn": "请在 {{provider}} 窗口中继续…",
     "continueWith": "使用 {{provider}} 继续",
+    "copyError": "无法复制。请选中上方的文本自行复制。",
     "dayOne": "1 天",
     "days": "{{count}} 天",
     "experimental": "实验性：尚未在所有工具上测试。",

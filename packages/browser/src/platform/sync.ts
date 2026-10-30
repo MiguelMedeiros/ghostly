@@ -9,6 +9,7 @@ import {
   forgetInviteCode,
   forgetShownSession,
   getInviteCode,
+  getUnreadCount,
   isSessionKey,
   listShownSessions,
   loadSession,
@@ -21,6 +22,7 @@ import {
   updateSessionLabel,
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
+import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
@@ -174,15 +176,20 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (!link || !shown) return;
   // A row the engine says it deleted (its author deleted it for everyone, WISP 400 § Delete for everyone) goes from the
   // chat as a delete here does: the row, its id kept so it is not taken again, its place in the read count. Only what
-  // the change tick names: a whole list without a row may be one a page has not caught up with (two pages of the
+  // the change tick names, or the ids a whole list says the engine deleted (a removal no page heard, as on the
+  // extension with none open): a whole list without a row may be one a page has not caught up with (two pages of the
   // extension over one storage), and a row the engine never had (a call's line) is the chat's own.
-  const gone = (changes?.deleted ?? []).filter((id) => shown!.messages.some((m) => m.id === id));
+  const named = changes ? changes.deleted : engine.deletedIds.get(linkId) ?? [];
+  const here = named.length ? new Set(shown.messages.map((m) => m.id)) : undefined;
+  const gone = named.filter((id) => here!.has(id));
   if (gone.length) {
     for (const id of gone) deleteMessage(shown.id, id);
     forget(shown.id);
     notifySessionsChanged();
     shown = sessionForPeer(link.peerPubKeyZ32);
     if (!shown) return;
+    // Nothing unread left: the chat's notification goes, as reading the chat takes it (the Android and Linux apps keep one).
+    if (!getUnreadCount(shown)) clearChatNotification(shown.id);
   }
   // Changed here (its rows, its sort, what is added), never the one the other readers hold.
   const session: ChatSession = { ...shown, messages: shown.messages.slice() };

@@ -336,3 +336,29 @@ it("a contact whose app started again and took the session over (no stop on this
   expect(prepare[1]).toHaveBeenCalledWith(expect.objectContaining({ choices: expect.arrayContaining(["hyperdht/1"]) }), false);
   switches.forEach(s => s.stop());
 });
+it("reads a handful of the contact's policies a minute: a flood of policy, ready and failed does not start a dial each", () => {
+  vi.useFakeTimers();
+  const sent: Record<string, unknown>[] = [], prepare = vi.fn(), peer = vi.fn();
+  const own = { preferred: "webrtc/1" as const, fallback: true, available: ["webrtc/1", "iroh/1", "hyperdht/1"] as TransportPolicy["available"], descriptors: {} };
+  const coordinator = new TransportSwitch({ key: "0", peerKey: "1", policy: () => own, send: frame => sent.push(frame as Record<string, unknown>),
+    peer, state: vi.fn(), prepare, cancel: vi.fn(), timeoutMs: 100 });
+  coordinator.begin("session-1", "webrtc/1");
+  const node = (revision: number) => ({ id: revision.toString(16).padStart(64, "0"), relay: null, addresses: ["192.168.1.1:4433"] });
+  const loop = (revision: number) => {
+    coordinator.handle({ t: "paired-policy", context: "session-1", replaces: true, policy: { revision, intent: revision, preferred: "iroh/1",
+      fallback: false, available: ["webrtc/1", "iroh/1"], descriptors: { "iroh/1": node(revision) } } });
+    const plan = sent.filter(f => f.t === "paired-switch-plan").at(-1);
+    if (!plan) return;
+    coordinator.handle({ t: "paired-switch-ready", context: "session-1", id: plan.id });
+    coordinator.handle({ t: "paired-switch-failed", context: "session-1", id: plan.id });
+  };
+  for (let revision = 1; revision <= 50; revision++) loop(revision);
+  const dials = () => prepare.mock.calls.filter(([, dial]) => dial).length;
+  expect(dials()).toBe(10); expect(peer).toHaveBeenCalledTimes(10);
+  // Only the newest held policy is read once the window has room, and it is planned as any other.
+  vi.advanceTimersByTime(60_000);
+  expect(peer).toHaveBeenCalledTimes(11);
+  expect(coordinator.peerPolicy?.revision).toBe(50);
+  expect(coordinator.pending?.remote.descriptors["iroh/1"]).toEqual(node(50));
+  coordinator.stop();
+});

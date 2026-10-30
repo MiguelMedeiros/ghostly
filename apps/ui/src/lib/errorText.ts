@@ -52,6 +52,24 @@ const PARTS: Record<string, TranslationKey> = {
 };
 const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) => (PARTS[part] ? t(PARTS[part]) : part)).join(", ");
 
+/**
+ * The members a group waits on, as engine/groups.ts `growthBlocked` lists them ("Ana, Member q5zt8m3x and 2 more"), in
+ * the app's language: an unnamed member as the app names one, "2 more" in its words, and the language's own list
+ * (Intl.ListFormat). They were pasted whole, English commas and "and 2 more" in every language (agents#1593).
+ */
+function behindNames(text: string, t: Translate): string {
+  const tail = text.match(/^([\s\S]+) and (\d+) more$/);
+  const names = (tail ? tail[1] : text).split(", ").map((name) => {
+    const key = name.match(/^Member ([a-z0-9]{8})$/)?.[1];
+    return key ? t("group.member.unnamed", { key }) : name;
+  });
+  if (tail) names.push(t("errors.group.growMore", { count: Number(tail[2]) }));
+  // Not in this build's TypeScript library, but in every browser the app runs in.
+  const ListFormat = (Intl as unknown as { ListFormat?: new (locale: string, options: object) => { format(list: readonly string[]): string } }).ListFormat;
+  try { if (ListFormat) return new ListFormat(t.language ?? "en", { style: "long", type: "conjunction" }).format(names); } catch { /* below */ }
+  return names.join(", ");
+}
+
 /** A transport as the engine names it ("iroh/1"), as people call it: a name, the same in every language. */
 const TRANSPORT_WORDS: Record<string, string> = { "webrtc/1": "WebRTC", "iroh/1": "Iroh", "hyperdht/1": "HyperDHT" };
 const transportWord = (transport: string) => TRANSPORT_WORDS[transport] ?? transport;
@@ -104,6 +122,8 @@ const RULES: readonly Rule[] = [
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
+  // A write the browser threw away for want of room (packages/browser/src/shared/idb.ts `committed`).
+  exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
@@ -432,7 +452,7 @@ const RULES: readonly Rule[] = [
   exact("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", "errors.group.adminAlone", "errors.group.adminAloneNext"),
   exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave", "errors.group.nobodyForLeaveNext"),
   exact("Only the admin can share a link to the group", "errors.group.adminShares"),
-  exact("This is not a link to a group", "errors.group.notALink"),
+  exact("This is not a link to a group", "errors.group.notALink", "errors.group.notALinkNext"),
   exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
   // A group's link the engine refuses for a group already here (engine/groups.ts joinGroupByLink).
@@ -452,7 +472,7 @@ const RULES: readonly Rule[] = [
   exact("This group has reached its membership history limit. Create a new group.", "errors.group.chainFull", "errors.group.chainFullNext"),
   exact("This group runs through hubs, which their app does not take part in: they need an updated Ghostly first.", "errors.group.hubsNeedUpdate", "errors.group.hubsNeedUpdateNext"),
   { match: /^Their app takes groups of (?<max>\d+) at most: they need an updated Ghostly first\.$/, key: "errors.group.legacyApp", next: "errors.group.legacyAppNext" },
-  { match: /^A group grows past (?<max>\d+) only when everyone is on an updated Ghostly\. Not seen updated yet: (?<names>[\s\S]+)\.$/, key: "errors.group.growNeedsUpdates", next: "errors.group.growNeedsUpdatesNext" },
+  { match: /^A group grows past (?<max>\d+) only when everyone is on an updated Ghostly\. Not seen updated yet: (?<names>[\s\S]+)\.$/, key: "errors.group.growNeedsUpdates", next: "errors.group.growNeedsUpdatesNext", params: ({ max, names }, t) => ({ max, names: behindNames(names, t) }) },
   exact("Share the group's link with them: anyone who opens it joins", "errors.group.shareLinkInstead"),
   { match: /^At most (?<max>\d+) members can be pinned as hubs$/, key: "errors.group.hubsPinned" },
   exact("A community group chooses its hubs by itself", "errors.group.communityHubs"),
@@ -622,6 +642,9 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  // As the chat's payment line says them (Chat.tsx).
+  contactNoWallet: "chat.payments.noWallet",
+  contactNoPayments: "chat.payments.offOrOld",
 };
 /** The next line of an engine error that has one: what to do, or what is safe. */
 const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {

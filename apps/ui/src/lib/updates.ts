@@ -21,6 +21,8 @@ export interface FoundUpdate {
    * offers the download instead of a button.
    */
   apply: "restart" | "reload" | "manual";
+  /** The file of this very version, where the platform knows it (the Android app's APK). Otherwise the platform's `downloadUrl`. */
+  downloadUrl?: string;
   /** The platform's own handle on the update. Nothing outside the platform looks inside. */
   handle?: unknown;
 }

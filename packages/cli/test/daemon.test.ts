@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Server } from "node:net";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
 import { greeting, newDaemonSecret, proof } from "../src/daemonProof";
+import { privateFolder } from "../src/privateFolder";
 import { createProfile, lockOwner, profilePaths } from "../src/profiles";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
@@ -33,6 +35,9 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const other = home("old-daemon");
     createProfile(other, "default");
     const { socket, dir: profileDir } = profilePaths(other, "default");
+    // Where a long temp folder puts the socket (macOS's /var/folders/…): in a folder of /tmp, made as the daemon makes it.
+    const outside = dirname(socket) !== profileDir;
+    if (outside) privateFolder(dirname(socket), "the test's daemon will not put its socket there");
     // A daemon of another release that has the greeting and the hello already: it proves itself, then answers as an
     // older one. It runs in this process, which holds the profile as a daemon does.
     const secret = newDaemonSecret(profileDir);
@@ -47,7 +52,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
         connection.write(JSON.stringify({ id, result: method === "status" ? { version: "0.0.1", profile: "default" } : { chats: [] } }) + "\n");
       });
     });
-    await new Promise<void>((r) => server.listen(socket, r));
+    await new Promise<void>((listening, failed) => { server.once("error", failed); server.listen(socket, listening); });
     try {
       const listed = await ghostly(["--home", other, "chat", "list"]);
       expect(ok(listed)).toEqual({ chats: [] });
@@ -56,7 +61,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       expect(methods).toEqual(["daemon.hello", "status", "chat.list"]);
     } finally {
       server.close();
-      rmSync(socket, { force: true });
+      rmSync(outside ? dirname(socket) : socket, { recursive: true, force: true });
     }
   });
 
@@ -120,9 +125,44 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     createProfile(held, "default");
     // This test's own process stands in for a one-shot command that opened the profile in process.
     writeFileSync(profilePaths(held, "default").lock, String(process.pid));
-    const started = await ghostly(["--home", held, "daemon", "--detach"], { env });
+    // It is waited for until the timeout, as a one-shot that ends in a moment is: this one never lets go.
+    const started = await ghostly(["--home", held, "daemon", "--detach", "--timeout", "1"], { env });
     expect(error(started, "busy", 1).message).toContain(`in use by process ${process.pid}`);
     expect(started.json.error).toMatchObject({ details: { pid: process.pid } });
+  });
+
+  it("daemon restart waits for a one-shot that holds the profile for a moment, and starts the daemon once it let go", async () => {
+    const moment = home("restart-one-shot");
+    ok(await ghostly(["--home", moment, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    // A one-shot command (a bot's `send`) that opened the profile and ends 1.5 s later.
+    const oneShot = spawn(process.execPath, ["-e", "setTimeout(() => {}, 1500)"], { stdio: "ignore" });
+    try {
+      writeFileSync(profilePaths(moment, "default").lock, String(oneShot.pid));
+      const restarted = await ghostly(["--home", moment, "daemon", "restart"], { env });
+      expect(ok(restarted)).toMatchObject({ restarted: true, stopped: null, daemon: "started" });
+      expect(ok(await ghostly(["--home", moment, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: restarted.json.pid });
+    } finally {
+      oneShot.kill("SIGKILL");
+      await ghostly(["--home", moment, "daemon", "stop"], { env });
+    }
+  });
+
+  it("daemon restart whose start loses the profile after the stop says the daemon was stopped and how to start it", async () => {
+    const lost = home("restart-lost");
+    ok(await ghostly(["--home", lost, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const daemon = ok(await ghostly(["--home", lost, "daemon", "--detach"], { env }));
+    const paths = profilePaths(lost, "default");
+    // A process that takes the profile the moment the stopped daemon frees it, and keeps it.
+    const taker = spawn(process.execPath, ["-e", 'const fs = require("node:fs"); const t = setInterval(() => { try { const fd = fs.openSync(process.argv[1], "wx", 0o600); fs.writeSync(fd, String(process.pid)); fs.closeSync(fd); clearInterval(t); } catch {} }, 5); setTimeout(() => {}, 120000)', paths.lock], { stdio: "ignore" });
+    try {
+      const restarted = await ghostly(["--home", lost, "daemon", "restart", "--timeout", "5"], { env });
+      const failure = error(restarted, "busy", 1);
+      expect(failure.message).toBe(`Profile default is in use by process ${taker.pid}. The daemon (process ${daemon.pid}) was stopped: start it again with ghostly daemon --detach`);
+      expect(restarted.json.error).toMatchObject({ details: { pid: taker.pid, stopped: daemon.pid } });
+    } finally {
+      taker.kill("SIGKILL");
+      await ghostly(["--home", lost, "daemon", "stop"], { env });
+    }
   });
 
   it("daemon --detach with a timeout shorter than the start says the daemon is still starting, with its pid; 0 or less is a usage error", async () => {
@@ -246,5 +286,33 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       }
     }
     slow.server.close();
+  });
+
+  it("a listen through a daemon that stops says so once on stderr, waits, and says when a daemon answers again", async () => {
+    const orphan = home("listen-orphan");
+    ok(await ghostly(["--home", orphan, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
+    // From the journal's start: on a loaded host the listen subscribes after the invite's `chat.created` is out, and a
+    // live-only listen never sees it.
+    const listen = new Running(["--home", orphan, "listen", "--since", "0"], env);
+    const gone = "ghostly: the daemon of profile default stopped; waiting for it to start again (ghostly daemon --detach)\n";
+    const back = "ghostly: the daemon of profile default answers again\n";
+    try {
+      ok(await ghostly(["--home", orphan, "invite", "create", "--label", "first"], { env }));
+      const created = await listen.waitFor((l) => l.type === "chat.created");
+      ok(await ghostly(["--home", orphan, "daemon", "stop"], { env }));
+      const until = Date.now() + 15_000;
+      while (!listen.stderr.includes(gone) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+      // Once, however long the wait: a few more failed tries add nothing.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      expect(listen.stderr).toBe(gone);
+      expect(listen.child.exitCode).toBeNull();
+      ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
+      await listen.waitFor((l) => l.type === "daemon.started" && (l.seq as number) > (created.seq as number));
+      expect(listen.stderr).toBe(gone + back);
+    } finally {
+      await listen.stop();
+      await ghostly(["--home", orphan, "daemon", "stop"], { env });
+    }
   });
 });

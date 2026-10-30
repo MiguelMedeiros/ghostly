@@ -205,6 +205,15 @@ export const CONSTRAINTS: readonly Constraint[] = [
     dims: ["client", "identity"],
     allows: (a) => !(a.identity === "oidc" && hasExtension(a)),
   },
+  {
+    // B picks up what A held (WISP 404). Held items are read only over HTTPS on the public Internet; plain HTTP to this
+    // machine is the web build's test switch (holdLoopback, apps/web/src/host.ts). The extension runs as shipped and
+    // drops a pointer to the suite's S3 without a word. As A, it holds there like any other client.
+    id: "local-s3-held-for-web-only",
+    why: "the suite's S3 is plain HTTP on this machine, which only the web build's test switch reads held items from; the extension runs as shipped",
+    dims: ["client", "delivery"],
+    allows: (a) => !(a.delivery === "store-forward" && a.client?.endsWith("-extension")),
+  },
 ];
 
 /** Covered completely, not only pairwise: how people connect is where combinations break. */

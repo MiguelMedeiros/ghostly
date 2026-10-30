@@ -2,7 +2,7 @@ import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { concatBytes, fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
-import { sanitizeNick } from "./text";
+import { sanitizeNick, unwrapPasted } from "./text";
 import {
   confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openPair, openSecret, sealPair, sealSecret, sha256Hex,
   type SealedSecret,
@@ -105,8 +105,12 @@ export const GROUP_READ_NOTE_COMMUNITY = `Anyone with the group's link can join,
 
 /** A community group's link: `group2/<group id>/<entry key>` (web: `#/join/group2/…`). */
 export function encodeCommunityLink(link: { g: string; host: string }): string { return `group2/${link.g}/${link.host}`; }
-/** A pasted link, a `/join/…` path or the bare code; null when it is not a community group's link. */
+/** A pasted link, a `/join/…` path or the bare code (or one in words: `unwrapPasted`); null when it is not a community group's link. */
 export function decodeCommunityLink(input: string): { g: string; host: string } | null {
+  return readCommunityLink(input) ?? readCommunityLink(unwrapPasted(input));
+}
+
+function readCommunityLink(input: string): { g: string; host: string } | null {
   const clean = input.trim().replace(/^.*#/, "").replace(/^.*?\/join\//, "").replace(/^\/+/, "");
   const parts = clean.split("/");
   if (parts.length !== 3 || parts[0] !== "group2" || !GROUP_ID.test(parts[1]) || !MEMBER_KEY.test(parts[2])) return null;
@@ -454,6 +458,11 @@ export interface CommunitySessionHooks {
    * the answer asks again. Absent: an answer goes all at once, as before 2026-10-07.
    */
   handled?(to: string): Promise<CatchUpHandled>;
+  /**
+   * Whether message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: a frame of it
+   * that comes (a catch-up, a hub passing it on) is not taken, kept or passed on. Absent: none is.
+   */
+  removed?(id: string): boolean;
 }
 
 const MAX_TEXT_BOX = Math.ceil((COMMUNITY_LIMITS.textBytes + 256 + 16) * 4 / 3) + 4;
@@ -529,8 +538,11 @@ export class CommunitySession {
   private known = new Map<string, CommunityCommit>();
   /** Commit hash → roster after it, for the window of the main branch and the side commits. */
   private rosters = new Map<string, Roster>();
-  /** Commit hash → roster after it, for a few main-branch commits older than the window that `couldRead` was asked about. */
-  private pastRosters = new Map<string, Roster>();
+  /**
+   * Who was in the roster after each main-branch commit, from one replay of the branch: key → the places where it came in
+   * and went out, in turn (an open last span while it is in). `through` commits are counted, the last one `top`.
+   */
+  private spans = { through: 0, top: "", roster: null as Roster | null, byKey: new Map<string, number[]>() };
   private mainIndex = new Map<string, number>();
   private pendingCommits = new Map<string, { from: string; commit: CommunityCommit; at: number }>();
   private pendingSecrets = new Map<string, { sealed: SealedSecret; at: number }>();
@@ -559,6 +571,11 @@ export class CommunitySession {
       send: (to, frame) => hooks.direct(to, frame),
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
       active: () => this.state.status === "active",
+      // A member whose app handles 1 or 2 frames a second asks again while the last answer still waits there: without
+      // a key, what was on its way went again (29-104 of 200 messages; 610 commit frames for 318 commits).
+      key: frame => frame.t === "group-msg" ? communityMessageId(frame.s, frame.e, frame.h, frame.n)
+        : frame.t === "group-commit" ? `commit:${communityCommitHash(frame.commit)}`
+        : frame.t === "group-secret" ? `secret:${frame.h}` : undefined,
     });
     this.rebuild();
     // A branch kept under the older rule (longest first) may be the better one now: it keeps an admin change mine dropped.
@@ -637,7 +654,16 @@ export class CommunitySession {
   get name(): string { return groupDisplayName(this.state.meta, this.state.name); }
   get myKey(): string { return this.identity.pubKeyZ32; }
   get top(): CommunityCommit { return this.state.chain[this.state.chain.length - 1]; }
-  get topHash(): string { return communityCommitHash(this.top); }
+  /**
+   * The top commit's hash, kept for the commit it was taken from: a view reads it for each member (its roster, what
+   * each member's lines are missing), and hashing it every time cost tens of milliseconds per state in big communities.
+   */
+  get topHash(): string {
+    const top = this.top;
+    if (this.topHashOf?.commit !== top) this.topHashOf = { commit: top, hash: communityCommitHash(top) };
+    return this.topHashOf.hash;
+  }
+  private topHashOf: { commit: CommunityCommit; hash: string } | undefined;
   get epoch(): number { return this.top.e; }
   get roster(): Roster { return this.rosters.get(this.topHash)!; }
   get admin(): string | undefined { return rosterAdmin(this.roster); }
@@ -669,17 +695,28 @@ export class CommunitySession {
     const i = this.state.chain.length - 1 - (this.epoch - Number(e));
     const commit = Number.isSafeInteger(i) && i >= 0 ? this.state.chain[i] : undefined;
     const hash = commit && communityCommitHash(commit);
-    return !!hash && hash.startsWith(h) && rosterHas(this.pastRoster(i, hash), key);
+    return !!hash && hash.startsWith(h) && this.wasInAt(key, i);
   }
-  /** The roster after an old commit of the main branch, replayed and kept apart from the window's (a few, the latest asked). */
-  private pastRoster(i: number, hash: string): Roster {
-    const known = this.pastRosters.get(hash);
-    if (known) return known;
-    let roster: Roster | null = null;
-    for (let j = 0; j <= i && (j === 0 || roster); j++) roster = communityRoster(roster, this.state.chain[j]);
-    this.pastRosters.set(hash, roster ?? []);
-    for (const old of this.pastRosters.keys()) { if (this.pastRosters.size <= 8) break; this.pastRosters.delete(old); }
-    return roster ?? [];
+  /**
+   * Whether `key` was in the roster after the main branch's commit `i`. The branch is replayed once, as `rebuild` does (its
+   * leaves were checked when they were taken), and only further as it grows: again from the start only once it changed.
+   */
+  private wasInAt(key: string, i: number): boolean {
+    let s = this.spans;
+    if (s.through > 0 && this.mainIndex.get(s.top) !== s.through - 1) s = this.spans = { through: 0, top: "", roster: null, byKey: new Map() };
+    if (s.through <= i) {
+      for (; s.through <= i; s.through++) {
+        const before = new Set((s.roster ?? []).map(([k]) => k));
+        s.roster = s.through === 0 || s.roster ? communityRoster(s.roster, this.state.chain[s.through], true) : null;
+        const after = new Set((s.roster ?? []).map(([k]) => k));
+        for (const k of after) if (!before.has(k)) s.byKey.set(k, [...s.byKey.get(k) ?? [], s.through]);
+        for (const k of before) if (!after.has(k)) s.byKey.get(k)!.push(s.through);
+      }
+      s.top = communityCommitHash(this.state.chain[s.through - 1]);
+    }
+    const at = s.byKey.get(key) ?? [];
+    for (let j = 0; j < at.length; j += 2) if (at[j] <= i && (j + 1 >= at.length || i < at[j + 1])) return true;
+    return false;
   }
   /** Someone the chain took out (removed or left) and who is not back in. */
   wasRemoved(key: string): boolean { return this.outIndex(key) >= 0; }
@@ -969,14 +1006,20 @@ export class CommunitySession {
    * within the window.
    */
   private async chooseBranch(): Promise<void> {
+    const status = this.state.status;
     const best = this.bestBranch();
     if (best.tip !== this.topHash) await this.adopt(best.tip);
     if (this.state.status === "lost" && rosterHas(this.roster, this.myKey)) { this.state.status = "active"; delete this.state.statusReason; }
     this.followEntry();
     this.pruneSide();
-    await this.persist();
+    // Saved at once only when my place in the group changed (removed, left, lost, back in); otherwise within a second, as
+    // messages are. Each commit of a catch-up saved the whole state: 1,000 commits were 1,051 whole-record writes, 241 MB
+    // of journal on the CLI store (agents#1767). A save lost to a crash is asked again at the next sync: the commits are on
+    // every hub.
+    if (this.state.status !== status) await this.persist(); else this.persistSoon();
     this.hooks.changed();
     await this.replayWaiting();
+    await this.renewLasting();
   }
 
   private bestBranch(): Branch {
@@ -1131,6 +1174,7 @@ export class CommunitySession {
     // broadcast above, so it gets no secret instead.
     if (FRESH.has(kind)) for (const [key] of roster) if (key !== this.myKey && isZ32Key(key)) this.hooks.addressed(key, { t: "group-secret", v: 2, g: this.id, to: key, h: hash, s: sealSecret(key, secret, secretAad(this.id, hash, key)) });
     this.hooks.changed();
+    await this.renewLasting();
     return { commit, hash, secret };
   }
 
@@ -1321,15 +1365,15 @@ export class CommunitySession {
 
   /**
    * An application frame that says the group's state (`CommunitySessionHooks.lasting`) in place of the one of its
-   * kind kept now, unless that one is newer (by the author's time, then the frame's identity, so every member keeps
-   * the same one).
+   * kind kept now, unless that one is newer (by the author's time, then its epoch, so one said again under a newer
+   * commit takes the first's place, then the frame's identity, so every member keeps the same one).
    */
   private keepLasting(message: CommunityIncomingApp, frame: CommunityMessageFrame): void {
     const kind = this.hooks.lasting?.(message);
     if (typeof kind !== "string" || !kind) return;
     const kept = { ...this.state.lasting };
     const now = kept[kind];
-    if (now && (now.ts > frame.ts || (now.ts === frame.ts && frameKey(now) >= frameKey(frame)))) return;
+    if (now && (now.ts > frame.ts || (now.ts === frame.ts && (now.e > frame.e || (now.e === frame.e && frameKey(now) >= frameKey(frame)))))) return;
     if (!now && Object.keys(kept).length >= COMMUNITY_LIMITS.lasting) return;
     kept[kind] = frame;
     this.state.lasting = kept;
@@ -1419,6 +1463,29 @@ export class CommunitySession {
     this.persistSoon();
   }
 
+  /**
+   * Message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: its frame goes from
+   * the store, so no catch-up hands it to a member who was away (they get the removal, which stays). A frame said again
+   * (`reseal`) carries the first one's place inside: its author's are opened to tell.
+   */
+  forget(id: string): void {
+    const author = id.slice(0, id.indexOf(":"));
+    const kept = this.state.store.filter(f => f.s !== author || this.storedId(f) !== id);
+    if (kept.length === this.state.store.length) return;
+    this.state.store = kept;
+    this.persistSoon();
+  }
+
+  /** The id of the message a stored frame is, by its first place when it was said again (and I can open it). */
+  private storedId(f: CommunityMessageFrame): string {
+    const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+    const plain = secret ? decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c) : null;
+    let parsed: unknown = null;
+    try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload: its own place */ }
+    const original = isObject(parsed) && parsed.o !== undefined ? readOriginal(parsed.o, f) : null;
+    return original ? communityMessageId(f.s, original.e, original.h, original.n) : communityMessageId(f.s, f.e, f.h, f.n);
+  }
+
   private keep(frame: CommunityMessageFrame): void {
     this.state.store.push(frame);
     let bytes = this.state.store.reduce((sum, f) => sum + f.c.length, 0);
@@ -1484,6 +1551,53 @@ export class CommunitySession {
     this.persistSoon();
   }
 
+  /**
+   * My lasting frames (`keepLasting`), said again under the current commit once theirs is half the window behind: past
+   * the window no member finds that commit or holds its secret, and a member back from away after more commits than
+   * that was never handed the group's state. With the same content and time and `o` naming the first, as
+   * `resealBehind` says one, so it stays one message, and in the place of the one kept, everywhere.
+   */
+  private async renewLasting(): Promise<void> {
+    if (!this.isMember || !this.state.secrets[this.topHash]) return;
+    for (const [kind, f] of Object.entries(this.state.lasting ?? {})) {
+      if (f.s !== this.myKey || this.epoch - f.e < COMMUNITY_LIMITS.window / 2) continue;
+      const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+      if (!secret) continue;
+      const plain = decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c);
+      let parsed: unknown = null;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload to say again */ }
+      if (!isObject(parsed) || !isObject(parsed.x)) continue;
+      const o = readOriginal(parsed.o, f) ?? { e: f.e, h: f.h, n: f.n };
+      const id = communityMessageId(this.myKey, o.e, o.h, o.n);
+      // Still the group's state, said by me (an admin's pin, while I am the admin).
+      if (this.hooks.lasting?.({ id, sender: this.myKey, epoch: this.epoch, timestamp: f.ts, frame: parsed.x }) !== kind) continue;
+      const { nick, o: _first, ...body } = parsed;
+      void _first;
+      const name = typeof nick === "string" ? nick : undefined;
+      const fits = (withNick: boolean) => Math.ceil((utf8Encode(JSON.stringify({ ...body, o, ...(withNick && name ? { nick: name } : {}) })).length + 16) * 4 / 3) + 4 <= MAX_TEXT_BOX;
+      if (!fits(false)) continue;
+      const sent = await this.sendPayload(() => ({ ...body, o }), fits(true) ? name : undefined, f.ts);
+      if ("error" in sent) continue;
+      this.resealedFrom.set(frameKey(sent.frame), id);
+      this.keepLasting({ id, sender: this.myKey, epoch: sent.frame.e, timestamp: f.ts, frame: parsed.x }, sent.frame);
+      await this.say(sent.frame);
+    }
+  }
+
+  /** Whether a lasting frame kept here is `f`'s author's, said at its time, and is the message `id` (the first's, said again). */
+  private keepsLasting(f: CommunityMessageFrame, id: string): boolean {
+    return Object.values(this.state.lasting ?? {}).some(kept => {
+      if (kept.s !== f.s || kept.ts !== f.ts || frameKey(kept) === frameKey(f)) return false;
+      const found = this.commitByShort(kept.e, kept.h), secret = found && this.state.secrets[found.hash];
+      const plain = secret ? decryptText(epochKeys(fromBase64Url(secret), this.id, kept.e).message, messageAad(kept), kept.nn, kept.c) : null;
+      let parsed: unknown;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { return false; }
+      if (!isObject(parsed)) return false;
+      const o = readOriginal(parsed.o, kept) ?? kept;
+      return communityMessageId(kept.s, o.e, o.h, o.n) === id;
+    });
+  }
+
   /** The message a frame of mine is: the first one's id for a frame said again (`resealBehind`), else its own. */
   messageIdOf(f: { s: string; e: number; h: string; n: number }): string {
     return (f.s === this.myKey && this.resealedFrom.get(frameKey(f))) || communityMessageId(f.s, f.e, f.h, f.n);
@@ -1533,14 +1647,16 @@ export class CommunitySession {
         case "group-secret": {
           if (frame.to !== this.myKey || typeof frame.h !== "string") return false;
           const took = this.takeSecret(frame.h, frame.s);
-          if (took) { await this.persist(); this.hooks.changed(); await this.replayWaiting(); }
+          // Within a second, as a commit (agents#1767): a catch-up hands one per epoch.
+          if (took) { this.persistSoon(); this.hooks.changed(); await this.replayWaiting(); }
           return took;
         }
         case "group-secrets": {
           if (!Array.isArray(frame.secrets) || frame.secrets.length > COMMUNITY_LIMITS.secrets) return false;
           let took = false;
           for (const entry of frame.secrets as { h?: unknown; s?: unknown }[]) if (entry && typeof entry.h === "string") took = this.takeSecret(entry.h, entry.s) || took;
-          if (took) { await this.persist(); this.hooks.changed(); await this.replayWaiting(); }
+          // Within a second, as a commit (agents#1767): a catch-up hands one per epoch.
+          if (took) { this.persistSoon(); this.hooks.changed(); await this.replayWaiting(); }
           return false;
         }
         case "group-sync": await this.receiveSync(from, frame as unknown as CommunitySyncFrame); return false;
@@ -1613,13 +1729,20 @@ export class CommunitySession {
     // (A first one I only carried, let in after it was sealed, was never shown here: this one is.)
     const firstAt = original && this.commitByShort(original.e, original.h);
     const readFirst = !!firstAt && rosterHas(this.rosterOf(firstAt.hash) ?? [], this.myKey);
-    if (original && readFirst && this.isDuplicate(first)) { this.markSeen(raw); this.keep(raw); this.persistSoon(); return true; }
+    const id = communityMessageId(raw.s, first.e, first.h, first.n);
+    // Deleted for everyone (`hooks.removed`): it stays gone here, and is neither kept nor passed on.
+    if (this.hooks.removed?.(id)) { this.markSeen(raw); this.persistSoon(); return false; }
+    // Or the group's state said again once more (`renewLasting`), its first past the window: the one kept here names it.
+    if (original && ((readFirst && this.isDuplicate(first)) || this.keepsLasting(raw, id))) {
+      // Kept in the first's place, so it outlives the first's commit.
+      if (isObject(parsed.x)) this.keepLasting({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x }, raw);
+      this.markSeen(raw); this.keep(raw); this.persistSoon(); return true;
+    }
     const text = typeof parsed.text === "string" ? parsed.text.slice(0, COMMUNITY_LIMITS.textBytes) : undefined;
     // Exactly one of: text, an application frame for the group, a payload for one member.
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
-    const id = communityMessageId(raw.s, first.e, first.h, first.n);
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
       // A reply that does not hold is left out, never the text.
@@ -1648,8 +1771,9 @@ export class CommunitySession {
       }
     }
     this.markSeen(raw);
-    // The first one, should it come too (from a member who carried it): a duplicate.
-    if (original) this.markSeen({ ...raw, ...original });
+    // The first one, should it come too (from a member who carried it): a duplicate. Only under a commit I know: a
+    // place naming none would be a new entry in `seen` per frame, never pruned before the window passes it.
+    if (original && firstAt) this.markSeen({ ...raw, ...original });
     this.keep(raw);
     // The message itself is stored already; what changed here (seen, store) is saved in a batch.
     this.persistSoon();
@@ -1782,6 +1906,8 @@ export class CommunitySession {
       // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
       if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
+      // Deleted for everyone and still here (a removal taken by an app that kept the frame, before `forget`): their removal goes, not it.
+      if (this.hooks.removed?.(communityMessageId(stored.s, stored.e, stored.h, stored.n))) continue;
       if (!this.heardAfterOut(stored)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;
@@ -1944,27 +2070,34 @@ export class CommunitySession {
   /**
    * Who made the change a statement brings me (`at`: its commit's place on my main branch): its signer, when they were
    * the admin all along since the statement I held (or, with none, since I got in). A new admin signs again what the
-   * last one set (`metaFollowsChain`): to a member that missed that, it is no change of theirs it can tell apart.
+   * last one set (`metaFollowsChain`): to a member that missed that, it is no change of theirs it can tell apart. With
+   * none held, theirs is one dated after the commit that made them the admin: what they sign again keeps its date.
    */
   private metaAuthor(before: GroupMeta | undefined, s: GroupMetaStatement, at: number): string | undefined {
     const from = before ? this.mainIndex.get(before.h) : undefined;
-    let roster = before && from !== undefined ? this.rosterAt(before.h) ?? null : null, counted = from !== undefined;
+    let roster = before && from !== undefined ? this.rosterAt(before.h) ?? null : null, counted = from !== undefined, moved: number | undefined;
     for (let i = from ?? 0; i <= at; i++) {
       if (i !== from) roster = communityRoster(roster, this.state.chain[i]);
       if (!roster) return undefined;
       counted ||= rosterHas(roster, this.myKey);
-      if (counted && rosterAdmin(roster) !== s.by) return undefined;
+      if (counted && rosterAdmin(roster) !== s.by) { if (before) return undefined; moved = i + 1; }
     }
-    return s.by;
+    return moved === undefined || s.ts > this.state.chain[moved].ts ? s.by : undefined;
   }
 
-  /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
+  /**
+   * After the chain or my secrets moved: the waiting statement, and, if I became the admin, or my statement's commit
+   * went with a branch that lost a fork, the name and picture signed again as mine under the main branch.
+   */
   private async metaFollowsChain(): Promise<void> {
     const pending = this.pendingMeta;
     this.pendingMeta = undefined;
     if (pending && await this.receiveMeta(pending.from, pending.frame)) this.hooks.relay?.(pending.frame as GroupMetaFrame);
-    // Joiners accept only the current admin's statement: a new admin signs the picture again.
-    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.hooks.clock?.() ?? Date.now());
+    // Joiners accept only the current admin's statement: a new admin signs the picture again. One under a commit off
+    // the main branch reaches no one (each waits for a chain that never comes): its admin signs it again too. Dated
+    // when it was set: a member holding nothing tells it from a new admin's change by that (`metaAuthor`).
+    const meta = this.state.meta;
+    if (this.isAdmin && meta && (meta.by !== this.myKey || !this.mainIndex.has(meta.h))) await this.publishMeta(meta.body, meta.ts);
   }
 
   private async fork(reason: string): Promise<void> {

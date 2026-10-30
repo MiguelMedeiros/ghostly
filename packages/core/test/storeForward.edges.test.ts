@@ -363,6 +363,16 @@ describe("manifests and storage addresses", () => {
     }
   });
 
+  it("never trusts a name only a local network answers", () => {
+    for (const url of ["https://router/o", "https://nas.local/o", "https://nas.local./o", "https://gw.lan/o", "https://wiki.internal/o", "https://box.home.arpa/o",
+      "https://fritz.box.home/o", "https://srv.localdomain/o", "https://hr.intranet/o", "https://files.corp/o", "https://NAS.LOCAL/o"]) {
+      expect(isHoldUrl(url), url).toBe(false);
+      expect(isHoldUrl(url, true), url).toBe(false);
+    }
+    for (const url of ["https://local.example/o", "https://lan.example.com/o", "https://s3.internalcloud.example/o", "https://bucket.s3.amazonaws.com/o"]) expect(isHoldUrl(url), url).toBe(true);
+    expect(() => readManifest({ entries: [entry({ 4: "https://nas.local/o" })] })).toThrow(HoldRefusedError);
+  });
+
   it("holds every address a manifest lists to that rule", () => {
     for (const url of ["http://127.0.0.1:4959/admin?x", "http://192.168.1.1/o", "https://10.0.0.5/o"]) expect(() => readManifest({ entries: [entry({ 4: url })] })).toThrow(HoldRefusedError);
     expect(readManifest({ entries: [entry({ 4: "http://127.0.0.1:9000/b/o" })] }, true)).toHaveLength(1);

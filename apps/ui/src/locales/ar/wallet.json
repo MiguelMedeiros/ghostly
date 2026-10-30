@@ -59,6 +59,7 @@
     },
     "label": "نسخة احتياطية مطلوبة",
     "later": "لاحقًا",
+    "line": "انسخ محفظة {{wallet}} احتياطيًا",
     "title": "لديك أموال حقيقية في {{wallet}}"
   },
   "bark": {
@@ -765,6 +766,8 @@
     "send": "إرسال"
   },
   "unseen": {
+    "lineReal": "{{amount}} ساتوشي جديدة في {{wallet}}",
+    "lineTest": "{{amount}} ساتوشي تجريبية جديدة في {{wallet}}",
     "real": "{{place}}، {{amount}} sats جديدة",
     "test": "{{place}}، {{amount}} sats تجريبية جديدة"
   },

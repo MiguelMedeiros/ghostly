@@ -50,14 +50,22 @@ describe("what a file's status line says", () => {
     ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
     ["a group's file, its holders busy", t({ stage: "waiting", direction: "in", wait: "busy" }), "Busy, trying again soon · 62% done"],
     ["a group's file, its holders busy, nothing here yet", t({ stage: "waiting", direction: "in", wait: "busy", transferred: 0 }), "Busy, trying again soon · 4.2 GB"],
+    // agents#1672: its holders served all they can today; "trying again soon" was wrong for up to a day.
+    ["a group's file whose holders served their day", t({ stage: "waiting", direction: "in", wait: "day", transferred: 0 }), "Shared all they can today, comes from another member or tomorrow · 4.2 GB"],
     ["a group's file that came damaged", t({ stage: "waiting", direction: "in", wait: "damaged", stalled: true, transferred: 0 }), "Arrived damaged · 4.2 GB"],
     ["a group's file nobody in reach has", t({ stage: "waiting", direction: "in", wait: "nobody", transferred: 0 }), "Waiting for connection · 4.2 GB"],
   ])("%s", (_, transfer, text) => {
-    expect(fileStatus(f, transfer, "Ana", false)).toBe(text);
+    expect(fileStatus(f, transfer, "Ana", false).replace(/\u00a0/g, " ")).toBe(text);
+  });
+  it("a wrapped line never parts a size from its unit: \"26.0\" and \"MB\" stay on one line", () => {
+    const zip = file({ size: 26 * 1024 ** 2 });
+    expect(fileStatus(zip, t({ stage: "asking", direction: "out", transferred: 0, size: zip.size }), undefined, false)).toBe("Waiting for your contact to accept · 26.0\u00a0MB");
+    expect(fileStatus(f, t({ rate: 12 * 1024 ** 2 }), "Ana", false)).toBe("62% of 4.2\u00a0GB · 12.0\u00a0MB/s · 2 min left");
+    expect(fileStatus(zip, null, "Ana", false)).toBe("26.0\u00a0MB");
   });
   it("a contact with no name is \"your contact\", in lower case mid-sentence", () => {
-    expect(fileStatus(f, t({ stage: "paused", pausedBy: "peer" }), undefined, false)).toBe("Paused by your contact · 62% of 4.2 GB");
-    expect(fileStatus(f, t({ stage: "asking", direction: "out", transferred: 0 }), undefined, false)).toBe("Waiting for your contact to accept · 4.2 GB");
+    expect(fileStatus(f, t({ stage: "paused", pausedBy: "peer" }), undefined, false)).toBe("Paused by your contact · 62% of 4.2\u00a0GB");
+    expect(fileStatus(f, t({ stage: "asking", direction: "out", transferred: 0 }), undefined, false)).toBe("Waiting for your contact to accept · 4.2\u00a0GB");
     expect(fileStatus(f, t({ stage: "queued", direction: "out" }), undefined, false)).toBe("Queued by your contact · 62% done");
   });
   it("time left reads in minutes and hours", () => {

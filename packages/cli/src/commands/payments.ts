@@ -1,12 +1,18 @@
 import { type Command, net, card, memo, confirmReal, force, sats, pairs } from "./shared";
-import { ADDRESS_TYPES, CHAT_METHODS, WALLET_TYPES } from "../words";
+import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "../words";
+import { CliError } from "../errors";
 
 /** Wallets and payments: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "chat accept": {
-    method: "chat.accept", usage: "chat accept <chat> <method> [--off] [--networks mainnet,testnet]", summary: "Which ways of paying a chat takes",
-    args: ["chat", "method"], words: { method: CHAT_METHODS }, options: { off: { type: "boolean", description: "Stop taking it" }, networks: { type: "string", description: "Comma-separated networks it is taken on" } },
-    params: ({ options }, a) => ({ chat: a.chat, method: a.method, on: options.off !== true, networks: typeof options.networks === "string" ? options.networks.split(",").map((n) => n.trim()).filter(Boolean) : undefined }),
+    method: "chat.accept", usage: "chat accept <chat> [<method> [--off] [--networks mainnet,testnet]]", summary: "Which ways of paying a chat takes (no method: the ones it takes now)",
+    args: ["chat", "method?"], words: { method: CHAT_METHODS }, options: { off: { type: "boolean", description: "Stop taking it" }, networks: { type: "string", description: "Comma-separated networks it is taken on" } },
+    params: ({ options }, a) => {
+      // Without a method it only answers what the chat takes: --off or --networks would be dropped without a word.
+      if (a.method === undefined && (options.off !== undefined || options.networks !== undefined)) throw new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]");
+      if (a.method === undefined) return { chat: a.chat };
+      return { chat: a.chat, method: a.method, on: options.off !== true, networks: typeof options.networks === "string" ? options.networks.split(",").map((n) => n.trim()).filter(Boolean) : undefined };
+    },
   },
   "chat pay": {
     method: "chat.pay", usage: "chat pay <chat> <sats> [--memo t] [--network testnet] [--confirm-real] [--force]", summary: "Send ecash to a contact (Mainnet needs --confirm-real)",
@@ -20,15 +26,15 @@ export const commands: Record<string, Command> = {
   },
   "chat request": {
     method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay",
-    args: ["chat", "amount"], options: { memo, method: { type: "string", description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
+    args: ["chat", "amount"], options: { memo, method: { type: "string", choices: PAY_METHODS, description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
     params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card, force: options.force === true }),
   },
   "lightning default": { method: "lightning.default", usage: "lightning default <card> [--network testnet]", summary: "The Lightning card that receives by default", args: ["card"], options: { network: net }, params: ({ options }, { card: c }) => ({ card: c, network: options.network }) },
   "lightning rename": { method: "lightning.rename", usage: "lightning rename <card> <name...> [--network testnet]", summary: "Name a Lightning card", args: ["card", "name..."], options: { network: net }, params: ({ options }, a) => ({ card: a.card, name: a.name, network: options.network }) },
   "pay": {
-    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--confirm-real]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real",
-    args: ["target"], options: { amount: { type: "number", description: "Sats, for an address or LNURL" }, network: net, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, comment: { type: "string", description: "For the address's owner" }, "confirm-real": confirmReal },
-    params: ({ options }, { target }) => ({ target, amount: options.amount, network: options.network, maxFee: options["max-fee"], card: options.card, comment: options.comment, confirmReal: options["confirm-real"] === true }),
+    method: "pay", usage: "pay <invoice|lightning-address|lnurl> [--amount sats] [--network n] [--max-fee sats] [--card <id>] [--comment t] [--confirm-real] [--force]", summary: "Pay over Lightning from Testnet, or --network mainnet with --confirm-real",
+    args: ["target"], options: { amount: { type: "number", description: "Sats, for an address or LNURL" }, network: net, "max-fee": { type: "number", description: "Refuse a fee above this" }, card, comment: { type: "string", description: "For the address's owner" }, "confirm-real": confirmReal, force },
+    params: ({ options }, { target }) => ({ target, amount: options.amount, network: options.network, maxFee: options["max-fee"], card: options.card, comment: options.comment, confirmReal: options["confirm-real"] === true, force: options.force === true }),
   },
   "payment check": { method: "payment.check", usage: "payment check <chat> <payment>", summary: "Paid from another wallet: the contact's app looks now", args: ["chat", "payment"], params: (_, a) => ({ chat: a.chat, payment: a.payment }) },
   "payment list": { method: "payment.list", usage: "payment list [--chat <chat>]", summary: "Payments and requests, newest first", options: { chat: { type: "string", description: "Only this chat's" } }, params: ({ options }) => ({ chat: options.chat }) },

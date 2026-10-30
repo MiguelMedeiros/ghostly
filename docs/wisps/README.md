@@ -46,6 +46,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 404 | Chat | [Store-and-Forward for an Away Contact](404-store-and-forward.md) | Profile | Draft | Available |
 | 405 | Chat | [Status Cards for Bots and Apps](405-status-cards.md) | Profile | Draft | Available |
 | 406 | Chat | [Message Buttons for Bots](406-message-buttons.md) | Profile | Draft | Available |
+| 4xx | Chat | [Forward Secrecy for a Chat's Stored Paths](4xx-ratchet.md) | Profile | Draft | Available |
 | 500 | Files | [File Transfer](500-files.md) | Contract | Draft | Available |
 | 501 | Files | [Chat Files](501-paired-files.md) | Profile | Draft | Available |
 | 502 | Files | [Compatibility File Frames](502-legacy-files.md) | Profile | Draft | Available |

@@ -136,6 +136,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not from Android's main thread", "apps/desktop/src/android.rs"],
   ["Ghostly is starting…", `${BROWSER}/platform/engine.ts`],
   ["Lost the Ghostly peer", `${BROWSER}/platform/engine.ts`],
+  ["This device has no room left to save this", `${BROWSER}/shared/idb.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],
   ["Ghostly needs your permission to reach that local address", `${BROWSER}/platform/services.ts`],
   ["Pick a Lightning card first", `${BROWSER}/platform/services.ts`],
@@ -508,6 +509,19 @@ describe("errors in the app's language", () => {
     expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK. O servidor Esplora em esplora.example não respondeu em 10 s");
   });
 
+  // agents#1593: the members a group waits on were pasted as the engine listed them, in English, in every language.
+  it("the members a group waits on to grow past 8 are listed in the language: unnamed ones, the list, and how many more", () => {
+    const text = "A group grows past 8 only when everyone is on an updated Ghostly. Not seen updated yet: Ana, Bruno, Member q5zt8m3x and 2 more.";
+    const pt = errorText(text, translators.pt), ja = errorText(text, translators.ja), en = errorText(text, english);
+    expect(pt).toContain("Ana, Bruno, Membro q5zt8m3x e mais 2");
+    expect(ja).toContain("他 2 人");
+    expect(ja).not.toContain("Member");
+    for (const said of [pt, ja]) expect(said).not.toMatch(/ and \d+ more/);
+    expect(en).toContain("Ana, Bruno, Member q5zt8m3x, and 2 more");
+    // Fewer than four: no tail, and one name alone is just that name.
+    expect(errorText("A group grows past 8 only when everyone is on an updated Ghostly. Not seen updated yet: Member abcdefgh.", translators.fr)).toContain("Membre abcdefgh");
+  });
+
   it("a paste the app's clipboard refused says what to do next, in the language", () => {
     const pt = translators.pt;
     expect(errorText("That picture is too large to paste", pt)).toBe("Isso é grande demais para colar. Envie com + → Documento.");
@@ -593,6 +607,12 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
   });
 
+  it("a write the device had no room for says so and that nothing was saved, in the language, not an empty error", () => {
+    const full = Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError" });
+    expect(knownErrorParts(full, english)).toEqual({ title: "No room left on this device", next: "Nothing was saved. Free some space, then try again." });
+    expect(knownErrorParts(full, translators.pt)).toEqual({ title: "Não há mais espaço neste dispositivo", next: "Nada foi salvo. Libere espaço e tente de novo." });
+  });
+
   it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {
     const off = new Error("Managing this group is off on this device. Turn on Manage groups from this device first.");
     expect(knownErrorParts(off, english)).toEqual({ title: "Managing this group is off on this device", next: "Turn it on first: Manage groups from this device, on the group's page." });
@@ -675,6 +695,11 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText(new Error("The fee exceeds your limit"), pt)).toBe("A taxa passa do seu limite");
     expect(errorText("Error: Unknown payment intent", pt)).toBe("Pagamento desconhecido");
     expect(errorText("Outcome unknown. Check the existing payment; do not send another.", translators.fr)).toContain("Résultat inconnu");
+  });
+
+  it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {
+    expect(errorText("Your contact has no wallet yet: they need one to pay or be paid", translators.pt)).toBe("Seu contato ainda não tem carteira");
+    expect(errorText("Your contact has payments off in this chat, or needs an updated Ghostly", english)).toBe(english("chat.payments.offOrOld"));
   });
 
   it("the values stay, and amounts are written the app's way", () => {

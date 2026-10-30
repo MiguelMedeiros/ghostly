@@ -387,6 +387,62 @@ test("the chat's pickers stay inside the chat's column beside the widest list, t
   }
 });
 
+/**
+ * What is wrong with the open wallet's tabs (wallet/ui.tsx `Actions`): a label cut short ("Historiq…") or out of its
+ * tab, and whether each icon sits above its label or beside it.
+ */
+async function walletTabs(page: Page) {
+  return page.getByRole("tablist").filter({ has: page.getByTestId("wallet-history") }).evaluate((list) => {
+    const problems: string[] = [];
+    const stacked: boolean[] = [];
+    for (const tab of list.querySelectorAll<HTMLElement>("[role=tab]")) {
+      const label = tab.querySelector<HTMLElement>("span")!, icon = tab.querySelector("svg")!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const ink = range.getBoundingClientRect(), box = tab.getBoundingClientRect(), text = label.textContent ?? "";
+      if (label.scrollWidth > label.clientWidth) problems.push(`"${text}" is cut: ${label.scrollWidth} > ${label.clientWidth}`);
+      if (ink.left < box.left - 1 || ink.right > box.right + 1) problems.push(`"${text}" runs out of its tab`);
+      if (range.getClientRects().length > 1) problems.push(`"${text}" breaks into lines`);
+      stacked.push(icon.bottom <= ink.top + 1);
+    }
+    return { problems, stacked };
+  });
+}
+
+test("a wallet's tabs read whole on a phone in every language, the icon above the label", { tag: ["@feature:app.responsive", "@feature:app.i18n", "@feature:wallet.history"] }, async ({ peer }) => {
+  const alice = await peer("alice", { mobile: true, viewport: { width: 375, height: 740 } });
+  const { page } = alice;
+  await useFakeProviders(alice);
+  await page.goto("/#/wallet");
+  // The cards with three tabs (Receive, Send, History) that need no outside service: Testnet Cashu and a fake Testnet
+  // Bitcoin wallet. Fedimint's card has the same tabs and needs the gated regtest stack.
+  await createWallet(alice, "cashu", "testnet");
+  await createWallet(alice, "bitcoin", "testnet", { provider: "fake-onchain", fill: async (form) => {
+    await form.getByLabel("Access token").fill("token");
+    await form.getByTestId("provider-save").click();
+  } });
+  const problems: string[] = [], stacked: string[] = [];
+  for (const language of ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"]) {
+    await page.goto("/#/settings/appearance");
+    await choose(page.getByTestId("settings-language"), language);
+    await page.goto("/#/wallet");
+    for (const card of ["cashu-testnet", "bitcoin-testnet"] as const) {
+      await openWallet(alice, card);
+      await expect(page.getByTestId("wallet-history")).toBeVisible();
+      const tabs = await walletTabs(page);
+      problems.push(...tabs.problems.map((problem) => `${card} in ${language}: ${problem}`));
+      if (tabs.stacked.includes(false)) stacked.push(`${card} in ${language}`);
+    }
+  }
+  expect(problems, "every label whole at 375px").toEqual([]);
+  expect(stacked, "the icon above the label at 375px").toEqual([]);
+  // A desktop's column is wide enough: the icon goes back beside the label, the label whole.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect.poll(() => walletTabs(page), "the tabs at 1280px").toEqual({ problems: [], stacked: [false, false, false] });
+  // The tab's name is still its label alone.
+  await expect(page.getByTestId("wallet-history")).toHaveAccessibleName("السجل");
+});
+
 /** Whether a control can be used where it is, without scrolling: in the window, and what a click there lands on. */
 const reachable = (page: Page, testId: string) => page.getByTestId(testId).evaluate((el) => {
   const r = el.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);

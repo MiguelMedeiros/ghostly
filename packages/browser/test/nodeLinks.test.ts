@@ -544,6 +544,44 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
         expect(node.getState().links.find((l) => l.id === holders[3].options.params.id)?.transportErrors?.["iroh/1"]).toMatch(/quiet/);
       });
 
+      it("a chat paired while every listener was in use takes one once a chat goes quiet, though it is not on screen", async () => {
+        // agents#1619: a CLI daemon's ninth chat, paired while eight chats used in the last two minutes held the listeners,
+        // stayed "waiting" for 10+ minutes: it was in use only while its invite was on screen, and its retries could take
+        // only a free listener. Its error said it would take one once a chat went quiet.
+        const { node, holders, nine } = await allLive([1, 1, 1, 1, 1, 1, 1, 1], { pairedPeerKey: undefined });
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        await nine.options.pairing.pinPeer(createIdentity().pubKeyZ32, true);
+        await node["nativeQueue"];
+        expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toMatch(/slots are in use/);
+        expect(yielded(holders)).toEqual([]);
+        // Three minutes later, nobody has written in any of them: its next try takes the listener of the quietest.
+        holders[4].lastActivityAt -= 30_000;
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 3 * 60_000);
+        onTestFinished(() => { clock.mockRestore(); });
+        node["retryNative"]();
+        await vi.waitFor(() => expect(nine.registerEndpoint).toHaveBeenCalled());
+        expect(yielded(holders)).toEqual([holders[4]]);
+      });
+
+      it("a chat paired in this run takes one only until it has gone live, or for ten minutes", async () => {
+        const { node, holders, nine } = await allLive([1, 1, 1, 1, 1, 1, 1, 1], { pairedPeerKey: undefined });
+        await nine.options.pairing.pinPeer(createIdentity().pubKeyZ32, true);
+        await node["nativeQueue"];
+        const live = node["links"].get("chat-z")!;
+        expect(live.pairedAt).toBeGreaterThan(0);
+        // Its next try eleven minutes on, the others quiet by then: it is a chat like any other not in use, and waits.
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000);
+        onTestFinished(() => { clock.mockRestore(); });
+        node["retryNative"]();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([]);
+        // Live once, it no longer counts as just paired.
+        (nine.options as unknown as { events: { onDataLinkState(state: string): void } }).events.onDataLinkState("open");
+        expect(live.pairedAt).toBeUndefined();
+      });
+
       it("never one with a call on, nor one used in the last two minutes: the chat on screen waits until one goes quiet", async () => {
         const { node, holders, nine } = await allLive([1, 1, 30, 1, 1, 1, 1, 1]);
         // The quietest has a call on: its media runs elsewhere, the session itself says nothing for half an hour.
@@ -782,6 +820,8 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
             await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[0]]));
             for (const id of edgeIds) linkOf(id).isDataLinkOpen = false;
+            // Each member is there, its packet saying no listener for its edge here (all its own taken).
+            for (const id of edgeIds) { const live = node["links"].get(id)!; live.presence = { ...live.presence, online: true }; }
             // The member heard from last comes after the hub.
             node["links"].get(edgeIds[2])!.lastSyncAt = Date.now() - 1_000;
             const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
@@ -826,6 +866,30 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             await node["nativeQueues"].get("iroh/1");
             expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
             expect(onIroh()).toEqual([edgeIds[0]]);
+          });
+
+          it("every member away past twenty seconds: no edge is passed over, and each has its listener when they come back", async () => {
+            // A hub with no WebRTC, its three members stopped for minutes: the edge passed over while they were away gave
+            // its listener up, nothing asked for one again, and its member stayed offline here once back (12 min seen).
+            const { node, linkOf } = await nativeStarted();
+            const { edgeIds } = await groupOf(node, 3);
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            expect(onIroh()).toEqual(edgeIds);
+            for (const id of edgeIds) {
+              linkOf(id).isDataLinkOpen = false;
+              irohSaid(linkOf(id) as never);
+              const live = node["links"].get(id)!;
+              live.presence = { ...live.presence, online: false };
+              live.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            }
+            const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
+            for (let i = 0; i < 3; i++) { check(); await node["nativeQueues"].get("iroh/1"); }
+            for (const id of edgeIds) expect(linkOf(id).releaseEndpoint).not.toHaveBeenCalled();
+            // Back: each member's packet is there again, and every edge still listens for it.
+            for (const id of edgeIds) { const live = node["links"].get(id)!; live.presence = { ...live.presence, online: true }; }
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(onIroh()).toEqual(edgeIds);
           });
         });
       });
@@ -2045,7 +2109,7 @@ describe("private groups through the engine", () => {
       await vi.waitFor(() => expect(waiting()).toHaveLength(0));
     });
 
-    it("an app with no WebRTC offers to be no private group's hub, and gives its groups four connections in all", async () => {
+    it("an app with no WebRTC offers to be no private group's hub, and gives its groups the listeners its 1:1 chats leave, four at least", async () => {
       const iroh = vi.fn(async () => endpoint());
       const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
       const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, platform: "desktop", nativeTransports: { "iroh/1": iroh } });
@@ -2055,16 +2119,36 @@ describe("private groups through the engine", () => {
       // A Linux Desktop: native listeners only, a few of them. A Mac (WebRTC) stays a hub candidate, as before.
       expect(host.staysOnline()).toBe(false);
       const { groupId } = await node.createGroup({ name: "Plaza" });
-      expect(host.peerRoom(groupId)).toBe(GROUP_NATIVE_SLOTS);
-      // Another group's links take from the same four.
+      // No 1:1 chats: all eight listeners. A private group of seven keeps an edge with each of its six other members,
+      // where four left two of them unreached for good.
+      expect(host.peerRoom(groupId)).toBe(8);
+      // Another group's links take from the same eight.
       const other = await node.createGroup({ name: "Other" });
       const state = (await db.getGroups()).find((g) => g.id === other.groupId)!.community;
       await openEdge(node, state,createIdentity().pubKeyZ32);
-      expect(host.peerRoom(groupId)).toBe(GROUP_NATIVE_SLOTS - 1);
+      expect(host.peerRoom(groupId)).toBe(7);
       vi.stubGlobal("RTCPeerConnection", class {});
       onTestFinished(() => { vi.unstubAllGlobals(); });
       expect(host.staysOnline()).toBe(true);
       expect(host.peerRoom(groupId)).toBeUndefined();
+    });
+
+    it("an app with no WebRTC leaves its groups the listeners its 1:1 chats do not hold, and four however many chats hold one", async () => {
+      const chats = Array.from({ length: 6 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats.slice(0, 2)) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats.slice(0, 2)) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const host = node["groups"]["host"] as { peerRoom(groupId: string): number | undefined };
+      const { groupId } = await node.createGroup({ name: "Team" });
+      // Two chats hold a listener each: six for the groups.
+      expect(host.peerRoom(groupId)).toBe(6);
+      await node.shutdown();
+      nodes.splice(nodes.indexOf(node), 1);
+      // Six chats: the four kept for groups, as before.
+      for (const r of chats.slice(2)) await db.putLink(r);
+      const again = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      expect((again.node["groups"]["host"] as typeof host).peerRoom(groupId)).toBe(GROUP_NATIVE_SLOTS);
     });
 
     it("an app whose Iroh is the browser build holds twelve Iroh listeners for group links, and answers past them the edge each member keeps to it", async () => {
@@ -2103,9 +2187,9 @@ describe("private groups through the engine", () => {
       await node["nativeQueues"].get("hyperdht/1");
       expect(waiting()).toHaveLength(0);
       expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS);
-      // With no WebRTC (GHOSTLY_WEBRTC=0), those twelve are what its groups may hold in all.
+      // With no WebRTC (GHOSTLY_WEBRTC=0), its groups may have all sixteen Iroh listeners with no 1:1 chat holding one.
       vi.unstubAllGlobals();
-      expect((node["groups"]["host"] as { peerRoom(groupId: string): number | undefined }).peerRoom(groupId)).toBe(GROUP_IROH_WEB_SLOTS);
+      expect((node["groups"]["host"] as { peerRoom(groupId: string): number | undefined }).peerRoom(groupId)).toBe(16);
       expect(GROUP_IROH_WEB_SLOTS).toBe(12);
     });
 

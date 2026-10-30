@@ -10,7 +10,7 @@ import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinSer
 import type { Removal } from "../engine/removals";
 import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
-import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind, RatchetState } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { BackupReminders } from "./backupReminder";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
@@ -34,6 +34,11 @@ export interface StoredLink {
   wakeMuted?: boolean;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
+  /**
+   * Paired 1:1 chats: the ratchet of the DHT floor and held items (WISP 4xx). State of this device only: never in a
+   * backup or a handoff (`profileBackup.ts`), and dropped by a forced takeover (`raisedLink`).
+   */
+  ratchetState?: RatchetState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
   capsState?: CapsState;
   publicProfiles?: PublicProfile[];
@@ -198,14 +203,22 @@ export interface StoredGroup {
   /**
    * I left: the group is gone from the list and its history from the device. What is kept is the
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
-   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, and my
-   * signed leave (`bye`) that they carry to the admin.
+   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, which carry my
+   * signed leave (`bye`) to the admin. `bye` is kept without hubs too: opening the group's link again takes it along
+   * (`owedBye`).
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /**
+   * Left while the admin was away, then back by the group's link before it heard the leave: the signed leave of my old
+   * key, said to the admin on my new key's edge, so it takes the old key out (it was in every roster twice for good,
+   * agents#1652). Dropped once the old key is out of the roster, or a week after the leave.
+   */
+  owedBye?: GroupByeFrame;
+  /**
    * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
    * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
-   * was to a group I was removed from, which stays.
+   * was to a group I was removed from, which stays; beside a join by the group's link opened after the decline (its
+   * `invitation`, then its `state`), which stays too.
    */
   declined?: { at: number; linkId: string };
   /**
@@ -312,7 +325,8 @@ export interface GroupView {
    * was created long before).
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
    * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
-   * while that chat was up: the answer is offered again.
+   * while that chat was up: the answer is offered again. Through a link (`viaLink`): nobody answered it for an hour of
+   * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
   invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
@@ -446,7 +460,7 @@ export interface FileTransferView {
    * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
    * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
    */
-  wait?: "nobody" | "busy" | "damaged";
+  wait?: "nobody" | "busy" | "day" | "damaged";
   /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
@@ -1266,7 +1280,8 @@ export interface Settings {
   /**
    * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
    * group edges) goes through the TURN server in `iceServers` alone, with no STUN server. On only with a TURN server
-   * (`relayOnlyProblem`). Absent means off. The Desktop's own Iroh and HyperDHT do not follow it yet.
+   * (`relayOnlyProblem`). The Desktop offers contacts neither its own Iroh nor its own HyperDHT (HyperDHT goes through
+   * `hyperdhtRelay`, as in a browser); its own devices keep them. Absent means off.
    */
   relayOnly?: boolean;
   /**
@@ -1277,7 +1292,7 @@ export interface Settings {
   /**
    * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
    * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
-   * runs HyperDHT itself and ignores it.
+   * runs HyperDHT itself and ignores it, except toward contacts while `relayOnly` is on.
    */
   hyperdhtRelay?: string;
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */

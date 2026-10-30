@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ENDPOINT, ONCHAIN_PROVIDER, cashuRequestPayload, engineText, type GhostLink, type PaymentRequest, type PaymentReview, type PaymentTarget } from "@ghostly/core";
+import { ENDPOINT, ONCHAIN_PROVIDER, cashuRequestPayload, engineError, engineText, type GhostLink, type PaymentRequest, type PaymentReview, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import { CashuAdapter } from "../src/engine/paymentAdapters/cashu";
 import { SwapUnsettledError, type CashuPrepared, type CashuWallet } from "../src/engine/wallet";
 import { MintOperationError } from "@cashu/cashu-ts";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { BarkWallet } from "../src/engine/paymentAdapters/barkWallet";
+import type { BarkReceipts } from "../src/engine/paymentAdapters/bark";
 import type { UsdtWallet } from "../src/engine/paymentAdapters/usdtWallet";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
 import type { PendingSwap, StoredMessage, StoredPayment } from "../src/shared/types";
@@ -80,7 +81,8 @@ function setup(stored: StoredPayment[] = []) {
     check: vi.fn(async () => {}),
   };
   const arkWallet = { target: vi.fn(async () => ark()), adapter: { config: { provider: ARK, network: "mutinynet" }, received: vi.fn(async (): Promise<string | undefined> => undefined), verifyReceipt: vi.fn(async () => false) } };
-  const barkWallet = { target: vi.fn(async () => bark()), adapter: { config: { provider: BARK, network: "signet" }, received: vi.fn(async (): Promise<string | undefined> => undefined), sync: vi.fn(async () => {}) } };
+  const barkReceived = vi.fn((..._: Parameters<BarkReceipts>): string | undefined => undefined);
+  const barkWallet = { target: vi.fn(async () => bark()), adapter: { config: { provider: BARK, network: "signet" }, received: barkReceived, receipts: vi.fn(async () => barkReceived), sync: vi.fn(async () => {}) } };
   const usdtWallet = { target: vi.fn(async () => usdt()), adapter: { receipt: vi.fn(async (): Promise<{ settled?: boolean; failed?: boolean; error?: string }> => ({ settled: false })) } };
   const bitcoin = { requestTarget: vi.fn(async () => btc()), received: vi.fn<DeskBitcoin["received"]>(async () => undefined) };
   const desk = new PaymentDesk(wallet as unknown as CashuWallet, host, arkWallet as unknown as ArkWallet, usdtWallet as unknown as UsdtWallet, barkWallet as unknown as BarkWallet, lightning as DeskLightning, bitcoin);
@@ -439,6 +441,26 @@ describe("ecash arriving", () => {
     expect(texts().slice(0, 2)).toEqual(["Could not receive 100 sats: Unsupported payment method", "Could not receive a payment: Unsupported amount"]);
   });
 
+  it("the same spent ecash sent again under new ids is refused each time, and said once in its chat", async () => {
+    const { desk, wallet, sent, host } = setup();
+    wallet.receiveToken.mockRejectedValue(engineError("ecashAlreadySpent"));
+    for (let i = 0; i < 5; i++) await desk.onPayment("l", cashuPayment(`p${i}`, { timestamp: 100 + i }));
+    await desk.onPayment("l", cashuPayment("q", { timestamp: 200, endpoint: [ENDPOINT.cashu, "cashuBother"] }));
+    await desk.onPayment("m", cashuPayment("r", { timestamp: 300 }));
+    expect(sent.filter((s) => s.kind === "res").map((s) => s.frame.ok), "the contact is told every time").toEqual(Array(7).fill(false));
+    const lines = host.storeMessage.mock.calls.map(([m]) => `${m.linkId}:${m.id}`);
+    expect(lines, "every line of one token in one chat has one id: stored once").toHaveLength(7);
+    expect(new Set(lines).size, "one per token and chat").toBe(3);
+  });
+
+  it("a refusal for anything but spent ecash keeps a line per payment", async () => {
+    const { desk, wallet, host } = setup();
+    wallet.receiveToken.mockRejectedValue(new Error("Ecash from mint.example is not accepted"));
+    await desk.onPayment("l", cashuPayment("p1", { timestamp: 1 }));
+    await desk.onPayment("l", cashuPayment("p2", { timestamp: 2 }));
+    expect(host.storeMessage.mock.calls.map(([m]) => m.id)).toEqual(["peer_1_refused", "peer_2_refused"]);
+  });
+
   it("settles our request only in full, from a mint it named, and only when it came through this chat", async () => {
     const { desk, wallet, state } = setup([record({ id: "r", direction: "out", mints: [MINT] })]);
     await desk.start();
@@ -698,6 +720,24 @@ describe("USDT receipts", () => {
     expect(state("p4")).toMatchObject({ state: "failed", error: "reverted" });
     expect(state("r")?.state).toBe("pending");
   });
+
+  it("a USDT receipt sent again under its id with a new time is not said, stored or checked again; a settled one is answered", async () => {
+    const { desk, usdtWallet, state, texts, sent } = setup([record({ id: "r", direction: "out", unit: "testusdt", target: usdt(), amount: 2_000_000 })]);
+    await desk.start();
+    const pay = (timestamp: number, hash: string) => desk.onPayment("l", { id: "p", requestId: "r", timestamp, amount: { value: "2000000", asset: "testusdt" }, endpoint: [ENDPOINT.usdt, JSON.stringify({ txid: hash })] });
+    await pay(1, txid);
+    for (let i = 2; i <= 6; i++) await pay(i, `0x${String(i).repeat(64)}`);
+    expect(texts().filter((t) => t?.includes("checking chain"))).toHaveLength(1);
+    expect(usdtWallet.adapter.receipt).toHaveBeenCalledOnce();
+    expect(state("p"), "its first frame says its txid").toMatchObject({ state: "pending", txid, createdAt: 1 });
+
+    usdtWallet.adapter.receipt.mockResolvedValueOnce({ settled: true });
+    await desk.reconcileUsdtReceipts();
+    expect(sent).toEqual([]);
+    await pay(7, txid);
+    expect(sent).toEqual([{ kind: "res", frame: { id: "r", ok: true } }]);
+    expect(usdtWallet.adapter.receipt).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("Ark receipts", () => {
@@ -760,6 +800,25 @@ describe("Ark receipts", () => {
     arkWallet.adapter.received.mockResolvedValue(tx("f"));
     await desk.reconcileArkReceipts();
     expect([state("r")?.state, state("p0")?.state]).toEqual(["settled", "settled"]);
+  });
+
+  it("an Ark receipt sent again under its id with a new time is not said, stored or checked again; a settled one is answered", async () => {
+    const { desk, arkWallet, state, texts, sent } = setup([record({ id: "r", direction: "out", target: ark("tark1mine") })]);
+    await desk.start();
+    const pay = (timestamp: number, txid: string) => desk.onPayment("l", { id: "p", requestId: "r", timestamp, amount: { value: "100", asset: "sat" }, endpoint: [ENDPOINT.arkade, JSON.stringify({ txid })] });
+    for (const [i, c] of ["a", "b", "c", "d", "e"].entries()) await pay(i + 1, tx(c));
+    expect(texts().filter((t) => t?.includes("on Ark"))).toHaveLength(1);
+    expect(arkWallet.adapter.received).toHaveBeenCalledOnce();
+    expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledOnce();
+    expect(state("p"), "its first frame says its txid").toMatchObject({ state: "pending", txid: tx("a"), createdAt: 1 });
+
+    arkWallet.adapter.verifyReceipt.mockResolvedValue(true);
+    await desk.reconcileArkReceipts();
+    expect(state("r")?.state).toBe("settled");
+    sent.length = 0;
+    await pay(6, tx("a"));
+    expect(sent).toEqual([{ kind: "res", frame: { id: "r", ok: true } }]);
+    expect(arkWallet.adapter.verifyReceipt).toHaveBeenCalledTimes(2);
   });
 
   it("requests and receipts of another Ark server or network are left for it", async () => {
@@ -1000,7 +1059,7 @@ describe("receipts that do not add up", () => {
     await desk.start();
     arkWallet.adapter.received.mockRejectedValue(new Error("indexer down"));
     arkWallet.adapter.verifyReceipt.mockRejectedValue(new Error("indexer down"));
-    barkWallet.adapter.received.mockRejectedValue(new Error("server down"));
+    barkWallet.adapter.receipts.mockRejectedValue(new Error("server down"));
     barkWallet.adapter.sync.mockRejectedValue(new Error("server down"));
     await desk.reconcileArkReceipts();
     await desk.reconcileBarkReceipts();

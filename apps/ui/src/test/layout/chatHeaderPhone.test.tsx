@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readStatusCard, statusCardText } from "@ghostly/core";
 import { Chat } from "../../pages/Chat";
@@ -139,6 +139,19 @@ describe("a chat's ⋮ menu, in groups", () => {
   });
 });
 
+// agents#1704: a chat kept loaded (on a call) when another opens closes what it opened over the page.
+describe("a chat that goes off screen", () => {
+  it("closes its Tech Info, which does not stay over the chat opened", async () => {
+    viewport(1024, 768);
+    const { user, rerender } = openChat();
+    await user.click(await screen.findByTestId("chat-options"));
+    await user.click(screen.getByTestId("chat-tech-info"));
+    expect(screen.getByRole("heading", { name: "Tech Info" })).toBeInTheDocument();
+    rerender(<Chat sessionId="chat-1" visible={false} onCallChange={() => {}} callLayer={null} />);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Tech Info" })).not.toBeInTheDocument());
+  });
+});
+
 describe("a bot's Tasks in a phone's ⋮", () => {
   const cardMessage = (id: string, card: Record<string, unknown>): ChatMessage => {
     const c = readStatusCard(card)!;
@@ -208,5 +221,36 @@ describe("a chat's Tech Info", () => {
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("dialog", { name: "Tech Info" })).not.toBeInTheDocument();
     expect(options).toHaveFocus();
+  });
+
+  /** Tech Info of a chat whose link is open, polled every 59.996 s, in `language`. */
+  async function techInfo(language: "ar" | "en") {
+    viewport(1024, 768);
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Cérebro (Mac)", messages: [], createdAt: 1_700_000_000_000 });
+    const { user, engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />, { language });
+    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
+    engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "ready" }, status: "online", poll: { polling: false, nextAt: 0, interval: 59_996 } } as never)] });
+    await user.click(await screen.findByTestId("chat-options"));
+    await user.click(screen.getByTestId("chat-tech-info"));
+    // The connection's panel is a dialog too; Tech Info is the modal one.
+    return screen.getAllByRole("dialog").find(dialog => dialog.getAttribute("aria-modal") === "true")!;
+  }
+
+  // agents#1701: the status was the engine's English word and the network line English in every language.
+  it("says the status and the network in the reader's language", async () => {
+    const dialog = await techInfo("ar");
+    expect(dialog).toHaveTextContent("الحالة" + "متصل");
+    expect(dialog.textContent).not.toMatch(/online|peer to peer|for discovery/);
+    expect(dialog).toHaveTextContent("WebRTC DataChannel");
+  });
+
+  // agents#1701: Polls, My ACK and Pending were constants (0, none, 0) the engine never filled.
+  it("shows no row the engine has no value for, and the poll interval in whole seconds", async () => {
+    const dialog = await techInfo("en");
+    expect(dialog).toHaveTextContent("Statusonline");
+    expect(dialog).toHaveTextContent("NetworkWebRTC DataChannel (peer to peer) · Pkarr for discovery");
+    expect(dialog).toHaveTextContent("Poll Interval60s");
+    for (const gone of ["Polls", "My ACK", "Pending"]) expect(dialog.textContent, gone).not.toContain(gone);
+    expect(dialog).toHaveTextContent("Peer ACK");
   });
 });

@@ -1,4 +1,4 @@
-import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
+import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, statusCardBytes, toBase64Url, type StatusCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
@@ -73,10 +73,16 @@ export function withRun(fields: Record<string, unknown>, params: Params, now = D
   return { ...fields, lastRun, runs: [lastRun, ...before].slice(0, STATUS_CARD_LIMITS.runs) };
 }
 
-/** A card checked by the sender's rule, or a `bad_request` that says what is wrong. */
+/**
+ * A card checked by the sender's rule, or a `bad_request` that says what is wrong: with the card, unless the card is
+ * what is too big (its size and the bound, not kilobytes of it echoed back).
+ */
 function checked(card: Record<string, unknown>): StatusCard {
   const result = checkStatusCard(card);
-  if ("error" in result) throw new CliError("bad_request", `Status card: ${result.error}`, { card });
+  if ("error" in result) {
+    const bytes = statusCardBytes(card);
+    throw new CliError("bad_request", `Status card: ${result.error}`, bytes > STATUS_CARD_LIMITS.bytes ? { bytes, max: STATUS_CARD_LIMITS.bytes } : { card });
+  }
   return result.card;
 }
 

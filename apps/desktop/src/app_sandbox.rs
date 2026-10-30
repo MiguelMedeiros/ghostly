@@ -50,7 +50,8 @@ const MAX_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_REQUESTS_PER_SECOND: usize = 50;
 /// The largest id a request may carry: a safe integer in JavaScript.
 const MAX_ID: u64 = (1 << 53) - 1;
-/// How long a request waits for the Ghostly window's broker (a file read included).
+/// How long a request waits for the Ghostly window's broker (a file read included), a file pick excepted
+/// (`answer_to`).
 #[cfg(not(test))]
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(test)]
@@ -499,6 +500,11 @@ fn open_window<R: Runtime>(
     Ok(label)
 }
 
+/// An app window's title: the Ghostly window's words for it, and whose window it is, outside the page.
+fn window_title(title: &str) -> String {
+    format!("{title} (Ghostly)")
+}
+
 /// The window, with every layer that does not depend on the platform.
 fn window_builder<'a, R: Runtime>(
     app: &'a AppHandle<R>,
@@ -518,7 +524,7 @@ fn window_builder<'a, R: Runtime>(
         .size();
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
-        .title(format!("{title} (Ghostly)"))
+        .title(window_title(title))
         .on_navigation(move |to| {
             nav_app
                 .state::<AppSandboxState>()
@@ -911,26 +917,30 @@ pub async fn app_broker<R: Runtime>(
         json!({ "label": label, "request": request }),
     );
     let answer = match sent {
-        Ok(()) => {
-            let wait = if request.get("type").and_then(Value::as_str) == Some("files.pick") {
-                PICK_TIMEOUT
-            } else {
-                ANSWER_TIMEOUT
-            };
-            tokio::time::timeout(wait, receiver).await.ok()
-        }
+        Ok(()) => answer_to(&request, receiver).await,
         Err(_) => None,
     };
     state.with(&label, |window| window.pending.remove(&id));
-    let answer = match answer {
-        Some(Ok(answer)) => answer,
-        _ => return Err("No answer".into()),
+    let Some(answer) = answer else {
+        return Err("No answer".into());
     };
     match file_bytes(&app, &answer).await {
         Some(Ok(bytes)) => bytes_response(id, &bytes),
         Some(Err(_)) => json_response(&json!({ "id": id, "ok": false, "error": "failed" })),
         None => json_response(&answer),
     }
+}
+
+/// The broker's answer to `request`, or None when it never came. A file pick waits for the person as long as they
+/// take, as on the web (WISP 1200: `cancelled` only when they pick nothing), up to `PICK_TIMEOUT` or until the
+/// window goes and drops the sender; anything else waits `ANSWER_TIMEOUT`.
+async fn answer_to(request: &Value, receiver: oneshot::Receiver<Value>) -> Option<Value> {
+    let wait = if request.get("type").and_then(Value::as_str) == Some("files.pick") {
+        PICK_TIMEOUT
+    } else {
+        ANSWER_TIMEOUT
+    };
+    tokio::time::timeout(wait, receiver).await.ok()?.ok()
 }
 
 /// A file's bytes for the app window, as base64 in the answer (`"bytes"`, which the runner decodes). Not raw: the
@@ -1014,6 +1024,23 @@ pub fn app_post<R: Runtime>(
     post(&app, &label, message)
 }
 
+/// Names an app window anew (the Ghostly window only): "Chess · sharing a file with Ana" while the app serves the
+/// contact a file (WISP 1200 § A read lane to the contact), as the web's panel header says it.
+#[tauri::command]
+pub fn app_title<R: Runtime>(
+    app: AppHandle<R>,
+    label: String,
+    title: String,
+) -> Result<(), String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    let window = app.get_webview_window(&label).ok_or("No app window")?;
+    window
+        .set_title(&window_title(&title))
+        .map_err(|e| e.to_string())
+}
+
 /// Closes an app window (the Ghostly window only): the broker stopped the app.
 #[tauri::command]
 pub fn app_close<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), String> {
@@ -1023,6 +1050,21 @@ pub fn app_close<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), Str
     forget(&app, &label);
     if let Some(window) = app.get_webview_window(&label) {
         window.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Brings an app window to the front (the Ghostly window only): the person opened the app again in a chat where
+/// it already runs, which shows its window rather than opening a second one.
+#[tauri::command]
+pub fn app_focus<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        window.set_focus().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -1885,6 +1927,35 @@ mod tests {
         ));
     }
 
+    /// A pick waits for the person as long as they take, within `PICK_TIMEOUT` (as on the web); it ends when the
+    /// window goes. Anything else gives up after `ANSWER_TIMEOUT` (1 s under test).
+    #[test]
+    fn a_pick_waits_for_the_person_past_the_answer_timeout() {
+        let late = |kind: &str, after: Duration| {
+            let (sender, receiver) = oneshot::channel();
+            std::thread::spawn(move || {
+                std::thread::sleep(after);
+                let _ = sender.send(json!({"id": 3, "ok": true, "value": []}));
+            });
+            let request = json!({"id": 3, "type": kind, "args": []});
+            tauri::async_runtime::block_on(answer_to(&request, receiver))
+        };
+        let slow = ANSWER_TIMEOUT + Duration::from_millis(500);
+        assert_eq!(
+            late("files.pick", slow),
+            Some(json!({"id": 3, "ok": true, "value": []}))
+        );
+        assert_eq!(late("storage.keys", slow), None);
+        // The window closed (its state and the waiting sender dropped): the pick ends at once.
+        let (sender, receiver) = oneshot::channel::<Value>();
+        drop(sender);
+        let request = json!({"id": 3, "type": "files.pick", "args": []});
+        assert_eq!(
+            tauri::async_runtime::block_on(answer_to(&request, receiver)),
+            None
+        );
+    }
+
     #[test]
     fn an_event_is_handed_to_the_runners_receiver_as_json_text() {
         let script =
@@ -2165,6 +2236,31 @@ mod tests {
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
         assert_eq!(refused(app.handle(), &label), None);
+    }
+
+    /// Opened again in a chat where it runs: its window comes to the front. Only an app window, and one gone is
+    /// no error (it closed while the Ghostly window asked).
+    #[test]
+    fn an_app_window_is_brought_to_the_front_and_no_other_window() {
+        let app = app();
+        let request = OpenRequest {
+            app: "ana/chess".into(),
+            title: "Chess".into(),
+            entry: "<p>chess</p>".into(),
+            internet: false,
+            view: AppView::Chat,
+        };
+        let label = open(app.handle(), request).unwrap();
+        assert_eq!(app_focus(app.handle().clone(), label.clone()), Ok(()));
+        app_close(app.handle().clone(), label.clone()).unwrap();
+        assert_eq!(app_focus(app.handle().clone(), label), Ok(()));
+        for other in ["main", "svc-1", "app-"] {
+            assert_eq!(
+                app_focus(app.handle().clone(), other.into()),
+                Err("Not an app window".into()),
+                "{other}"
+            );
+        }
     }
 
     /// A profile switch or a reload replaces the page whose brokers answered the app windows: they must not stay

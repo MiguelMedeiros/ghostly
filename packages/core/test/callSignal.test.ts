@@ -404,6 +404,14 @@ describe("call candidates on the chat session", () => {
     expect(config.iceServers?.slice(RTC_CONFIG.iceServers!.length)).toEqual([{ urls: ["turn:turn.example.org:3478", "turns:turn.example.org:5349"], username: "u", credential: "p" }]);
   });
 
+  it("a call gathers one session's candidates: no pre-gathered candidate pool", () => {
+    // The connection is made when the call is placed and its offer follows at once: a pool saves no time, and each
+    // of its sessions opens its own sockets, asks every STUN server and takes its own TURN allocation.
+    expect(RTC_CONFIG.iceCandidatePoolSize ?? 0).toBe(0);
+    expect(callRtcConfig().iceCandidatePoolSize ?? 0).toBe(0);
+    expect(callRtcConfig([{ urls: "turn:turn.example.org:3478", username: "u", credential: "p" }], { relayOnly: true }).iceCandidatePoolSize ?? 0).toBe(0);
+  });
+
   it("skips a TURN server that lacks its credential (restored from a backup), which a browser would refuse", () => {
     const config = callRtcConfig([{ urls: "turn:turn.example.org:3478", username: "u" }, { urls: "turns:b.example.org", username: "u", credential: " " }, { urls: "stun:stun.example.org" }]);
     expect(config.iceServers?.slice(RTC_CONFIG.iceServers!.length)).toEqual([{ urls: ["stun:stun.example.org"] }]);

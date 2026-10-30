@@ -189,7 +189,7 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
   // An unplugged microphone or camera may end its track before the device list says anything.
   useEffect(() => {
     if (!active) return;
-    const tracks = [audioTrack, videoTrack].filter((t): t is MediaStreamTrack => !!t);
+    const tracks = [audioTrack, videoTrack].filter((t): t is NonNullable<typeof t> => !!t);
     const ended = () => { void listDevices().then((next) => { setList(next); void check(next); }); };
     tracks.forEach((t) => t.addEventListener?.("ended", ended));
     return () => tracks.forEach((t) => t.removeEventListener?.("ended", ended));

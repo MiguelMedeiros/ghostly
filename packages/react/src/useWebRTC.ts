@@ -6,6 +6,7 @@ import {
   parseCallSignal,
   answersOffer,
   callSignalHeardAt,
+  keepsToRelays,
   sdpHasCandidates,
   signalHasVideo,
   traceLink,
@@ -116,9 +117,10 @@ export const MEDIA_PROBLEM_SHOWN_MS = 8000;
 /**
  * Why a call could not use the microphone or camera: refused (by the person, the browser or the system), or none to
  * use. Or, with "Hide my IP from contacts" on, why it could not start: `relay`, the TURN server gave no relay
- * candidate (it did not answer); `relayOnly`, this app's call media cannot keep a call to the relay.
+ * candidate (it did not answer); `relayOnly`, this app's call media cannot keep a call to the relay. `relayOnlyNow`:
+ * the setting was turned on during a call whose connection had a direct path, which ended it.
  */
-export type MediaProblem = "denied" | "unavailable" | "relay" | "relayOnly";
+export type MediaProblem = "denied" | "unavailable" | "relay" | "relayOnly" | "relayOnlyNow";
 
 /** What a failed call start means for the person, or null when the failure was not the microphone's, camera's or relay's. */
 export function mediaProblem(error: unknown): MediaProblem | null {
@@ -707,11 +709,13 @@ export function useWebRTC({
       await waitForIceGathering(pc, ICE_RESTART_GATHER_MS, { fresh: true });
       if (!current()) return;
       const sdp = pc.localDescription?.sdp;
-      // No candidate: no network yet. Nothing to send; the next try, or the browser's "online", finds one.
-      if (sdp && sdpHasCandidates(sdp)) {
+      const params = sdp && sdpHasCandidates(sdp) ? extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current }) : null;
+      // No candidate: no network yet. Nothing to send; the next try, or the browser's "online", finds one. Counted after
+      // the relay filter: a restart offer left with none went out with `c: []` (agents#1601).
+      if (params && (params.c?.length ?? 0) > 0) {
         const ts = Math.max(Date.now(), lastRestartOfferRef.current + 1);
         restartOfferRef.current = lastRestartOfferRef.current = ts;
-        const signal: CallSignal = { t: "r", ts, ...extractParamsFromSdp(sdp, { maxCandidates: maxCandidatesRef.current, relayOnly: relayOnlyRef.current }), ...describeSelf() };
+        const signal: CallSignal = { t: "r", ts, ...params, ...describeSelf() };
         traceLink("call", "call-ice-restart", { candidates: signal.c?.length ?? 0 });
         publishCallSignal(JSON.stringify(signal));
       }
@@ -1387,6 +1391,19 @@ export function useWebRTC({
   // An unanswered call does not ring forever (RING_MS). Ours hangs up and says "No answer". Theirs stops ringing here
   // with a missed call and sends nothing: the caller's own ring runs out too, and a hang-up would read as declined.
   hangUpRef.current = hangUp;
+
+  // "Hide my IP from contacts" turned on during a call: its connection was made with this device's own addresses
+  // (STUN, policy "all"), and its ICE restarts would run on it, so a new network address still reached the contact
+  // (agents#1601). The chats' links restart for it (the engine's `restartLinksForRelayOnly`); the call ends, the
+  // contact is told, and the person is told why. Calling again goes through the relay.
+  useEffect(() => {
+    if (!relayOnly) return;
+    const pc = pcRef.current;
+    if (!pc || callStateRef.current === "idle" || keepsToRelays(pc)) return;
+    traceCallEnd("relay-only", { state: callStateRef.current });
+    hangUpRef.current(true, true);
+    setMediaProblemShown("relayOnlyNow");
+  }, [relayOnly]);
   useEffect(() => {
     if (callState !== "offering" && callState !== "incoming") return;
     const ringing = callState;

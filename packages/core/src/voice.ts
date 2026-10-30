@@ -135,11 +135,13 @@ export function recordingMime(isTypeSupported: (mime: string) => boolean): { rec
 
 const EXTENSIONS: Record<string, string> = { "audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/mpeg": "mp3", "audio/aac": "aac", "audio/wav": "wav" };
 
+/** A time no date can hold (past Date's end, NaN) makes a name without one, never "NaN-NaN-NaN". */
 function voiceName(prefix: string, mime: string, timestamp: number): string {
-  const date = new Date(timestamp);
+  const date = new Date(timestamp), extension = EXTENSIONS[baseMime(mime)] ?? "audio";
+  if (Number.isNaN(date.getTime())) return `${prefix}.${extension}`;
   const pad = (n: number) => String(n).padStart(2, "0");
   const stamp = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}.${pad(date.getMinutes())}.${pad(date.getSeconds())}`;
-  return `${prefix} ${stamp}.${EXTENSIONS[baseMime(mime)] ?? "audio"}`;
+  return `${prefix} ${stamp}.${extension}`;
 }
 
 /** A name for the file, for whoever saves it or runs a Ghostly that shows it as a file. */
