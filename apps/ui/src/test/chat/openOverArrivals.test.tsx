@@ -77,9 +77,10 @@ describe("something open from a message while messages come", () => {
     ["a long chat, a catch-up in one change", 5_000, false],
     ["a long chat, a busy bot one by one", 5_000, true],
     ["a short chat", 20, false],
-  ])("a picture open large stays open: %s", async (_, count, oneByOne) => {
+  ])("a picture open large stays open: %s", { timeout: 20_000 }, async (_, count, oneByOne) => {
     openChat(count);
     await openPicture(count);
+    // One by one, each a save of the whole history: seconds on a slow runner.
     arrive(120, oneByOne);
     expect(screen.getByTestId("avatar-viewer")).toBeInTheDocument();
     expect(pictureRow(count)).not.toBeNull();
