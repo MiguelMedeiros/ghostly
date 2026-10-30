@@ -110,6 +110,34 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   return seconds;
 }
 
+/** The ranges the API takes (api.ts, files.ts): the most minutes of a `--hold` (a week, HOLD_MAX_MINUTES), seconds. */
+export const HOLD_MINUTES = 10_080, WAIT_SECONDS = 3600, LONG_WAIT_SECONDS = 86_400, HISTORY_LIMIT = 10_000;
+
+/**
+ * A number flag out of the range the API takes: a usage error (exit 2) that names the flag, before the profile opens.
+ * Before, the API's own check answered once it had opened (a one-shot went online first), in its parameter's words
+ * ("hold must be a number from 0 to 10080", exit 1). The API keeps its check for socket callers.
+ */
+export function inRange(options: Parsed["options"], flag: string, what: string, min: number, max: number, whole = false): number | undefined {
+  const value = options[flag];
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !(value >= min && value <= max) || (whole && !Number.isInteger(value)))
+    throw new CliError("usage", `--${flag} takes ${what} from ${min} to ${max}, not ${JSON.stringify(value)}`);
+  return value;
+}
+
+/** `--timeout` of a command that waits: seconds, up to an hour (a send, a card, a button) or a day (`chat wait`, a file). */
+export const timeout = (options: Parsed["options"], max = WAIT_SECONDS) => inRange(options, "timeout", "a number of seconds", 1, max);
+/** `--limit` of a history: messages per page. */
+export const pageLimit = (options: Parsed["options"]) => inRange(options, "limit", "a whole number", 1, HISTORY_LIMIT, true);
+
+/** `--since` of `events` and `listen`: a seq, a whole number from 0 (a negative one replayed a made-up gap first). */
+export function since(options: Parsed["options"]): number | undefined {
+  const value = options.since;
+  if (value !== undefined && !(Number.isSafeInteger(value) && (value as number) >= 0)) throw new CliError("usage", `--since takes a seq from 0 up, not ${JSON.stringify(value)}`);
+  return value as number | undefined;
+}
+
 /**
  * A time given as digits: milliseconds. Unix seconds (from 1e9, 2001, up to 1e11, which as milliseconds would be 1970
  * to 1973) are refused with the milliseconds they mean: before, they were read as January 1970 without a word.
