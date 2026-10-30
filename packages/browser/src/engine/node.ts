@@ -6403,6 +6403,8 @@ export class GhostlyNode implements EngineImplementation {
       this.hold.storageChanged();
     }
     if (wasOnline && !this.networkOn) {
+      // Add a device stops too, and says why: its one-time link would read the relays until its code ran out.
+      void this.enrollment?.cancel("offline").catch(() => {});
       await Promise.allSettled(
         [...this.links.values()].map(async (live) => {
           live.carried?.stop();
@@ -6554,7 +6556,8 @@ export class GhostlyNode implements EngineImplementation {
    * turn read made a moment before (the read at start, or limited mode's), which counts while it is fresh.
    */
   private async startDeviceSet({ justRead = false }: { justRead?: boolean } = {}): Promise<void> {
-    if (this.shuttingDown) return;
+    // An enrollment that finished with the network off (past its point of no return): the links wait for it to come back.
+    if (this.shuttingDown || !this.networkOn) return;
     // This device's signing key, as its record names it: whose the profile's push subscription is (WISP 06 § Push and the phone).
     const own = await readDeviceRecord(databaseName()).catch(() => null);
     this.ownDeviceKey = own?.ownSlot !== undefined ? own.deviceSet[own.ownSlot]?.key ?? null : null;
