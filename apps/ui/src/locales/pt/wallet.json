@@ -59,6 +59,7 @@
     },
     "label": "backup pendente",
     "later": "Depois",
+    "laterFailed": "Não foi possível adiar o lembrete. Tente de novo.",
     "line": "Faça backup da carteira {{wallet}}",
     "title": "Você tem dinheiro real em {{wallet}}"
   },
