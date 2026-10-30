@@ -1,4 +1,24 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * Elements of main whose box or text ends past a phone's screen, outside a box that scrolls sideways by design (a wide
+ * table). The text is measured too: a word that has nowhere to break runs out of a paragraph whose own box fits.
+ */
+const pastScreen = (page: Page) =>
+  page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    const scrolls = (el: Element) => { for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) if (/auto|scroll/.test(getComputedStyle(up).overflowX)) return true; return false; };
+    const range = document.createRange();
+    // Its own text only: an ancestor's whole contents would take in a scrolling table's text.
+    const textRight = (el: Element) => Math.max(0, ...[...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim()).map((n) => {
+      range.selectNode(n);
+      return range.getBoundingClientRect().right;
+    }));
+    return [...document.querySelectorAll("main *")].filter((el) => {
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && Math.max(box.right, textRight(el)) > width + 0.5 && !scrolls(el);
+    }).map((el) => `${el.tagName.toLowerCase()}.${el.className} ${(el.textContent ?? "").trim().slice(0, 40)}`).slice(0, 5);
+  });
 
 /**
  * A long source path (packages/browser/src/proofs/...) has nowhere to break, and on a 375 px phone it pushed the WISP
@@ -8,16 +28,27 @@ for (const path of ["/wisps/306-bitcoin", "/roadmap"]) {
   test(`${path}: long paths wrap inside a 375 px phone`, async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(path);
-    const past = await page.evaluate(() => {
-      const width = document.documentElement.clientWidth;
-      // A wide table scrolls in a box of its own: that is by design, not text cut off.
-      const scrolls = (el: Element) => { for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) if (/auto|scroll/.test(getComputedStyle(up).overflowX)) return true; return false; };
-      return [...document.querySelectorAll("main *")].filter((el) => {
-        const box = el.getBoundingClientRect();
-        return box.width > 0 && box.right > width + 0.5 && !scrolls(el);
-      }).map((el) => `${el.tagName.toLowerCase()}.${el.className} ${(el.textContent ?? "").trim().slice(0, 40)}`).slice(0, 5);
-    });
-    expect(past).toEqual([]);
+    expect(await pastScreen(page)).toEqual([]);
+  });
+}
+
+/**
+ * A reader with larger text: Chrome's "Very large" default font (24 px) or the WCAG 1.4.12 text spacing. The press
+ * address on /brand lost ".com.br" at the screen's edge (and pushed its card's text with it), the host names in
+ * /privacy ran past it, and a WISP paragraph's slash list (GhostStory/FeatureLedger/GhostFinale) lost its end.
+ */
+const SPACING = "*:not(svg):not(svg *){line-height:1.5!important;letter-spacing:.12em!important;word-spacing:.16em!important}p{margin-bottom:2em!important}";
+for (const [path, mode] of [["/brand", "font24"], ["/privacy", "font24"], ["/wisps/adapter-roadmap", "spacing"]] as const) {
+  test(`${path}: long strings wrap inside a 375 px phone with ${mode === "font24" ? "a 24 px default font" : "WCAG text spacing"}`, async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    if (mode === "font24") {
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Page.enable");
+      await cdp.send("Page.setFontSizes", { fontSizes: { standard: 24, fixed: 20 } });
+    }
+    await page.goto(path);
+    if (mode === "spacing") await page.addStyleTag({ content: SPACING });
+    expect(await pastScreen(page)).toEqual([]);
   });
 }
 
