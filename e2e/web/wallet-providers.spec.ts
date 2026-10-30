@@ -9,6 +9,7 @@ import { composerRow } from "../support/composer";
 import { mockEthereum } from "../support/ethereum";
 import { exclusive } from "../support/exclusive";
 import { chatPayments, paymentCard } from "../support/payments";
+import { qrPicture } from "../support/qr";
 
 /**
  * Every wallet provider receiving and sending, on test networks only: each person makes the Testnet wallets the test
@@ -18,7 +19,7 @@ import { chatPayments, paymentCard } from "../support/payments";
  *  - Bark (Second's Ark): captaind on e2e/infra's regtest chain (GHOSTLY_BARK_REGTEST=1). New makes it on signet first (@network).
  *  - USDT: e2e/infra's local EVM chain with a test token (GHOSTLY_USDT_LOCAL=1). New makes it on Sepolia first (@network).
  * For each: money in, a Send in the chat (reviewed, approved), a Request paid in the chat, and a Send
- * from the wallet page where the provider has one. Balances are checked on both sides.
+ * from the wallet page where the provider has one (Ark and Bark: started from a picture of the payee's QR). Balances are checked on both sides.
  */
 
 /** Two people in a chat, each with these Testnet wallets, made with New (a new profile has none). */
@@ -109,7 +110,7 @@ test.describe("Cashu and Lightning", () => {
   });
 });
 
-test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.ark.send", "@feature:payments.arkade.send", "@feature:payments.arkade.request"] }, async ({ peer }) => {
+test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.ark.send", "@feature:wallet.ark.send-scan", "@feature:payments.arkade.send", "@feature:payments.arkade.request"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_ARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_ARK_REGTEST=1");
   test.setTimeout(10 * 60_000);
   const mnemonic = execFileSync(process.execPath, ["--experimental-eventsource", "e2e/support/fund-ark.mjs"], { encoding: "utf8", stdio: "pipe" }).trim();
@@ -132,10 +133,12 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   // In: the funded wallet shows its sats.
   await expect(balance(alice)).toHaveText(/^9,900\s*test sats/, { timeout: 30_000 });
 
-  // A Send from the wallet page, to Bob's address.
+  // A Send from the wallet page, to Bob's address read from a picture of its QR (Choose image; the camera reads frames
+  // the same way), upper case as a QR often carries it: the scan fills the address, the amount is typed.
   const bobAddress = (await panel(bob).getByTestId("ark-address").innerText()).trim();
   await alice.page.getByTestId("wallet-send").click();
-  await panel(alice).getByLabel("Ark recipient address").fill(bobAddress);
+  await alice.page.getByLabel("Choose image").setInputFiles(await qrPicture(alice.page, bobAddress.toUpperCase()));
+  await expect(panel(alice).getByLabel("Ark recipient address")).toHaveValue(bobAddress);
   await panel(alice).getByLabel(/^Amount in/).fill("500");
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
@@ -178,7 +181,7 @@ test("Ark: in, a Send from the wallet, a Send in the chat and a Request paid in 
   expect(await sats()).toBeLessThanOrEqual(400);
 });
 
-test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.bark.send", "@feature:payments.bark.send"] }, async ({ peer }) => {
+test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat and a Request paid in the chat", { tag: ["@network", "@gated", "@feature:wallet.bark.send", "@feature:wallet.ark.send-scan", "@feature:payments.bark.send"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_BARK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_BARK_REGTEST=1");
   test.setTimeout(6 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bark-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
@@ -215,10 +218,11 @@ test("Bark: in over Ark and on-chain, a Send from the wallet, a Send in the chat
   expect(boarded).toBeLessThan(30_000);
   await panel(bob).getByRole("radio", { name: "Bark (instant)" }).click();
 
-  // A Send from the wallet page, to Bob's address.
+  // A Send from the wallet page, from a picture of Bob's payment link: the scan fills his address and the amount.
   await alice.page.getByTestId("wallet-send").click();
-  await panel(alice).getByLabel("Bark recipient address").fill(address[bob.name]);
-  await panel(alice).getByLabel(/^Amount in/).fill("5000");
+  await alice.page.getByLabel("Choose image").setInputFiles(await qrPicture(alice.page, `bitcoin:?ark=${address[bob.name]}&amount=0.00005`));
+  await expect(panel(alice).getByLabel("Bark recipient address")).toHaveValue(address[bob.name]);
+  await expect(panel(alice).getByLabel(/^Amount in/)).toHaveValue("5000");
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   await panel(alice).getByTestId("payment-review").getByRole("button", { name: "Approve payment" }).click();
   await expect(panel(alice).getByTestId("review-status")).toHaveText("settled", { timeout: 60_000 });
