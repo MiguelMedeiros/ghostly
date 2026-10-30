@@ -5901,10 +5901,13 @@ export class GhostlyNode implements EngineImplementation {
     return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
   }
 
-  /** `card`: the Lightning card that will pay; absent, the network's default one. */
-  walletQuoteInvoice({ invoice, via, network, card }: { invoice: string; via?: "cashu"; network?: WalletNetwork; card?: string }) {
+  /**
+   * `card`: the Lightning card that will pay; absent, the network's default one. `amount`: the sats chosen for an
+   * invoice with no amount, which only the mints pay (`via: "cashu"`); a Lightning source refuses one.
+   */
+  walletQuoteInvoice({ invoice, via, network, card, amount }: { invoice: string; via?: "cashu"; network?: WalletNetwork; card?: string; amount?: number }) {
     const n = this.net(network);
-    return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightningCard(n, card).then((c) => c.quote(invoice));
+    return via === "cashu" ? this.wallet.quoteInvoice(invoice, n, amount) : this.lightningCard(n, card).then((c) => c.quote(invoice));
   }
 
   /**

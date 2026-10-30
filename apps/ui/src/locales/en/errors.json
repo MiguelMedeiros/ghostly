@@ -30,6 +30,8 @@
     "lightningFailed": "The Lightning payment did not go through.",
     "mintHttps": "Mints must use https",
     "mintNotAccepted": "Ecash from {{host}} is not accepted",
+    "mintsNoAnyAmount": "None of your mints can pay an invoice with no amount",
+    "mintsNoAnyAmountNext": "Ask for one with the amount.",
     "noAnswer": "{{host}} did not answer",
     "noInvoice": "No mint could make an invoice",
     "noMint": "No mint configured",

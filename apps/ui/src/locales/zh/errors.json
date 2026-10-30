@@ -30,6 +30,8 @@
     "lightningFailed": "Lightning 付款没有成功。",
     "mintHttps": "铸币厂必须使用 https",
     "mintNotAccepted": "不接受来自 {{host}} 的 ecash",
+    "mintsNoAnyAmount": "你的铸币厂都无法支付没有金额的发票",
+    "mintsNoAnyAmountNext": "请索取带金额的发票。",
     "noAnswer": "{{host}} 没有响应",
     "noInvoice": "没有铸币厂能创建发票",
     "noMint": "尚未配置铸币厂",

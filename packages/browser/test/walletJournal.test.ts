@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bech32 } from "@scure/base";
 import { Amount, MeltChangeError, MintOperationError, PaymentRequest, getEncodedToken, getTokenMetadata, type Proof } from "@cashu/cashu-ts";
 import { CashuWallet, assertAmount, normalizeMintUrl } from "../src/engine/wallet";
 import { TEST_MINT } from "../src/shared/mints";
@@ -22,7 +23,7 @@ vi.mock("@cashu/cashu-ts", async (importOriginal) => {
     async loadMint(): Promise<void> { await extra.loadMint(this.url); }
     getMintInfo = () => extra.info(this.url);
     keyChain = { getKeysets: () => extra.keysets(this.url) };
-    createMeltQuoteBolt11 = (invoice: string) => extra.createMeltQuoteBolt11(this.url, invoice);
+    createMeltQuoteBolt11 = (...request: unknown[]) => extra.createMeltQuoteBolt11(this.url, ...request);
   }
   return { ...(await importOriginal<typeof import("@cashu/cashu-ts")>()), Wallet };
 });
@@ -304,6 +305,72 @@ describe("Lightning out", () => {
     // The mint that can send the most is the one named, whichever was asked last.
     seed("proofs", [stored(64, "a", POOR), stored(32, "b", POOR), stored(8, "c", MINT)]);
     await expect(setup([POOR, MINT]).wallet.quoteInvoice(INVOICE)).rejects.toThrow(/: 86 sats leave room for the fee$/);
+  });
+
+  describe("an invoice with no amount", () => {
+    /** The fake regtest invoice with no amount in its prefix: the payer chooses. */
+    const ANY = bech32.encode("lnbcrt", bech32.decode(INVOICE as `${string}1${string}`, false).words, false);
+    const anyAmountMints = (...able: string[]) => extra.info.mockImplementation((url: string) => ({ name: "", version: "", motd: undefined, isSupported: () => ({ params: [] }), supportsAmountless: () => able.includes(url) }) as never);
+    const quoted = (extras: object = {}) => extra.createMeltQuoteBolt11.mockImplementation(async () => meltQuote("UNPAID", { request: ANY, ...extras }));
+
+    it("is quoted for the amount the person chose, in millisats, by a mint that takes one", async () => {
+      anyAmountMints(MINT); quoted();
+      await expect(setup().wallet.quoteInvoice(ANY, undefined, 90)).resolves.toEqual({ quote: "m1", mint: MINT, amount: 90, feeReserve: 10 });
+      expect(extra.createMeltQuoteBolt11).toHaveBeenCalledWith(MINT, ANY, 90_000);
+    });
+
+    it("asks only the mints that say they take one, and says so when none does", async () => {
+      anyAmountMints(MINT); quoted();
+      seed("proofs", [stored(64, "p", POOR), stored(64, "q", POOR)]);
+      await expect(setup([POOR, MINT]).wallet.quoteInvoice(ANY, undefined, 90)).resolves.toMatchObject({ mint: MINT });
+      expect(extra.createMeltQuoteBolt11).toHaveBeenCalledTimes(1);
+      extra.createMeltQuoteBolt11.mockClear();
+      anyAmountMints();
+      await expect(setup().wallet.quoteInvoice(ANY, undefined, 90)).rejects.toThrow("None of your mints can pay an invoice with no amount");
+      expect(extra.createMeltQuoteBolt11).not.toHaveBeenCalled();
+    });
+
+    it("never pays without a chosen amount, nor for an amount that is not one", async () => {
+      anyAmountMints(MINT); quoted();
+      await expect(setup().wallet.quoteInvoice(ANY)).rejects.toThrow("Invoices without an amount are not supported");
+      await expect(setup([]).wallet.quoteInvoice(ANY, undefined, 90)).rejects.toThrow("Add a mint in Settings first");
+      for (const bad of [0, -1, 1.5, Number.NaN]) await expect(setup().wallet.quoteInvoice(ANY, undefined, bad), String(bad)).rejects.toThrow("Enter an amount in sats");
+      await expect(setup().wallet.quoteInvoice(ANY, undefined, 2_000_000)).rejects.toThrow("are not supported");
+      expect(extra.createMeltQuoteBolt11).not.toHaveBeenCalled();
+    });
+
+    it("an invoice that names its amount takes no other", async () => {
+      anyAmountMints(MINT); extra.createMeltQuoteBolt11.mockImplementation(async () => meltQuote("UNPAID"));
+      await expect(setup().wallet.quoteInvoice(INVOICE, undefined, 50)).rejects.toThrow(/another amount/);
+      expect(extra.createMeltQuoteBolt11).not.toHaveBeenCalled();
+    });
+
+    it("a mint's quote for another amount than chosen is refused, when quoted and again when paid", async () => {
+      anyAmountMints(MINT); quoted({ amount: Amount.from(95) });
+      await expect(setup().wallet.quoteInvoice(ANY, undefined, 90)).rejects.toThrow(/another amount/);
+      quoted();
+      const { wallet } = setup();
+      const shown = await wallet.quoteInvoice(ANY, undefined, 90);
+      mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID", { request: ANY, amount: Amount.from(95) }));
+      await expect(wallet.payQuote(shown.quote, shown.mint)).rejects.toThrow(/another amount/);
+      expect(mint.completeMelt).not.toHaveBeenCalled();
+    });
+
+    it("pays what was chosen, and books that amount", async () => {
+      anyAmountMints(MINT); quoted();
+      const { wallet } = setup();
+      const shown = await wallet.quoteInvoice(ANY, undefined, 90);
+      mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID", { request: ANY }));
+      mint.completeMelt.mockResolvedValue({ quote: meltQuote("PAID", { request: ANY }), change: [proof(4, "change")] });
+      await expect(wallet.payQuote(shown.quote, shown.mint)).resolves.toBe(true);
+      expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-out", amount: 90, fee: 6 }]);
+    });
+
+    it("a card short of what was chosen is refused before anything is spent", async () => {
+      anyAmountMints(MINT); quoted({ amount: Amount.from(500) });
+      await expect(setup().wallet.quoteInvoice(ANY, undefined, 500)).rejects.toThrow("Not enough sats in your wallet");
+      expect(mint.completeMelt).not.toHaveBeenCalled();
+    });
   });
 
   it("quotes from the first mint that can afford the invoice, and says why when none can", async () => {

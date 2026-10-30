@@ -30,6 +30,8 @@
     "lightningFailed": "لم تكتمل دفعة Lightning.",
     "mintHttps": "يجب أن تستخدم دور السكّ https",
     "mintNotAccepted": "لا يُقبل ecash من {{host}}",
+    "mintsNoAnyAmount": "لا يمكن لأي دار سكّ لديك دفع فاتورة بلا مبلغ",
+    "mintsNoAnyAmountNext": "اطلب فاتورة بالمبلغ.",
     "noAnswer": "لم يُجب {{host}}",
     "noInvoice": "لم تتمكن أي دار سك من إنشاء فاتورة",
     "noMint": "لا توجد دار سكّ مهيّأة",
