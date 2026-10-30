@@ -280,7 +280,7 @@ const RULES: readonly Rule[] = [
   exact("That is not a valid ecash token", "errors.cashu.badToken"),
   exact("Add a mint in Settings first", "errors.cashu.addMint"),
   exact("Not enough sats in your wallet", "errors.cashu.notEnough"),
-  { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s  ']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
+  { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
   exact("This invoice is already being paid", "errors.cashu.alreadyPaying"),
   exact("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", "errors.cashu.inFlight", "errors.cashu.inFlightNext"),
   // A failed payment and what came back: "<why> The sats are back in your wallet[, less N sats the mint kept as its fee]."
