@@ -413,7 +413,6 @@ export class RatchetBox {
     });
   }
   heard(lane: RatchetLane): boolean { return ratchetHeard(this.state, lane); }
-  debug(): unknown { try { const k = this.keys(); return { self: k.self.slice(0, 6), peer: k.peer?.slice(0, 6), rv: k.rendezvous.map(r => r.slice(0, 6)), cur: this.state.current?.sid, others: this.state.others.map(o => o.sid), retired: this.state.retired.length }; } catch (e) { return String(e); } }
   /** A ratcheted item from the contact opened on either lane: this side seals with the ratchet whatever the contact's record says. */
   get heardAny(): boolean { return this.heard("floor") || this.heard("hold"); }
   get on(): boolean { return ratchetOn(this.state); }

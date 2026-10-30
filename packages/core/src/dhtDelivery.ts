@@ -860,9 +860,9 @@ export class DhtDelivery {
     // Opened with no lock held, stored, and only then the ratchet's state saved, under the chat's lock, on the state as it
     // is by then (`RatchetBox.commitOpen`): what the content goes to may seal or open a held item, which takes that lock.
     let sealed: Uint8Array | undefined;
-    let why = "";
-    const opened = this.open(packet, box, bytes => { let plain: Uint8Array | null = null; try { plain = ratchet.box.peek("floor", bytes); } catch (e) { why = String(e); } if (plain) sealed = bytes; else why ||= "peek null"; return plain; });
-    if (!sealed) traceLink(this.from, "dht-ratchet-closed", { box, why: why || "before peek", peer: this.options.credentials.peerKey?.slice(0, 6), dbg: ratchet.box.debug?.() });
+    const opened = this.open(packet, box, bytes => { const plain = ratchet.box.peek("floor", bytes); if (plain) sealed = bytes; return plain; });
+    // Ratcheted, and not opened here: not for this side, from a session it lost, or before it pinned the contact.
+    if (!sealed) traceLink(this.from, "dht-ratchet-closed", { box, pinned: !!this.options.credentials.peerKey });
     return this.take(packet, box, opened, sealed && { commit: async order => { if (!await ratchet.box.commitOpen("floor", sealed!, order)) throw new Error("A ratcheted envelope no longer opens"); }, digest });
   }
   /** `ratchet`: the envelope was ratcheted; its state is saved once what it carried is stored, with its digest. */
