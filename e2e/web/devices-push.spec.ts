@@ -12,7 +12,18 @@ import { expect, test } from "../support/fixtures";
  */
 const deployed = !!process.env.E2E_WEB_URL;
 // Chromium's headless shell refuses notifications outright; the full browser in its headless mode shows them.
-test.use({ channel: "chromium" });
+test.use({
+  channel: "chromium",
+  launchOptions: {
+    args: [
+      // The project's own arguments, and `NativeNotifications` off, as in wake-push.spec.ts: Chromium then keeps a
+      // notification in its own list, which this spec reads, whatever the machine's notification service does with it.
+      "--disable-features=WebRtcHideLocalIpsWithMdns,NativeNotifications",
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
+    ],
+  },
+});
 const ENDPOINT = "https://fcm.googleapis.com/fcm/send/phone";
 const MACBOOK = "M".repeat(43), PHONE = "P".repeat(43);
 const DEVICE_TOKEN = "devicetokenaaaaaaaaaaa", UNKNOWN_TOKEN = "chatmadeonthemacbookaa";
