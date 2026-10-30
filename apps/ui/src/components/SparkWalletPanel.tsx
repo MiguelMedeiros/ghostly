@@ -6,6 +6,7 @@ import { paymentStateLabel } from "./paymentWords";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Signed, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { SendScan } from "./wallet/SendScan";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
@@ -49,6 +50,9 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
  const invoice = kind === "invoice" ? sparkInvoiceDetails(to, network) : undefined;
  const sats = invoice?.amount ?? Number(amount);
  const breezIsLightning = state.lightning?.providerId === "breez";
+ // Scanned, pasted or read from a picture: it fills the form, where it is shown, reviewed or refused as a typed one is. A
+ // QR's text is often upper case, and Spark writes lower case. The amount typed for the last address is not for this one.
+ const given = (text: string) => { setTo(text === text.toUpperCase() ? text.toLowerCase() : text); setAmount(""); };
 
  if (spark?.needsKey) return <div className="space-y-4" data-testid="spark-wallet">
   <div className="bg-surface rounded-xl p-6 space-y-3" data-testid="spark-needs-key">
@@ -71,6 +75,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     <Address value={spark.address} testId="spark-address" note={t("wallet.spark.addressNote")} />
    </div>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
+    <SendScan onText={given} disabled={busy}>
     <input aria-label={t("wallet.spark.to")} placeholder={t("wallet.spark.toPlaceholder", { prefix: mainnet ? "spark1…" : "sparkrt1…" })} spellCheck={false} className={`${input} font-mono text-xs`} value={to} onChange={e => setTo(e.target.value.trim())} />
     {to && (!kind || invoice?.token) && <Notice tone="warning" testId="spark-address-invalid">{invoice?.token ? t("wallet.spark.tokenInvoice") : mainnet ? t("wallet.spark.notMainnet") : t("wallet.spark.notRegtest")}</Notice>}
     {invoice && !invoice.token && invoice.amount !== undefined ? <p className="text-sm text-text-primary" data-testid="spark-invoice-summary">{fillNodes(invoice.memo ? t("wallet.spark.invoiceForMemo", { unit, memo: invoice.memo }) : t("wallet.spark.invoiceFor", { unit }), { amount: <span className="font-semibold tabular-nums">{formatAmount(invoice.amount, t.language)}</span> })}</p>
@@ -79,6 +84,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
      setReview(await wallet.preparePayment({ target: { method: "spark", network, provider: SPARK_PROVIDER, asset: "BTC", unit: "sat", address: to, expiresAt: Date.now() + 5 * 60 * 1000 }, amount: sats, feeCap: feeCap(sats), payee: to }));
     }, "review")}>{spark.balance ? t("wallet.panel.review") : t("wallet.panel.noBalance")}</Button>
     <Notice>{t("wallet.spark.approve")}</Notice>
+    </SendScan>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => { setReview(null); setTo(""); setAmount(""); }} />}
    {intents.filter(i => i.id !== review?.id && i.state !== "settled").map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}
