@@ -5,6 +5,8 @@ import { PaymentReview } from "./PaymentReview";
 import { paymentStateLabel } from "./paymentWords";
 import { Actions, Address, Amount, Button, Notice, Row, Section, Signed, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { SendScan } from "./wallet/SendScan";
+import { routeBitcoinSend } from "../lib/sendRoute";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
 import { changeableFields } from "./wallet/providers/sourceStatus";
 import { useI18n } from "../contexts/I18nContext";
@@ -33,6 +35,15 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
   /** The fee limit typed the person's way; `feeCap` is what it means, or "" while unclear. */
   const feeField = useAmountText(feeCap, setFeeCap, t.language ?? "en", 0, t);
   const [changing, setChanging] = useState(false);
+  /** What was scanned, pasted or read from a picture and could not fill the form. */
+  const [notUsable, setNotUsable] = useState<"refused" | "unknown" | null>(null);
+  // A link or an address fills the form, where it is shown and reviewed as a typed one is. The amount goes with it: one
+  // left from the last address is not meant for this one.
+  const given = (text: string) => {
+    const route = routeBitcoinSend(text, bt?.network ?? "");
+    if (route.kind !== "address") { setNotUsable(route.kind); setAddress(""); setAmount(""); return; }
+    setNotUsable(null); setAddress(route.address); setAmount(route.amountSat === undefined ? "" : String(route.amountSat));
+  };
   const ready = bt?.status === "ready";
   // On-chain Bitcoin goes through its network's source: a Testnet wallet's coins are test sats.
   const unit = satsIn(t, state.mode === "testnet" ? "testnet" : "mainnet");
@@ -86,7 +97,10 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           )}
           {action === "send" && (
             <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
-              <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => setAddress(e.target.value.trim())} />
+              <SendScan onText={given} disabled={busy}>
+              <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
+              {notUsable === "refused" && <Notice tone="error" testId="bitcoin-send-refused">{t("payments.formats.unsupported")}</Notice>}
+              {notUsable === "unknown" && <Notice tone="error" testId="bitcoin-send-unknown">{t("wallet.bitcoin.notAddress")}</Notice>}
               <Amount value={amount} onChange={setAmount} unit={unit} testId="bitcoin-amount" />
               <label className="flex flex-wrap items-center gap-2 text-xs text-text-secondary"><span className="min-w-0">{t("wallet.bitcoin.maxFee")}</span>
                 <input aria-label={t("wallet.bitcoin.maxFeeInput", { unit })} inputMode="numeric" className={`${input} !w-28 shrink-0`} aria-invalid={feeField.hint ? true : undefined} value={feeField.text} onChange={(e) => feeField.change(e.target.value)} /> {unit}
@@ -96,6 +110,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));
               }, "review")}>{t("wallet.panel.review")}</Button>
               <Notice>{t("wallet.bitcoin.reviewNote")}</Notice>
+              </SendScan>
             </div>
           )}
           {action === "history" && (
