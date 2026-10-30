@@ -31,6 +31,18 @@ describe("Back arrows in a right-to-left language point to the start edge", () =
     expect(mirrored("page-back")).toBe(true);
   });
 
+  // agents#1571: `-ml-2` pulled the Back button to the left in every language: in Arabic it sat 16 px from the right
+  // edge instead of 8, and the title ran 4 px into its box. Logical sides mirror with the page.
+  it("a page's header pulls Back to the start edge and its trailing controls to the end, with logical margins", () => {
+    renderApp(<PageHeader title="Apps" trailing={<button type="button">Edit</button>} />);
+    const back = screen.getByTestId("page-back").className.split(/\s+/);
+    expect(back).toContain("-ms-2");
+    expect(back.filter((c) => /^-?m[lr]-/.test(c))).toEqual([]);
+    const trailing = screen.getByRole("button", { name: "Edit" }).parentElement!.className.split(/\s+/);
+    expect(trailing).toContain("ms-auto");
+    expect(trailing.filter((c) => /^-?m[lr]-/.test(c))).toEqual([]);
+  });
+
   it("a chat's header", async () => {
     saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
     const { engine } = renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
