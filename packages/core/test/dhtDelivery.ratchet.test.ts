@@ -72,6 +72,42 @@ it("two apps with ratchet/1 seal the floor with it after the pin, and forward se
   await a.stop(); await b.stop();
 });
 
+it("a joiner whose invite someone else used first is told so, though the inviter's envelope to that one is ratcheted", async () => {
+  vi.useFakeTimers();
+  const h = setup(), a = h.make(0);
+  await a.start(); await vi.advanceTimersByTimeAsync(1_000);
+  // Alice's first envelope is out, unsealed. She pairs with Bob on a live session, and only then replaces it: ratcheted.
+  h.credentials[0].peerKey = identityFromSeedB64(h.credentials[1].seedB64).pubKeyZ32;
+  a.setLive(true);
+  await vi.advanceTimersByTimeAsync(6_000);
+  const inviteMailbox = (a as unknown as { identity: { pubKeyZ32: string } }).identity.pubKeyZ32;
+  expect(h.packets.get(inviteMailbox)?.records.map(r => r.label)).toContain("_dr");
+
+  // Carol holds a copy of the same invite, and her look-up pinned the inviter from its first envelope.
+  h.params.push(h.params[1]); h.saved.push(emptyDhtDeliveryState()); h.ratchets.push(emptyRatchetState());
+  h.credentials.push({ seedB64: createIdentity().seedB64 }); h.messages.push(new Map()); h.views.push([]); h.supports.push(true);
+  const carol = h.make(2, identityFromSeedB64(h.credentials[0].seedB64).pubKeyZ32);
+  await carol.start(); await vi.advanceTimersByTimeAsync(5_000);
+  expect(h.views[2].at(-1)?.inviteTaken).toBe(true);
+  await a.stop(); await carol.stop();
+});
+
+it("a contact's ratcheted envelope that does not open says nothing of a taken invite once this side is proven", async () => {
+  vi.useFakeTimers();
+  const h = setup(), a = h.make(0);
+  await a.start(); await vi.advanceTimersByTimeAsync(1_000);
+  h.credentials[0].peerKey = identityFromSeedB64(h.credentials[1].seedB64).pubKeyZ32;
+  a.setLive(true);
+  await vi.advanceTimersByTimeAsync(6_000);
+  // Bob was live with Alice, and has lost his ratchet state (a restore): he reads what he cannot open, and is not told he lost the invite.
+  const b = h.make(1, identityFromSeedB64(h.credentials[0].seedB64).pubKeyZ32);
+  await b.start();
+  b.setLive(true); b.setLive(false);
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(h.views[1].at(-1)?.inviteTaken).toBeFalsy();
+  await a.stop(); await b.stop();
+});
+
 it("an app without it gets plain envelopes, both ways, as before", async () => {
   vi.useFakeTimers();
   const h = setup();
