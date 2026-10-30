@@ -114,7 +114,6 @@
     "maxFee": "Le maximum de frais que vous acceptez",
     "maxFeeInput": "Frais maximum en {{unit}}",
     "newAddress": "Nouvelle adresse",
-    "notAddress": "Ce n'est pas une adresse Bitcoin pour ce portefeuille.",
     "notConnected": "{{label}} n'est pas connecté",
     "notConnectedDefault": "La source Bitcoin n'est pas connectée",
     "nothingYet": "Rien pour l'instant",
