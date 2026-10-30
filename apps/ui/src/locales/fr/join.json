@@ -20,6 +20,7 @@
   "own": "Cette invitation est la vôtre. Partagez-la avec un contact ; c'est lui qui la rejoint.",
   "paste": "Coller depuis le presse-papiers",
   "pasteScreenshot": "Ou collez une capture d’écran du code QR.",
+  "pastedTooLarge": "Cette image est trop grande pour être lue. Collez-en une plus petite, ou une capture d’écran du QR.",
   "placeholder": "Collez l'invitation…",
   "qrReaderNotLoaded": "Le lecteur de QR ne s’est pas chargé. Vérifiez votre connexion, puis réessayez.",
   "qrReaderReload": "Le lecteur de QR ne s’est toujours pas chargé. Rechargez Ghostly pour le charger.",

@@ -66,6 +66,27 @@ describe("file save to a folder", () => {
     expect(readdirSync(folder)).toEqual([name]);
   });
 
+  it("two voice messages of one second both go into --dir: the second under a free name, as a browser's Download picks", async () => {
+    const folder = join(dir, "same-second");
+    mkdirSync(folder);
+    for (const [id, at] of [["chat-one-in-va", 1_760_000_000_100], ["chat-one-in-vb", 1_760_000_000_900], ["chat-one-in-vc", 1_760_000_000_500]] as const) {
+      await fileStore.put({
+        id, linkId: "chat-one", blob: new Blob([id]), createdAt: 1, direction: "in",
+        metadata: { name: `${id}.webm`, size: id.length, mime: "audio/webm", timestamp: at, voice: { duration: 4_200, peaks: [] } },
+        transfer: { state: "done", transferred: id.length, size: id.length },
+      } as never);
+    }
+    const name = voiceDownloadName("audio/webm", 1_760_000_000_100), stem = name.slice(0, -".webm".length);
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-va", dir: folder })).toMatchObject({ path: join(folder, name) });
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-vb", dir: folder })).toMatchObject({ path: join(folder, `${stem} (2).webm`) });
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-vc", dir: folder })).toMatchObject({ path: join(folder, `${stem} (3).webm`) });
+    expect(readFileSync(join(folder, name), "utf8")).toBe("chat-one-in-va");
+    expect(readFileSync(join(folder, `${stem} (2).webm`), "utf8")).toBe("chat-one-in-vb");
+    expect(readFileSync(join(folder, `${stem} (3).webm`), "utf8")).toBe("chat-one-in-vc");
+    // A --path the user named is never renamed: there it is still a confirm.
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-vb", path: join(folder, name) })).rejects.toMatchObject({ code: "confirm" });
+  });
+
   it("an empty --path or --dir is a usage error", () => {
     const params = (argv: string[]) => {
       const command = COMMANDS["file save"];

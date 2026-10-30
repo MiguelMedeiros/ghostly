@@ -89,7 +89,11 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
             <div className="bg-black/40 flex items-center justify-center min-h-0">
               <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="max-w-full max-h-[55vh] object-contain" />
             </div>
-            <figcaption className="px-4 pt-2 text-xs text-text-muted truncate" data-testid="attachment-name"><bdi>{single.name}</bdi> · {formatFileSize(single.size)}</figcaption>
+            {/* The name is cut in its own direction, at its end, as in the file rows; the size stays whole beside it. */}
+            <figcaption className="px-4 pt-2 text-xs text-text-muted flex min-w-0" data-testid="attachment-name">
+              <span dir="auto" className="min-w-0 truncate">{single.name}</span>
+              <span className="shrink-0 whitespace-pre"> · {formatFileSize(single.size)}</span>
+            </figcaption>
           </figure>
         ) : (
           <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">
