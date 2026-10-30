@@ -73,14 +73,28 @@ export function classify(request: RequestLike, origin: string, precached: Readon
 }
 
 /**
- * What the build precaches: the app's page, its hashed files except the WebAssembly (wallets load theirs when
- * one is used, and they are most of the build's weight), and the static files beside it. Never the update
- * check, the sign-in callback or the worker itself.
+ * Packages only the Desktop app runs: the language detector translation reads messages with (lib/translateDetector.ts),
+ * 2 MiB. The web build bundles it with the screens it shares, but translation is Desktop only (`translateOffered`), so
+ * the web never loads it.
  */
-export function precacheList(files: readonly string[]): string[] {
+const DESKTOP_ONLY_PACKAGES = ["@qvac/langdetect-text", "tinyld"];
+
+/** The build's chunks that are Desktop's alone, by the modules they are made of: every one of them is from those packages. */
+export function desktopOnlyFiles(bundle: Iterable<{ type: string; fileName: string; moduleIds?: readonly string[] }>): string[] {
+  const desktops = (id: string) => DESKTOP_ONLY_PACKAGES.some((name) => id.replace(/\\/g, "/").includes(`/node_modules/${name}/`));
+  return [...bundle].filter((file) => file.type === "chunk" && !!file.moduleIds?.length && file.moduleIds.every(desktops)).map((file) => file.fileName);
+}
+
+/**
+ * What the build precaches: the app's page, its hashed files except the WebAssembly (wallets load theirs when
+ * one is used, and they are most of the build's weight) and the Desktop-only chunks (`leaveOut`), and the static
+ * files beside it. Never the update check, the sign-in callback or the worker itself.
+ */
+export function precacheList(files: readonly string[], leaveOut: readonly string[] = []): string[] {
+  const left = new Set(leaveOut.map((file) => "/" + file.replace(/^\/+/, "")));
   const paths = files
     .map((file) => "/" + file.replace(/^\/+/, ""))
-    .filter((path) => !NEVER.has(path))
+    .filter((path) => !NEVER.has(path) && !left.has(path))
     .filter((path) => !/\.(wasm|map)$/.test(path))
     .filter((path) => path !== "/index.html");
   return ["/", ...new Set(paths)].sort((a, b) => (a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b)));
