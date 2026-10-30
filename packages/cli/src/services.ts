@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
+import { GhostlyHttpError, LIMITS, parseLocalTarget, type ClientRequest, type ClientResponse, type LocalFetch } from "@ghostly/core";
 import { bool, chatOf, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { isLive } from "./views";
@@ -210,7 +210,15 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const target = str(params, "target", true);
     let url: URL;
     try { url = new URL(target); } catch { throw new CliError("bad_request", `Not a URL: ${target}`); }
-    if (!(LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname))) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
+    const here = LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname);
+    if (!here) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
+    // The engine's own check of the target (core http.ts `parseLocalTarget`), first: a query, a fragment, a user and
+    // password or a scheme other than http(s) is the person's input to fix, `bad_request` naming it. Thrown by the engine,
+    // they were plain errors, `engine` (exit 1): "the engine failed" (agents#894).
+    try { parseLocalTarget(target); } catch (error) {
+      const said = error instanceof Error ? error.message : String(error);
+      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${target}`);
+    }
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
     const { serviceId } = node(ctx).addService({ name: str(params, "name", true), target });
     return { service: serviceId, serviceId };
