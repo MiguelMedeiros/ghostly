@@ -452,3 +452,17 @@ describe("FileBubble: files/3", () => {
     } finally { delete (servicesPlatform as { saveFile?: unknown; fileHeld?: unknown }).saveFile; delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
   });
 });
+
+describe("a moving file's progress bar", () => {
+  it("draws its progress with a transform and no transition, so a new reading lays nothing out", () => {
+    show({ state: "transferring", direction: "in", transferred: 0.25 * 4.2 * GB, size: 4.2 * GB });
+    const bar = screen.getByTestId("file-progress").firstElementChild as HTMLElement;
+    expect(bar.style.transform).toBe("scaleX(0.25)");
+    expect(bar.style.width).toBe("");
+    // Readings come about 4 times a second: a transition would be running nearly all the time.
+    expect(bar.className).not.toMatch(/transition/);
+    // It grows from the start edge, on either side.
+    expect(bar.className).toMatch(/\borigin-left\b/);
+    expect(bar.className).toMatch(/\brtl:origin-right\b/);
+  });
+});
