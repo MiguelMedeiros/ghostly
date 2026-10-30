@@ -3,15 +3,17 @@ import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNames
 import { readClipboardText } from "../../lib/clipboard";
 import { rawError } from "../../lib/errorText";
 import { QR_IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, qrReaderFailures, readQrImage, scanQrFrames } from "../../lib/qrReader";
+import { touchOnly } from "../../lib/touchOnly";
 import { useI18n } from "../../contexts/I18nContext";
 import { Notice } from "../ui/Notice";
 
 /**
  * How Send on the Lightning and Cashu cards is given what to pay, as a phone wallet is: Scan (the camera), Paste, or
  * Choose image (a screenshot of a QR); a picture pasted or dropped anywhere in it (`children`: the card's field, where
- * one types) is read the same way. The text found goes to `onText` as is: the card sorts it.
+ * one types) is read the same way. The text found goes to `onText` as is: the card sorts it. `scanOnOpen`: the person
+ * just opened Send, and on a phone the camera starts by itself, as a phone wallet's does.
  */
-export function SendScan({ onText, disabled = false, children }: { onText: (text: string) => void; disabled?: boolean; children?: ReactNode }) {
+export function SendScan({ onText, disabled = false, scanOnOpen = false, children }: { onText: (text: string) => void; disabled?: boolean; scanOnOpen?: boolean; children?: ReactNode }) {
   const { t } = useI18n();
   const video = useRef<HTMLVideoElement>(null);
   const scanButton = useRef<HTMLButtonElement>(null);
@@ -41,14 +43,16 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
   }, [scanning]);
   const readerFailed = () => t(qrReaderFailures() < 2 ? "join.qrReaderNotLoaded" : "join.qrReaderReload");
 
-  const scan = async () => {
+  // `quiet`: nobody pressed Scan, so a camera that is missing or not allowed is not an error to say.
+  const scan = async (quiet = false) => {
     stop(); setError(""); setBusy(true);
     const current = generation.current;
     const decode = qrFrameReader();
     try {
       const camera = await qrCamera();
       if (current !== generation.current) { camera.getTracks().forEach((track) => track.stop()); return; }
-      stream.current = camera; setScanning(true);
+      // Running, it no longer holds the other ways back: Paste or a picture stops it and reads theirs.
+      stream.current = camera; setScanning(true); setBusy(false);
       const element = video.current!;
       element.srcObject = camera; await element.play();
       if (current !== generation.current) return;
@@ -56,9 +60,14 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
     } catch (cause) {
       if (current !== generation.current) return;
       stop();
-      setError(cause instanceof QrReaderNotLoaded ? readerFailed() : t("wallet.send.cameraUnavailable"));
+      if (!quiet) setError(cause instanceof QrReaderNotLoaded ? readerFailed() : t("wallet.send.cameraUnavailable"));
     } finally { decode.close(); }
   };
+  useEffect(() => {
+    if (scanOnOpen && touchOnly()) void scan(true);
+    // Only as it opens: `scan` is another function on each render, and the camera is not started again by one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const paste = async () => {
     stop(); setError(""); setBusy(true);
     const current = generation.current;
@@ -123,22 +132,23 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
       onDragOver={(event) => { if (dragHasFiles(event.dataTransfer)) event.preventDefault(); }}
       onDrop={(event) => { if (!dragHasFiles(event.dataTransfer)) return; event.preventDefault(); const file = droppedFiles(event.dataTransfer)[0]; if (file?.type.startsWith("image/")) { if (!off) void image(file); } else if (file) setError(t("join.imageFailed")); }}>
       <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} aspect-square w-full max-w-xs mx-auto rounded-xl bg-black object-cover`} />
-      {scanning ? <button ref={stopButton} type="button" onClick={stop} className={`${control} gap-2 px-3 py-2 w-full border border-border`} data-testid="wallet-send-scan-stop">{t("common.cancel")}</button> : (
-        <div className="grid grid-cols-3 gap-2">
-          <button ref={scanButton} type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void scan(); }} className={`${tile} bg-accent text-on-accent`} data-testid="wallet-send-camera">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
-            {t("wallet.send.scan")}
-          </button>
-          <button type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void paste(); }} className={`${tile} border border-border text-text-secondary`} data-testid="wallet-send-paste">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>
-            {t("wallet.send.paste")}
-          </button>
-          <label className={`${tile} border border-border text-text-secondary focus-within:ring-2 focus-within:ring-accent ${off ? "opacity-40 cursor-not-allowed" : ""}`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-            {t("wallet.send.image")}<input aria-disabled={off || undefined} onClick={(event) => { if (off) event.preventDefault(); }} aria-label={t("wallet.send.image")} data-testid="wallet-send-image" type="file" accept="image/*" className="sr-only" onChange={(event) => { void image(event.target.files?.[0]); event.target.value = ""; }} />
-          </label>
-        </div>
-      )}
+      <div className="grid grid-cols-3 gap-2">
+        {scanning ? <button ref={stopButton} type="button" onClick={stop} className={`${tile} border border-border text-text-secondary`} data-testid="wallet-send-scan-stop">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          {t("common.cancel")}
+        </button> : <button ref={scanButton} type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void scan(); }} className={`${tile} bg-accent text-on-accent`} data-testid="wallet-send-camera">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
+          {t("wallet.send.scan")}
+        </button>}
+        <button type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void paste(); }} className={`${tile} border border-border text-text-secondary`} data-testid="wallet-send-paste">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>
+          {t("wallet.send.paste")}
+        </button>
+        <label className={`${tile} border border-border text-text-secondary focus-within:ring-2 focus-within:ring-accent ${off ? "opacity-40 cursor-not-allowed" : ""}`}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          {t("wallet.send.image")}<input aria-disabled={off || undefined} onClick={(event) => { if (off) event.preventDefault(); }} aria-label={t("wallet.send.image")} data-testid="wallet-send-image" type="file" accept="image/*" className="sr-only" onChange={(event) => { void image(event.target.files?.[0]); event.target.value = ""; }} />
+        </label>
+      </div>
       {error && <Notice tone="error" testId="wallet-send-scan-error">{error}</Notice>}
       {children}
     </div>
