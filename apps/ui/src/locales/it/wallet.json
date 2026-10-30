@@ -593,6 +593,7 @@
   "send": {
     "balance": "Saldo: {{amount}} {{unit}}",
     "cameraUnavailable": "Fotocamera non disponibile. Incolla, scrivi o scegli un'immagine.",
+    "chooseAmount": "Questa fattura non ha un importo: scegli quanto pagare.",
     "clipboardEmpty": "Niente da incollare. Copia prima una fattura o un indirizzo.",
     "clipboardUnavailable": "Impossibile leggere gli appunti. Incolla o scrivi qui sotto.",
     "image": "Scegli immagine",

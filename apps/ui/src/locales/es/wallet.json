@@ -593,6 +593,7 @@
   "send": {
     "balance": "Saldo: {{amount}} {{unit}}",
     "cameraUnavailable": "Cámara no disponible. Pega, escribe o elige una imagen.",
+    "chooseAmount": "Esta factura no tiene importe: elige cuánto pagar.",
     "clipboardEmpty": "Nada que pegar. Copia antes una factura o una dirección.",
     "clipboardUnavailable": "No se pudo leer el portapapeles. Pégalo o escríbelo abajo.",
     "image": "Elegir imagen",
