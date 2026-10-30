@@ -6,7 +6,7 @@ import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
+import type { GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
@@ -43,6 +43,18 @@ async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; 
   const group = stored.linkId.startsWith("group:") ? stored.linkId.slice("group:".length) : undefined;
   const messages = group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(stored.linkId);
   return messages.find((m) => m.file?.id === stored.id)?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
+}
+
+/**
+ * The message of a chat or a group (`group:<id>`) that `test` picks: looked for among its newest first, where the one a
+ * command names almost always is, then in all of them only when there are more. A whole history costs a read of every row.
+ */
+async function findMessage(ctx: ApiContext, linkId: string, test: (m: StoredMessage) => boolean): Promise<StoredMessage | undefined> {
+  const page = await node(ctx).messagePage({ linkId, limit: 200 });
+  const newest = page.messages.find(test);
+  if (newest || !page.more) return newest;
+  const group = linkId.startsWith("group:") ? linkId.slice("group:".length) : undefined;
+  return (group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(linkId)).find(test);
 }
 
 /** A chat's files as the timeline shows them, with where each transfer stands (`transferOf`, by file id). */
@@ -125,8 +137,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   const mime = mimeOf(path, str(params, "mime"));
   const replyTo = str(params, "reply");
   if (replyTo) {
-    const messages = await node(ctx).groupMessages({ groupId: group.id });
-    if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this group, or cannot be replied to");
+    if (!await findMessage(ctx, `group:${group.id}`, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this group, or cannot be replied to");
   }
   // A send the group would refuse anyway (its files of the minute are taken, or this device is not in it) is refused
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
@@ -201,8 +212,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A reply names a message of this chat, as `send --reply` does: checked before anything is stored.
     const replyTo = str(params, "reply");
     if (replyTo) {
-      const messages = await node(ctx).getMessages(link.id);
-      if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
+      if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
     }
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
     const source = await openAsBlob(path, { type: mime });
