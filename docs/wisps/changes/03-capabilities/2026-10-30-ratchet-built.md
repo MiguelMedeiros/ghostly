@@ -1,0 +1,1 @@
+What the record enables on layer 0 now names `ratchet/1` as built on `dev` ([4xx · Forward Secrecy](../../4xx-ratchet.md)): when both records list it, the floor and held items are sealed with keys used once.
