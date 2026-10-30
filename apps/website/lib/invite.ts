@@ -7,16 +7,21 @@
  * in step. Older codes never came to this host, so they are not read here.
  */
 
-/** `device`: a code that adds a device to a profile (WISP 06, version 2), which no chat is made from. */
-export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged" | "device";
-/** A `device` refusal carries the code too: the page hands it to the web app, which adds the device (WISP 06). */
+/**
+ * `device`: a code that adds a device to a profile (WISP 06, version 2), which no chat is made from. `contact`: someone's
+ * contact link (WISP 8xx, version 3), which the web app opens as a request form.
+ */
+export type InviteRefusal = "typo" | "update" | "not-ghostly" | "damaged" | "device" | "contact";
+/** A `device` or `contact` refusal carries the code too: the page hands it to the web app. */
 export type InviteCheck = { ok: true; code: string } | { ok: false; reason: InviteRefusal; code?: string };
 
 const HRP = "ghostly";
 const MAX_LENGTH = 1023;
 const V1_BYTES = 128;
-/** The highest version this reader knows: 2, a code that adds a device (WISP 06). Above it is a newer Ghostly's. */
-const HIGHEST_KNOWN_VERSION = 2;
+/** The highest version this reader knows: 3, a contact link (WISP 8xx). Above it is a newer Ghostly's. */
+const HIGHEST_KNOWN_VERSION = 3;
+/** A contact link's payload: the link key alone (WISP 8xx, packages/core/src/contactLink.ts). */
+const CONTACT_BYTES = 32;
 const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
 const BECH32M = 0x2bc830a3;
 const BECH32 = 1;
@@ -73,6 +78,7 @@ export function checkInvite(input: string): InviteCheck {
   if (version === undefined || version === 0) return { ok: false, reason: "not-ghostly" };
   if (version > HIGHEST_KNOWN_VERSION) return { ok: false, reason: "update" };
   if (version === 2) return { ok: false, reason: "device", code };
+  if (version === 3) return payloadBytes(payload) === CONTACT_BYTES ? { ok: false, reason: "contact", code } : { ok: false, reason: "damaged" };
   if (payloadBytes(payload) !== V1_BYTES) return { ok: false, reason: "damaged" };
   return { ok: true, code };
 }

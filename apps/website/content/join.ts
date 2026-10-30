@@ -23,6 +23,7 @@ export const join = {
     "not-ghostly": "This is not a Ghostly invite.",
     damaged: "This invite is damaged. Ask for a new one.",
     device: "This code adds a device to a profile. On the new device, open Ghostly and choose Add this device to another profile.",
+    contact: "This is someone's contact link. Open it in Ghostly to send them a request.",
   } satisfies Record<InviteRefusal, string>,
   /** A code that adds a device to a profile (WISP 06): no chat, but the web app takes it. */
   device: {
@@ -31,6 +32,14 @@ export const join = {
     open: "Open in Ghostly",
     steps: "Or open Ghostly on this device, choose Add this device to another profile, and scan or paste the code.",
     private: "The code stays in this browser. It was never sent to ghostly.tools.",
+  },
+  /** Someone's contact link (WISP 8xx): the web app shows a request form for it, never a chat by itself. */
+  contact: {
+    title: "Write to someone on Ghostly",
+    lead: "Someone shared this contact link so people can write to them. The link does not say who they are; you find out if they accept your request.",
+    open: "Write a request in Ghostly",
+    steps: "Or copy this page's address and paste it in Join in the Ghostly app.",
+    private: "The link stays in this browser. It was never sent to ghostly.tools.",
   },
 };
 

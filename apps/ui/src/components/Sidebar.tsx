@@ -52,6 +52,7 @@ import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
+import { SidebarRequests } from "./requests/SidebarRequests";
 import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailChat, RailGroup, RailToggle } from "./ChatRail";
@@ -450,6 +451,7 @@ export function Sidebar() {
         </div>
       </div>
 
+      <SidebarRequests active={location.pathname === "/requests"} onOpen={() => (location.pathname === "/requests" ? nav.home() : nav.place("/requests"))} />
       <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
       <SidebarSaved active={location.pathname === "/saved"} onOpen={() => (location.pathname === "/saved" ? nav.home() : nav.place("/saved"))} />
 

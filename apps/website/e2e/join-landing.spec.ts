@@ -6,10 +6,13 @@ import { expect, test, type BrowserContext, type Page } from "@playwright/test";
  */
 
 // WISP 801's test vector (synthetic bytes), and codes made from it: version 2 (a code that adds a device, WISP 06),
-// version 3 (above every version a reader knows: a newer Ghostly's), version 0, 96 bytes.
+// version 3 with 128 bytes (a contact link of the wrong length: damaged), version 4 (above every version a reader knows:
+// a newer Ghostly's), version 0, 96 bytes. CONTACT is WISP 8xx's contact link vector.
 const CODE = "ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l8794pd4k";
 const V2 = "ghostly1zqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l87xe98gx";
 const V3 = "ghostly1rqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l878a7pr3";
+const V4 = "ghostly1yqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l87qpdnm0";
+const CONTACT = "ghostly1rqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0s0her5u";
 const V0 = "ghostly1qqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tasxzcnrv3jkvemgd94xkmrddehhqutjwd682anh0puh57mu04l87y36t7p";
 const SHORT = "ghostly1pqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqgfzyvjz2f389q5j52ev95hz7vp3xgengdfkxuurjw3m8s7nu06qg9pyx3z9ger5sj22fdxy6nj02pg4y56524t9wkzetfd4ch27tu5fqcad";
 const TYPO = CODE.slice(0, 100) + (CODE[100] === "q" ? "p" : "q") + CODE.slice(101);
@@ -146,7 +149,8 @@ test.describe("join page", () => {
 
   for (const [name, code, message] of [
     ["a typo", TYPO, "This code has a typo. Check it, or ask for the code again."],
-    ["a newer version", V3, "This invite was made by a newer Ghostly. Update to join."],
+    ["a newer version", V4, "This invite was made by a newer Ghostly. Update to join."],
+    ["a contact link of the wrong length", V3, "This invite is damaged. Ask for a new one."],
     ["version 0", V0, "This is not a Ghostly invite."],
     ["a damaged invite", SHORT, "This invite is damaged. Ask for a new one."],
   ]) {
@@ -186,6 +190,29 @@ test.describe("join page", () => {
     await page.waitForURL(`${APP}/**`);
     expect(new URL(page.url()).hash).toBe(`#${V2}`);
     expect(leaks).toEqual([]);
+  });
+
+  test("someone's contact link: the request form is offered in the web app, never opened by itself", async ({ page }) => {
+    await standInApp(page);
+    await page.goto(`/#${CONTACT.toUpperCase()}`);
+    const dialog = page.getByTestId("join-landing");
+    await expect(dialog).toHaveAttribute("data-kind", "contact");
+    await expect(dialog.getByRole("heading", { name: "Write to someone on Ghostly" })).toBeVisible();
+    expect(page.url()).not.toContain("#");
+    const open = dialog.getByTestId("join-contact-open");
+    await expect(open).toHaveAttribute("href", `${APP}/#${CONTACT}`);
+    await expect(dialog.getByTestId("join-going")).toHaveCount(0);
+    await page.waitForTimeout(500);
+    expect(new URL(page.url()).host).not.toBe(new URL(APP).host);
+    await open.click();
+    await page.waitForURL(`${APP}/**`);
+    expect(new URL(page.url()).hash).toBe(`#${CONTACT}`);
+  });
+
+  test("the contact link page says how to put the link on a site", async ({ page }) => {
+    await page.goto("/contact-link");
+    await expect(page.getByRole("heading", { name: "A contact link for your site" })).toBeVisible();
+    await expect(page.getByText("Write to me on Ghostly")).toBeVisible();
   });
 
   test("an invite link from the old /pt-br pages opens in English", async ({ page }) => {

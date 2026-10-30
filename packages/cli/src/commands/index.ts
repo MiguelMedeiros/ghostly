@@ -2,6 +2,7 @@ import { CliError } from "../errors";
 import { commands as apps } from "./apps";
 import { commands as calls } from "./calls";
 import { commands as chats } from "./chats";
+import { commands as contactLinks } from "./contactLinks";
 import { commands as files } from "./files";
 import { commands as general } from "./general";
 import { commands as groups } from "./groups";
@@ -21,6 +22,7 @@ export type { Command };
 export const COMMANDS: Record<string, Command> = {
   ...general,
   ...chats,
+  ...contactLinks,
   ...groups,
   ...files,
   ...payments,

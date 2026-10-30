@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { bech32, bech32m } from "@scure/base";
 import { createChatInvite, readInviteCode } from "../src/invite";
+import { encodeContactLink, readContactLink } from "../src/contactLink";
 import { checkInvite } from "../../../apps/website/lib/invite";
 // covers: invite.code
 
@@ -12,7 +13,10 @@ import { checkInvite } from "../../../apps/website/lib/invite";
 const same = (input: string) => {
   const core = readInviteCode(input);
   const site = checkInvite(input);
-  expect(site.ok ? "ok" : site.reason, input.slice(0, 40)).toBe(core.ok ? "ok" : core.reason);
+  // A version 3 code is the app's contact link (WISP 8xx): its own reader, which Join and the address ask first.
+  const contact = !core.ok && core.reason === "update" && core.detail === "Version 3" ? readContactLink(input) : null;
+  const app = contact ? (contact.ok ? "contact" : contact.reason) : core.ok ? "ok" : core.reason;
+  expect(site.ok ? "ok" : site.reason, input.slice(0, 40)).toBe(app);
 };
 
 describe("the site's invite reader agrees with the app's", () => {
@@ -35,7 +39,7 @@ describe("the site's invite reader agrees with the app's", () => {
   });
 
   it("a version above every one either reader knows is a newer Ghostly's, in both; version 2 adds a device, in both", () => {
-    for (const version of [3, 4, 16, 31]) {
+    for (const version of [4, 16, 31]) {
       const code = bech32m.encode("ghostly", [version, ...words.slice(1)], false);
       expect(readInviteCode(code)).toMatchObject({ ok: false, reason: "update" });
       expect(checkInvite(code)).toEqual({ ok: false, reason: "update" });
@@ -45,6 +49,15 @@ describe("the site's invite reader agrees with the app's", () => {
     // The site hands a device code to the web app (WISP 06), so it keeps the code, in lower case.
     expect(checkInvite(device)).toEqual({ ok: false, reason: "device", code: device });
     expect(checkInvite(device.toUpperCase())).toEqual({ ok: false, reason: "device", code: device });
+  });
+
+  it("version 3 is a contact link in both: the site hands it to the web app, and a wrong length is damaged in both", () => {
+    const code = encodeContactLink(createChatInvite().invite.peerPubKeyZ32);
+    expect(readContactLink(code).ok).toBe(true);
+    expect(checkInvite(code)).toEqual({ ok: false, reason: "contact", code });
+    expect(checkInvite(`https://ghostly.tools/#${code.toUpperCase()}`)).toEqual({ ok: false, reason: "contact", code });
+    same(code);
+    same(bech32m.encode("ghostly", [3, ...words.slice(1)], false));
   });
 
   it("on arbitrary strings after ghostly1", () => {
