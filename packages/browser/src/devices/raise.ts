@@ -106,7 +106,10 @@ export const raisedCounter = (value: number | undefined, floor: number): number 
  */
 export function raisedLink(link: StoredLink, floor: number): StoredLink {
   const paired = !!link.profile && !link.group;
-  const next: StoredLink = { ...link };
+  // The ratchet (WISP 4xx) is this device's: the copy taken over may have sealed with keys the device it replaces used
+  // since. The next item starts a new session with the contact.
+  const { ratchetState: _ratchet, ...rest } = link;
+  const next: StoredLink = { ...rest };
   if (link.dhtDeliveryState) next.dhtDeliveryState = { ...link.dhtDeliveryState, sequence: raisedCounter(link.dhtDeliveryState.sequence, floor) };
   else if (paired) next.dhtDeliveryState = { sequence: floor, peerSequence: 0 };
   if (link.capsState) {

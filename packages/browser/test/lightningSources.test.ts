@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { lightningJournalWritten } from "../src/engine/paymentAdapters/providers/lightningService";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { bech32 } from "@scure/base";
 import { decodeBolt11 } from "@ghostly/core";
@@ -22,15 +23,15 @@ import { BITCOIN_INVOICE_ON_TESTNET } from "../src/shared/mints";
 
 const keys = async () => (await wrap((await store(STORES.settings, "readonly")).getAllKeys())).map(String).sort();
 const hash = () => crypto.getRandomValues(new Uint8Array(32));
-const journal = (op: LightningOp) => transact([STORES.settings], (s) => { s[STORES.settings].put(op, `lightningOp-${op.direction}-${op.paymentHash}`); });
-beforeEach(async () => { await transact([STORES.settings], (s) => { s[STORES.settings].clear(); }); });
+const journal = (op: LightningOp) => transact([STORES.settings], (s) => { s[STORES.settings].put(op, `lightningOp-${op.direction}-${op.paymentHash}`); }).finally(lightningJournalWritten);
+beforeEach(async () => { await transact([STORES.settings], (s) => { s[STORES.settings].clear(); }); lightningJournalWritten(); });
 
 const services: LightningService[] = [];
 afterEach(async () => { for (const s of services.splice(0)) await s.stop(); });
 
 function service(provider: LightningProvider = new FakeLightningProvider({ settleMs: 600_000 }), extra: Partial<LightningProviderDescriptor> = {}) {
   const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-  const cashu = { view: async () => ({ balance: 7, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+  const cashu = { balance: async () => 7 } as unknown as CashuWallet;
   // Nothing secret to configure: no sealing (a 600k-round PBKDF2) on every set.
   const descriptor: LightningProviderDescriptor = { ...fakeLightning, fields: [], validate: undefined, create: async () => provider, ...extra };
   const lightning = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
@@ -190,7 +191,7 @@ describe("quoting an invoice to pay", () => {
     expect(pay).not.toHaveBeenCalled();
     await expect(lightning.quote(testInvoice({ sats: 10, prefix: "lntb" }))).resolves.toMatchObject({ amount: 10 });
     // The mints take it to the wallet, which refuses it unless a test mint pays (wallet.test.ts).
-    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://testnut.cashu.space", amount: 10, feeReserve: 1 })), view: async () => ({ balance: 100 }) };
+    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://testnut.cashu.space", amount: 10, feeReserve: 1 })), balance: async () => 100 };
     const mints = await ready(new CashuMintLightning(wallet as unknown as CashuWallet, "testnet"), { networks: ["testnet"] });
     await expect(mints.lightning.quote(testInvoice({ sats: 10, prefix: "lnbc" }))).resolves.toMatchObject({ mint: "https://testnut.cashu.space" });
     expect(wallet.quoteInvoice).toHaveBeenCalledWith(expect.stringMatching(/^lnbc10/), "testnet");
@@ -198,7 +199,7 @@ describe("quoting an invoice to pay", () => {
 
   it("names the Cashu mint that will pay when the source is the mints", async () => {
     const invoice = fakeInvoice(40, hash());
-    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://mint.example", amount: 40, feeReserve: 2 })), view: async () => ({ balance: 100 }) };
+    const wallet = { quoteInvoice: vi.fn(async () => ({ quote: "m1", mint: "https://mint.example", amount: 40, feeReserve: 2 })), balance: async () => 100 };
     const mints = new CashuMintLightning(wallet as unknown as CashuWallet, "testnet");
     const { lightning } = await ready(mints, { networks: ["testnet"] });
     expect(await lightning.quote(invoice)).toMatchObject({ mint: "https://mint.example", feeReserve: 2, source: "fake-lightning" });
@@ -240,6 +241,32 @@ describe("paying a quote", () => {
 
 // Connecting a source schedules a pass of its own: every source answer below is scripted before an
 // operation is journaled, so whichever pass sees it first gets the same answer.
+// agents#1687: a start read the whole journal 38 times, 8 of them one after another before the chat list showed.
+describe("the journal read", () => {
+  it("is read once while nothing writes it, every caller gets copies, and a write is read again", async () => {
+    for (let i = 0; i < 50; i++) await journal(op({ paymentHash: `h${i}`, state: "paid" }));
+    const { lightning } = await ready();
+    const proto = Object.getPrototypeOf(await store(STORES.settings, "readonly")) as { getAll: (...a: unknown[]) => unknown };
+    const getAll = vi.spyOn(proto, "getAll");
+    try {
+      // What the service writes is read again: from here, one read for every list after it.
+      await lightning.createInvoice(21, { paymentId: "req-0" });
+      getAll.mockClear();
+      const lists = await Promise.all(Array.from({ length: 4 }, () => lightning.list()));
+      for (let i = 0; i < 4; i++) lists.push(await lightning.list());
+      for (const list of lists) expect(list.filter((o) => o.paymentHash.startsWith("h"))).toHaveLength(50);
+      console.log(`JOURNAL READS: 8 lists, ${getAll.mock.calls.length} reads`);
+      expect(getAll).toHaveBeenCalledTimes(1);
+      lists[0].find((o) => o.paymentHash === "h7")!.state = "failed";
+      expect((await lightning.list()).find((o) => o.paymentHash === "h7")?.state, "a caller's change stays its own").toBe("paid");
+      const invoice = await lightning.createInvoice(21, { paymentId: "req-1" });
+      getAll.mockClear();
+      expect(await opOf(lightning, invoice.paymentHash), "what the service wrote is read").toBeDefined();
+      expect(getAll).toHaveBeenCalledTimes(1);
+    } finally { getAll.mockRestore(); }
+  });
+});
+
 describe("reconciling what is open", () => {
   it("asks only the source an operation went through, and never a source that cannot look up", async () => {
     const fake = new FakeLightningProvider();
@@ -329,7 +356,7 @@ describe("a payment through the mints that the app was cut off from", () => {
       payQuote: vi.fn(async () => new Promise<boolean>(() => {})),
       meltQuoteState: vi.fn(async () => quoteState),
       meltInFlight: vi.fn(async () => inFlight),
-      view: async () => ({ balance: 100 }),
+      balance: async () => 100,
     };
     return { wallet, provider: new CashuMintLightning(wallet as unknown as CashuWallet, "testnet") };
   }

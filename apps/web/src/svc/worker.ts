@@ -5,18 +5,18 @@
  * goes only when it is a frame's this origin started (`startedHere`): at the top, the app says it opens inside Ghostly. Built on its
  * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage.
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 
 declare const __SERVICES_HOST__: string;
 declare const __SERVICES_APP_ORIGIN__: string;
 
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
 interface FetchEvent extends ExtendableEvent { request: Request; clientId: string; respondWith(response: Promise<Response> | Response): void }
-interface WindowClient { id: string; url: string; frameType?: string; postMessage(message: unknown, transfer: Transferable[]): void }
+interface WindowClient { id: string; url: string; type?: string; frameType?: string; postMessage(message: unknown, transfer: Transferable[]): void }
 interface WorkerScope {
   location: Location;
   skipWaiting(): Promise<void>;
-  clients: { claim(): Promise<void>; matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<WindowClient[]> };
+  clients: { claim(): Promise<void>; get(id: string): Promise<WindowClient | undefined>; matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<WindowClient[]> };
   addEventListener(type: "install" | "activate", listener: (event: ExtendableEvent) => void): void;
   addEventListener(type: "fetch", listener: (event: FetchEvent) => void): void;
 }
@@ -150,5 +150,11 @@ worker.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   // The bridge's own files come from the server; another origin is not this app's.
   if (url.origin !== worker.location.origin || url.pathname.startsWith(BRIDGE_DIR) || url.pathname === WORKER_SCRIPT) return;
-  event.respondWith(forward(event).catch(() => plain(502, "The request failed.")));
+  const answer = async () => {
+    // A tab of its own on this origin (a window the app opened, a link from elsewhere) outlives the view: refused.
+    const client = event.clientId ? await worker.clients.get(event.clientId) : undefined;
+    if (!fromView(event.request, client)) return plain(403, "This app opens only inside Ghostly.");
+    return forward(event);
+  };
+  event.respondWith(answer().catch(() => plain(502, "The request failed.")));
 });

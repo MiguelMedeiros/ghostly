@@ -306,15 +306,18 @@ export function CallOverlay({
         </p>
       </div>
 
-      {/* On a phone your own picture starts at the top right, 64 to 154 px down (`selfView` above): the notice goes
-          below it, and over it when the picture is dragged or grown there, or "… is sharing their screen" lost its end. */}
+      {/* On a phone your own picture starts at the top right, 64 px down and 120 px wide (`selfView` above), as high as
+          its shape makes it: 90 px for a camera held sideways (4:3), 160 px held upright (3:4). The notice goes 16 px
+          below that, and over it when the picture is dragged or grown there, or "… is sharing their screen" lost its
+          end. A fixed 10.5rem put it 48 px into an upright camera's picture (agents#1630). */}
       {sharingNotice && (
         <p
           role="status"
           data-testid="call-sharing"
           data-self={isScreenSharing}
           data-peer={remoteIsScreenSharing}
-          className="call-share-notice absolute top-16 max-md:top-[calc(10.5rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+          style={phone && !mini ? { top: `calc(${64 + Math.round(120 / selfAspect) + 16}px + env(safe-area-inset-top))` } : undefined}
+          className="call-share-notice absolute top-16 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
         >
           <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="2" y="4" width="20" height="13" rx="2" />

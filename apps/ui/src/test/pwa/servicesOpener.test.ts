@@ -161,6 +161,13 @@ describe("a contact's app shown over the app", () => {
     }
   });
 
+  it("opens no window of its own: one would be a tab on its origin, outliving the view and the lock", async () => {
+    await open("one");
+    const sandbox = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("sandbox")!.split(" ");
+    expect(sandbox).toContain("allow-scripts");
+    expect(sandbox.filter((flag) => flag.startsWith("allow-popups") || flag.startsWith("allow-top-navigation"))).toEqual([]);
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     setServiceWindowsCloser(closeServiceView);
     await open("one");

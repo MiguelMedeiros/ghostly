@@ -1,6 +1,7 @@
 package tools.ghostly.app
 
 import java.io.File
+import java.nio.file.Files
 
 /**
  * The copies of shares from other apps in the app's cache (GhostlyHostPlugin `shared`): a folder per share under the
@@ -34,6 +35,15 @@ object SharedCopies {
     generateSequence(error) { it.cause }.take(8).any { NO_ROOM.containsMatchIn(it.message ?: "") }
 
   private val NO_ROOM = Regex("ENOSPC|EDQUOT|No space left on device|Disk quota exceeded")
+
+  /**
+   * Makes a copy's folder and the ones above it. File.mkdirs only says false; a disk already full refuses a new folder
+   * (ext4 a block, f2fs a node block for it), and then the copy's open fails with ENOENT, read as `unread`. This throws
+   * the errno's reason instead ("…: No space left on device"), which [noRoom] reads.
+   */
+  fun makeFolder(folder: File) {
+    Files.createDirectories(folder.toPath())
+  }
 
   /** What earlier runs left under the root: everything but the folders of shares numbered after `since`. */
   fun stale(root: File, since: Long): List<File> =

@@ -1,0 +1,1 @@
+A holder whose day's bytes are spent (§ Serving limits) answers `group-want-no` with `why: "day"` instead of `busy`, so the asker can say the file comes from another member or the next day rather than "asking again soon", which held for up to a day (agents#1672). An app from before reads an unknown `why` as `busy`, as it always did.

@@ -306,6 +306,13 @@ export class LinkSession {
   private fastStepsAfter = 0;
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
+  /**
+   * Until when this link's reads go as a resume's (`PkarrRequestOptions.resume`: a group edge's on the relays' floor):
+   * the peer is due now and nothing reaches it until its packet is read (`expectPeer(true)`: the edge to a member a hub
+   * just let in). As plain fast reads, a hub's admissions in a row spent the budget and the newcomer's edge waited for it:
+   * 22-39 s before it could send, receive or leave (agents#1740). Ends once a read finds the peer's packet.
+   */
+  private awaitedUntil = 0;
   private watchUntil = 0;
   /** The time of the peer's packet read last when it went away (`watchPeer`): a newer one that advertises says it is back. */
   private watchFrom = 0;
@@ -462,9 +469,10 @@ export class LinkSession {
    * The peer, or its offer, is due any moment: poll fast for `EXPECT_PEER_MS` (never cutting a longer fast window short),
    * then slow down step by step (`nextInterval`) rather than at once.
    */
-  expectPeer(): void {
+  expectPeer(awaited = false): void {
     const until = Date.now() + EXPECT_PEER_MS;
     this.expectUntil = Math.max(this.expectUntil, until);
+    if (awaited) this.awaitedUntil = Math.max(this.awaitedUntil, until);
     // Due now: an offer of mine that was looking less often looks fast again, as long as this window.
     const stepping = this.fastStepsAfter > 0 && Date.now() >= this.fastStepsAfter;
     if (this.fastStepsAfter) this.fastStepsAfter = Math.max(this.fastStepsAfter, until);
@@ -805,7 +813,7 @@ export class LinkSession {
       const departed = !signal && Date.now() < this.departedUntil;
       const background = pace === "background" || pace === "connected";
       // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
-      const resume = !signal && !watch && this.resumeReads;
+      const resume = !signal && !watch && (this.resumeReads || Date.now() < this.awaitedUntil);
       const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) });
       if (!this.running) return;
       this.discoveryResult("read");
@@ -817,6 +825,7 @@ export class LinkSession {
       const read = answered !== undefined && answered >= started;
       if (read) this.lastReadAt = started;
       if (read || !this.transport.readAnsweredAt) this.resumeReads = false;
+      if (packet && (read || !this.transport.readAnsweredAt)) this.awaitedUntil = 0;
       this.readMissed = !!this.transport.readAnsweredAt && !read;
       if (this.readMissed) heldBackMs = this.transport.readHeldBackFor?.(this.peerPubKeyZ32);
 

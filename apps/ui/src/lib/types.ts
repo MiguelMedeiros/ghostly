@@ -149,15 +149,15 @@ export interface ChatTechInfo {
   myPubKey: string;
   peerPubKey: string;
   encKeyPreview: string;
-  pollCount: number;
   currentPollInterval: number;
   republishInterval: number;
   messageTtl: number;
+  /** The transport's own name for how it reaches the network; the screen words it itself while `peerToPeer`. */
   protocol: string;
+  /** The chat's data link is open: messages go peer to peer, the network only finds the contact. */
+  peerToPeer: boolean;
   encryption: string;
   relays: string[];
   createdAt: number;
-  myAck: number;
   peerAck: number;
-  sentBufferSize: number;
 }

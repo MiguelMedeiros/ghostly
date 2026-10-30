@@ -208,6 +208,23 @@ describe("AddIdentityDialog", () => {
       expect(start).toBeEnabled();
     });
 
+    it("takes the keyboard's focus into each step: the first field, the chosen card after Back, the steps after Continue", async () => {
+      const { user } = dialog();
+      answerBegin();
+      screen.getByTestId("add-identity-domain").focus();
+      await user.keyboard("{Enter}");
+      // Several signers here: their choice comes first.
+      expect(document.activeElement).toBe(screen.getByTestId("add-identity-signer"));
+      screen.getByRole("button", { name: "Back" }).focus();
+      await user.keyboard("{Enter}");
+      expect(document.activeElement).toBe(screen.getByTestId("add-identity-domain"));
+      await user.keyboard("{Enter}");
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      screen.getByTestId("add-identity-start").focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByTestId("add-identity-steps")).toHaveFocus();
+    });
+
     it("switches between a publish signer and an in-app one", async () => {
       const { user } = dialog();
       await user.click(screen.getByTestId("add-identity-domain"));

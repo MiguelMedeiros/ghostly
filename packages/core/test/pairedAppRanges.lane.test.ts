@@ -84,6 +84,28 @@ describe("the read lane of one chat", () => {
     expect(await settled(after)).toEqual({ error: "not-served" });
   });
 
+  // Each serve kept a serve of its own until unserve or close: an app that served on each play grew by one a call.
+  it("a file served again answers the id it has: an app serving on each play holds one serve per file", async () => {
+    const { ana, bob, flush } = pair();
+    const serves = new Set(Array.from({ length: 100 }, () => ana.serve(CINEMA, "film-id")));
+    expect(serves.size).toBe(1);
+    const [serve] = serves;
+    // Another file, or the same file of another app, is a serve of its own.
+    const trailer = ana.serve(CINEMA, "trailer-id"), chess = ana.serve(CHESS, "film-id");
+    expect(new Set([serve, trailer, chess]).size).toBe(3);
+    expect(ana.servesOf(CINEMA)).toEqual([serve, trailer]);
+    const read = bob.read(CINEMA, serve!, 0, 10);
+    flush();
+    expect(await read).toEqual({ bytes: FILM.subarray(0, 10), size: FILM.length });
+    // One unserve ends it; served again, it is a new id.
+    expect(ana.unserve(serve!)).toBe(true);
+    const again = ana.serve(CINEMA, "film-id");
+    expect(again).not.toBe(serve);
+    ana.closeApp(CINEMA);
+    expect(ana.servesOf(CINEMA)).toEqual([]);
+    expect(ana.servesOf(CHESS)).toEqual([chess]);
+  });
+
   it("says changed or gone as the file under a serve does", async () => {
     const { ana, bob, flush } = pair({ serveFile: file => file === "moved" ? "gone" : "changed" });
     const moved = bob.read(CINEMA, ana.serve(CINEMA, "moved"), 0, 1), edited = bob.read(CINEMA, ana.serve(CINEMA, "edited"), 0, 1);

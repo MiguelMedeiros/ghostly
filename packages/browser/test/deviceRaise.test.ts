@@ -61,6 +61,11 @@ describe("the counters of a chat", () => {
     expect(raised.pin).toEqual(link().pin);
   });
 
+  it("drops the chat's ratchet: the copy taken over may hold keys the device it replaces used since (WISP 4xx)", () => {
+    const raised = raisedLink(link({ ratchetState: { v: 1, others: [], skipped: [], retired: [], heard: { floor: true } } }), 30_000_000);
+    expect(raised.ratchetState).toBeUndefined();
+  });
+
   it("goes up by the stride where the counter is already above the floor", () => {
     const raised = raisedLink(link({ dhtDeliveryState: { sequence: 50_000_000, peerSequence: 0 } }), 30_000_000);
     expect(raised.dhtDeliveryState!.sequence).toBe(50_000_000 + S);

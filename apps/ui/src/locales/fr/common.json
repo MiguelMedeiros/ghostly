@@ -19,6 +19,11 @@
   "goHome": "Aller à l’accueil",
   "loading": "Chargement...",
   "moreInfo": "Plus d'infos",
+  "needsYou": {
+    "mark": "à regarder",
+    "show": "Voir",
+    "title": "En attente"
+  },
   "save": "Enregistrer",
   "size": {
     "b": "{{n}} o",

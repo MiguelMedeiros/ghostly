@@ -244,9 +244,13 @@ export class AppRanges {
 
   constructor(private readonly send: (frame: AppRangeFrame) => void, private readonly newServeId = () => toBase64Url(randomBytes(16)), private readonly now = Date.now) {}
 
-  /** Lets the contact's `app` read `file` on this session: the serve id to tell it. */
+  /**
+   * Lets the contact's `app` read `file` on this session: the serve id to tell it. A file the app serves already answers
+   * the id it has, so an app that serves again on each play holds one serve per file, not one per call.
+   */
   serve(app: string, file: string): string {
     if (!isChatAppId(app)) throw new Error("Not a chat app id");
+    for (const [served, serve] of this.serves) if (serve.app === app && serve.file === file) return served;
     let id = this.newServeId();
     while (this.serves.has(id)) id = this.newServeId();
     this.serves.set(id, { app, file });
@@ -314,6 +318,14 @@ export class AppRanges {
   /** The session stopped working on `task` without an answer (it is no longer live, or the channel went): its place frees, nothing is sent. */
   release(task: AppRangeTask): void {
     this.take(task);
+  }
+
+  /**
+   * Whether `task` is still this session's: serving, or cancelled and draining until it is settled. False once it was
+   * settled, or its app closed or the session ended, which free its place: an answer to it sends and frees nothing.
+   */
+  holds(task: AppRangeTask): boolean {
+    return this.draining.has(task as Serving) || this.serving.get(slot(task.app, task.request)) === task;
   }
 
   /** Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end) and the file's size. */

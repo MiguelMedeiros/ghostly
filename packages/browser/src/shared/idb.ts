@@ -469,11 +469,20 @@ export const fileStore = {
     ]);
     return file && withState(file, state);
   },
+  /**
+   * A link's files in two requests: what changed about them is read as one range, from the least of their ids to the
+   * greatest. A link's file ids share its prefix (`<link>-in-`, `group-<id>-out-`…), so the range holds little else, and
+   * whatever else it holds is not theirs. A read per file was 16,000 requests at every start with 200 files per chat
+   * and 300 per group (50 chats, 20 groups).
+   */
   async listForLink(linkId: string): Promise<StoredFile[]> {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readonly");
     const files = await wrap<StoredFile[]>(tx.objectStore(STORES.files).index("byLink").getAll(linkId));
-    const states = await Promise.all(files.map((file) => wrap<FileState | undefined>(tx.objectStore(STORES.fileState).get(file.id))));
-    return files.map((file, i) => withState(file, states[i]));
+    if (!files.length) return files;
+    // Strings sort by UTF-16 code unit, as IndexedDB orders its keys.
+    const ids = files.map(file => file.id).sort();
+    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(IDBKeyRange.bound(ids[0], ids[ids.length - 1])))).map(state => [state.id, state]));
+    return files.map(file => withState(file, states.get(file.id)));
   },
   /** The id of every group a stored file is of (`linkId` `group:<id>`), read off the index: no record is loaded. */
   async groupIds(): Promise<string[]> {

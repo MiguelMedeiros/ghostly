@@ -278,6 +278,75 @@ describe("the device links of a profile on this device", () => {
     expect(page.links.views()[0].transport).toBe("hyperdht/1");
   });
 
+  it("move an idle HyperDHT endpoint to a new relay, and let it go when the relay is removed", async () => {
+    const dht = new NativeWorld();
+    dht.hexIds = true;
+    let relay: string | null = "wss://old.test";
+    const endpoints: { relay: string; closed: boolean }[] = [];
+    const d = newDeviceSetSecret();
+    // As the engine gives them: asked each time, on the relay set now; none once the relay is removed.
+    const desktop = await makeDevice("Linux", { createPeerConnection: undefined, nativeTransports: () => relay === null ? {} : {
+      "hyperdht/1": async () => {
+        const made = { relay: relay!, closed: false }, endpoint = dht.endpoint("hyperdht/1", "Linux");
+        endpoints.push(made);
+        const close = endpoint.close.bind(endpoint);
+        endpoint.close = async () => { made.closed = true; await close(); };
+        return endpoint;
+      },
+    } });
+    const phone = await makeDevice("Phone");
+    await write(desktop, "active", d, [desktop, phone]);
+    await settled(desktop.links.start());
+    await run(1000);
+    expect(endpoints).toEqual([{ relay: "wss://old.test", closed: false }]);
+
+    relay = "wss://new.test";
+    desktop.links.nativeChanged(["hyperdht/1"]);
+    await run(1000);
+    expect(endpoints).toEqual([{ relay: "wss://old.test", closed: true }, { relay: "wss://new.test", closed: false }]);
+
+    relay = null;
+    desktop.links.nativeChanged(["hyperdht/1"]);
+    await run(1000);
+    expect(endpoints).toEqual([{ relay: "wss://old.test", closed: true }, { relay: "wss://new.test", closed: true }]);
+    // Nothing starts it again on a relay that is gone.
+    await run(120_000);
+    expect(endpoints).toHaveLength(2);
+  });
+
+  it("keep the HyperDHT endpoint a session runs on until that session ends, and move it to the new relay then", async () => {
+    const dht = new NativeWorld();
+    dht.hexIds = true;
+    let relay = "wss://old.test";
+    const endpoints: { relay: string; closed: boolean }[] = [];
+    const d = newDeviceSetSecret();
+    const desktop = await makeDevice("Linux", { createPeerConnection: undefined, nativeTransports: () => ({
+      "hyperdht/1": async () => {
+        const made = { relay, closed: false }, endpoint = dht.endpoint("hyperdht/1", "Linux");
+        endpoints.push(made);
+        const close = endpoint.close.bind(endpoint);
+        endpoint.close = async () => { made.closed = true; await close(); };
+        return endpoint;
+      },
+    }) });
+    const phone = await makeDevice("Phone", { nativeTransports: { "hyperdht/1": async () => dht.endpoint("hyperdht/1", "Phone") } });
+    await write(desktop, "active", d, [desktop, phone]);
+    await write(phone, "standby", d, [desktop, phone]);
+    await settled(Promise.all([desktop.links.start(), phone.links.start()]));
+    expect(await until(() => liveBetween(desktop, phone), 120_000)).toBe(true);
+    expect(desktop.links.views()[0].transport).toBe("hyperdht/1");
+
+    relay = "wss://new.test";
+    desktop.links.nativeChanged(["hyperdht/1"]);
+    await run(5000);
+    expect(endpoints).toEqual([{ relay: "wss://old.test", closed: false }]);
+    expect(desktop.links.live(phone.slot.key)).toBe(true);
+
+    await settled(phone.links.stop());
+    expect(await until(() => endpoints.length === 2, 120_000)).toBe(true);
+    expect(endpoints).toEqual([{ relay: "wss://old.test", closed: true }, { relay: "wss://new.test", closed: false }]);
+  });
+
   it("give no old link to a key the current set does not list, whatever the list of devices still to acknowledge says", async () => {
     const oldD = newDeviceSetSecret(), newD = newDeviceSetSecret();
     const desktop = await makeDevice("Desktop"), phone = await makeDevice("Phone"), lost = await makeDevice("Lost");

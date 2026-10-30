@@ -16,18 +16,21 @@ export function offerSession(linkId: string, signal: string): string | undefined
 /**
  * A call answered from the lock screen of an app locked since it started (WISP 601 § Locked). The chat that rang
  * before the password goes with the lock; the chat the app opens once unlocked takes the call over and answers it at
- * once, as it came. Kept for one ring at most, so a handover nobody took never answers a later call.
+ * once, as it came. Kept for one ring at most, and for that offer only (its `ts`), so a handover nobody took never
+ * answers a later call.
  */
-let handed: { sessionId: string; video: boolean; at: number } | null = null;
+let handed: { sessionId: string; offer: number; video: boolean; at: number } | null = null;
 
-export function handOverCall(sessionId: string, video: boolean): void {
-  handed = { sessionId, video, at: Date.now() };
+export function handOverCall(sessionId: string, offer: string | null | undefined, video: boolean): void {
+  const ts = offer ? parseCallSignal(offer)?.ts : undefined;
+  handed = ts === undefined ? null : { sessionId, offer: ts, video, at: Date.now() };
 }
 
-/** Whether to answer the call ringing in this chat, and with the camera or not: once. */
-export function takeHandedCall(sessionId: string): boolean | undefined {
+/** Whether to answer the offer ringing in this chat, and with the camera or not: once, and only the one handed over. */
+export function takeHandedCall(sessionId: string, offer: string | null | undefined): boolean | undefined {
   if (!handed || handed.sessionId !== sessionId) return undefined;
-  const { video, at } = handed;
+  const { offer: ts, video, at } = handed;
   handed = null;
+  if (!offer || parseCallSignal(offer)?.ts !== ts) return undefined;
   return Date.now() - at <= RING_MS ? video : undefined;
 }

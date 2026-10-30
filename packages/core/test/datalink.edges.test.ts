@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { ANSWER_REFUSED_REDIALS, DataLink, GATHER_ATTEMPTS, GATHER_STALL_MS, REANSWERS, STALLED_EVIDENCE_MS, type DataLinkOptions, type DataLinkState } from "../src/datalink";
 import { DATA_CHANNEL_ID, DATA_CHANNEL_LABEL, RTC_SIGNAL_FUTURE_MS, RTC_SIGNAL_MAX_AGE_MS, offerIsFresh, parseRtcSignal, type RtcSignal, type SignalSight } from "../src/signal";
+import { LIMITS, type FrameChannel } from "../src/frames";
 
 // covers: transport.webrtc, core.frames, chat.paired.clock-skew
 
@@ -610,6 +611,42 @@ describe("DataLink failures and teardown", () => {
     expect(b.options.onClose).toHaveBeenCalledOnce();
     expect(b.dl.state).toBe("connecting");
     expect(b.pcs).toHaveLength(2);
+  });
+
+  // node-datachannel does not always report a closed connection's channel closed, and its native handle kept the data
+  // channel's listeners, and through them the session and the link, for good (a CLI member after 60 groups, 2026-10-20).
+  it("lets go of the data channel of a connection it closed: the channel says closed after the link, and hears nothing more", async () => {
+    const b = link("bbbb", "aaaa");
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    const pc = b.pc();
+    pc.channel.open();
+    const channel = b.options.onOpen.mock.calls[0]![0] as FrameChannel;
+    const order: string[] = [];
+    b.options.onClose.mockImplementation(() => void order.push("link"));
+    channel.onClose = () => void order.push("channel");
+    const heard = vi.fn();
+    channel.onMessage = heard;
+    pc.channel.bufferedAmount = LIMITS.sendLowWaterMark + 1;
+    pc.channel.readyState = "open";
+    let drained = false;
+    void channel.drained().then(() => (drained = true));
+
+    // The connection closes and its channel never says so, as libdatachannel's sometimes does not.
+    b.dl.close();
+    expect(pc.closed).toBe(true);
+    expect(order).toEqual(["link"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order).toEqual(["link", "channel"]);
+    // A send waiting for room goes on (to find the channel closed) rather than wait for good.
+    expect(drained).toBe(true);
+
+    const message = new Event("message") as Event & { data: unknown };
+    message.data = "late";
+    pc.channel.dispatchEvent(message);
+    pc.channel.dispatchEvent(new Event("close"));
+    expect(heard).not.toHaveBeenCalled();
+    expect(order).toEqual(["link", "channel"]);
+    expect(b.dl.state).toBe("idle");
   });
 
   it("does nothing when closed while idle, and says nothing twice", async () => {

@@ -91,8 +91,12 @@ export const GROUP_VERSION_FILES = 6;
 export const GROUP_WANT_FRAME = "group-want";
 export const GROUP_WANT_NO_FRAME = "group-want-no";
 export const GROUP_HAVE_FRAME = "group-have";
-export type GroupWantRefusal = "gone" | "busy" | "refused";
-const REFUSALS: readonly string[] = ["gone", "busy", "refused"];
+/**
+ * Why a holder does not serve a file (`group-want-no`). `day`: it served its day's bytes already
+ * (`serveBytesPerDay`), so asking it again soon is no use; an app from before reads it as `busy`.
+ */
+export type GroupWantRefusal = "gone" | "busy" | "refused" | "day";
+const REFUSALS: readonly string[] = ["gone", "busy", "refused", "day"];
 
 /** A group message's id, as a private group (`<s>:<e>:<n>`) or a community (`<s>:<e>:<h>:<n>`) names it. */
 const MESSAGE_ID = /^[a-z0-9]{52}:\d{1,15}(:[A-Za-z0-9_-]{1,64})?:\d{1,15}$/;
