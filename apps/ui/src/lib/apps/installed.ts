@@ -16,6 +16,7 @@ let offers: readonly BuiltInAppOffer[] = [];
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 
 // After any update check (the engine's scheduled one included), once a screen has read the list or an app runs: a
 // version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`). The engine says
@@ -37,11 +38,15 @@ export function forgetInstalledApps(): void {
   loading = null;
 }
 
-/** The installed apps, or null until read. `enabled` false (Apps not shown here): nothing is asked of the engine. */
+/**
+ * The installed apps, or null until read. `enabled` false (Apps not shown here): nothing is asked of the engine, and the
+ * list read again draws nothing: every message and chat row calls this, and only the ones with an app card show the list.
+ */
 export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] | null {
-  const list = useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => apps, () => apps);
+  const snapshot = () => (enabled ? apps : null);
+  const list = useSyncExternalStore(subscribe, snapshot, snapshot);
   useEffect(() => { if (enabled && apps === null && !loading) void refreshInstalledApps(); }, [enabled]);
-  return enabled ? list : null;
+  return list;
 }
 
 /**
@@ -50,7 +55,7 @@ export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] 
  */
 export function useBuiltInApps(enabled: boolean): readonly BuiltInAppOffer[] {
   const installed = useInstalledApps(enabled);
-  const list = useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => offers, () => offers);
+  const list = useSyncExternalStore(subscribe, () => offers, () => offers);
   return enabled && installed !== null ? list : NONE;
 }
 const NONE: readonly BuiltInAppOffer[] = [];
