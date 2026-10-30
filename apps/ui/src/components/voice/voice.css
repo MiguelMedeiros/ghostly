@@ -56,7 +56,7 @@
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12);
   pointer-events: none;
 }
-/* Not while dragged (the knob stays under the finger), nor with reduced motion. 250ms = PROGRESS_STEP_MS in VoiceBubble. */
+/* Not while dragged (the knob stays under the finger), nor with reduced motion. 250ms = PROGRESS_STEP_MS in Waveform.tsx. */
 @media (prefers-reduced-motion: no-preference) {
   .voice-wave[data-gliding]:not(:active) .voice-wave-knob { transition: transform 250ms linear; }
 }

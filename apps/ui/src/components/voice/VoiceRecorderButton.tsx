@@ -13,7 +13,7 @@ function microphoneText(t: Translate, problem: MicrophoneProblem): string {
     case "unsupported": return t("chat.voice.micUnsupported");
   }
 }
-import { LiveWaveform, Waveform } from "./Waveform";
+import { LiveWaveform, PROGRESS_STEP_MS, Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine } from "../../lib/problemText";
 
@@ -112,7 +112,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   const binTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previewAudio = useRef<{ audio: HTMLAudioElement; url: string } | null>(null);
   const previewWave = useRef<HTMLDivElement>(null);
-  const previewFrame = useRef(0);
+  /** The preview follows the sound in steps (PROGRESS_STEP_MS), not every frame. */
+  const previewStep = useRef(0);
   /** The preview's player is being made: a second tap then waits for it instead of making another. */
   const previewPending = useRef(false);
   /** Moves on each stopPreview: a player made for an earlier preview is dropped when it comes. */
@@ -132,7 +133,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const stopPreview = useCallback(() => {
     previewTurn.current += 1;
-    cancelAnimationFrame(previewFrame.current);
+    clearInterval(previewStep.current);
     const current = previewAudio.current;
     if (current) { current.audio.pause(); URL.revokeObjectURL(current.url); }
     previewAudio.current = null;
@@ -220,7 +221,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   useEffect(() => () => {
     recorderRef.current?.cancel();
     if (modeRef.current !== "idle") activeChange.current?.(false);
-    cancelAnimationFrame(previewFrame.current);
+    clearInterval(previewStep.current);
     if (previewAudio.current) URL.revokeObjectURL(previewAudio.current.url);
     if (hintTimer.current) clearTimeout(hintTimer.current);
     if (binTimer.current) clearTimeout(binTimer.current);
@@ -397,12 +398,14 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       const url = URL.createObjectURL(blob);
       audio = new Audio(url);
       const total = recorder.elapsed() / 1000;
+      const show = () => previewWave.current?.style.setProperty("--voice-progress", String(Math.min(1, audio!.currentTime / Math.max(0.001, total))));
       const follow = () => {
-        previewWave.current?.style.setProperty("--voice-progress", String(Math.min(1, audio!.currentTime / Math.max(0.001, total))));
-        if (!audio!.paused) previewFrame.current = requestAnimationFrame(follow);
+        clearInterval(previewStep.current);
+        show();
+        previewStep.current = window.setInterval(() => { if (audio!.paused) clearInterval(previewStep.current); else show(); }, PROGRESS_STEP_MS);
       };
       audio.addEventListener("play", () => { setPreview((p) => p && { ...p, playing: true }); follow(); });
-      audio.addEventListener("pause", () => setPreview((p) => p && { ...p, playing: false }));
+      audio.addEventListener("pause", () => { clearInterval(previewStep.current); show(); setPreview((p) => p && { ...p, playing: false }); });
       audio.addEventListener("ended", () => { previewWave.current?.style.setProperty("--voice-progress", "0"); setPreview((p) => p && { ...p, playing: false }); });
       previewAudio.current = { audio, url };
       await toChosenSpeaker(audio);
