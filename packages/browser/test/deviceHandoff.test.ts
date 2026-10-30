@@ -133,6 +133,8 @@ class Storage implements HandoffStagingHost {
   pointer = "ghostly";
   dropped: string[] = [];
   room: number | null = null;
+  /** Called as the rest is restored, before it is written. */
+  restoring: (() => void) | null = null;
   private next = 0;
   async open(database?: string): Promise<HandoffStaging> {
     const name = database ?? `ghostly_stage${++this.next}`;
@@ -152,7 +154,7 @@ class Storage implements HandoffStagingHost {
       discard: async (id) => { space.files.delete(id); space.held.delete(id); },
       copyHeld: async (copies) => { for (const { fromId, file } of copies) { space.files.set(file.id, this.frozen.get(fromId)!.slice()); space.held.set(file.id, file); } },
       copyStaged: async (fromId, file) => { space.files.set(file.id, space.files.get(fromId)!.slice()); space.held.set(file.id, file); },
-      restore: async (bundle, files) => { space.restored = { bundle: bundle.slice(), files }; },
+      restore: async (bundle, files) => { this.restoring?.(); space.restored = { bundle: bundle.slice(), files }; },
       dropRest: async () => { space.restored = null; },
       room: async () => this.room,
     };
@@ -1091,6 +1093,23 @@ describe("pass 1 and its resumption", () => {
 });
 
 describe("pass 2 and the release", () => {
+  it("the rest is held once while it is restored, and not at all once restored", async () => {
+    const w = world();
+    w.profile.rest = bytesOf(HANDOFF_PIECE_BYTES * 3 + 77);
+    type Inside = { incoming: Map<string, { chunks?: Uint8Array[] }>; bundle: { bytes: Uint8Array } | null; phase: string };
+    const inside = () => w.taker as unknown as Inside;
+    const held: { pieces: number; bundle: number }[] = [];
+    w.storage.restoring = () => held.push({ pieces: inside().incoming.get("db/peer")!.chunks!.length, bundle: inside().bundle!.bytes.length });
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => inside().phase !== "receiving");
+    expect(held).toEqual([{ pieces: 0, bundle: w.profile.rest.length }]);
+    expect(inside().bundle).toBeNull();
+    await until(() => w.reloads === 1);
+    expect(w.storage.spaces.get(w.takerRecords.record.profile!)!.restored!.bundle).toEqual(w.profile.rest);
+  });
+
   it("files that arrived during pass 1 go in pass 2", async () => {
     const w = world();
     w.profile.add("first", bytesOf(1_000));
