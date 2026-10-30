@@ -743,7 +743,7 @@ export class DhtDelivery {
     const records = await this.sealed(fittedEnvelope);
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
-    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
+    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }), ...(records[0]?.label === "_dr" && { ratchet: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
     // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
     // link's heartbeat, `LinkSession.publishOnce`), so a profile's live chats never take the requests its groups need.
@@ -796,7 +796,7 @@ export class DhtDelivery {
       try { plaintext = utf8Decode(opened); } catch { return null; }
     } else {
       // A ratcheted envelope of the contact's opened here: a plain one from it is refused from then on (WISP 4xx § Downgrade).
-      if (peer && this.options.ratchet?.box.heard("floor") && (!sender || sender === peer)) return null;
+      if (peer && this.options.ratchet?.box.heard("floor") && (!sender || sender === peer)) { traceLink(this.from, "dht-plain-refused", { box }); return null; }
       try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { plaintext = null; }
       // Sealed, by its hint, from `sender` to a key other than this side's: nothing to read, but who it names says something.
       if (!plaintext && sender) return { sealedToAnother: sender };
@@ -855,7 +855,9 @@ export class DhtDelivery {
     // Opened with no lock held, stored, and only then the ratchet's state saved, under the chat's lock, on the state as it
     // is by then (`RatchetBox.commitOpen`): what the content goes to may seal or open a held item, which takes that lock.
     let sealed: Uint8Array | undefined;
-    const opened = this.open(packet, box, bytes => { const plain = ratchet.box.peek("floor", bytes); if (plain) sealed = bytes; return plain; });
+    let why = "";
+    const opened = this.open(packet, box, bytes => { let plain: Uint8Array | null = null; try { plain = ratchet.box.peek("floor", bytes); } catch (e) { why = String(e); } if (plain) sealed = bytes; else why ||= "peek null"; return plain; });
+    if (!sealed) traceLink(this.from, "dht-ratchet-closed", { box, why: why || "before peek", peer: this.options.credentials.peerKey?.slice(0, 6), dbg: ratchet.box.debug?.() });
     return this.take(packet, box, opened, sealed && { commit: async order => { if (!await ratchet.box.commitOpen("floor", sealed!, order)) throw new Error("A ratcheted envelope no longer opens"); }, digest });
   }
   /** `ratchet`: the envelope was ratcheted; its state is saved once what it carried is stored, with its digest. */

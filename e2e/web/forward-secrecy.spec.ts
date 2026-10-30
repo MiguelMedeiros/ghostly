@@ -2,6 +2,8 @@ import { copyInvite, pasteInvite } from "../support/clipboard";
 import { test, expect, chat, chooseDhtOnly, delivered, say, type Peer } from "../support/fixtures";
 import type { LocalRelay } from "../support/relay";
 import { parseRelayPayload } from "@ghostly/core";
+import { linkTrace, watchLink } from "../support/callTrace";
+import { writeFileSync } from "node:fs";
 
 /**
  * Forward secrecy for a chat's stored paths (WISP 4xx, `ratchet/1`), in a DHT-only chat so every text goes on the floor:
@@ -61,8 +63,13 @@ async function exchange(a: Peer, b: Peer, texts: string[]) {
 test("two apps with ratchet/1 seal the DHT floor with keys used once, and say Forward secrecy On", { tag: ["@feature:chat.ratchet", "@feature:chat.ratchet.ui", "@feature:chat.dht.send"] }, async ({ peer, relay }) => {
   test.setTimeout(4 * 60_000);
   const a = await peer("fs-first"), b = await peer("fs-second");
+  for (const p of [a, b]) await watchLink({ kind: "web", page: p.page } as never);
   await pairOnDht(a, b);
-  await exchange(a, b, ["hello, with fresh keys 👻", "and back", "and once more"]);
+  try { await exchange(a, b, ["hello, with fresh keys 👻", "and back", "and once more"]); }
+  catch (error) {
+    writeFileSync(`/tmp/fs-trace-${Date.now()}.txt`, `A\n${await linkTrace({ kind: "web", page: a.page } as never)}\nB\n${await linkTrace({ kind: "web", page: b.page } as never)}`);
+    throw error;
+  }
   // Every mailbox holds a ratcheted envelope now; none of either side is plain after the pin.
   await expect.poll(() => sealed(relay).ratcheted).toBeGreaterThanOrEqual(2);
   expect(sealed(relay).plain).toBe(0);
