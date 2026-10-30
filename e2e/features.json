@@ -711,7 +711,8 @@
     {"id":"wallet.usdt.backup","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"USDT phrase on request; sealed backup file; restore; phrases distinct from Ark's"},
     {"id":"wallet.usdt.create","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"A USDT wallet per mode; Mainnet gets the same one back"},
     {"id":"wallet.usdt.faucet","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":["usdt-local"],"title":"USDT test tokens"},
-    {"id":"wallet.usdt.send","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":["usdt-local"],"title":"USDT: in, a Send from the wallet"}
+    {"id":"wallet.usdt.send","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":["usdt-local"],"title":"USDT: in, a Send from the wallet"},
+    {"id":"wallet.usdt.send-scan","wisp":"200","kind":"feature","clients":["web","extension","desktop"],"infra":[],"title":"Send on the USDT card: scan a QR (camera or picture), paste or type; a link for another chain or token is refused"}
   ],
   "paths": {
     "apps/desktop/src/app_sandbox.rs": ["apps.desktop-sandbox"],
@@ -1008,7 +1009,7 @@
     "apps/ui/src/lib/relativeTime.ts": ["groups.*","nostr.*"],
     "apps/ui/src/lib/restoreGuard.ts": ["devices.restore-guard","backup.*"],
     "apps/ui/src/lib/sameValue.ts": ["*"],
-    "apps/ui/src/lib/sendRoute.ts": ["wallet.cashu.send-scan","wallet.cashu.pay-invoice","wallet.lnurl.*","wallet.onchain.send-scan","wallet.ark.send-scan"],
+    "apps/ui/src/lib/sendRoute.ts": ["wallet.cashu.send-scan","wallet.cashu.pay-invoice","wallet.lnurl.*","wallet.onchain.send-scan","wallet.ark.send-scan","wallet.usdt.send-scan"],
     "apps/ui/src/lib/senderRuns.ts": ["groups.member-colors"],
     "apps/ui/src/lib/servicesAvailability.ts": ["services.*"],
     "apps/ui/src/lib/settings.ts": ["*"],
