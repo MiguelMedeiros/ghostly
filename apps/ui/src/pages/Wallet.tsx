@@ -32,7 +32,7 @@ import { NetworkTag } from "../components/NetworkTag";
 import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Page, PageAction } from "../components/layout";
-import { focusInPlace } from "../lib/focus";
+import { focusInPlace, focusLost } from "../lib/focus";
 import { navOnly } from "../lib/navigation";
 import { playCue } from "../lib/cues";
 import { servicesPlatform, type WalletInstanceView, type WalletNetwork, type WalletPlatform, type WalletState } from "../lib/platform";
@@ -154,10 +154,19 @@ export function Wallet() {
     select(d.id, false);
     setBackup(d.id);
   };
+  // Later takes the card away with the button pressed: the keys go to the next reminder, or to the network tab in view
+  // (just before where the card was), not to the page.
+  const putOff = useRef<string | null>(null);
   const later = (d: BackupDue) => {
     setPuttingOff(true);
-    void wallet?.backupReminder({ event: "later", wallet: d.id }).catch(() => {}).finally(() => setPuttingOff(false));
+    putOff.current = d.id;
+    void wallet?.backupReminder({ event: "later", wallet: d.id }).catch(() => { putOff.current = null; }).finally(() => setPuttingOff(false));
   };
+  useEffect(() => {
+    if (!putOff.current || due?.id === putOff.current) return;
+    putOff.current = null;
+    if (focusLost()) (page.current?.querySelector<HTMLElement>("[data-testid=backup-reminder-go]") ?? document.getElementById(`wallet-network-tab-${network}`))?.focus({ preventScroll: true });
+  }, [due?.id, network]);
   // What the wallet dot is about (lib/needsYou), in one line each at the top, its dot on the way there: the network's
   // tab and the card. New sats are on their network's Cashu card (the balance they came into); the backup, on its wallet's.
   // The tab in view first, then what came in counted: sats arriving on it as it opens are seen.
