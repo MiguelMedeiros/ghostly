@@ -1320,6 +1320,11 @@ html .toast-place.toast-place-page[data-at="top"] {
 /* A place's name that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It
    keeps its line, so the icons stay level. The profile's own name never decides it: a long one ends in "…". */
 .account-actions[data-compact] .account-label { visibility: hidden; }
+/* Under the chat list folded to a rail (ChatRail.tsx): the places stacked, by their icons; the switcher as wide as on the list. */
+.account-footer[data-rail] .account-actions { grid-auto-flow: row; grid-auto-rows: 44px; height: auto; }
+.account-footer[data-rail] .account-label { display: none; }
+.account-footer[data-rail] .profile-switcher-popover { right: auto; width: 20rem; }
+[dir="rtl"] .account-footer[data-rail] .profile-switcher-popover { left: auto; right: 0.5rem; }
 /* Something to look at behind an icon (Identities, sats that came in): a dot on its corner, ringed in the bar's color. */
 .nav-dot { --dot-ring: var(--theme-sidebar-bg); position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px;
   background: var(--theme-accent); box-shadow: 0 0 0 2px var(--dot-ring); animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }

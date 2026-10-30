@@ -47,7 +47,8 @@ function placeNameCut(nav: HTMLElement): boolean {
   });
 }
 
-export function AccountBar() {
+/** `rail`: under the chat list folded to a rail (ChatRail.tsx), the places stacked by their icons, their names in the tooltips. */
+export function AccountBar({ rail = false }: { rail?: boolean }) {
   const nav = useAppNavigation();
   const location = useLocation();
   const { t } = useI18n();
@@ -106,8 +107,8 @@ export function AccountBar() {
   const walletLabel = `${unseenSatsLabel(t("tabs.wallets"), unseen, t)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}`;
 
   return (
-    <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar">
-      <nav ref={navRef} aria-label={t("sidebar.account")} className="account-actions" data-compact={labelsHidden || undefined}>
+    <div ref={panelRoot} className="account-footer relative border-t border-border bg-sidebar-bg" data-testid="account-bar" data-rail={rail || undefined}>
+      <nav ref={navRef} aria-label={t("sidebar.account")} className="account-actions" data-compact={labelsHidden || rail || undefined}>
         <button
           data-testid="account-profile"
           onClick={canSwitch ? switcher.toggle : () => (onProfile ? nav.home() : nav.place("/profile"))}

@@ -54,6 +54,14 @@
   "pinned": "Pinned",
   "quiet": "It's quiet here...",
   "quietHint": "Time to haunt someone! 👻",
+  "rail": {
+    "collapse": "Collapse chat list",
+    "expand": "Expand chat list",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, unread messages",
+    "unreadCount": "{{name}}, {{count}} unread messages",
+    "unreadOne": "{{name}}, 1 unread message"
+  },
   "searchPlaceholder": "Search chats...",
   "settings": "Settings",
   "sharedIdentity": "Shared an identity",

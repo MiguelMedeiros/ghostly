@@ -54,6 +54,14 @@
   "pinned": "Fixada",
   "quiet": "Está quieto por aqui...",
   "quietHint": "Hora de assombrar alguém! 👻",
+  "rail": {
+    "collapse": "Recolher lista de conversas",
+    "expand": "Expandir lista de conversas",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, mensagens não lidas",
+    "unreadCount": "{{name}}, {{count}} mensagens não lidas",
+    "unreadOne": "{{name}}, 1 mensagem não lida"
+  },
   "searchPlaceholder": "Buscar conversas...",
   "settings": "Ajustes",
   "sharedIdentity": "Compartilhou uma identidade",
