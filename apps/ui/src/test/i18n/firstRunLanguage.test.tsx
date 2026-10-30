@@ -46,7 +46,7 @@ describe("a new profile's language", () => {
   it("the language setting still wins, whatever the browser speaks", async () => {
     browserSpeaks("fr-FR");
     const { user, unmount } = renderApp(<Title />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Paramètres");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Réglages");
     await user.click(screen.getByRole("button", { name: "English" }));
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Settings");
     unmount();

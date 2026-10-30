@@ -144,7 +144,7 @@
   "reduceMotion": "Reducir movimiento",
   "reduceMotionHint": "Menos animaciones. El ajuste del sistema siempre se respeta.",
   "removePassword": "Eliminar contraseña",
-  "search": "Buscar en la configuración",
+  "search": "Buscar en los ajustes",
   "searchEmpty": "Ningún ajuste coincide",
   "searchWords": {
     "account": "cuenta",
@@ -221,7 +221,7 @@
     "30": "30 minutos",
     "60": "1 hora"
   },
-  "title": "Configuración",
+  "title": "Ajustes",
   "translate": {
     "downloaded": "Idiomas descargados",
     "hint": "La opción predeterminada para los chats que no han elegido",

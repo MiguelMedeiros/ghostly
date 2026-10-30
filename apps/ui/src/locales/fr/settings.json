@@ -144,7 +144,7 @@
   "reduceMotion": "Réduire les animations",
   "reduceMotionHint": "Moins d'animations. Le réglage du système s'applique toujours.",
   "removePassword": "Supprimer le mot de passe",
-  "search": "Rechercher un paramètre",
+  "search": "Rechercher un réglage",
   "searchEmpty": "Aucun paramètre ne correspond",
   "searchWords": {
     "account": "compte",
@@ -221,7 +221,7 @@
     "30": "30 minutes",
     "60": "1 heure"
   },
-  "title": "Paramètres",
+  "title": "Réglages",
   "translate": {
     "downloaded": "Langues téléchargées",
     "hint": "Le choix par défaut des discussions qui n’ont pas choisi",

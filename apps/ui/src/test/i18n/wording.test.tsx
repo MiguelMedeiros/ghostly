@@ -27,6 +27,28 @@ describe("Portuguese says Ajustes for Settings", () => {
   });
 });
 
+/*
+ * Spanish, French and Italian too (2026-10-30): the phone's tab took the short word in #909 and the page, the account
+ * bar and the hint to hold the tab kept the long one. The OS's own Settings apps keep their names.
+ */
+const settingsWords = [
+  { language: "es", word: "Ajustes", long: "Configuración", os: [/Configuración de Windows/] },
+  { language: "fr", word: "Réglages", long: "Paramètres", os: [/Paramètres Windows/] },
+  { language: "it", word: "Opzioni", long: "Impostazioni", os: [/macOS|Windows|iOS|iPhone|Safari/] },
+] as const;
+
+describe.each(settingsWords)("$language says $word for Settings", ({ language, word, long, os }) => {
+  it("on the account bar, the tab bar, the page and the hint to hold the tab", () => {
+    for (const key of ["sidebar.settings", "tabs.settings", "settings.title"]) expect(lookup(language, key), key).toBe(word);
+    expect(lookup(language, "profileSwitcher.holdHint")).toContain(word);
+  });
+
+  it(`everywhere it names the app's settings: only the OS's own app is ${long}`, () => {
+    const named = [...flatten(LOCALES[language])].filter(([, value]) => typeof value === "string" && value.includes(long) && !os.some((name) => name.test(value)));
+    expect(named.map(([key]) => key)).toEqual([]);
+  });
+});
+
 describe("New chat is in sentence case", () => {
   it("in English, with no Title Case left", () => {
     const titled = [...flatten(LOCALES.en)].filter(([, value]) => typeof value === "string" && /\bNew Chat\b/.test(value));
