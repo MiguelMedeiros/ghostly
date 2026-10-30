@@ -52,12 +52,12 @@ export function PageHeader({ title, trailing }: { title: ReactNode; trailing?: R
     <header className="page-header shrink-0 bg-panel-header border-b border-border flex flex-wrap items-center gap-x-3 gap-y-2 px-4">
       <div className="flex items-center gap-1 min-w-0 flex-[1_1_auto]">
         <button type="button" onClick={nav.up} aria-label={back} data-testid="page-back" data-goes={nav.hasParent ? "up" : "home"}
-          className={`${phoneBack ? "" : "max-md:hidden "}-ml-2 grid place-items-center w-10 h-10 shrink-0 rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}>
+          className={`${phoneBack ? "" : "max-md:hidden "}-ms-2 grid place-items-center w-10 h-10 shrink-0 rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}>
           <svg className="w-5 h-5 text-text-secondary rtl:-scale-x-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>
         <h1 className="text-lg font-medium text-text-primary truncate">{title}</h1>
       </div>
-      {trailing && <div className="flex items-center gap-2 shrink-0 max-w-full ml-auto">{trailing}</div>}
+      {trailing && <div className="flex items-center gap-2 shrink-0 max-w-full ms-auto">{trailing}</div>}
     </header>
   );
 }
