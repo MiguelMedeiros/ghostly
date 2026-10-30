@@ -280,11 +280,6 @@ export function AgentsPage() {
             </IntentLink>
           </li>
           <li>
-            <a className="link-arrow" href={LINKS.faq}>
-              {t.links.faq} →
-            </a>
-          </li>
-          <li>
             <a className="link-arrow" href={LINKS.llms}>
               {t.links.llms} →
             </a>

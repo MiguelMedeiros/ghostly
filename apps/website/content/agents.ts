@@ -347,7 +347,6 @@ export const agents = {
     cli: "The CLI",
     wisp: "WISP 1100: the contract",
     threat: "Threat model for agents",
-    faq: "Agents FAQ",
     llms: "llms.txt, for AI readers",
   },
 };
