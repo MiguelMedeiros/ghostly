@@ -99,13 +99,14 @@ it("a contact's ratcheted envelope that does not open says nothing of a taken in
   h.credentials[0].peerKey = identityFromSeedB64(h.credentials[1].seedB64).pubKeyZ32;
   a.setLive(true);
   await vi.advanceTimersByTimeAsync(6_000);
-  // Bob was live with Alice, and has lost his ratchet state (a restore): he reads what he cannot open, and is not told he lost the invite.
-  const b = h.make(1, identityFromSeedB64(h.credentials[0].seedB64).pubKeyZ32);
-  await b.start();
-  b.setLive(true); b.setLive(false);
-  await vi.advanceTimersByTimeAsync(5_000);
-  expect(h.views[1].at(-1)?.inviteTaken).toBeFalsy();
-  await a.stop(); await b.stop();
+  // The same reader as above, who cannot open it, but this one has been live with Alice: it is not told it lost the invite.
+  h.params.push(h.params[1]); h.saved.push({ ...emptyDhtDeliveryState(), wasLive: true }); h.ratchets.push(emptyRatchetState());
+  h.credentials.push({ seedB64: createIdentity().seedB64 }); h.messages.push(new Map()); h.views.push([]); h.supports.push(true);
+  const reader = h.make(2, identityFromSeedB64(h.credentials[0].seedB64).pubKeyZ32);
+  await reader.start(); await vi.advanceTimersByTimeAsync(5_000);
+  expect(h.saved[2].inviteTaken).toBeUndefined();
+  expect(h.views[2].at(-1)?.inviteTaken).toBeFalsy();
+  await a.stop(); await reader.stop();
 });
 
 it("an app without it gets plain envelopes, both ways, as before", async () => {
