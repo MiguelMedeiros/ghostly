@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -604,6 +604,36 @@ describe("a run of the train", () => {
     repo.settle();
     await repo.run();
     expect(repo.members()).toEqual([1, 3]);
+  });
+
+  it("tells a red one what its fix costs: a re-run keeps its place, a pushed fix takes it out of the line", async () => {
+    const repo = fakeRepo();
+    repo.add(1, { ci: red });
+    await repo.run();
+    const said = repo.comments.get(1)![0].body;
+    expect(said).toMatch(/1st\*\*\. Waiting: CI Success is red on its last commit\. A re-run of a failed job keeps its place; after a pushed fix it leaves the line and joins it again at the back once it is reviewed and queued\.$/);
+    expect(said).not.toMatch(/It keeps its place/);
+    // It follows the advice: the push drops it, as the comment said.
+    repo.pulls.get(1)!.sha = "h1b";
+    expect((await repo.run()).dropped).toEqual([1]);
+  });
+
+  it("says no fix that needs a push or a new pull request keeps the place", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "pending", draft: false, fork: false, sha: "h1", ...extra });
+    const cases = [
+      pr({ shared: [{ number: 2, base: "epic/x" }] }),
+      pr({ retargeted: true }),
+      pr({ unread: "events" }),
+      pr({ crowded: true }),
+    ];
+    for (const p of cases) {
+      const said = positionText("dev", p, 2, null);
+      expect(said).toMatch(/joins (it|the line) again at the back once it is reviewed and queued\)?\.$/);
+      expect(said).not.toMatch(/It keeps its place/);
+    }
+    // A wait whose way out needs no push still keeps its place.
+    expect(positionText("dev", pr({ draft: true }), 2, null)).toMatch(/Waiting: it is a draft\. It keeps its place\.$/);
+    expect(positionText("dev", pr({ misplanned: true }), 2, null)).toMatch(/run CI on it again\. It keeps its place\.$/);
   });
 
   it("rebuilds a batch on the new tip when the base moved under it", async () => {
