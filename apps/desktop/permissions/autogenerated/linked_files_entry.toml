@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-linked-files-entry"
+description = "Enables the linked_files_entry command without any pre-configured scope."
+commands.allow = ["linked_files_entry"]
+
+[[permission]]
+identifier = "deny-linked-files-entry"
+description = "Denies the linked_files_entry command without any pre-configured scope."
+commands.deny = ["linked_files_entry"]

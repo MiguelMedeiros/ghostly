@@ -512,21 +512,13 @@ impl LinkedFiles {
 
     /// Every link the app keeps; `available` says whether its file is there as it was.
     pub fn list(&self, space: &str, app: &str) -> Result<Vec<Entry>, String> {
-        Ok(self
-            .load(space, app)?
-            .live()
-            .map(|link| {
-                let available = fs::metadata(&link.full)
-                    .is_ok_and(|meta| stamp(&meta) == (link.size, link.modified));
-                Entry {
-                    id: link.id.clone(),
-                    path: link.path.clone(),
-                    size: link.size,
-                    modified: link.modified,
-                    available,
-                }
-            })
-            .collect())
+        Ok(self.load(space, app)?.live().map(entry).collect())
+    }
+
+    /// One link as `list` gives it, or None for an id the app does not keep: what `files.serve` looks up, so serving
+    /// one file of a library looks at that file alone on disk.
+    pub fn entry(&self, space: &str, app: &str, id: &str) -> Result<Option<Entry>, String> {
+        Ok(self.load(space, app)?.get(id).map(entry))
     }
 
     /// At most `length` bytes (and `MAX_READ`) from `offset`: fewer at the end of the file.
@@ -623,6 +615,19 @@ impl LinkedFiles {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
         }
+    }
+}
+
+/// A link as the app sees it, `available` when its file is there as it was.
+fn entry(link: &Link) -> Entry {
+    let available =
+        fs::metadata(&link.full).is_ok_and(|meta| stamp(&meta) == (link.size, link.modified));
+    Entry {
+        id: link.id.clone(),
+        path: link.path.clone(),
+        size: link.size,
+        modified: link.modified,
+        available,
     }
 }
 
@@ -732,6 +737,19 @@ pub async fn linked_files_list<R: tauri::Runtime>(
 ) -> Result<Vec<Entry>, String> {
     let links = state(&app)?;
     tauri::async_runtime::spawn_blocking(move || links.list(&space, &app_ref))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn linked_files_entry<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    space: String,
+    app_ref: String,
+    id: String,
+) -> Result<Option<Entry>, String> {
+    let links = state(&app)?;
+    tauri::async_runtime::spawn_blocking(move || links.entry(&space, &app_ref, &id))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1151,6 +1169,30 @@ mod tests {
             .unwrap()
             .iter()
             .all(|e| !e.available));
+    }
+
+    #[test]
+    fn one_link_is_looked_up_as_the_list_gives_it_and_a_changed_gone_or_forgotten_one_says_so() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
+        let (up, e01) = (&added[1], &added[0]);
+        let listed = links.list("ghostly", APP).unwrap();
+        for link in &listed {
+            assert_eq!(links.entry("ghostly", APP, &link.id).unwrap().as_ref(), Some(link));
+        }
+        assert!(links.entry("ghostly", APP, &up.id).unwrap().unwrap().available);
+        fs::write(root.join("Up.mp4"), b"01234567890").unwrap();
+        assert!(!links.entry("ghostly", APP, &up.id).unwrap().unwrap().available);
+        fs::remove_file(root.join("Season 1").join("E01.mp4")).unwrap();
+        assert!(!links.entry("ghostly", APP, &e01.id).unwrap().unwrap().available);
+        links.forget("ghostly", APP, &e01.id).unwrap();
+        assert_eq!(links.entry("ghostly", APP, &e01.id).unwrap(), None);
+        assert_eq!(links.entry("ghostly", APP, &"z".repeat(22)).unwrap(), None);
+        // Another app does not find this one's links.
+        let other = APP.replace("/cinema", "/chess");
+        assert_eq!(links.entry("ghostly", &other, &up.id).unwrap(), None);
+        assert!(links.entry("../x", APP, &up.id).is_err());
     }
 
     #[test]

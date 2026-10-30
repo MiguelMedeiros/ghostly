@@ -87,6 +87,7 @@ export function desktopLinkedFiles(invoke: Invoke, space: () => string, text: ()
   return {
     pick,
     list: (ref) => call<MiniAppLinkedFile[]>("linked_files_list", { appRef: ref }),
+    entry: (ref, id) => call<MiniAppLinkedFile | null>("linked_files_entry", { appRef: ref, id }),
     read: async (ref, id, offset, length) => new Uint8Array(await call<ArrayBuffer>("linked_files_read", { appRef: ref, id, offset, length })),
     forget: (ref, id) => call<void>("linked_files_forget", { appRef: ref, id }),
   };
