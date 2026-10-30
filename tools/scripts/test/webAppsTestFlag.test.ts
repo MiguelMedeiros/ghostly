@@ -26,6 +26,20 @@ it("the web image empties it before its build", () => {
   expect(empty).toBeLessThan(dockerfile.indexOf("RUN npm run build -w @ghostly/web"));
 });
 
+/** `npm ci --ignore-scripts` skips the root postinstall, so the image applies the dependency patches itself. */
+it("the web image applies the dependency patches the root postinstall applies, and fails its build when one does not", () => {
+  const dockerfile = readFileSync(join(ROOT, "apps/web/Dockerfile"), "utf8");
+  const postinstall = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts.postinstall as string;
+  const patchDir = /patch-package --patch-dir (\S+)/.exec(postinstall)?.[1];
+  expect(patchDir).toBe("tools/patches");
+  const copy = dockerfile.indexOf(`COPY ${patchDir} ${patchDir}\n`);
+  const install = dockerfile.indexOf("RUN npm ci --ignore-scripts");
+  expect(copy).toBeGreaterThan(0);
+  expect(copy).toBeLessThan(install);
+  const run = dockerfile.slice(install, dockerfile.indexOf("\n", install));
+  expect(run).toContain(`&& npx patch-package --patch-dir ${patchDir} --error-on-fail`);
+});
+
 it("the app reads it only from the build (import.meta.env), never from storage or the address", () => {
   for (const file of ["apps/web/src/host.ts", "apps/web/src/main.tsx", "apps/ui/src/desktop/host.ts", "apps/ui/src/lib/apps/flag.ts", "packages/browser/src/shared/features.ts"]) {
     const text = readFileSync(join(ROOT, file), "utf8");
