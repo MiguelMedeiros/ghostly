@@ -1,8 +1,6 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { QRCodeSVG } from "qrcode.react";
 import type { Page } from "@playwright/test";
 import { expect, getTestCoins, openWallet, TEST_COINS, test, useTestnet } from "../support/fixtures";
+import { qrPicture } from "../support/qr";
 import { strangerInvoice } from "../support/bolt11";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
@@ -17,16 +15,6 @@ import { endpoints } from "../infra/env.mjs";
 
 /** The card's balance, in sats. */
 const sats = async (page: Page) => Number((await page.getByTestId("wallet-balance").innerText()).replace(/[^\d]/g, ""));
-
-/** A PNG of `text`'s QR, as a screenshot of one would be: drawn by the app's own QR component, on a blank page. */
-async function qrPicture(page: Page, text: string): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
-  const svg = renderToStaticMarkup(createElement(QRCodeSVG, { value: text, size: 360, marginSize: 4 }));
-  const blank = await page.context().newPage();
-  try {
-    await blank.setContent(`<body style="margin:0;background:#fff">${svg}</body>`);
-    return { name: "qr.png", mimeType: "image/png", buffer: await blank.locator("svg").screenshot() };
-  } finally { await blank.close(); }
-}
 
 test.describe("Send scans a QR", () => {
   test.describe.configure({ retries: 2 });

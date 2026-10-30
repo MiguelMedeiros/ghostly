@@ -6,6 +6,7 @@ import { choose } from "../support/select";
 import { FakeEsplora } from "../../packages/browser/test/helpers/fakeEsplora";
 import { composerRow } from "../support/composer";
 import { closePayments, openPayments, paymentCard } from "../support/payments";
+import { qrPicture } from "../support/qr";
 
 /**
  * The BDK wallet (bitcoindevkit in WebAssembly) as the on-chain Bitcoin source, Testnet only, made with New:
@@ -15,7 +16,7 @@ import { closePayments, openPayments, paymentCard } from "../support/payments";
  *    when the app starts shows Connecting… with its last balance and connects by itself once the server is
  *    back; Change server moves it to another server, the same wallet;
  *  - GHOSTLY_BDK_REGTEST=1: two wallets on e2e/infra's regtest chain (e2e/support/bdk-regtest) — funded, a Send
- *    from the wallet page, a Send and a Request paid in the chat, balances and txids checked on both sides.
+ *    from the wallet page started from a picture of the payee's QR, a Send and a Request paid in the chat, balances and txids checked on both sides.
  */
 
 const ESPLORA = BDK_REGTEST.esplora;
@@ -179,7 +180,7 @@ test("the chat offers on-chain Bitcoin once a wallet is made, and only where the
   await closePayments(alice.page);
 });
 
-test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:payments.bitcoin.send", "@feature:wallet.onchain.sources"] }, async ({ peer }) => {
+test("BDK on regtest: funded, a Send from the wallet started from a QR, a Send and a Request paid in the chat", { tag: ["@gated", "@feature:wallet.onchain.bdk.send", "@feature:wallet.onchain.send-scan", "@feature:payments.bitcoin.send", "@feature:wallet.onchain.sources"] }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_BDK_REGTEST !== "1", "Requires e2e/infra (npm run e2e:infra:up) and GHOSTLY_BDK_REGTEST=1");
   test.setTimeout(8 * 60_000);
   const regtest = (...args: string[]) => execFileSync(process.execPath, ["e2e/support/bdk-regtest/regtest.mjs", ...args], { encoding: "utf8", stdio: "pipe" }).trim();
@@ -205,10 +206,12 @@ test("BDK on regtest: funded, a Send from the wallet, a Send and a Request paid 
   const fundTxid = regtest("send", address[alice.name], "100000");
   await confirmed(alice, 100_000);
 
-  // A Send from the wallet page, to Bob's address: signed at review, broadcast at approval.
+  // A Send from the wallet page, to Bob's address as a QR of his link would carry it (Choose image; the camera reads
+  // frames the same way): the scan fills the address and the amount, signed at review, broadcast at approval.
   await alice.page.getByTestId("wallet-send").click();
-  await panel(alice).getByLabel("Bitcoin recipient address").fill(address[bob.name]);
-  await panel(alice).getByTestId("bitcoin-amount").fill("20000");
+  await alice.page.getByLabel("Choose image").setInputFiles(await qrPicture(alice.page, `bitcoin:${address[bob.name]}?amount=0.0002`));
+  await expect(panel(alice).getByLabel("Bitcoin recipient address")).toHaveValue(address[bob.name]);
+  await expect(panel(alice).getByTestId("bitcoin-amount")).toHaveValue("20000");
   await panel(alice).getByRole("button", { name: "Review payment" }).click();
   const review = panel(alice).getByTestId("payment-review");
   await expect(review).toContainText("Bitcoin on-chain · Regtest");
