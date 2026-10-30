@@ -571,6 +571,59 @@ describe("a copy that stops (WISP 06 § States and events)", () => {
     expect(w.takerRecords.record.state).toBe("standby");
   });
 
+  /** A bundle as the app makes it: its head says when it was made, so no two are the same bytes. */
+  const freshBundles = (w: World): { made: number } => {
+    const count = { made: 0 };
+    w.profile.bundle = async () => { count.made += 1; const bytes = bytesOf(HANDOFF_PIECE_BYTES * 40); bytes[0] = count.made; return bytes; };
+    return count;
+  };
+
+  it("a link that blinks in pass 2: the same bundle goes on from the bytes the taker holds", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const bundles = freshBundles(w);
+    let pieces = 0, blinked = false;
+    w.link.meddle = (_from, frame) => {
+      if (frame.t === "handoff-data" && frame.p === "db/peer" && ++pieces === 21 && !blinked) { blinked = true; queueMicrotask(() => w.link.drop()); }
+      return frame;
+    };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => !w.link.live);
+    await settle();
+    w.link.reconnect();
+    await until(() => w.reloads === 1);
+    expect(bundles.made).toBe(1);
+    // The window's 16 pieces may have been lost with the link, and no more than those go twice.
+    expect(pieces).toBeLessThanOrEqual(40 + 16);
+    expect(w.giverRecords.record.state).toBe("standby");
+  });
+
+  it("a giver that made another bundle after the blink (it reloaded, or an app that makes one each time): the taker starts that one from its first byte, and the move ends", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const bundles = freshBundles(w);
+    let pieces = 0, blinked = false;
+    w.link.meddle = (_from, frame) => {
+      if (frame.t === "handoff-data" && frame.p === "db/peer" && ++pieces === 21 && !blinked) { blinked = true; queueMicrotask(() => w.link.drop()); }
+      return frame;
+    };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => !w.link.live);
+    await settle();
+    w.giver.stop();
+    w.giver = w.makeGiver("gated");
+    await w.giver.resume();
+    w.link.reconnect();
+    await until(() => w.reloads === 1);
+    expect(bundles.made).toBeGreaterThan(1);
+    expect(w.giverRecords.record.state).toBe("standby");
+    expect(w.takerRecords.record.handoff!.h).toBe(w.giverRecords.record.handoff!.release!.h);
+  });
+
   it("a giver that hears from the taker keeps going: only silence counts, not a slow copy", async () => {
     vi.useFakeTimers({ ...FAKE, toFake: [...FAKE.toFake] });
     const w = world();
