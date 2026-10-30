@@ -40,9 +40,7 @@ export function mimeOf(path: string, given?: string): string {
  * a date can hold it; else when it was stored here.
  */
 async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; createdAt: number; metadata?: { timestamp: number } }): Promise<number> {
-  const group = stored.linkId.startsWith("group:") ? stored.linkId.slice("group:".length) : undefined;
-  const messages = group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(stored.linkId);
-  return messages.find((m) => m.file?.id === stored.id)?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
+  return (await findMessage(ctx, stored.linkId, (m) => m.file?.id === stored.id))?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
 }
 
 /**
