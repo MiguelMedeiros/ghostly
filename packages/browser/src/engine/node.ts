@@ -22,7 +22,7 @@ import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/provid
 import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
-import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED, testBuild } from '../shared/features';
 import { RATCHET_CAPABILITY, RatchetBox, emptyRatchetState } from "@ghostly/core";
 import { APP_RANGE_LIMITS, chatAppId, isAppRef, isAppVersion, isServeId, publicKeyFromZ32, type AppFrameEvent, type AppRangeTask, type AppSendError } from "@ghostly/core";
 import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
@@ -3665,9 +3665,9 @@ export class GhostlyNode implements EngineImplementation {
   private peerRatchets(live: LiveLink): boolean {
     return !!(live.caps?.peer ?? live.stored.capsState?.peer)?.capabilities.includes(RATCHET_CAPABILITY);
   }
-  /** An e2e run playing an app from before forward secrecy (WISP 4xx): no ratchet/1, no ratchet, as that app. */
+  /** An e2e run playing an app from before forward secrecy (WISP 4xx): no ratchet/1, no ratchet, as that app. A release build ignores the key. */
   private static testNoRatchet(): boolean {
-    try { return typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-ratchet") === "1"; } catch { return false; }
+    try { return testBuild() && typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-ratchet") === "1"; } catch { return false; }
   }
 
   private static wireReply(message: StoredMessage): WireReply | undefined {
