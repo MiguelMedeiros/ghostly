@@ -140,7 +140,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
-  when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
+  when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed. These lines
+  name the bridge by its origin only (`http://127.0.0.1:8787`), never its path or query, so its token stays off stderr.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 - A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
   (`daemon stop`), it says so once on stderr and waits; it says again when a daemon answers, and goes on from the last
