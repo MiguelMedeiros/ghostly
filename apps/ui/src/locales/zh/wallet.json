@@ -59,6 +59,7 @@
     },
     "label": "需要备份",
     "later": "稍后",
+    "laterFailed": "无法推迟此提醒。请重试。",
     "line": "备份你的 {{wallet}} 钱包",
     "title": "{{wallet}} 中有真钱"
   },

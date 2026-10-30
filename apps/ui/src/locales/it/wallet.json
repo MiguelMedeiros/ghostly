@@ -59,6 +59,7 @@
     },
     "label": "backup da fare",
     "later": "Più tardi",
+    "laterFailed": "Impossibile rimandare il promemoria. Riprova.",
     "line": "Fai il backup del portafoglio {{wallet}}",
     "title": "Hai denaro reale in {{wallet}}"
   },

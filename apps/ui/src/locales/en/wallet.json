@@ -59,6 +59,7 @@
     },
     "label": "backup needed",
     "later": "Later",
+    "laterFailed": "Could not put the reminder off. Try again.",
     "line": "Back up your {{wallet}} wallet",
     "title": "You have real money in {{wallet}}"
   },

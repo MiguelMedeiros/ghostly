@@ -59,6 +59,7 @@
     },
     "label": "falta una copia",
     "later": "Más tarde",
+    "laterFailed": "No se pudo posponer el recordatorio. Inténtalo de nuevo.",
     "line": "Haz una copia de la cartera {{wallet}}",
     "title": "Tienes dinero real en {{wallet}}"
   },
