@@ -174,6 +174,9 @@ const backInWallet = (lost: number) => lost > 0
   ? `The sats are back in your wallet, less ${lost} sat${lost === 1 ? "" : "s"} the mint kept as its fee.`
   : "The sats are back in your wallet.";
 
+/** Every proof and swap stored, as `CashuWallet.readStored` read them. */
+export interface StoredCashu { proofs: StoredProof[]; swaps: PendingSwap[] }
+
 export interface WalletEvents {
   onChange(): void;
   /** Ecash arrived from the public test mint, which this wallet did not have yet. */
@@ -266,10 +269,11 @@ export class CashuWallet {
 
   /**
    * The Cashu wallet of one network: its mints, their balance, and the network's newest movements (every network's when
-   * none is named) with the fees they paid. Only those movements are read, however long the history is.
+   * none is named) with the fees they paid. Only those movements are read, however long the history is. `read` is the
+   * proofs and swaps as `readStored` read them, shared by the views of several networks.
    */
-  async view(network?: WalletNetwork): Promise<WalletView> {
-    const proofs = await this.allProofs();
+  async view(network?: WalletNetwork, read?: StoredCashu): Promise<WalletView> {
+    const { proofs, swaps: allSwaps } = read ?? await this.readStored();
     const mints: MintView[] = this.getMints(network).map((url) => ({
       url,
       name: this.names.get(url) ?? new URL(url).hostname,
@@ -278,7 +282,7 @@ export class CashuWallet {
     }));
     const history = await newestWalletTx<WalletTx>((mint) => !network || mintNetwork(mint) === network, HISTORY_SHOWN);
     const here = new Set(mints.map((m) => m.url));
-    const swaps = (await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll())).filter((s) => here.has(s.mint) && !s.released && !s.finished);
+    const swaps = allSwaps.filter((s) => here.has(s.mint) && !s.released && !s.finished);
     // What a swap is about: the proofs it spends, or what a redeem would bring.
     const about = (s: PendingSwap) => s.kind === "send" ? swapOf(s).inputs.reduce((sum, p) => sum + Number(p.amount), 0) : s.tx?.amount ?? 0;
     // Inputs that read spent at a mint that cannot say what it gave for them are not "set aside": they may not return.
@@ -294,6 +298,12 @@ export class CashuWallet {
       history,
       feesPaid: history.reduce((sum, tx) => sum + tx.fee, 0),
     };
+  }
+
+  /** Every proof and swap stored, read once for the views of every network: each read is the whole store. */
+  async readStored(): Promise<StoredCashu> {
+    const proofs = await this.allProofs();
+    return { proofs, swaps: await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll()) };
   }
 
   /**
@@ -361,6 +371,12 @@ export class CashuWallet {
       send: bounds(5),
     });
     return { url: normalized, name };
+  }
+
+  /** What `view(network).balance` says, from the proofs alone: no swaps, no history. */
+  async balance(network?: WalletNetwork): Promise<number> {
+    const here = new Set(this.getMints(network));
+    return total((await this.allProofs()).filter((p) => here.has(p.mint) && !p.reserved));
   }
 
   async balanceAt(mint: string): Promise<number> {

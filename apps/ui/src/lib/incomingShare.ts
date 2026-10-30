@@ -60,22 +60,27 @@ export function isEmptyShare(share: IncomingShare): boolean {
 /**
  * A share arrived: it waits for a chat to be picked. An empty one is dropped, and never clears one that waits; one
  * that only names files left out (too large, not read, no room for them, or past the most one share brings) is said
- * all the same, with the share that waits when there is one.
+ * all the same, with the share that waits when there is one. A share with something replaces the one that waits, but
+ * still names what a waiting notice named (Android may hand an older share still copying over after a newer notice).
  */
 export function receiveShare(share: IncomingShare): void {
   if (isEmptyShare(share)) {
     if (!share.leftOut?.length && !share.unread?.length && !share.noRoom?.length && !share.pastLimit?.length) return;
-    pending = pending
-      ? {
-        ...pending,
-        leftOut: [...pending.leftOut ?? [], ...share.leftOut ?? []],
-        unread: [...pending.unread ?? [], ...share.unread ?? []],
-        noRoom: [...pending.noRoom ?? [], ...share.noRoom ?? []],
-        pastLimit: [...pending.pastLimit ?? [], ...share.pastLimit ?? []],
-      }
-      : share;
-  } else pending = share;
+    pending = pending ? withNames(pending, share) : share;
+  } else pending = pending && isEmptyShare(pending) ? withNames(share, pending, true) : share;
   emit();
+}
+
+/** `share` naming `names`' files left out too: after its own, or before them (`first`). */
+function withNames(share: IncomingShare, names: IncomingShare, first = false): IncomingShare {
+  const join = (own: string[] = [], more: string[] = []) => first ? [...more, ...own] : [...own, ...more];
+  return {
+    ...share,
+    leftOut: join(share.leftOut, names.leftOut),
+    unread: join(share.unread, names.unread),
+    noRoom: join(share.noRoom, names.noRoom),
+    pastLimit: join(share.pastLimit, names.pastLimit),
+  };
 }
 
 export function incomingShare(): IncomingShare | null {

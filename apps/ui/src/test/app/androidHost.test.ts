@@ -129,13 +129,14 @@ describe("a share from another app", () => {
     expect(incomingShare()).toMatchObject({ files: [], leftOut: ["VID_1.mp4", "VID_2.mp4"] });
 
     arrived();
+    // The share with something takes the notice's place, and still names what the notice named.
     await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["a.mov", "c.jpg"]));
-    expect(incomingShare()?.leftOut).toEqual(["b.mov"]);
+    expect(incomingShare()?.leftOut).toEqual(["VID_1.mp4", "VID_2.mp4", "b.mov"]);
 
     // A later share of only a video too large: named with the share that waits, which stays.
     shares.push({ title: "", text: "", files: [], leftOut: ["VID_3.mp4"] });
     arrived();
-    await vi.waitFor(() => expect(incomingShare()?.leftOut).toEqual(["b.mov", "VID_3.mp4"]));
+    await vi.waitFor(() => expect(incomingShare()?.leftOut).toEqual(["VID_1.mp4", "VID_2.mp4", "b.mov", "VID_3.mp4"]));
     expect(incomingShare()?.files.map((file) => file.name)).toEqual(["a.mov", "c.jpg"]);
     await shareFiles(incomingShare()!);
     expect(read).not.toContain("paste-3");
@@ -177,6 +178,24 @@ describe("a share from another app", () => {
     takeIncomingShares(invoke as never, vi.fn(async () => {}));
     await vi.waitFor(() => expect(incomingShare()).not.toBeNull());
     expect(incomingShare()).toMatchObject({ leftOut: ["VID_1.mp4"], pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] });
+  });
+
+  it("still names what a newer share left out when an older one still copying is handed over after it", async () => {
+    // The newer share ends first: its one video too large, only a notice. The older one ends after, with its video.
+    const shares: unknown[] = [{ title: "", text: "", files: [], leftOut: ["VID_B.mp4"], unread: [], noRoom: [] }];
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "incoming_share_done") return undefined;
+      throw new Error(command);
+    });
+    let arrived: () => void = () => {};
+    takeIncomingShares(invoke as never, vi.fn(async (_event: string, handler: () => void) => { arrived = handler; }));
+    await vi.waitFor(() => expect(incomingShare()?.leftOut).toEqual(["VID_B.mp4"]));
+
+    shares.push({ title: "", text: "", files: [{ token: "a", name: "VID_A.mp4", size: 4, mime: "video/mp4" }], leftOut: [], unread: [], noRoom: [] });
+    arrived();
+    await vi.waitFor(() => expect(incomingShare()?.files.map((file) => file.name)).toEqual(["VID_A.mp4"]));
+    expect(incomingShare()?.leftOut).toEqual(["VID_B.mp4"]);
   });
 
   it("shows the picker from names and sizes, and reads only what a paste brings in all once a chat takes it", async () => {

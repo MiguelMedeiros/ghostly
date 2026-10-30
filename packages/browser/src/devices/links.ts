@@ -208,6 +208,8 @@ interface Running {
   native: boolean;
   /** The native transports whose endpoint is being made now. */
   starting: Set<NativeTransport>;
+  /** Native endpoints on a relay the person changed or removed, kept while a session runs on them (`moveNative`). */
+  moved: Set<NativeTransport>;
   /** A start of the native transports still missing, after one failed or went away. */
   nativeRetry?: ReturnType<typeof setTimeout>;
   /** Starts that left a transport missing since the last one that left none: the wait before the next doubles. */
@@ -421,7 +423,7 @@ export class DeviceLinks implements DeviceLinkEngine {
   private open(want: Wanted): void {
     const signer = this.key!;
     const rtc = !!this.createPeerConnection;
-    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, starting: new Set(), nativeMisses: 0, waiting: new Map() };
+    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, starting: new Set(), moved: new Set(), nativeMisses: 0, waiting: new Map() };
     running.link = new GhostLink({
       ...deviceLinkPairing(want.d, signer, fromBase64Url(want.key)),
       deviceCapabilities: [DEVICES_CAPABILITY, HANDOFF_CAPABILITY],
@@ -460,6 +462,7 @@ export class DeviceLinks implements DeviceLinkEngine {
           if (state !== "open") {
             running.agreed = false; this.failPings(running, "The device link closed");
             if (running.handoff) { running.handoff = false; if (!running.earlier) this.handoffLink(running.key, false); }
+            if (running.moved.size) void this.moveNative(running);
           }
           this.changed();
         },
@@ -522,14 +525,32 @@ export class DeviceLinks implements DeviceLinkEngine {
 
   /**
    * The native transports this app runs changed (the person set a HyperDHT relay, or other Iroh relays): every link
-   * that runs native endpoints starts the ones it lacks now.
+   * that runs native endpoints starts the ones it lacks now. Its endpoints of the `moved` transports, on the relay the
+   * person changed or removed, go first, as a chat's do: each once no session runs on it.
    */
-  nativeChanged(): void {
+  nativeChanged(moved: NativeTransport[] = []): void {
     for (const running of this.running.values()) {
       if (!running.native) continue;
       running.nativeMisses = 0;
-      this.startNative(running);
+      for (const transport of moved) if (running.link.availableTransports.includes(transport)) running.moved.add(transport);
+      void this.moveNative(running);
     }
+  }
+
+  /**
+   * Lets go of the link's endpoints on an old relay that no session runs on, and starts the native transports it lacks
+   * then: the new relay's, or none where the relay was removed. One carrying the session goes when the session ends.
+   */
+  private async moveNative(running: Running): Promise<void> {
+    for (const transport of [...running.moved]) {
+      if (!running.link.availableTransports.includes(transport)) { running.moved.delete(transport); continue; }
+      if (!running.link.canReleaseEndpoint(transport)) continue;
+      running.moved.delete(transport);
+      // Not missing while it goes: nothing starts it again on the old relay meanwhile.
+      running.starting.add(transport);
+      try { await running.link.releaseEndpoint(transport); } finally { running.starting.delete(transport); }
+    }
+    if (!this.stopped && this.running.get(running.id) === running) this.startNative(running);
   }
 
   private async receive(running: Running, frame: DeviceFrame): Promise<void> {

@@ -50,7 +50,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
-import { setServiceWindowsCloser } from "../lib/serviceWindows";
+import { hostErrorText, setServiceWindowsCloser } from "../lib/serviceWindows";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
@@ -223,8 +223,9 @@ export interface ServiceWindowResponse {
  * The answer a service window gets for one request: the contact's, over the data link, with only the headers a
  * viewer serves (`viewerResponseHeaders`), or a short page saying why there is none, in `t`'s language. An error the
  * app does not know is said as a failed request only: the engine's own English goes to the console, not to the page.
+ * `app`: the service's name, for the page the contact's machine answered in place of their app (`hostErrorText`).
  */
-export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "node">, payload: ServiceRequest, t: Translate = english): Promise<ServiceWindowResponse> {
+export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "node">, payload: ServiceRequest, t: Translate = english, app = payload.service): Promise<ServiceWindowResponse> {
   try {
     await server.ready;
     const answer = await server.node.request(payload.peer, payload.service, {
@@ -234,7 +235,10 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
       body: payload.body_b64 ? fromBase64(payload.body_b64) : null,
       maxResponseBytes: VIEWER_MAX_RESPONSE_BYTES,
     });
-    return { status: answer.status, headers: viewerResponseHeaders(answer.headers), body_b64: toBase64(await answer.bytes()) };
+    const body = await answer.bytes();
+    const hostError = hostErrorText(answer.headers, app, t);
+    if (hostError !== null) return { status: answer.status, headers: [["content-type", "text/plain; charset=utf-8"]], body_b64: toBase64(new TextEncoder().encode(hostError)) };
+    return { status: answer.status, headers: viewerResponseHeaders(answer.headers), body_b64: toBase64(body) };
   } catch (error) {
     const gone = error instanceof GhostlyHttpError && ["unreachable", "timeout", "closed", "offline"].includes(error.code);
     if (!gone) console.warn("Service window request failed:", error);
@@ -253,7 +257,8 @@ const profileT = (): Translate => translatorFor(loadSettings().language);
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    const response = await answerServiceWindow(server, payload, profileT());
+    const name = engine.linkByPeer(payload.peer)?.peerServices?.find((s) => s.id === payload.service)?.name;
+    const response = await answerServiceWindow(server, payload, profileT(), name);
     await invoke("service_respond", { id: payload.id, response });
   });
 }
@@ -384,8 +389,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     openPubkyPassport: (url) => invoke("open_pubky_passport", { url }),
     // Ring's cookie session: its homeserver requests through Rust, which keeps the cookie WKWebView drops.
     pubkyCookieSession,
-    // "Keep this computer awake" (WISP 06): Rust holds the system's own sleep assertion, and it ends with the app.
-    keepAwake: (on) => invoke<boolean>("keep_awake", { on }),
+    // "Keep this computer awake" (WISP 06): Rust holds the system's own sleep assertion, and it ends with the app. On
+    // Android a foreground service while files move (`files`).
+    keepAwake: (on, files) => invoke<boolean>("keep_awake", { on, files }),
     // WKWebView has no Web Share API; the system's share sheet is shown by Rust (macOS; elsewhere false: the page copies).
     shareText: (text, anchor) => invoke<boolean>("share_text", { text, anchor }),
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).

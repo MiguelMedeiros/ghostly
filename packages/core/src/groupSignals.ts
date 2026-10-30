@@ -130,6 +130,7 @@ export class CarriedTransport implements PkarrTransport {
   readonly subscribe?: PkarrTransport["subscribe"];
   readonly networkChanged?: PkarrTransport["networkChanged"];
   readonly configure?: PkarrTransport["configure"];
+  readonly publishHeld?: PkarrTransport["publishHeld"];
 
   constructor(private readonly inner: PkarrTransport, private readonly myKey: string, private readonly peerKey: string, private readonly hooks: CarriedHooks) {
     this.lastTimestamp = hooks.after ?? 0n;
@@ -138,6 +139,7 @@ export class CarriedTransport implements PkarrTransport {
     if (inner.subscribe) this.subscribe = listener => inner.subscribe!(listener);
     if (inner.networkChanged) this.networkChanged = () => inner.networkChanged!();
     if (inner.configure) this.configure = options => inner.configure!(options);
+    if (inner.publishHeld) this.publishHeld = (key, options) => inner.publishHeld!(key, options);
   }
 
   describe(): { protocol: string; relays: string[] } { return this.inner.describe(); }
@@ -145,15 +147,22 @@ export class CarriedTransport implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void> {
     if (this.stopped || identity.pubKeyZ32 !== this.myKey) return this.inner.publish(identity, records, options);
     this.drop();
-    const payload = this.newest = this.stamp(identity, records);
     // Up: the edge carries everything, and its packet on the relays (it is here, its offer is settled) is nothing
     // anyone waits for. It goes as a background write, behind the links that are signaling (a new offer of its own aside).
     if (this.hooks.open()) {
+      const relayOptions = options?.signal ? options : { ...options, background: true };
+      // No relay takes it now: refused before it is signed and dated, as a chat's (`RelayTransport.publishDated`); the
+      // link tries again when the wait says. A hub at its budget signed ~450-670 edge packets a minute that never went
+      // out, 8-10% of its busy CPU (agents#1573). Down, a packet is signed whatever the relays say: members carry it.
+      const held = this.inner.publishHeld?.(identity.pubKeyZ32, relayOptions);
+      if (held) throw held;
       this.mine = null;
-      const published = this.toRelays(identity, records, payload, options?.signal ? options : { ...options, background: true });
+      const payload = this.newest = this.stamp(identity, records);
+      const published = this.toRelays(identity, records, payload, relayOptions);
       if (this.hooks.direct && this.inner.publishPayload) void published.then(() => this.handDirect(payload), () => { /* the link publishes again, and hands it then */ });
       return published;
     }
+    const payload = this.newest = this.stamp(identity, records);
     this.mine = payload;
     let carried = { taken: 0, sure: false };
     try { carried = this.hooks.carry(payload); } catch { /* nobody took it */ }

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, PONG_WAIT_MS } from "../src/ghostlink";
+import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, PONG_WAIT_MS, WAKE_ANSWER_GRACE_MS } from "../src/ghostlink";
 import { LinkSession, RELAY_POLL_INTERVALS, AWAITING_PEER_MS } from "../src/link";
 import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
@@ -119,6 +119,39 @@ it("a wake with the session up pings it, and a session that does not answer is l
   vi.advanceTimersByTime(PONG_WAIT_MS * 2);
   expect(keptInner.channel).toBe(live);
   expect(keptInner.resuming).toBeUndefined();
+});
+
+it("an answer made while the app was away, still connecting after the wake, is let go so the resume dials", () => {
+  vi.useFakeTimers();
+  type Answering = { lastLiveOn?: string; answeringEpoch: number; connectionEpoch: number; channel: unknown; resuming?: string };
+  /** A chat live over WebRTC before the absence, connecting on an answer to the contact's offer it took while away. */
+  const answeringWhileAway = () => {
+    const link = pairedLink(true), inner = link as unknown as Answering;
+    vi.spyOn(link.session, "pollNow").mockImplementation(() => {});
+    vi.spyOn(link.session, "refreshAdvertisement").mockImplementation(async () => {});
+    inner.lastLiveOn = "webrtc/1";
+    inner.answeringEpoch = inner.connectionEpoch;
+    link.dataLink.state = "connecting";
+    const reset = vi.spyOn(link.dataLink as unknown as { reset(): void }, "reset").mockImplementation(() => {});
+    return { link, inner, reset };
+  };
+
+  // Back in front (Android, 2026-10-29): the answer from the background sat connecting until ICE gave up, 15 s.
+  const stale = answeringWhileAway();
+  stale.link.wake();
+  expect(stale.inner.resuming).toBe("webrtc/1");
+  vi.advanceTimersByTime(WAKE_ANSWER_GRACE_MS - 1);
+  expect(stale.reset, "given a moment to connect").not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);
+  expect(stale.reset, "let go for the resume's dial").toHaveBeenCalledOnce();
+
+  // One that connects meanwhile is the session.
+  const opened = answeringWhileAway();
+  opened.link.wake();
+  vi.advanceTimersByTime(1_000);
+  opened.inner.channel = { send: vi.fn(), close: vi.fn() };
+  vi.advanceTimersByTime(WAKE_ANSWER_GRACE_MS);
+  expect(opened.reset).not.toHaveBeenCalled();
 });
 
 it("a chat whose contact was never seen keeps the active pace in the background for a while", () => {

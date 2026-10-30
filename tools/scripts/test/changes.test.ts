@@ -189,6 +189,11 @@ Ghostly next.
     it("is in none of the repository's notes for 1.2", () => {
       const fragments = readFragments(root);
       expect(fragments.flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
+      // Once the repository is past 1.3.0 (1.6.0 shipped the first signed APK), an Android entry is an ordinary entry of
+      // the next release: no fragment waits for 1.3 any more, and a 1.1.x/1.2.x notes run no longer exists to keep it out of.
+      const guard = RELEASE_GUARDS.find((g: { about: string }) => g.about === "Android app");
+      const repository = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+      if (!guard || !versionBefore(repository, guard.from)) return;
       // Until 1.3.0 is cut, the Android entries wait in the folder as `release: 1.3`; the 1.3.0 bump takes them out.
       const waiting = fragments.some((f: { release?: string }) => f.release === "1.3");
       for (const version of ["1.1.8", "1.2.0", "1.2.1"]) {
@@ -196,6 +201,54 @@ Ghostly next.
         if (waiting) expect(held.filter((f: { release: string }) => f.release === "1.3").length, version).toBeGreaterThan(0);
         const notes = released.map((f: { name: string; group?: string; body: string }) => `${f.name} [${f.group ?? ""}] ${f.body}`);
         expect(notes.filter((note: string) => /\[Android\]|Android app|\bAPK\b|uninstall it before/i.test(note)), version).toEqual([]);
+      }
+    });
+  });
+
+  // The owner's decision (2026-10-27): auto-translation ships in 1.7.0, in the Desktop app.
+  describe("an entry about auto-translation", () => {
+    const entry = (section: string, body: string, version?: string, release?: string) =>
+      parseFragment("docs/changelog/unreleased/x.md", `---\nsection: ${section}\n${release ? `release: ${release}\n` : ""}---\n${body}\n`, version).problems;
+    const hold = /an auto-translation entry says "release: 1\.7" \(it is in no release before 1\.7\.0\)/;
+
+    it("is held for 1.7 while the repository is before it", () => {
+      for (const body of [
+        "- On Desktop, Settings > Translate messages translates what your contacts write.",
+        "- A translated message keeps Show original under it.",
+        "- A chat can be set to Translate what I send.",
+        "- The composer's Translate button waits for the model.",
+        "- The translation runtime downloads again after a failed check.",
+        "- Auto-translation reads emoji right.",
+      ]) {
+        expect(entry("For users / Chat", body, "1.6.0"), body).toEqual([expect.stringMatching(hold)]);
+        expect(entry("Fixed / Chat", body, "1.6.3", "1.6"), body).toEqual([expect.stringMatching(hold)]);
+        expect(entry("For users / Chat", body, "1.6.0", "1.7"), body).toEqual([]);
+        // From 1.7.0 on, an entry about it goes out with the next release like any other.
+        expect(entry("Fixed / Chat", body, "1.7.0"), body).toEqual([]);
+      }
+      // The app's own words in a language (its locales) are not the feature; nor is the CLI's --translate, which
+      // ships with the CLI's own releases.
+      expect(entry("For users / Wallets", "- The wallet screens are translated in all 8 languages.", "1.6.0")).toEqual([]);
+      expect(entry("For developers / CLI", "- `ghostly listen` takes `--translate <lang>`, with the translation runtime the Desktop app downloads.", "1.6.0")).toEqual([]);
+    });
+
+    it("follows the release workflow's TRANSLATE_FROM", () => {
+      const workflow = readFileSync(join(root, ".github/workflows/release.yml"), "utf8");
+      const guard = RELEASE_GUARDS.find((g: { about: string }) => g.about === "auto-translation");
+      expect(guard.from).toBe(workflow.match(/^ {2}TRANSLATE_FROM: "(\d+\.\d+\.\d+)"$/m)?.[1]);
+      expect(`${guard.release}.0`).toBe(guard.from);
+    });
+
+    it("is in none of the repository's notes for 1.6.x", () => {
+      const fragments = readFragments(root);
+      expect(fragments.flatMap((f: { problems: string[] }) => f.problems)).toEqual([]);
+      const guard = RELEASE_GUARDS.find((g: { about: string }) => g.about === "auto-translation");
+      const repository = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+      if (!guard || !versionBefore(repository, guard.from)) return;
+      for (const version of ["1.6.1", "1.6.9"]) {
+        const { released, held } = splitFragments(fragments, version);
+        expect(held.filter((f: { release: string }) => f.release === "1.7").length, version).toBeGreaterThan(0);
+        expect(released.filter((f: { group?: string; body: string }) => guard.entry(f)).map((f: { name: string }) => f.name), version).toEqual([]);
       }
     });
   });

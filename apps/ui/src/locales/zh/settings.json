@@ -222,6 +222,20 @@
     "60": "1小时"
   },
   "title": "设置",
+  "translate": {
+    "downloaded": "已下载的语言",
+    "hint": "尚未单独选择的聊天的默认设置",
+    "info": "以其他语言收到的消息会在此设备上由只需下载一次的语言模型翻译。文字不会离开设备，联系人也不会知道。",
+    "name": "翻译消息",
+    "none": "尚未下载任何语言",
+    "pair": "{{from}} → {{to}}",
+    "remove": "移除",
+    "removeFailed": "无法移除。请重试。",
+    "removeLabel": "移除{{name}}",
+    "searchWords": "翻译, 自动翻译, 语言, 模型",
+    "title": "将消息翻译成{{language}}",
+    "unread": "无法读取已下载的语言。"
+  },
   "version": "版本",
   "website": "网站"
 }

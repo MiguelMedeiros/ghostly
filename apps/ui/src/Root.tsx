@@ -34,6 +34,8 @@ import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
+import { guardContextMenu } from "./lib/contextMenu";
+import { isDesktopApp } from "./lib/externalLink";
 import "./index.css";
 
 // The pages of the menu, each loaded the first time it is opened (components/MenuPage.tsx).
@@ -229,7 +231,7 @@ function GroupLinkIntake() {
     if (!found) return;
     // A `%` that is not an escape: no group's link, said as one the engine could not read.
     const link = decodePart(found);
-    if (link === null) setProblem({ tone: "error", title: t("group.link.broken") });
+    if (link === null) setProblem({ tone: "error", title: t("group.link.broken"), next: t("group.link.brokenNext") });
     else setCode(link);
     navigate("/", { replace: true });
   }, [pathname, navigate, t]);
@@ -300,6 +302,8 @@ export function Root() {
   useState(takeDeviceLinkFromAddress);
   // The loops rest while the window is hidden or behind others (index.css `:root[data-away]`).
   useEffect(watchWindowAway, []);
+  // A right-click opens the item's own ⋮ menu where it has one; the desktop app never shows the webview's Back/Reload.
+  useEffect(() => guardContextMenu({ suppress: isDesktopApp() }), []);
   // Not the active device for this profile (WISP 06 § The gate): the standby screen, and nothing of the profile. No
   // router and no link intake either: an invite opened here would be written into a copy that must stay as it is.
   const standby = useDeviceGate();

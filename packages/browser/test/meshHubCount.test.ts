@@ -19,8 +19,11 @@ describe("hubs when every member stays online", () => {
   let restore = () => {};
   afterEach(() => { restore(); restore = () => {}; });
 
-  it("at most maxHubs hubs, and the others keep two edges", async () => {
+  it.each([false, true])("at most maxHubs hubs, and the others keep two edges (reads held back answer the known packet: %s)", async (heldReads) => {
     const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    // agents#1691: on real apps a held read answers the packet already known (relay.ts), and hubs piled up to 14-20
+    // of 20 for minutes. Failing those reads, as the World did, hid it.
+    world.heldReads = heldReads;
     restore = sameRun(world, 1);
     const admin = world.add("admin", undefined, { staysOnline: true });
     const id = await admin.groups.create("Hubs", "mesh");
@@ -36,9 +39,43 @@ describe("hubs when every member stays online", () => {
     const edges = (p: Peer) => [...p.links.values()].filter(e => e.kind === "edge" && e.g === id).length;
     const counts: number[] = [];
     for (let t = 0; t < 6; t++) { await world.run(60_000, 1000); counts.push(hubs().length); }
+    if (process.env.HUBS1691) console.info(`hubs per minute (held ${heldReads}): ${counts.join(" ")}`);
     // The joins' bursts may list a few too many for a moment (writes held back); they step down, and it holds.
     for (const count of counts.slice(2)) expect(count, `hubs per minute: ${counts.join(" ")}`).toBeLessThanOrEqual(MESH_HUBS.maxHubs);
     expect(hubs().length).toBeGreaterThanOrEqual(MESH_HUBS.hubsPerMember);
     for (const p of peers.filter(p => !hubs().includes(p))) expect(edges(p)).toBeLessThanOrEqual(MESH_HUBS.hubsPerMember);
+  }, 600_000);
+
+  // agents#1691, as 20 CLI daemons on the same relays saw it: most background reads and writes held back (290 of 339
+  // beacon writes refused, 294 of 352 readings listing 1-7 hubs), each held read answering the packet already known.
+  it("at most maxHubs hubs when most reads and writes of the beacon are held back", async () => {
+    const random = seededRandom(7);
+    const world = new CommunityWorld(undefined, RELAY_NETWORK, seededRandom(1));
+    restore = sameRun(world, 1);
+    world.heldReads = true;
+    const admin = world.add("admin", undefined, { staysOnline: true });
+    const id = await admin.groups.create("Hubs", "mesh");
+    const link = await admin.groups.enableLink(id);
+    const peers: Peer[] = [admin];
+    for (let i = 1; i < 20; i++) {
+      const p = world.add(`p${i}`, undefined, { staysOnline: true });
+      await p.groups.joinByLink(link);
+      await world.until(() => world.member(p, id), 5 * 60_000, 500);
+      peers.push(p);
+    }
+    let reads = 0, writes = 0;
+    world.holdRead = () => { reads++; return random() < 0.75; };
+    world.holdWrite = () => { writes++; return random() < 0.75; };
+    const hubs = () => peers.filter(p => world.view(p, id)?.hubs?.hub === true);
+    const counts: number[] = [];
+    for (let t = 0; t < 8; t++) { await world.run(60_000, 1000); counts.push(hubs().length); }
+    if (process.env.HUBS1691) console.info(`held: hubs per minute ${counts.join(" ")}; background reads ${reads}, writes ${writes}`);
+    // Before: 12 16 18 19 19 19 18 20, nobody ever stepping down. A hub may still come up a minute too many (a reading
+    // short of hubs whose writes were held), and steps down again: few past maxHubs, and on the whole at most it.
+    const later = counts.slice(2), mean = later.reduce((a, b) => a + b, 0) / later.length;
+    expect(Math.max(...later), `hubs per minute: ${counts.join(" ")}`).toBeLessThanOrEqual(MESH_HUBS.maxHubs + 4);
+    expect(mean, `hubs per minute: ${counts.join(" ")}`).toBeLessThanOrEqual(MESH_HUBS.maxHubs);
+    expect(counts.at(-1), `hubs per minute: ${counts.join(" ")}`).toBeLessThanOrEqual(MESH_HUBS.maxHubs);
+    expect(hubs().length).toBeGreaterThanOrEqual(MESH_HUBS.hubsPerMember);
   }, 600_000);
 });

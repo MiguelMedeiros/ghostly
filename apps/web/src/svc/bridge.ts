@@ -42,8 +42,10 @@ function start(): void {
       .then(() => {
         const frame = document.createElement("iframe");
         frame.title = document.title;
-        frame.src = "/";
         frame.setAttribute("allow", "fullscreen; clipboard-write");
+        // This page sends no referrer (its server says so); the worker forwards a navigation only with this origin's.
+        frame.setAttribute("referrerpolicy", "same-origin");
+        frame.src = "/";
         document.body.replaceChildren(frame);
       }, () => say("This browser cannot open the app here."));
   });

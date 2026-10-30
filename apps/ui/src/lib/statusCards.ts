@@ -1,5 +1,6 @@
 import { ACTIVE_TASK_STATUSES, taskProgress, usageLeft, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus, type UsageCard } from "@ghostly/core";
 import type { Translate } from "../contexts/I18nContext";
+import { installedApps } from "./apps/installed";
 
 /*
  * The status cards of a chat or group, as its Tasks panel lists them (WISP 405 · Status Cards): the newest message of
@@ -246,9 +247,11 @@ export function cardLine(card: ShownCard): string {
 /**
  * An app card's line where a message's text would be (the chat list, a quote, the pinned bar, Saved, the screen
  * reader): "🧩 App: Chess 1.2.0" in the reader's language. Its text is the English fallback an older app shows, with
- * the bundle's link (WISP 405 § An app). None for any other message.
+ * the bundle's link (WISP 405 § An app). An app installed here is named as its card names it, by its own title and
+ * version, never the sender's words for it (`installed`: the list as last read). None for any other message.
  */
-export function appCardLine(card: StatusCard | undefined, t: Translate): string | undefined {
+export function appCardLine(card: StatusCard | undefined, t: Translate, installed = installedApps()): string | undefined {
   if (card?.kind !== "app") return undefined;
-  return `🧩 ${t("apps.card.label", { title: card.version ? `${card.title} ${card.version}` : card.title })}`;
+  const { title, version } = installed?.find((app) => app.ref === card.ref) ?? card;
+  return `🧩 ${t("apps.card.label", { title: version ? `${title} ${version}` : title })}`;
 }

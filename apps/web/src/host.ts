@@ -11,7 +11,7 @@ import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwit
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { hostErrorText, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { translatorFor } from "../../ui/src/locales";
 
@@ -75,6 +75,8 @@ let peer: EngineServer | null = null;
 // A contact's app closes when the profile locks, as Desktop's windows do: this page answers its requests.
 // A reload ends it with the page.
 setServiceWindowsCloser(closeServiceView);
+// Drawn over the whole app, it makes way for a call that rings or starts: the call's windows are under it.
+setServiceViewCloser(closeServiceView);
 
 /**
  * Ghostly on the web: the peer runs in this page and lives as long as the tab.
@@ -138,7 +140,7 @@ export const webHost = createInPageHost({
     await openServiceView({
       host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title,
       send: (request) => node.request(peerPubKeyZ32, serviceId, request),
-      words: { unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close") },
+      words: { unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }), hostError: (headers) => hostErrorText(headers, title, t) },
     });
   },
 });

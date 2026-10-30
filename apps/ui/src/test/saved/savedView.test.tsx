@@ -40,6 +40,13 @@ function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>, language?: 
 
 const texts = () => screen.getAllByTestId("saved-row").map((row) => within(row).getByTestId("saved-text").textContent);
 
+/**
+ * Label in Name (WCAG 2.5.3) as axe-core reads it: the words a control shows (its text nodes joined with nothing between
+ * them, parentheticals left out), in their order, one after another in its name.
+ */
+const words = (text: string) => (text.normalize("NFKD").replace(/\([^()]*\)/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).join(" ");
+const expectShownInName = (control: HTMLElement) => expect(` ${words(control.getAttribute("aria-label") ?? "")} `).toContain(` ${words(control.textContent ?? "")} `);
+
 describe("the Saved view", () => {
   it("lists the saved messages of chats and groups, the last saved first, with where they are and who wrote them", async () => {
     profile([
@@ -56,7 +63,11 @@ describe("the Saved view", () => {
     expect(within(mine).getByTestId("saved-author")).toHaveTextContent("You");
     // In a 1:1 chat the contact is the chat: named once.
     expect(within(theirs).queryByTestId("saved-author")).not.toBeInTheDocument();
-    expect(within(theirs).getByTestId("saved-open")).toHaveAccessibleName("Open in Alice: the address");
+    // A row is named by what it shows, in its order: the chat, who wrote it when that is not the chat, when, the text.
+    expect(within(group).getByTestId("saved-open")).toHaveAccessibleName(/^Crew, Hermes, \S.*: deploy at 5$/);
+    expect(within(mine).getByTestId("saved-open")).toHaveAccessibleName(/^Alice, You, \S.*: my note$/);
+    expect(within(theirs).getByTestId("saved-open")).toHaveAccessibleName(/^Alice, \S.*: the address$/);
+    for (const open of screen.getAllByTestId("saved-open")) expectShownInName(open);
   });
 
   it("says a voice message or a video in the app's language, not in the English the history keeps", async () => {
@@ -66,7 +77,9 @@ describe("the Saved view", () => {
       saved(message("link-1", "peer_3", { text: "📎 notes.pdf", file: { id: "f3", name: "notes.pdf", size: 10, mime: "application/pdf" } })),
     ], undefined, "pt");
     await waitFor(() => expect(texts()).toEqual(["🎤 Mensagem de voz (0:02)", "🎬 Vídeo (0:07)", "📎 notes.pdf"]));
-    expect(within(screen.getAllByTestId("saved-row")[0]).getByTestId("saved-open")).toHaveAccessibleName("Abrir em Alice: 🎤 Mensagem de voz (0:02)");
+    const open = within(screen.getAllByTestId("saved-row")[0]).getByTestId("saved-open");
+    expect(open).toHaveAccessibleName(/^Alice, \S.*: 🎤 Mensagem de voz \(0:02\)$/);
+    expectShownInName(open);
   });
 
   it("says an app card as the card names it, in the app's language, not its English fallback with the bundle's link", async () => {
@@ -137,5 +150,6 @@ describe("the Saved view", () => {
     act(() => engine.setState({ ...state, groups: [...state.groups, groupView({ id: "g2", name: "Other", status: "active" })] }));
     const entry = await screen.findByTestId("sidebar-saved");
     expect(entry).toHaveAccessibleName("Saved messages, 2");
+    expectShownInName(entry);
   });
 });

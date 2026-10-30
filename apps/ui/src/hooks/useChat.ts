@@ -16,11 +16,14 @@ import {
   loadSession,
   saveSession,
   addMessage,
+  addMissedCall,
   deleteMessage as deleteStoredMessage,
   getInviteCode,
+  uncountMissedCall as uncountStoredMissedCall,
   hasAnnouncedJoin,
   markJoinAnnounced,
 } from "../lib/storage";
+import { forgetSentOriginal } from "../lib/sentOriginals";
 
 const POLL_INTERVAL_ACTIVE = 2_000;
 const POLL_INTERVAL_IDLE = 8_000;
@@ -422,7 +425,7 @@ export function useChat(params: ChatParams | null) {
 
   const sendMessage = useCallback(
     // A preview needs a paired chat (WISP 401): these DHT-only messages go as plain text.
-    async (text: string, _extra?: { preview?: import("@ghostly/core").LinkPreview; replyTo?: string }): Promise<string | null> => {
+    async (text: string, extra?: { preview?: import("@ghostly/core").LinkPreview; replyTo?: string; onSent?: (messageId: string) => void }): Promise<string | null> => {
       if (burnedRef.current) return t("chat.compat.burned");
       if (!text.trim()) return null;
 
@@ -479,6 +482,7 @@ export function useChat(params: ChatParams | null) {
         if (kept === 0) {
           return t("chat.compat.overLimit");
         }
+        extra?.onSent?.(newMsg.id);
       } catch {
         setStatus("error");
         return t("chat.compat.sendFailed");
@@ -563,9 +567,30 @@ export function useChat(params: ChatParams | null) {
     window.dispatchEvent(new Event("session-updated"));
   }, []);
 
+  /**
+   * A missed call's line, or one more call on the chat's last missed line (`addMissedCall`): the id of the line that
+   * says it.
+   */
+  const addMissedCallMessage = useCallback((msg: ChatMessage, options: { rang?: string; seen?: boolean }) => {
+    const updated = addMissedCall(sessionIdRef.current, msg, options);
+    if (!updated) return undefined;
+    setMessages([...updated.session.messages]);
+    window.dispatchEvent(new Event("session-updated"));
+    return updated.line;
+  }, []);
+
+  /** One call less on a line that counts several (`uncountMissedCall`). */
+  const uncountMissedCall = useCallback((line: string) => {
+    const updated = uncountStoredMissedCall(sessionIdRef.current, line);
+    if (!updated) return;
+    setMessages([...updated.messages]);
+    window.dispatchEvent(new Event("session-updated"));
+  }, []);
+
   const deleteMessage = useCallback((messageId: string) => {
     const updated = deleteStoredMessage(sessionIdRef.current, messageId);
     if (!updated) return;
+    forgetSentOriginal(sessionIdRef.current, messageId);
     setMessages([...updated.messages]);
     // The chat list keeps its own copy of the last message.
     window.dispatchEvent(new Event("session-updated"));
@@ -578,7 +603,6 @@ export function useChat(params: ChatParams | null) {
     encKeyPreview: params
       ? params.encKeyB64.slice(0, 8) + "..." + params.encKeyB64.slice(-4)
       : "",
-    pollCount: pollCountRef.current,
     currentPollInterval:
       Date.now() - lastActivityRef.current > IDLE_THRESHOLD
         ? POLL_INTERVAL_IDLE
@@ -586,12 +610,11 @@ export function useChat(params: ChatParams | null) {
     republishInterval: REPUBLISH_INTERVAL,
     messageTtl: MESSAGE_TTL,
     protocol: "Mainline DHT (BEP44) — Direct UDP",
+    peerToPeer: false,
     encryption: "NaCl secretbox (XSalsa20-Poly1305)",
     relays: [],
     createdAt: sessionCreatedAtRef.current,
-    myAck: myAckRef.current,
     peerAck,
-    sentBufferSize: sentBufferRef.current.length,
   };
 
   return {
@@ -610,6 +633,8 @@ export function useChat(params: ChatParams | null) {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    addMissedCallMessage,
+    uncountMissedCall,
     deleteMessage,
     pollCountdown,
   };

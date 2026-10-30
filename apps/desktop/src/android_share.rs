@@ -40,12 +40,13 @@ pub struct SharedFile {
 
 /// The latest share waiting for the page: one at a time, a newer one replaces it (as the web app's share target). A
 /// newer one that is only a notice joins the waiting share instead, as the page does (`receiveShare` in
-/// `incomingShare.ts`): the waiting share's files would be lost for a notice.
+/// `incomingShare.ts`): the waiting share's files would be lost for a notice. A share with something that replaces a
+/// waiting notice keeps its names (Android may hand an older share still copying over after a newer notice).
 #[derive(Default)]
 pub struct Incoming(Mutex<Option<Shared>>);
 
 impl Incoming {
-    pub fn put(&self, shared: Shared) {
+    pub fn put(&self, mut shared: Shared) {
         let mut held = self.0.lock().unwrap();
         match held.as_mut() {
             Some(waiting) if shared.is_notice() => {
@@ -53,6 +54,13 @@ impl Incoming {
                 waiting.unread.extend(shared.unread);
                 waiting.no_room.extend(shared.no_room);
                 waiting.past_limit.extend(shared.past_limit);
+            }
+            Some(waiting) if waiting.is_notice() => {
+                let waiting = std::mem::take(waiting);
+                shared.left_out.splice(0..0, waiting.left_out);
+                shared.unread.splice(0..0, waiting.unread);
+                shared.no_room.splice(0..0, waiting.no_room);
+                *held = Some(shared);
             }
             _ => *held = Some(shared),
         }
@@ -113,14 +121,32 @@ mod tests {
     }
 
     #[test]
+    fn a_share_with_something_keeps_the_names_of_the_waiting_notice() {
+        // An older share still copying is handed over after a newer one that was only a notice.
+        let incoming = Incoming::default();
+        incoming.put(notice(&["VID_B.mp4"], &["DOC_B.pdf"]));
+        incoming.put(Shared {
+            left_out: vec!["VID_A2.mp4".into()],
+            no_room: vec!["VID_A3.mp4".into()],
+            ..photo()
+        });
+        assert_eq!(
+            incoming.take(),
+            Some(Shared {
+                left_out: vec!["VID_B.mp4".into(), "VID_A2.mp4".into()],
+                unread: vec!["DOC_B.pdf".into()],
+                no_room: vec!["VID_A3.mp4".into()],
+                ..photo()
+            })
+        );
+        assert_eq!(incoming.take(), None);
+    }
+
+    #[test]
     fn a_notice_alone_waits_and_a_share_with_something_replaces_the_waiting_one() {
         let incoming = Incoming::default();
         incoming.put(notice(&["VID_1.mp4"], &[]));
         assert_eq!(incoming.take(), Some(notice(&["VID_1.mp4"], &[])));
-
-        incoming.put(notice(&["VID_1.mp4"], &[]));
-        incoming.put(photo());
-        assert_eq!(incoming.take(), Some(photo()));
 
         incoming.put(photo());
         let text = Shared {
