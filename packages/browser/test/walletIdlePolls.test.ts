@@ -74,7 +74,10 @@ it.each(["ark", "bark", "spark", "usdt"] as const)("%s: the engine checks the re
   expect(receipts).toHaveBeenCalledTimes(1);
   wallet.changed(true);
   wallet.changed();
-  expect(refresh).toHaveBeenCalledTimes(2);
   expect(receipts).toHaveBeenCalledTimes(3);
+  // Changes said together make one view, a moment later.
+  expect(refresh).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(refresh).toHaveBeenCalledTimes(1);
   await node.shutdown();
 });
