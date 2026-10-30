@@ -62,6 +62,10 @@ mod share;
 mod single_instance;
 #[cfg(test)]
 mod test_support;
+#[cfg(desktop)]
+mod translate;
+#[cfg(desktop)]
+mod translate_models;
 mod turn_network;
 #[cfg(test)]
 mod turn_record;
@@ -72,7 +76,7 @@ mod viewer;
 
 use commands::AppState;
 #[cfg(mobile)]
-use mobile::{app_sandbox, hyperdht, keep_awake, share, viewer};
+use mobile::{app_sandbox, hyperdht, keep_awake, share, translate, translate_models, viewer};
 use pkarr_network::Pkarr;
 use tauri::Manager;
 #[cfg(desktop)]
@@ -113,8 +117,10 @@ macro_rules! commands {
         tauri::generate_handler![
             app_sandbox::app_broker,
             app_sandbox::app_close,
+            app_sandbox::app_focus,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            app_sandbox::app_title,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
@@ -221,6 +227,10 @@ macro_rules! commands {
             paired_transport::paired_native_close,
             paired_transport::paired_native_send,
             share::share_text,
+            translate::translate_texts,
+            translate_models::translation_download,
+            translate_models::translation_remove,
+            translate_models::translation_status,
             unread_count::native_unread_count,
         ]
     };
@@ -281,6 +291,10 @@ pub fn run() {
         .manage(ViewerState::default())
         .manage(app_sandbox::AppSandboxState::default())
         .manage(hyperdht::HyperState::default())
+        // Translation on this computer, by the runtime downloaded with the first language model (none: not installed).
+        .manage(translate::TranslateState::default())
+        // Its models and the runtime, downloaded only when the person says yes, each file checked against its pin.
+        .manage(translate_models::ModelsState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -672,6 +686,8 @@ mod tests {
             .manage(app_sandbox::AppSandboxState::default())
             .manage(paired_transport::TransportState::default())
             .manage(hyperdht::HyperState::default())
+            .manage(translate::TranslateState::default())
+            .manage(translate_models::ModelsState::default())
             .manage(oidc::OidcState::default())
             .manage(local_access::LocalAccess::default())
             .invoke_handler(only_main(commands!()))
@@ -738,6 +754,8 @@ mod tests {
         arguments["record"] = serde_json::json!(null);
         arguments["count"] = serde_json::json!(0);
         arguments["tag"] = serde_json::json!("x");
+        arguments["pair"] = serde_json::json!("pt-en");
+        arguments["texts"] = serde_json::json!([]);
         arguments
     }
 
@@ -827,9 +845,15 @@ mod tests {
             assert!(!may_call("app-1", command), "{command}");
             assert!(may_call("main", command), "{command}");
         }
-        // The Ghostly window's side of the broker: it opens app windows, answers them and closes them; an app
-        // window does none of that.
-        for command in ["app_open", "app_post", "app_close"] {
+        // The Ghostly window's side of the broker: it opens app windows, answers them, brings them to the front, names
+        // them and closes them; an app window does none of that.
+        for command in [
+            "app_open",
+            "app_post",
+            "app_focus",
+            "app_title",
+            "app_close",
+        ] {
             assert!(registered().iter().any(|c| c == command), "{command}");
             assert!(may_call("main", command), "{command}");
             for label in ["app-1", "app-0123456789abcdef", "svc-1"] {

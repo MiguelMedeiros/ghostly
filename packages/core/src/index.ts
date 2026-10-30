@@ -68,6 +68,7 @@ export * from "./capsRecord";
 export { DhtDelivery, peekDhtMailbox, DHT_TEXT_BYTES, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, DHT_FILE_REFUSED, DHT_FILE_TOO_LARGE, LIVE_POLL_MS, ACTIVE_DHT_POLL_MS, emptyDhtDeliveryState, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView, type DhtPacketFacts } from "./dhtDelivery";
 export { DHT_FILE_CAPABILITY, dhtFileId, dhtFileElements, readDhtFile, type DhtFileAnnouncement, type DhtFileElement, type DhtFileMeta, type DhtFileOffer } from "./dhtFiles";
 export * from "./storeForward";
+export * from "./ratchet";
 export * from "./paymentIntent";
 export * from "./bitcoinAddress";
 export * from "./sparkAddress";

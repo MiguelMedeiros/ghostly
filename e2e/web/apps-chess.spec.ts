@@ -11,7 +11,7 @@ import { CHESS, CHESS_1_0_2 } from "../support/chessFixture";
  * and signed by the headless CLI with keys made for the test, in a store the CLI signed, served at
  * raw.githubusercontent.com URLs by the test. Ana installs it from the store (the install screen asks for her name in
  * the chat) and opens it in her chat with Bob; Bob installs it from her card, which asks nothing of any host before he
- * presses "Install and open"; Ana invites, Bob accepts, they play Scholar's mate over `paired-app`, and Bob's game is
+ * presses "Join"; Ana invites, Bob accepts, they play Scholar's mate over `paired-app`, and Bob's game is
  * back after he reloads. Then what a client refuses: a tampered bundle, a lower sequence, a version a store removed
  * (stopped until "Run anyway"), a version its publisher revoked (stopped for good). And the update from Chess 1.0.2,
  * which waits until the person agrees to `name`.
@@ -77,7 +77,7 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   await ana.page.waitForTimeout(15_000);
   await expect(chessStatus(ana.page)).toHaveText("Waiting for your contact to open Chess");
 
-  // 2. Bob's card, drawn from its own data: not one request until he presses "Install and open".
+  // 2. Bob's card, drawn from its own data: not one request until he presses "Join".
   const card = chat(bob).getByTestId("app-card");
   await expect(card).toContainText(`Chess ${CHESS.manifest.version}`);
   await expect(card).toContainText("Ana opened it here");

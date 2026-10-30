@@ -29,6 +29,10 @@ section: For users / Chat
 - Until 1.3.0, an entry about the native Android app (section `... / Android`, or text that names the Android app or
   an APK) must say `release: 1.3`: the app is in no release before it. The web app on an Android phone is not the
   native app; write "on Android" there.
+- Until 1.7.0, an entry about auto-translation in the Desktop app (text that names Translate messages, Translate what
+  I send, the Translate button, Show original, the translation runtime or models, or auto-translation) must say
+  `release: 1.7`: the Desktop app carries it from 1.7.0. "Translated" alone (the app's own words in a language) is not
+  held, nor is a `... / CLI` entry.
 
 ```markdown
 ---

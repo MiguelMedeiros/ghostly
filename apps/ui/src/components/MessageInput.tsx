@@ -14,7 +14,7 @@ import { SecretGuardDialog } from "./SecretGuardDialog";
 import { findSecret, type SecretFinding } from "../lib/parse/secrets";
 import { ExpressionPanel } from "./composer/ExpressionPanel";
 import { CameraCapture, cameraByFileInput, useHasCamera } from "./composer/CameraCapture";
-import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon } from "./composer/icons";
+import { AppsGlyph, CameraGlyph, DocumentGlyph, IdentityGlyph, MediaGlyph, PaymentGlyph, ServicesGlyph, SmileIcon, TranslateIcon } from "./composer/icons";
 import type { ComposerServices } from "./composer/servicesRow";
 import { useMentionPicker, type ComposerMentions } from "./composer/MentionPicker";
 import type { GroupMention } from "@ghostly/core";
@@ -26,18 +26,28 @@ import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNames
 import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import { useComposition } from "../hooks/useComposition";
+import { draftLanguage } from "../lib/translateDraft";
+import { useTranslatesWhatISend } from "../lib/chatTranslateSend";
 import "./composer/composer.css";
 import { touchOnly } from "../lib/touchOnly";
 import { formatAmount } from "../lib/amount";
 import { problemLine } from "../lib/problemText";
+import { readingTime } from "../lib/readingTime";
+import { TranslatePreview } from "./composer/TranslatePreview";
+import { translationStale, useDraftTranslation, type ComposerTranslation, type DraftTranslationFailure } from "../hooks/useDraftTranslation";
+import { languageName } from "../lib/documentLanguage";
+import { carryMentions } from "../lib/translateDraft";
+import { translateEnabled } from "../lib/translateFlag";
+import { isConvertibleVideo, prepareVideo, type PreparedVideo } from "../lib/videoSend";
 
 interface MessageInputProps {
   draftId?: string;
   /**
    * `mentions`: in a group, the places of the text that name members (see `mentions` below). `extra.preview`: in a
-   * paired chat, the link preview shown in the composer when it was sent (`linkPreviews`).
+   * paired chat, the link preview shown in the composer when it was sent (`linkPreviews`). `extra.translated`: the
+   * text is the draft translated into `to` from the preview; `original` is the draft as typed, kept on this device.
    */
-  onSend: (text: string, mentions?: GroupMention[], extra?: { preview?: LinkPreview }) => Promise<string | null>;
+  onSend: (text: string, mentions?: GroupMention[], extra?: { preview?: LinkPreview; translated?: SentTranslation }) => Promise<string | null>;
   disabled?: boolean;
   disabledPlaceholder?: string;
   maxLength?: number;
@@ -114,10 +124,18 @@ interface MessageInputProps {
    * with no field focused is then for the chat on screen, never for this one.
    */
   onScreen?: boolean;
+  /**
+   * The chat translates what I write on request (docs/AUTO-TRANSLATE.md § Outgoing translation): a Translate button
+   * beside Send, and the translation shown above the field before it goes. Only in a build with translation.
+   */
+  translation?: ComposerTranslation;
 }
 
+/** A draft sent translated: the language it went in, and the draft as it was typed. */
+export interface SentTranslation { to: string; original: string }
+
 /** A message sent from the field, waiting for the one before it to go. */
-interface Outgoing { words: string; named: GroupMention[]; preview?: LinkPreview }
+interface Outgoing { words: string; named: GroupMention[]; preview?: LinkPreview; translated?: SentTranslation }
 
 const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
@@ -156,8 +174,9 @@ export function MessageInput({
   edit,
   onEditLast,
   onScreen = true,
+  translation,
 }: MessageInputProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const phone = useIsMobile();
   const locked = useIsLocked();
   const [showPayment, setShowPayment] = useState(false);
@@ -177,8 +196,13 @@ export function MessageInput({
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
   const textRef = useRef(text); textRef.current = text;
   const [toast, setToast] = useState<string | null>(null);
-  /** `caption`: the guard asks about a pasted file's caption, not the draft. */
-  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string } | null>(null);
+  /**
+   * `caption`: the guard asks about a pasted file's caption, not the draft; `translated`: about the translation shown;
+   * `translate`: about the draft, before it is translated (what Send anyway does then).
+   */
+  const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string; translated?: boolean; translate?: () => void } | null>(null);
+  /** The draft the guard was answered Send for before Translate: its translation does not ask again. */
+  const guardedDraft = useRef<string | null>(null);
   /** Files pasted or dropped here, waiting on the sheet for Send. */
   const [attached, setAttached] = useState<File[] | null>(null);
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
@@ -190,9 +214,16 @@ export function MessageInput({
    */
   const [preparing, setPreparing] = useState<File[]>([]);
   const preparingKeys = useRef(new Set<string>());
+  /** A video being converted to H.264 MP4 before it goes (`prepareVideo`): how far, and its Cancel. */
+  const [converting, setConverting] = useState<{ file: File; progress?: number } | null>(null);
+  const conversion = useRef<AbortController | null>(null);
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastRef = useRef<HTMLDivElement>(null);
+  const toastMs = useRef(TOAST_DURATION);
+  /** The card is pointed at, or has the focus: its time waits. */
+  const toastHeld = useRef({ pointer: false, focus: false });
   const caretRef = useRef<number | null>(null);
   /**
    * Each Enter is a message of its own: its words leave the field at once and wait here, and they go one at a time, in
@@ -213,6 +244,8 @@ export function MessageInput({
   const sharedIdentities = useSharedIdentityCount(identities?.peerKey);
   const hasCamera = useHasCamera();
   const picker = useMentionPicker({ mentions, text, setText, textareaRef, caretRef });
+  // Translate what I send, this chat's choice on this device (the Translation sheet).
+  const translatesSend = useTranslatesWhatISend(draftId);
   const linkPreview = useLinkPreviewDraft(text, linkPreviews && !disabled);
 
   // Ready to type when the chat opens, where that costs nothing: on a touch screen the keyboard would come up over
@@ -273,14 +306,55 @@ export function MessageInput({
     if (input && at !== null) { caretRef.current = null; input.setSelectionRange(at, at); }
   }, [text]);
 
-  const showToast = useCallback((msg: string) => {
+  /**
+   * The card goes; the focus on its × goes to the message field (in the attachment sheet, to the sheet), not to the
+   * page. On a touch screen the field would bring the keyboard up: there it stays where it falls.
+   */
+  const hideToast = useCallback(() => {
+    // First: the card's blur would start its time again.
+    const card = toastRef.current, at = document.activeElement;
+    if (card && at && card.contains(at) && !touchOnly()) (card.closest<HTMLElement>("[role='dialog']") ?? textareaRef.current)?.focus({ preventScroll: true });
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast(msg);
-    toastTimerRef.current = setTimeout(
-      () => setToast(null),
-      TOAST_DURATION,
-    );
+    toastTimerRef.current = null;
+    toastHeld.current = { pointer: false, focus: false };
+    setToast(null);
   }, []);
+
+  /** The card's time runs again, in full, unless it is pointed at or has the focus: it stays until it has been read. */
+  const runToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = null;
+    if (toastHeld.current.pointer || toastHeld.current.focus) return;
+    toastTimerRef.current = setTimeout(hideToast, toastMs.current);
+  }, [hideToast]);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    // Long enough to read in the app's language: a line in Japanese or Chinese takes twice the 5 s and more.
+    toastMs.current = readingTime(msg, language, TOAST_DURATION);
+    runToast();
+  }, [language, runToast]);
+
+  // The draft translated on Translate, shown above the field until something is sent.
+  const drafting = useDraftTranslation({ config: translation, appLanguage: language, onFailure: (reason: DraftTranslationFailure, pair: string) => {
+    const [from = "", to = ""] = pair.split("-");
+    showToast(reason === "no-model" ? t("composer.translate.noModel", { from: languageName(from, language), to: languageName(to, language) })
+      : reason === "not-installed" ? t("composer.translate.notInstalled") : t("composer.translate.failed"));
+  } });
+  // An edit has no translation: the one shown waits for nothing.
+  const previewOpen = !!drafting.state && !edit;
+  const closeTranslation = drafting.close;
+  // The draft emptied (by hand, or given to an edit): nothing left to translate.
+  useEffect(() => { if (!text.trim() || editKey) closeTranslation(); }, [text, editKey, closeTranslation]);
+  // The chat's translation turned off, or its language changed, while a preview was open: that preview is closed, so
+  // Enter sends the draft again rather than wait on a translation nothing can make (ghostly-agents#1812).
+  // A group's list is ordered by use and recomputed as messages arrive, so it is compared as a set, and an open preview
+  // stays while the language it shows is still offered: a reorder or a new language must not drop a picked translation.
+  const offered = translation ? (translation.language ? [translation.language] : [...(translation.languages ?? [])].sort()).join(",") : null;
+  const shownTo = drafting.state && drafting.state.step !== "choose" ? drafting.state.to : null;
+  useEffect(() => {
+    if (offered === null || (shownTo !== null && !offered.split(",").includes(shownTo))) closeTranslation();
+  }, [offered, shownTo, closeTranslation]);
 
   /**
    * What could not go comes back to the field, before what is typed there now: the failed words, then those that waited
@@ -306,12 +380,14 @@ export function MessageInput({
         let err: string | null;
         try {
           const send = onSendRef.current;
-          err = await (next.named.length ? send(next.words, next.named) : next.preview ? send(next.words, undefined, { preview: next.preview }) : send(next.words));
+          err = await (next.translated ? send(next.words, next.named.length ? next.named : undefined, { ...(next.preview && { preview: next.preview }), translated: next.translated })
+            : next.named.length ? send(next.words, next.named) : next.preview ? send(next.words, undefined, { preview: next.preview }) : send(next.words));
         } catch (e) {
           err = problemLine(e, t);
         }
         if (err) {
-          const failed = outbox.current.splice(0).map((o) => o.words);
+          // A translation comes back as the draft it was made from: sent from the field again, it would go as plain text.
+          const failed = outbox.current.splice(0).map((o) => o.translated?.original ?? o.words);
           if (mounted.current) showToast(err);
           giveBack(failed);
           return;
@@ -345,8 +421,15 @@ export function MessageInput({
       }
       return;
     }
+    if (sendsTranslated && !previewOpen && sendTranslatedNow()) return;
     // The words leave the field now, with what goes with them (the members named, the preview), and wait their turn.
-    outbox.current.push({ words: text, named: picker.compose(text), preview: linkPreview.preview ?? undefined });
+    await queue({ words: text, named: picker.compose(text), preview: linkPreview.preview ?? undefined });
+  };
+
+  /** The draft leaves the field for the outbox, and the translation shown with it. */
+  const queue = async (outgoing: Outgoing) => {
+    outbox.current.push(outgoing);
+    drafting.close();
     picker.reset();
     linkPreview.reset();
     setText("");
@@ -356,6 +439,80 @@ export function MessageInput({
     await drain();
   };
 
+  /**
+   * The translation shown goes in place of the draft, through the same checks; its mentions are the draft's, found
+   * again in it. `confirmed` once the secret guard was answered Send.
+   */
+  const sendTranslation = async (confirmed = false) => {
+    const shown = drafting.state;
+    if (shown?.step !== "shown" || disabled || edit) return;
+    const words = shown.text.trim();
+    if (!words) return;
+    const bytes = new TextEncoder().encode(words).length;
+    if (maxBytes && bytes > maxBytes) { showToast(t("composer.dhtTooLong", { bytes, max: maxBytes })); return; }
+    if (textBytes && bytes > textBytes) { showToast(t("composer.tooLongBytes", { bytes: formatAmount(bytes, t.language), max: formatAmount(textBytes, t.language) })); return; }
+    const found = confirmed || guardedDraft.current === shown.source ? null : findSecret(words);
+    if (found) { setSecret({ finding: found, translated: true }); return; }
+    const named = carryMentions(text, picker.compose(text), words);
+    // Already in that language: it goes as typed, with nothing to keep beside it. A draft holding a seed or a key is
+    // not kept either, as it is not kept as a draft: only ecash is.
+    await queue({ words, named, preview: linkPreview.preview ?? undefined, ...(!shown.same && keepsOriginal(shown.source) && { translated: { to: shown.to, original: shown.source } }) });
+  };
+
+  /** Whether a draft sent translated keeps its original: not one holding a seed or a key (ecash is kept, as drafts keep it). */
+  const keepsOriginal = (source: string) => { const found = findSecret(source); return !found || found.kind === "cashu"; };
+
+  /**
+   * The secret guard on the draft as typed, before any of it is translated: Cancel leaves it untranslated, Send anyway
+   * translates it (and the translation does not ask again).
+   */
+  const guardThen = (translate: () => void) => {
+    const draft = text.trim();
+    const found = guardedDraft.current === draft ? null : findSecret(draft);
+    if (found) { setSecret({ finding: found, translate: () => { guardedDraft.current = draft; translate(); } }); return; }
+    translate();
+  };
+
+  /**
+   * Translate what I send: the draft goes translated, with no preview, when the chat has a single language and the
+   * detector is sure of the draft's. Unsure of either, the preview opens instead (asking which language in a group
+   * with several). False when the draft goes as typed: no words, or already in the chat's language.
+   */
+  const sendTranslatedNow = (): boolean => {
+    const to = translation?.language ?? null;
+    const source = text.trim(), named = picker.compose(text);
+    const from = translation?.detect ? draftLanguage(source, translation.detect, named) : null;
+    if (from === undefined || from === to) return false;
+    // Send already passed the guard on the draft: its translation does not ask again.
+    guardedDraft.current = source;
+    if (!to || from === null) { drafting.start(text, named); return true; }
+    void drafting.translateInto(to, text, named, (words) => {
+      // Changed while it was translated: the preview shows it, stale, rather than send what was not seen.
+      if (textRef.current.trim() !== source) return false;
+      const bytes = new TextEncoder().encode(words.trim()).length;
+      if ((maxBytes && bytes > maxBytes) || (textBytes && bytes > textBytes)) return false;
+      void queue({ words: words.trim(), named: carryMentions(source, named, words.trim()), preview: linkPreview.preview ?? undefined,
+        ...(keepsOriginal(source) && { translated: { to, original: source } }) });
+      return true;
+    });
+    return true;
+  };
+
+  const translateAgain = () => {
+    const state = drafting.state;
+    if (state && state.step !== "choose") guardThen(() => void drafting.translateInto(state.to, text, picker.compose(text)));
+  };
+  /**
+   * Enter (or Send) with the preview open: the translation shown goes; a stale one is translated again first, and
+   * nothing goes while it is made. Still asking which language, nothing is translated: the draft goes as typed.
+   */
+  const submitTranslated = () => {
+    const state = drafting.state;
+    if (state?.step === "choose") { void handleSubmit(); return; }
+    if (state?.step !== "shown") return;
+    if (translationStale(state, text)) translateAgain(); else void sendTranslation();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Keys an input method is using (Enter confirming a candidate, the arrows, Escape) are its own, not the composer's.
     if (composition.composing(e)) return;
@@ -363,6 +520,7 @@ export function MessageInput({
     // Whatever the composer has open over it closes first; then Escape lets go of the message being answered.
     const nothingOpen = !showPanel && !showMenu && !showPayment && !showIdentities;
     if (e.key === "Escape" && edit && nothingOpen) { e.preventDefault(); e.stopPropagation(); endEdit(); return; }
+    if (e.key === "Escape" && previewOpen && nothingOpen) { e.preventDefault(); e.stopPropagation(); drafting.close(); return; }
     if (e.key === "Escape" && reply && nothingOpen) { e.preventDefault(); e.stopPropagation(); reply.onCancel(); return; }
     if (e.key === "ArrowUp" && onEditLast && !edit && !text && nothingOpen && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault();
@@ -371,7 +529,7 @@ export function MessageInput({
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit();
+      if (previewOpen) submitTranslated(); else handleSubmit();
     }
   };
 
@@ -451,11 +609,29 @@ export function MessageInput({
     try {
       for (const file of fresh) {
         setPreparing((was) => [...was, file]);
-        const err = await onSendFile(file).finally(() => {
+        const done = () => {
           preparingKeys.current.delete(fileKey(file));
           if (mounted.current) setPreparing((was) => was.filter((other) => other !== file));
-        });
+        };
+        // A video the receiver may not play goes as H.264 MP4; Cancel while it converts sends neither it nor the rest.
+        let prepared: PreparedVideo = { file };
+        if (isConvertibleVideo(file)) {
+          const stopper = new AbortController();
+          conversion.current = stopper;
+          setConverting({ file });
+          try {
+            prepared = await prepareVideo(file, { signal: stopper.signal, onProgress: (progress) => { if (mounted.current && !stopper.signal.aborted) setConverting({ file, progress }); } });
+          } catch {
+            done();
+            return false;
+          } finally {
+            if (conversion.current === stopper) conversion.current = null;
+            if (mounted.current) setConverting(null);
+          }
+        }
+        const err = await onSendFile(prepared.file).finally(done);
         if (err) { showToast(err); return false; }
+        if (prepared.asIs) showToast(t("composer.videoSentAsIs", { name: file.name }));
       }
       return true;
     } finally {
@@ -660,6 +836,12 @@ export function MessageInput({
       onSelect: () => cameraByFileInput() ? cameraInputRef.current?.click() : setShowCamera(true) });
   }
 
+  // Translate (beside Send): in a chat with a language other than the app's, or a group with several, for a draft.
+  const canTranslate = !!translation && translateEnabled() && !edit && !recording && !!text.trim()
+    && (translation.language ? translation.language !== language : !!translation.languages?.some((code) => code !== language));
+  const sendsTranslated = canTranslate && translatesSend;
+  const translateLabel = translation?.language ? t("composer.translate.into", { language: languageName(translation.language, language) }) : t("composer.translate.button");
+
   const bytes = maxBytes || softBytes || textBytes ? new TextEncoder().encode(text.trim()).length : 0;
   const remaining = maxBytes ? maxBytes - bytes : textBytes ? textBytes - bytes : maxLength - text.length;
   const overSoft = !!softBytes && bytes > softBytes;
@@ -668,8 +850,17 @@ export function MessageInput({
 
   // With the sheet open the composer is behind its veil, outside the dialog: what it has to say is said on the sheet.
   const sheetOpen = !!attached && !locked;
+  // The card moves between the composer and the sheet, a new one: the pointer or the focus on the old one holds nothing.
+  useEffect(() => {
+    toastHeld.current = { pointer: false, focus: false };
+    if (toastRef.current) runToast();
+  }, [sheetOpen, runToast]);
   const toastBox = toast && (
-    <div className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg">
+    <div ref={toastRef} className="bg-[#3b2020] border border-danger/30 rounded-lg px-4 py-2.5 flex items-start gap-2 shadow-lg"
+      onPointerEnter={() => { toastHeld.current.pointer = true; runToast(); }}
+      onPointerLeave={() => { toastHeld.current.pointer = false; runToast(); }}
+      onFocus={() => { toastHeld.current.focus = true; runToast(); }}
+      onBlur={(e) => { if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return; toastHeld.current.focus = false; runToast(); }}>
       <svg
         width="16"
         height="16"
@@ -688,10 +879,7 @@ export function MessageInput({
       </span>
       <button
         type="button"
-        onClick={() => {
-          setToast(null);
-          if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        }}
+        onClick={hideToast}
         aria-label={t("common.close")}
         className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
       >
@@ -705,11 +893,24 @@ export function MessageInput({
       {t("composer.pasteReading")}
     </p>
   );
+  const convertingNow = converting && converting.file === preparing[0] ? converting : null;
   const preparingLine = preparing.length > 0 && !locked && (
-    <p role="status" data-testid="file-preparing" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
-      <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
-      <span className="min-w-0 truncate">{t("composer.filePreparing", { name: preparing[0]!.name })}</span>
-    </p>
+    <div className="flex items-center gap-3 animate-fade-in">
+      <p role="status" data-testid="file-preparing" className="m-0 flex min-w-0 items-center gap-2 text-[13px] text-text-secondary">
+        <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+        <span className="min-w-0 truncate">
+          {convertingNow?.progress !== undefined
+            ? t("composer.videoConverting", { name: preparing[0]!.name, percent: new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }).format(convertingNow.progress) })
+            : t("composer.filePreparing", { name: preparing[0]!.name })}
+        </span>
+      </p>
+      {convertingNow && (
+        <button type="button" data-testid="video-convert-cancel" onClick={() => conversion.current?.abort()}
+          className="shrink-0 cursor-pointer border-none bg-transparent p-0 text-[13px] font-medium text-accent hover:underline">
+          {t("common.cancel")}
+        </button>
+      )}
+    </div>
   );
 
   return (
@@ -723,6 +924,10 @@ export function MessageInput({
       )}
       {edit && <EditBar snippet={edit.snippet} onCancel={() => { endEdit(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {reply && !edit && <ReplyBar name={reply.name} snippet={reply.snippet} mine={reply.mine} member={reply.member} onCancel={() => { reply.onCancel(); textareaRef.current?.focus({ preventScroll: true }); }} />}
+      {previewOpen && <TranslatePreview state={drafting.state!} stale={translationStale(drafting.state, text)} disabled={disabled} onEdit={drafting.edit}
+        onChoose={(code) => guardThen(() => void drafting.translateInto(code, text, picker.compose(text)))} onAgain={translateAgain}
+        onSendTranslation={() => void sendTranslation()} onSendOriginal={() => void handleSubmit()}
+        onCancel={() => { drafting.close(); textareaRef.current?.focus({ preventScroll: true }); }} />}
       {linkPreview.draft && <LinkPreviewDraftCard draft={linkPreview.draft} onRemove={linkPreview.remove} />}
       <div className="composer-row flex items-end gap-2 relative">
         {/* One rounded field: the +, the emoji/GIF panel's smiley and the message. */}
@@ -776,6 +981,11 @@ export function MessageInput({
           </div>
         </div>
 
+        {canTranslate && (
+          <button type="button" data-testid="composer-translate" aria-label={translateLabel} title={translateLabel}
+            onMouseDown={(e) => e.preventDefault()} onClick={() => guardThen(() => drafting.start(text, picker.compose(text)))} disabled={disabled}
+            className="composer-icon-button self-center shrink-0"><TranslateIcon /></button>
+        )}
         {/* Send button; the mic while there is nothing to send, as in WhatsApp */}
         {onSendFile && canRecord && (recording || !text.trim()) ? (
           <VoiceRecorderButton
@@ -787,10 +997,10 @@ export function MessageInput({
             onActiveChange={(active) => { setRecording(active); if (active) closeAll(); onTyping?.(active, "recording"); }}
           />
         ) : <button
-          aria-label={t("composer.sendMessage")}
+          aria-label={sendsTranslated && translation?.language ? t("composer.translate.sendTranslated", { language: languageName(translation.language, language) }) : t("composer.sendMessage")}
           // The field keeps the focus: a tap on Send would take it (and on a phone close the keyboard) mid-conversation.
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => handleSubmit()}
+          onClick={() => previewOpen ? submitTranslated() : handleSubmit()}
           disabled={disabled || !text.trim()}
           className="composer-send w-11 h-11 max-md:w-12 max-md:h-12 flex items-center justify-center bg-accent rounded-full text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
         >
@@ -854,6 +1064,8 @@ export function MessageInput({
           onCancel={() => setSecret(null)} onConfirm={() => {
             setSecret(null);
             if (secret.caption !== undefined) void sendCaption(secret.caption, true);
+            else if (secret.translate) secret.translate();
+            else if (secret.translated) void sendTranslation(true);
             else void handleSubmit(true);
           }} />
       )}

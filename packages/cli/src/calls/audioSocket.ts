@@ -2,19 +2,19 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, join } from "node:path";
-import { privateFolder } from "../privateFolder";
+import { privateFolder, runtimePath } from "../privateFolder";
 import { bytesToMs, type CallRate } from "./pcm";
 
 /**
  * A call's audio socket (WISP 1100 § Calls): `<profile>/calls/<call>.sock`, 0600, in a folder only the owner may
- * open. When that path is too long for a Unix socket: `/tmp/ghostly-calls-<hash of the profile>/<call>.sock`, in a
- * folder of the owner's, 0700, checked as such before use. A named pipe on Windows.
+ * open. When that path is too long for a Unix socket: `ghostly-calls-<hash of the profile>/<call>.sock` in the user's
+ * runtime folder (`runtimePath`), a folder of the owner's, 0700, checked as such before use. A named pipe on Windows.
  */
 export function audioSocketPath(profileDir: string, callId: string): string {
   const inside = join(profileDir, "calls", `${callId}.sock`);
   if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-call-${createHash("sha256").update(inside).digest("hex").slice(0, 24)}`;
   if (Buffer.byteLength(inside) <= 100) return inside;
-  return join("/tmp", `ghostly-calls-${createHash("sha256").update(profileDir).digest("hex").slice(0, 24)}`, `${callId}.sock`);
+  return runtimePath("ghostly-calls", profileDir, `${callId}.sock`);
 }
 
 /**

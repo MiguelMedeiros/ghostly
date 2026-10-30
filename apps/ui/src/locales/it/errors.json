@@ -242,6 +242,7 @@
     "forkedMember": "Le modifiche al gruppo sono in pausa",
     "forkedNext": "L'admin deve ricreare il gruppo.",
     "full": "Un gruppo ha al massimo {{max}} membri",
+    "growMore": "{{count}} in più",
     "growNeedsUpdates": "Tutti devono aggiornare per superare {{max}}",
     "growNeedsUpdatesNext": "Non ancora aggiornati: {{names}}.",
     "hubSetting": "Questa impostazione degli hub non si può usare",

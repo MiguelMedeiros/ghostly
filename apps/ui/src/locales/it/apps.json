@@ -37,6 +37,7 @@
     "ask": "Chiedi a {{name}} un link",
     "contactCannot": "L'app di {{name}} non esegue ancora app",
     "installed": "Installata",
+    "join": "Entra",
     "label": "App: {{title}}",
     "needsOnline": "{{title}} vi serve entrambi online",
     "noLink": "Nessun link per installarla",
@@ -167,6 +168,7 @@
     "stoppedRemoved": "{{title}} è stata fermata: {{store}} ha rimosso questa versione",
     "stoppedRevoked": "{{title}} è stata fermata: il suo autore ha revocato questa versione",
     "with": "{{title}} con {{name}}",
-    "withName": "con {{name}}"
+    "withName": "con {{name}}",
+    "withSharing": "{{title}} · condivide un file con {{name}}"
   }
 }

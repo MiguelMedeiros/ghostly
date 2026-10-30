@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ENDPOINT, PaymentPreflightError, parseFedimintRequestPayload, validatePaymentTarget, type GhostLink, type PaymentReview } from "@ghostly/core";
+import { ENDPOINT, PaymentPreflightError, parseFedimintRequestPayload, randomBytes, validatePaymentTarget, type GhostLink, type PaymentReview } from "@ghostly/core";
 import { FedimintAdapter } from "../src/engine/paymentAdapters/fedimint";
 import { FedimintWallet, fedimintTiming, historyEntry, normalizeInvite } from "../src/engine/paymentAdapters/fedimintWallet";
 import { federationInfo } from "../src/engine/paymentAdapters/fedimintSdk";
@@ -360,6 +360,48 @@ describe("Fedimint in a chat", () => {
     expect(desk.payment("t0")).toMatchObject({ state: "failed" });
     expect(lines()).toEqual(["Could not receive Fedimint ecash: These notes were already redeemed"]);
     expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("t")).map((s) => s.frame.error)).toEqual(Array(5).fill("These notes were already redeemed"));
+  });
+
+  it("the same notes encoded otherwise (parts reordered or repeated, an unknown part, notes reordered, base32) are answered from what is known", async () => {
+    // OOBNotes as Fedimint encodes them: a list of parts (BigSize tag, length, bytes); Notes are tiers of amount, count, notes.
+    const big = (n: number) => n < 0xfd ? [n] : n <= 0xffff ? [0xfd, n >> 8, n & 0xff] : [0xfe, n >>> 24, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    const part = (tag: number, body: number[]) => [...big(tag), ...big(body.length), ...body];
+    const note = () => [...randomBytes(48), ...randomBytes(32)];
+    const [a, b, c, other] = [note(), note(), note(), note()];
+    const notesPart = (tiers: [number, number[][]][]) => part(0, [...big(tiers.length), ...tiers.flatMap(([msats, ns]) => [...big(msats), ...big(ns.length), ...ns.flat()])]);
+    const prefix = part(1, [...Buffer.from(federation.id.slice(0, 8), "hex")]);
+    const oob = (...parts: number[][]) => [...big(parts.length), ...parts.flat()];
+    const base64 = (bytes: number[]) => Buffer.from(bytes).toString("base64");
+    const base32 = (bytes: number[]) => { let out = "fedimint", buffer = 0, bits = 0; for (const byte of bytes) { buffer |= byte << bits; bits += 8; while (bits >= 5) { out += "0123456789abcdefghijklmnopqrstuv"[buffer & 31]; buffer >>>= 5; bits -= 5; } } return bits ? out + "0123456789abcdefghijklmnopqrstuv"[buffer & 31] : out; };
+    const ours = notesPart([[400_000, [a, b]], [800_000, [c]]]);
+    const original = oob(prefix, ours);
+    const notes = base64(original).replace(/\+/g, "-").replace(/\//g, "_");
+    const copies = [
+      oob(ours, prefix), oob(prefix, prefix, ours), oob(prefix, prefix, prefix, ours), oob(prefix, ours, part(9, [1, 2, 3])), oob(prefix, ours, part(77, [...randomBytes(300)])),
+      oob(prefix, notesPart([[400_000, [b, a]], [800_000, [c]]])), oob(prefix, ours, notesPart([[1_000, [other]]])),
+    ].map((bytes) => base64(bytes).replace(/\+/g, "-").replace(/\//g, "_")).concat(base64(oob(ours, prefix)), base32(original), base32(original).toUpperCase(), base32(oob(ours, prefix, prefix)));
+    expect(new Set([notes, ...copies]).size, "each copy is spelled otherwise").toBe(copies.length + 1);
+    // The federation reads every copy as the same notes: whichever is redeemed first, the others are spent.
+    const payer = await funded(3_000);
+    const { notes: spent } = await payer.spendNotes(federation.id, 1_200);
+    const entry = federation.notes.get(spent)!;
+    for (const text of [notes, ...copies]) federation.notes.set(text.replace(/\+/g, "-").replace(/\//g, "_"), entry);
+    const bobClient = await (await fake.sdk()()).join({ database: "ghostly-fedimint-bob4.db", mnemonic: "bob", invite: federation.invite, recover: false });
+    const redeems = vi.fn();
+    const bobWallet = { inspectNotes: async (n: string) => ({ federation: federation.id, amountMsats: (await bobClient.parseNotes(n)).amountMsats }),
+      redeemNotes: async (_f: string, n: string, g: string) => { redeems(); const op = await bobClient.redeem(n, g); return { operationId: op, state: await bobClient.redeemState(op, 0) }; },
+      redeemState: (_f: string, op: string) => bobClient.redeemState(op, 0), federation: () => ({ network: "regtest" }), requestFederations: () => [federation.id] } as unknown as FedimintWallet;
+    const { desk, sent, host } = chat(bobWallet);
+    const pay = (id: string, timestamp: number, text: string) => desk.onPayment("l", { id, timestamp, amount: { value: "1200", asset: "sat" }, endpoint: [ENDPOINT.fedimint, text] });
+    const lines = () => (host.storeMessage.mock.calls as unknown as [{ text: string }][]).map(([m]) => m.text);
+
+    await pay("p0", 1, notes);
+    expect(desk.payment("p0")).toMatchObject({ state: "settled" });
+    for (const [i, copy] of copies.entries()) await pay(`c${i}`, 10 + i, copy);
+    expect(redeems).toHaveBeenCalledTimes(1);
+    expect(lines()).toEqual(["⚡ 1,200 test sats on Fedimint"]);
+    expect(copies.map((_, i) => desk.payment(`c${i}`)), "no record per copy").toEqual(copies.map(() => undefined));
+    expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("c")).map((s) => s.frame.error)).toEqual(copies.map(() => "These notes were already received"));
   });
 
   it("received notes carry their federation's network: test sats are never a Mainnet payment, and older records learn it", async () => {

@@ -465,6 +465,47 @@ describe("apps on a paired session (apps/1)", () => {
     expect(await a.link.sendMessage("hello")).toBeNull();
   });
 
+  // A link of 8 Mbit/s and 40 ms each way whose transport holds what it sends in flight, as UDX and SCTP do: the
+  // channel's `bufferedAmount` stays at 0. Before, an app sending 32 KiB 48 times a second filled the queue under it,
+  // and each chat text waited 0.5-2.3 s behind the app's data.
+  it("keeps the chat's texts near the link's own delay while an app sends faster than the link carries", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    try {
+      const { a, b, app } = pair();
+      await live(a, b);
+      await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps).toBe(true));
+      a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
+      await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
+      const channel = (a.link as unknown as { channel: FrameChannel & { peer: { receive(data: string): void } } }).channel;
+      const rate = 1_000_000, delay = 40;
+      let free = 0, appBytes = 0;
+      const waits: number[] = [];
+      channel.send = (data) => {
+        if (typeof data !== "string") throw new Error("Text only");
+        const now = Date.now();
+        free = Math.max(now, free) + data.length / rate * 1000;
+        if (data.includes(`"t":"${APP_FRAME}"`) && data.includes('"d":')) appBytes += data.length;
+        setTimeout(() => {
+          if (data.includes('"m":"hello')) waits.push(Date.now() - now);
+          channel.peer.receive(data);
+        }, free + delay - now);
+      };
+      const tick = 20, texts = 8;
+      for (let t = 0; t < 10_000; t += tick) {
+        a.link.sendAppData(app, jsonOf(APP_DATA_MAX_BYTES));
+        if (t >= 2_000 && t % 1_000 === 0) void a.link.sendMessage(`hello ${t}`).catch(() => {});
+        await vi.advanceTimersByTimeAsync(tick);
+      }
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(waits).toHaveLength(texts);
+      expect(Math.max(...waits)).toBeLessThan(300);
+      // The app still gets most of the link.
+      expect(appBytes).toBeGreaterThan(10 * rate * 0.5);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("gives an app's data its own quarter above what a file going in the chat holds", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {

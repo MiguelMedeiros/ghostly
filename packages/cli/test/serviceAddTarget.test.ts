@@ -11,7 +11,7 @@ import type { ApiContext } from "../src/apiKit";
  */
 const added: string[] = [];
 /** The engine's addService checks the target as the real one does (browser platform/services.ts). */
-const ctx = { runtime: { server: { node: { addService: async ({ target }: { target: string }) => { parseLocalTarget(target); added.push(target); return { serviceId: "w" }; } } } } } as unknown as ApiContext;
+const ctx = { runtime: { server: { node: { addService: ({ target }: { target: string }) => { parseLocalTarget(target); added.push(target); return { serviceId: "w" }; } } } } } as unknown as ApiContext;
 const add = async (target: string) => {
   try { await SERVICE_METHODS["service.add"](ctx, { name: "w", target }); return "ok"; } catch (error) { const e = asCliError(error); return `${e.code}: ${e.message}`; }
 };

@@ -9,7 +9,7 @@ import { strangerInvoice } from "../support/bolt11";
 import { callTrace, linkTrace, watchCalls, watchLink } from "../support/callTrace";
 import { setClipboard } from "../support/clipboard";
 import { startTestDomain, type TestDomain } from "../support/domain";
-import { delivered, GIF, type WalletKind } from "../support/fixtures";
+import { delivered, GIF, headerControl, phoneHeader, type WalletKind } from "../support/fixtures";
 import { mockMainnetMints } from "../support/mint";
 import { closeIdentities, openIdentities, shareIdentity, theirCards, theirFace } from "../support/identities";
 import { injectNostrSigner } from "../support/nostrSigner";
@@ -477,7 +477,9 @@ export const identity: Block = {
     await shareIdentity(a, undefined, { timeout: 90_000 });
     await closeIdentities(a);
     await openChat(b);
-    await expect(b.page.getByTestId("chat-identity-badge").first()).toBeVisible({ timeout: 60_000 });
+    // The contact's marks in the header; on an upright phone a row of ⋮ instead, which counts them (no marks there).
+    if (await phoneHeader(b.page)) await expect(await headerControl(b.page, "chat-identity-badges")).not.toHaveAttribute("data-count", "0", { timeout: 60_000 });
+    else await expect(b.page.getByTestId("chat-identity-badge").first()).toBeVisible({ timeout: 60_000 });
     await openIdentities(b);
     const received = theirCards(b);
     await expect(received).toHaveCount(1);

@@ -77,6 +77,12 @@ const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 const BLANK = /[\u034F\u115F\u1160\u2800\u3164\uFFA0]/gu;
 
 /**
+ * A run of whitespace, with the marks that sit on it: a mark that draws nothing (a variation selector, a Mongolian or
+ * Khmer one) between two spaces must not keep them apart, or " \uFE0F" repeated is a blank run again.
+ */
+const SPACE_RUN = /(?:\s\p{M}*)+/gu;
+
+/**
  * Names Windows keeps for devices, whatever the case, with any extension, and with spaces before the dot:
  * "CON", "nul.txt", "COM1 .log" open a device there, not a file.
  */
@@ -95,7 +101,7 @@ function shorten(name: string): string {
 
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
-  const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "").replace(/\s+/gu, " ");
+  const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "").replace(SPACE_RUN, " ");
   // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
   const clean = shorten(visible.replace(/^[\s.]+/, "").trim());
   if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean);
