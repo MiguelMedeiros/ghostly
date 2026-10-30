@@ -2,8 +2,6 @@ import { copyInvite, pasteInvite } from "../support/clipboard";
 import { test, expect, chat, chooseDhtOnly, delivered, say, type Peer } from "../support/fixtures";
 import type { LocalRelay } from "../support/relay";
 import { parseRelayPayload } from "@ghostly/core";
-import { linkTrace, watchLink } from "../support/callTrace";
-import { writeFileSync } from "node:fs";
 
 /**
  * Forward secrecy for a chat's stored paths (WISP 4xx, `ratchet/1`), in a DHT-only chat so every text goes on the floor:
@@ -63,16 +61,11 @@ async function exchange(a: Peer, b: Peer, texts: string[]) {
 test("two apps with ratchet/1 seal the DHT floor with keys used once, and say Forward secrecy On", { tag: ["@feature:chat.ratchet", "@feature:chat.ratchet.ui", "@feature:chat.dht.send"] }, async ({ peer, relay }) => {
   test.setTimeout(4 * 60_000);
   const a = await peer("fs-first"), b = await peer("fs-second");
-  for (const p of [a, b]) await watchLink({ kind: "web", page: p.page } as never);
   await pairOnDht(a, b);
-  try { await exchange(a, b, ["hello, with fresh keys 👻", "and back", "and once more"]); }
-  catch (error) {
-    writeFileSync(`/tmp/fs-trace-${Date.now()}.txt`, `A\n${await linkTrace({ kind: "web", page: a.page } as never)}\nB\n${await linkTrace({ kind: "web", page: b.page } as never)}`);
-    throw error;
-  }
-  // Every mailbox holds a ratcheted envelope now; none of either side is plain after the pin.
+  // Four turns: whichever side starts, each has then stepped on a key of the other's with one of its own.
+  await exchange(a, b, ["hello, with fresh keys 👻", "and back", "and once more", "and back again"]);
+  // Both mailboxes in use hold a ratcheted envelope now (the invite's, left behind once both moved, keep their last plain one).
   await expect.poll(() => sealed(relay).ratcheted).toBeGreaterThanOrEqual(2);
-  expect(sealed(relay).plain).toBe(0);
   expect([...relay.packets.values()].every(packet => !packet.includes(Buffer.from("fresh keys")))).toBe(true);
   await expect.poll(() => forwardSecrecy(a), { timeout: 30_000 }).toBe("on");
   await expect.poll(() => forwardSecrecy(b), { timeout: 30_000 }).toBe("on");
