@@ -13,12 +13,22 @@ function linesOnScreen() {
 }
 
 /**
+ * The page has run: on a touch screen or a narrow window the chapters have taken their own shape (no film steps
+ * left from the server's page, stage.tsx). A slow runner can take seconds past `load` for it; lines read before it
+ * are the server's page, not the one the reader reads.
+ */
+function shaped() {
+  return !matchMedia("(pointer: coarse), (max-width: 860px)").matches || !document.querySelector(".scene-steps");
+}
+
+/**
  * A reader scrolls the home to `at` (a fraction of the way down), reloads it, and finds the lines they were reading
  * on screen once the reloaded page has settled. `sameOffset`: the page is the server's (a wide window with a
  * mouse), where the offset is the place, to the frame of a scroll-driven film.
  */
 export async function reloadKeepsLines(page: Page, at: number, sameOffset = false) {
   await page.goto("/", { waitUntil: "load" });
+  await page.waitForFunction(shaped);
   await page.waitForTimeout(1500);
   // A real wheel at the end, so the page knows a reader is here (html.landed), as it would.
   await page.mouse.move(200, 200);
@@ -36,7 +46,11 @@ export async function reloadKeepsLines(page: Page, at: number, sameOffset = fals
   const y = await page.evaluate(() => scrollY);
 
   await page.reload({ waitUntil: "load" });
-  await page.waitForTimeout(3000);
+  // Settled: in its shape, and done taking the reader back (KeepPlace holds the place while the page settles, then
+  // lets go); the page then stays where it is.
+  await page.waitForFunction(shaped);
+  await page.waitForFunction(() => !document.documentElement.dataset.landing);
+  await page.waitForTimeout(500);
   const after = await page.evaluate(linesOnScreen);
   const kept = before.filter((line) => after.includes(line));
   expect(kept, `before: ${before.join(" / ")}\nafter: ${after.join(" / ")}`).toEqual(before);
