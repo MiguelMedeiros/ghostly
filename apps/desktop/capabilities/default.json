@@ -18,6 +18,7 @@
     "notification:allow-notify",
     "allow-app-close",
     "allow-app-focus",
+    "allow-app-focused",
     "allow-app-open",
     "allow-app-post",
     "allow-app-title",

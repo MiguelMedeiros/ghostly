@@ -6,6 +6,7 @@ const COMMANDS: &[&str] = &[
     "app_broker",
     "app_close",
     "app_focus",
+    "app_focused",
     "app_open",
     "app_post",
     "app_title",

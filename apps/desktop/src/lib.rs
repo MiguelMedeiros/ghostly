@@ -118,6 +118,7 @@ macro_rules! commands {
             app_sandbox::app_broker,
             app_sandbox::app_close,
             app_sandbox::app_focus,
+            app_sandbox::app_focused,
             app_sandbox::app_open,
             app_sandbox::app_post,
             app_sandbox::app_title,
@@ -860,6 +861,7 @@ mod tests {
             "app_open",
             "app_post",
             "app_focus",
+            "app_focused",
             "app_title",
             "app_close",
         ] {
