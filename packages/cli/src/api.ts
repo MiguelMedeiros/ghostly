@@ -921,7 +921,7 @@ function history(messages: StoredMessage[], params: Params): { messages: StoredM
   return { messages: page, more };
 }
 
-export { findChat, findGroup } from "./apiKit";
+export { findChat, findGroup, startNamedChats } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
