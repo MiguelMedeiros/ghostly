@@ -160,3 +160,66 @@ it("a start that goes offline between slices starts no more links", async () => 
   expect(built.length).toBeLessThan(40);
   expect(live.filter((l) => l.link)).toHaveLength(0);
 }, 30000);
+
+/** A private group's edge to one of its members, stored under an id that sorts before every chat's. */
+function edge(i: number): StoredLink {
+  return { ...chat(i, 0), id: `a-edge-${String(i).padStart(2, "0")}`, group: "group-1", groupPeer: createIdentity().pubKeyZ32, transportHistory: [] };
+}
+
+/** 10 saved chats and 30 group edges, and the links started from here on, in the order they started. */
+async function chatsAndEdges(online: boolean): Promise<string[]> {
+  await db.putSettings({ online, nick: "", relays: [], iceServers: [{ urls: "turn:turn.example:3478", username: "u", credential: "c" }], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  for (const stored of await db.getLinks()) await db.deleteLink(stored.id);
+  for (let i = 0; i < 30; i++) await db.putLink(edge(i));
+  for (let i = 0; i < 10; i++) await db.putLink(chat(i, 1000 + i));
+  const started: string[] = [];
+  // Only the order is looked at: an edge of a group this test never stored builds nothing.
+  vi.spyOn(GhostlyNode.prototype as unknown as { startLink(id: string): void }, "startLink").mockImplementation((id) => { started.push(id); });
+  return started;
+}
+
+/** The chats first, most recently live first, then the edges: the chat about to be opened waits for none of them. */
+const chatsFirst = ["chat-09", "chat-08", "chat-07", "chat-06", "chat-05", "chat-04", "chat-03", "chat-02", "chat-01", "chat-00"];
+
+/**
+ * Leaving limited mode, the network back on and "Hide my IP" switched started the links in the engine's order, every
+ * private group's edge before any chat: with 10 mesh groups of 32, the newest chat started after 310 edges.
+ */
+it("a start puts the chats before the group edges stored ahead of them", async () => {
+  const started = await chatsAndEdges(true);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {} });
+  await node.start();
+  expect(started.slice(0, 10)).toEqual(chatsFirst);
+  expect(started).toHaveLength(40);
+}, 30000);
+
+it("leaving limited mode puts the chats before the group edges", async () => {
+  const started = await chatsAndEdges(true);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {}, limited: true });
+  await node.start();
+  started.length = 0;
+  await node.leaveLimited();
+  expect(started.slice(0, 10)).toEqual(chatsFirst);
+  expect(started).toHaveLength(40);
+}, 30000);
+
+it("the network turned on puts the chats before the group edges", async () => {
+  const started = await chatsAndEdges(false);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {} });
+  await node.start();
+  expect(started).toEqual([]);
+  await node.updateSettings({ settings: { online: true } });
+  expect(started.slice(0, 10)).toEqual(chatsFirst);
+  expect(started).toHaveLength(40);
+}, 30000);
+
+it("\"Hide my IP\" switched starts the chats again before the group edges", async () => {
+  const started = await chatsAndEdges(true);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {} });
+  await node.start();
+  started.length = 0;
+  await node.updateSettings({ settings: { relayOnly: true } });
+  expect(started.slice(0, 10)).toEqual(chatsFirst);
+  expect(started).toHaveLength(40);
+}, 30000);

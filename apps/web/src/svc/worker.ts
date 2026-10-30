@@ -1,21 +1,22 @@
 /**
  * The services worker: registered by the bridge (`bridge.ts`) on one contact's app origin, never on the app's own
  * (`isServiceHostname`). Every request that origin's pages make, but the bridge's own files, is handed to the bridge
- * page with a port of its own, and answered with what comes back on it: the contact's answer, streamed. Built on its
+ * page with a port of its own, and answered with what comes back on it: the contact's answer, streamed. A navigation
+ * goes only when it is a frame's this origin started (`startedHere`): at the top, the app says it opens inside Ghostly. Built on its
  * own into `/ghostly-services-sw.js` (apps/web/svcBuild.ts). It keeps nothing: no cache, no storage.
  */
-import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
+import { BRIDGE_DIR, BRIDGE_PAGE, WORKER_SCRIPT, HEAD_TIMEOUT_MS, MAX_REQUEST_BYTES, NULL_BODY, answerStatus, fromView, isServiceHostname, parseServicesHost, type ServiceReply, type ServiceRequestMessage } from "./protocol";
 
 declare const __SERVICES_HOST__: string;
 declare const __SERVICES_APP_ORIGIN__: string;
 
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
-interface FetchEvent extends ExtendableEvent { request: Request; respondWith(response: Promise<Response> | Response): void }
-interface WindowClient { url: string; frameType?: string; postMessage(message: unknown, transfer: Transferable[]): void }
+interface FetchEvent extends ExtendableEvent { request: Request; clientId: string; respondWith(response: Promise<Response> | Response): void }
+interface WindowClient { id: string; url: string; type?: string; frameType?: string; postMessage(message: unknown, transfer: Transferable[]): void }
 interface WorkerScope {
   location: Location;
   skipWaiting(): Promise<void>;
-  clients: { claim(): Promise<void>; matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<WindowClient[]> };
+  clients: { claim(): Promise<void>; get(id: string): Promise<WindowClient | undefined>; matchAll(options: { type: "window"; includeUncontrolled: boolean }): Promise<WindowClient[]> };
   addEventListener(type: "install" | "activate", listener: (event: ExtendableEvent) => void): void;
   addEventListener(type: "fetch", listener: (event: FetchEvent) => void): void;
 }
@@ -46,11 +47,23 @@ function plain(status: number, text: string): Response {
   return new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "content-security-policy": frameAncestors() } });
 }
 
-/** The bridge page open on this origin: the one way to the app, and so to the contact. */
-async function bridge(): Promise<WindowClient | undefined> {
-  const all = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
+/** The bridge page open on this origin, among its pages: the one way to the app, and so to the contact. */
+function bridge(all: WindowClient[]): WindowClient | undefined {
   // Framed, as the app frames it: a bridge page opened on its own (by another site, say) has no way to the app.
   return all.find((client) => { try { return client.frameType === "nested" && new URL(client.url).pathname === BRIDGE_PAGE; } catch { return false; } });
+}
+
+/**
+ * Whether this origin started a navigation: a frame's (the bridge's first, a link in the app), with this origin's
+ * referrer or, with none, from one of its own pages. Another site may navigate a window or a frame of its own here;
+ * where this worker is in its partition (a services host on the app's own site), that would reach the contact as this
+ * person, with the page's cookies.
+ */
+function startedHere(event: FetchEvent, all: WindowClient[]): boolean {
+  const { destination, referrer } = event.request;
+  if (destination !== "iframe" && destination !== "frame") return false;
+  if (referrer) { try { return new URL(referrer).origin === worker.location.origin; } catch { return false; } }
+  return !!event.clientId && all.some((client) => client.id === event.clientId);
 }
 
 /** The request body, read up to the data link's limit: null past it. */
@@ -76,8 +89,11 @@ async function readBody(request: Request): Promise<ArrayBuffer | null | "too-lar
  * The contact's answer to one request. Headers the page's browser set go as they are (the engine drops the ones a
  * proxy must not pass on); cookies are the app's to keep, by the bridge's jar, as a worker never sees them.
  */
-async function forward(request: Request): Promise<Response> {
-  const to = await bridge();
+async function forward(event: FetchEvent): Promise<Response> {
+  const request = event.request;
+  const all = await worker.clients.matchAll({ type: "window", includeUncontrolled: true });
+  if (request.mode === "navigate" && !startedHere(event, all)) return plain(403, "This app opens only inside Ghostly.");
+  const to = bridge(all);
   if (!to) return plain(503, "This app is open only while Ghostly shows it.");
   const body = await readBody(request);
   if (body === "too-large") return plain(413, "The request body is too large.");
@@ -134,5 +150,11 @@ worker.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   // The bridge's own files come from the server; another origin is not this app's.
   if (url.origin !== worker.location.origin || url.pathname.startsWith(BRIDGE_DIR) || url.pathname === WORKER_SCRIPT) return;
-  event.respondWith(forward(event.request).catch(() => plain(502, "The request failed.")));
+  const answer = async () => {
+    // A tab of its own on this origin (a window the app opened, a link from elsewhere) outlives the view: refused.
+    const client = event.clientId ? await worker.clients.get(event.clientId) : undefined;
+    if (!fromView(event.request, client)) return plain(403, "This app opens only inside Ghostly.");
+    return forward(event);
+  };
+  event.respondWith(answer().catch(() => plain(502, "The request failed.")));
 });

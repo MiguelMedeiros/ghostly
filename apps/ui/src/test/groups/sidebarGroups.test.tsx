@@ -100,6 +100,17 @@ describe("Sidebar: groups in the chat list", () => {
     expect(within(row()).queryByTestId("group-decline")).not.toBeInTheDocument();
   });
 
+  it.each([["a private group", "mesh" as const], ["a community", "community" as const]])("a link nobody answered for an hour (%s) says so, with Try again and no Accept or Decline", async (_, profile) => {
+    const { user, engine } = sidebar([{ ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked", unanswered: true }), profile }]);
+    engine.on("acceptGroupInvitation", () => undefined);
+    expect(row()).toHaveTextContent("The link did not answer");
+    expect(within(row()).queryByTestId("group-accept")).not.toBeInTheDocument();
+    expect(within(row()).queryByTestId("group-decline")).not.toBeInTheDocument();
+    await user.click(within(row()).getByTestId("group-link-retry"));
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+  });
+
   it("offers the answer again for an accept the inviter's app never answered", async () => {
     const { user, engine } = sidebar([invitation({ accepted: true, unanswered: true })]);
     expect(row()).toHaveTextContent("No answer from the inviter's app. Accept again, or decline.");

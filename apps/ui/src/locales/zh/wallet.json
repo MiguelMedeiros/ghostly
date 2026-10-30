@@ -59,6 +59,7 @@
     },
     "label": "需要备份",
     "later": "稍后",
+    "line": "备份你的 {{wallet}} 钱包",
     "title": "{{wallet}} 中有真钱"
   },
   "bark": {
@@ -765,6 +766,8 @@
     "send": "发送"
   },
   "unseen": {
+    "lineReal": "{{wallet}} 中有 {{amount}} 新 sats",
+    "lineTest": "{{wallet}} 中有 {{amount}} 新测试 sats",
     "real": "{{place}}，新到 {{amount}} sats",
     "test": "{{place}}，新到 {{amount}} 测试 sats"
   },

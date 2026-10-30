@@ -39,6 +39,7 @@
     "continue": "Continue",
     "continueIn": "Continue in the {{provider}} window…",
     "continueWith": "Continue with {{provider}}",
+    "copyError": "Could not copy. Select the text above and copy it yourself.",
     "dayOne": "1 day",
     "days": "{{count}} days",
     "experimental": "Experimental: not yet tested with every tool.",

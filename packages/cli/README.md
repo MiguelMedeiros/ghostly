@@ -110,23 +110,23 @@ The rows are in alphabetical order of their first command, and every command of 
 | `call hangup [<chat\|call>]`, `call list`, `call flush [<chat\|call>]` | Hang up (or decline); calls on now; drop the audio queued and not played yet |
 | `call pipe [<chat\|call>]` | A call's audio on stdin and stdout, for shell pipelines (sox, ffmpeg) |
 | `call start <chat> [--rate 48000]`, `call answer [<chat\|call>] [--rate n]` | Voice calls (daemon): the result names the call's audio socket ([Calls](#calls)) |
-| `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
+| `chat accept <chat> [<method> [--off] [--networks mainnet,testnet]]` | Which ways of paying the chat takes (no method: the ones it takes now, per network) |
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
-| `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
+| `chat history <chat> [--limit n] [--before x] [--after x] [--translate lang]` | Messages, oldest first; `x` is a message id or a time in ms ([Translation](#translation)) |
 | `chat list [--show-secret]`, `chat show <chat> [--show-secret]` | Chats, and one chat's connection: transports, last attempt, comparison code. A pending chat's `invite` prints as `<hidden>` without `--show-secret` |
-| `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact |
+| `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact. A contact that offers no way of paying is `refused`: `details.reason` `contact_no_wallet` (it has no wallet yet) or `contact_payments_off` (it has payments off in this chat, or an older app) |
 | `chat rename <chat> <name>`, `chat remove <chat> --yes` | Name it here; delete it (keys and history) here |
-| `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
+| `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request. Refused as `chat pay` is when the contact offers no way of paying |
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact. Live means a session that exists now, in this run of the daemon: a chat that was live before a restart counts once its contact answers again |
 | `daemon [--detach] [--timeout s]`, `daemon status [--timeout s]`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret] [--yes] [--force]`, `engine --list [--verbose]` | Any call of the app's engine; `--verbose` lists what each takes (`{ linkId, label }`, `?` for an optional key). A call given less than it takes is refused as `bad_request`. One that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`) needs `--yes`; `clearProfileData` answers what it removed and stops a daemon. One that sends a text that looks like a secret (`sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`) needs `--force` |
-| `events [--since seq]` | What the event journal holds, without following |
+| `events [--since seq] [--translate lang]` | What the event journal holds, without following ([Translation](#translation)) |
 | `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
-| `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk: to `--path`, or into `--dir` under the name its sender gave it, with a `_` first when that name starts with `-`, so no tool run in the folder takes it for an option (the answer's `path` is what was written). Never over a file without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first |
+| `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk: to `--path`, or into `--dir` under the name its sender gave it, with a `_` first when that name starts with `-`, so no tool run in the folder takes it for an option; a voice message goes in under the name Ghostly makes for it (`Ghostly voice <date time>`), and when that name is taken (two of one second) under a free `… (2)` (the answer's `path` is what was written). Never over a file without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first |
 | `file send <chat\|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does. Answers the message's `messageId` (what `message delete`, `react` and `pin` take) and the file's id. To a group (`group:<id>` when a chat has the same name), up to 100 MiB: every member sees it at once and each member's app fetches it from a member who has it (WISP 503) |
 | `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
 | `forward <chat\|group> <message>… --to <chat\|group>… [--force] [--wait none\|sent] [--timeout s]` | Forward messages to up to 5 chats and groups (`--to` again for each; `group:<id>` names a group when a chat has the same name; an id that starts with a dash is taken as it is, `--to -Ab…` or `--to=-Ab…`). Each is a new message of yours that says it was forwarded (`forwarded`, the hop count) and nothing of who wrote it. Files go from the bytes this profile holds, never fetched again; a group takes texts only. A text that looks like a seed, a key or ecash needs `--force`. Answers `{from, results: [{to, kind, messageIds, error}]}`; any refusal fails the command (exit 1) with the results in `details`. `--wait sent`: each text on its way (a group's taken by an edge), each file's transfer done |
@@ -148,12 +148,12 @@ The rows are in alphabetical order of their first command, and every command of 
 | `invite create [--label <name>]` | A new chat's `ghostly1…` invite and its link |
 | `invite join [<invite-or-link> \| -] [--label <name>]` | Join a chat (your own invite is refused). The invite comes from stdin when none is given or `-`, out of `ps` and the shell's history; on the command line the CLI warns |
 | `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
-| `listen [--since seq] [--cursor file] [--type t]… [--turns] [--from <chat\|key>]… [--group <group>]… [--exec cmd] [--webhook url] [--print]` | The event stream; `--from` and `--group` an allowlist, `--turns` one `agent.turn` per message to answer ([Events](#events)) |
-| `message delete <chat\|group> <message> --everyone` | Deletes a message of yours for everyone (a text, a card, a file or a voice message; never a payment): it goes from this device at once and from every member's as the message's last edit, once they are back if they are away. An app from before this shows "🗑 Message removed" in its place. Without `--everyone`, only this device forgets it |
+| `listen [--since seq] [--cursor file] [--type t]… [--turns] [--from <chat\|key>]… [--group <group>]… [--exec cmd] [--webhook url] [--print] [--translate lang]` | The event stream; `--from` and `--group` an allowlist, `--turns` one `agent.turn` per message to answer, `--translate` a translation of received messages ([Events](#events), [Translation](#translation)) |
+| `message delete <chat\|group> <message> --everyone` | Deletes a message of yours for everyone (a text, a card, a file or a voice message; never a payment): it goes from this device at once and from every member's as the message's last edit, once they are back if they are away. An app from before this shows "🗑 Message removed" in its place. Without `--everyone`, only this device forgets it. Answers the chat or group, the message's `messageId` and `everyone` (`deleted` says the same id, kept for callers that read it) |
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
-| `pin <chat\|group> <message> \| --remove` | Pin a message at the top of a chat or group, for everyone in it: one per chat, a new pin replaces it; `pin <chat\|group> --remove` unpins (it names no message). In a community only the admin pins. A 1:1 pin reaches the contact on the next live session; the other side hears `chat.pinned` or `group.pinned` |
+| `pin <chat\|group> <message> \| --remove` | Pin a message at the top of a chat or group, for everyone in it: one per chat, a new pin replaces it; `pin <chat\|group> --remove` unpins (it names no message). In a community only the admin pins. A 1:1 pin reaches the contact on the next live session; the other side hears `chat.pinned` or `group.pinned`. `chat show`, `group show` and `group list` say what is pinned now: `pin: {messageId, ref, by, at}` (`messageId` null when the message is not here), or `pin: null` |
 | `profile backup --out <file>`, `profile restore <file> <new profile>` | A backup (WISP 05 envelope, written and read a piece at a time), encrypted with the passphrase from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE`. `--no-passphrase` makes one that is not encrypted: the file then holds the profile's keys and wallet secrets in the clear. Neither given, nothing is made. `--light` leaves out files over 1 MB (voice messages over 4 MB): their messages stay, and the restored copy says each one is not in this backup |
 | `profile create <name> [--use] [--name <shown>]`, `profile list`, `profile use <name>` | Profiles |
 | `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
@@ -162,12 +162,12 @@ The rows are in alphabetical order of their first command, and every command of 
 | `routine send <chat\|group> --name <name> --schedule "every day 01:00" [--cron "0 1 * * *"] [--state active\|paused] [--next <time>] [--run ok\|failed\|skipped[:summary]] [--link url]… [--id id] [--json json\|-\|file] [--force]`, `routine update <chat\|group> <routine> [fields…]` | A routine card for something a bot runs on a schedule (WISP 405 · Status Cards): its name, schedule (and cron line, shown only), state, last run and result, next run and up to 10 recent runs. `--run` records a run now as the last one; `--next` takes milliseconds or a date. Updates merge and are paced as `task update`'s. The app shows it, and runs nothing |
 | `saved add\|remove <chat\|group> <message>`, `saved list` | Saved messages: mark a message of a chat or a group to find it again, kept for this profile on this device and never sent (the app shows the same list in its Saved view). `saved list` gives them the last saved first, each as it is now (an edit shows its latest text) with its `chat` or `group` and `savedAt`; a deleted message drops out |
 | `send <chat> [text…] [--reply <message>] [--button id:Label]… [--style id=primary\|neutral\|danger]… [--once] [--id id] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat. `--button yes:Yes` (1 to 6; the id ends at the first colon; no two labels alike ignoring case and spaces, and no label that is another button's id, else exit 2) puts buttons under the text, which is the question and what older apps show, so say how to answer in words. `--once`: one answer a person. A question that goes on the DHT floor or into a hold (the contact's app closed) reaches them as text alone; the engine sends its buttons again once the chat is live, as an edit of the buttons alone (no `message.edited` for it). The answer adds `buttons` (the question's id, `ask-…` unless `--id`), `card`, and `pressable`: whether the contact's app shows buttons (null until it says). A press comes back as `button.pressed` ([Events](#events)) |
-| `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact |
+| `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact. `service add` answers the new one as `service` (the id the others take); its old key `serviceId` stays beside it for one release |
 | `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon). `url` is a link for your browser, `http://<random>.localhost:<port>/.ghostly-open/<token>`: it sets the service's cookie and shows the app on a host name of its own; any other host name, or a request without that cookie, gets 404. Chrome, Edge and curl reach `*.localhost` names by themselves; Safari and Node's `fetch` on macOS may not (add the name to `/etc/hosts` for them) |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
 | `store sign <index> --key <file> [--out <dir>]` | Sign a store index (WISP 1200 · Stores) with the store key file (kept offline; made when missing, the index names no `key` and no signed index is in the output folder): writes `ghostly-store.json`, canonical, and `ghostly-store.sig` beside the index or in `--out`. Refused, with the reason, when a client would refuse the index (`expires` more than 90 days ahead, a bad field), or when the index already there has a higher `sequence` (`rollback`), the same one with other content (`equivocation`), or is signed by another key (`store-key`: another store is another `--out`) |
-| `task send <chat\|group> --title <title> [--status s] [--progress n \| --steps a/b] [--step "…"] [--item state:text]… [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]… [--parent task] [--link url]… [--id id] [--json json\|-\|file] [--force]`, `task update <chat\|group> <task> [fields…]` | A task card for a bot's work (WISP 405 · Status Cards): a title, a status (queued, running, blocked, done, failed, cancelled), progress, the step it is on, up to 20 steps or log lines (`--item done:Codec`; a lowercase word before the colon must be an item state: pending, running, done, failed or skipped) and its pull request, shown as a small card that apps without cards read as text. Optional, and ignored by apps from before them: where the pull request stands (`--pr-state draft`, `open`, `merged` or `closed`; an open one puts the task in the board's Review column) and its checks (`--pr-checks passing`, `failing` or `pending`), up to 3 tags of 24 characters (`--tag core --tag web`; an update's tags replace the card's), and `--parent <task>`, a task of yours in the same chat that this one is a part of (sent first; its parts stack under it on the board). `send` prints the task's id and message; `update` merges the fields given over the card (an update's `--item` list replaces the card's: give all of them) and edits its message, at most once per 2.5 s (sooner updates merge into the next). `--json` takes the whole card; `null` in it removes a field. Only the CLI sends cards: the app shows them |
+| `task send <chat\|group> --title <title> [--status s] [--progress n \| --steps a/b] [--step "…"] [--item state:text]… [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]… [--parent task] [--link url]… [--id id] [--json json\|-\|file] [--force]`, `task update <chat\|group> <task> [fields…]` | A task card for a bot's work (WISP 405 · Status Cards): a title, a status (queued, running, blocked, done, failed, cancelled), progress, the step it is on, up to 20 steps or log lines (`--item done:Codec`; the card holds at most 8 KiB in all, so 20 long items of non-Latin text are past it; a lowercase word before the colon must be an item state: pending, running, done, failed or skipped) and its pull request, shown as a small card that apps without cards read as text. Optional, and ignored by apps from before them: where the pull request stands (`--pr-state draft`, `open`, `merged` or `closed`; an open one puts the task in the board's Review column) and its checks (`--pr-checks passing`, `failing` or `pending`), up to 3 tags of 24 characters (`--tag core --tag web`; an update's tags replace the card's), and `--parent <task>`, a task of yours in the same chat that this one is a part of (sent first; its parts stack under it on the board). `send` prints the task's id and message; `update` merges the fields given over the card (an update's `--item` list replaces the card's: give all of them) and edits its message, at most once per 2.5 s (sooner updates merge into the next). `--json` takes the whole card; `null` in it removes a field. Only the CLI sends cards: the app shows them |
 | `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long once the chat is live, and stops with `live: false` when it is not live within 15 s); a new kind or status shows at once; a message to the chat or `--stop` ends it |
 | `usage send [<chat\|group>] [--all] --left <percent> [--window "5 h"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]… [--used n --limit n] [--id id] [--json json\|-\|file] [--force]` | How much of a quota the bot has left (WISP 405 § Usage): the percent (or `--used` of `--limit`), what it is of, the account, the window, when it resets, and up to 3 other windows (`--also week=80@2026-10-10T00:00:00Z`). The app shows a small meter on the chat's row and in its header, amber under 20%, red under 5%, muted once 6 h old or past the reset. One card per chat: the first report sends it, later ones edit it in place (quiet, paced as `task update`'s); each report is whole, so a field it leaves out goes. `--all` reports to every 1:1 chat with a contact. See [docs/AI-AGENTS.md](../../docs/AI-AGENTS.md#reporting-usage) for where a bot gets its numbers |
 | `version` | This CLI's version, `{"version":"…"}` (also `ghostly --version`) |
@@ -191,13 +191,15 @@ nothing, so put the options before `--` (`send bob --wait sent -- -1 today`).
 
 ### Voice notes
 
-`file send <chat> <path> --voice` sends an audio file as a voice note. Its length (`--voice <ms>`) and its 64
-waveform bars (`--peaks 0,40,…`, 0-255) may be given; whatever is not given is measured from the file with the
+`file send <chat> <path> --voice` sends an audio file as a voice note. Its length (`--voice <ms>`, 1 to 900000) and
+its 64 waveform bars (`--peaks 0,40,…`, 0-255, at most 128, only with `--voice`) may be given; whatever is not given is measured from the file with the
 app's own meter (`voicePeaksOf` in packages/core `voice.ts`: a reading every 50 ms, the loudest per bar), so the
 bars look like the app's recordings. WAV, Opus in WebM or Ogg and MP3 are decoded in the CLI (wasm, no native code);
 AAC in MP4/M4A and other kinds need `ffmpeg` on the PATH (`GHOSTLY_FFMPEG` names another). When the sound cannot be
-read, a note with a given length goes out flat with a warning on stderr (the socket API answers `warning`), and one
-without is refused (`bad_request`). `--voice` takes the next word only when it is a number.
+measured here (no `ffmpeg` for its kind), a note with a given length goes out flat with a warning on stderr (the socket
+API answers `warning`), and one without is refused (`bad_request`). A file that is not a voice note is refused with or
+without a length, naming why: empty, not audio (its type, or no sound a decoder finds in it), or longer than 15
+minutes. `--voice` takes the next word only when it is a number.
 
 ### Files a bot receives
 
@@ -232,7 +234,12 @@ arrives until it is back online.
 
 A daemon keeps running the code it started with. After upgrading the CLI, every command that goes through an older
 (or newer) daemon still answers, and says on stderr `ghostly: the daemon runs <version> and this command is
-<version>`. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
+<version>`, then what to do: an older daemon is restarted (`ghostly daemon restart` runs the new code); a newer one
+means this command is the older CLI (a second install, a project's pinned copy), so it says to upgrade the CLI
+(`npm install -g @ghostlytools/cli`) and gives no restart advice, since a restart from it would start the older
+release. A `daemon restart` that does start an older release than the one it stopped says so on stderr. A daemon of a release before 1.5.0 cannot prove it is the profile's daemon (no
+[greeting](#the-socket-api)): commands are refused after 2 s, exit `1`, until `ghostly daemon restart`. A daemon of
+this release that is slow to answer (busy on a long task) is waited for, under each command's own deadline. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
 background, as `daemon --detach` does. A daemon kept by a service manager (systemd, launchd) is restarted with the
 service manager instead.
 
@@ -348,7 +355,7 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
 - `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile (or
   `group.mentioned`, `source: "group.mentioned"`, for a mention learned later):
   `{seq, id: "agent.turn:<source>:<chat | group>:<messageId>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
-  {text, name, messageId, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `messageId` is made here
+  {text, name, messageId, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}, translation?: {from, text}}}`. `messageId` is made here
   (`t_` and 32 hex digits) and every command that takes a message takes it; the id the message is stored under, which
   its sender chose most of, is `untrusted.messageId`. `press` (`{messageId, button, label,
   inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors
@@ -362,14 +369,31 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   apart, and the cursor stays before it until the bridge takes it. A 4xx or a redirect (not followed) passes the event
   as not taken.
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
+- `--translate <lang>`: received messages carry a translation ([Translation](#translation)).
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
 side that invited answers once.
 
+### Translation
+
+`listen`, `events` and `chat history` take `--translate <lang>` (an ISO 639 code: `en`, `pt`, `es`...). A message a
+contact or a member sent, in another language, then carries `translation: {from, text}` beside its `text`: `from` is
+the language it was written in. It is made on this machine by the translation runtime the Desktop app downloads; the
+CLI fetches nothing. Mine, files, payments, cards, the group's own lines, join notices, text the language detector is
+not sure of (a few letters on their own take the language the chat's others last wrote with confidence) and a language
+with no model stay as they are, without the field. With `--turns` it is `untrusted.translation`: the sender's words,
+as the text is.
+
+The runtime is found in the data folder (`--home`, `~/.ghostly` by default): `translation-runtime/<version>/` holds the
+unpacked runtime and `translation-models/<from>-<to>/` each model (a pair with English on neither side goes through
+English, so `es-en` and `en-pt` for Spanish to Portuguese). When the runtime is not there, the command says so in one
+line on stderr and prints what it prints without the flag. One runtime process serves a whole `listen` and ends with
+it. A message's text never goes to stderr or a log.
+
 ## The socket API
 
-The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `/tmp/ghostly-<hash>/`, a
-folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
+The daemon listens on a Unix socket in the profile's folder (`daemon.sock`, 0600; in `ghostly-<hash>/` in
+`$XDG_RUNTIME_DIR`, else `/tmp/ghostly-<uid>-<hash>/`, a folder of the user's alone, when the folder's path is too long for a socket). `ghostly daemon status` names it, as
 `socket`, whether the daemon runs or not. One JSON object per line each way:
 
 ```json
@@ -418,8 +442,8 @@ A whole voice agent on this socket: [ghostly-voice-agent](https://github.com/Mig
 speech to text, Claude and text to speech, stops talking when the caller talks, and hands real work to another agent.
 Its `AGENTS.md` is the guide for an AI agent that sets it up.
 
-**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `/tmp/ghostly-calls-<hash>/<call>.sock` (in a
-folder of yours alone, 0700) when that path is too long; `call start`, `call answer`, `call list` and the
+**The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `ghostly-calls-<hash>/<call>.sock` in
+`$XDG_RUNTIME_DIR`, else in `/tmp/ghostly-calls-<uid>-<hash>/` (a folder of yours alone, 0700), when that path is too long; `call start`, `call answer`, `call list` and the
 `call.connected` event name it. It carries raw PCM,
 with no framing:
 
@@ -476,19 +500,24 @@ same setting chats use). A relay connects the calls no direct path can: a VPN th
 tunnel, a NAT that maps each destination apart. The media stays encrypted end to end; the relay sees both
 addresses and when and how much is sent. The CLI (libdatachannel) reaches TURN over UDP only: a `turns:` or
 `?transport=tcp` address stays in the setting for the apps, which use it, and `settings set` warns that the CLI does
-not. Behind a network that blocks UDP, the CLI has no relay.
+not. Behind a network that blocks UDP, the CLI has no relay. libdatachannel never gives a relay back when a call
+ends: the server holds it until its 10-minute lifetime runs out, so with a TURN server the CLI makes an incoming
+call's connection only when it is answered, and a call declined or missed costs the server nothing. A call the server
+gives no relay (a per-user quota reached, wrong credentials) logs `no relay address` in the daemon's log.
 
 ## Transports
 
 The engine picks as the app does: WebRTC (libdatachannel), HyperDHT (native, in process), Iroh (the wasm build,
 relay only, as in the web app), and the DHT floor through the Pkarr relays in the settings and the Mainline DHT
-directly (every packet to both; reads from the DHT when every relay fails). Tests and private networks:
+directly (every packet to both; reads from the DHT when every relay fails, so `settings set readRelays`, the
+app's "Also use Pkarr relays", is refused). Tests and private networks:
 `GHOSTLY_DHT=0` leaves the Mainline DHT out, `GHOSTLY_DHT_BOOTSTRAP=host:port,…` replaces its bootstrap routers,
 `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` replaces HyperDHT's bootstrap nodes, `settings set relays
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
 turns WebRTC off, and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of it (the profile's own `iceServers`
 stay). A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
-`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
+`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it). These four switches take `0`/`false`/`off`/`no`
+(or `1`/`true`/`on`/`yes`), in any case; any other value stops the command with a usage error naming the variable.
 
 ### Private networks
 

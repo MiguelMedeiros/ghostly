@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GroupPayments, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
+import { GroupPayments, WAITING, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
 import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "../src/shared/types";
 // covers: groups.payments.member, groups.payments.group-request, groups.payments.notes
 
@@ -301,6 +301,25 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     expect(noteOf("C", "pay-00002")).toBeUndefined();
     await peers.get("C")!.engine.receive("g1", B, note({ id: "pay-00002", k: "pay", f: B, to: A, st: "sent" }));
     expect(noteOf("C", "pay-00002")).toMatchObject({ kind: "payment", from: B, to: A, state: "paid", by: B });
+  });
+
+  it("notes waiting for their initiator are bounded per group, the oldest dropped first", async () => {
+    const { peers, deliver, noteOf } = world({ A, B, C, D });
+    const engine = peers.get("C")!.engine;
+    const kept = () => (engine as unknown as { notes: Map<string, Map<string, GroupPayNote>> }).notes.get("g1")!;
+    // B's claim on A's request arrives before A's note; then D makes up many more, each in A's name.
+    await engine.receive("g1", B, note({ id: "req-00009", f: B, to: A, by: B, st: "sent" }));
+    for (let i = 0; i < WAITING + 50; i++) await engine.receive("g1", D, note({ id: `fake-${String(i).padStart(5, "0")}`, f: "*", to: A, by: D, st: "sent", m: "x".repeat(140) }));
+    expect(kept().size).toBe(WAITING);
+    expect(kept().has("req-00009")).toBe(false);
+    expect(kept().has(`fake-${String(WAITING + 49).padStart(5, "0")}`)).toBe(true);
+    // A's own note still shows, without the claim that was dropped.
+    peers.get("A")!.payments.push(pay({ id: "req-00009", linkId: "AB" }));
+    await peers.get("A")!.engine.sync();
+    await deliver();
+    expect(noteOf("C", "req-00009")).toMatchObject({ state: "open", to: A });
+    expect(noteOf("C", "req-00009")!.claims).toBeUndefined();
+    expect(kept().size).toBe(WAITING + 1);
   });
 
   it("a note from someone it is not about is not kept", async () => {

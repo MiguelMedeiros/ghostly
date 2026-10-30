@@ -128,6 +128,9 @@
       "knocked": "Richiesta lasciata per l'app dell'admin",
       "knockedCommunity": "Richiesta inviata al gruppo"
     },
+    "tryAgain": "Riprova",
+    "unanswered": "Questo link non ha risposto",
+    "unansweredBody": "Nessuno ti ha fatto entrare in un'ora, quindi questa app ha smesso di bussare. Il link potrebbe essere stato sostituito o disattivato: chiedi quello attuale, o riprova.",
     "waiting": "In attesa di essere ammesso"
   },
   "leave": {
@@ -149,6 +152,7 @@
   },
   "link": {
     "broken": "Questo link a un gruppo non funziona",
+    "brokenNext": "Chiedi di nuovo il link: forse ha perso un carattere nella copia.",
     "copied": "Copiato",
     "copyFailed": "La copia non ha funzionato. Seleziona il link e copialo.",
     "disable": "Disattiva",
@@ -209,6 +213,7 @@
     "makeAdmin": "Cedi admin",
     "missing": "{{count}} mancanti",
     "missingHint": "Messaggi di questa epoca non ancora arrivati",
+    "missingOne": "{{count}} mancante",
     "needsBothHint": "I gruppi richiedono entrambe le app connesse e aggiornate",
     "needsUpdate": "Serve un Ghostly aggiornato",
     "noContacts": "Tutti i contatti associati sono già dentro, oppure non ne hai ancora.",

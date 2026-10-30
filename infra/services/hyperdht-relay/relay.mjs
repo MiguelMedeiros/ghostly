@@ -14,7 +14,7 @@ import { WebSocketServer } from 'ws'
 export const DEFAULT_LIMITS = Object.freeze({
   /** WebSockets at once, over all clients. */
   clients: 512,
-  /** WebSockets at once from one address. */
+  /** WebSockets at once from one address (an IPv6 /64 counts as one, see addressKey). */
   clientsPerAddress: 16,
   /** Largest relay protocol message a client may send. */
   payloadBytes: 256 * 1024,
@@ -58,8 +58,13 @@ const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
  * and announcements are refused (Ghostly never uses them), so the relay is no open crawler. Past a limit
  * the client is dropped, and so is one that holds its slot with no listen open and no dial for `idleMs`.
+ *
+ * Every client shares the relay's one HyperDHT node, which refuses a second listen on a key it already listens
+ * on (`KEYPAIR_ALREADY_USED`, whoever asked first). dht-relay 0.4.3 does not catch that rejection, so it would end
+ * the process and every client with it. A listen the node refuses closes that server only: the client that holds
+ * the key, and the asking client's other listens, go on.
  */
-function clientDht(dht, limits, drop, gone) {
+function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
   let dials = []
   let idle = null
@@ -68,7 +73,23 @@ function clientDht(dht, limits, drop, gone) {
     idle = listening > 0 ? null : setTimeout(() => drop('idle'), limits.idleMs)
   }
   watchIdle()
-  void gone.then(() => clearTimeout(idle))
+  // Every HyperDHT stream the relay holds for this client: its dials and the connections its servers get, taken or
+  // not. dht-relay forgets some of them (a dial whose alias the client reuses, an incoming one the client never
+  // takes) and would leave them open after the client has gone, outside every limit; they all close with it.
+  const streams = new Set()
+  let left = false
+  const hold = stream => {
+    if (left) { stream.destroy(); return stream }
+    streams.add(stream)
+    stream.once('close', () => streams.delete(stream))
+    return stream
+  }
+  void gone.then(() => {
+    clearTimeout(idle)
+    left = true
+    for (const stream of streams) stream.destroy()
+    streams.clear()
+  })
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
@@ -76,8 +97,12 @@ function clientDht(dht, limits, drop, gone) {
         watchIdle()
         const server = target.createServer(options, onconnection)
         const listen = server.listen.bind(server)
-        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone))
+        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone)).catch(error => {
+          log('refused listen', error?.code ?? 'error')
+          void server.close().catch(() => {})
+        })
         server.once('close', () => { listening--; watchIdle() })
+        server.on('connection', hold)
         return server
       }
       if (prop === 'connect') return (publicKey, options) => {
@@ -85,7 +110,7 @@ function clientDht(dht, limits, drop, gone) {
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         watchIdle()
-        return target.connect(publicKey, options)
+        return hold(target.connect(publicKey, options))
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
         drop('topic query'); throw new Error('Topic queries are not relayed')
@@ -153,6 +178,22 @@ export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
 }
 
 /**
+ * What `clientsPerAddress` counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its
+ * /64, the block one subscriber usually holds whole. The push relay's `rateKey`; the two services ship separately.
+ */
+export function addressKey(address) {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
+  if (mapped) return mapped[1]
+  if (!address.includes(':')) return address
+  const [head, tail] = address.split('%')[0].split('::')
+  const before = head ? head.split(':') : []
+  const after = tail ? tail.split(':') : []
+  const groups = tail === undefined ? before : [...before, ...Array(Math.max(0, 8 - before.length - after.length)).fill('0'), ...after]
+  const prefix = groups.slice(0, 4).map(group => parseInt(group, 16))
+  return prefix.length === 4 && prefix.every(n => n >= 0 && n <= 0xffff) ? `${prefix.map(n => n.toString(16)).join(':')}::/64` : address
+}
+
+/**
  * Starts a relay: an HTTP server whose WebSocket upgrades each carry one browser's HyperDHT (dht-relay,
  * non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream itself;
  * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts.
@@ -194,7 +235,7 @@ export async function startRelay(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false })
 
   server.on('upgrade', (request, socket, head) => {
-    const address = addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare })
+    const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
     const origin = request.headers.origin
     const refuse = (status, why) => {
       stats.refused++; log('refused', why)
@@ -253,7 +294,7 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
-    void relay(clientDht(dht, limits, drop, gone), stream).then(node => guardProtocol(node._protocol, drop))
+    void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => guardProtocol(node._protocol, drop))
   }
 
   await new Promise((resolve, reject) => {

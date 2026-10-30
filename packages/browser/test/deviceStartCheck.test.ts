@@ -118,6 +118,24 @@ describe("the active device's start, while its turn read is out", () => {
     expect(network.puts()).toEqual([]);
   });
 
+  it("reads the turn once at start: the device set's links start on that read, with no second read of their own", async () => {
+    const network = new FakeTurnNetwork();
+    const { stored } = await activeDesktop();
+    network.seed(stored);
+    await db.putSettings({ online: true } as never);
+    // The engine's own transport reaches the same sources as the read at start.
+    const transport: PkarrTransport = { ...quiet, turnRead: network.turnRead.bind(network), turnPut: network.turnPut.bind(network) };
+    const server = await createPeerServer({ transport, automaticWallets: false }, { turn: network }) as EngineServer;
+    servers.push(server);
+    await server.ready;
+    const node = nodeOf(server);
+    await vi.waitFor(() => expect(node.limited).toBe(false));
+    // The device set is started: its links are up, and the turn is read every 10 minutes from now on.
+    await vi.waitFor(() => expect((node as unknown as { activeTurnTimer: unknown }).activeTurnTimer).not.toBeNull());
+    // The read at start, then its read back after the put: no third read of a record put a moment before.
+    expect(network.calls.map((call) => call.op)).toEqual(["read", "put", "put", "read"]);
+  });
+
   it("no source answers: it stays in limited mode, and the pages are told the read is no longer out (they ask Try again or Start anyway)", async () => {
     const network = new FakeTurnNetwork();
     await activeDesktop();

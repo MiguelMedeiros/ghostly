@@ -1,7 +1,7 @@
 import { openAsBlob } from "node:fs";
 import { access, constants, open, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
@@ -32,6 +32,17 @@ const TYPES: Record<string, string> = {
 
 export function mimeOf(path: string, given?: string): string {
   return sanitizeMime(given ?? TYPES[extname(path).toLowerCase()] ?? "application/octet-stream");
+}
+
+/**
+ * The time a saved voice message is named from: its message's in the chat, as the apps' Download names it. The file's
+ * own time is what its sender says (any safe integer, past Date's end too), taken only when no message is there and
+ * a date can hold it; else when it was stored here.
+ */
+async function voiceTime(ctx: ApiContext, stored: { id: string; linkId: string; createdAt: number; metadata?: { timestamp: number } }): Promise<number> {
+  const group = stored.linkId.startsWith("group:") ? stored.linkId.slice("group:".length) : undefined;
+  const messages = group ? await node(ctx).groupMessages({ groupId: group }) : await node(ctx).getMessages(stored.linkId);
+  return messages.find((m) => m.file?.id === stored.id)?.timestamp ?? claimedTime(stored.metadata?.timestamp) ?? stored.createdAt;
 }
 
 /** A chat's files as the timeline shows them, with where each transfer stands (`transferOf`, by file id). */
@@ -65,14 +76,20 @@ function fileChat(ctx: ApiContext, params: Params, fileId: string): { linkId: st
   return { linkId: link.id, where: { chat: link.id } };
 }
 
-const VOICE_ONLY = "A voice note is audio (webm, ogg, mp4, mpeg, aac, m4a or wav) of at most 15 minutes, with peaks from 0 to 255";
+const VOICE_MINUTES = VOICE_LIMITS.maxDurationMs / 60_000;
 
-/** `--voice [ms] [--peaks …]`: the voice description, its length and waveform measured from the sound when not given. */
-async function voiceOf(params: Params, path: string, mime: string): Promise<{ voice?: VoiceMeta; warning?: string }> {
+/**
+ * `--voice [ms] [--peaks …]`: the voice description, its length and waveform measured from the sound when not given.
+ * A file that is not a voice note is refused naming what is wrong with it: empty, not audio, too long.
+ */
+async function voiceOf(params: Params, path: string, mime: string, size: number): Promise<{ voice?: VoiceMeta; warning?: string }> {
   if (params.voice === undefined) return {};
-  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", VOICE_ONLY);
+  const name = basename(path);
+  if (!size) throw new CliError("bad_request", `${name} is empty: a voice note is audio`);
+  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", `${name} is ${mime}, not audio (webm, ogg, mp4, mpeg, aac, m4a or wav)`);
   // Without a length or a waveform, both are measured from the sound, as the apps measure their recordings.
-  let duration = params.voice === true ? undefined : num(params, "voice", 0, { min: 1 });
+  const given = params.voice === true ? undefined : num(params, "voice", 0, { min: 1 });
+  let duration = given;
   let peaks = list(params, "peaks").map(Number);
   let warning: string | undefined;
   if (duration === undefined || !peaks.length) {
@@ -80,13 +97,22 @@ async function voiceOf(params: Params, path: string, mime: string): Promise<{ vo
     if ("voice" in measured) {
       duration ??= measured.voice.duration;
       if (!peaks.length) peaks = measured.voice.peaks;
+    } else if (measured.notSound) {
+      // A length given for it would send a voice note that cannot play.
+      throw new CliError("bad_request", `${name} is not audio (${measured.problem})`);
     } else if (duration === undefined) {
       throw new CliError("bad_request", `Could not measure the voice note (${measured.problem}): give its length as --voice <ms>`);
     } else warning = `Sent without a waveform: could not read the sound (${measured.problem})`;
   }
   const voice = parseVoiceMeta({ duration, peaks: peaks.length ? peaks : new Array(VOICE_LIMITS.bars).fill(0) }, mime);
-  if (!voice) throw new CliError("bad_request", VOICE_ONLY);
-  return { voice, ...(warning ? { warning } : {}) };
+  if (voice) return { voice, ...(warning ? { warning } : {}) };
+  // A length past the limit (with the moment a recorder takes to stop), or else a waveform the voice note does not take.
+  if (duration! > VOICE_LIMITS.maxDurationMs + 5_000) {
+    throw new CliError("bad_request", given === undefined
+      ? `${name} is longer than ${VOICE_MINUTES} minutes: a voice note is at most ${VOICE_MINUTES}`
+      : `A voice note is at most ${VOICE_MINUTES} minutes (${VOICE_LIMITS.maxDurationMs} ms), not ${given} ms`);
+  }
+  throw new CliError("bad_request", `A voice note's waveform is 1 to ${VOICE_LIMITS.maxBars} peaks from 0 to 255`);
 }
 
 /**
@@ -106,7 +132,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
   if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
-  const { voice, warning } = await voiceOf(params, path, mime);
+  const { voice, warning } = await voiceOf(params, path, mime, size);
   const source = await openAsBlob(path, { type: mime });
   const image = voice ? undefined : await readImageMeta(source, mime);
   const fileId = groupFileId(group.id, "out");
@@ -178,7 +204,7 @@ export const FILE_METHODS: Record<string, Method> = {
       const messages = await node(ctx).getMessages(link.id);
       if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
     }
-    const { voice, warning } = await voiceOf(params, path, mime);
+    const { voice, warning } = await voiceOf(params, path, mime, info.size);
     const source = await openAsBlob(path, { type: mime });
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
     const image = voice ? undefined : await readImageMeta(source, mime);
@@ -278,8 +304,8 @@ export const FILE_METHODS: Record<string, Method> = {
 
   /**
    * Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), a voice message under the one
-   * Ghostly makes for it as the apps' Download does (`voiceDownloadName`, never the sender's), or to `path`. Never over
-   * a file unless `force`.
+   * Ghostly makes for it as the apps' Download does (`voiceDownloadName`, never the sender's; "<name> (2)" when taken),
+   * or to `path`. Never over a file unless `force`.
    */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
@@ -291,11 +317,17 @@ export const FILE_METHODS: Record<string, Method> = {
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, stored.metadata.timestamp) : stored.metadata.name));
-    const flags = bool(params, "force") ? "w" : "wx";
-    let out;
-    try { out = await open(target, flags, 0o600); } catch (error) {
+    const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
+    const force = bool(params, "force");
+    // A voice message's name is Ghostly's, down to the second its sender claims: two of one second took one name, and
+    // the --force the confirm hinted at replaced the first recording with the other. In --dir it steps to a free
+    // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
+    const free = !force && !str(params, "path") && !!stored.metadata.voice;
+    const ext = extname(named), stem = named.slice(0, named.length - ext.length);
+    let target = named, out;
+    for (let n = 2; !out; n += 1) try { out = await open(target, force ? "w" : "wx", 0o600); } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
+      if (free && code === "EEXIST" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
       if ((code === "EEXIST" || code === "EISDIR") && (await stat(target).catch(() => undefined))?.isDirectory()) throw new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
       if (code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);

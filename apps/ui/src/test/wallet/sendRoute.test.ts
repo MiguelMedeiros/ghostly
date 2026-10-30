@@ -40,6 +40,9 @@ describe("Send sorts what it was given", () => {
     expect(routeSend(`bitcoin:${address}?amount=0.0025&req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
     expect(routeSend(`bitcoin:?req-pop=x&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
     expect(routeSend(`bitcoin:?amount=abc&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    // A link with no address whose invoice asks another amount than the link: not the same payment.
+    expect(routeSend(`bitcoin:?amount=0.00001&lightning=${REGTEST_INVOICE}`).kind).toBe("refused");
+    expect(routeSend(`bitcoin:?amount=0.0025&lightning=${REGTEST_INVOICE}`).kind).toBe("invoice");
     // A req- parameter it does understand is no reason to refuse.
     expect(routeSend(`bitcoin:${address}?amount=0.0025&req-lightning=${REGTEST_INVOICE}&lightning=${REGTEST_INVOICE}`).kind).toBe("invoice");
   });
@@ -70,5 +73,13 @@ describe("Send sorts what it was given", () => {
     expect(routeSend("hello there").kind).toBe("unknown");
     expect(routeSend("lnbc-this-is-not-an-invoice").kind).toBe("unknown");
     expect(routeSend("https://example.com").kind).toBe("unknown");
+  });
+
+  it("a token behind the cashu: URI scheme (cashu:, cashu://, web+cashu://) is the token, given on bare", () => {
+    for (const scheme of ["cashu:", "cashu://", "web+cashu://"]) {
+      expect(routeSend(` ${scheme}cashuBo2F0gaJhaUgA\n`)).toEqual({ kind: "token", text: "cashuBo2F0gaJhaUgA" });
+    }
+    expect(routeSend("cashu:").kind).toBe("unknown");
+    expect(routeSend("cashu:hello").kind).toBe("unknown");
   });
 });

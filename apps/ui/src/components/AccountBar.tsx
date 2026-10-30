@@ -118,10 +118,11 @@ export function AccountBar() {
           title={`${t("settings.profile")}: ${profile.name}`}
         >
           <span className="relative w-[23px] h-[23px] shrink-0 flex items-center justify-center">
-            {/* The active profile's initial in its own color: which profile this is, at a glance. */}
+            {/* The active profile's initial in its own color: which profile this is, at a glance. Drawn by CSS, so the
+                place shows only the name its own name holds (Label in Name), not "P" glued to "Personal". */}
             {myAvatar
               ? <img src={myAvatar} alt="" aria-hidden="true" draggable={false} className="w-[23px] h-[23px] rounded-full object-cover" />
-              : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{initial(profile.name)}</span>}
+              : <span aria-hidden="true" data-initial={initial(profile.name)} className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21] before:content-[attr(data-initial)]" style={{ background: THEME_COLOR[themeOf(profile.id)] }} />}
             {platform && (
               <span
                 className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar-bg ${

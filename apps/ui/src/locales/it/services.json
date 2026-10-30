@@ -29,7 +29,11 @@
     "stopped": "Fermo"
   },
   "window": {
+    "callOn": "C'è una chiamata in corso. Chiudila per aprire {{app}}.",
+    "elsewhere": "{{app}} ha provato a mandarti altrove, fuori da ciò che il tuo contatto condivide.",
     "failed": "La richiesta non è riuscita.",
+    "notAnswering": "{{app}} non risponde sul computer del tuo contatto. Chiedi al tuo contatto di controllare che sia in esecuzione.",
+    "tooSlow": "{{app}} non ha risposto in tempo sul computer del tuo contatto. Riprova tra un momento.",
     "unreachable": "Questo servizio non è raggiungibile. I servizi esistono finché il loro fantasma è online."
   },
   "yourApps": "Le tue app"

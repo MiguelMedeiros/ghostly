@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
-// covers: files.video.meta, files.image.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request
+// covers: files.video.meta, files.image.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request, apps.offer.wire
 
 /** Deterministic bytes for any range: files of any size exist without being held. */
 function pattern(offset: number, length: number): Uint8Array {
@@ -257,6 +257,22 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => state(w.b, "in", "reply-01") === "done");
     expect(w.a.sent.find((f) => f.t === "pf-offer")).toMatchObject({ r: reply });
     expect(w.b.records.get("in:reply-01")!.file.reply).toEqual(reply);
+  });
+
+  it("an offer carries the mini-app that sent it ahead (app), kept with the record; a malformed one is dropped, the file still arrives", async () => {
+    const w = wire({ keepBytes: true });
+    w.attach();
+    const app = "AbCdEfGhIjKlMnOpQrStUv";
+    send(w, { ...file("ahead-01", 1000), app });
+    send(w, { ...file("ahead-02", 1000), app: "short" });
+    await until(() => state(w.b, "in", "ahead-01") === "done" && state(w.b, "in", "ahead-02") === "done");
+    expect(w.a.sent.find((f) => f.t === "pf-offer" && f.id === "ahead-01")).toMatchObject({ app });
+    expect(w.a.sent.find((f) => f.t === "pf-offer" && f.id === "ahead-02")).not.toHaveProperty("app");
+    expect(w.b.records.get("in:ahead-01")!.file.app).toBe(app);
+    // Read as it arrives: a key that is not a chat app id is dropped, and the file is taken as any file.
+    await w.b.files.handle({ t: "pf-offer", id: "ahead-03", name: "a", mime: "x/y", size: 10, ts: 1, app: "AbCdEfGhIjKlMnOpQrStU!" });
+    await until(() => state(w.b, "in", "ahead-03") !== undefined);
+    expect(w.b.records.get("in:ahead-03")!.file).not.toHaveProperty("app");
   });
 
   it("an empty file goes too", async () => {

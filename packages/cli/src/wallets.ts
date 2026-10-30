@@ -148,11 +148,11 @@ const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.tri
  * its shape: the engine's `EngineError` carries `engineCode`.
  */
 /** A payment's memo: the contact reads it as a message's text, so the secret guard of `send` holds (docs/CLI.md § Safety). */
-function memoOf(params: Params, verb: string): string | undefined {
-  const memo = str(params, "memo");
+function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"): string | undefined {
+  const memo = str(params, field);
   if (memo && !bool(params, "force")) {
     const secret = findSecret(memo);
-    if (secret) throw new CliError("confirm", `The memo looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The ${field} looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} with --force if you mean to`, { kind: secret.kind });
   }
   return memo || undefined;
 }
@@ -291,6 +291,8 @@ const WALLETS: Record<string, Method> = {
 
   /** An invoice, a Lightning address or an LNURL, from the network's Lightning (a card of it, or its default). */
   async "pay"(ctx, params) {
+    // A Lightning address's comment reaches its owner as a memo reaches a contact (agents#1624).
+    const comment = memoOf(params, "pay", "comment");
     const text = str(params, "target", true).trim();
     const card = str(params, "card");
     let invoice = text.replace(/^lightning:/i, "");
@@ -306,7 +308,7 @@ const WALLETS: Record<string, Method> = {
       if (!amount) throw new CliError("bad_request", "amount is required to pay a Lightning address or LNURL");
       const view = await node(ctx).lnurlResolve({ text, network: n });
       if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
-      const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(str(params, "comment") ? { comment: str(params, "comment") } : {}), network: n });
+      const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });
       invoice = got.invoice; note = got.note;
     } else throw new CliError("bad_request", "Not a Lightning invoice, Lightning address or LNURL");
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
@@ -366,6 +368,11 @@ const WALLETS: Record<string, Method> = {
   /** Which ways of paying this chat takes, per network (the chat's Accept switches). */
   async "chat.accept"(ctx, params) {
     const link = chatOf(ctx, params);
+    // No method: what it takes now, with nothing changed.
+    if (params.method === undefined) {
+      if (params.on !== undefined || params.networks !== undefined) throw new CliError("bad_request", "on and networks change one method: name it");
+      return { chat: link.id, methods: link.paymentMethods ?? null, networks: link.paymentNetworks ?? null };
+    }
     const method = oneOf(params, "method", CHAT_METHODS, "cashu");
     const on = bool(params, "on");
     const nets = params.networks === undefined ? undefined : (() => {

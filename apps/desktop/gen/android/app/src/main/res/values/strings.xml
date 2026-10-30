@@ -3,6 +3,10 @@
     <string name="main_activity_title">"Ghostly"</string>
     <!-- The notification channel, as Android's settings list it. -->
     <string name="channel_messages">Messages</string>
+    <!-- The notification while a file moves with the app out of sight (TransferService), and its channel. -->
+    <string name="channel_transfers">File transfers</string>
+    <string name="transfer_title">Sending and receiving files</string>
+    <string name="transfer_text">Ghostly keeps going until they are through.</string>
     <!-- The screen shown instead of the app when the phone's WebView is too old for it (MainActivity). -->
     <string name="webview_title">Update Android System WebView</string>
     <string name="webview_text">Ghostly runs in Android System WebView, and this phone\'s is too old for it (version %1$s, Ghostly needs %2$d or later). Update it from the Play Store, then open Ghostly again.</string>

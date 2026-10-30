@@ -11,7 +11,7 @@ import { CHESS, CHESS_1_0_2 } from "../support/chessFixture";
  * and signed by the headless CLI with keys made for the test, in a store the CLI signed, served at
  * raw.githubusercontent.com URLs by the test. Ana installs it from the store (the install screen asks for her name in
  * the chat) and opens it in her chat with Bob; Bob installs it from her card, which asks nothing of any host before he
- * presses "Install and open"; Ana invites, Bob accepts, they play Scholar's mate over `paired-app`, and Bob's game is
+ * presses "Join"; Ana invites, Bob accepts, they play Scholar's mate over `paired-app`, and Bob's game is
  * back after he reloads. Then what a client refuses: a tampered bundle, a lower sequence, a version a store removed
  * (stopped until "Run anyway"), a version its publisher revoked (stopped for good). And the update from Chess 1.0.2,
  * which waits until the person agrees to `name`.
@@ -77,7 +77,7 @@ test("two people install Chess, play Scholar's mate in their chat, and the game 
   await ana.page.waitForTimeout(15_000);
   await expect(chessStatus(ana.page)).toHaveText("Waiting for your contact to open Chess");
 
-  // 2. Bob's card, drawn from its own data: not one request until he presses "Install and open".
+  // 2. Bob's card, drawn from its own data: not one request until he presses "Join".
   const card = chat(bob).getByTestId("app-card");
   await expect(card).toContainText(`Chess ${CHESS.manifest.version}`);
   await expect(card).toContainText("Ana opened it here");
@@ -379,7 +379,7 @@ test("Chess 1.0.2 updates to 2.3.1 only once the person agrees to share their na
   await expect(row).toContainText("1.0.2");
 
   // Its details say what the new version asks for on top of what was granted: `name`, and nothing else.
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   const update = details.getByTestId("app-update");
   await expect(update).toContainText(`Version ${CHESS.manifest.version} is ready.`);
@@ -410,7 +410,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
   await expect(row.getByTestId("installed-app-hint")).toHaveText("Stopped");
   await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
 
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by ${STORE_NAME}: Sends your moves to a server`);
   await expect(details.getByTestId("app-open")).toHaveCount(0);
@@ -418,7 +418,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
   await expect(miniApp(ana.page)).toBeHidden();
 
   // Run anyway, the person's own choice: it runs.
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   await details.getByTestId("app-run-anyway").click();
   await expect(miniApp(ana.page)).toBeVisible();
   await expect(chessStatus(ana.page)).toHaveText("White to move");
@@ -440,7 +440,7 @@ test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.
   const row = ana.page.getByTestId("installed-app");
   await expect(row.getByTestId("installed-app-hint")).toHaveText("Stopped");
   await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   await expect(details.getByTestId("app-run-line")).toHaveText("Its publisher revoked this version.");
   await expect(details.getByTestId("app-open")).toHaveCount(0);

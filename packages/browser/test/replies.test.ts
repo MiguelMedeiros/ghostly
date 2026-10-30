@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, createLink, identityFromSeedB64, readStatusCard, type IncomingMessage, type PairingState } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { fileStore } from "../src/shared/idb";
 import { groupReply, pairedWireReply, receivedPairedReply, replyRef } from "../src/shared/replies";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -175,11 +176,52 @@ describe("a received reply in a long history", () => {
     expect(await t.row("k2:0:2")).not.toHaveProperty("press");
   });
 
+  it("in a group, many members' presses on a once question read the history once, and each member still answers once", async () => {
+    const linkId = `group:${crypto.randomUUID()}`;
+    const card = readStatusCard({ kind: "buttons", id: "ask", buttons: [{ id: "yes", label: "Yes", once: true }, { id: "no", label: "No", once: true }] })!;
+    const press = (member: string, id: string, text: string, button: string): StoredMessage => ({ linkId, id, text, sender: "peer", member, timestamp: Date.now(), via: "datalink", replyTo: { id: "me:0:1", snippet: "", from: "me", member: "me", button } });
+    // k0 answered before this app started: the history says so.
+    const t = await keeper(linkId, [...history(linkId, i => ({ id: `k1:0:${i}`, member: "k1" })), { linkId, id: "me:0:1", text: "Yes or no?", sender: "me", member: "me", timestamp: 1_700_000_001_000, via: "datalink", card },
+      { ...press("k0", "k0:0:1", "Yes", "yes"), timestamp: 1_700_000_002_000, press: { messageId: "me:0:1", button: "yes", label: "Yes" } }]);
+    for (let i = 2; i < 22; i++) await t.store(press(`k${i}`, `k${i}:0:1`, "Yes", "yes"));
+    for (let i = 2; i < 22; i++) expect((await t.row(`k${i}:0:1`))?.press).toEqual({ messageId: "me:0:1", button: "yes", label: "Yes" });
+    expect(t.whole()).toBe(1);
+    // A second answer, from one who answered before the start or since, is only a reply; the same copy again keeps its press.
+    await t.store(press("k0", "k0:0:2", "No", "no"));
+    await t.store(press("k5", "k5:0:2", "No", "no"));
+    expect(await t.row("k0:0:2")).not.toHaveProperty("press");
+    expect(await t.row("k5:0:2")).not.toHaveProperty("press");
+    await db.deleteMessage(linkId, "k6:0:1");
+    await t.store(press("k6", "k6:0:1", "Yes", "yes"));
+    expect((await t.row("k6:0:1"))?.press).toEqual({ messageId: "me:0:1", button: "yes", label: "Yes" });
+    // An answer that is no longer here answers nothing: that member may answer again.
+    await db.deleteMessage(linkId, "k7:0:1");
+    await t.store(press("k7", "k7:0:2", "No", "no"));
+    expect((await t.row("k7:0:2"))?.press).toEqual({ messageId: "me:0:1", button: "no", label: "No" });
+    expect(t.whole()).toBe(1);
+  });
+
   it("in a chat, finds a text's original by its row alone", async () => {
     const linkId = `long-${crypto.randomUUID()}`, wire = (i: number) => `${"W".repeat(20)}${String(i).padStart(2, "0")}`;
     const t = await keeper(linkId, history(linkId, i => ({ id: `peer_${wire(i)}` })));
     await t.store({ linkId, id: `peer_${"R".repeat(22)}`, text: "yes", sender: "peer", timestamp: Date.now(), via: "pkarr", replyTo: receivedPairedReply({ i: wire(7) }) });
     expect((await t.row(`peer_${"R".repeat(22)}`))?.replyTo).toEqual({ id: wire(7), snippet: "line 7", from: "peer", messageId: `peer_${wire(7)}` });
+    expect(t.whole()).toBe(0);
+  });
+
+  it("in a chat, finds a file of mine by its stored file: a reply to it, received or sent, reads no whole history", async () => {
+    const replyFor = (node: GhostlyNode, linkId: string, id: string) => (node as unknown as { replyFor(l: string, m: string): Promise<unknown> }).replyFor(linkId, id);
+    const linkId = `long-${crypto.randomUUID()}`, wire = (i: number) => `${"W".repeat(20)}${String(i).padStart(2, "0")}`, fileWire = "F".repeat(22), at = 1_700_000_001_000;
+    const file = { id: `${linkId}-out-${fileWire}`, name: "photo.jpg", size: 5, mime: "image/jpeg" };
+    await fileStore.put({ id: file.id, linkId, blob: new Blob([new Uint8Array(5)]), createdAt: 1, direction: "out", wireId: fileWire, metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: at } });
+    cleanup.push(() => fileStore.delete(file.id));
+    // My file's row goes by its time, as sending it keeps it; its wire id is its file id's tail.
+    const t = await keeper(linkId, [...history(linkId, i => ({ id: `peer_${wire(i)}` })), { linkId, id: `me_${at}`, text: "📎 photo.jpg", sender: "me", timestamp: at, via: "datalink", file }]);
+    await t.store({ linkId, id: `peer_${"R".repeat(22)}`, text: "nice photo", sender: "peer", timestamp: Date.now(), via: "datalink", replyTo: receivedPairedReply({ i: fileWire }) });
+    expect((await t.row(`peer_${"R".repeat(22)}`))?.replyTo).toMatchObject({ id: fileWire, from: "me", messageId: `me_${at}` });
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    cleanup.push(async () => { await node.shutdown(); });
+    expect(await replyFor(node, linkId, fileWire)).toMatchObject({ id: fileWire, messageId: `me_${at}` });
     expect(t.whole()).toBe(0);
   });
 });

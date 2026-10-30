@@ -76,7 +76,7 @@ test("an edit in a group shows on the other member's side in place, marked edite
   await expect(row(alice.page, "Done: 2 of 2").getByTestId("message-edited")).not.toHaveAttribute("data-pending", { timeout: 30_000 });
 
   // Its details keep the earlier versions, the original first.
-  await row(bob.page, "Done: 2 of 2").getByTestId("message-text").dblclick();
+  await row(bob.page, "Done: 2 of 2").getByTestId("message-text").dblclick({ modifiers: ["ControlOrMeta"] });
   const versions = bob.page.getByTestId("message-details").locator('[data-section="edits"] [data-testid="message-details-row"]');
   await expect(versions.nth(0)).toHaveAttribute("data-value", /^2, the last at /);
   await expect(versions.nth(1)).toHaveAttribute("data-label", /^Original, /);

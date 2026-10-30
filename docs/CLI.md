@@ -85,8 +85,8 @@ it cleanly: it tells contacts it is going and removes its socket.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
-The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `/tmp/ghostly-<hash>/` when that
-path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `ghostly-<hash>/` in `$XDG_RUNTIME_DIR`,
+else `/tmp/ghostly-<uid>-<hash>/`, when that path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
 One JSON object per line each way:
 
 ```json
@@ -129,11 +129,15 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
+- `--translate <lang>` (also on `events` and `chat history`) adds `translation: {from, text}` to a message a contact
+  or a member sent in another language, made on this machine by the translation runtime the Desktop downloads
+  (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
+  says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
   cursor moves past its event: it is not run again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
@@ -239,9 +243,10 @@ Safety rules the CLI enforces:
 - **Real money.** Wallets default to Testnet. A Mainnet spend needs `--network mainnet --confirm-real`; without the
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
-  `chat request`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`,
-  `sendGroupFile` caption and payment memos of `sendPayment`, `requestPayment`, `requestGroupPayment` and `askToPay`
-  through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
+  `chat request`, the comment of `pay` to a Lightning address, and the engine's own `sendMessage`,
+  `sendGroupMessage`, `editMessage`, `forwardMessages`, `sendGroupFile` caption, payment memos of `sendPayment`,
+  `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo and
+  `lnurlInvoice`'s comment through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
   unless `--force`.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
@@ -351,7 +356,9 @@ A private network or a test sets `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desk
 relays are then the only ones from the very first publish, the profile's `relays` setting is not used, and the DHT is
 left out unless `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on
 loopback) pins the Iroh relays the same way, `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` the HyperDHT's bootstrap nodes,
-and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. The CLI's own tests run with all of them on
+and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. `GHOSTLY_DHT`, `GHOSTLY_STUN`, `GHOSTLY_WEBRTC`
+and `GHOSTLY_HUB` take `0`/`false`/`off`/`no` or `1`/`true`/`on`/`yes`, in any case; any other value is a usage error
+(exit 2) naming the variable, never a switch left on. The CLI's own tests run with all of them on
 loopback or nowhere (`packages/cli/test/support/network.ts`); `GHOSTLY_TEST_PUBLIC_NET=1` lets a run reach the public
 networks. A new profile publishes within seconds of its first run,
 so without the variable, set `relays` before the first `daemon`
