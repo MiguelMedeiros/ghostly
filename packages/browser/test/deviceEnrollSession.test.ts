@@ -7,7 +7,7 @@ import { DEVICE_KEYS_DB, closeDeviceKeysDb, loadDeviceSigningKey } from "../src/
 import { closeDevicesDb, readDeviceRecord, setDeviceMirror } from "../src/devices/store";
 import { dropDevicesDatabase } from "./helpers/deviceRecord";
 import { FakeTurnNetwork } from "./helpers/turnNetwork";
-import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
+import { DESKTOP_NETWORK, MemoryPkarr, closeWorld, fakePeerConnection, rtc, useFakeWorld, yieldToLoop } from "../../core/test/support/pairingWorld";
 import { NativeWorld } from "../../core/test/support/nativeWorld";
 // covers: devices.enroll, devices.enroll.session
 
@@ -107,6 +107,30 @@ describe("enroll/1 over a one-time paired session", () => {
     expect(b.current()).toMatchObject({ step: "done", device: "Web" });
     // The page dialled, or was dialled, on Iroh: it started an endpoint although it has WebRTC.
     expect((native.dialsBy.get("web") ?? 0) + (native.dialsBy.get("linux") ?? 0)).toBeGreaterThan(0);
+  });
+
+  it.each([undefined, 15_000])("two web pages whose WebRTC never connects (ICE fails after %s ms) meet over Iroh: both start their native endpoints", async (failsAfter) => {
+    // Both have WebRTC, so neither packet says it has none: offer and answer meet, and nothing connects (mDNS host
+    // candidates the phone does not resolve, a router that does not hairpin, no TURN).
+    rtc.blocked = true;
+    rtc.blockedFailsAfterMs = failsAfter;
+    const network = new FakeTurnNetwork();
+    const native = new NativeWorld();
+    native.hexIds = true;
+    const factories = (name: string): Partial<Record<NativeTransport, (seed: string) => Promise<NativeEndpoint>>> => ({ "iroh/1": async () => native.endpoint("iroh/1", name) });
+    const open = (owner: string) => ghostLinkEnrollChannel({ transport: pkarr.transport(), createPeerConnection: () => fakePeerConnection(owner), nativeTransports: factories(owner), pollIntervals: RELAY_POLL_INTERVALS });
+    const a = new EnrollInviter({ profile: A, network, open: open("phone"), didSeed: async () => randomBytes(32), name: "Phone", forceSeed: true });
+    const b = new EnrollJoiner({ profile: B, network, open: open("computer"), about: { name: "Computer", kind: "web", app: "1.1.0" }, forceSeed: true, install: null });
+    const waiting = await settled(a.start());
+    if (waiting.step !== "waiting") throw new Error("no code");
+    await settled(b.start(waiting.code));
+    // Well inside the joiner's two minutes of waiting for the proof: the digits, on both screens.
+    expect(await until(() => a.current().step === "confirm" && b.current().step === "confirm", 60_000)).toBe(true);
+    await settled(a.confirm(true));
+    expect(await until(() => a.ended && b.ended, 60_000)).toBe(true);
+    expect(a.current()).toMatchObject({ step: "done", device: "Computer" });
+    expect(b.current()).toMatchObject({ step: "done", device: "Phone" });
+    expect((native.dialsBy.get("phone") ?? 0) + (native.dialsBy.get("computer") ?? 0)).toBeGreaterThan(0);
   });
 
   it("two devices that see each other and cannot connect both say so, at the joiner's timeout", async () => {

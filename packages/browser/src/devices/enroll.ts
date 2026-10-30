@@ -42,6 +42,12 @@ export const ENROLL_DONE_TIMEOUT_MS = 60_000;
 export const ENROLL_PROOF_TIMEOUT_MS = 120_000;
 /** A joiner with no session yet puts its packet out again this often: another device on the same code may have replaced it. */
 export const ENROLL_REPUT_MS = 5_000;
+/**
+ * Both devices are on the link and no session opened over WebRTC in this long: the link goes on without it, over the
+ * native transports (Iroh's browser build, HyperDHT through the person's relay), well inside the joiner's
+ * `ENROLL_PROOF_TIMEOUT_MS`. Over WebRTC that works, a session opens in a few seconds.
+ */
+export const ENROLL_RTC_MS = 20_000;
 /** How long, and how often, the joiner reads the turn record for the record that lists it. */
 export const ENROLL_FINISH = { rounds: 20, everyMs: 3_000 };
 
@@ -671,7 +677,8 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
       ? { seedB64: "", signer, peerKey: pinned, expectedPeerKey: pinned, verifiedPeerKey: pinned, requireSignedSignals: true }
       : { seedB64: "", signer };
     let link: GhostLink | null = null;
-    const rtc = !!options.createPeerConnection;
+    /** WebRTC on this link: this page has it, and it did not fail to connect the two (`withoutRtc`). */
+    let rtc = !!options.createPeerConnection;
     // One session per invite, and the inviter says so (WISP 06 § Adding a device). Every device that reads the code
     // writes the joiner's one packet, and the inviter reads only the last one written: a device whose packet another
     // one replaced never reaches it. So a joiner with WebRTC always makes an offer, whichever key sorts first, signed
@@ -681,6 +688,7 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
     // signal of another key is nothing else.
     const intervals = options.pollIntervals ?? DHT_POLL_INTERVALS;
     let offered = false;
+    let rtcTimer: ReturnType<typeof setTimeout> | null = null;
     const reput = pinned && rtc ? setInterval(() => { if (!opened) link?.republish(); }, ENROLL_REPUT_MS) : null;
     const tryOpen = () => {
       if (opened || !link?.supportsDevice(ENROLL_CAPABILITY)) return;
@@ -689,7 +697,7 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
       opened = true;
       events.onOpen(publicKeyFromZ32(key), hash);
     };
-    link = new GhostLink({
+    const make = (): GhostLink => { const made: GhostLink = new GhostLink({
       params,
       pairing: {
         credentials,
@@ -714,48 +722,77 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
       getServices: () => [{ id: "chat", type: "chat" }],
       getHostedHttpService: () => undefined,
       events: {
-        onDeviceCapabilities: () => tryOpen(),
-        onPairingState: () => tryOpen(),
+        onDeviceCapabilities: () => { if (link === made) tryOpen(); },
+        onPairingState: () => { if (link === made) tryOpen(); },
         onDataLinkState: (state) => {
+          if (link !== made) return;
           if (state === "open") { tryOpen(); return; }
           if (opened) { opened = false; events.onClose(); }
         },
-        onDeviceFrame: (frame) => { if (opened) events.onFrame(frame); },
-        onPeerKeyRefused: () => events.onPeerRefused(),
+        onDeviceFrame: (frame) => { if (opened && link === made) events.onFrame(frame); },
+        onPeerKeyRefused: () => { if (link === made) events.onPeerRefused(); },
+        // What a WebRTC attempt said: no direct path between the two (`withoutRtc`).
+        onRtcStalled: () => withoutRtc(made),
+        onDirectEvidence: (evidence) => { if (evidence !== "open" && evidence !== "closed") withoutRtc(made); },
+        onAnswersRefused: () => withoutRtc(made),
         onPresence: (presence) => {
-          if (!presence.online) return;
+          if (!presence.online || link !== made) return;
           events.onPeerSeen?.();
+          // The other device is there, and no session by `ENROLL_RTC_MS`: the answering side may hear nothing of an
+          // attempt that failed (it waits out its 90 s).
+          if (rtc && !rtcTimer && !opened) rtcTimer = setTimeout(() => { if (link) withoutRtc(link); }, ENROLL_RTC_MS);
           if (!pinned || !rtc || offered || opened) return;
           offered = true;
-          void link?.connect().catch(() => {});
+          void made.connect().catch(() => {});
         },
-        // The other device has no WebRTC (a Linux Desktop): this one starts its native endpoints for it, as a device
-        // link does. Without them a page with WebRTC had no transport in common with it, and nothing said so.
-        onPacketTransports: (transports) => { if (!transports.includes("webrtc/1")) startNative(); },
+        // The other device has no WebRTC (a Linux Desktop, or a page whose WebRTC failed): this one starts its native
+        // endpoints for it, as a device link does. Without them a page with WebRTC had no transport in common with it,
+        // and nothing said so.
+        onPacketTransports: (transports) => { if (link === made && !transports.includes("webrtc/1")) startNative(); },
       },
-    });
+    }); return made; };
+    /*
+     * WebRTC on both sides that connects nothing (host candidates the other browser does not resolve, a router that does
+     * not hairpin, no TURN): neither packet says it has no WebRTC, so neither side starts a native endpoint, and the two
+     * saw each other until the joiner gave up. The link starts again as on an app with no WebRTC, as a group's edge does
+     * (node.ts `edgeWithoutRtc`): it runs its native endpoints and its packet lists no `webrtc/1`, the other device
+     * starts its own for it as for a Linux Desktop, and the two meet over Iroh's relay. Only before a session opened,
+     * and only where this app has a native transport to go on with.
+     */
+    const withoutRtc = (from: GhostLink) => {
+      // A link that runs its native endpoints already (the other device has no WebRTC) has nothing more to go on with.
+      if (link !== from || !rtc || opened || started.has(from) || !Object.values(options.nativeTransports ?? {}).some(Boolean)) return;
+      rtc = false;
+      if (rtcTimer) { clearTimeout(rtcTimer); rtcTimer = null; }
+      link = make();
+      link.start();
+      startNative();
+      void from.stop(false).catch(() => {});
+    };
     // The native endpoints, each on a seed made for this run: their addresses go out in the link's own packet.
-    let native = false;
     const startNative = () => {
-      if (native) return;
-      native = true;
+      const target = link;
+      if (!target || started.has(target)) return;
+      started.add(target);
       void (async () => {
         for (const [transport, factory] of Object.entries(options.nativeTransports ?? {})) {
-          if (!factory || !link || link.availableTransports.includes(transport as NativeTransport)) continue;
+          if (!factory || link !== target || target.availableTransports.includes(transport as NativeTransport)) continue;
           try {
             const endpoint = await factory(randomSeed());
-            if (!link) { await endpoint.close(); return; }
-            link.registerEndpoint(endpoint);
+            if (link !== target) { await endpoint.close(); return; }
+            target.registerEndpoint(endpoint);
           } catch { /* this transport is not available now; the others, and WebRTC, still are */ }
         }
       })();
     };
+    const started = new WeakSet<GhostLink>();
+    link = make();
     link.start();
     // Where this page has no WebRTC, the session runs on the native transports from the start.
     if (!rtc) startNative();
     return {
       send: (frame) => link!.sendDeviceFrame(frame),
-      stop: async () => { const running = link; link = null; if (reput) clearInterval(reput); await running?.stop().catch(() => {}); },
+      stop: async () => { const running = link; link = null; if (reput) clearInterval(reput); if (rtcTimer) clearTimeout(rtcTimer); await running?.stop().catch(() => {}); },
     };
   };
 }
