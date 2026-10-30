@@ -129,7 +129,7 @@ describe("executing it after approval", () => {
     expect((await all<StoredProof>(STORES.proofs)).map((p) => p.secret).sort()).toEqual(["b", "k", "r"]);
     expect(await all<StoredPayment>(STORES.payments)).toMatchObject([{ id: "r1", linkId: "l1", direction: "out", amount: 40, state: "pending", mint: MINT, token, requestId: "ask-1", memo: "rent" }]);
     expect(await all<WalletTx>(STORES.walletTx)).toMatchObject([{ id: "r1", kind: "ecash-out", amount: 40, fee: 8 }]);
-    expect(events.onChange).toHaveBeenCalledOnce();
+    expect(events.onChange, "the inputs reserved, then the payment stored").toHaveBeenCalledTimes(2);
   });
 
   it("a swap with no answer keeps its inputs reserved and records no payment, so it can only be recovered", async () => {
@@ -142,6 +142,20 @@ describe("executing it after approval", () => {
     // Approving again does not swap the reserved inputs a second time.
     await expect(wallet.executeReviewedCashu(review(), saved)).rejects.toThrow("went to another payment");
     expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+  });
+
+  it("says the wallet changed once its inputs are reserved, before the mint answers: they show set aside meanwhile", async () => {
+    const saved = await prepared();
+    const { wallet, events } = setup();
+    // The mint never answers. A view made before the inputs were reserved was the only one, and kept them in the balance.
+    // (4 of the set-aside sats were reserved before: the fixture's "r".)
+    let asked!: () => void;
+    const reached = new Promise<void>((resolve) => { asked = resolve; });
+    mintApi.completeSwap.mockImplementation(() => { asked(); return new Promise(() => {}); });
+    void wallet.executeReviewedCashu(review(), saved);
+    await reached;
+    expect(events.onChange).toHaveBeenCalledOnce();
+    expect(await wallet.view()).toMatchObject({ balance: 8, setAside: 64 + 4 });
   });
 });
 
