@@ -39,11 +39,11 @@
   "reconnecting": "Reconectando...",
   "rejected": "Llamada rechazada",
   "relayNoAnswer": "Tu relay no respondió",
-  "relayNoAnswerNext": "Revisa el servidor TURN en Configuración, Red. Ocultar mi IP nunca conecta directo.",
+  "relayNoAnswerNext": "Revisa el servidor TURN en Ajustes, Red. Ocultar mi IP nunca conecta directo.",
   "relayOnlyNow": "Llamada terminada: Ocultar mi IP está activado",
   "relayOnlyNowNext": "Esta llamada llegaba directo a tu contacto. Llama de nuevo: pasará por tu relay.",
   "relayOnlyOff": "Las llamadas están desactivadas con Ocultar mi IP",
-  "relayOnlyOffNext": "Las llamadas de esta app aún no pueden usar un relay. Desactívalo en Configuración, Red para llamar.",
+  "relayOnlyOffNext": "Las llamadas de esta app aún no pueden usar un relay. Desactívalo en Ajustes, Red para llamar.",
   "selfView": "Arrastra para mover, tira de una esquina para cambiar el tamaño, doble clic para restablecer",
   "share": {
     "blocked": "Compartir pantalla está bloqueado",
