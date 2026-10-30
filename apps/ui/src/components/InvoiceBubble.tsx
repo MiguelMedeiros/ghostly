@@ -275,6 +275,13 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
   const wallet = lightningPayer.payer;
   const [paying, setPaying] = useState(false);
   const { copied, failed, copy } = useMoneyCopy(destination.text);
+  // Done takes the payment away with the button pressed: the keys go back to Pay, drawn again, not to the page.
+  const payOpen = useRef<HTMLButtonElement>(null);
+  const wasPaying = useRef(paying);
+  useEffect(() => {
+    if (wasPaying.current && !paying && focusLost()) payOpen.current?.focus({ preventScroll: true });
+    wasPaying.current = paying;
+  }, [paying]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid="lnurl-bubble">
       <p className="text-[11px] uppercase tracking-wider text-text-primary/65 m-0">{destination.kind === "address" ? t("payments.invoice.lightningAddress") : "LNURL"}</p>
@@ -285,7 +292,7 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
       ) : (
         <div className="flex flex-wrap gap-1.5 mt-2">
           {wallet && !mine && !off && <LightningPayWith payer={lightningPayer} unit={satsIn(t, network)} testId="lnurl-lightning-card" />}
-          {wallet && !mine && !off && <button className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>{t("payments.invoice.pay")}</button>}
+          {wallet && !mine && !off && <button ref={payOpen} className={button} data-testid="lnurl-pay-open" onClick={() => setPaying(true)}>{t("payments.invoice.pay")}</button>}
           <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
           {failed && <MoneyCopyRefused value={destination.text} />}
         </div>
