@@ -48,9 +48,30 @@ describe("the Redeemed mark of an ecash token", () => {
     expect(await screen.findByTestId("token-redeemed")).toBeInTheDocument();
   });
 
-  // A token redeemed before the mark was keyed by the whole token reads Redeem again: the mint's word that it is spent
-  // is what is left, and spent ecash has nothing more to offer.
-  it("is shown when the mint says the token was already spent", async () => {
+  // agents#1588: the same token in two messages: the second card offered Redeem still, and pressed said "Already spent"
+  // for a token this device had just redeemed.
+  it("turns every card of the same token Redeemed when one of them is redeemed here, not Already spent", async () => {
+    const token = `cashuBa${"o".repeat(60)}`;
+    fakeEngine.setState({ links: [linkView()] });
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 1008, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    const view = renderApp(<><MessageBubble message={message("m1", token)} peerPubKey="peer" /><MessageBubble message={message("m2", token)} peerPubKey="peer" /></>);
+    let receives = 0;
+    view.engine.on("walletReceiveToken", () => {
+      if (receives++) throw new Error("This ecash was already spent somewhere else");
+      return { amount: 1008 };
+    });
+    await waitFor(() => expect(screen.getAllByTestId("token-redeem")).toHaveLength(2));
+    const [first, second] = screen.getAllByTestId("cashu-token-bubble");
+    await view.user.click(within(first).getByTestId("token-redeem"));
+    expect(await within(first).findByTestId("token-redeemed")).toBeInTheDocument();
+    expect(await within(second).findByTestId("token-redeemed")).toBeInTheDocument();
+    expect(within(second).queryByTestId("token-redeem")).not.toBeInTheDocument();
+    expect(within(second).queryByTestId("token-spent")).not.toBeInTheDocument();
+  });
+
+  // Spent at the mint says nothing of who spent it: the contact, someone they sent it to, or this device before. Nothing
+  // came in, so the card says spent and offers nothing more, and never claims Redeemed.
+  it("is not shown when the mint says the token was already spent", async () => {
     const token = `cashuBa${"o".repeat(60)}`;
     fakeEngine.setState({ links: [linkView()] });
     fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 1008, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
@@ -60,13 +81,15 @@ describe("the Redeemed mark of an ecash token", () => {
     });
     const card = await screen.findByTestId("cashu-token-bubble");
     await view.user.click(within(card).getByTestId("token-redeem"));
-    expect(await within(card).findByTestId("token-redeemed")).toBeInTheDocument();
+    expect(await within(card).findByTestId("token-spent")).toHaveTextContent("Already spent");
     expect(within(card).queryByTestId("token-redeem")).not.toBeInTheDocument();
-    expect(card).not.toHaveTextContent(/already spent/);
+    expect(within(card).queryByTestId("token-redeemed")).not.toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/Redeemed/);
     view.unmount();
 
     renderApp(<MessageBubble message={message("m2", token)} peerPubKey="peer" />);
-    expect(await screen.findByTestId("token-redeemed")).toBeInTheDocument();
+    const later = await screen.findByTestId("cashu-token-bubble");
+    expect(within(later).queryByTestId("token-redeemed")).not.toBeInTheDocument();
   });
 
   it("is not shown when the redeem fails for another reason", async () => {

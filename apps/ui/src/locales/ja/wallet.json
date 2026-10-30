@@ -59,6 +59,7 @@
     },
     "label": "バックアップが必要",
     "later": "あとで",
+    "line": "{{wallet}} ウォレットをバックアップ",
     "title": "{{wallet}} に本物のお金があります"
   },
   "bark": {
@@ -201,6 +202,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "このインボイスは期限切れです。もう誰も支払えません。",
     "invoiceFor": "{{amount}} のインボイス",
     "makePrimary": "メインにする",
     "mints": "ミント",
@@ -585,6 +587,17 @@
     "mainnet": "sats",
     "testnet": "テスト sats"
   },
+  "send": {
+    "balance": "残高: {{amount}} {{unit}}",
+    "cameraUnavailable": "カメラを使えません。貼り付け、入力、または画像を選んでください。",
+    "clipboardEmpty": "貼り付けるものがありません。先に請求書かアドレスをコピーしてください。",
+    "clipboardUnavailable": "クリップボードを読めませんでした。下に貼り付けるか入力してください。",
+    "image": "画像を選ぶ",
+    "max": "最大",
+    "noAmount": "この請求書には金額がありません。金額付きのものを頼んでください。",
+    "paste": "貼り付け",
+    "scan": "スキャン"
+  },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",
     "progress": "Mainnet のウォレットを作成しています…",
@@ -753,6 +766,8 @@
     "send": "送金"
   },
   "unseen": {
+    "lineReal": "{{wallet}} に新しい {{amount}} sats",
+    "lineTest": "{{wallet}} に新しいテスト用 {{amount}} sats",
     "real": "{{place}}、新着 {{amount}} sats",
     "test": "{{place}}、新着 {{amount}} テスト sats"
   },

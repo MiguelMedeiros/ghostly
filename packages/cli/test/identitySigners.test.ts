@@ -1,6 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { EngineState } from "@ghostly/browser/shared/types";
+import type { InAppSigner } from "@ghostly/browser/proofs/contract";
+import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { callApi, type ApiContext } from "../src/api";
+import { EventHub, type GhostlyEvent } from "../src/events";
 // covers: headless.identities
 
 /**
@@ -64,5 +70,28 @@ describe("identity signers on Node", () => {
       code: "bad_request", message: "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>",
     });
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  });
+
+  // The link or code a signer waits on holds the request's secret: it went into the event journal, kept on disk and
+  // replayed to every `listen` that came later.
+  it("reports a signer's approval link to the listeners live, never to the journal or a replay", async () => {
+    const { ctx } = fake();
+    const hub = new EventHub(join(mkdtempSync(join(tmpdir(), "ghostly-approval-")), "events.jsonl"), () => 1000, "approval");
+    (ctx as unknown as { hub: EventHub }).hub = hub;
+    const live: GhostlyEvent[] = [];
+    hub.onEvent((e) => live.push(e));
+    hub.emit("daemon.started", "daemon.started:1");
+    const signer = IDENTITY_PROVIDERS.find((p) => p.id === "nostr")!.signers.find((s) => s.id === "nip46") as InAppSigner<unknown>;
+    const run = vi.spyOn(signer, "run").mockImplementation(async (sctx) => {
+      sctx.onAuthUrl("https://bunker.test/auth?secret=s3cret");
+      sctx.onApproval?.({ qr: { value: "pubkyauth://signin?secret=s3cret", label: "Scan" }, notes: [] });
+      throw new Error("stopped here");
+    });
+    try {
+      await expect(callApi(ctx, "identity.add", { provider: "nostr", fields: { bunker: "bunker://x" } })).rejects.toThrow("stopped here");
+    } finally { run.mockRestore(); }
+    expect(live.filter((e) => e.type === "identity.approval").map((e) => e.url ?? e.qr)).toEqual(["https://bunker.test/auth?secret=s3cret", "pubkyauth://signin?secret=s3cret"]);
+    expect(JSON.stringify(hub.replay(0))).not.toContain("s3cret");
+    expect(hub.replay(0).map((e) => e.type)).toEqual(["daemon.started"]);
   });
 });

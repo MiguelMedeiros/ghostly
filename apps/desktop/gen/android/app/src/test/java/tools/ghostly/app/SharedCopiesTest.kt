@@ -41,6 +41,45 @@ class SharedCopiesTest {
   }
 
   @Test
+  fun aCopyOntoAFullDiskIsNoRoomNotUnread() {
+    // A full disk as the JVM and Android say it, also when wrapped.
+    val full = try {
+      java.io.FileOutputStream("/dev/full").use { it.write(ByteArray(1)); it.flush() }
+      null
+    } catch (e: java.io.IOException) {
+      e
+    }
+    if (full != null) assertEquals(true, SharedCopies.noRoom(full))
+    assertEquals(true, SharedCopies.noRoom(java.io.IOException("write failed: ENOSPC (No space left on device)")))
+    assertEquals(true, SharedCopies.noRoom(RuntimeException("copy", java.io.IOException("write failed: EDQUOT (Disk quota exceeded)"))))
+    // What the other app's stream did: not read, as before.
+    assertEquals(false, SharedCopies.noRoom(SecurityException("Permission Denial: reading content://media/external/video/1")))
+    assertEquals(false, SharedCopies.noRoom(java.io.IOException("No stream for content://x/1")))
+    assertEquals(false, SharedCopies.noRoom(java.io.FileNotFoundException()))
+  }
+
+  @Test
+  fun aFolderThatCannotBeMadeSaysWhyNotFalse() {
+    val root = temp.newFolder("shared")
+    val folder = File(root, "1000/0")
+    SharedCopies.makeFolder(folder)
+    SharedCopies.makeFolder(folder)
+    assertEquals(true, folder.isDirectory)
+    // Not made (here a file where a folder goes): it throws, as before the copy's open would; not for want of room.
+    val blocked = File(temp.newFile("notes"), "0")
+    val error = try {
+      SharedCopies.makeFolder(blocked)
+      null
+    } catch (e: java.io.IOException) {
+      e
+    }
+    assertEquals(true, error != null)
+    assertEquals(false, SharedCopies.noRoom(error!!))
+    // What it throws on a disk already full (the errno's reason): no room, not unread.
+    assertEquals(true, SharedCopies.noRoom(java.nio.file.FileSystemException(folder.path, null, "No space left on device")))
+  }
+
+  @Test
   fun aStartLeavesOnlySharesTakenSinceIt() {
     val root = temp.newFolder("shared")
     for (share in listOf("900", "1000", "1001", "junk")) copy(root, share, 0, "f")

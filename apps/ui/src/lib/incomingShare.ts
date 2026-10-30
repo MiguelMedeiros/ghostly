@@ -2,9 +2,10 @@ import { useSyncExternalStore } from "react";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
- * files. It is held here, in memory only, from the moment the page receives it until a chat is picked; then
- * it waits for that chat's composer, which puts the text in the draft and the files on the attachment sheet
- * (the same sheet a paste or a drop opens, #349). Nothing is sent until the person sends it there.
+ * files. It is held here, in memory only, from the moment the page receives it until a chat is picked (a profile
+ * switch hands it to the next page, `carryIncomingShare`); then it waits for that chat's composer, which puts the
+ * text in the draft and the files on the attachment sheet (the same sheet a paste or a drop opens, #349). Nothing is
+ * sent until the person sends it there.
  */
 
 /** A file of a share as the picker shows it: a browser's File, or one not read into the page yet. */
@@ -19,11 +20,18 @@ export interface IncomingShare {
   leftOut?: string[];
   /** The names of files Android could not read (a revoked permission, a broken stream); the picker says so. */
   unread?: string[];
+  /** The names of files Android had no room to copy (the device is full); the picker says so. */
+  noRoom?: string[];
   /**
    * Reads `files` into the page where they are only names and sizes (the Android app's share: its bytes are read
    * when a chat's composer takes it, not before the picker shows). Without it, `files` are the Files.
    */
   read?: () => Promise<File[]>;
+  /**
+   * Keeps the share for the page that loads next (a profile switch restarts the app), which shows it in its picker
+   * again. False where it could not be kept. Without it, the share goes with this page.
+   */
+  carry?: () => boolean;
 }
 
 /** A share's files as Files, read now where they were not yet. */
@@ -43,15 +51,27 @@ export function isEmptyShare(share: IncomingShare): boolean {
 
 /**
  * A share arrived: it waits for a chat to be picked. An empty one is dropped, and never clears one that waits; one
- * that only names files left out (too large, or not read) is said all the same, with the share that waits when there
- * is one.
+ * that only names files left out (too large, not read, or no room for them) is said all the same, with the share that
+ * waits when there is one. A share with something replaces the one that waits, but still names what a waiting notice
+ * named (Android may hand an older share still copying over after a newer notice).
  */
 export function receiveShare(share: IncomingShare): void {
   if (isEmptyShare(share)) {
-    if (!share.leftOut?.length && !share.unread?.length) return;
-    pending = pending ? { ...pending, leftOut: [...pending.leftOut ?? [], ...share.leftOut ?? []], unread: [...pending.unread ?? [], ...share.unread ?? []] } : share;
-  } else pending = share;
+    if (!share.leftOut?.length && !share.unread?.length && !share.noRoom?.length) return;
+    pending = pending ? withNames(pending, share) : share;
+  } else pending = pending && isEmptyShare(pending) ? withNames(share, pending, true) : share;
   emit();
+}
+
+/** `share` naming `names`' files left out too: after its own, or before them (`first`). */
+function withNames(share: IncomingShare, names: IncomingShare, first = false): IncomingShare {
+  const join = (own: string[] = [], more: string[] = []) => first ? [...more, ...own] : [...own, ...more];
+  return {
+    ...share,
+    leftOut: join(share.leftOut, names.leftOut),
+    unread: join(share.unread, names.unread),
+    noRoom: join(share.noRoom, names.noRoom),
+  };
 }
 
 export function incomingShare(): IncomingShare | null {
@@ -62,6 +82,11 @@ export function incomingShare(): IncomingShare | null {
 export function dropIncomingShare(): void {
   pending = null;
   emit();
+}
+
+/** The page is about to restart: the share that waits for a chat to be picked is kept for the next page. Whether it was. */
+export function carryIncomingShare(): boolean {
+  try { return pending?.carry?.() ?? false; } catch { return false; }
 }
 
 /** The chat picked: the share waits for its composer. `chat` is the composer's draft id (a session id, `group:<id>`). */

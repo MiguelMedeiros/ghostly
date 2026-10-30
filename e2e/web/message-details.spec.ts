@@ -55,10 +55,23 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   const [alice, bob] = await Promise.all([peer("details-alice"), peer("details-bob")]);
   await pair(alice, bob);
 
-  // A text, seen from the side that sent it (double click) and from the side that got it (the ⋮ menu).
+  // A text, seen from the side that sent it (Ctrl/⌘+double click) and from the side that got it (the ⋮ menu).
   await say(alice, "how did this travel?");
   await expect(chat(bob).getByText("how did this travel?")).toBeVisible();
-  await rowOf(alice, "how did this travel?").dblclick();
+  // A plain double click on the words selects a word, a triple click the line, as anywhere else: no details.
+  // The bubble settles first: until the receipt its mark changes (and its width with it), so the words move.
+  await expect(rowOf(alice, "how did this travel?").getByTestId("message-delivery")).toHaveAttribute("data-delivery", "delivered");
+  const words = rowOf(alice, "how did this travel?").getByTestId("message-text");
+  const selected = () => alice.page.evaluate(() => window.getSelection()?.toString().trim());
+  // On the first word, where the words are at the moment of the click (a locator's click waits for them to hold still).
+  const first = async () => ({ x: 4, y: (await words.boundingBox())!.height / 2 });
+  await words.dblclick({ position: await first() });
+  await expect.poll(selected).toBe("how");
+  await words.click({ position: await first(), clickCount: 3 });
+  await expect.poll(selected).toBe("how did this travel?");
+  await expect(panel(alice.page)).toHaveCount(0);
+  // Ctrl+double click (⌘ on a Mac) opens them.
+  await words.dblclick({ modifiers: ["ControlOrMeta"] });
   await expect(panel(alice.page)).toHaveAttribute("data-loaded", "yes");
   await expect(panel(alice.page)).toHaveAttribute("data-side", "end");
   await expect(rowOf(alice, "how did this travel?")).toHaveAttribute("data-details-open", "true");
@@ -77,6 +90,10 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   expect(copied).toMatchObject({ kind: "Text", path: { "Sent over": "WebRTC, direct" }, engine: { message: { kind: "text" } } });
   await close(alice.page);
   await expect(rowOf(alice, "how did this travel?")).not.toHaveAttribute("data-details-open");
+  // ⌘ by name, whatever the machine running the test.
+  await words.dblclick({ modifiers: ["Meta"] });
+  await expect(panel(alice.page)).toHaveAttribute("data-loaded", "yes");
+  await close(alice.page);
 
   await openFromMenu(bob, rowOf(bob, "how did this travel?"));
   await expect(field(bob.page, "Received over")).toHaveText("WebRTC, direct");

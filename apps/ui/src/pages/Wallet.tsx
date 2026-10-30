@@ -21,17 +21,21 @@ import { BackupReminder } from "../components/wallet/BackupReminder";
 import { useBackupDue } from "../hooks/useBackupDue";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { BackupDue } from "@ghostly/browser/shared/backupReminder";
-import { NETWORK_NAME } from "../components/wallet/names";
+import { NETWORK_NAME, WALLET_NAME } from "../components/wallet/names";
+import { NeedsYouList } from "../components/NeedsYou";
+import type { NeedsYou } from "../lib/needsYou";
+import { showingNetwork, useUnseenSats } from "../hooks/useUnseenSats";
+import { formatAmount } from "../lib/amount";
 import { dealCard } from "../components/wallet/motion";
 import { Button } from "../components/wallet/ui";
 import { NetworkTag } from "../components/NetworkTag";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Page, PageAction } from "../components/layout";
 import { focusInPlace } from "../lib/focus";
 import { navOnly } from "../lib/navigation";
 import { playCue } from "../lib/cues";
-import type { WalletInstanceView, WalletNetwork, WalletPlatform, WalletState } from "../lib/platform";
+import { servicesPlatform, type WalletInstanceView, type WalletNetwork, type WalletPlatform, type WalletState } from "../lib/platform";
 
 const CARD_KEY = "ghostly-wallet-card";
 /** The card chosen last in this tab: a wallet's id, or (a tab from before wallets had networks) a rail. */
@@ -59,8 +63,8 @@ const backupFirst = (made: WalletInstanceView) => made.network === "mainnet" && 
  */
 export function Wallet() {
   const { t } = useI18n();
-  const platform = useServicesPlatform();
-  const wallet = platform?.wallet;
+  // The page draws again when the wallets change, not on every engine state (a file moving, a chat, a call).
+  const wallet = useWalletPlatform();
   const state = wallet?.getState();
   const cards = state ? walletCards(state, { t }) : [];
   // The tab chosen on this visit; before that, the one shown last on this device while it has wallets (another
@@ -154,6 +158,30 @@ export function Wallet() {
     setPuttingOff(true);
     void wallet?.backupReminder({ event: "later", wallet: d.id }).catch(() => {}).finally(() => setPuttingOff(false));
   };
+  // What the wallet dot is about (lib/needsYou), in one line each at the top, its dot on the way there: the network's
+  // tab and the card. New sats are on their network's Cashu card (the balance they came into); the backup, on its wallet's.
+  // The tab in view first, then what came in counted: sats arriving on it as it opens are seen.
+  useEffect(() => showingNetwork(network), [network]);
+  const unseen = useUnseenSats();
+  const goTo = (id: string) => {
+    select(id, false);
+    requestAnimationFrame(() => page.current?.querySelector(`[data-testid="${walletCardTestId(id)}"]`)?.scrollIntoView({ block: "nearest" }));
+  };
+  const needs: (NeedsYou & { card: string; network: WalletNetwork })[] = NETWORKS.flatMap((n) => {
+    const amount = n === "mainnet" ? unseen.real : unseen.test;
+    const card = cards.find((c) => c.network === n && c.rail === "cashu") ?? cards.find((c) => c.network === n);
+    if (!amount || !card) return [];
+    const text = t(n === "mainnet" ? "wallet.unseen.lineReal" : "wallet.unseen.lineTest", { amount: formatAmount(amount, t.language), wallet: card.name });
+    return [{ id: `sats:${n}`, text, clears: "seen" as const, show: () => goTo(card.id), card: card.id, network: n }];
+  });
+  const dueCard = due && cards.find((c) => c.id === due.id);
+  if (due && dueCard) needs.unshift({ id: `backup:${due.id}`, text: t("wallet.backupReminder.line", { wallet: WALLET_NAME[due.type] }), clears: "done", card: dueCard.id, network: dueCard.network,
+    show: () => {
+      const go = page.current?.querySelector<HTMLElement>("[data-testid=backup-reminder-go]");
+      go?.scrollIntoView({ block: "nearest" });
+      go?.focus();
+    } });
+  const marks = Object.fromEntries(needs.map((item) => [item.card, item.text]));
   /** After a removal: the next card of the same network; with none left the tab stays, saying so. */
   const removed = (id: string) => {
     const next = shown.find((c) => c.id !== id);
@@ -164,18 +192,20 @@ export function Wallet() {
       <PageAction label={t("sidebar.new")} title={t("wallet.page.create")} testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
     )}>
       <div ref={page} className="space-y-6">
-        {platform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-warn-ink text-xs" data-testid="platform-notice">{platform.notice}</p>}
+        {servicesPlatform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-warn-ink text-xs" data-testid="platform-notice">{servicesPlatform.notice}</p>}
         {wallet && state?.setup && <WalletSetupStatus wallet={wallet} setup={state.setup} showProgress={!cards.length} />}
         {!wallet || !state ? <p className="text-text-muted text-sm">{t("wallet.page.unavailable")}</p> : (!cards.length && state.setup?.running && !firstRun) ? null : !cards.length || firstRun ? (
           <FirstWallet wallet={wallet} offers={state.offers} onNew={() => setCreating("testnet")} onStart={() => setFirstRun(true)} onMade={(id) => { setFirstRun(false); select(id); setDealt(id); }} />
         ) : <>
+          <NeedsYouList items={needs} />
           <NetworkTabs network={network} counts={{ mainnet: cards.filter((c) => c.network === "mainnet").length, testnet: cards.filter((c) => c.network === "testnet").length }}
+            marked={{ mainnet: needs.some((item) => item.network === "mainnet"), testnet: needs.some((item) => item.network === "testnet") }}
             onChange={(n) => { setFocusPanel(false); show(n); }} label={t("wallet.page.networks")} testId="wallet-networks" tabTestId="wallet-network" idPrefix="wallet-network-tab" controls="wallet-network-panel" />
           <div role="tabpanel" id="wallet-network-panel" aria-labelledby={`wallet-network-tab-${network}`} data-testid="wallet-network-panel" data-network={network} className="space-y-6">
             {due && <BackupReminder key={due.id} due={due} busy={puttingOff} onBackUp={() => backUp(due)} onLater={() => later(due)} />}
             <div key={network} className="wallet-network-view space-y-3" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
               <p className="text-xs text-text-muted" data-testid="wallet-network-about">{t(network === "mainnet" ? "wallet.page.about.mainnet" : "wallet.page.about.testnet")}</p>
-              {selected ? <WalletDeck network={network} cards={shown} selected={selected.id} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
+              {selected ? <WalletDeck network={network} cards={shown} selected={selected.id} marks={marks} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-border px-4 py-3" data-testid={`wallet-network-${network}-empty`}>
                   <p className="text-sm text-text-secondary">{t("wallet.page.none", { network: NETWORK_NAME[network] })}</p>
                   <Button data-testid={`wallet-network-${network}-new`} onClick={() => setCreating(network)}>{t("wallet.page.new", { network: NETWORK_NAME[network] })}</Button>

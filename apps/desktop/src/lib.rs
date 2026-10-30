@@ -5,6 +5,9 @@
 // plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
 #[cfg(target_os = "android")]
 mod android;
+// The share another app made on Android, until the page takes it (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_share;
 #[cfg(desktop)]
 mod app_sandbox;
 #[cfg(desktop)]
@@ -59,6 +62,10 @@ mod share;
 mod single_instance;
 #[cfg(test)]
 mod test_support;
+#[cfg(desktop)]
+mod translate;
+#[cfg(desktop)]
+mod translate_models;
 mod turn_network;
 #[cfg(test)]
 mod turn_record;
@@ -69,7 +76,7 @@ mod viewer;
 
 use commands::AppState;
 #[cfg(mobile)]
-use mobile::{app_sandbox, hyperdht, keep_awake, share, viewer};
+use mobile::{app_sandbox, hyperdht, keep_awake, share, translate, translate_models, viewer};
 use pkarr_network::Pkarr;
 use tauri::Manager;
 #[cfg(desktop)]
@@ -110,8 +117,10 @@ macro_rules! commands {
         tauri::generate_handler![
             app_sandbox::app_broker,
             app_sandbox::app_close,
+            app_sandbox::app_focus,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            app_sandbox::app_title,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
@@ -218,6 +227,10 @@ macro_rules! commands {
             paired_transport::paired_native_close,
             paired_transport::paired_native_send,
             share::share_text,
+            translate::translate_texts,
+            translate_models::translation_download,
+            translate_models::translation_remove,
+            translate_models::translation_status,
             unread_count::native_unread_count,
         ]
     };
@@ -278,6 +291,10 @@ pub fn run() {
         .manage(ViewerState::default())
         .manage(app_sandbox::AppSandboxState::default())
         .manage(hyperdht::HyperState::default())
+        // Translation on this computer, by the runtime downloaded with the first language model (none: not installed).
+        .manage(translate::TranslateState::default())
+        // Its models and the runtime, downloaded only when the person says yes, each file checked against its pin.
+        .manage(translate_models::ModelsState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -329,6 +346,11 @@ pub fn run() {
                 diagnostics::init(&dir);
             }
             notifications::install(app.handle());
+            #[cfg(target_os = "linux")]
+            {
+                let app = app.handle().clone();
+                exit_on_signals(move || app.exit(0));
+            }
             // Files sent and received in chats, one folder per profile.
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
             app.manage(local_access::LocalAccess::load(
@@ -514,6 +536,43 @@ fn hold_close(window: impl Closing) {
     });
 }
 
+/// A request to quit from outside the app (a logout or a shutdown sends SIGTERM, a terminal Ctrl+C SIGINT, a closed
+/// terminal SIGHUP): the first one runs `quit`, the app's `app.exit`, so it leaves as its window's close makes it
+/// leave: the page says goodbye (`on_run_event`), the native connections close and the app's notifications leave the
+/// desktop's list. A second one ends the process at once. The handlers are in place when this returns.
+#[cfg(target_os = "linux")]
+fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let signals = tauri::async_runtime::block_on(async {
+        Ok::<_, std::io::Error>((
+            signal(SignalKind::terminate())?,
+            signal(SignalKind::interrupt())?,
+            signal(SignalKind::hangup())?,
+        ))
+    });
+    let (mut term, mut int, mut hup) = match signals {
+        Ok(signals) => signals,
+        Err(error) => {
+            eprintln!("signals: a SIGTERM will end the app without its goodbye: {error}");
+            return;
+        }
+    };
+    tauri::async_runtime::spawn(async move {
+        let mut quit = Some(quit);
+        loop {
+            let kind = tokio::select! {
+                _ = term.recv() => SignalKind::terminate(),
+                _ = int.recv() => SignalKind::interrupt(),
+                _ = hup.recv() => SignalKind::hangup(),
+            };
+            match quit.take() {
+                Some(quit) => quit(),
+                None => std::process::exit(128 + kind.as_raw_value()),
+            }
+        }
+    });
+}
+
 /// Leaving well: contacts hear this app go at once, and watch for it to come back (a restart is back
 /// in seconds), rather than noticing when their liveness gives up a minute later.
 /// - The Ghostly window closed on Linux or Windows: see `on_close_requested`.
@@ -627,6 +686,8 @@ mod tests {
             .manage(app_sandbox::AppSandboxState::default())
             .manage(paired_transport::TransportState::default())
             .manage(hyperdht::HyperState::default())
+            .manage(translate::TranslateState::default())
+            .manage(translate_models::ModelsState::default())
             .manage(oidc::OidcState::default())
             .manage(local_access::LocalAccess::default())
             .invoke_handler(only_main(commands!()))
@@ -693,6 +754,8 @@ mod tests {
         arguments["record"] = serde_json::json!(null);
         arguments["count"] = serde_json::json!(0);
         arguments["tag"] = serde_json::json!("x");
+        arguments["pair"] = serde_json::json!("pt-en");
+        arguments["texts"] = serde_json::json!([]);
         arguments
     }
 
@@ -782,9 +845,15 @@ mod tests {
             assert!(!may_call("app-1", command), "{command}");
             assert!(may_call("main", command), "{command}");
         }
-        // The Ghostly window's side of the broker: it opens app windows, answers them and closes them; an app
-        // window does none of that.
-        for command in ["app_open", "app_post", "app_close"] {
+        // The Ghostly window's side of the broker: it opens app windows, answers them, brings them to the front, names
+        // them and closes them; an app window does none of that.
+        for command in [
+            "app_open",
+            "app_post",
+            "app_focus",
+            "app_title",
+            "app_close",
+        ] {
             assert!(registered().iter().any(|c| c == command), "{command}");
             assert!(may_call("main", command), "{command}");
             for label in ["app-1", "app-0123456789abcdef", "svc-1"] {
@@ -1105,6 +1174,22 @@ mod tests {
             after >= Duration::from_millis(DEPART_MS),
             "the app exited {after:?} after the close"
         );
+    }
+
+    /// A logout, a shutdown or `kill <pid>` sends SIGTERM: the app is asked to exit (`app.exit`, where the page says
+    /// goodbye as on the window's close), not ended on the spot with all of that skipped.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_sigterm_asks_the_app_to_exit_as_its_window_s_close_does() {
+        let (asked, quit) = std::sync::mpsc::channel();
+        exit_on_signals(move || asked.send(()).unwrap());
+        let sent = std::process::Command::new("kill")
+            .args(["-TERM", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        quit.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the app was asked to exit");
     }
 
     #[test]

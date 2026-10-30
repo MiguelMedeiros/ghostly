@@ -37,6 +37,7 @@
     "ask": "Ask {{name}} for a link to it",
     "contactCannot": "{{name}}'s app can't run apps yet",
     "installed": "Installed",
+    "join": "Join",
     "label": "App: {{title}}",
     "needsOnline": "{{title}} needs you both online",
     "noLink": "No link to install from",
@@ -162,9 +163,12 @@
     "beside": "Show the chat",
     "full": "Full width",
     "resume": "Back to {{title}}",
+    "resumeSharing": "sharing a file",
+    "sharingWith": "sharing a file with {{name}}",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
     "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
     "with": "{{title}} with {{name}}",
-    "withName": "with {{name}}"
+    "withName": "with {{name}}",
+    "withSharing": "{{title}} · sharing a file with {{name}}"
   }
 }

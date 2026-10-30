@@ -26,6 +26,8 @@
       "tagsLabel": "Tags:",
       "updatedLabel": "Updated:"
     },
+    "clearFinished": "Clear finished",
+    "clearFinishedHint": "Hides done, failed and cancelled tasks on this device. A bot's next update brings one back.",
     "column": {
       "blocked": "Blocked",
       "closed": "Stopped",

@@ -1,8 +1,9 @@
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { fromBase64Url, toBase64Url, utf8Encode } from "./bytes";
+import { fromBase64, fromBase64Url, toBase64, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { encrypt, sealedLength, tryDecrypt } from "./crypto";
+import { RATCHET_OVERHEAD, RatchetBox, type RatchetState } from "./ratchet";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
@@ -155,6 +156,11 @@ export interface DhtDeliveryState {
    * the chat is read as an invite nobody used (`unusedInviteWait`), counted from the join.
    */
   unanswered?: number;
+  /**
+   * A digest of the contact's last ratcheted envelope taken (WISP 4xx § The DHT floor): a reader reads more often than
+   * the contact publishes, and a floor key once used is gone, so the same envelope read again is known by this.
+   */
+  lastDr?: string;
 }
 export interface DhtDeliveryView {
   mode: DeliveryMode;
@@ -173,6 +179,12 @@ export interface DhtDeliveryView {
   foreignKeySeenAt?: number;
   /** The invite was used by someone else first (`DhtDeliveryState.inviteTaken`): this side's texts reach nobody. */
   inviteTaken?: boolean;
+  /**
+   * Forward secrecy of the floor (WISP 4xx): `on`, the turn passed both ways; `starting`, both apps have it and it is on
+   * once both have written; `unsupported`, the contact's app does not have it; `stopped`, it was on and the contact's
+   * app no longer says it has it (floor texts wait for the live session). Absent: this app does not run it here.
+   */
+  forwardSecrecy?: "on" | "starting" | "unsupported" | "stopped";
 }
 /**
  * What can be said about one DHT envelope without opening it: which text it carried, its sequence and times, the
@@ -292,6 +304,11 @@ export class DhtDelivery {
      * uses it, or while its inviter never answered the join (`unanswered`) (`unusedInviteWait`).
      */
     inviteMadeAt?: number;
+    /**
+     * The chat's ratchet (WISP 4xx), shared with its held items, and whether the contact's capability record lists
+     * `ratchet/1`. Absent: every envelope is sealed as before.
+     */
+    ratchet?: { box: RatchetBox; peerSupports(): boolean };
   }) {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
     // holding the invite could forge: it is dropped, not honoured.
@@ -312,7 +329,26 @@ export class DhtDelivery {
     return { mode: this.mode, peerMode: this.state.peerMode, authenticated: !!this.options.credentials.peerKey,
       error: [this.errors.read, this.errors.publish].filter(Boolean).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
       ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }),
-      ...(this.state.inviteTaken && { inviteTaken: true }) };
+      ...(this.state.inviteTaken && { inviteTaken: true }), ...(this.forwardSecrecy && { forwardSecrecy: this.forwardSecrecy }) };
+  }
+  private get forwardSecrecy(): DhtDeliveryView["forwardSecrecy"] {
+    const ratchet = this.options.ratchet;
+    if (!ratchet || !this.options.credentials.peerKey) return undefined;
+    const supports = ratchet.peerSupports();
+    return ratchet.box.on && supports ? "on" : !supports ? (ratchet.box.heardAny ? "stopped" : "unsupported") : "starting";
+  }
+  /**
+   * Whether an envelope to `recipient` is sealed with the ratchet: the contact is pinned and its record lists
+   * `ratchet/1`, or a ratcheted envelope of its was opened here, after which nothing goes plain (WISP 4xx § Downgrade).
+   * And the contact pinned this side too (an envelope of its sealed to this side read, or a live session had): a joiner
+   * pins its inviter from the invite, and its first contact sealed with the ratchet would reach an inviter that has no key
+   * to open it with, and so never pins it.
+   */
+  private ratcheted(recipient: string | undefined): boolean {
+    const ratchet = this.options.ratchet, peer = this.options.credentials.peerKey;
+    if (!ratchet || !peer || recipient !== peer) return false;
+    if (ratchet.box.heardAny) return true;
+    return ratchet.peerSupports() && (!!this.state.peerPinned || !!this.state.wasLive);
   }
   /**
    * This side joined, and its inviter never answered (`DhtDeliveryState.unanswered`): no envelope of its newer than the
@@ -348,6 +384,14 @@ export class DhtDelivery {
     return this.pinnedBoxes;
   }
   private lastPublished?: DhtPacketFacts;
+  /** The envelope a trace line was last said for, per step: a packet read again says nothing new (a Desktop logs every line). */
+  private traced = new Map<string, string>();
+  private traceOnce(step: string, record: string, detail: Record<string, unknown>): void {
+    const seen = record.slice(-24);
+    if (this.traced.get(step) === seen) return;
+    this.traced.set(step, seen);
+    traceLink(this.from, step, detail);
+  }
   /** The sealed record's nonce is its first 24 bytes: 32 characters of base64. */
   private static facts(body: Body, records: GhostRecord[], key: string): DhtPacketFacts {
     return { ...(body[6] && { id: body[6][0] }), seq: body[1], issued: body[2], expires: body[3], packetBytes: measureRecords(key, records),
@@ -373,20 +417,41 @@ export class DhtDelivery {
     return hkdf(sha256, shared, this.key, utf8Encode("ghostly-dht-participation-envelope/1"), 32);
   }
   private signed(body: Body, recipient = "invite"): Uint8Array { return utf8Encode(JSON.stringify(["ghostly-dht-envelope", this.from, this.to, recipient, body])); }
-  private records(body: Body, recipient = this.options.credentials.peerKey): GhostRecord[] {
+  private records(body: Body, recipient = this.options.credentials.peerKey): GhostRecord[] { return this.envelope(body, recipient).records; }
+  /**
+   * The envelope's records. Ratcheted (`ratcheted`), its `_dr` record is the right length but not sealed yet: `seal`
+   * gives its bytes, under the chat's lock, once the publication is sure to go. Measuring a packet takes no key.
+   */
+  private envelope(body: Body, recipient = this.options.credentials.peerKey): { records: GhostRecord[]; plaintext?: string } {
     const signature = toBase64Url(sign(this.signed(body, recipient), this.participation.seed));
     const plaintext = JSON.stringify([body, signature]);
     const hint = recipient ? [{ label: "_dmk", value: encrypt(this.participation.pubKeyZ32, this.key), ttl: ENVELOPE_TTL }] : [];
+    const ratchet = this.ratcheted(recipient);
+    const sealedBytes = (bytes: number) => ratchet ? 4 * Math.ceil((RATCHET_OVERHEAD + bytes) / 3) : sealedLength(bytes);
+    const label = ratchet ? "_dr" : "_dm";
     // The packet a plaintext of this many bytes makes: its size depends on the length alone.
     const fits = (bytes: number) => bytes <= MAX_ENVELOPE_PLAINTEXT &&
-      measureRecords(this.identity.pubKeyZ32, [{ label: "_dm", value: "A".repeat(sealedLength(bytes)), ttl: ENVELOPE_TTL }, ...hint]) <= ENVELOPE_PACKET_BYTES;
+      measureRecords(this.identity.pubKeyZ32, [{ label, value: "A".repeat(sealedBytes(bytes)), ttl: ENVELOPE_TTL }, ...hint]) <= ENVELOPE_PACKET_BYTES;
     const bytes = utf8Encode(plaintext).length;
     if (!fits(bytes)) throw new Error("Text and authentication exceed the DHT packet budget. Shorten the message.");
     // Padded with spaces up to the largest that fits, so a keep-alive is as long as a text. JSON allows spaces after the
     // value: readers from before read the envelope as ever.
     let padded = bytes;
     for (let step = 512; step >= 1; step >>= 1) if (fits(padded + step)) padded += step;
-    return [{ label: "_dm", value: encrypt(plaintext + " ".repeat(padded - bytes), recipient ? this.sealedKey(recipient) : this.key), ttl: ENVELOPE_TTL }, ...hint];
+    const full = plaintext + " ".repeat(padded - bytes);
+    if (ratchet) return { records: [{ label, value: "A".repeat(sealedBytes(padded)), ttl: ENVELOPE_TTL }, ...hint], plaintext: full };
+    return { records: [{ label, value: encrypt(full, recipient ? this.sealedKey(recipient) : this.key), ttl: ENVELOPE_TTL }, ...hint] };
+  }
+  /**
+   * The records to publish: a ratcheted one sealed now, its state saved first (seal, save, send), from the plaintext
+   * the envelope was measured with.
+   */
+  private async sealed(envelope: { records: GhostRecord[]; plaintext?: string }): Promise<GhostRecord[]> {
+    const { records, plaintext } = envelope;
+    if (records[0]?.label !== "_dr") return records;
+    if (plaintext === undefined) throw new Error("A ratcheted envelope without its plaintext");
+    const sealed = await this.options.ratchet!.box.lock(tx => tx.seal("floor", utf8Encode(plaintext)));
+    return [{ ...records[0], value: toBase64(sealed) }, ...records.slice(1)];
   }
   async start(): Promise<void> {
     if (this.running) return; this.running = true;
@@ -481,6 +546,8 @@ export class DhtDelivery {
   validate(text: string, timestamp: number, id: string, reply?: string, edit?: DhtEdit): string | null {
     // Every chat's first contact runs here too (WISP 403): before the pin the text is sealed with the invite key.
     if (this.options.peerAcceptsText?.() === false) return DHT_TEXT_REFUSED;
+    // Forward secrecy was on, and the contact's app no longer says it has it: nothing goes plain (WISP 4xx § Downgrade).
+    if (this.forwardSecrecy === "stopped") return DHT_RATCHET_STOPPED;
     if (!ID.test(id) || !Number.isSafeInteger(timestamp) || timestamp <= 0 || (reply !== undefined && !REPLY_TO.test(reply))) return "Invalid message.";
     if (edit !== undefined && (reply !== undefined || !ID.test(edit[0]) || !validEditNumber(edit[1]))) return "Invalid message.";
     if (utf8Encode(text).length > DHT_TEXT_BYTES) return DHT_TEXT_TOO_LONG;
@@ -640,17 +707,17 @@ export class DhtDelivery {
    * The envelope with as many of this side's pending reactions as fit, oldest first: the packet's budget and what a
    * reader reads (`MAX_ENVELOPE_PLAINTEXT`) both bound it. The contact confirms up to the newest it carried.
    */
-  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, edit?: DhtEdit, forwarded?: number, file?: DhtFileElement): { body: Body; records: GhostRecord[]; reactions: number } {
+  private fitted(sequence: number, issued: number, expires: number, message: Message | null, receipt: string | null, reply?: string, edit?: DhtEdit, forwarded?: number, file?: DhtFileElement): { body: Body; records: GhostRecord[]; plaintext?: string; reactions: number } {
     const pending = (this.options.reactions?.() ?? []).slice(0, REACTION_LIMITS.dht);
     for (let count = pending.length; count > 0; count--) {
       const body = this.body(sequence, issued, expires, message, receipt, reply, pending.slice(0, count), edit, forwarded, file);
       try {
-        const records = this.records(body);
-        if (utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT) return { body, records, reactions: count };
+        const envelope = this.envelope(body);
+        if (utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT) return { body, ...envelope, reactions: count };
       } catch { /* one fewer */ }
     }
     const body = this.body(sequence, issued, expires, message, receipt, reply, [], edit, forwarded, file);
-    return { body, records: this.records(body), reactions: 0 };
+    return { body, ...this.envelope(body), reactions: 0 };
   }
   private async publish(force = false): Promise<void> {
     const now = Date.now();
@@ -663,12 +730,14 @@ export class DhtDelivery {
     const reseal = this.resealDue;
     const keepAlive = !force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal;
     // The invite was taken from this side: its mailbox is the joiner's every copy of the invite derives, and a keep-alive
-    // there would only cover the envelope of whoever joined first. Nothing goes until the invite turns out not taken.
-    if (keepAlive && (this.controlDue > now || (this.state.inviteTaken && !this.options.credentials.peerKey))) return;
+    // there would only cover the envelope of whoever joined first. Nothing goes until the invite turns out not taken, a
+    // look-up that pinned the inviter first or not: pinned, the keep-alive went every 4-6 minutes for good (agents#1592).
+    if (keepAlive && (this.controlDue > now || this.state.inviteTaken)) return;
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
-    const { body, records, reactions } = this.fitted(this.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
+    const fittedEnvelope = this.fitted(this.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
+    const { body, reactions } = fittedEnvelope;
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
@@ -683,9 +752,11 @@ export class DhtDelivery {
       pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
       receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1, next: now + backoff(receipt.attempts) } : this.state.receipt });
     this.sequence = sequence;
+    // Ratcheted, the envelope is sealed only now, with the sequence saved: a key is never taken for one that does not go.
+    const records = await this.sealed(fittedEnvelope);
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
-    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
+    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }), ...(records[0]?.label === "_dr" && { ratchet: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
     // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
     // link's heartbeat, `LinkSession.publishOnce`), so a profile's live chats never take the requests its groups need.
@@ -719,17 +790,30 @@ export class DhtDelivery {
    * one sealed record, a well-formed body within its times, signed by the key it names. Null: not an envelope of the
    * contact's (the pin rules are the caller's).
    */
-  private open(packet: SignedPacket, box: "invite" | "pinned") {
+  private open(packet: SignedPacket, box: "invite" | "pinned", ratchet?: (sealed: Uint8Array) => Uint8Array | null) {
     const address = box === "pinned" ? this.pinned()?.peerAddress : this.peerAddress;
     if (!address || packet.pubKeyZ32 !== address || measureRecords(packet.pubKeyZ32, packet.records) > MAX_DNS_PACKET_BYTES) return null;
-    const records = packet.records.filter(r => r.label === "_dm"); if (records.length !== 1) return null;
+    const records = packet.records.filter(r => r.label === "_dm"), ratcheted = packet.records.filter(r => r.label === "_dr");
+    if (records.length + ratcheted.length !== 1) return null;
     const hints = packet.records.filter(r => r.label === "_dmk"); if (hints.length > 1) return null;
     const sender = hints.length ? tryDecrypt(hints[0].value, this.key) : null;
     if (hints.length && !sender) return null;
+    const peer = this.options.credentials.peerKey;
     let plaintext: string | null;
-    try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { plaintext = null; }
-    // Sealed, by its hint, from `sender` to a key other than this side's: nothing to read, but who it names says something.
-    if (!plaintext && sender) return { sealedToAnother: sender };
+    if (ratcheted.length) {
+      // Ratcheted (WISP 4xx): only the pinned contact seals one, to this side. One that does not open says nothing.
+      if (!ratchet || !peer || sender !== peer) return null;
+      let opened: Uint8Array | null;
+      try { opened = ratchet(fromBase64(ratcheted[0].value)); } catch { opened = null; }
+      if (!opened) return null;
+      try { plaintext = utf8Decode(opened); } catch { return null; }
+    } else {
+      // A ratcheted envelope of the contact's opened here: a plain one from it is refused from then on (WISP 4xx § Downgrade).
+      if (peer && this.options.ratchet?.box.heard("floor") && (!sender || sender === peer)) { this.traceOnce("dht-plain-refused", records[0].value, { box }); return null; }
+      try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { plaintext = null; }
+      // Sealed, by its hint, from `sender` to a key other than this side's: nothing to read, but who it names says something.
+      if (!plaintext && sender) return { sealedToAnother: sender };
+    }
     if (!plaintext || utf8Encode(plaintext).length > MAX_ENVELOPE_PLAINTEXT) return null;
     let envelope: unknown; try { envelope = JSON.parse(plaintext); } catch { return null; }
     if (!Array.isArray(envelope) || envelope.length !== 2 || !Array.isArray(envelope[0])) return null;
@@ -774,7 +858,30 @@ export class DhtDelivery {
    * can write to) or `pinned`. `none`: nothing from the contact in it; `old`: the contact's, already read; `new`: taken.
    */
   private async receive(packet: SignedPacket, box: "invite" | "pinned"): Promise<"none" | "old" | "new"> {
-    const opened = this.open(packet, box);
+    const ratcheted = packet.records.find(r => r.label === "_dr");
+    if (!ratcheted) return this.take(packet, box, this.open(packet, box));
+    // The same ratcheted envelope read again: its key is gone, and it was taken (WISP 4xx § The DHT floor).
+    const digest = toBase64Url(sha256(utf8Encode(ratcheted.value)).slice(0, 16));
+    if (digest === this.state.lastDr) return "old";
+    const ratchet = this.options.ratchet;
+    if (!ratchet) return "none";
+    // Opened with no lock held, stored, and only then the ratchet's state saved, under the chat's lock, on the state as it
+    // is by then (`RatchetBox.commitOpen`): what the content goes to may seal or open a held item, which takes that lock.
+    let sealed: Uint8Array | undefined;
+    const opened = this.open(packet, box, bytes => { const plain = ratchet.box.peek("floor", bytes); if (plain) sealed = bytes; return plain; });
+    // Ratcheted, and not opened here: not for this side, from a session it lost, or before it pinned the contact.
+    if (!sealed) this.traceOnce("dht-ratchet-closed", ratcheted.value, { box, pinned: !!this.options.credentials.peerKey });
+    // Not opened here, but in the pinned mailbox, whose address only the two participation keys give: the contact pinned
+    // this side. A side restored from a backup made before it knew that learns it here, and its next envelope starts a
+    // session the contact follows, rather than going plain to a contact that refuses plain.
+    if (!sealed && box === "pinned" && packet.pubKeyZ32 === this.pinned()?.peerAddress && this.state.peerPinned !== "seen") {
+      await this.persist({ ...this.state, peerPinned: "seen" });
+      traceLink(this.from, "dht-peer-pinned", { peerPinned: "seen", ratchet: true });
+    }
+    return this.take(packet, box, opened, sealed && { commit: async order => { if (!await ratchet.box.commitOpen("floor", sealed!, order)) throw new Error("A ratcheted envelope no longer opens"); }, digest });
+  }
+  /** `ratchet`: the envelope was ratcheted; its state is saved once what it carried is stored, with its digest. */
+  private async take(packet: SignedPacket, box: "invite" | "pinned", opened: ReturnType<DhtDelivery["open"]>, ratchet?: { commit(order?: number): Promise<void>; digest: string }): Promise<"none" | "old" | "new"> {
     if (!opened) return "none";
     if ("sealedToAnother" in opened) { if (opened.sealedToAnother) await this.sealedToAnother(opened.sealedToAnother); return "none"; }
     const { body, sender, author, sequence, issued, expires, mode, message, receipt, capsRev, pinnedMailbox, replyTo, editOf, reactions, reactionsTaken, forwarded, file } = opened;
@@ -834,7 +941,9 @@ export class DhtDelivery {
     // A newer envelope of the contact's that opens here: whatever said the invite was taken was not the contact.
     if (this.state.inviteTaken) traceLink(this.from, "invite-untaken", {});
     const { inviteTaken: _taken, ...kept } = this.state;
-    await this.persist({ ...kept, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }), ...(unanswered && { unanswered: sequence }),
+    // The contact's own sequence orders its sessions (WISP 4xx § Sessions).
+    if (ratchet) await ratchet.commit(sequence);
+    await this.persist({ ...kept, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }), ...(unanswered && { unanswered: sequence }), ...(ratchet && { lastDr: ratchet.digest }),
       pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending,
       ...(newest > (this.state.reactionsTaken ?? 0) && { reactionsTaken: newest }) });
     if (confirmed) await this.options.receipt(confirmed);
@@ -857,8 +966,9 @@ export class DhtDelivery {
     for (const [i, box] of boxes.entries()) {
       if (i > 0 && box === "pinned") {
         // The contact just said it can use it: looked in at once. Otherwise a probe, when the invite's mailbox held a
-        // packet but nothing from the contact, now and then.
-        if (!this.state.peerPinned && (!found || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
+        // packet but nothing from the contact, now and then; never while the invite is taken (that packet is the contact's,
+        // sealed to another: had it pinned this side, it would open here).
+        if (!this.state.peerPinned && (!found || this.state.inviteTaken || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
         if (!this.state.peerPinned) this.pinnedProbeAt = Date.now();
       }
       const address = box === "pinned" ? pinned!.peerAddress : this.peerAddress;
@@ -885,7 +995,9 @@ export class DhtDelivery {
     for (const box of boxes) {
       const packet = await this.options.transport.resolve(box === "pinned" ? pinned!.peerAddress : this.peerAddress, options);
       reads++;
-      const opened = packet && this.open(packet, box);
+      const dr = packet?.records.find(r => r.label === "_dr");
+      if (dr && toBase64Url(sha256(utf8Encode(dr.value)).slice(0, 16)) === this.state.lastDr) return { reads, text: null };
+      const opened = packet && this.open(packet, box, sealed => this.options.ratchet?.box.peek("floor", sealed) ?? null);
       if (!opened || "sealedToAnother" in opened || opened.author !== expected) continue;
       const { sequence, message } = opened;
       const fresh = Array.isArray(message) && typeof message[0] === "string" && ID.test(message[0]) && sequence > this.state.peerSequence && this.state.receipt?.id !== message[0];
@@ -966,14 +1078,14 @@ export class DhtDelivery {
     return age >= AWAITING_PEER_MS ? age : undefined;
   }
   /**
-   * The wait between reads of the mailbox of a joined chat whose invite someone else used first (`inviteTaken`), before
-   * it pinned anyone: nothing is awaited from its inviter, so it is read as an unused invite of its age (counted from
-   * the join) from the notice on, however few other invites the app holds. One slow read stays, so a chat whose invite
-   * turns out not to be taken (`untaken`) still notices. Undefined for any other chat.
+   * The wait between reads of the mailbox of a joined chat whose invite someone else used first (`inviteTaken`), whether
+   * or not its look-up pinned the inviter first (`unanswered`): nothing is awaited from its inviter, so it is read as an
+   * unused invite of its age (counted from the join) from the notice on, however few other invites the app holds. One
+   * slow read stays, so a chat whose invite turns out not to be taken (`untaken`) still notices. Undefined for any other chat.
    */
   private takenInviteWait(): number | undefined {
     const now = Date.now(), madeAt = this.options.inviteMadeAt;
-    if (!this.state.inviteTaken || this.options.credentials.peerKey || madeAt === undefined || this.active || now < this.fastUntil) return undefined;
+    if (!this.state.inviteTaken || madeAt === undefined || this.active || now < this.fastUntil) return undefined;
     return unusedInviteWait(now - Math.min(madeAt, this.startedAt), this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, Infinity);
   }
   private schedule(): void {
@@ -991,6 +1103,7 @@ export class DhtDelivery {
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";
+export const DHT_RATCHET_STOPPED = "Your contact's app no longer reads protected messages over the DHT. It is sent when you are live.";
 export const DHT_FILE_REFUSED = "Your contact's app shows a file only once it comes. It is sent when you are live.";
 export const DHT_FILE_TOO_LARGE = "This file's name is too long to say over the DHT. It is sent when you are live.";
 
@@ -998,9 +1111,13 @@ export const DHT_FILE_TOO_LARGE = "This file's name is too long to say over the 
  * `DhtDelivery.peek` for a chat of a profile that is not running: built from what that profile stored, with every
  * callback a no-op that refuses to save, so the look can change nothing.
  */
-export function peekDhtMailbox(options: { params: LinkParams; credentials: PairingCredentials; state?: DhtDeliveryState; transport: PkarrTransport; background?: boolean }): Promise<{ reads: number; text: string | null }> {
+export function peekDhtMailbox(options: { params: LinkParams; credentials: PairingCredentials; state?: DhtDeliveryState; transport: PkarrTransport; background?: boolean; ratchet?: RatchetState }): Promise<{ reads: number; text: string | null }> {
   const refuse = async () => { throw new Error("A peek saves nothing"); };
-  const delivery = new DhtDelivery({ params: options.params, mode: "stream", state: options.state, credentials: { ...options.credentials }, transport: options.transport,
-    save: refuse, pin: refuse, message: refuse, receipt: refuse, changed: () => {} });
+  const credentials = { ...options.credentials }, peer = credentials.peerKey;
+  // A ratcheted envelope is opened on a copy of the chat's ratchet, and nothing of it kept (`RatchetBox.peek`).
+  const box = options.ratchet && peer ? new RatchetBox(() => ({ seed: fromBase64Url(credentials.seedB64), self: identityFromSeedB64(credentials.seedB64).pubKeyZ32, peer,
+    rendezvous: [identityFromSeedB64(options.params.seedB64).pubKeyZ32, options.params.peerPubKeyZ32], secret: fromBase64Url(options.params.encKeyB64) }), options.ratchet, refuse) : undefined;
+  const delivery = new DhtDelivery({ params: options.params, mode: "stream", state: options.state, credentials, transport: options.transport,
+    save: refuse, pin: refuse, message: refuse, receipt: refuse, changed: () => {}, ...(box && { ratchet: { box, peerSupports: () => true } }) });
   return delivery.peek(options.background ? { background: true } : undefined);
 }

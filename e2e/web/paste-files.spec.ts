@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, test } from "../support/fixtures";
 
 /** A 1×1 PNG, as a screenshot would put one on the clipboard. */
@@ -60,6 +60,89 @@ test("a pasted screenshot and a dropped file reach the contact", { tag: ["@featu
   await expect(sheet.getByTestId("attachment-item")).toHaveCount(2);
   await sheet.getByTestId("attachment-send").click();
   for (const name of ["ghost notes.txt", "route.csv"]) await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: name })).toBeVisible();
+});
+
+/**
+ * Where the first `needle` inside the element is drawn: its box on the screen, from the text itself, and the element's
+ * own (`box`), read in the same frame.
+ */
+const textBox = (element: Locator, needle: string) => element.evaluate((root, find) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const at = node.textContent!.indexOf(find);
+    if (at < 0) continue;
+    const range = document.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + find.length);
+    const { left, right } = range.getBoundingClientRect(), box = root.getBoundingClientRect();
+    return { left, right, box: { left: box.left, right: box.right } };
+  }
+  throw new Error(`"${find}" is not in the element`);
+}, needle);
+
+test("a file named in the other script reads from its start, in the sheet and in the bubble", { tag: ["@feature:app.composer.paste-files", "@feature:files.paired.send"] }, async ({ peer }) => {
+  // In an English app an Arabic name lost its start to the "…" (what the file is), and the sheet split ".png" off it.
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { mobile: true, viewport: { width: 375, height: 740 } })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  expect(await paste(alice.page, "textarea", [{ name: "صورة من الاجتماع.png", type: "image/png", base64: PNG }])).toBe(false);
+  const caption = alice.page.getByTestId("attachment-sheet").getByTestId("attachment-name");
+  await expect(caption).toHaveText(/^صورة من الاجتماع\.png ·\s*\d+\sB$/);
+  // Right to left inside the name, ".png" at its left end; the size after it, on the right as the app reads.
+  const [start, extension, size] = await Promise.all([textBox(caption, "صورة"), textBox(caption, "png"), textBox(caption, "B")]);
+  expect(start.left).toBeGreaterThan(extension.right);
+  expect(size.left).toBeGreaterThan(start.right);
+  await alice.page.keyboard.press("Escape");
+
+  const name = "تقرير الربع الثالث النهائي للمشروع مع كل الملاحق والجداول.pdf";
+  await alice.page.getByTestId("file-input").setInputFiles({ name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n") });
+  const shown = chat(bob).getByTestId("file-bubble").getByTitle(name);
+  await expect(shown).toHaveText(name, { timeout: 30_000 });
+  // Cut with … on a phone, at its end: its first word is on the screen, inside the name's box. Read once the bubble's
+  // entry (a 0.22 s slide and scale) is over, and both boxes in one go: mid-slide they were read 1.1 px apart.
+  await shown.evaluate(() => Promise.all(document.getAnimations()
+    .filter((a) => (a as CSSAnimation).animationName?.startsWith("bubble-in")).map((a) => a.finished.catch(() => {}))));
+  const { box, ...first } = await textBox(shown, "تقرير");
+  expect(first.left).toBeGreaterThanOrEqual(box.left - 1);
+  expect(first.right).toBeLessThanOrEqual(box.right + 1);
+});
+
+test("a picture's name too long for the sheet reads from its start in either app direction, its size still shown", { tag: ["@feature:app.composer.paste-files", "@feature:app.i18n"] }, async ({ peer }) => {
+  // The caption cut a name in the other script at its start ("…eenshot of …") and its " · size" off the end.
+  const [alice, bob] = await Promise.all([peer("alice", { mobile: true, viewport: { width: 375, height: 740 } }), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  const names = [
+    { language: "ar", name: "Screenshot of the quarterly planning meeting whiteboard.png", first: "Screenshot" },
+    { language: "en", name: "لقطة شاشة من اجتماع التخطيط الفصلي للفريق كاملة مع السبورة البيضاء والملاحظات.png", first: "لقطة" },
+  ];
+  for (const { language, name, first } of names) {
+    await alice.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await alice.page.reload();
+    await expect(alice.page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+
+    expect(await paste(alice.page, ".composer-row textarea", [{ name, type: "image/png", base64: PNG }])).toBe(false);
+    const caption = alice.page.getByTestId("attachment-sheet").getByTestId("attachment-name");
+    await expect(caption).toHaveText(`${name} · 70 B`);
+    // The box that clips: the caption's content box (no padding), as the text is cut inside it.
+    const inner = (el: Element) => {
+      const { left, right } = el.getBoundingClientRect(), style = getComputedStyle(el);
+      return { left: left + parseFloat(style.paddingLeft), right: right - parseFloat(style.paddingRight) };
+    };
+    const [box, start, size] = await Promise.all([caption.evaluate(inner), textBox(caption, first), textBox(caption, "70 B")]);
+    // Its first word and the size are drawn inside it, not under the "…" or past its edge.
+    for (const shown of [start, size]) {
+      expect(shown.left).toBeGreaterThanOrEqual(box.left - 1);
+      expect(shown.right).toBeLessThanOrEqual(box.right + 1);
+    }
+    await alice.page.keyboard.press("Escape");
+    await expect(alice.page.getByTestId("attachment-sheet")).toHaveCount(0);
+  }
 });
 
 /**

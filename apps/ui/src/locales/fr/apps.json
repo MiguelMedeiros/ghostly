@@ -37,6 +37,7 @@
     "ask": "Demandez un lien à {{name}}",
     "contactCannot": "L'app de {{name}} ne lance pas encore d'apps",
     "installed": "Installée",
+    "join": "Rejoindre",
     "label": "App : {{title}}",
     "needsOnline": "{{title}} a besoin que vous soyez en ligne tous les deux",
     "noLink": "Pas de lien pour l'installer",
@@ -162,9 +163,12 @@
     "beside": "Afficher la discussion",
     "full": "Pleine largeur",
     "resume": "Revenir à {{title}}",
+    "resumeSharing": "partage un fichier",
+    "sharingWith": "partage un fichier avec {{name}}",
     "stoppedRemoved": "{{title}} a été arrêtée : {{store}} a retiré cette version",
     "stoppedRevoked": "{{title}} a été arrêtée : son auteur a révoqué cette version",
     "with": "{{title}} avec {{name}}",
-    "withName": "avec {{name}}"
+    "withName": "avec {{name}}",
+    "withSharing": "{{title}} · partage un fichier avec {{name}}"
   }
 }

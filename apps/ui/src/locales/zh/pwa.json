@@ -22,6 +22,8 @@
   "shareFrom": "来自其他应用或网站。在你发送之前不会发出任何内容。",
   "shareHint": "选择一个聊天。在那里检查后发送。",
   "shareNoChats": "还没有聊天。先开始一个，再重新分享。",
+  "shareNoRoom": "此设备空间不足,无法保存:{{names}}",
+  "shareNoRoomNext": "请释放空间,然后再分享一次。",
   "shareNone": "没有分享任何内容，或已被接收。",
   "shareOneFile": "1 个文件",
   "shareTitle": "分享到…",

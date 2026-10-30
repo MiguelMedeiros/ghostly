@@ -80,6 +80,8 @@
     "allow": "Permitir",
     "camera": "Cámara",
     "cameraInfo": "Se usa en llamadas y fotos. Se guarda en este dispositivo, para este perfil.",
+    "denied": "Bloqueado. Permite el micrófono y la cámara en los ajustes del navegador o del sistema.",
+    "deniedIos": "Bloqueado por iOS. En Ajustes → Apps → Safari, permite Micrófono (y Cámara) y vuelve a abrir Ghostly.",
     "failed": "No se pudo abrir. Comprueba que Ghostly tenga permiso.",
     "level": "Nivel del micrófono",
     "microphone": "Micrófono",
@@ -220,6 +222,20 @@
     "60": "1 hora"
   },
   "title": "Configuración",
+  "translate": {
+    "downloaded": "Idiomas descargados",
+    "hint": "La opción predeterminada para los chats que no han elegido",
+    "info": "Los mensajes recibidos en otro idioma se traducen en este dispositivo con un modelo de idioma descargado una vez. Ningún texto sale del dispositivo y tus contactos nunca lo saben.",
+    "name": "Traducir mensajes",
+    "none": "No hay idiomas descargados",
+    "pair": "{{from}} → {{to}}",
+    "remove": "Eliminar",
+    "removeFailed": "No se pudo eliminar. Inténtalo de nuevo.",
+    "removeLabel": "Eliminar {{name}}",
+    "searchWords": "traducción, traducción automática, idiomas, modelos",
+    "title": "Traducir los mensajes al {{language}}",
+    "unread": "No se pudieron leer los idiomas descargados."
+  },
   "version": "Versión",
   "website": "Sitio web"
 }

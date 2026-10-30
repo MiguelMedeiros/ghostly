@@ -26,8 +26,8 @@ const MAX_LINES = 600;
 const MIN_HOURS = 20;
 const PROTECTED = [/^\.github\//, /^tools\/scripts\/(security-scan|autorelease-gate)\.mjs$/];
 // Every lock file the repository ships from: the app and its workspace, the website, the Desktop's HyperDHT sidecar, the
-// HyperDHT relay for browsers and Iroh for browsers. One that is missing here is read as code: a dependency added to it
-// would pass, and its lines would count against MAX_LINES.
+// HyperDHT relay for browsers, Iroh for browsers and the translation runtime. One that is missing here is read as code: a
+// dependency added to it would pass, and its lines would count against MAX_LINES.
 const LOCKFILES = new Set([
   "package-lock.json",
   "apps/website/package-lock.json",
@@ -35,6 +35,7 @@ const LOCKFILES = new Set([
   "infra/services/hyperdht-relay/package-lock.json",
   "Cargo.lock",
   "native/transports/iroh-web/Cargo.lock",
+  "native/translation/package-lock.json",
 ]);
 const VERSION_FILES = new Set([
   "package.json",
@@ -109,7 +110,11 @@ if (lines > MAX_LINES) refuse(`${lines} changed lines outside lock files (max ${
 // name that now comes from somewhere else (an npm alias to another package, another registry or a git repository, a
 // workspace link turned into a download, a crate off crates.io). Each name maps to every place it comes from. An npm
 // download counts as that package only at its exact registry URL: npm resolves dot segments (also percent-encoded),
-// so a URL that merely starts with the package's path can fetch any other package.
+// so a URL that merely starts with the package's path can fetch any other package. The URL is built from the entry's
+// own version, so that version must be a plain semver: one with a `/` puts the dot segments in both. An entry with no
+// URL comes only from the package it is bundled in (`inBundle`); any other one npm fetches by its version, which can
+// be a URL itself, so it reads as a source of its own at that path.
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const npmSources = (text) => {
   const sources = new Map();
   for (const [path, entry] of Object.entries(JSON.parse(text).packages ?? {})) {
@@ -118,11 +123,15 @@ const npmSources = (text) => {
     const real = entry.name ?? name;
     const from = entry.link
       ? `link:${entry.resolved}`
-      : !entry.resolved
-        ? `${real}, no source`
-        : entry.resolved === `https://registry.npmjs.org/${real}/-/${real.split("/").pop()}-${entry.version}.tgz`
-          ? `npm:${real}`
-          : entry.resolved;
+      : !SEMVER.test(entry.version)
+        ? `version ${entry.version}`
+        : !entry.resolved
+          ? entry.inBundle
+            ? `${real}, bundled in ${path.slice(0, path.lastIndexOf("node_modules/")) || "the root"}`
+            : `${real}, no source at ${path}`
+          : entry.resolved === `https://registry.npmjs.org/${real}/-/${real.split("/").pop()}-${entry.version}.tgz`
+            ? `npm:${real}`
+            : entry.resolved;
     sources.set(name, (sources.get(name) ?? new Set()).add(from));
   }
   return sources;
@@ -156,11 +165,12 @@ if (next !== `${major}.${minor}.${patch + 1}`) refuse(`version must go from ${cu
 // key, a Cargo build script or a Dockerfile's RUN lines. Each changed file is read on main and on the branch with its
 // versions blanked out (a dependency's range, a crate's version, a base image's tag), and the two must be equal. A
 // dependency spec that is not a plain range (`npm:`, `file:`, a git or GitHub source) stays as written, so changing it
-// counts. Lock files have their own check above; the changelog and the security review are notes.
+// counts, and so does a spec with no version in it (`*`, empty, a dist-tag), which npm takes on faith whatever the
+// lock file says. Lock files have their own check above; the changelog and the security review are notes.
 if (MODE === "deps") {
   const RANGE = /^[\w.^~<>=*|+ -]*$/;
   const blank = (value) =>
-    typeof value === "string" ? (RANGE.test(value) ? "" : value) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blank(v)])) : value;
+    typeof value === "string" ? (RANGE.test(value) && /\d/.test(value) ? "<range>" : value) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blank(v)])) : value;
   const DEP_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides"];
   const json = (text) => {
     const data = JSON.parse(text);

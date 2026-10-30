@@ -139,6 +139,13 @@ const PUBLISH_RETRY_MS = 4_000;
  * meanwhile: each refusal keeps it first in line for that request (`WRITE_FIRST_MS`), and costs no request itself.
  */
 const BUDGET_RETRY_MIN_MS = 250;
+/**
+ * A background write the budget held back (`{ background: true }`) is not first in line for anything (`WRITE_FIRST_MS`
+ * is a chat's or a group's write): it goes again when the budget frees one of its share, up to this long. Tried every
+ * 4 s, an idle admin's daemon built and signed 1,041 packets in 9 minutes that the budget refused again (bug hunt,
+ * 2026-10-19). Anything new to say goes at once all the same (`publish`).
+ */
+const BACKGROUND_RETRY_MAX_MS = 60_000;
 /** Two reads are never closer than this, however long the last one took. */
 const MIN_POLL_GAP_MS = 250;
 export const IDLE_THRESHOLD = 60_000;
@@ -283,6 +290,8 @@ export class LinkSession {
   private publishAgain = false;
   /** What waits to go out is the presence heartbeat alone (`PRESENCE_HEARTBEAT`): nothing in the packet changed. */
   private upkeepOnly = false;
+  /** The last write this link asked for was a background one (`retryDelay`). */
+  private wroteInBackground = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
@@ -297,6 +306,13 @@ export class LinkSession {
   private fastStepsAfter = 0;
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
+  /**
+   * Until when this link's reads go as a resume's (`PkarrRequestOptions.resume`: a group edge's on the relays' floor):
+   * the peer is due now and nothing reaches it until its packet is read (`expectPeer(true)`: the edge to a member a hub
+   * just let in). As plain fast reads, a hub's admissions in a row spent the budget and the newcomer's edge waited for it:
+   * 22-39 s before it could send, receive or leave (agents#1740). Ends once a read finds the peer's packet.
+   */
+  private awaitedUntil = 0;
   private watchUntil = 0;
   /** The time of the peer's packet read last when it went away (`watchPeer`): a newer one that advertises says it is back. */
   private watchFrom = 0;
@@ -453,9 +469,10 @@ export class LinkSession {
    * The peer, or its offer, is due any moment: poll fast for `EXPECT_PEER_MS` (never cutting a longer fast window short),
    * then slow down step by step (`nextInterval`) rather than at once.
    */
-  expectPeer(): void {
+  expectPeer(awaited = false): void {
     const until = Date.now() + EXPECT_PEER_MS;
     this.expectUntil = Math.max(this.expectUntil, until);
+    if (awaited) this.awaitedUntil = Math.max(this.awaitedUntil, until);
     // Due now: an offer of mine that was looking less often looks fast again, as long as this window.
     const stepping = this.fastStepsAfter > 0 && Date.now() >= this.fastStepsAfter;
     if (this.fastStepsAfter) this.fastStepsAfter = Math.max(this.fastStepsAfter, until);
@@ -734,6 +751,7 @@ export class LinkSession {
       const takesBack = !rtcSignal && this.rtcSignalOut !== null;
       const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
         : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
+      this.wroteInBackground = options?.background === true;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
@@ -761,9 +779,13 @@ export class LinkSession {
     return built.keptMessages;
   }
 
-  /** When a publish that failed goes again: when the relays' budget frees a request, if that held it back. */
+  /**
+   * When a publish that failed goes again: when the relays' budget frees a request, if that held it back; a chat's or a
+   * group's write within `PUBLISH_RETRY_MS` meanwhile, which keeps it first in line, a background one when its share frees.
+   */
   private retryDelay(error: unknown): number {
-    return isDiscoveryBudgetError(error) ? budgetRetryMs(error, BUDGET_RETRY_MIN_MS, PUBLISH_RETRY_MS) : PUBLISH_RETRY_MS;
+    if (!isDiscoveryBudgetError(error)) return PUBLISH_RETRY_MS;
+    return budgetRetryMs(error, BUDGET_RETRY_MIN_MS, this.wroteInBackground ? BACKGROUND_RETRY_MAX_MS : PUBLISH_RETRY_MS);
   }
 
   private discoveryResult(operation: "publish" | "read", error?: unknown): void {
@@ -791,7 +813,7 @@ export class LinkSession {
       const departed = !signal && Date.now() < this.departedUntil;
       const background = pace === "background" || pace === "connected";
       // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
-      const resume = !signal && !watch && this.resumeReads;
+      const resume = !signal && !watch && (this.resumeReads || Date.now() < this.awaitedUntil);
       const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) });
       if (!this.running) return;
       this.discoveryResult("read");
@@ -803,6 +825,7 @@ export class LinkSession {
       const read = answered !== undefined && answered >= started;
       if (read) this.lastReadAt = started;
       if (read || !this.transport.readAnsweredAt) this.resumeReads = false;
+      if (packet && (read || !this.transport.readAnsweredAt)) this.awaitedUntil = 0;
       this.readMissed = !!this.transport.readAnsweredAt && !read;
       if (this.readMissed) heldBackMs = this.transport.readHeldBackFor?.(this.peerPubKeyZ32);
 

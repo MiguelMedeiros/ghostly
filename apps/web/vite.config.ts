@@ -5,7 +5,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { runnerHeaders } from "./runnerPolicy";
 import { appsTestGuard } from "./appsTestFlag";
+import { translateGuard } from "./translateFlag";
 import { serviceWorker } from "./pwa";
+import { servicesBridge } from "./svcBuild";
 import { ghostlyPlatformModules, repositoryRoot, tauriAliases } from "../../packages/browser/vite-plugin";
 
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
@@ -56,7 +58,7 @@ function versionFile(): Plugin {
 
 export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version), __APP_BUILD__: JSON.stringify(build) },
-  plugins: [appsTestGuard("web"), versionFile(), serviceWorker(build), runnerHeaders(), ghostlyPlatformModules(), react(), tailwindcss()],
+  plugins: [appsTestGuard("web"), translateGuard("web"), versionFile(), serviceWorker(build), servicesBridge(), runnerHeaders(), ghostlyPlatformModules(), react(), tailwindcss()],
   envDir: repositoryRoot,
   resolve: { alias: tauriAliases },
   server: { port: 5180, strictPort: true },

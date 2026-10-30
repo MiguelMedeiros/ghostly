@@ -11,6 +11,10 @@
  *   `files.read` and `files.list` answer at most 16 MiB a second together, one at a time.
  * - `files.*` (WISP 1200 · Linked files) only for an app granted `files`, through the platform's `linkedFiles`: the client
  *   asks the person and keeps the links; the app names only the ids it was given.
+ * - The read lane (WISP 1200 § A read lane to the contact), through the platform's `ranges`, in a chat with `chat`:
+ *   `files.serve` (with `files` too) lets the same app on the contact's side read one kept file, and this broker answers
+ *   the ranges it asks of its own serves; `remote.read` and `remote.stat` read what the contact's app serves, counted
+ *   with `file`'s bytes.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
@@ -51,7 +55,8 @@ export type AppPhase = "loading" | "starting" | "writing" | "running" | "stopped
 
 /** Every request type the broker answers: the whole `ghostly.*` API (WISP 1200). */
 export const BROKER_REQUESTS: readonly MiniAppRequestType[] = [
-  "context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget", "close",
+  "context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget",
+  "files.serve", "files.unserve", "remote.read", "remote.stat", "close",
 ];
 
 /** How long the runner has to say `writing` once it has the port. */
@@ -91,6 +96,8 @@ interface BrokerOptions {
    * the box they type in, and name an app they cannot see. None: always (a Desktop app window).
    */
   shown?: () => boolean;
+  /** The app serves a file to its contact now (true), or no longer (false): the panel's header says so. */
+  serving?: (on: boolean) => void;
   now?: () => number;
 }
 
@@ -199,6 +206,15 @@ const refuse = (code: MiniAppErrorCode): never => { throw new Refusal(code); };
  */
 const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "too-fast", "bad-key", "stopped", "cancelled", "changed", "gone"]);
 
+/** What the read lane answers an app with, as it is; anything else is `failed`. */
+const RANGE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["not-open", "not-served", "offline", "peer-closed", "changed", "gone"]);
+
+/**
+ * The serve ids an app ended that it still answers asks under. The engine holds at most 4 asks of an app's in flight,
+ * so one still on its way is under one of the last few ids ended; every id it was ever given grew with each serve.
+ */
+const ENDED_SERVES_KEPT = 16;
+
 function refusalOf(error: unknown): MiniAppErrorCode {
   if (error instanceof Refusal) return error.message;
   const code = error instanceof Error ? /^([a-z][a-z-]*): /.exec(error.message)?.[1] : undefined;
@@ -244,7 +260,7 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, serving: onServing, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -262,6 +278,21 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
   /** Linked files: only for an app granted `files`, in a client that keeps them. Not a version's: the outer platform's. */
   const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
+  /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. */
+  const ranges = () => (chatAllowed ? platform.ranges ?? null : null);
+  /**
+   * What this app serves on its chat's session now: serve id to the linked file, its size as listed and the serves not
+   * unserved yet. The engine answers the same id for a file served again, so each serve needs its own unserve.
+   */
+  const serving = new Map<string, { file: string; size: number; count: number }>();
+  /** The last serve ids this app ended: an ask under one that was on its way is still answered, so its place frees at once. */
+  const ended: string[] = [];
+  /** Says when the app starts or stops serving anything. */
+  const servingChange = (change: () => void) => {
+    const was = serving.size > 0;
+    change();
+    if (was !== serving.size > 0) onServing?.(!was);
+  };
   /** A pick waiting for the person: one at a time per app. */
   let picking = false;
   /** Aborts as the app stops: a sheet the client shows for it goes with it. */
@@ -286,8 +317,23 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       if (frameLink !== linkId || appId === null || frame.app !== appId) return;
       if ("d" in frame) { if (peer) event("chat.message", frame.d as MiniAppJson); return; }
       if (frame.o === "open") { peer = { version: frame.v }; event("chat.peer", { open: true, version: frame.v }); }
-      else { peer = null; event("chat.peer", { open: false }); }
+      // The contact's side closed (or the session went): every serve ended with it.
+      else { peer = null; servingChange(() => serving.clear()); ended.length = 0; event("chat.peer", { open: false }); }
     });
+    const lane = ranges(), files = linkedFiles();
+    const asks = lane && files ? lane.onAsk((askLink, ask) => {
+      if (askLink !== linkId || ask.app !== appId || (!serving.has(ask.serve) && !ended.includes(ask.serve))) return;
+      const serve = serving.get(ask.serve);
+      // Ended meanwhile (unserved, or the app stopped): nothing to read, but the answer frees its place.
+      if (serve?.file !== ask.file || phase === "stopped") { void lane.answer(linkId, { app: ask.app, request: ask.request, error: "gone" }).catch(() => {}); return; }
+      // The bytes as the link reads them now: a file that changed or went says so, as `files.read` would.
+      void files.read(launch.ref, ask.file, ask.offset, ask.length).then(
+        (bytes) => lane.answer(linkId, { app: ask.app, request: ask.request, bytes, size: serve.size }),
+        (error) => { const code = refusalOf(error); return lane.answer(linkId, { app: ask.app, request: ask.request, error: code === "changed" ? "changed" : "gone" }); },
+      ).catch(() => { /* the engine went: the contact's read fails as the session does */ });
+    }) : null;
+    const frames = unsubscribe;
+    unsubscribe = () => { frames?.(); asks?.(); };
     chatOpened = true;
     opened = host.chat.open(linkId, launch.ref, launch.version).then(({ app }) => {
       if (phase === "stopped") return;
@@ -301,6 +347,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     if (phase === "stopped") return;
     phase = "stopped";
     alive.abort();
+    servingChange(() => serving.clear());
+    ended.length = 0;
     unsubscribe?.();
     unsubscribe = null;
     if (chatOpened && launch.chat) void host.chat.close(launch.chat.linkId, launch.ref).catch(() => {});
@@ -325,6 +373,30 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     });
     reading = read.catch(() => {});
     return read;
+  };
+
+  /** The bytes of the contact's reads (`remote.*`) asked and not answered yet: counted against the budget with `served`. */
+  let remoteAsked = 0;
+  /**
+   * Counted as `counted` counts, but waiting for the contact only: a contact that never answered held the app's own
+   * `file`, `files.read`, `files.list` and `files.serve` behind it for good. Not one at a time either: the read lane
+   * keeps 4 asks in flight (and queues the rest), where a chain made each wait for the one before it. Its `length`
+   * is reserved against the budget before it asks, so asks at once cannot pass it; the bytes that came replace it.
+   */
+  const countedRemote = async <T>(length: number, load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
+    await counted(async () => {
+      if (servedBytes + remoteAsked >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
+      remoteAsked += length;
+    }, () => 0);
+    try {
+      const answer = await load();
+      const bytes = size(answer);
+      served.push({ at: now(), bytes });
+      servedBytes += bytes;
+      return answer;
+    } finally {
+      remoteAsked -= length;
+    }
   };
 
   const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[]; file?: AppFileAt }> => {
@@ -417,6 +489,56 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (bytes.byteLength > length) refuse("failed");
         // The host's answer is the caller's (LinkedFilesHost.read): handed over as it is, as `file`'s is, where copying
         // it again cost the page a third of the read.
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
+        return { value: buffer, transfer: [buffer] };
+      }
+      case "files.serve": {
+        const files = linkedFiles(), lane = ranges();
+        if (!files || !lane || !launch.chat) return refuse("not-allowed");
+        const id = args[0];
+        if (typeof id !== "string" || !LINK_ID.test(id)) refuse("bad-request");
+        // Its size, as the contact's reads tell it: an id this app does not keep, or cannot read now, is gone.
+        // The one link where the host can look it up: a library's whole list per serve spent the app's second on it.
+        const entry = files.entry
+          ? await counted(() => files.entry!(launch.ref, id as string), (link) => (link ? listBytes([link]) : 0))
+          : (await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes)).find((link) => link.id === id);
+        if (!entry?.available) refuse("gone");
+        const answer = await lane.serve(launch.chat!.linkId, launch.ref, id as string);
+        if ("error" in answer) refuse(answer.error);
+        const { serve } = answer as { serve: string };
+        const held = serving.get(serve);
+        const count = (held && held.file === id ? held.count : 0) + 1;
+        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size, count }));
+        return { value: serve };
+      }
+      case "files.unserve": {
+        const lane = ranges();
+        if (!linkedFiles() || !lane || !launch.chat) return refuse("not-allowed");
+        const serve = args[0];
+        if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
+        const held = serving.get(serve as string);
+        if (held && held.count > 1) held.count--;
+        else if (held) {
+          servingChange(() => serving.delete(serve as string));
+          ended.push(serve as string);
+          if (ended.length > ENDED_SERVES_KEPT) ended.shift();
+          await lane.unserve(launch.chat!.linkId, serve as string);
+        }
+        return {};
+      }
+      case "remote.read":
+      case "remote.stat": {
+        const lane = ranges();
+        if (!lane || !launch.chat) return refuse("not-allowed");
+        const serve = args[0];
+        if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
+        const { offset, length } = type === "remote.stat" ? { offset: 0, length: 1 } : readRange(args[1]);
+        const read = await countedRemote(length, () => lane.read(launch.chat!.linkId, launch.ref, serve as string, offset, length), (got) => ("bytes" in got ? got.bytes.byteLength : 0));
+        if ("error" in read) refuse(RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
+        const { bytes, size } = read as { bytes: Uint8Array; size: number };
+        if (type === "remote.stat") return { value: { size } };
+        if (bytes.byteLength > length) refuse("failed");
         const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
         const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
         return { value: buffer, transfer: [buffer] };
@@ -529,12 +651,14 @@ export function onScreen(frame: HTMLIFrameElement): boolean {
  * Runs an app in a sandboxed frame of the runner, inside `container`: the frame, its one port, the start and the
  * teardown. The frame is removed when the app stops, for whatever reason.
  */
-export function startApp({ container, host, launch, view, onStop, startTimeoutMs = START_TIMEOUT_MS }: {
+export function startApp({ container, host, launch, view, onStop, onServing, startTimeoutMs = START_TIMEOUT_MS }: {
   container: HTMLElement;
   host: AppsPlatform;
   launch: AppLaunch;
   view: AppView;
   onStop?: (reason: AppStopReason) => void;
+  /** It serves a file to its contact now, or no longer. */
+  onServing?: (on: boolean) => void;
   startTimeoutMs?: number;
 }): RunningApp {
   const runner = runnerFor(host, launch);
@@ -550,6 +674,7 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
   const broker = createBroker({
     host, launch, view,
     shown: () => onScreen(frame),
+    serving: onServing,
     post:(message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
     stopped: (reason) => {
       if (timer) clearTimeout(timer);

@@ -38,6 +38,12 @@
   "outgoing": "Llamando...",
   "reconnecting": "Reconectando...",
   "rejected": "Llamada rechazada",
+  "relayNoAnswer": "Tu relay no respondió",
+  "relayNoAnswerNext": "Revisa el servidor TURN en Configuración, Red. Ocultar mi IP nunca conecta directo.",
+  "relayOnlyNow": "Llamada terminada: Ocultar mi IP está activado",
+  "relayOnlyNowNext": "Esta llamada llegaba directo a tu contacto. Llama de nuevo: pasará por tu relay.",
+  "relayOnlyOff": "Las llamadas están desactivadas con Ocultar mi IP",
+  "relayOnlyOffNext": "Las llamadas de esta app aún no pueden usar un relay. Desactívalo en Configuración, Red para llamar.",
   "selfView": "Arrastra para mover, tira de una esquina para cambiar el tamaño, doble clic para restablecer",
   "share": {
     "blocked": "Compartir pantalla está bloqueado",
@@ -64,6 +70,7 @@
     "audioFailed": "No se pudo conectar la llamada de voz",
     "audioIncoming": "Llamada de voz entrante",
     "audioMissed": "Llamada de voz perdida",
+    "audioMissedMany": "{{count}} llamadas de voz perdidas",
     "audioStarted": "Llamada de voz iniciada",
     "audioUnanswered": "Llamada de voz sin respuesta",
     "videoCancelled": "Videollamada cancelada",
@@ -73,6 +80,7 @@
     "videoFailed": "No se pudo conectar la videollamada",
     "videoIncoming": "Videollamada entrante",
     "videoMissed": "Videollamada perdida",
+    "videoMissedMany": "{{count}} videollamadas perdidas",
     "videoStarted": "Videollamada iniciada",
     "videoUnanswered": "Videollamada sin respuesta"
   },

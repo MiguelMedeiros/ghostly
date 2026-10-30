@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 
 export interface SelectOption<V extends string = string> {
@@ -31,6 +31,8 @@ export interface SelectProps<V extends string = string> {
   "aria-labelledby"?: string;
   "aria-describedby"?: string;
   "data-testid"?: string;
+  /** The button: for a step that takes the place of the focused control to give the select the focus. */
+  ref?: Ref<HTMLButtonElement>;
 }
 
 // The list goes to the top layer where the popover API exists (above dialogs, out of any overflow or transform);
@@ -51,13 +53,18 @@ type Place = { left: number; width: number; maxHeight: number } & ({ top: number
  */
 export function Select<V extends string = string>({
   value, options, onChange, placeholder = "", id, name, disabled = false, size = "md", fit = false,
-  "aria-label": ariaLabel, "aria-labelledby": labelledBy, "aria-describedby": describedBy, "data-testid": testId,
+  "aria-label": ariaLabel, "aria-labelledby": labelledBy, "aria-describedby": describedBy, "data-testid": testId, ref,
 }: SelectProps<V>) {
   const uid = useId();
   const triggerId = id ?? `${uid}select`;
   const listId = `${uid}list`;
   const optionId = (i: number) => `${uid}option-${i}`;
   const trigger = useRef<HTMLButtonElement>(null);
+  const setTrigger = useCallback((el: HTMLButtonElement | null) => {
+    trigger.current = el;
+    if (typeof ref === "function") ref(el);
+    else if (ref) ref.current = el;
+  }, [ref]);
   const list = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
@@ -200,7 +207,7 @@ export function Select<V extends string = string>({
   return (
     <>
       <button
-        ref={trigger}
+        ref={setTrigger}
         type="button"
         id={triggerId}
         role="combobox"

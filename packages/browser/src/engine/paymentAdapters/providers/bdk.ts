@@ -61,12 +61,22 @@ export interface BdkConfig {
 const STOP_GAP = 20;
 const PARALLEL = 4;
 const SYNC_TIMEOUT = 90_000;
+/** The pauses before reading the chain again after a failed read; the last read's failure is final. */
+const SYNC_RETRIES = [1_000, 2_000, undefined] as const;
 const HTTP_TIMEOUT = 20_000;
+class TooSlow extends Error { constructor() { super("The Esplora server is too slow"); } }
 /** A reservation outlives an app restart, but not forever: a review saved and then lost cannot lock coins. */
 const RESERVATION_MS = 24 * 3600_000;
 
+/**
+ * How long an address handed out (a chat request, the Receive screen) is kept for whoever was shown it, before an
+ * unpaid one may be shown again (`receiveAddress`): a request's target expires in 15 minutes.
+ */
+export const ADDRESS_HOLD_MS = 60 * 60_000;
+
 interface Reservation { txid: string; outpoints: string[]; at: number }
-interface StoredBdk { changeset: string; reserved: Reservation[]; scanned: boolean }
+/** `shown`: when each external address was last handed out, by index (`receiveAddress`). */
+interface StoredBdk { changeset: string; reserved: Reservation[]; scanned: boolean; shown?: Record<string, number> }
 
 export interface BdkStore {
   load(key: string): Promise<StoredBdk | undefined>;
@@ -221,7 +231,11 @@ export class BdkOnchain implements OnchainProvider {
     this.changeset = stored ? bdk.ChangeSet.from_json(stored.changeset) : undefined;
     this.reserved = (stored?.reserved ?? []).filter((r) => Date.now() - r.at < RESERVATION_MS);
     this.scanned = stored?.scanned ?? false;
+    this.shown = new Map(Object.entries(stored?.shown ?? {}).map(([index, at]) => [Number(index), at]));
+    this.openedAt = Date.now();
   }
+  private readonly shown: Map<number, number>;
+  private readonly openedAt: number;
   private scanned: boolean;
 
   /**
@@ -268,12 +282,24 @@ export class BdkOnchain implements OnchainProvider {
     if (this.closed) return Promise.reject(new Error("This wallet is closed"));
     if (!force && Date.now() - this.syncedAt < 3_000) return Promise.resolve();
     return this.syncing ??= (async () => {
-      const work = this.scanned
-        ? this.client.sync(this.wallet.start_sync_with_revealed_spks(), PARALLEL)
-        : this.client.full_scan(this.wallet.start_full_scan(), STOP_GAP, PARALLEL);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const update = await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("The Esplora server is too slow")), SYNC_TIMEOUT); })]).finally(() => clearTimeout(timer));
-      if (this.closed) return;
+      const read = () => {
+        const work = this.scanned
+          ? this.client.sync(this.wallet.start_sync_with_revealed_spks(), PARALLEL)
+          : this.client.full_scan(this.wallet.start_full_scan(), STOP_GAP, PARALLEL);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        return Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new TooSlow()), SYNC_TIMEOUT); })]).finally(() => clearTimeout(timer));
+      };
+      let update: Awaited<ReturnType<typeof read>> | undefined;
+      // A server can stumble for a moment (electrs answers 404 for its newest blocks while it indexes a new
+      // tip): read again a little later before saying it failed. Not after a time-out, or once closed.
+      for (const pause of SYNC_RETRIES) {
+        try { update = await read(); break; }
+        catch (error) {
+          if (pause === undefined || this.closed || error instanceof TooSlow) throw error;
+          await new Promise((resolve) => setTimeout(resolve, pause));
+        }
+      }
+      if (this.closed || !update) return;
       this.wallet.apply_update(update);
       this.scanned = true;
       this.syncedAt = Date.now();
@@ -281,11 +307,30 @@ export class BdkOnchain implements OnchainProvider {
     })().catch((error) => { throw Object.assign(new Error(`Could not sync from Esplora: ${message(error)}`), { cause: error }); }).finally(() => { this.syncing = undefined; });
   }
 
+  /**
+   * Where to be paid: a new address, unless STOP_GAP - 1 handed out already wait unpaid. Then the unpaid one shown
+   * longest ago, once that is ADDRESS_HOLD_MS: a restore's full scan stops after STOP_GAP unused addresses in a row, so
+   * a payment past more unpaid requests than that was never found from the phrase (agents#1634), and every address
+   * revealed is read at every sync. Only where each of those is still held for someone is a new one revealed anyway.
+   */
   async receiveAddress(): Promise<string> {
-    // Always a new one: an address shown once (to a contact, in a request) is not shown to someone else.
-    const address = this.wallet.reveal_next_address("external").address.toString();
+    let unused = this.wallet.list_unused_addresses("external");
+    // About to show one again: first what the chain says was paid meanwhile (one paid is no longer unused).
+    if (unused.length >= STOP_GAP - 1) {
+      try { await this.sync(); unused = this.wallet.list_unused_addresses("external"); } catch { /* as last read */ }
+    }
+    const now = Date.now();
+    const shownAt = (index: number) => this.shown.get(index) ?? this.openedAt;
+    const again = unused.length < STOP_GAP - 1 ? undefined : unused
+      .filter((info) => now - shownAt(info.index) >= ADDRESS_HOLD_MS)
+      .sort((a, b) => shownAt(a.index) - shownAt(b.index) || a.index - b.index)[0];
+    const info = again ?? this.wallet.reveal_next_address("external");
+    this.shown.set(info.index, now);
+    // Only what is still unused needs its time: an address paid is never handed out again.
+    const open = new Set(unused.map((u) => u.index));
+    for (const index of this.shown.keys()) if (index !== info.index && !open.has(index)) this.shown.delete(index);
     this.persist();
-    return address;
+    return info.address.toString();
   }
 
   async balance(): Promise<OnchainBalance> {
@@ -454,7 +499,7 @@ export class BdkOnchain implements OnchainProvider {
     const staged = this.wallet.take_staged();
     if (staged) { if (this.changeset) this.changeset.merge(staged); else this.changeset = staged; }
     if (!this.changeset) return;
-    const value: StoredBdk = { changeset: this.changeset.to_json(), reserved: this.reserved, scanned: this.scanned };
+    const value: StoredBdk = { changeset: this.changeset.to_json(), reserved: this.reserved, scanned: this.scanned, shown: Object.fromEntries(this.shown) };
     this.writes = this.writes.then(() => this.store.save(this.key, value)).catch(() => {});
   }
 

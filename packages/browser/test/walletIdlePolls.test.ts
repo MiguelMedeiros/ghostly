@@ -22,7 +22,7 @@ function wallets() {
   const ark = new ArkWallet("testnet", vi.fn());
   Object.assign(ark, { adapter: {
     config: { network: "regtest", provider: "http://127.0.0.1:43010" },
-    address: async () => "tark1me", boardingAddress: async () => "bcrt1me", incoming: async () => 0,
+    address: async () => "tark1me", boardingAddress: async () => "bcrt1me", balances: async () => ({ balance: money.balance, incoming: 0 }),
     balance: async () => money.balance, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: async () => {},
   } });
   const bark = new BarkWallet("testnet", vi.fn(), async () => { throw new Error("not opened here"); });
@@ -74,7 +74,10 @@ it.each(["ark", "bark", "spark", "usdt"] as const)("%s: the engine checks the re
   expect(receipts).toHaveBeenCalledTimes(1);
   wallet.changed(true);
   wallet.changed();
-  expect(refresh).toHaveBeenCalledTimes(2);
   expect(receipts).toHaveBeenCalledTimes(3);
+  // Changes said together make one view, a moment later.
+  expect(refresh).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(50);
+  expect(refresh).toHaveBeenCalledTimes(1);
   await node.shutdown();
 });

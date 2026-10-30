@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame } from "../src/groupSession";
-import { COMMUNITY_LIMITS, CommunitySession, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
+import { COMMUNITY_LIMITS, CommunitySession, communityCommitHash, shortHash, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
 import { GROUP_FILE_LIMITS, fetchesByItself, groupFileFallback, isGroupMessageId, readGroupFileMeta, readGroupHave, readGroupWant, readGroupWantNo, type GroupFileMeta } from "../src/groupFiles";
 // covers: groups.files.wire
 
@@ -103,8 +103,8 @@ function mesh() {
     return session;
   };
   const settle = async () => { while (pending.length) { const batch = pending; pending = []; await Promise.all(batch); } };
-  const admit = async (admin: GroupSession) => {
-    const seed = createIdentity().seedB64;
+  /** `seed`: a member let in again, under the key it had. */
+  const admit = async (admin: GroupSession, seed = createIdentity().seedB64) => {
     const welcome = await admin.admit(identityFromSeedB64(seed).pubKeyZ32);
     const invite = admin.inviteFrame();
     const joined = GroupSession.join({ name: invite.name, admin: invite.admin }, welcome.slice(0, -1), welcome[welcome.length - 1], seed);
@@ -189,6 +189,41 @@ describe("a file in a private group", () => {
     expect(alice.couldRead(carol.myKey, id)).toBe(false);
     expect(bob.couldRead(alice.myKey, id)).toBe(true);
   });
+
+  it("given its time, could be read by a member let in after its epoch but before it was written (said again to them), not by one let in after it", async () => {
+    const tick = () => new Promise(r => setTimeout(r, 5));
+    const net = mesh();
+    const alice = net.add(GroupSession.create("Ghosts"));
+    const bob = await net.admit(alice);
+    // Bob, behind on the chain, writes under epoch 1 after Dave (epoch 2) and Erin (epoch 3) were let in.
+    const id = `${bob.myKey}:1:0`;
+    await tick();
+    const before = Date.now();
+    await tick();
+    const dave = await net.admit(alice);
+    const erinSeed = createIdentity().seedB64, erin = await net.admit(alice, erinSeed);
+    await tick();
+    const written = Date.now();
+    expect(alice.couldRead(dave.myKey, id)).toBe(false);
+    expect(alice.couldRead(dave.myKey, id, written)).toBe(true);
+    expect(alice.couldRead(erin.myKey, id, written)).toBe(true);
+    // Written before they were let in: never said again to them.
+    expect(alice.couldRead(dave.myKey, id, before)).toBe(false);
+    // Erin removed: out of the roster now, so no.
+    await tick();
+    await alice.remove(erin.myKey);
+    await net.settle();
+    expect(alice.couldRead(erin.myKey, id, written)).toBe(false);
+    // Let in again after a second message written while she was out: not in the epoch either would be said again under
+    // (the removal's), though she was in an earlier one.
+    await tick();
+    const whileOut = Date.now();
+    await tick();
+    await net.admit(alice, erinSeed);
+    expect(alice.couldRead(erin.myKey, `${bob.myKey}:1:1`, whileOut)).toBe(false);
+    expect(alice.couldRead(erin.myKey, id, written)).toBe(false);
+    expect(alice.couldRead(dave.myKey, `${bob.myKey}:1:1`, whileOut)).toBe(true);
+  });
 });
 
 /** Community members on one network where every broadcast reaches everyone. */
@@ -266,6 +301,13 @@ describe("a file in a community", () => {
     expect(bob.couldRead(alice.myKey, id)).toBe(true);
     expect(alice.couldRead(carol.myKey, id)).toBe(false);
     expect(alice.couldRead(bob.myKey, id.replace(/:[0-9a-f]{16}:/, ":ffffffffffffffff:"))).toBe(false);
+    // Asked again once the chain grew past what was replayed for the first answer.
+    for (let i = 0; i < COMMUNITY_LIMITS.window + 1; i++) await alice.rotate();
+    await net.settle();
+    expect(alice.couldRead(bob.myKey, id)).toBe(true);
+    const old = alice.state.chain[alice.state.chain.length - COMMUNITY_LIMITS.window - 2], at = `${old.e}:${shortHash(communityCommitHash(old))}`;
+    expect(alice.couldRead(bob.myKey, `${bob.myKey}:${at}:1`)).toBe(true);
+    expect(alice.couldRead(carol.myKey, `${bob.myKey}:${at}:1`)).toBe(false);
     // Looking the old roster up does not widen whom a frame may come from.
     expect(alice.isRecentMember(carol.myKey)).toBe(false);
   });

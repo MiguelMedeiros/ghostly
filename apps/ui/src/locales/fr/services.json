@@ -29,7 +29,11 @@
     "stopped": "Arrêté"
   },
   "window": {
+    "callOn": "Un appel est en cours. Terminez-le pour ouvrir {{app}}.",
+    "elsewhere": "{{app}} a tenté de vous envoyer ailleurs, hors de ce que votre contact partage.",
     "failed": "La requête a échoué.",
+    "notAnswering": "{{app}} ne répond pas sur la machine de votre contact. Demandez-lui de vérifier qu’il tourne.",
+    "tooSlow": "{{app}} n’a pas répondu à temps sur la machine de votre contact. Réessayez dans un instant.",
     "unreachable": "Ce service n’est pas joignable. Les services existent tant que leur fantôme est en ligne."
   },
   "yourApps": "Vos apps"

@@ -101,6 +101,17 @@ export interface OpenedService {
   host: string;
 }
 
+/**
+ * Added to every answer of a contact's app, next to any policy the contact sends (a browser enforces both): its
+ * scripts, forms, pictures, frames, fonts, media, styles and workers reach its own origin and public https sites
+ * (and inline, data: and blob: content), never plain http. The page is served from `<random>.localhost`, which Chrome
+ * counts as this machine, so its own guard for requests to local addresses (Local Network Access) would not ask
+ * before the page reached another service on 127.0.0.1 or the local network. Inline scripts and styles stay allowed:
+ * this policy bounds where the page reaches, not how the app is written. A top-level navigation is not covered: no
+ * browser lets a policy bound it.
+ */
+export const OPENED_SERVICE_CSP = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:";
+
 function plain(response: ServerResponse, status: number, text: string, headers: Record<string, string> = {}): void {
   response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", ...headers });
   response.end(text);
@@ -166,8 +177,10 @@ async function proxy(request: IncomingMessage, response: ServerResponse, chunks:
         if (!cookie) continue;
         if (cookies.size < MAX_COOKIE_NAMES) cookies.add(setCookieName(cookie)!);
         out[lower] = [...((out[lower] as string[] | undefined) ?? []), cookie];
-      } else out[lower] = value;
+      } else if (lower === "content-security-policy") out[lower] = [...((out[lower] as string[] | undefined) ?? []), value];
+      else out[lower] = value;
     }
+    out["content-security-policy"] = [...((out["content-security-policy"] as string[] | undefined) ?? []), OPENED_SERVICE_CSP];
     response.writeHead(answer.status, out);
     // Streamed, not gathered: past the cap (or when the contact drops it) the body stops and the connection closes.
     await pipeline(Readable.from(answer.body, { objectMode: false }), response);
@@ -198,7 +211,9 @@ export const SERVICE_METHODS: Record<string, Method> = {
     let url: URL;
     try { url = new URL(target); } catch { throw new CliError("bad_request", `Not a URL: ${target}`); }
     if (!(LOOPBACK.has(url.hostname) || /^127\.\d+\.\d+\.\d+$/.test(url.hostname))) throw new CliError("refused", "Only a web app on this machine (127.0.0.1, localhost) can be shared");
-    return node(ctx).addService({ name: str(params, "name", true), target });
+    // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
+    const { serviceId } = node(ctx).addService({ name: str(params, "name", true), target });
+    return { service: serviceId, serviceId };
   },
   async "service.remove"(ctx, params) {
     const serviceId = serviceOf(ctx, params);

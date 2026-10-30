@@ -1,14 +1,16 @@
 import { act, renderHook } from "@testing-library/react";
 import { vi } from "vitest";
-import type { CallMedia } from "@ghostly/core";
+import type { CallIceServer, CallMedia } from "@ghostly/core";
 import { useWebRTC } from "../src/useWebRTC";
 
 /**
  * Renders `useWebRTC` as a chat does: `receive` is the other side's `_call` record changing, and
  * `published` is every value the hook put in ours, in order (`null` clears it). `media`: where the call's media
- * comes from, when not the page's own WebRTC; `devices`: the microphone and camera the profile chose.
+ * comes from, when not the page's own WebRTC; `devices`: the microphone and camera the profile chose; `network`: the
+ * profile's ICE servers and "Hide my IP from contacts".
  */
-export function renderCall(media?: CallMedia, devices?: () => { audio?: ConstrainDOMString; video?: ConstrainDOMString }) {
+export function renderCall(media?: CallMedia, devices?: () => { audio?: ConstrainDOMString; video?: ConstrainDOMString },
+  network: { iceServers?: CallIceServer[]; relayOnly?: boolean } = {}) {
   const published: (string | null)[] = [];
   const publishCallSignal = vi.fn((signal: string | null) => { published.push(signal); });
   const setFastPoll = vi.fn();
@@ -20,7 +22,7 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
 
   const hook = renderHook(
     ({ signal }: { signal: string | null }) =>
-      useWebRTC({ incomingCallSignal: signal, publishCallSignal, setFastPoll, addCallEventMessage, removeCallEventMessage, onError, media, devices }),
+      useWebRTC({ incomingCallSignal: signal, publishCallSignal, setFastPoll, addCallEventMessage, removeCallEventMessage, onError, media, devices, ...network }),
     { initialProps: { signal: null as string | null } },
   );
 

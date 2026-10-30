@@ -3,7 +3,8 @@
 //
 // One runner took 6.5 minutes for the packages' unit tests, one package after another (core 86 s, browser 104 s,
 // cli 178 s). Here they split into shards of about the same time, each on its own runner. The unit is a package:
-// its files run in parallel inside one Vitest, and cutting a package in two pays its imports twice. A file in ALONE
+// its files run in parallel inside one Vitest, and each part of a package cut in two pays a start of Vitest (and the
+// package's globalSetup), so only a package too heavy for one shard is cut, by its files (see split). A file in ALONE
 // is a unit of its own that no other unit joins: the CLI's two-peer story (twoPeers.test.ts, about 3 minutes of
 // designed waits in one sequence of tests) sets the floor, so nothing else waits behind it or loads its runner.
 // Heaviest first to the least loaded shard, by the seconds CI took per file (tools/scripts/test-durations.json; a file not
@@ -69,9 +70,11 @@ function listed(dir, filters = []) {
 
 /**
  * Units (a package's files, or one ALONE file) to shards. ALONE units first, one per shard, which nothing else
- * joins; then heaviest first to the least loaded of the others. Ties go by name and by shard number, so every
- * shard computes the same split.
- * @param {{ id: string, dir: string, files: string[], alone: boolean }[]} units
+ * joins; then heaviest first to the least loaded of the others. A package heavier than one of those shards' fair share
+ * cannot fit in one: its files go one by one, heaviest first, and the files of it that land on the same shard run as
+ * one part of it (@ghostly/browser was over a third of all the time, and its shard alone set CI's length). Ties go by
+ * name, by file and by shard number, so every shard computes the same split.
+ * @param {{ id: string, dir: string, files: string[], alone: boolean, whole?: boolean }[]} units
  * @param {Record<string, number>} seconds
  */
 export function split(units, seconds, of) {
@@ -81,12 +84,21 @@ export function split(units, seconds, of) {
   const alone = units.filter((u) => u.alone);
   if (alone.length >= of) throw new Error(`${alone.length} files run alone: that needs more than ${of} shards`);
   const shards = Array.from({ length: of }, () => ({ load: 0, units: [], alone: false }));
-  const order = (a, b) => weight(b) - weight(a) || (a.id < b.id ? -1 : 1);
+  const order = (a, b) => weight(b) - weight(a) || (a.id < b.id ? -1 : a.id > b.id ? 1 : a.files[0] < b.files[0] ? -1 : 1);
   for (const [i, unit] of [...alone].sort(order).entries()) Object.assign(shards[i], { load: weight(unit), units: [unit], alone: true });
-  for (const unit of units.filter((u) => !u.alone && u.files.length).sort(order)) {
+  const rest = units.filter((u) => !u.alone && u.files.length);
+  const share = rest.reduce((sum, u) => sum + weight(u), 0) / (of - alone.length);
+  const pieces = rest.flatMap((u) => (weight(u) > share ? u.files.map((f) => ({ ...u, files: [f], of: u })) : [u]));
+  for (const piece of pieces.sort(order)) {
     const lightest = shards.filter((s) => !s.alone).reduce((best, s) => (s.load < best.load ? s : best));
-    lightest.load += weight(unit);
-    lightest.units.push(unit);
+    lightest.load += weight(piece);
+    const part = piece.of && lightest.units.find((u) => u.of === piece.of);
+    if (part) part.files.push(...piece.files);
+    else lightest.units.push(piece);
+  }
+  // A cut package's part runs by its files, unless all of them landed on one shard.
+  for (const shard of shards) {
+    shard.units = shard.units.map(({ of: from, ...unit }) => (from ? { ...unit, files: unit.files.sort(), whole: unit.files.length === from.files.length && from.whole } : unit));
   }
   return shards;
 }

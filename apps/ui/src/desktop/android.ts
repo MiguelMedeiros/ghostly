@@ -37,7 +37,7 @@ export function followAppVisibility(listen: ListenWith, doc: Document = document
 
 /**
  * A share from another app as Rust hands it over: its text, its files on the paste shelf, by token, and the names of
- * those Android did not copy, too large to bring in (`leftOut`) or not read (`unread`).
+ * those Android did not copy, too large to bring in (`leftOut`), not read (`unread`) or with no room for them (`noRoom`).
  */
 interface Shared {
   title: string;
@@ -45,6 +45,25 @@ interface Shared {
   files: { token: string; name: string | null; size: number; mime: string | null }[];
   leftOut?: string[];
   unread?: string[];
+  noRoom?: string[];
+}
+
+/** Where a share that waits in the picker is kept across a restart of the page (a profile switch), tokens and all. */
+const CARRIED_SHARE_KEY = "ghostly_carried_share";
+
+/** The share the page before this one kept for it, taken: it is handed over once. Null when none, or not one. */
+function takeCarriedShare(): Shared | null {
+  try {
+    const kept = sessionStorage.getItem(CARRIED_SHARE_KEY);
+    sessionStorage.removeItem(CARRIED_SHARE_KEY);
+    const shared = JSON.parse(kept ?? "null") as Shared | null;
+    const file = (f: Shared["files"][number] | null) => typeof f?.token === "string" && typeof f.size === "number";
+    const names = (left: unknown) => left === undefined || (Array.isArray(left) && left.every((name) => typeof name === "string"));
+    return shared && typeof shared.title === "string" && typeof shared.text === "string" && Array.isArray(shared.files) && shared.files.every(file)
+      && names(shared.leftOut)
+      ? shared
+      : null;
+  } catch { return null; }
 }
 
 /**
@@ -126,17 +145,21 @@ function withinPasteTotal<T extends { size: number }>(files: T[]): T[] {
  * and sizes; their bytes are read into the page, as a paste's, only when the chat picked takes them. At most a paste's
  * size in all: a file that would pass it is left out, and named, as are those Android did not copy. A share taken
  * later wins over one that waits. Once read (or none of it taken, or a later share took its place before it was
- * read), the share's copies in the app's cache go (`incoming_share_done`): the page holds what it needs.
+ * read), the share's copies in the app's cache go (`incoming_share_done`): the page holds what it needs. Rust hands
+ * a share over once, so one that waits when the page restarts (a profile switch, `carryIncomingShare`) is kept for the
+ * next page in session storage, its tokens with it (the shelf lasts as long as the process); one not kept goes with
+ * the page, its copies too.
  */
 export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
   /** Lets the copies of the share that waits to be read go. */
   let letGo: (() => void) | null = null;
-  const take = async () => {
-    const shared = await invoke<Shared | null>("incoming_share_take");
-    if (!shared) return;
+  /** The share that waits was kept for the next page: its copies stay when this one goes. */
+  let carried = false;
+  const receive = (shared: Shared) => {
     const taken = withinPasteTotal(shared.files);
     const leftOut = [...shared.leftOut ?? [], ...shared.files.filter((file) => !taken.includes(file)).map((file) => file.name ?? "")];
     const unread = shared.unread ?? [];
+    const noRoom = shared.noRoom ?? [];
     const clips: ClipboardFile[] = taken
       .map(({ token, ...file }) => ({
         ...file,
@@ -161,6 +184,7 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
       files,
       ...(leftOut.length > 0 && { leftOut }),
       ...(unread.length > 0 && { unread }),
+      ...(noRoom.length > 0 && { noRoom }),
       read: async () => {
         // Being read: a later share no longer lets these go under it; they go when the read ends.
         if (letGo === done) letGo = null;
@@ -169,6 +193,13 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
         } finally {
           done();
         }
+      },
+      carry: () => {
+        // Its copies already let go: nothing of it would read on the next page.
+        if (clips.length && !held) return false;
+        sessionStorage.setItem(CARRIED_SHARE_KEY, JSON.stringify(shared));
+        carried = true;
+        return true;
       },
     };
     if (!clips.length) done();
@@ -180,6 +211,15 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
     receiveShare(share);
     if (location.hash !== "#/shared") location.hash = "#/shared";
   };
+  const take = async () => {
+    const shared = await invoke<Shared | null>("incoming_share_take");
+    if (shared) receive(shared);
+  };
+  // The page goes (a reload, the app closing): a share it never read takes its copies with it, unless it was kept.
+  addEventListener("pagehide", () => { if (!carried) letGo?.(); });
   void listen("incoming-share", () => void take().catch(() => {})).catch(() => {});
+  // The share the page before this one kept first: one Rust holds is newer, and takes its place.
+  const kept = takeCarriedShare();
+  if (kept) receive(kept);
   void take().catch(() => {});
 }

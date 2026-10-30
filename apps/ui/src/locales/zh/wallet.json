@@ -59,6 +59,7 @@
     },
     "label": "需要备份",
     "later": "稍后",
+    "line": "备份你的 {{wallet}} 钱包",
     "title": "{{wallet}} 中有真钱"
   },
   "bark": {
@@ -201,6 +202,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "这张发票已过期：现在没有人能支付它。",
     "invoiceFor": "{{amount}} 的发票",
     "makePrimary": "设为主要",
     "mints": "铸币厂",
@@ -585,6 +587,17 @@
     "mainnet": "sats",
     "testnet": "测试 sats"
   },
+  "send": {
+    "balance": "余额：{{amount}} {{unit}}",
+    "cameraUnavailable": "相机不可用。请粘贴、输入或选择图片。",
+    "clipboardEmpty": "没有可粘贴的内容。请先复制发票或地址。",
+    "clipboardUnavailable": "无法读取剪贴板。请在下方粘贴或输入。",
+    "image": "选择图片",
+    "max": "最大",
+    "noAmount": "此发票没有金额。请索取带金额的发票。",
+    "paste": "粘贴",
+    "scan": "扫描"
+  },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",
     "progress": "正在创建你的 Mainnet 钱包…",
@@ -753,6 +766,8 @@
     "send": "发送"
   },
   "unseen": {
+    "lineReal": "{{wallet}} 中有 {{amount}} 新 sats",
+    "lineTest": "{{wallet}} 中有 {{amount}} 新测试 sats",
     "real": "{{place}}，新到 {{amount}} sats",
     "test": "{{place}}，新到 {{amount}} 测试 sats"
   },

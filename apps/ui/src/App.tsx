@@ -16,17 +16,21 @@ import { useEngineNick } from "./hooks/useAvatars";
 import { useProfilePeek } from "./hooks/useProfilePeek";
 import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
+import { useWakeOnReturn } from "./hooks/useWakeOnReturn";
 import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
 import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
-import { useComputerAwake } from "./lib/keepAwake";
+import { useComputerAwake, useFilesMoving } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
 import { NowPlayingBar } from "./components/NowPlayingBar";
 import { stopHeld } from "./lib/nowPlaying";
+import { groupRouteId } from "./lib/groups";
+import { sessionPeerKey } from "./lib/storage";
+import { useEngineValue } from "./lib/engineState";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -51,27 +55,6 @@ function useThemeColor() {
  * page that holds it, and so does the polling that would carry the hang-up.
  * The one on a call follows you to Settings as a small window instead.
  */
-/**
- * Coming back to the window or tab after a while: a laptop that slept, an app left in the background.
- * Chats look for their contacts now, and a connection that dropped meanwhile is dialled again at once.
- */
-function useWakeOnReturn() {
-  useEffect(() => {
-    let last = 0;
-    const wake = () => {
-      if (document.visibilityState !== "visible" || Date.now() - last < 5_000) return;
-      last = Date.now();
-      void engine.call("wake").catch(() => {});
-    };
-    // Back online (another network, a VPN up or down): discovery forgets the relays that failed on the old one.
-    const online = () => { last = Date.now(); void engine.call("wake", { network: true }).catch(() => {}); };
-    document.addEventListener("visibilitychange", wake);
-    window.addEventListener("focus", wake);
-    window.addEventListener("online", online);
-    return () => { document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake); window.removeEventListener("online", online); };
-  }, []);
-}
-
 /**
  * The peer holds items for away contacts in this profile's S3 storage (WISP 404), the one set up under
  * Profile → Backups: whenever that changes, the peer is told, credentials and space alike, and told when
@@ -102,12 +85,41 @@ function useProfileNameSync() {
   }, [nick, engineNick]);
 }
 
+/**
+ * The chat or group on screen, as the route says, tells the engine (WISP 902 § Transports): its link keeps this device's
+ * native connections. From here, not from each page: a chat kept loaded off screen (on a call, running a mini-app) is
+ * the one on screen again when it comes back, after a group or another chat let go of theirs.
+ */
+function useOnScreenLink() {
+  const { pathname } = useLocation();
+  const session = chatRouteSession(pathname);
+  const groupId = groupRouteId(pathname);
+  // Read again as the state changes: a chat opened for the first time has its link once the engine made it.
+  const chatLink = useEngineValue(state => {
+    const peerKey = session ? sessionPeerKey(session) : undefined;
+    return peerKey ? state?.links.find(l => l.peerPubKeyZ32 === peerKey)?.id : undefined;
+  });
+  const onScreen = groupId ? `group:${groupId}` : chatLink ?? null;
+  const told = useRef<string | null>(null);
+  useEffect(() => {
+    if (told.current === onScreen) return;
+    told.current = onScreen;
+    void engine.call("setActiveLink", { linkId: onScreen }).catch(() => {});
+  }, [onScreen]);
+  useEffect(() => () => {
+    if (told.current) void engine.call("setActiveLink", { linkId: null }).catch(() => {});
+    told.current = null;
+  }, []);
+}
+
 function useLoadedChats() {
   const routeSession = chatRouteSession(useLocation().pathname);
   // Every chat on a call or ringing: a second call ringing (or declined) while one is on must not unload the first.
   const [callSessions, setCallSessions] = useState<readonly string[]>([]);
-  // A call keeps the screen on (Screen Wake Lock, where there is one).
-  useWakeLock(callSessions.length > 0);
+  // A call keeps the screen on (Screen Wake Lock, where there is one), and so does a file on its way: a phone that
+  // sleeps stops it.
+  const filesMoving = useFilesMoving();
+  useWakeLock(callSessions.length > 0 || filesMoving);
   // And the profile on this device: a handoff waits for the call to end.
   useCallOnSync();
   // The call window hangs here instead of inside its chat, which may be off
@@ -183,9 +195,11 @@ export function App() {
   const { t } = useI18n();
   // What a wake-up shows, and which chats it may name (the installed web app; nothing elsewhere).
   useWakeTableSync({ title: "Ghostly", body: t("pwa.wakeNotice"), call: t("pwa.wakeCall"), ...deviceWakeWords(t) });
-  // Desktop: the computer stays awake for a handoff, and while the person keeps it so for a standby (WISP 06).
+  // Desktop: the computer stays awake for a handoff, while the person keeps it so for a standby (WISP 06), and while a
+  // file is on its way.
   useComputerAwake();
   const chats = useLoadedChats();
+  useOnScreenLink();
   const mainRef = useRef<HTMLElement>(null);
   // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
   // profile closing): after the bubbles' layout cleanups have handed it over.

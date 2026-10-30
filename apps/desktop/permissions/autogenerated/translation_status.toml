@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-translation-status"
+description = "Enables the translation_status command without any pre-configured scope."
+commands.allow = ["translation_status"]
+
+[[permission]]
+identifier = "deny-translation-status"
+description = "Denies the translation_status command without any pre-configured scope."
+commands.deny = ["translation_status"]

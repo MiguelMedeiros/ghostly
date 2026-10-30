@@ -59,7 +59,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     const slot = linkId ? appSlot(linkId) : undefined;
     if (linkId && slot) {
       const there = chatApp(linkId);
-      if (there?.ref === ref && !there.stopped) { updateChatApp(linkId, { shown: true }); return; }
+      if (there?.ref === ref && !there.stopped) { updateChatApp(linkId, { shown: true }); return "shown"; }
       if (there && !there.stopped) there.running.stop();
       let running: RunningApp | null = null;
       let takenDown: AppTakedown | null = null;
@@ -79,6 +79,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
           warnStop(entry.title, reason);
           onStop?.(ref, reason);
         },
+        onServing: (on) => { if (chatApp(linkId)?.running === running) updateChatApp(linkId, { serving: on }); },
       });
       setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running });
       return;
@@ -88,7 +89,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     // the focus goes back to what opened it (or that app's Open on the Apps page, when a dialog opened it and went).
     // Open pressed twice before it shows (a double click) gets here twice: the second finds the first one's layer.
     const place = `${linkId ?? ""} ${ref}`;
-    if (alone.get(place)?.isConnected) return;
+    if (alone.get(place)?.isConnected) return "shown";
     const before = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     const overlay = document.createElement("div");
     overlay.setAttribute("role", "dialog");

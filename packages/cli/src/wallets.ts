@@ -5,6 +5,7 @@ import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, 
 import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError, type ErrorCode } from "./errors";
+import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 
 /**
@@ -14,9 +15,6 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
  */
 
 const NETWORKS = ["mainnet", "testnet"] as const;
-const TYPES = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"] as const;
-const METHODS = ["cashu", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"] as const;
-const CHAT_METHODS = ["cashu", "lightning", ...METHODS.filter((m) => m !== "cashu")] as const;
 
 /**
  * What the app has and a headless Ghostly cannot run yet, and why (WISP 1100 § Wallet SDKs on Node). New offers
@@ -150,11 +148,11 @@ const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.tri
  * its shape: the engine's `EngineError` carries `engineCode`.
  */
 /** A payment's memo: the contact reads it as a message's text, so the secret guard of `send` holds (docs/CLI.md § Safety). */
-function memoOf(params: Params, verb: string): string | undefined {
-  const memo = str(params, "memo");
+function memoOf(params: Params, verb: string, field: "memo" | "comment" = "memo"): string | undefined {
+  const memo = str(params, field);
   if (memo && !bool(params, "force")) {
     const secret = findSecret(memo);
-    if (secret) throw new CliError("confirm", `The memo looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} with --force if you mean to`, { kind: secret.kind });
+    if (secret) throw new CliError("confirm", `The ${field} looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} with --force if you mean to`, { kind: secret.kind });
   }
   return memo || undefined;
 }
@@ -201,7 +199,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.create"(ctx, params) {
-    const type = oneOf(params, "type", TYPES, "cashu");
+    const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     const n = network(params);
     const gap = NODE_GAPS[type];
     if (gap) throw new CliError("unavailable", gap);
@@ -221,7 +219,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.remove"(ctx, params) {
-    const type = oneOf(params, "type", TYPES, "cashu");
+    const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     const n = network(params);
     const card = cardOf(ctx, params, type);
     try {
@@ -236,7 +234,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.faucet"(ctx, params) {
-    const type = oneOf(params, "type", TYPES, "cashu");
+    const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     if (network(params) !== "testnet") throw new CliError("refused", "Test coins are for Testnet wallets only");
     const card = cardOf(ctx, params, type);
     return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) });
@@ -260,7 +258,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.address"(ctx, params) {
-    const type = oneOf(params, "type", ["bitcoin", "arkade", "spark", "usdt"] as const, "bitcoin");
+    const type = oneOf(params, "type", ADDRESS_TYPES, "bitcoin");
     const n = network(params);
     if (type === "bitcoin") return { type, network: n, address: await node(ctx).bitcoinReceiveAddress({ network: n }) };
     const view = netView(state(ctx), n);
@@ -293,6 +291,8 @@ const WALLETS: Record<string, Method> = {
 
   /** An invoice, a Lightning address or an LNURL, from the network's Lightning (a card of it, or its default). */
   async "pay"(ctx, params) {
+    // A Lightning address's comment reaches its owner as a memo reaches a contact (agents#1624).
+    const comment = memoOf(params, "pay", "comment");
     const text = str(params, "target", true).trim();
     const card = str(params, "card");
     let invoice = text.replace(/^lightning:/i, "");
@@ -308,7 +308,7 @@ const WALLETS: Record<string, Method> = {
       if (!amount) throw new CliError("bad_request", "amount is required to pay a Lightning address or LNURL");
       const view = await node(ctx).lnurlResolve({ text, network: n });
       if (amount < view.minSat || amount > view.maxSat) throw new CliError("refused", `${view.domain} takes from ${view.minSat} to ${view.maxSat} sats`);
-      const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(str(params, "comment") ? { comment: str(params, "comment") } : {}), network: n });
+      const got = await node(ctx).lnurlInvoice({ id: view.id, amount, ...(comment ? { comment } : {}), network: n });
       invoice = got.invoice; note = got.note;
     } else throw new CliError("bad_request", "Not a Lightning invoice, Lightning address or LNURL");
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
@@ -340,7 +340,7 @@ const WALLETS: Record<string, Method> = {
     const link = chatOf(ctx, params);
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
-    const method = params.method === undefined ? undefined : oneOf(params, "method", METHODS, "cashu");
+    const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
@@ -368,6 +368,11 @@ const WALLETS: Record<string, Method> = {
   /** Which ways of paying this chat takes, per network (the chat's Accept switches). */
   async "chat.accept"(ctx, params) {
     const link = chatOf(ctx, params);
+    // No method: what it takes now, with nothing changed.
+    if (params.method === undefined) {
+      if (params.on !== undefined || params.networks !== undefined) throw new CliError("bad_request", "on and networks change one method: name it");
+      return { chat: link.id, methods: link.paymentMethods ?? null, networks: link.paymentNetworks ?? null };
+    }
     const method = oneOf(params, "method", CHAT_METHODS, "cashu");
     const on = bool(params, "on");
     const nets = params.networks === undefined ? undefined : (() => {

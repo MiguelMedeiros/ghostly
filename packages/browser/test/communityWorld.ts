@@ -62,6 +62,9 @@ export interface Peer {
   spent: number[];
   spentBackground: number[];
   refused: number;
+  /** With `heldReads`: the packet this app last read or wrote per key, and until when a read of it is held back. */
+  known: Map<string, GhostRecord[]>;
+  heldUntil: Map<string, number>;
   /** When a link write of this app was last refused, while it waits for the budget. */
   writeWaiting?: number;
   /** An app from before hubs (`paired-groups` 3): it keeps every private group a full mesh and does not announce version 4. */
@@ -167,6 +170,16 @@ export class CommunityWorld {
    * second see (each read is done before any of their writes lands). Writes land at once, as before.
    */
   readsFromStepStart: ((key: string) => boolean) | null = null;
+  /**
+   * As the engine's relay client does (relay.ts `resolve`): a read the budget holds back answers the packet this app
+   * already knows of the key (its last reading, or its own write), with nothing in the answer to say it is old; only
+   * `readHeldBackFor` says the read was held. A write the budget holds back is a `DiscoveryBudgetError`. Without it, a
+   * held read fails, which no engine code mistakes for a reading (agents#1691: the World hid the hubs' pile-up).
+   */
+  heldReads = false;
+  /** With `heldReads`: background reads and writes the relays' budget holds back besides the World's own count (a test says which). */
+  holdRead: ((peer: Peer, key: string) => boolean) | null = null;
+  holdWrite: ((peer: Peer, key: string) => boolean) | null = null;
   private stepStart = new Map<string, GhostRecord[]>();
   /** An edge that was up and dropped looks "seen" from its side alone, as the engine's does while it dials again. */
   redialSeen = false;
@@ -216,7 +229,7 @@ export class CommunityWorld {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
     const places = new Map<number, string>();
-    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, host: null as unknown as GroupsHost, ...app };
+    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, known: new Map(), heldUntil: new Map(), host: null as unknown as GroupsHost, ...app };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
         const edge = links.get(linkId), there = edge && this.counterpart(edge);
@@ -271,21 +284,38 @@ export class CommunityWorld {
         this.pkarrOps++;
         this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background, !!door);
         if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
-        if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) throw new Error("Discovery request budget reached; retry shortly");
+        if (this.heldReads && background && this.holdWrite?.(peer, identity.pubKeyZ32)) throw new DiscoveryBudgetError(5_000);
+        if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) {
+          if (this.heldReads) throw new DiscoveryBudgetError(5_000);
+          throw new Error("Discovery request budget reached; retry shortly");
+        }
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
+        if (this.heldReads) peer.known.set(identity.pubKeyZ32, structuredClone(records));
       },
       resolve: async (key, background, door) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "resolve", key, !!background, !!door);
         if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
         if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
-        if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
+        if ((this.heldReads && background && this.holdRead?.(peer, key)) || !this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) {
+          const known = peer.known.get(key);
+          if (!this.heldReads) throw new Error("No Pkarr relay reachable");
+          peer.heldUntil.set(key, this.now + 5_000);
+          if (!known) throw new DiscoveryBudgetError(5_000);
+          return structuredClone(known);
+        }
         const store = this.readsFromStepStart?.(key) ? this.stepStart : this.pkarr;
-        return peer.online ? structuredClone(store.get(key) ?? null) : null;
+        const found = peer.online ? structuredClone(store.get(key) ?? null) : null;
+        peer.heldUntil.delete(key);
+        if (found) peer.known.set(key, structuredClone(found));
+        return found;
       },
+      readHeldBackFor: key => { const until = peer.heldUntil.get(key); return until !== undefined && until > this.now ? until - this.now : undefined; },
       // A row given a place above another goes just before it; any other, to the end.
       storeMessage: async (message, _live, place) => {
         if (messages.some(m => m.id === message.id)) return false;
+        // As the node's: a member's message its author deleted for everyone stays gone.
+        if (message.linkId.startsWith("group:") && peer.groups?.isRemoved(message.linkId.slice("group:".length), message.id)) return false;
         const at = place === undefined ? -1 : messages.findIndex(m => m.id === places.get(place));
         if (at >= 0) messages.splice(at, 0, message);
         else messages.push(message);

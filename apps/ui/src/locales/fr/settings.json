@@ -80,6 +80,8 @@
     "allow": "Autoriser",
     "camera": "Caméra",
     "cameraInfo": "Utilisée pour les appels et les photos. Gardée sur cet appareil, pour ce profil.",
+    "denied": "Bloqué. Autorisez le micro et la caméra dans les réglages du navigateur ou du système.",
+    "deniedIos": "Bloqué par iOS. Dans Réglages → Apps → Safari, autorisez Micro (et Caméra), puis rouvrez Ghostly.",
     "failed": "Impossible de l’ouvrir. Vérifiez que Ghostly y a accès.",
     "level": "Niveau du micro",
     "microphone": "Micro",
@@ -220,6 +222,20 @@
     "60": "1 heure"
   },
   "title": "Paramètres",
+  "translate": {
+    "downloaded": "Langues téléchargées",
+    "hint": "Le choix par défaut des discussions qui n’ont pas choisi",
+    "info": "Les messages reçus dans une autre langue sont traduits sur cet appareil par un modèle de langue téléchargé une fois. Aucun texte ne quitte l’appareil, et vos contacts n’en savent rien.",
+    "name": "Traduire les messages",
+    "none": "Aucune langue téléchargée",
+    "pair": "{{from}} → {{to}}",
+    "remove": "Supprimer",
+    "removeFailed": "Impossible de la supprimer. Réessayez.",
+    "removeLabel": "Supprimer {{name}}",
+    "searchWords": "traduction, traduction automatique, langues, modèles",
+    "title": "Traduire les messages en {{language}}",
+    "unread": "Impossible de lire les langues téléchargées."
+  },
   "version": "Version",
   "website": "Site web"
 }

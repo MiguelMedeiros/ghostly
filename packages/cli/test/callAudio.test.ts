@@ -359,7 +359,7 @@ describe("a call's audio through Opus", () => {
       const packets: RtpPacket[] = [];
       const audio = new CallAudio({
         rate, payloadType: 111, ssrc: 1, track: { send: (p) => packets.push(parseRtp(p)!), onPacket: () => {} },
-        encoder: { encode: (pcm, size) => { encodes++; return real.encode(pcm, size); }, decode: (packet) => real.decode(packet), delete: () => real.delete?.() },
+        encoder: { encode: (pcm, size) => { encodes++; return real.encode(pcm, size); }, decode: (packet) => real.decode(packet), delete: () => real.delete?.(), fec: (on) => real.fec?.(on) },
         decoder: stack.opus(rate), onFrame: () => {},
       });
       const ticks = (count: number) => { const from = encodes; for (let i = 0; i < count; i++) audio.tick(); return encodes - from; };
@@ -490,8 +490,12 @@ describe("a call's audio through Opus", () => {
         rate, payloadType: 111, ssrc: 1, encoder: stack.opus(rate), decoder: stack.opus(rate), onFrame: (f) => frames.push(f),
         track: { send: () => {}, onPacket: (l) => { listener = l; } },
       });
-      // The contact's side: a steady tone; packet 20 never arrives, nor 30 and 31.
+      // The contact's side: a steady tone; packet 20 never arrives, nor 30 and 31. An encoder with no FEC planned for
+      // loss, as an app's is until its RTCP reports some: one that plans for 10% (the CLI's own, agents#1741) makes
+      // SILK lean less on the frames before, and a decoder that cannot read FEC (opusscript's) fades the second of
+      // two lost frames to near silence.
       const encoder = stack.opus(rate), writer = new RtpWriter(2, 111);
+      encoder.fec?.(false);
       for (let k = 0; k < 50; k++) {
         const packet = writer.packet(encoder.encode(tone(440, rate, 20, 0.3, (k * rate) / 50), rate / 50));
         if (k !== 20 && k !== 30 && k !== 31) listener(packet);

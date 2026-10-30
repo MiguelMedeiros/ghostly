@@ -1,6 +1,7 @@
 package tools.ghostly.app
 
 import java.io.File
+import java.nio.file.Files
 
 /**
  * The copies of shares from other apps in the app's cache (GhostlyHostPlugin `shared`): a folder per share under the
@@ -24,6 +25,25 @@ object SharedCopies {
    * share is never handed over: the page would drop it anyway.
    */
   fun nothingIn(title: String, text: String, files: Int): Boolean = files == 0 && text.isBlank() && title.isBlank()
+
+  /**
+   * Whether a copy failed for want of room on the device (ENOSPC, EDQUOT; Android's "write failed: ENOSPC (No space
+   * left on device)", the JVM's "No space left on device"), not for the stream it read: sharing it again fails the
+   * same way until there is space, so the page says so apart from what it could not read.
+   */
+  fun noRoom(error: Throwable): Boolean =
+    generateSequence(error) { it.cause }.take(8).any { NO_ROOM.containsMatchIn(it.message ?: "") }
+
+  private val NO_ROOM = Regex("ENOSPC|EDQUOT|No space left on device|Disk quota exceeded")
+
+  /**
+   * Makes a copy's folder and the ones above it. File.mkdirs only says false; a disk already full refuses a new folder
+   * (ext4 a block, f2fs a node block for it), and then the copy's open fails with ENOENT, read as `unread`. This throws
+   * the errno's reason instead ("…: No space left on device"), which [noRoom] reads.
+   */
+  fun makeFolder(folder: File) {
+    Files.createDirectories(folder.toPath())
+  }
 
   /** What earlier runs left under the root: everything but the folders of shares numbered after `since`. */
   fun stale(root: File, since: Long): List<File> =

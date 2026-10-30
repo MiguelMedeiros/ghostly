@@ -97,6 +97,22 @@ describe("GroupChat: who wrote each message", () => {
     expect(within(await screen.findByTestId("group-members-dialog")).getAllByTestId("group-member").find(li => li.dataset.focused)?.dataset.key).toBe(BO);
   });
 
+  it("in Arabic, a member's own name is one isolated run with its \"~\" first, over their messages as on their routine row", async () => {
+    // Plain text in a right-to-left bubble drew a Latin name "Bo~": the neutral "~" took the page's direction.
+    const routine = (id: string) => readStatusCard({ kind: "routine", id, name: `Routine ${id}`, schedule: "every hour", state: "active" })!;
+    fakeEngine.on("groupMessages", () => [stored({ member: BO, text: "hello" }), stored({ member: ANA, text: "hi" }),
+      stored({ member: BOT, text: "r1", card: routine("r1") }), stored({ member: BOT, text: "r2", card: routine("r2") }), stored({ member: BOT, text: "r3", card: routine("r3") })])
+      .on("updateSettings", () => undefined).on("setGroupTyping", () => undefined);
+    fakeEngine.update({ groups: [active()] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "ar" });
+    await screen.findByText("hello");
+    const runs = screen.getAllByTestId("message-nick").map(nick => nick.querySelector("bdi"));
+    expect(runs.map(run => run?.textContent)).toEqual(["~Bo", "~Ana"]);
+    expect(runs.every(run => run && !run.hasAttribute("dir"))).toBe(true);
+    expect(screen.getByRole("button", { name: "~Bo" })).toContainElement(runs[0]);
+    expect(screen.getByTestId("routine-stack-name").tagName).toBe("BDI");
+  });
+
   it("a bot's status card gets its colour and its picture like any message", async () => {
     const card = readStatusCard({ kind: "task", id: "t1", title: "Fix relay rotation", status: "running" })!;
     openGroup(active(), [stored({ member: BOT, text: "Fix relay rotation", card })]);

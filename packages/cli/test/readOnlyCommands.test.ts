@@ -11,10 +11,10 @@ import { LOCAL_SETTINGS, offlineCall, readOnly } from "../src/main";
 const READS = [
   "events", "status", "chat history", "chat list", "chat show", "message details", "group history", "group list", "group show",
   "file list", "payment list", "wallet history", "wallet list", "identity contact", "identity list", "identity providers",
-  "service list", "service peer", "call auto", "call list", "app served", "x401 credential list", "contact-link show",
+  "service list", "service peer", "call auto", "chat accept", "call list", "app served", "x401 credential list", "saved list", "contact-link show",
 ];
 /** Changes that stay on this device: no contact and no relay hears of them. */
-const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "service add", "x401 credential add", "x401 credential remove", "x401 key new", "requests decline"];
+const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "saved add", "saved remove", "service add", "x401 credential add", "x401 credential remove", "x401 key new", "requests decline"];
 const ONLINE = [
   "profile picture",
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",
@@ -23,7 +23,7 @@ const ONLINE = [
   "group accept", "group admin", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
   "group link", "group picture", "group react", "group remove", "group rename", "group rotate", "group typing",
   "file accept", "file cancel", "file decline", "file pause", "file request", "file resend", "file resume", "file save", "file send", "file wait",
-  "chat accept", "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
+  "chat pay", "chat pay-request", "chat request", "lightning default", "lightning rename", "pay", "payment check", "payment reclaim",
   "wallet add-mint", "wallet address", "wallet create", "wallet faucet", "wallet receive", "wallet redeem", "wallet remove",
   "identity complete", "identity recheck", "identity remove", "identity share", "identity withdraw",
   "service close", "service enable", "service open", "service remove", "service share",
@@ -52,9 +52,15 @@ describe("which one-shots open the profile offline", () => {
     expect(offlineCall("call.auto", { on: false })).toBe(true);
   });
 
+  it("opens chat accept offline only when it names no method: then it says what the chat takes", () => {
+    expect(readOnly("chat.accept", { chat: "bob" })).toBe(true);
+    expect(readOnly("chat.accept", { chat: "bob", method: "cashu", on: false })).toBe(false);
+    expect(offlineCall("chat.accept", { chat: "bob", method: "cashu", on: true, networks: ["testnet"] })).toBe(false);
+  });
+
   it("sets this device's own settings offline, and those the contacts or the relays see online", () => {
     expect([...LOCAL_SETTINGS].sort()).toEqual(["autoDownloads", "sendTyping", "serveFiles"]);
-    for (const key of ["nick", "shareProfile", "online", "relays", "irohRelays", "hyperdhtRelay", "readRelays", "iceServers", "publicProfiles"]) {
+    for (const key of ["nick", "shareProfile", "online", "relays", "irohRelays", "hyperdhtRelay", "iceServers", "publicProfiles"]) {
       expect(LOCAL_SETTINGS.has(key), key).toBe(false);
     }
   });

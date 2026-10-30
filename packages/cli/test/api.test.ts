@@ -11,6 +11,7 @@ import type { GhostlyEvent } from "../src/events";
 import { allowlist } from "../src/listen";
 import { chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
+import { ONE_SHOT_RECEIPT_MS } from "../src/waits";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
 
 /** The API over a fake engine: what it checks before the engine is asked, and what it makes of the answers. */
@@ -306,6 +307,60 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent" })).rejects.toMatchObject({ code: "engine", message: "Peer is gone" });
     // A send and its wait read the message itself: in a long chat, the whole history costs each of them a read of every row.
     expect((ctx.runtime.server.node as unknown as { getMessages: ReturnType<typeof vi.fn> }).getMessages).not.toHaveBeenCalled();
+  });
+
+  // agents#1640: a script's one-shot sends to a contact who is online. A text sent over the live link left at `sent` was
+  // taken for unconfirmed as the profile closed, sent again on the DHT at the next start, and that copy held the chat's
+  // one DHT text awaiting a receipt: the next send timed out after 30 s, every 5-8 messages.
+  it("a one-shot's text sent over the live link waits a moment for its receipt before it leaves", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored = [msg("me_1", 5, { sender: "me", delivery: "sending" })];
+      const { ctx, emit } = fake(stored);
+      Object.assign(ctx, { mode: "one-shot" });
+      const sent = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(10);
+      stored[0] = { ...stored[0], delivery: "sent", via: "datalink" };
+      emit({ seq: 1, id: "x", type: "message.delivery", at: 1, chat: "chat-one", messageId: "me_1" });
+      await vi.advanceTimersByTimeAsync(300);
+      let done = false;
+      void sent.then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done, "it does not leave at sent").toBe(false);
+      stored[0] = { ...stored[0], delivery: "delivered" };
+      emit({ seq: 2, id: "y", type: "message.delivery", at: 2, chat: "chat-one", messageId: "me_1" });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await sent).toMatchObject({ delivery: "delivered" });
+
+      // No receipt within ONE_SHOT_RECEIPT_MS: it leaves at sent, as before, with no error.
+      stored[0] = { ...stored[0], delivery: "sent", via: "datalink" };
+      const late = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(ONE_SHOT_RECEIPT_MS + 100);
+      expect(await late).toMatchObject({ delivery: "sent" });
+
+      // A text on the DHT, or a daemon: no wait past sent.
+      stored[0] = { ...stored[0], delivery: "sent", via: "pkarr" };
+      const dht = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await dht).toMatchObject({ delivery: "sent" });
+      Object.assign(ctx, { mode: "daemon" });
+      stored[0] = { ...stored[0], delivery: "sent", via: "datalink" };
+      const daemon = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 });
+      await vi.advanceTimersByTimeAsync(10);
+      expect(await daemon).toMatchObject({ delivery: "sent" });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a one-shot's timeout says the text goes at the next command, not while a profile it is closing is online", async () => {
+    vi.useFakeTimers();
+    try {
+      const stored = [msg("me_1", 5, { sender: "me", delivery: "queued" })];
+      const { ctx } = fake(stored);
+      Object.assign(ctx, { mode: "one-shot" });
+      const sent = callApi(ctx, "chat.send", { chat: "chat-one", text: "hi", wait: "sent", timeout: 30 }).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await sent).toMatchObject({ code: "timeout", message: "Timed out after 30 s: the message is queued and goes with this profile's next command, or keep it online with `ghostly daemon --detach`" });
+    } finally { vi.useRealTimers(); }
   });
 
   it("send's wait sees a delivery that never came as message.delivery, and one that came as the time ran out", async () => {
@@ -642,6 +697,29 @@ describe("the engine passthrough", () => {
     expect(await callApi(ctx, "engine.call", { method: "walletCreate", params: { type: "cashu" } })).toEqual({ id: "w" });
   });
 
+  it("refuses Hide my IP from contacts (relayOnly) until the release that shows it", async () => {
+    const { ctx, node } = fake();
+    const updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { updateSettings });
+    for (const relayOnly of [true, "yes", null]) {
+      await expect(callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly } } })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("relayOnly") });
+    }
+    await expect(callApi(ctx, "settings.set", { relayOnly: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(updateSettings).not.toHaveBeenCalled();
+    await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { sendTyping: false } } });
+    expect(updateSettings).toHaveBeenCalledWith({ settings: { sendTyping: false } });
+  });
+
+  // A profile an older CLI (or a dev build) turned it on in kept it for good: false was refused too, and while it is on
+  // the TURN server it needs cannot be taken away either.
+  it("still turns Hide my IP from contacts off on a profile that has it on", async () => {
+    const { ctx, node } = fake();
+    const updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { updateSettings });
+    await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly: false } } });
+    expect(updateSettings).toHaveBeenCalledWith({ settings: { relayOnly: false } });
+  });
+
   it("refuses a real-money confirmation it was not given", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "engine.call", { method: "payRequest", params: { linkId: "x", paymentId: "y", confirmedReal: true } })).rejects.toMatchObject({ code: "confirm" });
@@ -812,8 +890,13 @@ describe("settings", () => {
     expect(JSON.stringify(capabilities)).not.toMatch(/fcm|AUTH|VK|SPACE/);
     await expect(callApi(ctx, "settings.set", { mints: [] })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
-    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
-    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"] });
+    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"] } });
+    // readRelays (the app's "Also use Pkarr relays") is refused with the reason: the CLI reads the relays first anyway.
+    node.updateSettings.mockClear();
+    for (const value of [false, true])
+      await expect(callApi(ctx, "settings.set", { readRelays: value })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("reads the Pkarr relays first") });
+    expect(node.updateSettings).not.toHaveBeenCalled();
     // ICE servers in WebRTC's form (urls a list) are taken; one without urls is a bad_request that says what to write.
     await callApi(ctx, "settings.set", { iceServers: [{ urls: ["stun:stun.example.org:3478", "stun:b.example.org"] }] });
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [{ urls: "stun:stun.example.org:3478, stun:b.example.org" }] } });

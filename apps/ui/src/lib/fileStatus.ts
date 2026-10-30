@@ -14,6 +14,9 @@ export function timeLeft(seconds: number, tr: Translate = englishT): string {
   return rest ? tr("chat.file.leftHoursMinutes", { hours, minutes: rest }) : tr("chat.file.leftHours", { hours });
 }
 
+/** A size as a status line shows it: a no-break space keeps "26.0" and "MB" on one line when the line wraps. */
+export const statusSize = (bytes: number): string => formatFileSize(bytes).replace(" ", "\u00a0");
+
 const percent = (transfer: FileTransferState) => Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100);
 
 /**
@@ -92,7 +95,7 @@ export async function fileHeld(platform: Pick<ServicesPlatform, "fileHeld" | "sa
  * this device (`left-out`: a light backup left them out).
  */
 export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean | "left-out", tr: Translate = englishT): string {
-  const size = formatFileSize(file.size);
+  const size = statusSize(file.size);
   const peerName = named ?? tr("chat.file.yourContact");
   if (!transfer || transfer.state === "done") return missing === "left-out" ? tr("chat.file.notInBackup") : missing ? tr("chat.file.gone") : size;
   if (transfer.state === "failed") return failedStatus(file, transfer, tr);
@@ -111,6 +114,8 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
       // A group's file says why it waits: its holders busy, or its bytes damaged; else, as a chat's, for a connection.
       if (transfer.wait === "damaged") return tr("chat.file.damaged", { size });
       if (transfer.wait === "busy") return transfer.transferred > 0 ? tr("chat.file.busyDone", { done }) : tr("chat.file.busySize", { size });
+      // Its holders served all they can today (WISP 503 § Serving limits): no "soon" about it (agents#1672).
+      if (transfer.wait === "day") return tr("chat.file.daySpent", { size });
       return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
     case "asking": return incoming ? tr("chat.file.askingYou", { size }) : tr("chat.file.askingThem", { name: peerName, size });
     case "queued": return incoming ? tr("chat.file.queuedHere", { done }) : tr("chat.file.queuedThere", { name: peerName, done });
@@ -121,7 +126,7 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
   if (transfer.stalled) return tr("chat.file.stalled", { progress: of });
   const parts = [of];
   if (transfer.rate && transfer.rate > 0) {
-    parts.push(`${formatFileSize(Math.round(transfer.rate))}/s`);
+    parts.push(`${statusSize(Math.round(transfer.rate))}/s`);
     const left = timeLeft((transfer.size - transfer.transferred) / transfer.rate, tr);
     if (left) parts.push(left);
   }

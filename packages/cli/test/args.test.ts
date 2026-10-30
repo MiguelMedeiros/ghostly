@@ -113,6 +113,30 @@ describe("the argument parser", () => {
     expect(parseArgs(["--left", "0"], COMMANDS["usage send"].options!).options).toEqual({ left: 0 });
   });
 
+  it("refuses a word a flag does not take as a usage error that names the flag and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "network must be one of mainnet, testnet".
+    const refused = (name: string, argv: string[], message: string) => {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", message));
+    };
+    for (const name of ["wallet list", "wallet history", "wallet create", "wallet remove", "wallet address", "wallet receive", "pay", "chat pay", "chat request", "lightning default"])
+      refused(name, ["--network", "weird"], "--network takes mainnet or testnet, not \"weird\"");
+    refused("wallet list", ["--network=Testnet"], "--network takes mainnet or testnet, not \"Testnet\"");
+    refused("wallet list", ["--network", ""], "--network takes mainnet or testnet, not \"\"");
+    refused("send", ["--wait", "weird"], "--wait takes none, sent or delivered, not \"weird\"");
+    refused("group send", ["--wait", "delivered"], "--wait takes none or sent, not \"delivered\"");
+    refused("edit", ["--wait", "sent"], "--wait takes none or confirmed, not \"sent\"");
+    refused("task update", ["t", "--wait", "delivered"], "--wait takes none, confirmed or sent, not \"delivered\"");
+    refused("chat wait", ["--until", "weird"], "--until takes live, text or paired, not \"weird\"");
+    refused("chat request", ["1", "--rail", "onchain"], "--rail takes cashu or lightning, not \"onchain\"");
+    refused("chat request", ["1", "--method", "weird"], "--method takes cashu, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat pay-request", ["p", "--via", "cashu"], "--via takes lightning, not \"cashu\"");
+    // The words each takes still go through as given.
+    expect(parseArgs(["--network", "mainnet"], COMMANDS["wallet list"].options!).options).toEqual({ network: "mainnet" });
+    expect(parseArgs(["--wait=delivered"], TEXT_COMMANDS.send.options!).options).toEqual({ wait: "delivered" });
+    expect(parseArgs(["--until", "paired"], COMMANDS["chat wait"].options!).options).toEqual({ until: "paired" });
+  });
+
   it("moves global options given before the command after it", () => {
     expect(liftGlobals(["--home", "/h", "-p", "bot", "--pretty", "send", "c", "hi"])).toEqual(["send", "c", "hi", "--home", "/h", "-p", "bot", "--pretty"]);
     expect(liftGlobals(["--profile=bot", "chat", "list"])).toEqual(["chat", "list", "--profile=bot"]);
@@ -163,6 +187,32 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["file accept"], [])).toThrow(/Missing <file>/);
     expect(() => positionals(COMMANDS["file accept"], ["a", "b", "c"])).toThrow(/Too many/);
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
+  });
+
+  it("refuses a word an argument does not take as a usage error that names the argument and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "type must be one of cashu, lightning, …".
+    const refused = (name: string, values: string[], message: string) =>
+      expect(() => positionals(COMMANDS[name], values), `${name} ${values.join(" ")}`).toThrow(new CliError("usage", message));
+    const types = "cashu, lightning, arkade, bark, spark, bitcoin, fedimint or usdt";
+    for (const name of ["wallet create", "wallet remove", "wallet faucet"]) refused(name, ["weird"], `<type> takes ${types}, not "weird"`);
+    refused("wallet create", ["Cashu"], `<type> takes ${types}, not "Cashu"`);
+    refused("wallet address", ["cashu"], "<type> takes bitcoin, arkade, spark or usdt, not \"cashu\"");
+    refused("chat accept", ["bob", "weird"], "<method> takes cashu, lightning, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat transport", ["bob", "weird"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"weird\"");
+    refused("chat transport", ["bob", "constructor"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"constructor\"");
+    // A missing or "" one is still the missing argument, and the words each takes go through as given.
+    expect(() => positionals(COMMANDS["wallet create"], [""])).toThrow(/^Missing <type>/);
+    expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
+    expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
+    expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat accept"], ["bob"])).toEqual({ chat: "bob" });
+    const accept = (...argv: string[]) => { const c = COMMANDS["chat accept"], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    // With no method it asks what the chat takes; --off or --networks there would change nothing without a word.
+    expect(accept("bob")).toEqual({ chat: "bob" });
+    expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
+    expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
+    expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
+    expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
@@ -243,6 +293,8 @@ describe("the argument parser", () => {
     usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
     expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
     expect(params("call auto", ["off"])).toEqual({ on: false });
+    // The help names what --from takes: a name the contact chose is refused there.
+    expect(COMMANDS["call auto"].options?.from.description).toMatch(/id.*key.*label.*chat rename/);
     // "" (an unset variable in a script) names no chat: before, it was a prefix of every id and took the only chat.
     usage("forward", ["bob", "m1", "--to", ""], "--to \"\" names no chat or group");
     usage("forward", ["bob", "m1", "--to", "alice", "--to", "group:"], "--to \"group:\" names no chat or group");
@@ -284,6 +336,31 @@ describe("the argument parser", () => {
       expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
     }
+    // A rate no call takes: before, the API's own check answered after the profile opened ("rate must be …", exit 1),
+    // and `call answer` only once a call rang.
+    for (const [name, argv] of [["call start", ["alice"]], ["call answer", []], ["call answer", ["alice"]], ["call auto", ["on"]]] as const) {
+      usage(name, [...argv, "--rate", "44100"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 44100");
+      usage(name, [...argv, "--rate", "0"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 0");
+      expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
+      expect(params(name, [...argv])).toMatchObject({ rate: undefined });
+    }
+    // A voice note's length or waveform out of range: before, the API answered after the profile opened (exit 1,
+    // "voice must be a number from 1 to 9007199254740991" or one sentence for every case), and --peaks alone was dropped.
+    const voice = "--voice takes a length in milliseconds from 1 to 900000 (15 minutes), not";
+    usage("file send", ["alice", "a.wav", "--voice", "0"], `${voice} 0`);
+    usage("file send", ["alice", "a.wav", "--voice", "-5"], `${voice} -5`);
+    usage("file send", ["alice", "a.wav", "--voice", "2.5"], `${voice} 2.5`);
+    usage("file send", ["alice", "a.wav", "--voice", "1000000"], `${voice} 1000000`);
+    const peaks = "--peaks takes up to 128 numbers from 0 to 255, comma-separated, not";
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,2,999"], `${peaks} "1,2,999"`);
+    usage("file send", ["alice", "a.wav", "--voice", "2000", "--peaks", "a,b"], `${peaks} "a,b"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,,2"], `${peaks} "1,,2"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
+    usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
+    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
@@ -358,6 +435,9 @@ describe("errors", () => {
     for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
     for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
     expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
+    // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
+    expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
+    expect(asCliError(engineError("contactNoPayments")).toJSON()).toEqual({ code: "refused", message: "Your contact has payments off in this chat, or needs an updated Ghostly", details: { reason: "contact_payments_off" } });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });
@@ -371,6 +451,16 @@ describe("errors", () => {
     expect(asCliError(Object.assign(new Error("EISDIR: illegal operation"), { code: "EISDIR", syscall: "open", path: "/tmp" })).code).toBe("bad_request");
     // An engine error that only mentions a file keeps its words.
     expect(asCliError(new Error("The file is gone")).code).toBe("engine");
+  });
+
+  it("say a change the full disk could not take as unavailable, in the store's words", () => {
+    // A daemon on a full disk answered done for a settings change, a chat's label, that a restart then lost.
+    const store = Object.assign(new DOMException("No room left on the disk of /home/x/store: free some space, then try again", "QuotaExceededError"), { cause: new Error("ENOSPC") });
+    expect(asCliError(store).toJSON()).toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    // As the engine's `committed` hands it on: its own words, the store's as the cause.
+    expect(asCliError(Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError", cause: store })).toJSON())
+      .toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    expect(asCliError(new DOMException("", "QuotaExceededError")).code).toBe("unavailable");
   });
 
   it("say a contact that could not be reached as unavailable, not as the engine failing", () => {

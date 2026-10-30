@@ -6,6 +6,8 @@
     "lostPeer": "Il peer di Ghostly è stato perso",
     "noRoom": "Spazio insufficiente su questo dispositivo",
     "noRoomNext": "Libera spazio, poi riprova.",
+    "noRoomToSave": "Spazio esaurito su questo dispositivo",
+    "noRoomToSaveNext": "Non è stato salvato nulla. Libera spazio, poi riprova.",
     "partNotLoaded": "Una parte di Ghostly non si è caricata.",
     "pickCard": "Scegli prima una carta Lightning",
     "signerKey": "Il tuo firmatario ha una chiave diversa da quella di questa identità. Non è stato pubblicato nulla.",
@@ -146,6 +148,13 @@
     "cannotRetry": "Non è possibile riprovare con questo file",
     "clipboardUnavailable": "Impossibile leggere gli appunti",
     "clipboardUnavailableNext": "Allegalo con +.",
+    "floor": {
+      "noRoomNext": "Libera spazio, poi chiedi al tuo contatto di inviarlo di nuovo.",
+      "notInAWeek": "Non è arrivato entro una settimana",
+      "refused": "Questo dispositivo non ha potuto ricevere questo file",
+      "tooMany": "Troppi file in attesa qui",
+      "tooManyNext": "Rispondi ai file che ti aspettano, poi chiedi al tuo contatto di inviarlo di nuovo."
+    },
     "gone": "Questo file non è più qui",
     "noRoom": "Nessuno spazio sul dispositivo del tuo contatto",
     "noRoomHere": "Spazio esaurito su questo dispositivo",
@@ -233,6 +242,7 @@
     "forkedMember": "Le modifiche al gruppo sono in pausa",
     "forkedNext": "L'admin deve ricreare il gruppo.",
     "full": "Un gruppo ha al massimo {{max}} membri",
+    "growMore": "{{count}} in più",
     "growNeedsUpdates": "Tutti devono aggiornare per superare {{max}}",
     "growNeedsUpdatesNext": "Non ancora aggiornati: {{names}}.",
     "hubSetting": "Questa impostazione degli hub non si può usare",
@@ -257,6 +267,7 @@
     "nobodyForLeave": "Nessuno è online per registrare la tua uscita",
     "nobodyForLeaveNext": "Riprova tra un momento.",
     "notALink": "Questo non è un link a un gruppo",
+    "notALinkNext": "Chiedi di nuovo il link: forse ha perso un carattere nella copia.",
     "notIn": "Non fai parte di questo gruppo",
     "notYet": "Non fai ancora parte di questo gruppo",
     "nothingToSend": "Niente da inviare",
@@ -502,6 +513,12 @@
     "usdtRejected": "L'RPC USDT ha rifiutato l'operazione",
     "usdtReverted": "La transazione è stata annullata",
     "usdtRevertedNext": "Nessun token è stato inviato; il gas è stato speso."
+  },
+  "relayOnly": {
+    "keepsTurn": "Nascondi il mio IP richiede questo server TURN",
+    "keepsTurnNext": "Disattivalo prima, poi rimuovi il server.",
+    "needsTurn": "Aggiungi prima un server TURN",
+    "needsTurnNext": "Salvane uno qui sopra, poi attiva questa opzione."
   },
   "relays": {
     "atLeastOne": "Inserisci almeno un indirizzo di relay",

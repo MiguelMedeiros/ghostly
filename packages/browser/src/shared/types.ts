@@ -7,9 +7,10 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "../engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
+import type { Removal } from "../engine/removals";
 import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
-import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind, RatchetState } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { BackupReminders } from "./backupReminder";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
@@ -33,6 +34,11 @@ export interface StoredLink {
   wakeMuted?: boolean;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
+  /**
+   * Paired 1:1 chats: the ratchet of the DHT floor and held items (WISP 4xx). State of this device only: never in a
+   * backup or a handoff (`profileBackup.ts`), and dropped by a forced takeover (`raisedLink`).
+   */
+  ratchetState?: RatchetState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
   capsState?: CapsState;
   publicProfiles?: PublicProfile[];
@@ -78,6 +84,8 @@ export interface StoredLink {
   inviteCode?: string;
   /** Messages deleted on this device, by id, so a republished one is not stored again. */
   deletedIds?: string[];
+  /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
+  removals?: Removal[];
   /**
    * Files of mine whose offer went on the DHT floor (WISP 403 § Files) and that were deleted here before they went live,
    * by wire id: the next session that carries files/3 says each is cancelled (`pf-abort`), so the contact's bubble does too.
@@ -153,6 +161,13 @@ export interface StoredGroup {
    * started again still lets them in.
    */
   invited?: Record<string, number>;
+  /**
+   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, the newest
+   * `MAX_REMOVED_IDS`: a copy that comes again (a catch-up, a member handing it on) is not stored again.
+   */
+  removedIds?: string[];
+  /** My messages I deleted for everyone, their removal said to the members and again to an edge that opens (`engine/removals.ts`). */
+  removals?: Removal[];
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
@@ -188,14 +203,22 @@ export interface StoredGroup {
   /**
    * I left: the group is gone from the list and its history from the device. What is kept is the
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
-   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, and my
-   * signed leave (`bye`) that they carry to the admin.
+   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, which carry my
+   * signed leave (`bye`) to the admin. `bye` is kept without hubs too: opening the group's link again takes it along
+   * (`owedBye`).
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /**
+   * Left while the admin was away, then back by the group's link before it heard the leave: the signed leave of my old
+   * key, said to the admin on my new key's edge, so it takes the old key out (it was in every roster twice for good,
+   * agents#1652). Dropped once the old key is out of the roster, or a week after the leave.
+   */
+  owedBye?: GroupByeFrame;
+  /**
    * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
    * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
-   * was to a group I was removed from, which stays.
+   * was to a group I was removed from, which stays; beside a join by the group's link opened after the decline (its
+   * `invitation`, then its `state`), which stays too.
    */
   declined?: { at: number; linkId: string };
   /**
@@ -302,7 +325,8 @@ export interface GroupView {
    * was created long before).
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
    * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
-   * while that chat was up: the answer is offered again.
+   * while that chat was up: the answer is offered again. Through a link (`viaLink`): nobody answered it for an hour of
+   * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
   invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
@@ -436,7 +460,7 @@ export interface FileTransferView {
    * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
    * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
    */
-  wait?: "nobody" | "busy" | "damaged";
+  wait?: "nobody" | "busy" | "day" | "damaged";
   /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
@@ -920,6 +944,8 @@ export interface StoredMessage {
    * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
    */
   card?: StatusCard;
+  /** Only on the row a removal of mine reads as to the edit queues (`engine/removals.ts`): never stored, never shown. */
+  removed?: true;
   /**
    * A reply that presses a button of this side's own message (WISP 406 · Message Buttons), as the author's engine took
    * it: set only when the button was open for this person. What `button.pressed` reports.
@@ -949,6 +975,12 @@ export interface CardIndexRow {
   timestamp: number;
   editedAt?: number;
 }
+
+/**
+ * A message saved on this device (`savedMessages`): when it was saved and its row as it is now (an edit shows its latest
+ * version). Kept for the profile here only, never sent.
+ */
+export interface SavedMessage { savedAt: number; message: StoredMessage }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
 export interface MessagePage { messages: StoredMessage[]; more: boolean }
@@ -1246,6 +1278,13 @@ export interface Settings {
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
   /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
+   * group edges) goes through the TURN server in `iceServers` alone, with no STUN server. On only with a TURN server
+   * (`relayOnlyProblem`). The Desktop offers contacts neither its own Iroh nor its own HyperDHT (HyperDHT goes through
+   * `hyperdhtRelay`, as in a browser); its own devices keep them. Absent means off.
+   */
+  relayOnly?: boolean;
+  /**
    * The Iroh relays a browser build homes on (WISP 102, relay only): a page cannot send UDP, so every Iroh
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
    */
@@ -1253,7 +1292,7 @@ export interface Settings {
   /**
    * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
    * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
-   * runs HyperDHT itself and ignores it.
+   * runs HyperDHT itself and ignores it, except toward contacts while `relayOnly` is on.
    */
   hyperdhtRelay?: string;
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */
@@ -1719,6 +1758,11 @@ export interface EngineState {
    * device set moved after a removal, and only the person can start the copy as a profile of its own.
    */
   restoreCheck?: "checking" | "removed";
+  /**
+   * Limited mode only while the active device's read at start is out (WISP 06 § When a device checks): the profile shows
+   * as it is, nothing goes out, and nobody is asked anything until the read answers. Absent otherwise.
+   */
+  startCheck?: true;
   /**
    * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
    * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page

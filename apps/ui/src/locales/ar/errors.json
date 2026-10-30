@@ -6,6 +6,8 @@
     "lostPeer": "فُقد الاتصال بنظير Ghostly",
     "noRoom": "لا توجد مساحة كافية على هذا الجهاز",
     "noRoomNext": "حرّر بعض المساحة ثم حاول مجددًا.",
+    "noRoomToSave": "لم تعد هناك مساحة على هذا الجهاز",
+    "noRoomToSaveNext": "لم يُحفظ أي شيء. أفرغ بعض المساحة، ثم حاول مجددًا.",
     "partNotLoaded": "لم يتم تحميل جزء من Ghostly.",
     "pickCard": "اختر بطاقة Lightning أولًا",
     "signerKey": "يحمل الموقّع لديك مفتاحًا مختلفًا عن مفتاح هذه الهوية. لم يُنشر شيء.",
@@ -146,6 +148,13 @@
     "cannotRetry": "لا يمكن إعادة محاولة هذا الملف",
     "clipboardUnavailable": "تعذّرت قراءة الحافظة",
     "clipboardUnavailableNext": "أرفقه عبر +.",
+    "floor": {
+      "noRoomNext": "أفرغ بعض المساحة، ثم اطلب من جهة الاتصال إرساله مرة أخرى.",
+      "notInAWeek": "لم يصل خلال أسبوع",
+      "refused": "لم يتمكن هذا الجهاز من استلام هذا الملف",
+      "tooMany": "هناك ملفات كثيرة جدًا تنتظر هنا",
+      "tooManyNext": "رُدّ على الملفات التي تنتظرك، ثم اطلب من جهة الاتصال إرساله مرة أخرى."
+    },
     "gone": "لم يعد هذا الملف هنا",
     "noRoom": "لا مساحة على جهاز جهة اتصالك",
     "noRoomHere": "لا توجد مساحة على هذا الجهاز",
@@ -225,6 +234,10 @@
     "filesPaced": "أرسلت ملفات كثيرة إلى هذه المجموعة للتو",
     "filesPacedNext": "انتظر دقيقة، ثم أرسله مرة أخرى.",
     "filesPacedNextMinutes": "انتظر {{minutes}} دقائق، ثم أرسله مرة أخرى.",
+    "filesPacedNextMinutes_many": "انتظر {{minutes}} دقيقة، ثم أرسله مرة أخرى.",
+    "filesPacedNextMinutes_one": "انتظر دقيقة واحدة، ثم أرسله مرة أخرى.",
+    "filesPacedNextMinutes_other": "انتظر {{minutes}} دقيقة، ثم أرسله مرة أخرى.",
+    "filesPacedNextMinutes_two": "انتظر دقيقتين، ثم أرسله مرة أخرى.",
     "filesUnsupported": "لا يمكن لهذا التطبيق إرسال ملفات إلى المجموعات",
     "filesUnsupportedNext": "حدّث Ghostly، ثم حاول مرة أخرى.",
     "forked": "تغييرات المجموعة متوقفة مؤقتًا",
@@ -233,6 +246,7 @@
     "forkedMember": "تغييرات المجموعة متوقفة مؤقتًا",
     "forkedNext": "يجب على المشرف إعادة تكوين المجموعة.",
     "full": "تضم المجموعة {{max}} عضوًا على الأكثر",
+    "growMore": "{{count}} آخرين",
     "growNeedsUpdates": "يحتاج الجميع إلى تحديث لتجاوز {{max}}",
     "growNeedsUpdatesNext": "لم يُحدَّث بعد: {{names}}.",
     "hubSetting": "لا يمكن استخدام إعداد المحاور هذا",
@@ -257,6 +271,7 @@
     "nobodyForLeave": "لا أحد متصل لتسجيل مغادرتك",
     "nobodyForLeaveNext": "حاول مجددًا بعد لحظة.",
     "notALink": "هذا ليس رابط مجموعة",
+    "notALinkNext": "اطلب الرابط مجددًا: ربما فقد حرفًا عند نسخه.",
     "notIn": "لست في هذه المجموعة",
     "notYet": "لست في هذه المجموعة بعد",
     "nothingToSend": "لا شيء لإرساله",
@@ -502,6 +517,12 @@
     "usdtRejected": "رفض RPC الخاص بـ USDT العملية",
     "usdtReverted": "أُلغيت المعاملة",
     "usdtRevertedNext": "لم تُرسل أي رموز؛ وأُنفق الغاز."
+  },
+  "relayOnly": {
+    "keepsTurn": "إخفاء IP يحتاج إلى خادم TURN هذا",
+    "keepsTurnNext": "أوقفه أولًا، ثم أزل الخادم.",
+    "needsTurn": "أضف خادم TURN أولًا",
+    "needsTurnNext": "احفظ واحدًا في الأعلى، ثم شغّل هذا."
   },
   "relays": {
     "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل",

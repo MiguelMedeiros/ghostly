@@ -357,6 +357,14 @@ export function normalizeRelayUrl(input: string): string | null {
 /** A relay the breaker leaves alone for failing (`RelayBreaker`): nothing was asked of it now. */
 class RelayLeftAloneError extends Error {}
 
+/**
+ * A read the relays failed (or left alone for failing before), when its caller has another path to ask
+ * (`RelayTransport.resolve` with `keptOnFailure` false): `kept` is the newest packet the relays gave for the key before.
+ */
+export class RelaysFailedError extends Error {
+  constructor(readonly kept: SignedPacket) { super("No Pkarr relay reachable"); }
+}
+
 export class RelayTransport implements PkarrTransport {
   private relays: string[];
   private readonly timeoutMs: number;
@@ -510,7 +518,7 @@ export class RelayTransport implements PkarrTransport {
     if (failure) { this.breaker.failure(relay, failure.kind, failure.reason); return; }
     // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
     if (method) this.networkCooldown.delete(`${method} ${relay}`);
-    this.breaker.success(relay);
+    this.breaker.success(relay, this.relays);
   }
 
   setRelays(relays: string[]): void {
@@ -556,10 +564,11 @@ export class RelayTransport implements PkarrTransport {
    * which this client has not read (an inviter's warm packet under the key it gave its contact, from a clock ahead of
    * this one). That packet is read from that relay, and the records go again dated just past it, once. Without this
    * the packet was refused until this device's clock passed the other one's, however long that took, and on a relay
-   * that did take it, readers still preferred the later-dated empty packet of another relay.
+   * that did take it, readers still preferred the later-dated empty packet of another relay. `read`: how to learn the
+   * held packet's date where it is not a relay to ask (the CLI's DHT, whose nodes answer 302 for a later-dated packet).
    */
   async publishDated(identity: Identity, records: GhostRecord[],
-    put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string) => void) => Promise<void>,
+    put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string, read?: () => Promise<bigint | null>) => void) => Promise<void>,
     options: PkarrRequestOptions = {}, again = false, elsewhere = false): Promise<void> {
     const key = identity.pubKeyZ32;
     // Before the packet is signed and dated: a publish no relay takes now costs no signature, and moves no date on.
@@ -569,10 +578,10 @@ export class RelayTransport implements PkarrTransport {
     }
     const timestamp = this.nextTimestamp(key);
     let redated: Promise<boolean> | undefined;
-    const conflict = (relay: string) => {
+    const conflict = (relay: string, read?: () => Promise<bigint | null>) => {
       if (again || redated) return;
       redated = (async () => {
-        const held = await this.heldAt(relay, key, asker(options, true));
+        const held = read ? await read().catch(() => null) : await this.heldAt(relay, key, asker(options, true));
         // Not dated later than this one: the relay was still putting another packet. The caller tries again, as before.
         if (held === null || held < timestamp) return false;
         traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
@@ -589,6 +598,13 @@ export class RelayTransport implements PkarrTransport {
       const pending = redated as Promise<boolean> | undefined;
       if (!pending || !(await pending)) throw error;
     }
+  }
+
+  /** `PkarrTransport.publishHeld`: `publishDated`'s check before signing, for a payload signed elsewhere in this process. */
+  publishHeld(pubKeyZ32: string, options: PkarrRequestOptions = {}): DiscoveryBudgetError | null {
+    if (this.relays.length === 0) return null;
+    const held = this.publishWait(pubKeyZ32, asker(options, true));
+    return held ? new DiscoveryBudgetError(held.wait, `Publish held back on every relay: ${held.reasons.join("; ")}`) : null;
   }
 
   /**
@@ -664,6 +680,18 @@ export class RelayTransport implements PkarrTransport {
     const seq = options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
     if (options.signedAt === undefined || !options.redate) return this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
     await this.putRedated(pubKeyZ32, payload, seq, options, PAYLOAD_REDATES);
+  }
+
+  /**
+   * A payload every relay's budget held back while another path took it (the CLI's DHT): the publish is out, and each
+   * relay gets it once its budget frees a request for the same asker (`catchUpLater`), unless a newer packet of the key
+   * goes there first. Retried by the link instead, each try was signed and put on the DHT again (1-1.6 puts a minute per
+   * chat at budget, not one per 4 min). `timestamp`: its date when signed here; read from the payload otherwise.
+   */
+  putLater(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint | undefined, options: PkarrRequestOptions = {}): void {
+    const at = timestamp ?? options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
+    try { this.written.set(pubKeyZ32, readOwnRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
+    for (const relay of this.relays) this.catchUpLater(relay, pubKeyZ32, payload, at, asker(options, true));
   }
 
   /**
@@ -823,8 +851,11 @@ export class RelayTransport implements PkarrTransport {
    *
    * A hedge spends a second request, so it goes only where the budget has requests to spare (`hedgeRoom`), never for a
    * background read (nobody waits on it), and later for a key whose last read found nothing (`HEDGE_MISSING_MS`).
+   *
+   * `keptOnFailure` false: a read the relays failed throws `RelaysFailedError` with the packet they gave last, in place
+   * of handing that back as their answer (a CLI asks the DHT then, `RelaysAndDht`).
    */
-  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
+  async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}, keptOnFailure = true): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
     // A chat reading its contact at a slow pace has nothing due: the reserve kept for it lapses (`CHAT_RESERVE`).
     if (options.background && !options.urgent && !options.group) this.chatNeeds.delete(pubKeyZ32);
@@ -954,6 +985,7 @@ export class RelayTransport implements PkarrTransport {
     // key would hide the outage)…
     const known = down ? this.newest.get(pubKeyZ32) : newerPacket(this.newest.get(pubKeyZ32), this.written.get(pubKeyZ32));
     if (resting && known) {
+      if (down && !keptOnFailure) throw new RelaysFailedError(known);
       if (!down && budgetWait < Infinity) this.heldBackUntil(pubKeyZ32, Date.now() + budgetWait);
       return known;
     }
@@ -1016,7 +1048,7 @@ export class RelayTransport implements PkarrTransport {
     this.slowUntil.set(relay, Date.now() + SLOW_DEMOTE_MS);
     const another = this.relays.some((r) => r !== relay && this.breaker.blockedFor(r) === 0 && !this.isCoolingDown(r, "GET"));
     if (another) this.breaker.failure(relay, "error", "slow");
-    else this.breaker.success(relay);
+    else this.breaker.success(relay, this.relays);
   }
 
   /**
@@ -1030,6 +1062,9 @@ export class RelayTransport implements PkarrTransport {
   }
 
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.readAt.get(pubKeyZ32); }
+
+  /** The last read of this key was answered 404 (`HEDGE_MISSING_MS`): a relay takes seconds to say so. */
+  lastReadMissing(pubKeyZ32: string): boolean { return this.missing.has(pubKeyZ32); }
 
   readHeldBackFor(pubKeyZ32: string): number | undefined {
     const held = this.heldBack.get(pubKeyZ32);

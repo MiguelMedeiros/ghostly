@@ -39,6 +39,7 @@
     "continue": "متابعة",
     "continueIn": "تابع في نافذة {{provider}}…",
     "continueWith": "المتابعة باستخدام {{provider}}",
+    "copyError": "تعذّر النسخ. حدّد النص أعلاه وانسخه بنفسك.",
     "dayOne": "يوم واحد",
     "days": "{{count}} يومًا",
     "experimental": "تجريبي: لم يُختبر بعد مع كل الأدوات.",

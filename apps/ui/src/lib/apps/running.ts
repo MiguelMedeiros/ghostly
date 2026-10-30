@@ -29,6 +29,8 @@ export interface ChatApp {
   running: RunningApp;
   /** Stopped by the client, for this reason: the panel says why until the person closes it (WISP 1200 § Takedowns). */
   stopped?: AppTakedown;
+  /** It lets the contact's app read a file now (WISP 1200 § A read lane to the contact): the header says so. */
+  serving?: boolean;
 }
 
 /** The chat's contact as its header shows them. */
@@ -48,11 +50,9 @@ interface Slot {
 const slots = new Map<string, Slot>();
 const apps = new Map<string, ChatApp>();
 const listeners = new Set<() => void>();
-let version = 0;
 let sessions: readonly string[] = [];
 
 function changed() {
-  version++;
   const next = [...apps.keys()].map((linkId) => slots.get(linkId)?.sessionId).filter((id): id is string => !!id);
   if (next.length !== sessions.length || next.some((id, i) => id !== sessions[i])) sessions = next;
   for (const listener of [...listeners]) listener();
@@ -90,7 +90,7 @@ export function setChatApp(linkId: string, app: ChatApp | null): void {
 }
 
 /** Shows or hides the app in `linkId`, or puts it over the whole chat (`wide`). */
-export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide">>): void {
+export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide" | "serving">>): void {
   const app = apps.get(linkId);
   if (!app) return;
   apps.set(linkId, { ...app, ...patch });
@@ -98,12 +98,23 @@ export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "show
 }
 
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
-const snapshot = () => version;
 
-/** The app running in the chat `linkId`, if one is. */
+/**
+ * The app running in the chat `linkId`, if one is. A change to another chat's app (an app there serving and unserving
+ * a file, up to 50 times a second) does not draw this one again: each change makes a new object for its own chat only.
+ */
 export function useChatApp(linkId: string | undefined): ChatApp | undefined {
-  useSyncExternalStore(subscribe, snapshot, snapshot);
-  return linkId ? apps.get(linkId) : undefined;
+  const snapshot = () => (linkId ? apps.get(linkId) : undefined);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+/** Whether the app in the chat `linkId` covers the chat (over its whole width, or a `full` one): all its page needs. */
+export function useChatAppCovers(linkId: string | undefined): boolean {
+  const snapshot = () => {
+    const app = linkId ? apps.get(linkId) : undefined;
+    return !!app?.shown && (app.wide || app.view === "full");
+  };
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /** The chats an app runs in, by session: App.tsx keeps them loaded. */
@@ -127,8 +138,8 @@ export function requestOpenInChat(linkId: string, request: OpenRequest): void {
 
 /** Whether an open request waits for the chat `linkId`. */
 export function useOpenRequested(linkId: string | undefined): boolean {
-  useSyncExternalStore(subscribe, snapshot, snapshot);
-  return !!linkId && requests.has(linkId);
+  const snapshot = () => !!linkId && requests.has(linkId);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /** The open request for the chat `linkId`, once: taken, it is gone. */
@@ -140,8 +151,11 @@ export function takeOpenRequest(linkId: string): OpenRequest | undefined {
   return Date.now() - request.at <= OPEN_REQUEST_MS ? { app: request.app, ...(request.options && { options: request.options }) } : undefined;
 }
 
-/** "Chess with Ana": a panel's name, and a Desktop app window's title. Only the title when opened alone. */
-export function appWithContact(title: string, linkId: string | null, t: Translate): string {
+/**
+ * "Chess with Ana": a panel's name, and a Desktop app window's title; "Chess · sharing a file with Ana" while it serves
+ * the contact a file (`serving`). Only the title when opened alone.
+ */
+export function appWithContact(title: string, linkId: string | null, t: Translate, serving = false): string {
   const contact = linkId ? appContact(linkId) : undefined;
-  return contact ? t("apps.view.with", { title, name: contact.name }) : title;
+  return contact ? t(serving ? "apps.view.withSharing" : "apps.view.with", { title, name: contact.name }) : title;
 }

@@ -249,6 +249,18 @@ describe("GroupChat: joining through a link", () => {
     expect(hint).not.toHaveTextContent("link was replaced");
   });
 
+  it("a link nobody answered for an hour: says so, no longer spins, and Try again knocks again", async () => {
+    const { user, engine } = openGroup(groupView({ createdAt: Date.now() - 2 * 60 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked", unanswered: true } }));
+    engine.on("acceptGroupInvitation", () => undefined);
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This link did not answer");
+    expect(card).toHaveTextContent("Nobody let you in for an hour, so this app stopped knocking.");
+    expect(card.querySelector(".animate-spin")).toBeNull();
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+    await user.click(within(card).getByTestId("group-link-retry"));
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
@@ -347,6 +359,43 @@ describe("GroupChat: out of the group", () => {
     await user.click(screen.getByTestId("group-options"));
     expect(screen.queryByTestId("group-leave")).not.toBeInTheDocument();
     expect(screen.getByTestId("group-forget")).toBeInTheDocument();
+  });
+
+  it("removed while typing: the focus goes to the line that says so, not to the page, as the field turns off under it", async () => {
+    const { user } = openGroup(active());
+    await user.click(composer());
+    expect(composer()).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(composer()).toBeDisabled();
+    expect(screen.getByTestId("group-notice")).toHaveFocus();
+  });
+
+  // agents#1739: a private group past 16 turns its composer off for a moment on every join, leave or removal. The focus
+  // went to ⋮ and stayed there: "lo there" opened its menu instead of going into the message.
+  it("off for a moment on a group still active: the focus stays in the field and the next keys go into the message", async () => {
+    for (const profile of ["mesh", "community"] as const) {
+      const { user, unmount } = openGroup(active({ profile }));
+      await user.click(composer());
+      // The draft is the group's: the first round's text is still there.
+      await user.clear(composer());
+      await user.keyboard("hel");
+      act(() => fakeEngine.update({ groups: [active({ profile, canSend: false })] }));
+      act(() => fakeEngine.update({ groups: [active({ profile })] }));
+      expect(composer(), profile).toHaveFocus();
+      await user.keyboard("lo there");
+      expect(composer()).toHaveValue("hello there");
+      expect(screen.queryByTestId("group-options-menu")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it("the composer turned off while the focus is elsewhere leaves the focus where it is", async () => {
+    const { user } = openGroup(active());
+    await user.click(screen.getByTestId("group-options"));
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(screen.getByTestId("group-options")).toHaveFocus();
   });
 
   it("says how to come back when removed from a community, and a line when back in", async () => {
@@ -475,6 +524,64 @@ describe("GroupChat: the options menu", () => {
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-rotate"));
     expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+  });
+
+  // One page for every group (Root.tsx): a refusal in one group's notice is about that group, not the next one opened.
+  describe("a refusal, then another group opened", () => {
+    const other = (patch: Partial<GroupView> = {}) => active({ id: "group-2", name: "Others", isAdmin: true, ...patch });
+    function Go() {
+      const navigate = useNavigate();
+      return <><button onClick={() => navigate("/group/group-1")}>one</button><button onClick={() => navigate("/group/group-2")}>two</button></>;
+    }
+    const open = (second: GroupView) => {
+      fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+      fakeEngine.update({ groups: [active({ isAdmin: true }), second] });
+      return renderApp(<><Go /><Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes></>, { route: "/group/group-1" });
+    };
+    const rotate = async (user: ReturnType<typeof open>["user"]) => {
+      await user.click(screen.getByTestId("group-options"));
+      await user.click(screen.getByTestId("group-rotate"));
+    };
+
+    it.each([
+      ["Rotate keys", "rotateGroup", rotate],
+      ["Share link", "enableGroupLink", async (user: ReturnType<typeof open>["user"]) => { await user.click(screen.getByTestId("group-share")); }],
+    ] as const)("%s refused in one group says nothing in the next", async (_, method, press) => {
+      const { user, engine } = open(other());
+      engine.on(method, () => { throw new Error("Bob is not reachable"); });
+      await press(user);
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
+      expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+      // Back in the first group, it is gone there too: the next refusal is said again by its own action.
+      await act(async () => screen.getByRole("button", { name: "one" }).click());
+      expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+    });
+
+    it("a group I was removed from keeps its own line", async () => {
+      const { user, engine } = open(other({ status: "removed", statusReason: "You were removed from this group", canSend: false, isAdmin: false }));
+      engine.on("rotateGroup", () => { throw new Error("Bob is not reachable"); });
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      const removed = screen.getByTestId("group-notice").textContent;
+      await act(async () => screen.getByRole("button", { name: "one" }).click());
+      await rotate(user);
+      expect(await screen.findByTestId("group-notice")).toHaveTextContent("Bob is not reachable");
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      expect(screen.getByTestId("group-notice")).toHaveTextContent(removed!);
+      expect(screen.getByTestId("group-notice")).not.toHaveTextContent("Bob is not reachable");
+    });
+
+    it("a refusal that comes after the group was left is not said in the one open now", async () => {
+      const { user, engine } = open(other());
+      let refuse: (e: Error) => void = () => {};
+      engine.on("rotateGroup", () => new Promise((_, reject) => { refuse = reject; }));
+      await rotate(user);
+      await act(async () => screen.getByRole("button", { name: "two" }).click());
+      await act(async () => refuse(new Error("Bob is not reachable")));
+      expect(screen.getByTestId("group-name")).toHaveTextContent("Others");
+      expect(screen.queryByTestId("group-notice")).not.toBeInTheDocument();
+    });
   });
 
   it("deletes the group from this device only after confirming, and says it leaves the group", async () => {

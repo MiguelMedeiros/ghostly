@@ -6,7 +6,7 @@ import {
   type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
-import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
+import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap, committed } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
@@ -129,8 +129,10 @@ export interface AddedAppStore {
   addedAt: number;
   /** A default store of this build. */
   preloaded?: true;
-  /** A default store the person removed: kept, without its index, so it does not come back. */
+  /** A store the person removed: kept, without its index, so a default one does not come back. */
   removed?: true;
+  /** A removed store's last index taken (its `sequence` and digest): adding the store back refuses an older one. */
+  seen?: { sequence: number; digest: string };
   index?: AppStoreIndex;
   /** SHA-256 of the index's bytes. */
   digest?: string;
@@ -654,7 +656,7 @@ export class Apps {
     if (app) await this.stillRunnable(app, digest);
   }
   private async putApp(app: InstalledApp): Promise<void> {
-    try { await wrap((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
+    try { await committed((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
   }
   /**
    * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
@@ -688,7 +690,7 @@ export class Apps {
   private async writeStores(write: (records: IDBObjectStore) => IDBRequest, apply: (held: Map<string, AddedAppStore>) => void): Promise<void> {
     const before = this.records();
     const written = before.then(async (held) => {
-      await wrap(write(await store(STORES.appStores, "readwrite")));
+      await committed(write(await store(STORES.appStores, "readwrite")));
       apply(held);
       this.views = null;
     });
@@ -699,9 +701,6 @@ export class Apps {
   }
   private putStore(record: AddedAppStore): Promise<void> {
     return this.writeStores((records) => records.put(record), (held) => held.set(record.key, record));
-  }
-  private deleteStore(key: string): Promise<void> {
-    return this.writeStores((records) => records.delete(key), (held) => held.delete(key));
   }
   /** The stores' views, made once and again after a store is written here: an app's every storage call and chat frame checks them. */
   private heldViews(): Promise<AppStoreView[]> {
@@ -985,8 +984,10 @@ export class Apps {
 
   /**
    * Adds a store the person chose: read at its URL and pinned to its key (`key`, when given, is the key the person saw,
-   * and another one is refused). A store already added under that key takes the URL and the newer index. The index the
-   * preview just read at that URL, under that key, is taken as it is (only its expiry again), not downloaded again.
+   * and another one is refused). A store already added under that key keeps the URL it is read from and takes only a newer
+   * index: a copy of its signed index at another URL, the same one or an older one, never moves it there (it would be
+   * read only there from then on, frozen). The index the preview just read at that URL, under that key, is taken as it
+   * is (only its expiry again), not downloaded again.
    */
   async addStore({ url, key }: { url: string; key?: string }): Promise<AppStoreSummary> {
     if (key !== undefined && !isAppKey(key)) fail("store-key", "Not a store key");
@@ -999,7 +1000,11 @@ export class Apps {
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
     const { index, digest } = read.store;
     const held = await this.storeRecord(index.key);
-    const record: AddedAppStore = held && !held.removed ? { ...held, url: at } : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
+    // A store removed and added back: an index older than the last one taken from it (or another under its sequence) is
+    // refused, so the takedowns the person has seen since still hold.
+    const seen = held?.removed && held.seen && appStoreDecision({ key: held.key, ...held.seen }, { key: index.key, sequence: index.sequence, digest });
+    if (seen === "rollback" || seen === "equivocation") fail(seen, `This store's index is older than the one you had (sequence ${held!.seen!.sequence})`);
+    const record: AddedAppStore = held && !held.removed ? held : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
     await this.putStore(this.withIndex(record, index, digest));
     return this.summary((await this.storeRecord(index.key))!);
   }
@@ -1021,8 +1026,8 @@ export class Apps {
   async removeStore({ key }: { key: string }): Promise<void> {
     const held = await this.storeRecord(key);
     if (!held) return;
-    if (held.preloaded) await this.putStore({ key: held.key, url: held.url, addedAt: held.addedAt, preloaded: true, removed: true });
-    else await this.deleteStore(key);
+    const seen = held.index ? { sequence: held.index.sequence, digest: held.digest ?? "" } : held.seen;
+    await this.putStore({ key: held.key, url: held.url, addedAt: held.addedAt, ...(held.preloaded && { preloaded: true as const }), removed: true, ...(seen && { seen }) });
     // The person no longer takes this store's curation: an app installed from it updates from its sources and the other
     // stores again (WISP 1200 § Updates and rollback), so its security fixes still arrive. A newer version waiting stays:
     // a valid newer version is one under that rule too.
@@ -1672,7 +1677,7 @@ export class Apps {
         fail("not-installed", "This app is not installed");
       }
       writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
-      await wrap(writing.put(counterRow(app.ref, where, next)));
+      await committed(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
@@ -1687,7 +1692,7 @@ export class Apps {
       const next = plus(used, countOf(old, -1));
       const writing = await store(STORES.appStorage, "readwrite");
       writing.delete([app.ref, where, name]);
-      await (next.rows ? wrap(writing.put(counterRow(app.ref, where, next))) : wrap(writing.delete([app.ref, where, COUNT_KEY])));
+      await (next.rows ? committed(writing.put(counterRow(app.ref, where, next))) : committed(writing.delete([app.ref, where, COUNT_KEY])));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }

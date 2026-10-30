@@ -32,7 +32,7 @@ function counted(pkarr: MemoryPkarr, app: App): PkarrTransport {
   };
 }
 
-function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, dhtState: DhtDeliveryState, wasLive = false): App {
+function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: string, side: Side, contact: { side: Side; name: string }, dhtState: DhtDeliveryState, wasLive = false, listenerAfterMs = 0): App {
   const app = { name, side, dhtState, reads: [] } as unknown as App;
   app.link = new GhostLink({
     params: side.params,
@@ -50,7 +50,8 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
   apps.push(app);
   app.link.start();
   app.link.setChatActive(false);
-  app.link.registerEndpoint(world.native.endpoint("hyperdht/1", name));
+  const listen = () => { if (!app.stopped) app.link.registerEndpoint(world.native.endpoint("hyperdht/1", name)); };
+  if (listenerAfterMs) setTimeout(listen, listenerAfterMs); else listen();
   if (app.link.myPubKeyZ32 < side.params.peerPubKeyZ32) void app.link.connect().catch(() => {});
   return app;
 }
@@ -103,5 +104,36 @@ describe("a HyperDHT-only chat whose first dials after a restart fail", () => {
     console.log(`dials fail after ${failMs} ms: live again ${liveMs} ms, restarted app's reads to live ${reads}, dial-backoff steps ${backoffs}`);
     expect(liveMs, "from the restart to live on both sides").toBeLessThanOrEqual(liveBy);
     expect(reads, "reads by the restarted app until live").toBeLessThanOrEqual(readsBy);
+  }, 240_000);
+});
+
+describe("a HyperDHT-only chat whose contact turns its network back on", () => {
+  // The DHT-direct lab (two CLI daemons, 100 ms RTT): the app with the higher key turned its network off for 20 s and
+  // on again; its contact read the fresh record and dialled before the app's listener was announced again, the dial
+  // failed in 200 ms (PEER_NOT_FOUND), and that chat was live again 41 s later, the others in 1-3 s.
+  it("is live again in a few seconds when the first dial after it came back fails at once", async () => {
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    world.native.dialMs = 30;
+    world.native.dialFailMs = 200;
+    const made = invitationWhere("inviter");
+    const dials = startApp(world, "dials", made.inviter, { side: made.joiner, name: "toggles" }, emptyDhtDeliveryState());
+    let toggles = startApp(world, "toggles", made.joiner, { side: made.inviter, name: "dials" }, emptyDhtDeliveryState());
+    expect(dials.link.myPubKeyZ32 < toggles.link.myPubKeyZ32, "the contact that stays dials").toBe(true);
+    expect(await until(() => dials.link.isDataLinkOpen && toggles.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    // Network off: the link says goodbye and stops, and its listener goes with it.
+    toggles.link.depart(); await run(300);
+    world.native.kill("toggles");
+    toggles.stopped = toggles.link.stop(true);
+    await run(20_000);
+    await toggles.stopped;
+    const steps: string[] = [];
+    setLinkTraceSink(line => { steps.push((JSON.parse(line) as { step: string }).step); });
+    // Network on: the link publishes at once, its listener is up a second later (0.7-2.5 s in the lab).
+    toggles = startApp(world, "toggles", made.joiner, { side: made.inviter, name: "dials" }, toggles.dhtState, false, 1_000);
+    const liveMs = await until(() => dials.link.isDataLinkOpen && toggles.link.isDataLinkOpen, 120_000);
+    console.log(`network back on: live again ${liveMs} ms, steps ${steps.filter(s => s.startsWith("dial") || s === "peer-back").join(",")}`);
+    expect(steps, "the contact saw the app come back").toContain("peer-back");
+    expect(liveMs, "from the network on to live on both sides").toBeLessThan(5_000);
   }, 240_000);
 });

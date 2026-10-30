@@ -1,4 +1,4 @@
-import type { GroupView, LinkView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
+import type { GroupView, LinkView, MessageFile, PinView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { StatusCard } from "@ghostly/core";
 
 /**
@@ -73,7 +73,16 @@ export function chatJson(link: LinkView, showSecret?: boolean): ChatJson {
   };
 }
 
-/** A chat's details: the summary plus what its connection panel shows. */
+/**
+ * What is pinned at the top of a chat or a group (WISP 400 § Pinned message), as `chat.pinned` / `group.pinned` say it:
+ * `messageId` the row here (null when it is not here), `ref` the id both sides know it by, `by` (`me`, `peer` or a
+ * member key) and `at`, when it came here. Null when nothing is pinned, or it was unpinned.
+ */
+export function pinJson(pin: PinView | undefined) {
+  return pin?.id ? { messageId: pin.messageId ?? null, ref: pin.id, by: pin.by, at: pin.at } : null;
+}
+
+/** A chat's details: the summary plus what its connection panel shows, and its pin. */
 export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
   return {
     ...chatJson(link, showSecret),
@@ -92,6 +101,7 @@ export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
     history: link.transportHistory ?? null,
     errors: link.transportErrors ?? null,
     comparisonCode: link.pairing?.code ?? null,
+    pin: pinJson(link.pin),
   };
 }
 
@@ -120,7 +130,7 @@ export interface MessageJson {
    * The message this one answers (WISP 400 § Replies). `id`: the original's message id here when it is in this chat
    * (`found`), else the id the reply named. `from`: null when nothing says (only the id came, over the DHT).
    */
-  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean; button?: string };
+  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean; deleted?: true; button?: string };
   /** Reactions to it, one per person (WISP 400 § Reactions): `by` is `me`, `peer` or a member's key. */
   reactions?: { by: string; emoji: string; at: number }[];
   /** An edited text (WISP 400 § Edits): `text` is the latest version, `edits` its number, `editedAt` when it was made. */
@@ -239,5 +249,6 @@ export function groupJson(group: GroupView, showSecret = false) {
     invitation: group.invitation ? { chat: group.invitation.linkId, accepted: group.invitation.accepted, viaLink: !!group.invitation.viaLink, stage: group.invitation.stage ?? null } : null,
     community: group.community ?? null,
     picture: !!group.picture,
+    pin: pinJson(group.pin),
   };
 }

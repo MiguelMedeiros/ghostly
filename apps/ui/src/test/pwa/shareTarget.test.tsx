@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageInput } from "../../components/MessageInput";
@@ -76,7 +76,9 @@ describe("in the composer", () => {
       sendShareTo("chat-1");
     });
     await screen.findByTestId("attachment-sheet");
-    expect(screen.getByTestId("attachment-caption")).toHaveFocus();
+    // The sheet opens once the share's files are read, outside act(): its effects (the focus into the caption, the
+    // Escape it answers) may run a task after it is in the page.
+    await waitFor(() => expect(screen.getByTestId("attachment-caption")).toHaveFocus());
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("attachment-sheet")).toBeNull();
     expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…")).toHaveFocus();
@@ -286,6 +288,16 @@ describe("the Share to… picker", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("names the files the device had no room to copy as such, not as unread, also when that was all of a later share", () => {
+    receiveShare(share({ text: "look", noRoom: ["VID_1.mp4"] }));
+    receiveShare(share({ noRoom: ["VID_2.mp4"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-no-room-title")).toHaveTextContent("No room on this device for: VID_1.mp4, VID_2.mp4");
+    expect(screen.getByTestId("share-no-room-next")).toHaveTextContent("Free some space, then share it again.");
+    expect(screen.queryByTestId("share-unread")).toBeNull();
   });
 
   it("with nothing shared, it says so once it has waited", () => {

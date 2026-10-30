@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, createIdentity, parseCommunityEdit, type GroupEdit } from "@ghostly/core";
+import { EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, REMOVED_TEXT, createIdentity, parseCommunityEdit, type GroupEdit } from "@ghostly/core";
 import { GROUP_EDITS_HELD, GROUP_EDIT_CATCH_UP, GROUP_EDIT_RESEND, GROUP_EDIT_RESEND_WINDOW_MS, GroupEdits, type GroupEditsHost } from "../src/engine/groupEdits";
+import { patchRemoval, removalRow, withRemoval } from "../src/engine/removals";
 import type { StoredMessage } from "../src/shared/types";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.edit, groups.protocol.edits
@@ -10,9 +11,20 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  * then on headless peers running the real group engine, a community and a private group joined by their links.
  */
 
-/** A member's rows, patched in place as the engine's database does. */
-function rows(messages: StoredMessage[]): Pick<GroupEditsHost, "messages" | "patch"> {
+/** A member's rows, patched in place as the engine's database does; a removal deletes one, as the engine does. */
+function rows(messages: StoredMessage[], removed: string[] = []): Pick<GroupEditsHost, "messages" | "patch" | "remove" | "removeMine"> {
   return {
+    // As the engine does: my message goes, and its removal reads as a row of mine with the removal as its edit.
+    removeMine: async (chat, message, removal) => {
+      removed.push(message.id);
+      const at = messages.findIndex(m => m.linkId === chat && m.id === message.id);
+      if (at >= 0) messages.splice(at, 1, removalRow(chat, removal));
+    },
+    remove: async (chat, id) => {
+      removed.push(id);
+      const at = messages.findIndex(m => m.linkId === chat && m.id === id);
+      if (at >= 0) messages.splice(at, 1);
+    },
     messages: async chat => messages.filter(m => m.linkId === chat).sort((a, b) => a.timestamp - b.timestamp),
     patch: async (chat, id, change) => {
       const at = messages.findIndex(m => m.linkId === chat && m.id === id);
@@ -32,11 +44,11 @@ describe("GroupEdits on its own", () => {
   const mine = (n: number, text = `text ${n}`): StoredMessage => ({ linkId: chat, id: `${me}:1:${n}`, text, sender: "me", member: me, timestamp: n + 1, via: "datalink" });
   const bobs = (n: number, text = `bob ${n}`): StoredMessage => ({ linkId: chat, id: `${bob}:1:${n}`, text, sender: "peer", member: bob, timestamp: n + 100, via: "datalink" });
 
-  function setup(messages: StoredMessage[], members = [me, bob, carol]) {
+  function setup(messages: StoredMessage[], members = [me, bob, carol], removed: string[] = []) {
     const sent: { edit: GroupEdit; to?: string }[] = [];
     let clock = 1_000_000, connection = {};
     const edits = new GroupEdits({
-      ...rows(messages),
+      ...rows(messages, removed),
       changed: () => {},
       membership: () => ({ me, members: new Set(members), community: false, admin: true }),
       send: async (_g, edit, to) => { sent.push({ edit, ...(to && { to }) }); return null; },
@@ -77,6 +89,27 @@ describe("GroupEdits on its own", () => {
     await edits.edit("g1", mine(0).id, "Working: 1 of 3");
     await edits.flush("g1");
     expect(sent).toHaveLength(1);
+  });
+
+  it("deletes mine for everyone: gone here, said to the group as its last edit, and again to an edge that opens", async () => {
+    const card = { kind: "task" as const, id: "t", title: "T", status: "running" as const };
+    const removed: string[] = [];
+    const { edits, sent, messages, tick } = setup([{ ...mine(0, "🔄 T"), card, edit: { seq: 7, at: 5, history: [] } }, bobs(0)], [me, bob, carol], removed);
+    expect(await edits.removeMine("g1", mine(0).id)).toEqual({ error: null, messageId: mine(0).id });
+    expect(removed).toEqual([mine(0).id]);
+    expect(sent).toEqual([{ edit: { id: mine(0).id, e: 8, ts: 1_000_000, m: REMOVED_TEXT, rm: true } }]);
+    expect(messages[0]).toMatchObject({ removed: true, edit: { seq: 8 } });
+    expect(messages[0].edit).not.toHaveProperty("pending");
+    // Carol's edge opens: she hears it too.
+    tick(1_000);
+    await edits.resend("g1", carol);
+    expect(sent.slice(1)).toEqual([{ edit: { id: mine(0).id, e: 8, ts: 1_000_000, m: REMOVED_TEXT, rm: true }, to: carol }]);
+    // Not again, and never someone else's or a payment.
+    expect(await edits.removeMine("g1", mine(0).id)).toMatchObject({ refused: true });
+    expect(await edits.removeMine("g1", bobs(0).id)).toMatchObject({ refused: true });
+    messages.push({ ...mine(1, "💸 5 sats"), paymentId: "p" });
+    expect(await edits.removeMine("g1", mine(1).id)).toMatchObject({ refused: true, error: expect.stringMatching(/payment/) });
+    edits.stop();
   });
 
   it("refuses what is not mine to edit, empty, too long, or edited too often", async () => {
@@ -184,6 +217,33 @@ describe("GroupEdits on its own", () => {
     expect(messages.map(m => m.text)).toEqual(["v0", "mine"]);
   });
 
+  it("a member's removal takes its own message off, a file too, whatever its number; also one not here yet", async () => {
+    const removed: string[] = [];
+    const file: StoredMessage = { ...bobs(1, "📎 plan.pdf"), file: { id: "f1", name: "plan.pdf", size: 3, mime: "application/pdf" } };
+    const { edits, messages } = setup([bobs(0, "🔄 Task"), file], [me, bob, carol], removed);
+    expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 5_001, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
+    expect(await edits.receive("g1", bob, { id: file.id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
+    // Not here yet: kept at once, so the message is taken as gone when it comes.
+    expect(await edits.receive("g1", bob, { id: bobs(2).id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
+    expect(removed).toEqual([bobs(0).id, file.id, bobs(2).id]);
+    expect(messages).toEqual([]);
+  });
+
+  it("a removal never takes someone else's message, mine, a payment or a notice", async () => {
+    const removed: string[] = [];
+    const paid: StoredMessage = { ...bobs(1, "💸 100 sats"), paymentId: "p1" };
+    const notice: StoredMessage = { ...bobs(2, "👋 Bob joined") };
+    const { edits, messages } = setup([bobs(0, "v0"), mine(0, "mine"), paid, notice], [me, bob, carol], removed);
+    const removal = (id: string) => ({ id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true as const });
+    expect(await edits.receive("g1", carol, removal(bobs(0).id))).toBe("dropped");
+    expect(await edits.receive("g1", bob, removal(mine(0).id))).toBe("dropped");
+    expect(await edits.receive("g1", me, removal(mine(0).id))).toBe("dropped");
+    expect(await edits.receive("g1", bob, removal(paid.id))).toBe("dropped");
+    expect(await edits.receive("g1", bob, removal(notice.id))).toBe("dropped");
+    expect(removed).toEqual([]);
+    expect(messages).toHaveLength(4);
+  });
+
   it("an edit that came before its message is shown once the message is stored", async () => {
     const { edits, messages } = setup([]);
     expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: "early" })).toBe("waiting");
@@ -275,6 +335,25 @@ describe("GroupEdits on its own", () => {
       edits.stop();
     });
 
+    // agents#1679: each window after the first read and sorted the group's whole history again. 7 edges with 256 edits
+    // to say read a history of 10,000 rows 112 times at a start, not 7.
+    it("reads the history once per edge that opens, not once a window", async () => {
+      vi.useFakeTimers();
+      const messages = edited(0, 3 * GROUP_EDIT_RESEND + 4);
+      const { edits, sent, tick } = setup([...messages, mine(99)]);
+      const host = (edits as unknown as { host: { messages(chat: string): Promise<StoredMessage[]> } }).host;
+      const read = host.messages.bind(host);
+      let reads = 0;
+      host.messages = chat => { reads++; return read(chat); };
+      await edits.resend("g1", carol);
+      await edits.resend("g1", bob);
+      for (let w = 0; w < 4; w++) { tick(GROUP_EDIT_RESEND_WINDOW_MS); await vi.advanceTimersByTimeAsync(GROUP_EDIT_RESEND_WINDOW_MS); }
+      for (const to of [carol, bob]) expect(ids(sent.filter(s => s.to === to)), "every edit, oldest first").toEqual(messages.map(m => m.id));
+      console.log(`EDIT RESEND: 2 edges, ${messages.length} edits each, ${reads} history reads`);
+      expect(reads).toBe(2);
+      edits.stop();
+    });
+
     it("hears my newest GROUP_EDIT_CATCH_UP at most when nothing is known of what it heard", async () => {
       vi.useFakeTimers();
       const messages = edited(0, GROUP_EDIT_CATCH_UP + 5);
@@ -312,6 +391,152 @@ describe("GroupEdits on its own", () => {
       expect(sent.slice(3)).toEqual(messages.slice(2).map(m => m.id));
       edits.stop();
     });
+
+    it("a member who left the roster: what was kept of its edge goes, the others' stays; out of the group, all of it", async () => {
+      const members = [me, bob, carol], edges = new Map([[bob, {}], [carol, {}]]);
+      const edits = new GroupEdits({
+        ...rows(edited(0, 3)), changed: () => {}, send: async () => null,
+        membership: () => members.length ? { me, members: new Set(members), community: false } : undefined,
+        edge: (_g, member) => edges.get(member),
+      });
+      const inner = edits as unknown as { resentOn: Map<string, unknown>; heard: Map<string, unknown>; resendPace: Map<string, unknown> };
+      const kept = () => [inner.resentOn, inner.heard, inner.resendPace].map(map => [...map.keys()].sort());
+      await edits.resend("g1", bob);
+      await edits.resend("g1", carol);
+      expect(kept()).toEqual(Array(3).fill([`g1\n${bob}`, `g1\n${carol}`].sort()));
+      members.splice(members.indexOf(carol), 1);
+      edits.membersChanged("g1");
+      expect(kept()).toEqual(Array(3).fill([`g1\n${bob}`]));
+      members.length = 0;
+      edits.membersChanged("g1");
+      expect(kept()).toEqual(Array(3).fill([]));
+      edits.stop();
+    });
+  });
+
+  it("a private group: the author removes its card and every member forgets it; handed on again, it stays gone", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Machines", "mesh");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id) && world.view(m.peer, id)!.members.length === 3), 10 * 60_000);
+    await world.until(() => [alice, bob, carol].every(m => world.view(m.peer, id)!.members.filter(x => !x.me).every(x => x.online)), 5 * 60_000);
+    const card = { kind: "task" as const, id: "task-1", title: "Task 1", status: "running" as const };
+    const { messageId } = await bob.peer.groups.send(id, "🔄 Task 1", [], undefined, undefined, card);
+    await world.until(() => [alice, carol].every(m => !!textOf(m.peer, messageId!)), 60_000);
+    expect(await bob.peer.groups.sendEdit(id, { id: messageId!, e: 1, ts: world.now, m: REMOVED_TEXT, rm: true })).toBeNull();
+    await world.until(() => [alice, carol].every(m => !textOf(m.peer, messageId!)), 60_000);
+    // A sync that hands Bob's messages on again (Carol away and back) brings nothing back.
+    carol.peer.online = false;
+    await world.run(5_000);
+    carol.peer.online = true;
+    await world.run(60_000);
+    for (const m of [alice, carol]) expect(m.peer.messages.filter(x => !x.event)).toEqual([]);
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it("a private group: a member away while the author deletes its card for everyone has it gone when its edge opens", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Machines", "mesh");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id) && world.view(m.peer, id)!.members.length === 3), 10 * 60_000);
+    await world.until(() => [alice, bob, carol].every(m => world.view(m.peer, id)!.members.filter(x => !x.me).every(x => x.online)), 5 * 60_000);
+    const card = { kind: "task" as const, id: "task-1", title: "Task 1", status: "running" as const };
+    const { messageId } = await bob.peer.groups.send(id, "🔄 Task 1", [], undefined, undefined, card);
+    await world.until(() => [alice, carol].every(m => !!textOf(m.peer, messageId!)), 60_000);
+    carol.peer.online = false;
+    await world.run(5_000);
+    expect(await bob.edits.removeMine(id, messageId!)).toMatchObject({ error: null });
+    await world.until(() => !textOf(alice.peer, messageId!), 60_000);
+    expect(textOf(carol.peer, messageId!)).toBe("🔄 Task 1");
+    carol.peer.online = true;
+    // Nobody asks: Bob's side of the edge coming up says it again.
+    await world.until(() => !textOf(carol.peer, messageId!), 3 * 60_000);
+    expect(bob.peer.messages.filter(m => !m.event && !m.removed)).toEqual([]);
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it("a community: a member away while the author removes its message never sees it after the catch-up", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Crew");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id)), 10 * 60_000);
+    await world.run(20_000);
+    const { messageId } = await bob.peer.groups.send(id, "a mistake");
+    await world.until(() => !!textOf(alice.peer, messageId!), 60_000);
+    carol.peer.online = false;
+    await world.run(5_000);
+    expect(await bob.peer.groups.sendEdit(id, { id: messageId!, e: 1, ts: world.now, m: REMOVED_TEXT, rm: true })).toBeNull();
+    await world.until(() => !textOf(alice.peer, messageId!), 60_000);
+    const after = (await bob.peer.groups.send(id, "the right one")).messageId!;
+    carol.peer.online = true;
+    await world.until(() => textOf(carol.peer, after) === "the right one", 3 * 60_000);
+    await world.run(10_000);
+    expect(textOf(carol.peer, messageId!)).toBeUndefined();
+    // Carol cannot remove Bob's message: the group signs her frame as hers.
+    await carol.peer.groups.sendCommunityApp(id, { t: "edit", id: after, v: 1, ts: 1, text: REMOVED_TEXT, rm: true });
+    await world.run(5_000);
+    expect(textOf(alice.peer, after)).toBe("the right one");
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it("a community: the author deletes its message for everyone from the app, every member forgets it, and a catch-up keeps it gone", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Crew");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id)), 10 * 60_000);
+    await world.run(20_000);
+    const { messageId } = await bob.peer.groups.send(id, "a mistake");
+    await world.until(() => [alice, carol].every(m => !!textOf(m.peer, messageId!)), 60_000);
+    expect(await bob.edits.removeMine(id, messageId!)).toMatchObject({ error: null });
+    expect(textOf(bob.peer, messageId!)).toBeUndefined();
+    // Kept with the community until it was said, as a private group's is.
+    expect(bob.peer.groups.removals(id)).toMatchObject([{ id: messageId }]);
+    await world.until(() => [alice, carol].every(m => !textOf(m.peer, messageId!)), 60_000);
+    expect(bob.peer.groups.removals(id)[0]).not.toHaveProperty("pending");
+    for (const m of [alice, carol]) expect(m.peer.groups.isRemoved(id, messageId!)).toBe(true);
+    // Carol away and back: whoever catches her up hands Bob's message on, and it is not stored again.
+    carol.peer.online = false;
+    await world.run(5_000);
+    carol.peer.online = true;
+    await world.run(60_000);
+    for (const m of [alice, carol]) expect(textOf(m.peer, messageId!)).toBeUndefined();
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
+  it("a community: messages deleted for everyone while a member was away never reach it when it comes back, not even for a moment", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Crew");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id)), 10 * 60_000);
+    await world.run(20_000);
+    // Every row Carol's app stores, even one taken out again a moment later.
+    const stored: string[] = [];
+    const store = carol.edits.stored.bind(carol.edits);
+    vi.spyOn(carol.edits, "stored").mockImplementation(async m => { stored.push(m.id); await store(m); });
+    carol.peer.online = false;
+    await world.run(5_000);
+    const gone: string[] = [];
+    for (let i = 0; i < 3; i++) gone.push((await bob.peer.groups.send(id, `secret ${i}`)).messageId!);
+    await world.until(() => gone.every(m => !!textOf(alice.peer, m)), 60_000);
+    for (const m of gone) expect(await bob.edits.removeMine(id, m)).toMatchObject({ error: null });
+    await world.until(() => gone.every(m => alice.peer.groups.isRemoved(id, m)), 60_000);
+    carol.peer.online = true;
+    // Whoever catches her up hands her the removals, and not the lines they took out.
+    await world.until(() => gone.every(m => carol.peer.groups.isRemoved(id, m)), 3 * 60_000);
+    await world.run(60_000);
+    expect(stored.filter(m => gone.includes(m))).toEqual([]);
+    for (const m of gone) expect(textOf(carol.peer, m)).toBeUndefined();
+    for (const m of [alice, bob, carol]) m.edits.stop();
   });
 });
 
@@ -319,14 +544,40 @@ describe("GroupEdits on its own", () => {
 function member(world: CommunityWorld, name: string, old = false): { peer: Peer; edits: GroupEdits } {
   // The hooks run once frames flow, after `edits` below exists.
   const peer = world.add(name, p => old ? {} : ({
-    storeMessage: async message => { if (!p.messages.some(m => m.id === message.id)) { p.messages.push(message); await edits.stored(message); } },
+    // As the engine does (node.ts `storeNewMessage`): a message its author deleted for everyone is not stored again.
+    storeMessage: async message => {
+      if (p.groups.isRemoved(message.linkId.slice("group:".length), message.id)) return false;
+      if (!p.messages.some(m => m.id === message.id)) { p.messages.push(message); await edits.stored(message); }
+    },
     groupEdit: async (groupId, { sender, ...edit }) => { await edits.receive(groupId, sender, edit); },
     communityApp: async (groupId, sender, frame) => { const edit = parseCommunityEdit(frame, sender); if (edit) await edits.receive(groupId, sender, edit); },
     // As the engine does (node.ts): an edge of a private group that comes up hears my latest edits again.
     edgeUp: (groupId, peerKey) => { void edits.resend(groupId, peerKey); },
   }));
+  const kept = rows(peer.messages);
   const edits: GroupEdits = new GroupEdits({
-    ...rows(peer.messages),
+    ...kept,
+    // As the engine does (node.ts): my removals on their way are kept by the group and read as rows of mine.
+    messages: async chat => [...await kept.messages(chat), ...peer.groups.removals(chat.slice("group:".length)).map(r => removalRow(chat, r))],
+    patch: async (chat, id, change) => {
+      const groupId = chat.slice("group:".length), patched = patchRemoval(peer.groups.removals(groupId), id, change, chat);
+      if (!patched) return kept.patch(chat, id, change);
+      await peer.groups.setRemovals(groupId, patched.list);
+      return patched.row;
+    },
+    // As the engine does: noted by the group, so a copy that comes again is not stored.
+    remove: async (chat, id) => {
+      await peer.groups.removed(chat.slice("group:".length), id);
+      const at = peer.messages.findIndex(m => m.linkId === chat && m.id === id);
+      if (at >= 0) peer.messages.splice(at, 1);
+    },
+    removeMine: async (chat, message, removal) => {
+      const groupId = chat.slice("group:".length);
+      await peer.groups.setRemovals(groupId, withRemoval(peer.groups.removals(groupId), removal));
+      await peer.groups.removed(groupId, message.id);
+      const at = peer.messages.findIndex(m => m.linkId === chat && m.id === message.id);
+      if (at >= 0) peer.messages.splice(at, 1);
+    },
     changed: () => {},
     membership: groupId => {
       const view = world.view(peer, groupId);

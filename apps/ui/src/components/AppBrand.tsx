@@ -18,7 +18,8 @@ interface AppBrandProps {
 }
 
 /**
- * The top of the chat list: the ghost and the wordmark, which go home. The logo moves briefly when the app opens and
+ * The top of the chat list: the ghost and the wordmark, which go home. Named "Ghostly", the word it shows, so a voice
+ * saying "click Ghostly" finds it (Label in Name); "Go home" is its tooltip and description. The logo moves briefly when the app opens and
  * when the pointer comes over it, then rests; nothing loops, and with reduced motion it stays still. Wallets say their
  * own network on their cards: nothing here is about money.
  */
@@ -55,7 +56,7 @@ export function AppBrand({ onHome }: AppBrandProps) {
   return (
     <div ref={root} className="app-brand relative flex shrink-0 items-center" data-testid="app-brand" data-motion={play?.motion} data-on={play?.on}
       onPointerEnter={hover}>
-      <Link to="/" onClick={(e) => { e.preventDefault(); onHome(); }} aria-label={home} title={home} className="sidebar-home flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      <Link to="/" onClick={(e) => { e.preventDefault(); onHome(); }} aria-label="Ghostly" title={home} className="sidebar-home flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
         <svg width="36" height="36" viewBox="0 0 64 64" className="app-brand-ghost shrink-0" aria-hidden="true">
           <g transform="translate(12, 8)">
             <path d="M20 4C10.059 4 2 12.059 2 22v18c0 1.5 1.2 2 2 1.2l4-3.2 4 3.2c.8.6 1.6.6 2.4 0L18 38l3.6 3.2c.8.6 1.6.6 2.4 0L28 38l4 3.2c.8.8 2 .3 2-1.2V22C34 12.059 25.941 4 20 4z" fill="currentColor" className="text-accent"/>

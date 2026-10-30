@@ -2,7 +2,7 @@ import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalSto
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
-import { answerable, InvitationButtons, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
+import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
@@ -12,7 +12,8 @@ import { usePeerTypingActivity } from "../hooks/useTyping";
 import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
-import { cardLine, showsCard } from "../lib/statusCards";
+import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
+import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
@@ -24,11 +25,13 @@ import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
 import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
+import { callLineCount } from "../lib/storage";
 import type { Translate } from "../locales/translate";
 import type { UsageEntry } from "../lib/usage";
 import { UsagePill } from "./chat/UsageMeter";
 import type { WorkingEntry } from "../lib/working";
 import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
+import { REORDER_KEYS } from "../hooks/useRowReorder";
 
 /*
  * The rows of the chat list, drawn the way messengers draw theirs: the name and the time on one line, the last
@@ -174,10 +177,11 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
 /**
  * What opens the row from the keyboard: a button over the whole row, first in it, so Tab reaches every chat and group
  * and Enter or Space opens it (the click it makes is the row's own). The pointer goes through it to the row and to the
- * buttons laid over it, as before; its ring is the row's edge.
+ * buttons laid over it, as before; its ring is the row's edge. A row that can be put in order says so with its keys
+ * (Alt+↑/↓, hooks/useRowReorder.ts).
  */
-function RowOpen({ label, active, describedBy, testId }: { label: string; active: boolean; describedBy: string; testId: string }) {
-  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined}
+function RowOpen({ label, active, describedBy, testId, reorders }: { label: string; active: boolean; describedBy: string; testId: string; reorders?: boolean }) {
+  return <button type="button" data-testid={testId} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} aria-keyshortcuts={reorders ? REORDER_KEYS : undefined}
     className="pointer-events-none absolute inset-0 rounded-sm focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent" />;
 }
 
@@ -272,6 +276,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
+  // An app card names an app installed here as its bubble does (appCardLine): the list read, and the row drawn again.
+  const installed = useInstalledApps(p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
@@ -286,7 +292,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
       className={`${rowClass(p.active, p.density)} ${p.reorder ? "select-none [-webkit-touch-callout:none]" : ""} ${p.reorder?.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg transition-none" : ""}`}>
       {p.reorder?.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={p.reorder.drop}
         className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${p.reorder.drop === "before" ? "top-0" : "bottom-0"}`} />}
-      <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} />
+      <RowOpen testId="chat-row-open" label={p.named ? p.label : `${p.label} · ${p.keyLabel}`} active={p.active} describedBy={previewId} reorders={!!p.reorder?.props["data-reorder-id"]} />
       <div className={`relative shrink-0 rounded-full flex items-center justify-center ${p.active ? "bg-surface-alt" : "bg-surface-hover"}`} style={{ width: size, height: size }}>
         <PeerAvatar peerPubKey={p.peerPubKey} label={p.label} named={p.named} photo={p.face?.photo} testId="chat-row-avatar" />
         {p.face && <FaceCorner face={p.face} />}
@@ -342,9 +348,9 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
-                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo) ?? p.lastMessage.text
+                : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : payment ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
@@ -389,7 +395,7 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
   latest.current = onOpen;
   const open = useCallback(() => latest.current(), []);
   const time = group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined;
-  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} reorders={!!drag?.props["data-reorder-id"]} />;
   if (!drag) return row;
   // The drag is on a box around the row, so the row itself is drawn again only when the group changes.
   return (
@@ -402,8 +408,8 @@ export function GroupRow({ group, active, density, onOpen, drag }: {
   );
 }
 
-const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt }: {
-  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number;
+const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt, reorders }: {
+  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number; reorders: boolean;
 }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
@@ -414,7 +420,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const { busy, refused, answer } = useInvitationAnswer(group);
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
-  const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+  const status = invitation ? (invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
       : invitationLine(invitation, t))
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
@@ -424,7 +430,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const size = AVATAR[density];
   return (
     <div data-testid="group-row" data-group={group.id} data-muted={muted || undefined} onClick={onOpen} title={group.name || t("group.chat.unnamed")} className={rowClass(active, density)}>
-      <RowOpen testId="group-row-open" label={group.name || t("group.chat.unnamed")} active={active} describedBy={previewId} />
+      <RowOpen testId="group-row-open" label={group.name || t("group.chat.unnamed")} active={active} describedBy={previewId} reorders={reorders} />
       <div className="relative shrink-0">
         <GroupAvatar picture={group.picture} size={size} glyph={Math.round(size * 0.46)} testId="group-row-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
       </div>
@@ -447,7 +453,8 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
         {invitation?.takenBack && <div className="mt-1.5 flex gap-2"><TakenBackDelete busy={busy} answer={answer} /></div>}
         {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2"><InvitationButtons busy={busy} answer={answer} /></div>}
-        {invitation && refused && <p role="status" data-testid="group-answer-refused" className="mt-1 text-xs text-danger">{refused}</p>}
+        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2"><LinkTryAgain busy={busy} answer={answer} /></div>}
+        {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>
   );

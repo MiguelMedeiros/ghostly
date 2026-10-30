@@ -328,6 +328,36 @@ describe("LinkSession presence and signals", () => {
     await a.s.stop(false);
   });
 
+  it("a background write the budget holds back for a while goes again when its share frees, not every 4 s; a chat's write keeps its turn", async () => {
+    // An idle admin's daemon built and signed 1,041 packets in 9 minutes that the budget refused again (bug hunt, 2026-10-19).
+    const { a, b } = pair({ getServices: () => [] }, { getServices: () => [] });
+    a.s.start();
+    b.s.start();
+    await settle();
+    const lastPublish = () => (a.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    a.s.setDataLinkOpen(true);
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    await vi.advanceTimersByTimeAsync(PRESENCE_HEARTBEAT);
+    expect(lastPublish()).toEqual({ background: true });
+    const held = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held);
+    // Its share frees: it goes.
+    a.transport.failPublish = null;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held + 1);
+    expect(lastPublish()).toEqual({ background: true });
+    // A chat's write held back the same way tries again within 4 s, which keeps it first in line (`WRITE_FIRST_MS`).
+    a.transport.failPublish = new DiscoveryBudgetError(30_000);
+    expect(await a.s.sendMessage("held")).toBeNull();
+    expect(lastPublish()).toBeUndefined();
+    const chat = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(a.transport.publish.mock.calls.length).toBeGreaterThan(chat);
+    a.transport.failPublish = null;
+    await a.s.stop(false);
+  });
+
   it("raises each call and RTC signal once, not on every poll", async () => {
     const { a, b } = pair();
     b.s.start();
@@ -869,6 +899,38 @@ describe("LinkSession poll pacing", () => {
     expect(a.s.peerPresence.online).toBe(true);
     // Answered: from then on a read is the contact's like any other.
     a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  // agents#1740: the edge to a member a hub just let in polled as plain fast reads, which the hub's admissions in a row
+  // had spent: 22-39 s before the newcomer could send, receive or leave.
+  it("an awaited peer's reads go as a resume's (the relays' floor) until its packet is read", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    a.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { resume?: boolean } | undefined;
+    expect(last()?.resume).toBeUndefined();
+    a.s.expectPeer(true);
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Not there yet: still awaited.
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    // Its packet read: a read like any other.
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.online).toBe(true);
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    // A plain expectPeer (an entry session, a chat) never says so.
+    a.s.expectPeer();
     await settle();
     expect(last()?.resume).toBeUndefined();
     await a.s.stop(false);

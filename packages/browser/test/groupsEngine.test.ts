@@ -1234,6 +1234,21 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     }
   });
 
+  it("a link just handed out is looked at fast for a minute, as a community's door, not for ten", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice");
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.enableLink(groupId);
+    const looks = () => world.resolves.get("alice") ?? 0;
+    for (let t = 0; t < 60_000; t += 1_000) await alice.tick(t0 + t);
+    expect(looks()).toBe(30); // every 2 s
+    // Nobody came in the minute: every 5 s for the nine after, 12 a minute, not 30 a minute.
+    for (let t = 60_000; t < 10 * 60_000; t += 1_000) await alice.tick(t0 + t);
+    expect(looks() - 30).toBe(108);
+  });
+
   it("a joiner knocks at its pace, slower once it has waited long, and not while its entry session is up", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t0 = Date.now();
@@ -1251,18 +1266,21 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect([looks(), world.publishes]).toEqual([2, 1]);
     await dan.tick(t0 + 3_600);
     expect([looks(), world.publishes]).toEqual([3, 1]);
-    // Thirty seconds old: written again, and read back again.
+    // Thirty seconds old: written again. Patience ran out: not read back, and every ten seconds now.
     await dan.tick(t0 + 40_000);
     expect([looks(), world.publishes]).toEqual([4, 2]);
     await dan.tick(t0 + 45_000);
-    expect([looks(), world.publishes]).toEqual([5, 2]);
+    expect([looks(), world.publishes]).toEqual([4, 2]);
     await dan.tick(t0 + 50_000);
-    expect(looks()).toBe(5); // patience ran out: every ten seconds now
-    await dan.tick(t0 + 55_000);
+    expect([looks(), world.publishes]).toEqual([5, 2]);
+    // Then less often the longer it waits: a fifth of the wait, 12.6 s at 63 s.
+    await dan.tick(t0 + 62_000);
+    expect(looks()).toBe(5);
+    await dan.tick(t0 + 63_000);
     expect([looks(), world.publishes]).toEqual([6, 2]);
     // The admin's app answers: a session is up, and knocking stops.
-    await alice.tick(t0 + 55_000); await world.settle();
-    await dan.tick(t0 + 70_000);
+    await alice.tick(t0 + 63_000); await world.settle();
+    await dan.tick(t0 + 90_000);
     expect([looks(), world.publishes]).toEqual([6, 2]);
   });
 

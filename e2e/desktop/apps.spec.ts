@@ -1,5 +1,5 @@
 import http from "node:http";
-import { test, expect, desktopWindows } from "../support/desktop";
+import { test, expect, desktopWindows, type DesktopApp } from "../support/desktop";
 import { STORE_URL, testStore } from "../support/appStore";
 
 /*
@@ -33,6 +33,14 @@ const PROBE = `<!doctype html><meta charset=utf-8><title>Chess</title><body styl
   document.body.dataset.done = "1";
 })();
 </script>`;
+
+/**
+ * The installed app's row as it renders. Not WebDriver's text: WebKitWebDriver leaves out the text of an element with
+ * `overflow: hidden` and no child element, which is the row's title (cut with an ellipsis when long).
+ */
+function installedRow(app: DesktopApp): Promise<string | null> {
+  return app.execute<string | null>(`return document.querySelector('[data-testid="installed-app"]')?.innerText ?? null;`);
+}
 
 /** Serves the store's files at `/<host><path>`, as appsTestFetch asks for them; returns its address and what it was asked. */
 async function storeServer(files: Map<string, Uint8Array>): Promise<{ base: string; asked: string[]; close: () => Promise<void> }> {
@@ -70,7 +78,7 @@ test("installs Chess from a store and opens it in an app window of its own, whic
     await app.click('[data-testid="app-listing-install"]');
     await expect.poll(() => app.text('[data-testid="app-install"]')).toContain("Talk to the same app on your contact's side");
     await app.click('[data-testid="app-install-confirm"]');
-    await expect.poll(() => app.text('[data-testid="installed-app"]')).toContain(store.title);
+    await expect.poll(() => installedRow(app)).toContain(store.title);
 
     // Open: a second window appears, and WebDriver can go to it.
     const windows = desktopWindows(app);
@@ -111,7 +119,7 @@ test("installs Chess from a store and opens it in an app window of its own, whic
     await app.execute("ghostly.close()");
     await windows.switchTo(main);
     await expect.poll(() => windows.windows()).toEqual([main]);
-    await expect.poll(() => app.text('[data-testid="installed-app"]')).toContain(store.title);
+    await expect.poll(() => installedRow(app)).toContain(store.title);
   } finally {
     await server.close();
   }

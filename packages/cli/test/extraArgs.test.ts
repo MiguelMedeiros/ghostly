@@ -36,7 +36,7 @@ describe("extra words", { timeout: 60_000 }, () => {
       const listen = new Running(["--home", dir, "listen", ...words]);
       try {
         expect(await listen.exited(30_000), words.join(" ")).toBe(2);
-        expect(listen.lines).toEqual([{ error: { code: "usage", message: "Too many arguments: ghostly listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]" } }]);
+        expect(listen.lines).toEqual([{ error: { code: "usage", message: "Too many arguments: ghostly listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print] [--translate lang]" } }]);
       } finally { await listen.stop(); }
     }
   });

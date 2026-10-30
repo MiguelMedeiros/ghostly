@@ -529,6 +529,12 @@ html[data-standalone="true"] {
   right: 6px;
 }
 
+/* In a video call the own camera's preview takes the top right corner (64 px at 8 px): the line ends 6 px before it.
+   Centred up to the window's edge, a phone's 190 px window had the clock's last digit and a half under the preview. */
+.call-mini:has(> .call-preview) .call-top {
+  right: 78px;
+}
+
 .call-mini .call-top p {
   display: flex;
   flex-flow: row-reverse wrap;
@@ -1323,6 +1329,12 @@ html .toast-place.toast-place-page[data-at="top"] {
 .nav-dot-inline { display: inline-block; width: 8px; height: 8px; border-radius: 999px; background: var(--theme-accent); flex-shrink: 0; }
 @keyframes nav-dot-in { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .nav-dot { animation: none; } }
+/* The same dot on the way down to what it is about (lib/needsYou): a network tab, beside its name; a wallet card, on
+   its chip's corner (shown on a small card too, where the chip is not), ringed in the card's own dark. */
+.wallet-network .needs-you-dot { margin-inline-start: 6px; }
+.needs-you-chip { position: relative; }
+.needs-you-chip .needs-you-dot { position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; box-shadow: 0 0 0 2px var(--to, #0b1f2a); }
+@container wallet-card (width < 154px) { .wallet-deck-card-chip.needs-you-chip { display: block; width: 10px; height: 10px; background: none; } }
 /* Another profile left something unread: a ring around the picture, in the accent. */
 .profile-others-ring { position: absolute; inset: -3px; border-radius: 999px; box-shadow: 0 0 0 2px var(--theme-accent); pointer-events: none;
   animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }

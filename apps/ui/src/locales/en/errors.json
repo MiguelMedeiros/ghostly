@@ -6,6 +6,8 @@
     "lostPeer": "Lost the Ghostly peer",
     "noRoom": "Not enough space on this device",
     "noRoomNext": "Free some space, then try again.",
+    "noRoomToSave": "No room left on this device",
+    "noRoomToSaveNext": "Nothing was saved. Free some space, then try again.",
     "partNotLoaded": "Part of Ghostly did not load.",
     "pickCard": "Pick a Lightning card first",
     "signerKey": "Your signer holds a different key than this identity. Nothing was published.",
@@ -146,6 +148,13 @@
     "cannotRetry": "This file cannot be retried",
     "clipboardUnavailable": "The clipboard cannot be read",
     "clipboardUnavailableNext": "Attach it with +.",
+    "floor": {
+      "noRoomNext": "Free some space, then ask your contact to send it again.",
+      "notInAWeek": "It did not come within a week",
+      "refused": "This device could not take this file",
+      "tooMany": "Too many files are waiting here",
+      "tooManyNext": "Answer the files waiting for you, then ask your contact to send it again."
+    },
     "gone": "This file is no longer here",
     "noRoom": "No room on your contact's device",
     "noRoomHere": "No room on this device",
@@ -233,6 +242,7 @@
     "forkedMember": "Group changes are paused",
     "forkedNext": "The admin must re-form the group.",
     "full": "A group holds {{max}} members at most",
+    "growMore": "{{count}} more",
     "growNeedsUpdates": "Everyone needs an update to grow past {{max}}",
     "growNeedsUpdatesNext": "Not updated yet: {{names}}.",
     "hubSetting": "This hub setting cannot be used",
@@ -257,6 +267,7 @@
     "nobodyForLeave": "Nobody is online to take your leave",
     "nobodyForLeaveNext": "Try again in a moment.",
     "notALink": "This is not a link to a group",
+    "notALinkNext": "Ask for the link again: it may have lost a character when copied.",
     "notIn": "You are not in this group",
     "notYet": "You are not in this group yet",
     "nothingToSend": "Nothing to send",
@@ -502,6 +513,12 @@
     "usdtRejected": "USDT RPC rejected the operation",
     "usdtReverted": "The transaction was reverted",
     "usdtRevertedNext": "No tokens were sent; the gas was spent."
+  },
+  "relayOnly": {
+    "keepsTurn": "Hide my IP needs this TURN server",
+    "keepsTurnNext": "Turn it off first, then remove the server.",
+    "needsTurn": "Add a TURN server first",
+    "needsTurnNext": "Save one above, then turn this on."
   },
   "relays": {
     "atLeastOne": "Enter at least one relay address",

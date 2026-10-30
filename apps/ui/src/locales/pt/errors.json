@@ -6,6 +6,8 @@
     "lostPeer": "A conexão com o peer do Ghostly caiu",
     "noRoom": "Não há espaço suficiente neste dispositivo",
     "noRoomNext": "Libere espaço e tente de novo.",
+    "noRoomToSave": "Não há mais espaço neste dispositivo",
+    "noRoomToSaveNext": "Nada foi salvo. Libere espaço e tente de novo.",
     "partNotLoaded": "Uma parte do Ghostly não carregou.",
     "pickCard": "Escolha um cartão Lightning primeiro",
     "signerKey": "Seu assinador tem uma chave diferente da desta identidade. Nada foi publicado.",
@@ -146,6 +148,13 @@
     "cannotRetry": "Não é possível tentar enviar este arquivo de novo",
     "clipboardUnavailable": "Não foi possível ler a área de transferência",
     "clipboardUnavailableNext": "Anexe com +.",
+    "floor": {
+      "noRoomNext": "Libere espaço e peça ao seu contato para enviar de novo.",
+      "notInAWeek": "Não chegou em uma semana",
+      "refused": "Este dispositivo não pôde receber este arquivo",
+      "tooMany": "Há arquivos demais esperando aqui",
+      "tooManyNext": "Responda aos arquivos que esperam por você e peça ao seu contato para enviar de novo."
+    },
     "gone": "Este arquivo não está mais aqui",
     "noRoom": "Sem espaço no dispositivo do contato",
     "noRoomHere": "Sem espaço neste dispositivo",
@@ -233,6 +242,7 @@
     "forkedMember": "As mudanças no grupo estão pausadas",
     "forkedNext": "O admin precisa recriar o grupo.",
     "full": "Um grupo tem no máximo {{max}} membros",
+    "growMore": "mais {{count}}",
     "growNeedsUpdates": "Todos precisam atualizar para passar de {{max}}",
     "growNeedsUpdatesNext": "Ainda sem atualizar: {{names}}.",
     "hubSetting": "Esta configuração de hub não pode ser usada",
@@ -257,6 +267,7 @@
     "nobodyForLeave": "Ninguém está online para registrar sua saída",
     "nobodyForLeaveNext": "Tente de novo em instantes.",
     "notALink": "Isto não é um link de grupo",
+    "notALinkNext": "Peça o link de novo: talvez tenha perdido um caractere ao ser copiado.",
     "notIn": "Você não está neste grupo",
     "notYet": "Você ainda não está neste grupo",
     "nothingToSend": "Nada para enviar",
@@ -502,6 +513,12 @@
     "usdtRejected": "O RPC do USDT recusou a operação",
     "usdtReverted": "A transação foi revertida",
     "usdtRevertedNext": "Nenhum token foi enviado; o gas foi gasto."
+  },
+  "relayOnly": {
+    "keepsTurn": "Ocultar meu IP precisa deste servidor TURN",
+    "keepsTurnNext": "Desligue primeiro e depois remova o servidor.",
+    "needsTurn": "Adicione um servidor TURN antes",
+    "needsTurnNext": "Salve um acima e depois ligue isto."
   },
   "relays": {
     "atLeastOne": "Informe pelo menos um endereço de relay",

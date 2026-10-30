@@ -29,7 +29,7 @@ import { connect } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMiner } from "./chain.mjs";
-import { PROJECT, SERVICE_PORTS, VARIABLES, dotenv, endpoints, localPort, read } from "./env.mjs";
+import { PROJECT, SERVICE_PORTS, VARIABLES, dotenv, endpoints, hyperdhtRelayReady, localPort, read } from "./env.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const COMPOSE = join(ROOT, "e2e", "infra", "docker-compose.yml");
@@ -92,7 +92,8 @@ const PROBES = {
   "Fedimint guardian / gateway": async () => (await tcp(endpoints.fedimint.api.replace(/^ws/, "http"))) && tcp(endpoints.fedimint.gateway),
   S3: () => http(`${endpoints.s3.endpoint}/health`),
   "Iroh relay": () => http(endpoints.irohRelay),
-  "HyperDHT relay": () => http(`${endpoints.hyperdhtRelay.replace(/^ws/, "http")}/healthz`),
+  // Up once its own HyperDHT node is reachable, not when it first answers.
+  "HyperDHT relay": () => hyperdhtRelayReady(),
   "AT Protocol PDS / PLC": async () => (await http(`${endpoints.atproto.pds}/xrpc/_health`)) && http(`${endpoints.atproto.plc}/_health`),
   // Up once the homeserver's record reached the testnet's Pkarr relay (the testnet's fixed homeserver key).
   "Pubky testnet": async () => (await http(`${endpoints.pubky.pkarrRelay}/8pinxxgqs41n4aididenw5apqp1urfmzdztr8jt4abrkdn435ewo`)) && tcp(endpoints.pubky.httpRelay) && tcp(endpoints.pubky.homeserver),
@@ -243,7 +244,9 @@ async function up() {
   // bitcoind and its miner wallet first: NBXplorer warms the chain up through the node's loaded wallet.
   if (compose(["up", "-d", "--wait", "--remove-orphans", "bitcoind"]) === null) throw new Error("docker compose up bitcoind failed");
   ensureMiner();
-  if (compose(["up", "-d", "--remove-orphans"]) === null) throw new Error("docker compose up failed");
+  // The images built from this checkout (the HyperDHT relay, the PDS) are built again: Compose would otherwise run
+  // whatever image of that name an earlier `up` left, fixes since then missing (`down` keeps images).
+  if (compose(["up", "-d", "--build", "--remove-orphans"]) === null) throw new Error("docker compose up failed");
   await waitHealthy();
   log("every service answers; funding");
   await seed();

@@ -182,7 +182,8 @@ export interface StoredFile {
    * device fetched it without asking (it counts toward the group's automatic limit), and whether its person asked for it.
    * `digest` is the author's, which the bytes are checked against.
    */
-  group?: { message: string; author: string; auto?: boolean; asked?: boolean; paused?: boolean };
+  /** A group's file (WISP 503): its message, author and the message's time (`ts`, absent on records from before). */
+  group?: { message: string; author: string; ts?: number; auto?: boolean; asked?: boolean; paused?: boolean };
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
@@ -289,11 +290,12 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
  * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs
  * with their keys and revocations, its own Nostr data, the public profiles it read, the built-in mini-apps it removed
  * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
- * (`engine/contactLinks.ts`) and the requests it sent through others' (`engine/contactAsks.ts`). A list of what goes
+ * (`engine/contactLinks.ts`), the requests it sent through others' (`engine/contactAsks.ts`) and its saved messages
+ * (`engine/saved.ts`). A list of what goes
  * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
  * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns", "x401Credentials", "contactLinks", "contactAsks"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
@@ -338,10 +340,32 @@ export function deleteDatabase(name: string): Promise<void> {
   });
 }
 
+/** A read. A write goes through `committed`: its request's success does not mean the browser kept it. */
 export function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+/** What a write the device had no room for says (Chromium's own QuotaExceededError has no message). */
+export const NO_ROOM_TO_SAVE = "This device has no room left to save this";
+
+/**
+ * A write, settled when its transaction is: kept once it commits, refused when it aborts. On a device out of storage
+ * Chromium fires the request's success and then aborts the transaction with QuotaExceededError, so a write awaited on
+ * its request alone reads as saved and is gone. The last request of its transaction: the transaction ends before this
+ * settles. Several in one transaction settle together.
+ */
+export function committed<T>(request: IDBRequest<T>): Promise<T> {
+  const tx = request.transaction!;
+  return new Promise((resolve, reject) => {
+    tx.addEventListener("complete", () => resolve(request.result));
+    tx.addEventListener("abort", () => {
+      const error = tx.error ?? request.error;
+      reject(error?.name === "QuotaExceededError" ? Object.assign(new Error(NO_ROOM_TO_SAVE), { name: "QuotaExceededError", cause: error })
+        : error ?? new Error("The write was not saved"));
+    });
   });
 }
 
@@ -445,11 +469,20 @@ export const fileStore = {
     ]);
     return file && withState(file, state);
   },
+  /**
+   * A link's files in two requests: what changed about them is read as one range, from the least of their ids to the
+   * greatest. A link's file ids share its prefix (`<link>-in-`, `group-<id>-out-`…), so the range holds little else, and
+   * whatever else it holds is not theirs. A read per file was 16,000 requests at every start with 200 files per chat
+   * and 300 per group (50 chats, 20 groups).
+   */
   async listForLink(linkId: string): Promise<StoredFile[]> {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readonly");
     const files = await wrap<StoredFile[]>(tx.objectStore(STORES.files).index("byLink").getAll(linkId));
-    const states = await Promise.all(files.map((file) => wrap<FileState | undefined>(tx.objectStore(STORES.fileState).get(file.id))));
-    return files.map((file, i) => withState(file, states[i]));
+    if (!files.length) return files;
+    // Strings sort by UTF-16 code unit, as IndexedDB orders its keys.
+    const ids = files.map(file => file.id).sort();
+    const states = new Map((await wrap<FileState[]>(tx.objectStore(STORES.fileState).getAll(IDBKeyRange.bound(ids[0], ids[ids.length - 1])))).map(state => [state.id, state]));
+    return files.map(file => withState(file, states.get(file.id)));
   },
   /** The id of every group a stored file is of (`linkId` `group:<id>`), read off the index: no record is loaded. */
   async groupIds(): Promise<string[]> {
@@ -510,6 +543,6 @@ export const fileStore = {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readwrite");
     const files = tx.objectStore(STORES.files), state = tx.objectStore(STORES.fileState);
     const keys = await wrap(files.index("byLink").getAllKeys(linkId));
-    await Promise.all(keys.flatMap((key) => [wrap(files.delete(key)), wrap(state.delete(key))]));
+    await Promise.all(keys.flatMap((key) => [committed(files.delete(key)), committed(state.delete(key))]));
   },
 };

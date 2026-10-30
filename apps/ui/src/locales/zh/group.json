@@ -128,6 +128,9 @@
       "knocked": "已给管理员的应用留下敲门请求",
       "knockedCommunity": "已向群组发送敲门请求"
     },
+    "tryAgain": "重试",
+    "unanswered": "此链接没有回应",
+    "unansweredBody": "一小时内没有人让你加入，所以此应用停止了敲门。链接可能已被替换或关闭：请索取当前的链接，或重试。",
     "waiting": "正在等待准许进入"
   },
   "leave": {
@@ -149,6 +152,7 @@
   },
   "link": {
     "broken": "此群组链接无效",
+    "brokenNext": "请重新索取链接：复制时可能丢了一个字符。",
     "copied": "已复制",
     "copyFailed": "复制失败。请选中链接后复制。",
     "disable": "关闭",
@@ -209,6 +213,7 @@
     "makeAdmin": "转让管理员",
     "missing": "缺少 {{count}} 条",
     "missingHint": "本纪元中尚未收到的消息",
+    "missingOne": "缺少 {{count}} 条",
     "needsBothHint": "群组需要双方应用都已连接且为最新版本",
     "needsUpdate": "需要更新 Ghostly",
     "noContacts": "所有已配对的联系人都已在群里，或者你还没有联系人。",

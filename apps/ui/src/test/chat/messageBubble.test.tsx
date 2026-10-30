@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { forgetPictureLinks } from "../../lib/pictureLink";
@@ -386,9 +387,11 @@ describe("MessageBubble: text", () => {
     expect(screen.queryByText("~Bob")).not.toBeInTheDocument();
   });
 
-  it("opens the message's details on a double click, and Escape closes them", async () => {
+  it("opens the message's details on a Ctrl+double click, and Escape closes them", async () => {
     const { user } = bubble({ text: "hi", sender: "me", meta: { dhtKey: "k".repeat(40), encryptedPayloadLength: 10, dnsRecords: ["a", "b"] } }, { peerAck: 1_800_000_000_000 });
+    await user.keyboard("{Control>}");
     await user.dblClick(screen.getByText("hi"));
+    await user.keyboard("{/Control}");
     const panel = await screen.findByTestId("message-details");
     expect(within(panel).getByTestId("message-details-kind")).toHaveTextContent("Text");
     expect(screen.getByTestId("message-details-keys-hint")).toBeInTheDocument();
@@ -448,6 +451,11 @@ describe("MessageBubble: system lines", () => {
   it("shows no length for a call that never started", () => {
     bubble({ sender: "system", text: "Missed audio call", callEvent: { type: "call_missed", duration: 0 } });
     expect(screen.getByText("Missed audio call").parentElement).not.toHaveTextContent("(");
+  });
+
+  it("a line that stands for a burst of missed calls says how many (agents#992)", () => {
+    bubble({ sender: "system", text: "12 missed video calls", callEvent: { type: "call_missed", hasVideo: true, count: 12 } });
+    expect(screen.getByText("12 missed video calls")).toBeInTheDocument();
   });
 
   it("shows no length for a call ended within its first second, rather than (0 s)", () => {
@@ -809,6 +817,45 @@ describe("MessageBubble: deleting", () => {
     expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();
   });
 
+  it("Delete for everyone, on my own message, says what it does and deletes only once confirmed", async () => {
+    const onDelete = vi.fn(), onDeleteForEveryone = vi.fn();
+    const { user } = bubble({ sender: "me", text: "wrong chat" }, { onDelete, onDeleteForEveryone });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByRole("button", { name: "Delete for everyone" }));
+    expect(screen.getByTestId("message-delete-menu").querySelector("p")).toHaveTextContent(/^Deleted from your contact's devices too\./);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onDeleteForEveryone).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-delete-everyone"));
+    await user.click(screen.getByTestId("message-delete-confirm"));
+    expect(onDeleteForEveryone).toHaveBeenCalledOnce();
+    expect(onDelete).not.toHaveBeenCalled();
+    // Delete (here only) still says it is only here.
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByRole("button", { name: "Delete message" }));
+    expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted only here.");
+  });
+
+  it("Delete for everyone in a group says it goes from the members' devices, not a contact's", async () => {
+    const { user } = bubble({ sender: "me", text: "wrong group" }, { linkId: "group:g1", onDeleteForEveryone: vi.fn() });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-delete-everyone"));
+    const hint = screen.getByTestId("message-delete-menu").querySelector("p");
+    expect(hint).toHaveTextContent(/^Deleted from the members' devices too\./);
+    expect(hint).not.toHaveTextContent(/contact/);
+  });
+
+  it("offers no Delete for everyone on the contact's message, or while it still waits to be sent", async () => {
+    const onDeleteForEveryone = vi.fn();
+    const { user, unmount } = bubble({ text: "theirs" }, { onDelete: vi.fn(), onDeleteForEveryone });
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-delete-everyone")).not.toBeInTheDocument();
+    unmount();
+    const waiting = bubble({ sender: "me", delivery: "waiting" }, { onDelete: vi.fn(), onDeleteForEveryone });
+    await waiting.user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-delete-everyone")).not.toBeInTheDocument();
+  });
+
   it("a file still on its way says it stops, not that the contact keeps a copy; once here it does", async () => {
     vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
     const moving = { state: "transferring" as const, transferred: 1_000_000, size: 30_000_000 };
@@ -829,6 +876,27 @@ describe("MessageBubble: deleting", () => {
     expect(await hint({ id: "peer_c", file: file("link-1-in-c") })).toBe("Deleted only here. Your contact keeps their copy.");
   });
 
+  it("from the keyboard the confirmation takes the focus, its keys stay in it, and Escape gives it back to ⋮", async () => {
+    const onDelete = vi.fn(), onDeleteForEveryone = vi.fn();
+    const { user } = bubble({ sender: "me", text: "typo" }, { onDelete, onDeleteForEveryone });
+    for (const item of ["message-delete", "message-delete-everyone"]) {
+      screen.getByTestId("message-options").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId(item).focus();
+      await user.keyboard("{Enter}");
+      const confirm = screen.getByTestId("message-delete-menu");
+      // Cancel first: Enter at once never deletes.
+      expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(screen.getByTestId("message-delete-confirm")).toHaveFocus();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();
+      expect(screen.getByTestId("message-options")).toHaveFocus();
+    }
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(onDeleteForEveryone).not.toHaveBeenCalled();
+  });
+
   it("closes the menu on a click elsewhere", async () => {
     const onDelete = vi.fn();
     const { user } = renderApp(<><p>elsewhere</p><MessageBubble message={message({ sender: "me" })} onDelete={onDelete} /></>);
@@ -846,6 +914,31 @@ describe("MessageBubble: deleting", () => {
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     expect(screen.getByTestId("message-delete-menu").parentElement).toBe(document.body);
     expect(container).not.toContainElement(screen.getByTestId("message-delete-menu"));
+  });
+
+  it("once a deleted row is gone, the focus goes to the next message's ⋮, or the one before it at the end, not to the page", async () => {
+    function List() {
+      const [ids, setIds] = useState(["a", "b", "c"]);
+      return <div data-message-list>{ids.map((id) => (
+        <MessageBubble key={id} message={message({ id, sender: "me", text: `text ${id}` })} onDelete={() => setIds((all) => all.filter((x) => x !== id))} />
+      ))}</div>;
+    }
+    const { user } = renderApp(<List />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    const remove = async (text: string) => {
+      options(text).focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-delete").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-delete-confirm").focus();
+      await user.keyboard("{Enter}");
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    };
+    await remove("text b");
+    expect(options("text c")).toHaveFocus();
+    // The last one: the one before it.
+    await remove("text c");
+    expect(options("text a")).toHaveFocus();
   });
 
   it("offers no delete where the chat cannot be edited", () => {

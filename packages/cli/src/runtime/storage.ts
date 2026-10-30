@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
 import { loadSqlite, openRowFile, rowRecords, type RowFile } from "./rows";
-import { handOut, openTreeFile, SqlTree, type TreeFile } from "./sqlTree";
+import { handOut, openTreeFile, rollback, SqlTree, type TreeFile } from "./sqlTree";
 
 /**
  * IndexedDB for the engine on Node, kept on disk.
@@ -292,9 +292,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       } else {
         const ops = pending.get(this._rollbackLog);
         if (ops?.length) {
-          const entry = ++seq;
-          trees?.complete(this._rollbackLog, entry);
-          append(ops, this.durability === "relaxed", entry);
+          const refused = append(ops, this.durability === "relaxed", ++seq, this._rollbackLog);
+          if (refused) return refuse(this, refused.error, event);
         }
       }
       pending.delete(this._rollbackLog);
@@ -317,14 +316,39 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     return request;
   };
 
-  /** A committed transaction's entry, numbered `entry` (its first op says so, where there are trees). */
-  function append(ops: Op[], lazy: boolean, entry: number) {
+  /**
+   * A committed transaction's entry, numbered `entry` (its first op says so, where there are trees), from the
+   * transaction whose rollback log is `owner`. Written at once, it may fail (a full disk): the reason is given back,
+   * and the transaction is to be refused, not completed.
+   */
+  function append(ops: Op[], lazy: boolean, entry: number, owner: unknown[]): { error: unknown } | null {
     if (trees) ops = [{ db: SEQ, store: "", kind: "clear", seq: entry }, ...ops];
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
-      if (writeEntry(serialize(ops), lazy)) written(entry);
-      return;
+      let done: boolean;
+      try { done = writeEntry(serialize(ops), lazy); } catch (error) { return { error }; }
+      trees?.complete(owner, entry);
+      if (done) written(entry);
+      return null;
     }
+    trees?.complete(owner, entry);
     void enqueue(async () => { if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy)) written(entry); });
+    return null;
+  }
+
+  /**
+   * A transaction whose entry the disk did not take: what it wrote is undone (as fake-indexeddb's own abort does), and
+   * it ends with an `abort` in place of its `complete`, with a QuotaExceededError, as a browser's out of room does. It
+   * completed, before: the engine answered done for a change that was held but not on disk (a full disk under a
+   * daemon), and a restart lost it.
+   */
+  function refuse(transaction: RawTransaction, error: unknown, complete: Event): boolean {
+    failed(error);
+    for (const undo of transaction._rollbackLog.reverse()) (undo as () => void)();
+    const reason = (error as { code?: unknown } | null)?.code === "ENOSPC" ? `No room left on the disk of ${dir}: free some space, then try again` : `This change could not be saved in ${dir}`;
+    (transaction as { error: DOMException }).error = Object.assign(new DOMException(reason, "QuotaExceededError"), { cause: error });
+    const abort = new (complete.constructor as new (type: string, init: EventInit) => Event)("abort", { bubbles: true, cancelable: false });
+    (abort as unknown as { eventPath: unknown[] }).eventPath = [transaction.db];
+    return transaction.dispatchEvent(abort);
   }
 
   /**
@@ -365,7 +389,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       trees!.load(id, store.records.values(), false, true);
       indexes.forEach((index, at) => trees!.load(ids[at]!, index.records.values(), true, index.records.keysAreUnique));
       trees!.db.exec("COMMIT");
-    } catch (error) { trees!.db.exec("ROLLBACK"); throw error; }
+    } catch (error) { rollback(trees!.db); throw error; }
     attachTree(store.records, trees!.tree(id, true, false), false);
     indexes.forEach((index, at) => attachTree(index.records, trees!.tree(ids[at]!, index.records.keysAreUnique, true), true));
   }
@@ -399,20 +423,22 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    */
   function writeEntry(entry: Buffer, lazy = false): boolean {
     if (!writing) return false;
+    let whole = -1;
     try {
-      if (journalFd === null) {
-        journalFd = openSync(journalPath, "a", 0o600);
-        if (snapshotName !== undefined && fstatSync(journalFd).size === 0) writeAll(journalFd, framed(serialize([{ db: FOLLOWS, store: "", kind: "clear", snapshot: snapshotName }])));
-      }
+      if (journalFd === null) journalFd = openSync(journalPath, "a", 0o600);
+      whole = fstatSync(journalFd).size;
+      if (snapshotName !== undefined && whole === 0) writeAll(journalFd, framed(serialize([{ db: FOLLOWS, store: "", kind: "clear", snapshot: snapshotName }])));
       marked = false;
       writeAll(journalFd, framed(entry));
+      if (!lazy) sync();
     } catch (error) {
-      // What this entry said is held but not on disk, and what is appended behind a cut entry is not read back.
+      // What this entry said is not on disk. The part of it that is goes: what is appended behind a cut entry is not
+      // read back, and the next entry (once there is room) must be.
       unsaved = true;
+      if (journalFd !== null && whole >= 0) try { ftruncateSync(journalFd, whole); } catch { /* the snapshot at close makes it whole */ }
       throw error;
     }
     if (lazy) relaxed ??= setTimeout(() => { try { sync(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
-    else sync();
     if (statSync(journalPath).size > COMPACT_BYTES) void enqueue(writeSnapshot);
     return true;
   }
@@ -547,6 +573,16 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     async exportSnapshot(path: string) {
       await settled();
       const snapshot = await capture(undefined, true);
+      // A chat's ratchet (WISP 4xx) is this profile's alone, here: a backup never carries it, so a restored copy seals with
+      // keys of its own, never the ones this profile goes on using.
+      for (const db of snapshot.databases) for (const store of db.stores) {
+        if (store.name !== "links") continue;
+        store.records = store.records.map(([key, value]) => {
+          if (!value || typeof value !== "object" || !("ratchetState" in value)) return [key, value];
+          const { ratchetState: _ratchet, ...link } = value as Record<string, unknown>;
+          return [key, link];
+        });
+      }
       const fd = openSync(path, "w", 0o600);
       try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
     },
@@ -900,7 +936,7 @@ function recordsToDisk(trees: TreeFile, db: string, store: RawStore, saved: [Key
       indexes.forEach((index, at) => { for (const entry of indexEntries(index, batch, cmp)) trees.row(ids[at]!, entry, true, index.records.keysAreUnique); });
     }
     trees.db.exec("COMMIT");
-  } catch (error) { trees.db.exec("ROLLBACK"); throw error; }
+  } catch (error) { rollback(trees.db); throw error; }
 }
 
 /**

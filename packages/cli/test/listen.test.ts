@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, checkTypes, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -163,7 +163,7 @@ describe("hooks", () => {
     try {
       const event = received("c1", "m1", "the plan for tonight");
       eventHandler({ types: [], print: false, write: () => {}, webhook: `http://127.0.0.1:${port(hook)}/hook` })(event);
-      await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`the webhook did not take event ${event.seq}`), { timeout: 8000 });
+      await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`answered 307: event ${event.seq} (message.received) passed, not taken`), { timeout: 8000 });
       expect(asked).toBeGreaterThan(0);
       expect(elsewhere).toEqual([]);
     } finally {
@@ -205,12 +205,61 @@ describe("hooks", () => {
       // Said once for the outage, and again when it is over; never "did not take".
       expect(said().match(/is not answering/g)).toHaveLength(1);
       expect(said()).toMatch(`answers again: event ${events[0].seq} taken`);
-      expect(said()).not.toMatch("did not take");
+      expect(said()).not.toMatch("passed, not taken");
     } finally {
       stderr.mockRestore();
       bridge.close();
     }
   }, 10_000);
+
+  it("a webhook with a user or password in its URL is a usage error that does not repeat them: fetch never posts to one", async () => {
+    // What `post` would meet: every event held as "not answering", for good, the password on stderr each time.
+    await expect(fetch("http://bridge:s3cret@127.0.0.1:1/hook", { method: "POST" })).rejects.toThrow(TypeError);
+    for (const url of ["http://bridge:s3cret@127.0.0.1:8080/hook", "http://s3cret@localhost:8080/hook", "https://:s3cret@[::1]/hook"]) {
+      let error: unknown;
+      try { checkWebhook(url); } catch (thrown) { error = thrown; }
+      expect(error, url).toBeInstanceOf(CliError);
+      expect((error as CliError).code).toBe("usage");
+      expect((error as CliError).message).toMatch("no user or password");
+      expect((error as CliError).message).not.toMatch("s3cret");
+    }
+    expect(checkWebhook("http://127.0.0.1:8080/hook?token=abc").href).toBe("http://127.0.0.1:8080/hook?token=abc");
+  });
+
+  // agents#1710: on a full disk the listener ran on with exit 0, a stderr line per event and its cursor never written.
+  it("a cursor that can no longer be written stops the listener, the cursor at the last event kept", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-cursor-")), cursor = join(dir, "bridge.cursor");
+    const lines: string[] = [], failed: unknown[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({ types: [], print: true, write: (line) => { lines.push(line); }, cursor, cursorFailed: (error) => { failed.push(error); } });
+      const [first, second, third] = [received("c1", "p", "one"), received("c1", "p", "two"), received("c1", "p", "three")];
+      handle(first);
+      await handle.idle();
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(first.seq));
+      // The folder stops taking files (as a full disk does).
+      chmodSync(dir, 0o500);
+      handle(second);
+      handle(third);
+      await handle.idle();
+      expect(failed).toHaveLength(1);
+      expect((failed[0] as NodeJS.ErrnoException).code).toMatch(/EACCES|EPERM/);
+      // The event that could not be kept was handed once; none after it, and no line per event on stderr.
+      expect(lines.map((line) => (JSON.parse(line) as GhostlyEvent).seq)).toEqual([first.seq, second.seq]);
+      expect(stderr).not.toHaveBeenCalled();
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(first.seq));
+    } finally {
+      chmodSync(dir, 0o700);
+      stderr.mockRestore();
+    }
+  });
+
+  it("a full disk is said as no room, naming the file, with a code a bot can branch on", () => {
+    const full = Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", errno: -28, syscall: "write" });
+    expect(asCliError(full).toJSON()).toEqual({ code: "unavailable", message: "No room left on the disk: free some space, then try again", details: { reason: "no_space", errno: "ENOSPC" } });
+    const named = Object.assign(new Error("EDQUOT: disk quota exceeded, open '/x/p.backup'"), { code: "EDQUOT", syscall: "open", path: "/x/p.backup" });
+    expect(asCliError(named).toJSON()).toEqual({ code: "unavailable", message: "No room left for /x/p.backup: free some space, then try again", details: { reason: "no_space", errno: "EDQUOT", path: "/x/p.backup" } });
+  });
 
   it("an event the webhook refuses (a 4xx) is passed: said on stderr, the cursor moves on", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor");
@@ -224,7 +273,9 @@ describe("hooks", () => {
       handle(event);
       await handle.idle();
       expect(asked).toBe(3);
-      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`the webhook did not take event ${event.seq}`);
+      // The bridge, what it answered, and that the event will not come again: a wrong path or a missing token is seen.
+      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(
+        `ghostly: the webhook at http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook answered 400: event ${event.seq} (message.received) passed, not taken (a 4xx or a redirect is not tried again)\n`);
       expect(readFileSync(cursor, "utf8").trim()).toBe(String(event.seq));
     } finally {
       stderr.mockRestore();

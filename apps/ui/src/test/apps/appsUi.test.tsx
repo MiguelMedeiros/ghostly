@@ -20,6 +20,7 @@ import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/app
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { shownInName } from "../labelInName";
 import { renderApp } from "../render";
 
 // covers: apps.page, apps.chat.card, apps.built-in
@@ -48,6 +49,8 @@ const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
     entry: "index.html", permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", files: [] },
   ...patch,
 });
+/** An installed app's row: named with its title, version and line as it shows them, then "details". */
+const detailsOf = (title: string) => new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} .*: details$`);
 
 const cardMessage = (patch: Partial<ChatMessage> = {}): ChatMessage =>
   ({ id: "m1", text: statusCardText(CARD), card: CARD, sender: "peer", timestamp: 1_700_000_000_000, ...patch });
@@ -250,7 +253,7 @@ describe("with the apps flag on", () => {
     expect(screen.getAllByTestId(/^mobile-tab-[a-z]+$/)).toHaveLength(5);
   });
 
-  it("draws a card from its own data and asks nothing of any host until Install", async () => {
+  it("draws a card from its own data and asks nothing of any host until Join", async () => {
     fakeEngine.on("appList", () => []).on("appPreview", () => preview()).on("appInstall", () => installed());
     const opener = vi.fn(async () => {});
     setAppOpener(opener);
@@ -267,6 +270,9 @@ describe("with the apps flag on", () => {
     await waitFor(() => expect(appCalls()).toEqual(["appBuiltIns", "appList"]));
     expect(fetches).toEqual([]);
 
+    // The card invites the person into the app their contact opened: it says Join, never Install.
+    expect(within(card).getByTestId("app-card-install")).toHaveTextContent(/^Join$/);
+    expect(card).not.toHaveTextContent(/install/i);
     await user.click(within(card).getByTestId("app-card-install"));
     expect(fakeEngine.callsTo("appPreview")).toEqual([{ card: { ref: REF, url: URL_, sequence: 7, digest: DIGEST } }]);
     const screenEl = await screen.findByTestId("app-install");
@@ -632,7 +638,7 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-store")).toHaveTextContent("Ghostly");
     expect(screen.getByTestId("app-store")).toHaveTextContent("Curated");
     expect(appCalls()).toContain("appCheckUpdates");
-    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
     expect(screen.getByTestId("app-store-line")).toHaveTextContent("In Ghostly");
     await user.click(screen.getByTestId("app-uninstall-open"));
     expect(screen.getByTestId("app-uninstall")).toHaveTextContent("Export the data first");
@@ -646,12 +652,20 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
-  it("an installed app's row is named for its details and describes its version and line, so a stopped app says so to a screen reader", async () => {
+  it("an installed app's row is named with all it shows, then details, so a stopped app says so to a screen reader", async () => {
     const run = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
     fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     renderApp(<Apps />, { route: "/apps" });
-    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" });
-    expect(details).toHaveAccessibleDescription("1.2.0 Stopped");
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess 1.2.0 Stopped: details" });
+    expect(details).toHaveAccessibleName(shownInName(details));
+  });
+
+  it("an installed app's row holds its title, version and line in its name, in the order it shows them (Label in Name)", async () => {
+    fakeEngine.on("appList", () => [installed()]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: /^Chess 1\.2\.0 / });
+    expect(details).toHaveAccessibleName("Chess 1.2.0 Unknown publisher · Play chess with a contact: details");
+    expect(details).toHaveAccessibleName(shownInName(details));
   });
 
   it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
@@ -661,7 +675,7 @@ describe("with the apps flag on", () => {
     fakeEngine.on("appList", () => apps).on("appStoreList", () => stores).on("appCheckUpdates", () => [])
       .on("appUninstall", () => { apps = []; return undefined; }).on("appStoreRemove", () => { stores = []; return undefined; });
     const { user } = renderApp(<Apps />, { route: "/apps" });
-    await user.click(within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(await screen.findByTestId("installed-app")).getByRole("button", { name: detailsOf("Chess") }));
     await user.click(screen.getByTestId("app-uninstall-open"));
     await user.click(screen.getByTestId("app-uninstall-confirm"));
     await waitFor(() => expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument());
@@ -710,7 +724,7 @@ describe("with the apps flag on", () => {
     expect(screen.getByText("Ghostly")).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Snake")).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Eat, grow.")).toHaveAttribute("dir", "auto");
-    await user.click(within(row).getByRole("button", { name: `${title}: details` }));
+    await user.click(within(row).getByRole("button", { name: detailsOf(title) }));
     const details = screen.getByTestId("app-details");
     expect(within(details).getByRole("heading", { name: title })).toHaveAttribute("dir", "auto");
     expect(within(details).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
@@ -865,8 +879,8 @@ describe("with the apps flag on", () => {
     expect(within(row).getByText(LONG)).toHaveClass("truncate", "min-w-0");
     expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
     expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
-    // Still the details button's description, as before.
-    expect(within(row).getByRole("button", { name: `${LONG}: details` })).toHaveAccessibleDescription(new RegExp(`^${BETA.replace(/\./g, "\\.")}`));
+    // The version stays in the details button's name, right after the title, as the row shows it.
+    expect(within(row).getByRole("button", { name: detailsOf(`${LONG} ${BETA}`) })).toBeInTheDocument();
   });
 });
 
@@ -975,7 +989,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent(/^Play chess with a contact$/);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
     const details = await screen.findByTestId("app-details");
     expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Publisher");
     expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Comes with Ghostly");
@@ -990,7 +1004,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Unknown publisher · Play chess with a contact");
     // The tagline reads in its own direction, apart from Ghostly's words.
     expect(within(row).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
-    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
     const details = await screen.findByTestId("app-details");
     expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Unknown publisher");
     expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Not in any of your stores");

@@ -59,6 +59,7 @@
     },
     "label": "backup needed",
     "later": "Later",
+    "line": "Back up your {{wallet}} wallet",
     "title": "You have real money in {{wallet}}"
   },
   "bark": {
@@ -201,6 +202,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "This invoice expired: nobody can pay it now.",
     "invoiceFor": "Invoice for {{amount}}",
     "makePrimary": "Make primary",
     "mints": "Mints",
@@ -585,6 +587,17 @@
     "mainnet": "sats",
     "testnet": "test sats"
   },
+  "send": {
+    "balance": "Balance: {{amount}} {{unit}}",
+    "cameraUnavailable": "Camera unavailable. Paste, type or choose an image.",
+    "clipboardEmpty": "Nothing to paste. Copy an invoice or an address first.",
+    "clipboardUnavailable": "Could not read the clipboard. Paste or type it below.",
+    "image": "Choose image",
+    "max": "Max",
+    "noAmount": "This invoice has no amount. Ask for one with the amount.",
+    "paste": "Paste",
+    "scan": "Scan"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Setting up your Mainnet wallets…",
@@ -753,6 +766,8 @@
     "send": "Send"
   },
   "unseen": {
+    "lineReal": "{{amount}} new sats in {{wallet}}",
+    "lineTest": "{{amount}} new test sats in {{wallet}}",
     "real": "{{place}}, {{amount}} new sats",
     "test": "{{place}}, {{amount}} new test sats"
   },

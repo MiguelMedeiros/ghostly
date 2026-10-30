@@ -1,6 +1,6 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import { ENDPOINT, ONCHAIN_PROVIDER, type GhostLink, type PaymentReview, type PaymentTarget } from "@ghostly/core";
-import { PaymentDesk, type DeskBitcoin } from "../src/engine/payments";
+import { ASKED_ONCHAIN_PER_HOUR, PaymentDesk, type DeskBitcoin } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { StoredPayment } from "../src/shared/types";
 import { fakeAddress } from "../src/engine/paymentAdapters/providers/testing";
@@ -69,6 +69,32 @@ it("a request is of the network its address is on: one saying another is dropped
   await desk.onPaymentRequest("l", request("r4", real));
   await desk.onPaymentRequest("l", request("r5", target(), "testnet"));
   expect([desk.payment("r3")?.network, desk.payment("r4")?.network, desk.payment("r5")?.network]).toEqual(["mainnet", "mainnet", "testnet"]);
+});
+
+// agents#1633: each community member's ask made the wallet hand out an address (40 members, 200 addresses), read at
+// every sync from then on.
+it("answers at most ten on-chain asks an hour across every chat, and the person's own requests are not held back", async () => {
+  const payee = setup();
+  await payee.desk.start();
+  const realNow = Date.now();
+  let now = realNow;
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  onTestFinished(() => { clock.mockRestore(); });
+  // Forty members (each their own link), ten asks each, 3 s apart.
+  for (let round = 0; round < 10; round++) {
+    for (let member = 0; member < 40; member++) {
+      await payee.desk.onPaymentAsk(`cpay:g:${member}`, { id: `ask_${round}_${member}`, timestamp: now, amount: { value: "1", asset: "sat" }, method: "bitcoin", network: "testnet" });
+    }
+    now += 3_100;
+  }
+  expect(payee.bitcoin.requestTarget).toHaveBeenCalledTimes(ASKED_ONCHAIN_PER_HOUR);
+  // The person's own request still gets its address.
+  await payee.desk.request({ linkId: "l", amount: 5, method: "bitcoin", timestamp: now, network: "testnet" });
+  expect(payee.bitcoin.requestTarget).toHaveBeenCalledTimes(ASKED_ONCHAIN_PER_HOUR + 1);
+  // An hour on, asks are answered again (a member with asks still open waits for those).
+  now += 3_600_000;
+  await payee.desk.onPaymentAsk("cpay:g:new", { id: "ask_later", timestamp: now, amount: { value: "1", asset: "sat" }, method: "bitcoin", network: "testnet" });
+  expect(payee.bitcoin.requestTarget).toHaveBeenCalledTimes(ASKED_ONCHAIN_PER_HOUR + 2);
 });
 
 it("the payee's app answers an on-chain ask with an on-chain request, and the payer ties it back", async () => {

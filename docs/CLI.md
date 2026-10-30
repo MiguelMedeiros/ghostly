@@ -85,8 +85,8 @@ it cleanly: it tells contacts it is going and removes its socket.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 
-The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `/tmp/ghostly-<hash>/` when that
-path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
+The daemon listens on a Unix socket, `daemon.sock` in the profile's folder (or in `ghostly-<hash>/` in `$XDG_RUNTIME_DIR`,
+else `/tmp/ghostly-<uid>-<hash>/`, when that path is too long for a socket), owner-only (0600), never on TCP. `ghostly daemon status` prints its path as `socket`.
 One JSON object per line each way:
 
 ```json
@@ -99,9 +99,11 @@ One JSON object per line each way:
 A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
 connection.
 
-Every command's first line on the socket is a `daemon.hello` with a nonce, and nothing else goes until the answer
-proves, with the secret the daemon writes in the profile's folder (`daemon.secret`, 0600, new at every start), that
-it is the profile's daemon: on Windows the socket is a named pipe whose name another account could open first. What
+The daemon speaks first on the socket: a greeting that proves, with the secret it writes in the profile's folder
+(`daemon.secret`, 0600, new at every start), its pid and the time. A command writes nothing until that checks out,
+then a `daemon.hello` with a nonce, and nothing else until the answer proves the same over that nonce: on Windows the
+socket is a named pipe whose name another account could open first, and a privileged one could impersonate a client
+that writes to it. What
 cannot prove it is refused (`refused`); a daemon of an older release cannot either, and `ghostly daemon restart` stops
 it through the process that holds the profile and starts this release's.
 
@@ -127,15 +129,22 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
+- `--translate <lang>` (also on `events` and `chat history`) adds `translation: {from, text}` to a message a contact
+  or a member sent in another language, made on this machine by the translation runtime the Desktop downloads
+  (`translation-runtime/<version>/` and `translation-models/<from>-<to>/` in the data folder). Without the runtime it
+  says so once on stderr and prints messages as they are. See the CLI README's Translation section.
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
   arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
   cursor moves past its event: it is not run again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
+- A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
+  (`daemon stop`), it says so once on stderr and waits; it says again when a daemon answers, and goes on from the last
+  event it took.
 - A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
   ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
@@ -201,7 +210,7 @@ reactions, typing).
 
 | Area | Commands |
 |---|---|
-| Invites and chats | `invite create\|join` (`join` with no invite reads it from stdin), `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details`, `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here), `typing <chat> [--kind typing\|recording\|thinking] [--status <text>] [--for s] [--stop]` |
+| Invites and chats | `invite create\|join` (`join` with no invite reads it from stdin), `chat list\|show\|history\|wait\|rename\|remove\|verify`, `send` (argument or `--stdin`; `--reply <message>` quotes one), `edit <chat> <message>` (a status updated in place), `message retry\|delete\|details` (`delete --everyone` takes one of yours off every member's device too), `react <chat> <message> <emoji>` (`--remove` takes yours back), `forward <chat> <message>… --to <chat\|group>…` (up to 5; files from the bytes here), `typing <chat> [--kind typing\|recording\|thinking] [--status <text>] [--for s] [--stop]` |
 | Transports | `chat transport <chat> auto\|dht\|webrtc\|iroh\|hyperdht`, `chat connect\|disconnect`, `chat disconnect <chat> --hold <minutes>` (off the direct link that long, on the DHT; `settings online false` is the whole profile); relays and ICE servers with `settings set` (the CLI reaches TURN over UDP only: a `turns:` or `?transport=tcp` server is kept for the apps, unused here, and the answer says so) |
 | Files and voice | `file send <chat\|group> <path>` (to a group: up to 100 MiB, fetched by each member's app from a member who has it), `file send … --voice [ms]` (length and waveform measured from the file), `file send … --reply <message>` (quotes it), `file accept\|decline\|pause\|resume\|cancel\|resend\|request [<chat>] <file>` (a resent file goes on from what the receiver holds), `file wait <file>`, `file save <file> [--wait]`. Files over 25 MiB wait for `file accept`, and so does a group's file that did not come by itself (over 8 MiB). `message.received` carries the file (`id`, and a voice note's `duration` and `peaks`); `file.*` events name its `messageId` |
 | Contact links | `contact-link create\|show\|off` (one link per profile that names nobody, to post on a site), `requests list\|accept\|decline` (what it took: accept starts the chat, decline says nothing back) |
@@ -235,9 +244,10 @@ Safety rules the CLI enforces:
 - **Real money.** Wallets default to Testnet. A Mainnet spend needs `--network mainnet --confirm-real`; without the
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
 - **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
-  `chat request`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`,
-  `sendGroupFile` caption and payment memos of `sendPayment`, `requestPayment`, `requestGroupPayment` and `askToPay`
-  through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
+  `chat request`, the comment of `pay` to a Lightning address, and the engine's own `sendMessage`,
+  `sendGroupMessage`, `editMessage`, `forwardMessages`, `sendGroupFile` caption, payment memos of `sendPayment`,
+  `requestPayment`, `requestGroupPayment`, `askToPay` and `preparePayment`, `fedimintInvoice`'s memo and
+  `lnurlInvoice`'s comment through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
   unless `--force`.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
@@ -245,7 +255,9 @@ Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage),
 5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
 seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
-`details.method`). `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+`details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
+once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
+sent, so the daemon does not act on it when it wakes. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.
@@ -309,6 +321,9 @@ ghostly call auto on --from alice        # or: ghostly call answer alice, on eac
 ghostly listen --type call.              # call.connected carries {"audio":{"socket":…,"rate":48000,…}}
 ```
 
+A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
+text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup.
+
 The audio contract, one Unix socket per call:
 
 - **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
@@ -342,7 +357,9 @@ A private network or a test sets `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desk
 relays are then the only ones from the very first publish, the profile's `relays` setting is not used, and the DHT is
 left out unless `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on
 loopback) pins the Iroh relays the same way, `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` the HyperDHT's bootstrap nodes,
-and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. The CLI's own tests run with all of them on
+and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. `GHOSTLY_DHT`, `GHOSTLY_STUN`, `GHOSTLY_WEBRTC`
+and `GHOSTLY_HUB` take `0`/`false`/`off`/`no` or `1`/`true`/`on`/`yes`, in any case; any other value is a usage error
+(exit 2) naming the variable, never a switch left on. The CLI's own tests run with all of them on
 loopback or nowhere (`packages/cli/test/support/network.ts`); `GHOSTLY_TEST_PUBLIC_NET=1` lets a run reach the public
 networks. A new profile publishes within seconds of its first run,
 so without the variable, set `relays` before the first `daemon`

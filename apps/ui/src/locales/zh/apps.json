@@ -37,6 +37,7 @@
     "ask": "向 {{name}} 要一个链接",
     "contactCannot": "{{name}} 的应用还不能运行小应用",
     "installed": "已安装",
+    "join": "加入",
     "label": "应用：{{title}}",
     "needsOnline": "{{title}} 需要你们都在线",
     "noLink": "没有可安装的链接",
@@ -162,9 +163,12 @@
     "beside": "显示聊天",
     "full": "全宽",
     "resume": "返回 {{title}}",
+    "resumeSharing": "正在共享文件",
+    "sharingWith": "正在与 {{name}} 共享文件",
     "stoppedRemoved": "{{title}} 已停止：{{store}} 移除了此版本",
     "stoppedRevoked": "{{title}} 已停止：其作者撤销了此版本",
     "with": "与 {{name}} 的 {{title}}",
-    "withName": "与 {{name}}"
+    "withName": "与 {{name}}",
+    "withSharing": "{{title}} · 正在与 {{name}} 共享文件"
   }
 }

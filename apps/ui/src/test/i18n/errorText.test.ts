@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
+import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemText } from "../../lib/problemText";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -135,6 +136,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not from Android's main thread", "apps/desktop/src/android.rs"],
   ["Ghostly is starting…", `${BROWSER}/platform/engine.ts`],
   ["Lost the Ghostly peer", `${BROWSER}/platform/engine.ts`],
+  ["This device has no room left to save this", `${BROWSER}/shared/idb.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],
   ["Ghostly needs your permission to reach that local address", `${BROWSER}/platform/services.ts`],
   ["Pick a Lightning card first", `${BROWSER}/platform/services.ts`],
@@ -162,6 +164,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: This device has no space left for the file", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
+  ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
+  // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
+  ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
+  ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
   // A file forwarded that is still arriving here, or whose bytes are gone (a copy of mine that failed, "Not sent").
   ["The file has not arrived yet", `${BROWSER}/engine/forwards.ts`],
@@ -452,6 +460,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
+  ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
+  ["Hide my IP from contacts needs a TURN server. Turn it off first", `${BROWSER}/engine/node.ts`],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
@@ -497,6 +507,19 @@ describe("errors in the app's language", () => {
     expect(errorText("Could not create the Mainnet Cashu wallet: Could not reach mint.example. Check the address: it should be a Cashu mint. Nothing was saved; try again.", pt))
       .toBe("Não foi possível criar a carteira Mainnet Cashu. Sem acesso a mint.example. Confira o endereço: deve ser um mint Cashu. Nada foi salvo. Tente de novo.");
     expect(errorText("Could not connect to BDK: the Esplora server at esplora.example did not answer in 10 s", pt)).toBe("Não foi possível conectar a BDK. O servidor Esplora em esplora.example não respondeu em 10 s");
+  });
+
+  // agents#1593: the members a group waits on were pasted as the engine listed them, in English, in every language.
+  it("the members a group waits on to grow past 8 are listed in the language: unnamed ones, the list, and how many more", () => {
+    const text = "A group grows past 8 only when everyone is on an updated Ghostly. Not seen updated yet: Ana, Bruno, Member q5zt8m3x and 2 more.";
+    const pt = errorText(text, translators.pt), ja = errorText(text, translators.ja), en = errorText(text, english);
+    expect(pt).toContain("Ana, Bruno, Membro q5zt8m3x e mais 2");
+    expect(ja).toContain("他 2 人");
+    expect(ja).not.toContain("Member");
+    for (const said of [pt, ja]) expect(said).not.toMatch(/ and \d+ more/);
+    expect(en).toContain("Ana, Bruno, Member q5zt8m3x, and 2 more");
+    // Fewer than four: no tail, and one name alone is just that name.
+    expect(errorText("A group grows past 8 only when everyone is on an updated Ghostly. Not seen updated yet: Member abcdefgh.", translators.fr)).toContain("Membre abcdefgh");
   });
 
   it("a paste the app's clipboard refused says what to do next, in the language", () => {
@@ -549,6 +572,21 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
   });
 
+  it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-in-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    // As fileDesk.ts `withdrawn` keeps it: failed, with no direction.
+    const bubble = (error: string) => {
+      const transfer = { state: "failed", transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("No room on this device for this file")).toEqual({ status: t("errors.files.noRoomHere"), info: { text: t("errors.files.floor.noRoomNext") } });
+    expect(bubble("Too many files are waiting here")).toEqual({ status: t("errors.files.floor.tooMany"), info: { text: t("errors.files.floor.tooManyNext") } });
+    expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
   it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
     const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
     expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
@@ -567,6 +605,12 @@ describe("errors in the app's language", () => {
     const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
     expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
+  });
+
+  it("a write the device had no room for says so and that nothing was saved, in the language, not an empty error", () => {
+    const full = Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError" });
+    expect(knownErrorParts(full, english)).toEqual({ title: "No room left on this device", next: "Nothing was saved. Free some space, then try again." });
+    expect(knownErrorParts(full, translators.pt)).toEqual({ title: "Não há mais espaço neste dispositivo", next: "Nada foi salvo. Libere espaço e tente de novo." });
   });
 
   it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {
@@ -651,6 +695,11 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText(new Error("The fee exceeds your limit"), pt)).toBe("A taxa passa do seu limite");
     expect(errorText("Error: Unknown payment intent", pt)).toBe("Pagamento desconhecido");
     expect(errorText("Outcome unknown. Check the existing payment; do not send another.", translators.fr)).toContain("Résultat inconnu");
+  });
+
+  it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {
+    expect(errorText("Your contact has no wallet yet: they need one to pay or be paid", translators.pt)).toBe("Seu contato ainda não tem carteira");
+    expect(errorText("Your contact has payments off in this chat, or needs an updated Ghostly", english)).toBe(english("chat.payments.offOrOld"));
   });
 
   it("the values stay, and amounts are written the app's way", () => {

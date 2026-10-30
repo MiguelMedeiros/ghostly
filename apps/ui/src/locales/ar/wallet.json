@@ -59,6 +59,7 @@
     },
     "label": "نسخة احتياطية مطلوبة",
     "later": "لاحقًا",
+    "line": "انسخ محفظة {{wallet}} احتياطيًا",
     "title": "لديك أموال حقيقية في {{wallet}}"
   },
   "bark": {
@@ -201,6 +202,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "انتهت صلاحية هذه الفاتورة: لا يمكن لأحد دفعها الآن.",
     "invoiceFor": "فاتورة بمبلغ {{amount}}",
     "makePrimary": "اجعلها الرئيسية",
     "mints": "دور السك",
@@ -585,6 +587,17 @@
     "mainnet": "sats",
     "testnet": "sats تجريبية"
   },
+  "send": {
+    "balance": "الرصيد: {{amount}} {{unit}}",
+    "cameraUnavailable": "الكاميرا غير متاحة. الصق أو اكتب أو اختر صورة.",
+    "clipboardEmpty": "لا شيء للصق. انسخ فاتورة أو عنوانًا أولًا.",
+    "clipboardUnavailable": "تعذرت قراءة الحافظة. الصقه أو اكتبه في الأسفل.",
+    "image": "اختر صورة",
+    "max": "الحد الأقصى",
+    "noAmount": "هذه الفاتورة بلا مبلغ. اطلب واحدة بالمبلغ.",
+    "paste": "لصق",
+    "scan": "مسح"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "جارٍ إنشاء محافظ Mainnet الخاصة بك…",
@@ -753,6 +766,8 @@
     "send": "إرسال"
   },
   "unseen": {
+    "lineReal": "{{amount}} ساتوشي جديدة في {{wallet}}",
+    "lineTest": "{{amount}} ساتوشي تجريبية جديدة في {{wallet}}",
     "real": "{{place}}، {{amount}} sats جديدة",
     "test": "{{place}}، {{amount}} sats تجريبية جديدة"
   },

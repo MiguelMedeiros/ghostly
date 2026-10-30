@@ -97,6 +97,12 @@ export interface CallMedia {
   /** Why the screen cannot be shared, where it cannot: the call window shows it on the share button, turned off. */
   screenUnavailable?: string;
   /**
+   * Its connections keep to the configuration's relay policy (`iceTransportPolicy: "relay"`): they gather and use
+   * only the TURN server's candidates, so a contact never learns this device's address. The browser's own media
+   * does; a stand-in that does not say so is not used for a call while "Hide my IP from contacts" is on.
+   */
+  keepsToRelays?: boolean;
+  /**
    * `getUserMedia` captures from the `deviceId` asked for, and `replaceTrack` on the audio sender switches the
    * microphone: the profile's devices and the call's device menu work as with the browser's own media.
    */
@@ -111,6 +117,11 @@ export function decompressSdp(compressed: string): string {
   return atob(compressed);
 }
 
+/**
+ * The apps' STUN servers. No candidate pool: a call's connection is made when the call is placed and its offer follows
+ * at once, so pre-gathered sessions save no time, and each one opens its own sockets, asks every STUN server and takes
+ * its own TURN allocation (a TURN server's per-user quota then refuses the call's own).
+ */
 export const RTC_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -119,7 +130,6 @@ export const RTC_CONFIG: RTCConfiguration = {
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
   ],
-  iceCandidatePoolSize: 10,
 };
 
 /** An ICE server as a profile's settings keep it: one or more URLs in `urls` (space or comma separated). */
@@ -129,18 +139,37 @@ export interface CallIceServer { urls: string | string[]; username?: string; cre
  * A call's WebRTC configuration: the apps' STUN servers, then the profile's own (Settings → Network → ICE
  * servers: a TURN relay, typically). A relay is what connects a call when no direct path works: a VPN that takes
  * every packet through its tunnel, or a NAT that maps each destination apart.
+ *
+ * `relayOnly` ("Hide my IP from contacts", WISP 100 § Relay only): the profile's TURN servers alone, no STUN server
+ * (the apps' or the profile's), and the relay policy, so the connection gathers and uses relay candidates only. With
+ * no usable TURN server it has no server at all, and finds no candidate: it fails, it never goes direct.
  */
-export function callRtcConfig(extra: readonly CallIceServer[] = []): RTCConfiguration {
+export function callRtcConfig(extra: readonly CallIceServer[] = [], { relayOnly = false }: { relayOnly?: boolean } = {}): RTCConfiguration {
   const servers: RTCIceServer[] = [];
   for (const server of extra) {
-    const urls = (Array.isArray(server.urls) ? server.urls : server.urls.split(/[\s,]+/)).filter(Boolean);
+    const urls = (Array.isArray(server.urls) ? server.urls : server.urls.split(/[\s,]+/)).filter(Boolean)
+      .filter((url) => !relayOnly || /^turns?:/i.test(url));
     if (!urls.length) continue;
     // A TURN server without its username and credential (a profile restored from a backup, which leaves the
     // credential out) is skipped: a browser refuses to make any connection with one in its list.
     if (urls.some((url) => /^turns?:/i.test(url)) && (!server.username?.trim() || !server.credential?.trim())) continue;
     servers.push({ urls, ...(server.username ? { username: server.username } : {}), ...(server.credential ? { credential: server.credential } : {}) });
   }
+  if (relayOnly) return { ...RTC_CONFIG, iceServers: servers, iceTransportPolicy: "relay" };
   return { ...RTC_CONFIG, iceServers: [...(RTC_CONFIG.iceServers ?? []), ...servers] };
+}
+
+/**
+ * The WebRTC configuration of a chat's data link or a group's edge, from the profile's settings: its ICE servers,
+ * and "Hide my IP from contacts" (`relayOnly`), as a call's (`callRtcConfig`).
+ */
+export function contactRtcConfig(settings: { iceServers?: readonly CallIceServer[]; relayOnly?: boolean }): RTCConfiguration {
+  return callRtcConfig(settings.iceServers ?? [], { relayOnly: settings.relayOnly === true });
+}
+
+/** Whether a connection keeps to relays (`iceTransportPolicy: "relay"`): what it sends a contact is then relay candidates only. */
+export function keepsToRelays(pc: Pick<RTCPeerConnection, "getConfiguration"> | null | undefined): boolean {
+  return pc?.getConfiguration?.().iceTransportPolicy === "relay";
 }
 
 /**
@@ -164,11 +193,14 @@ export const PAIRED_CALL_CANDIDATES = 8;
  *
  * UDP only, loopback, link-local and unspecified addresses left out (loopback kept with `loopback`), the related
  * address dropped (it is informational, and an IPv6 one broke apps before 0.5).
+ *
+ * `relayOnly` ("Hide my IP from contacts"): relay candidates alone, whatever else the connection gathered. A relay
+ * candidate's address is the TURN server's; its related address, dropped as every one is, would be this device's.
  */
-export function pickCallCandidates(candidates: readonly string[], max = PAIRED_CALL_CANDIDATES, { loopback = false } = {}): string[] {
-  const udp = candidates.map((c) => c.trim()).filter((c) => / udp /i.test(c));
-  const address = (c: string) => c.split(" ")[4] ?? "";
+export function pickCallCandidates(candidates: readonly string[], max = PAIRED_CALL_CANDIDATES, { loopback = false, relayOnly = false } = {}): string[] {
   const type = (c: string) => / typ (\S+)/.exec(c)?.[1];
+  const udp = candidates.map((c) => c.trim()).filter((c) => / udp /i.test(c) && (!relayOnly || type(c) === "relay"));
+  const address = (c: string) => c.split(" ")[4] ?? "";
   const cost = (c: string) => Number(/ network-cost (\d+)/.exec(c)?.[1] ?? 0);
   const ipv6 = (c: string) => address(c).includes(":");
   const usable = (c: string) => {
@@ -194,9 +226,10 @@ export function pickCallCandidates(candidates: readonly string[], max = PAIRED_C
 /**
  * The parameters of a call signal, from an SDP. `maxCandidates` above two (a signal on the chat session) carries
  * the candidates `pickCallCandidates` chooses; the default keeps a compatibility chat's one host and one server
- * reflexive candidate.
+ * reflexive candidate. `relayOnly` ("Hide my IP from contacts"): relay candidates only, in either; a compatibility
+ * chat's two then go to the first two relay ones.
  */
-export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback = false }: { maxCandidates?: number; loopback?: boolean } = {}): Partial<CallSignal> {
+export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback = false, relayOnly = false }: { maxCandidates?: number; loopback?: boolean; relayOnly?: boolean } = {}): Partial<CallSignal> {
   const lines = sdp.split("\r\n");
 
   let ufrag = "";
@@ -261,12 +294,13 @@ export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback 
   const hostCandidates = candidates.filter(c => / typ host( |$)/.test(c) && / udp /i.test(c));
   // Include 1 host candidate (for local connections) and 1 srflx (for remote)
   // Keep packet size under 1000 bytes DHT limit
-  // An IPv6 related address (`raddr ::`, WebKit's IPv6 srflx) made apps before 0.5 refuse the whole signal:
-  // the related address is informational, so it is left out.
-  const selectedCandidates = maxCandidates > 2 ? pickCallCandidates(candidates, maxCandidates, { loopback }) : [
+  // The related address is informational and names an interface of the sender's (webrtc-rs gives its LAN address),
+  // so it is left out, IPv4 too; an IPv6 one (`raddr ::`, WebKit's IPv6 srflx) also made apps before 0.5 refuse the
+  // whole signal.
+  const selectedCandidates = maxCandidates > 2 || relayOnly ? pickCallCandidates(candidates, maxCandidates, { loopback, relayOnly }) : [
     ...hostCandidates.slice(0, 1),
     ...srflxCandidates.slice(0, 1),
-  ].map(c => c.replace(/ raddr \S*:\S* rport \d+/, ""));
+  ].map(c => c.replace(/ raddr \S+ rport \d+/, ""));
   
   const ssrcs: number[] = [];
   if (audioSsrc !== null) ssrcs.push(audioSsrc);

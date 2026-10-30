@@ -59,6 +59,7 @@
     },
     "label": "backup da fare",
     "later": "Più tardi",
+    "line": "Fai il backup del portafoglio {{wallet}}",
     "title": "Hai denaro reale in {{wallet}}"
   },
   "bark": {
@@ -201,6 +202,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "Questa fattura è scaduta: ora nessuno può pagarla.",
     "invoiceFor": "Fattura di {{amount}}",
     "makePrimary": "Rendi principale",
     "mints": "Mint",
@@ -585,6 +587,17 @@
     "mainnet": "sats",
     "testnet": "sats di prova"
   },
+  "send": {
+    "balance": "Saldo: {{amount}} {{unit}}",
+    "cameraUnavailable": "Fotocamera non disponibile. Incolla, scrivi o scegli un'immagine.",
+    "clipboardEmpty": "Niente da incollare. Copia prima una fattura o un indirizzo.",
+    "clipboardUnavailable": "Impossibile leggere gli appunti. Incolla o scrivi qui sotto.",
+    "image": "Scegli immagine",
+    "max": "Max",
+    "noAmount": "Questa fattura non ha un importo. Chiedine una con l'importo.",
+    "paste": "Incolla",
+    "scan": "Scansiona"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Creo i tuoi portafogli Mainnet…",
@@ -753,6 +766,8 @@
     "send": "Invia"
   },
   "unseen": {
+    "lineReal": "{{amount}} nuovi sats in {{wallet}}",
+    "lineTest": "{{amount}} nuovi sats di test in {{wallet}}",
     "real": "{{place}}, {{amount}} nuovi sats",
     "test": "{{place}}, {{amount}} nuovi sats di prova"
   },
