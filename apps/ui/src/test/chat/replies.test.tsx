@@ -40,6 +40,14 @@ describe("starting a reply on a message", () => {
     expect(onReply).toHaveBeenCalledTimes(2);
   });
 
+  it("its ⋮ and the Reply beside it reach 24 × 24 px for a finger, without moving the row", () => {
+    renderApp(<MessageBubble message={message()} peerPubKey="peer" onReply={vi.fn()} />);
+    // 14 px of glyph plus p-1 is 22 px; a 1 px pseudo-element all round makes 24 and stays inside the row's 4 px gap.
+    for (const id of ["message-options", "message-reply-action"]) {
+      expect(screen.getByTestId(id).className.split(/\s+/)).toEqual(expect.arrayContaining(["p-1", "relative", "before:absolute", "before:-inset-px", "before:content-['']"]));
+    }
+  });
+
   it("a finger swiping it right past the threshold replies; a short, a vertical or a mouse drag does not", () => {
     const onReply = vi.fn();
     const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReply={onReply} />);
