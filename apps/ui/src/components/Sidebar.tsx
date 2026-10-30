@@ -54,6 +54,8 @@ import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
 import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
+import { RAIL_WIDTH, RailChat, RailGroup, RailToggle } from "./ChatRail";
+import { useRailShortcut } from "../hooks/useRailShortcut";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -100,9 +102,28 @@ export function Sidebar() {
   const headerRef = useRef<HTMLDivElement>(null), brandRef = useRef<HTMLDivElement>(null), actionsRef = useRef<HTMLDivElement>(null);
   const labelsFit = useLabelsFit(headerRef, brandRef, actionsRef, language);
   const isMobile = useIsMobile();
-  const density = useSettings().settings.chatListDensity;
+  const { settings: { chatListDensity: density, chatListCollapsed }, updateChatListCollapsed } = useSettings();
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [search, setSearch] = useState("");
+  // Folded to a rail of pictures, where there is a side list; a phone's list is the whole screen and never folds.
+  const collapsed = !isMobile && chatListCollapsed;
+  const sidebarRef = useRef<HTMLDivElement>(null), toggleRef = useRef<HTMLButtonElement>(null);
+  // The button that folded or unfolded the list goes with it: the focus goes to the one that takes its place (in the
+  // header, or at the top of the rail). A shortcut pressed elsewhere (the message field) leaves the focus where it is.
+  const refocus = useRef(false);
+  const toggleCollapsed = useCallback(() => {
+    const focused = document.activeElement;
+    refocus.current = !focused || focused === document.body || !!sidebarRef.current?.contains(focused);
+    // The rail has no search: it shows every chat, and the list unfolds as it was before a search.
+    setSearch("");
+    updateChatListCollapsed(!chatListCollapsed);
+  }, [chatListCollapsed, updateChatListCollapsed]);
+  useRailShortcut(!isMobile, toggleCollapsed);
+  useEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    toggleRef.current?.focus();
+  }, [collapsed]);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -281,17 +302,22 @@ export function Sidebar() {
   /** A part of the list a dragged row would go to is marked while the row is over it. */
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
 
+  const openGroup = (id: string) => { nav.conversation(groupPath(id)); setConfirmDeleteId(null); };
+  const openChat = (id: string) => { markSessionAsRead(id); nav.conversation(chatPath(id)); setConfirmDeleteId(null); };
   const groupRow = (group: (typeof groups)[number]) => (
-    <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => { nav.conversation(groupPath(group.id)); setConfirmDeleteId(null); }}
+    <GroupRow key={group.id} group={group} density={density} active={activeGroupId === group.id} onOpen={() => openGroup(group.id)}
       drag={movable.includes(groupChat(group.id)) ? { props: reorder.rowProps(groupChat(group.id)), dragging: reorder.dragging === groupChat(group.id), drop: reorder.drop?.id === groupChat(group.id) ? reorder.drop.edge : undefined } : undefined} />
   );
+  /** The identity a chat's contact is shown as, and the name it goes by in the list (and on the rail). */
+  const chatName = (session: ChatSession) => {
+    const face = faceOf(session.peerPubKeyB64);
+    return { face, shown: shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) }) };
+  };
   const chatRow = (session: ChatSession) => {
     const lastMsg = session.messages[session.messages.length - 1];
-    const path = chatPath(session.id);
     const isActive = activeSessionId === session.id;
 
-    const face = faceOf(session.peerPubKeyB64);
-    const shown = shownContactName({ nickname: session.label, face, nick: session.nick, fallback: t("common.unnamedContact", { key: contactTag(session.peerPubKeyB64) }) });
+    const { face, shown } = chatName(session);
     const peerKey = publicKeyLabel(session.peerPubKeyB64);
     const isAnonymous = shown.from === "key";
     const peerLabel = shown.name;
@@ -317,7 +343,7 @@ export function Sidebar() {
         pinned={isSessionPinned(session.id)}
         syncing={syncingSessions.has(session.id)}
         creator={isCreator}
-        onOpen={() => { markSessionAsRead(session.id); nav.conversation(path); setConfirmDeleteId(null); }}
+        onOpen={() => openChat(session.id)}
         onTogglePin={() => setSessionPinned(session.id, !isSessionPinned(session.id))}
         onDelete={(e) => handleDelete(session.id, e)}
         deleteLabel={t("sidebar.deleteChat")}
@@ -330,17 +356,41 @@ export function Sidebar() {
     );
   };
 
+  // The rail: every chat and group in the list's order, the folders' ones first, as the list has them unfolded (a rail
+  // has no folder headings to unfold them from).
+  const railRows: PartRow[] = !collapsed ? [] : byFolders
+    ? [...shownFolders.flatMap(folder => folderRows.get(folder.id) ?? []), ...looseGroups.filter(invitationRow).map(group => ({ key: groupChat(group.id), group })), ...looseRows]
+    : [...looseGroups.map(group => ({ key: groupChat(group.id), group })), ...loose.map(session => ({ key: session.id, session }))];
+  const railItem = ({ key, group, session }: PartRow) => {
+    if (group) return <RailGroup key={key} group={group} active={activeGroupId === group.id} onOpen={() => openGroup(group.id)} />;
+    const { face, shown } = chatName(session!);
+    const active = activeSessionId === session!.id;
+    return <RailChat key={key} chatId={session!.id} name={shown.name} named={shown.from !== "key"} peerPubKey={session!.peerPubKeyB64} photo={face?.photo}
+      unread={active ? 0 : getUnreadCount(session!)} active={active} onOpen={() => openChat(session!.id)} />;
+  };
+
   return (
     <div
+      ref={sidebarRef}
       data-testid="sidebar"
-      className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : "sidebar-desktop border-e border-border shrink-0"}`}
-      style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
+      data-collapsed={collapsed || undefined}
+      className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : collapsed ? "border-e border-border shrink-0" : "sidebar-desktop border-e border-border shrink-0"}`}
+      style={isMobile ? undefined : collapsed ? { width: RAIL_WIDTH } : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       <PinMoveNote text={moveNote} />
+      {collapsed ? <>
+        <div className="h-14 header-safe shrink-0 flex items-center justify-center bg-panel-header">
+          <RailToggle ref={toggleRef} collapsed onToggle={toggleCollapsed} />
+        </div>
+        <nav aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
+          {listReady && railRows.map(railItem)}
+        </nav>
+      </> : <>
       {/* Header */}
       <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
-        <div ref={actionsRef} className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
+        <div ref={actionsRef} className="flex shrink-0 items-center gap-1">
+        <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
             <button onClick={() => void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {})} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
@@ -364,6 +414,9 @@ export function Sidebar() {
           </div>
           <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H9l-5 3v-6 M2 12h12 M10 8l4 4-4 4"/></svg><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
         </div>
+        {/* A wide window folds the list to a rail of pictures, for more room for the open chat. */}
+        {!isMobile && <RailToggle ref={toggleRef} collapsed={false} onToggle={toggleCollapsed} />}
+        </div>
       </div>
       <UpdateBanner />
       <OfflineBanner />
@@ -371,11 +424,6 @@ export function Sidebar() {
       <LimitedBanner />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
       <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />
-      {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
-      {showNewFolder && <FolderNameDialog returnFocus={newMoreRef} onClose={() => setShowNewFolder(false)} onSave={name => { createFolder(name); setShowNewFolder(false); setSearch(""); }} />}
-      {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {const id = ensureSession(keys); setShowNewChat(false); nav.conversation(chatPath(id)); refreshSessions();}}
-        onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
-        onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
 
       {/* Search */}
       <div className="px-3 py-2 bg-sidebar-bg">
@@ -472,19 +520,26 @@ export function Sidebar() {
         )}
         </>}
       </div>
+      </>}
 
+      {/* Out of the list's branches: the installed app's #/new and #/scan open them on the rail too. */}
+      {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
+      {showNewFolder && <FolderNameDialog returnFocus={newMoreRef} onClose={() => setShowNewFolder(false)} onSave={name => { createFolder(name); setShowNewFolder(false); setSearch(""); }} />}
+      {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {const id = ensureSession(keys); setShowNewChat(false); nav.conversation(chatPath(id)); refreshSessions();}}
+        onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
+        onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
         onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
-      {!isMobile && <AccountBar />}
+      {!isMobile && <AccountBar rail={collapsed} />}
 
       {/* Resize Handle */}
-      <div
+      {!collapsed && <div
         data-testid="sidebar-resize"
         onMouseDown={handleResizeStart}
         className="max-md:hidden absolute top-0 end-0 w-1 h-full cursor-col-resize z-10 hover:bg-accent/40 active:bg-accent/60 transition-colors"
-      />
+      />}
     </div>
   );
 }

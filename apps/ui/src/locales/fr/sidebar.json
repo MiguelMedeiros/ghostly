@@ -54,6 +54,14 @@
   "pinned": "Épinglée",
   "quiet": "C'est calme ici...",
   "quietHint": "L'heure de hanter quelqu'un ! 👻",
+  "rail": {
+    "collapse": "Replier la liste des discussions",
+    "expand": "Déplier la liste des discussions",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, messages non lus",
+    "unreadCount": "{{name}}, {{count}} messages non lus",
+    "unreadOne": "{{name}}, 1 message non lu"
+  },
   "searchPlaceholder": "Rechercher...",
   "settings": "Paramètres",
   "sharedIdentity": "A partagé une identité",

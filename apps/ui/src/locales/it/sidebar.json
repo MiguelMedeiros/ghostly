@@ -54,6 +54,14 @@
   "pinned": "Fissata",
   "quiet": "C'è silenzio qui...",
   "quietHint": "È ora di infestare qualcuno! 👻",
+  "rail": {
+    "collapse": "Comprimi l'elenco chat",
+    "expand": "Espandi l'elenco chat",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, messaggi non letti",
+    "unreadCount": "{{name}}, {{count}} messaggi non letti",
+    "unreadOne": "{{name}}, 1 messaggio non letto"
+  },
   "searchPlaceholder": "Cerca chat...",
   "settings": "Impostazioni",
   "sharedIdentity": "Ha condiviso un'identità",

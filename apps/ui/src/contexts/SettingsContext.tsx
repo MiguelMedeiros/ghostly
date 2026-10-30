@@ -33,6 +33,7 @@ interface SettingsContextValue {
   updateDefaultNickname: (nickname: string) => void;
   updateReduceMotion: (reduce: boolean) => void;
   updateChatListDensity: (density: ChatListDensity) => void;
+  updateChatListCollapsed: (collapsed: boolean) => void;
   updateCheckForUpdates: (check: boolean) => void;
   updateLinkPreviews: (on: boolean) => void;
   updateTranslateMessages: (on: boolean) => void;
@@ -103,6 +104,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, chatListDensity }));
   }, []);
 
+  const updateChatListCollapsed = useCallback((chatListCollapsed: boolean) => {
+    setSettings((prev) => ({ ...prev, chatListCollapsed }));
+  }, []);
+
   const updateCheckForUpdates = useCallback((check: boolean) => {
     setSettings((prev) => ({ ...prev, checkForUpdates: check }));
   }, []);
@@ -151,6 +156,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateDefaultNickname,
         updateReduceMotion,
         updateChatListDensity,
+        updateChatListCollapsed,
         updateCheckForUpdates,
         updateLinkPreviews,
         updateTranslateMessages,
