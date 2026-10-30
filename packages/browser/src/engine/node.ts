@@ -8246,7 +8246,7 @@ export class GhostlyNode implements EngineImplementation {
   /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
   private async rehomeIroh(): Promise<void> {
     if (!this.options.irohWeb && !this.ownIrohRelays) return;
-    this.deviceLinks?.nativeChanged();
+    this.deviceLinks?.nativeChanged(["iroh/1"]);
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("iroh/1") || !link.canReleaseEndpoint("iroh/1")) continue;
@@ -8291,8 +8291,8 @@ export class GhostlyNode implements EngineImplementation {
   /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */
   private async relayChanged(): Promise<void> {
     if (!this.relaysHyperdht) return;
-    // A device link offers HyperDHT through the new relay too, where it runs native endpoints.
-    this.deviceLinks?.nativeChanged();
+    // A device link moves its HyperDHT to the new relay too (or lets it go), where it runs native endpoints.
+    this.deviceLinks?.nativeChanged(["hyperdht/1"]);
     for (const [linkId, live] of this.links) {
       const link = live.link;
       if (!link?.availableTransports.includes("hyperdht/1")) {
