@@ -189,6 +189,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Ecash from mint.example is not accepted", `${BROWSER}/engine/wallet.ts`, " is not accepted"],
   ["Add a mint in Settings first", `${BROWSER}/engine/wallet.ts`],
   ["Not enough sats in your wallet", CODES],
+  ["Not enough sats in your wallet: 690 sats leave room for the fee", CODES, ": {amount} sats leave room for the fee"],
   ["The Lightning payment did not go through. The sats are back in your wallet.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet."],
   ["The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet, less "],
   // Never alone: the start of the two above, said on its own before what came back.
