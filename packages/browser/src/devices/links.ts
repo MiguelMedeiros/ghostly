@@ -214,6 +214,10 @@ interface Running {
   nativeRetry?: ReturnType<typeof setTimeout>;
   /** Starts that left a transport missing since the last one that left none: the wait before the next doubles. */
   nativeMisses: number;
+  /** This link runs without WebRTC, which connected nothing between the two devices (`withoutRtc`). For this run only. */
+  rtcOff: boolean;
+  /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so. */
+  rtcWait?: ReturnType<typeof setTimeout>;
   waiting: Map<string, { resolve(ms: number): void; reject(error: Error): void; sentAt: number; timer: ReturnType<typeof setTimeout> }>;
 }
 
@@ -230,6 +234,8 @@ export type NativeFactories = Partial<Record<NativeTransport, (seedB64: string) 
  */
 export const NATIVE_RETRY_MS = 10_000;
 export const NATIVE_RETRY_MAX_MS = 120_000;
+/** The other device is there and no session opened over WebRTC in this long: the link goes on without it (`withoutRtc`). */
+export const DEVICE_RTC_MS = 20_000;
 
 /** How often a standby reads the turn while its screen shows (WISP 06 § When a device checks), and the jitter on it. */
 export const STANDBY_TURN_EVERY_MS = 10 * 60_000;
@@ -420,10 +426,10 @@ export class DeviceLinks implements DeviceLinkEngine {
     return wanted;
   }
 
-  private open(want: Wanted): void {
+  private open(want: Wanted, rtcOff = false): void {
     const signer = this.key!;
-    const rtc = !!this.createPeerConnection;
-    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, starting: new Set(), moved: new Set(), nativeMisses: 0, waiting: new Map() };
+    const rtc = !!this.createPeerConnection && !rtcOff;
+    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, starting: new Set(), moved: new Set(), nativeMisses: 0, rtcOff, waiting: new Map() };
     running.link = new GhostLink({
       ...deviceLinkPairing(want.d, signer, fromBase64Url(want.key)),
       deviceCapabilities: [DEVICES_CAPABILITY, HANDOFF_CAPABILITY],
@@ -459,6 +465,7 @@ export class DeviceLinks implements DeviceLinkEngine {
           this.changed();
         },
         onDataLinkState: (state) => {
+          if (state === "open" && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
           if (state !== "open") {
             running.agreed = false; this.failPings(running, "The device link closed");
             if (running.handoff) { running.handoff = false; if (!running.earlier) this.handoffLink(running.key, false); }
@@ -467,6 +474,16 @@ export class DeviceLinks implements DeviceLinkEngine {
           this.changed();
         },
         onDeviceFrame: (frame) => this.receive(running, frame),
+        // What a WebRTC attempt said: no direct path between the two devices (`withoutRtc`).
+        onRtcStalled: () => this.withoutRtc(running),
+        onDirectEvidence: (evidence) => { if (evidence !== "open" && evidence !== "closed") this.withoutRtc(running); },
+        onAnswersRefused: () => this.withoutRtc(running),
+        // The other device is there and no session opens by `DEVICE_RTC_MS`: the side that answers may hear nothing of
+        // an attempt that failed (it waits out its 90 s).
+        onPresence: (presence) => {
+          if (!presence.online || running.rtcOff || running.rtcWait || running.link.isDataLinkOpen) return;
+          running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running); }, DEVICE_RTC_MS);
+        },
         // The other device has no WebRTC: this one starts its native endpoints for it.
         onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
         // An endpoint went away (its relay closed the connection): it is started again in a while.
@@ -782,11 +799,37 @@ export class DeviceLinks implements DeviceLinkEngine {
     for (const [nonce, waiter] of running.waiting) { running.waiting.delete(nonce); clearTimeout(waiter.timer); waiter.reject(new Error(why)); }
   }
 
-  private async close(running: Running): Promise<void> {
+  /** `announce`: the link says goodbye (false where another link on the same keys takes its place at once). */
+  private async close(running: Running, announce = true): Promise<void> {
     if (running.nativeRetry) { clearTimeout(running.nativeRetry); running.nativeRetry = undefined; }
+    if (running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
     this.failPings(running, "The device link closed");
     running.agreed = false;
-    await running.link.stop().catch(() => {});
+    await running.link.stop(announce).catch(() => {});
+  }
+
+  /**
+   * WebRTC on both devices that connects nothing (two browsers whose host candidates the other does not resolve, a
+   * router that does not hairpin, no TURN): neither packet says it has no WebRTC, so neither device starts a native
+   * endpoint, and the link never went live. It starts again as on an app with no WebRTC, for this run, as a group's edge
+   * does (node.ts `edgeWithoutRtc`): its native endpoints run and its packet lists no `webrtc/1`, the other device starts
+   * its own for it as for a Linux Desktop, and the two meet over Iroh's relay. Only with no session open, and only
+   * where this app has a native transport to go on with.
+   */
+  private withoutRtc(running: Running): void {
+    // A link that runs its native endpoints already (the other device has no WebRTC) has nothing more to go on with.
+    if (this.stopped || running.rtcOff || running.native || !this.createPeerConnection || running.link.isDataLinkOpen) return;
+    if (!Object.values(this.nativeFactories()).some(Boolean)) return;
+    const run = this.queue.catch(() => {}).then(async () => {
+      if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
+      this.running.delete(running.id);
+      // Nothing said: the new link on the same keys is there at once, and a goodbye would tell the other device it went.
+      await this.close(running, false);
+      if (this.stopped) return;
+      this.open({ id: running.id, d: fromBase64Url(running.d), key: running.key, name: running.name, slot: running.slot, earlier: running.earlier }, true);
+      this.changed();
+    });
+    this.queue = run;
   }
 
   private find(key: string): Running | undefined {
