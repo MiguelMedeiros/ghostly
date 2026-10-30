@@ -1161,7 +1161,12 @@ export class GhostlyNode implements EngineImplementation {
       await db.updateDelivery(linkId, messageId, state, error);
       await this.noteHold(linkId, messageId, state, error);
       const message = await db.getMessage(linkId, messageId);
-      if (message?.file) this.transfers.set(message.file.id, state === "failed" ? { state: "failed", transferred: 0, size: message.file.size, error } : { state: "done", transferred: message.file.size, size: message.file.size });
+      if (message?.file) {
+        const transfer = state === "failed" ? { state: "failed" as const, transferred: 0, size: message.file.size, error } : { state: "done" as const, transferred: message.file.size, size: message.file.size };
+        this.transfers.set(message.file.id, transfer);
+        // Its record too: it still says the "transferring" the app wrote when the file was picked, read at the next start.
+        await fileStore.updateTransfer(message.file.id, transfer).catch(() => {});
+      }
       if (message && state !== "failed") this.messageFeedback("sent", message);
       await this.messagesChanged(linkId, [messageId]);
       this.emitState();
@@ -1991,10 +1996,12 @@ export class GhostlyNode implements EngineImplementation {
       const messages = await db.getMessages(stored.id);
       const storedFiles = await fileStore.listForLink(stored.id);
       // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
-      // would have without the restart, and shows no transfer until it does.
-      const waiting = new Set(messages.flatMap(m => m.sender === "me" && m.delivery === "waiting" && m.file ? [m.file.id] : []));
+      // would have without the restart, and shows no transfer until it does. One that storage took for an away contact
+      // (held, or picked up since) was not interrupted either: it is sent, whatever its record says (one kept before its
+      // delivery wrote the record says "transferring" for good).
+      const notInterrupted = new Set(messages.flatMap(m => m.sender === "me" && m.file && (m.delivery === "waiting" || (m.via === "hold" && (m.delivery === "held" || m.delivery === "delivered"))) ? [m.file.id] : []));
       // A finished one shows no transfer (a file with none reads as finished): a view for each would go into every state.
-      for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !waiting.has(file.id)) this.transfers.set(file.id,
+      for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !notInterrupted.has(file.id)) this.transfers.set(file.id,
         file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
       // files/3 transfers go on where they stopped, once the chat is live again. One that ended before is settled in its
       // message, so the chat connecting reads nothing for it; only a sent one whose receipt never came is looked at then.
