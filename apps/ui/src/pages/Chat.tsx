@@ -31,7 +31,8 @@ import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
@@ -1259,6 +1260,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             <TechInfoRow label={t("chat.tech.network")}
               value={techInfo.peerToPeer ? t("chat.tech.networkPeerToPeer", { webrtc: "WebRTC DataChannel", pkarr: "Pkarr" }) : techInfo.protocol} />
             <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
+            {paired && deliveryPeer?.dhtDelivery?.forwardSecrecy && <ForwardSecrecyRow state={deliveryPeer.dhtDelivery.forwardSecrecy} />}
             <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
             <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
           </TechInfoSection>
@@ -1335,6 +1337,27 @@ function TechInfoSection({ title, children }: { title: string; children: React.R
       <div className="bg-surface rounded-lg p-3 space-y-1.5">
         {children}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Whether what this chat sends while the contact is away (DHT text, held messages) has keys used once (WISP 4xx): On or
+ * Off, and why behind ⓘ. A live connection has fresh keys either way, which the ⓘ says too.
+ */
+function ForwardSecrecyRow({ state }: { state: "on" | "starting" | "unsupported" | "stopped" }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const why = ({ on: "chat.tech.forwardSecrecyOnInfo", starting: "chat.tech.forwardSecrecyStartingInfo", unsupported: "chat.tech.forwardSecrecyOldAppInfo", stopped: "chat.tech.forwardSecrecyStoppedInfo" } as const)[state];
+  return (
+    <div data-testid="tech-forward-secrecy" data-state={state} className="text-xs">
+      <div className="flex justify-between items-center gap-3">
+        <span className="text-text-muted shrink-0 flex items-center gap-1.5">{t("chat.tech.forwardSecrecy")}
+          <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="tech-forward-secrecy-info" className="-my-1" /></span>
+        <span className={state === "on" ? "text-success" : "text-text-secondary"}>{t(state === "on" ? "chat.tech.forwardSecrecyOn" : "chat.tech.forwardSecrecyOff")}</span>
+      </div>
+      {open && <p id={id} className="mt-1.5 text-text-secondary leading-relaxed">{t(why)} {t("chat.tech.forwardSecrecyLive")}</p>}
     </div>
   );
 }
