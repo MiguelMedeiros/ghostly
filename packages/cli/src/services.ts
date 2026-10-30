@@ -217,7 +217,9 @@ export const SERVICE_METHODS: Record<string, Method> = {
     // they were plain errors, `engine` (exit 1): "the engine failed" (agents#894).
     try { parseLocalTarget(target); } catch (error) {
       const said = error instanceof Error ? error.message : String(error);
-      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${target}`);
+      // Named without its user, password, query and fragment: the parts refused here can hold a secret (a token).
+      const shown = `${url.protocol}//${url.host}${url.pathname}`;
+      throw new CliError(/^Only services on this machine/.test(said) ? "refused" : "bad_request", `${said}: ${shown}`);
     }
     // `service`, as the rest of the family answers it; `serviceId` (the engine's key) stays beside it for a release.
     const { serviceId } = node(ctx).addService({ name: str(params, "name", true), target });

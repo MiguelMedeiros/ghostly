@@ -18,7 +18,7 @@ const add = async (target: string) => {
 
 describe("service add's target", () => {
   it.each([
-    ["http://localhost:4773/path?q=1", /^bad_request: The target cannot contain a query or fragment: http:\/\/localhost:4773\/path\?q=1$/],
+    ["http://localhost:4773/path?q=1", /^bad_request: The target cannot contain a query or fragment: http:\/\/localhost:4773\/path$/],
     ["http://localhost:4773/#frag", /^bad_request: The target cannot contain a query or fragment/],
     ["http://user:pw@127.0.0.1:4773", /^bad_request: Credentials in the target URL are not supported/],
     ["ftp://127.0.0.1:4773", /^bad_request: Only http and https targets are supported/],
@@ -27,6 +27,14 @@ describe("service add's target", () => {
     ["nope", /^bad_request: Not a URL/],
   ])("%s is the person's to fix, not the engine failing", async (target, said) => {
     expect(await add(target)).toMatch(said);
+  });
+
+  it("a refusal names the target without the password or the token it refused", async () => {
+    const credentials = await add("http://user:s3cretpw@127.0.0.1:4773/app");
+    expect(credentials).toBe("bad_request: Credentials in the target URL are not supported: http://127.0.0.1:4773/app");
+    const query = await add("http://localhost:8888/?token=t0ken42#also-s3cret");
+    expect(query).toMatch(/^bad_request: The target cannot contain a query or fragment: http:\/\/localhost:8888\/$/);
+    for (const said of [credentials, query]) for (const secret of ["s3cretpw", "user", "t0ken42", "s3cret"]) expect(said).not.toContain(secret);
   });
 
   it("a target on this machine is added", async () => {
