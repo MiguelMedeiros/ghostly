@@ -21,6 +21,7 @@ vi.mock("@cashu/cashu-ts", async (importOriginal) => ({
   Wallet: class {
     constructor(readonly url: string) {}
     async loadMint(): Promise<void> {}
+    getMintInfo = () => ({ isSupported: () => ({ params: [] }) });
     ops = { send: (amount: number, proofs: unknown[]) => ({ includeFees: (on: boolean) => ({ prepare: () => mintApi.prepare(amount, proofs, on) }) }) };
     completeSwap = (preview: unknown) => mintApi.completeSwap(preview);
     mint = { restore: (request: unknown) => mintApi.restore(request), getKeys: () => mintApi.getKeys() };

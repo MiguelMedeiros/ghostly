@@ -1,4 +1,5 @@
 import type {
+  GetInfoResponse,
   MeltPreview,
   MeltProofsResponse,
   MeltQuoteBolt11Response,
@@ -42,6 +43,15 @@ import type {
  * asked for again (NUT-09) at any time.
  */
 const UNIT = "sat";
+/**
+ * cdk-mintd 0.17 writes NUT-05's `amountless` beside the method, not under its `options` as 0.18 does, and cashu-ts reads
+ * `options` only: such a mint would be taken for one that refuses an invoice with no amount, and never sent the amount.
+ */
+const saysAmountlessBeside = (method: object): boolean => (method as { amountless?: unknown }).amountless === true;
+function amountlessUnderOptions(info: GetInfoResponse): GetInfoResponse {
+  const moved = info.nuts[5].methods.map((method) => (saysAmountlessBeside(method) ? { ...method, options: { ...method.options, amountless: true } } : method));
+  return { ...info, nuts: { ...info.nuts, 5: { ...info.nuts[5], methods: moved } } };
+}
 const QUOTE_POLL_MS = 4_000;
 /** A Lightning payment can stay in flight for minutes or hours; the mint is asked again this often. */
 const MELT_POLL_MS = 30_000;
@@ -1572,6 +1582,8 @@ export class CashuWallet {
       wallet = (async () => {
         const instance = new (await loadCashu()).Wallet(mint, { unit: UNIT });
         await within(MINT_TIMEOUT_MS, instance.loadMint(), mint);
+        const info = instance.getMintInfo();
+        if (info.isSupported(5).params.some(saysAmountlessBeside)) instance.loadMintFromCache(amountlessUnderOptions(info.cache), instance.keyChain.cache);
         return instance;
       })();
       this.wallets.set(mint, wallet);
