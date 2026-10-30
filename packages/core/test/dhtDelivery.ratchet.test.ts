@@ -30,7 +30,8 @@ function setup() {
   });
   const resolve = vi.fn(async (key: string) => packets.get(key) ?? null);
   const boxes: (RatchetBox | undefined)[] = [];
-  const make = (i: number) => {
+  const make = (i: number, expectedPeerKey?: string) => {
+    if (expectedPeerKey) credentials[i].expectedPeerKey = credentials[i].peerKey = expectedPeerKey;
     boxes[i] = supports[i] ? new RatchetBox(() => ratchetKeys(params[i], credentials[i]), ratchets[i], async state => { ratchets[i] = structuredClone(state); }) : undefined;
     return new DhtDelivery({
       params: params[i], mode: "dht", state: saved[i], credentials: credentials[i], transport: { publish, resolve, describe: () => ({ protocol: "fixture", relays: [] }) },
@@ -124,5 +125,26 @@ it("reads the same envelope again without opening it, and measuring a text takes
   for (let i = 0; i < 5; i++) expect(a.validate("x".repeat(200), Date.now(), id(9))).toBeNull();
   expect(JSON.stringify(h.ratchets[0].current?.send)).toBe(sent);
   void before;
+  await a.stop(); await b.stop();
+});
+
+it("a joiner that pinned its inviter from the invite sends its first contact plain, and both go ratcheted once each pinned the other", async () => {
+  vi.useFakeTimers();
+  const h = setup();
+  const a = h.make(0);
+  // A ghostly1 invite names the inviter's participation key: the joiner has it pinned before any envelope comes.
+  const b = h.make(1, identityFromSeedB64(h.credentials[0].seedB64).pubKeyZ32);
+  await a.start(); await b.start(); await vi.advanceTimersByTimeAsync(5_000);
+  expect(h.credentials[0].peerKey, "the inviter pinned the joiner").toBe(identityFromSeedB64(h.credentials[1].seedB64).pubKeyZ32);
+  expect(await b.send("first", Date.now(), id(1))).toBeNull();
+  await vi.advanceTimersByTimeAsync(6_000);
+  expect(await a.send("second", Date.now(), id(2))).toBeNull();
+  await vi.advanceTimersByTimeAsync(6_000);
+  expect(h.messages[0].get(id(1))).toBe("first");
+  expect(h.messages[1].get(id(2))).toBe("second");
+  // The joiner's first envelope is plain, under the invite's key; ratcheted ones follow once both pinned.
+  const joiner = h.published.find(p => !p.labels.includes("_dmk"));
+  expect(joiner?.labels).toContain("_dm");
+  expect(h.published.some(p => p.labels.includes("_dr"))).toBe(true);
   await a.stop(); await b.stop();
 });
