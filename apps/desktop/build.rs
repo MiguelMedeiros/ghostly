@@ -39,6 +39,7 @@ const COMMANDS: &[&str] = &[
     "incoming_share_take",
     "keep_awake",
     "link_preview_fetch",
+    "linked_files_entry",
     "linked_files_forget",
     "linked_files_list",
     "linked_files_pick",

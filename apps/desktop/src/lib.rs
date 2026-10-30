@@ -190,6 +190,7 @@ macro_rules! commands {
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
             keep_awake::keep_awake,
+            linked_files::linked_files_entry,
             linked_files::linked_files_forget,
             linked_files::linked_files_list,
             linked_files::linked_files_pick,
