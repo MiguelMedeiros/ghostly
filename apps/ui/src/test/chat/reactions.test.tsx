@@ -58,6 +58,34 @@ describe("the quick bar", () => {
     expect(screen.queryByTestId("reaction-picker")).not.toBeInTheDocument();
   });
 
+  it("a bubble taller than the list: the bar and the + panel open at the React button, inside the list", async () => {
+    // The list from 60 to 700, scrolled to the middle of a bubble running from far above it to far below; the React
+    // button in sight beside it. From the bubble's edges the bar opened 2000px above the list, out of sight.
+    const list = { left: 400, right: 1000, top: 60, bottom: 700 };
+    const sizes: Record<string, { width: number; height: number }> = { "reaction-bar": { width: 300, height: 44 }, "reaction-picker": { width: 320, height: 360 } };
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const size = sizes[this.dataset.testid ?? ""];
+      const box = size ? { left: 0, right: size.width, top: 0, bottom: size.height }
+        : "messageList" in this.dataset ? list
+        : "messageBubble" in this.dataset ? { left: 420, right: 860, top: -2000, bottom: 3000 }
+        : this.firstElementChild?.getAttribute("data-testid") === "message-react-action" ? { left: 868, right: 892, top: 380, bottom: 404 }
+        : { left: 0, right: 0, top: 0, bottom: 0 };
+      return { ...box, x: box.left, y: box.top, width: box.right - box.left, height: box.bottom - box.top, toJSON: () => box } as DOMRect;
+    });
+    const { user } = renderApp(<div data-message-list><MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} /></div>);
+    await user.click(screen.getByTestId("message-react-action"));
+    const bar = screen.getByTestId("reaction-bar");
+    // Over the button (room there), its end on the button's end, towards the bubble.
+    expect(bar.style.top).toBe(`${380 - 4 - 44}px`);
+    expect(bar.style.left).toBe(`${892 - 300}px`);
+    await user.click(screen.getByTestId("reaction-more"));
+    const picker = screen.getByTestId("reaction-picker");
+    // Too tall for either side of the button: on the roomier one (above), as tall as its room, still in the list.
+    const room = 380 - 4 - list.top - 8;
+    expect(picker.style.maxHeight).toBe(`${room}px`);
+    expect(picker.style.top).toBe(`${list.top + 8}px`);
+  });
+
   it("its ⋮ says React, after Reply", async () => {
     const onReact = vi.fn();
     const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReply={() => {}} onReact={onReact} reactionName={names} />);

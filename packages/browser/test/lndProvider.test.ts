@@ -188,7 +188,7 @@ describe("the LND provider", () => {
   it("goes through the Lightning journal: a lost answer is reconciled by hash and never paid twice", async () => {
     const node = new FakeLndNode();
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() };
-    const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+    const cashu = { balance: async () => 0 } as unknown as CashuWallet;
     const descriptor = { ...lnd, create: async () => new LndLightning(node.transport(), full) };
     const service = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE);
     await service.start();

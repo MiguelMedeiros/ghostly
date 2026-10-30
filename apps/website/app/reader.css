@@ -498,6 +498,50 @@
 .reader-prose tr:last-child td {
   border-bottom: 0;
 }
+/* On a phone, three or more columns squeeze each cell to a few words per line: each row becomes a card, every cell
+   full width under its column's header (data-label, set by ReferenceMarkdown). */
+@media (max-width: 640px) {
+  .reader-prose table[data-stack],
+  .reader-prose table[data-stack] tbody,
+  .reader-prose table[data-stack] tr,
+  .reader-prose table[data-stack] td {
+    display: block;
+  }
+  .reader-prose table[data-stack] thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .reader-prose table[data-stack] tr {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .reader-prose table[data-stack] tr:last-child {
+    border-bottom: 0;
+  }
+  .reader-prose table[data-stack] td {
+    padding: 6px 14px;
+    border-bottom: 0;
+  }
+  .reader-prose table[data-stack] td:first-child {
+    color: var(--text);
+    font-weight: 650;
+  }
+  .reader-prose table[data-stack] td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--dim);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .reader-prose table[data-stack] td[data-label=""]::before {
+    content: none;
+  }
+}
 .reference-diagram {
   padding: 16px;
   border: 1px solid var(--line);

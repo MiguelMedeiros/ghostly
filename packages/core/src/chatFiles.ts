@@ -50,11 +50,44 @@ export const FILE_LIMITS = {
   /** How much longer than the shortest round trip seen a confirm may take, by the queue the files keep on the path. */
   queueMs: 50,
   /**
+   * On a long path, the queue a confirm may show is this share of the shortest round trip, when that is more than `queueMs`.
+   * A relay's round trip wavers by more than 50 ms on its own: read as the files' queue, it held their window at its
+   * floor, 64 KiB per round trip (about 0.1 MiB/s at 600 ms), however fast the path.
+   */
+  queueOfBase: 0.5,
+  /**
    * A shortest round trip no confirm has come close to for this long is measured again, with the queue drained
    * (`ChatFiles.paced`). A path that got longer mid-session (another route, a relay) read as a queue for good before, and
    * held the window at its floor: 0.5 MiB/s where the same path from the start gave 8 MiB/s.
    */
   baseProbeMs: 10_000,
+  /**
+   * The window is sized by rate as well as by delay (`FilePace.tried`): a window up to this much larger is tried, and
+   * kept when it made no queue. On a path whose round trip wavers on its own (a radio's scheduling: 5G, Wi-Fi), the
+   * delay rule reads the waver as the files' queue and held the window at its floor, 0.25 MiB/s on a 50 Mbit/s link,
+   * where a larger window carried ten times as much with no longer round trip.
+   */
+  trialGain: 2,
+  /**
+   * A tried window is kept when its round trip grew by less than this share of the queue it would make on a full link
+   * (what it adds, at the rate the path carried). A full link's grows by all of it; a path that only wavers, by none.
+   */
+  trialPaid: 0.5,
+  /**
+   * What a trial may add, as queue on a full link at the rate the path carries: a chunk at least, or no trial. A 1 Mbit/s
+   * uplink never tries (a chunk is 131 ms there), so its texts keep the delay rule's queue.
+   */
+  trialQueueMs: 100,
+  /**
+   * Trials go only where the round trip wavers: its confirms' round trips within a round trip spread by this much
+   * (their standard deviation). A full link's own queue keeps them close (493-523 ms behind a relay on 5 Mbit/s); a
+   * radio's scheduling spreads them (150-450 ms on 5G). So a slow uplink's texts never wait behind a trial.
+   */
+  waverMs: 25,
+  /** Round trips between two trials that were not kept, at first (it doubles with each, up to 8 times). */
+  trialEvery: 4,
+  /** A round trip whose rate counts lasts until this many windows were confirmed: one is a coin flip on a wavering path. */
+  trialWindows: 4,
   /** A receiver asks its person before taking a file larger than this. */
   askAboveBytes: 25 * 1024 * 1024,
   /** Files taken without asking, per contact, while stored. Past it, every file is asked about. */
@@ -277,6 +310,23 @@ class FilePace {
   private probe?: { since: number; window: number };
   /** A confirm has sized the window on this path. */
   private sized = false;
+  /** Bytes of the chat's files confirmed on this session so far. */
+  delivered = 0;
+  /**
+   * The round trip under way (`tried`): from `start` until a chunk sent since is confirmed, and `trialWindows` windows
+   * were. `delivered` then, the round trips of its confirms added up, and whether little was in flight meanwhile
+   * (`limited`: it says nothing of the window).
+   */
+  private round?: { start: number; delivered: number; rtts: number; squares: number; count: number; limited: boolean };
+  /** The last round trip's: what the path carried, bytes per ms, its confirms' mean round trip and their spread. */
+  private last = { rate: 0, rtt: 0, spread: 0 };
+  /** A window a trial showed the path takes with no queue: the delay rule does not shrink the window below it. */
+  private held = 0;
+  /** A larger window being tried, `from` the one before: it shows in its second round trip (the first confirms what went before). */
+  private trial?: { from: number; window: number; before: { rate: number; rtt: number; spread: number }; rounds: number };
+  /** Round trips until the next trial, and between two trials while they are not kept (doubles with each, up to a limit). */
+  private wait: number = FILE_LIMITS.trialEvery;
+  private spacing: number = FILE_LIMITS.trialEvery;
 
   /** Another path (a session of its own opened): what was learnt of the old one goes. */
   reset(): void {
@@ -285,6 +335,10 @@ class FilePace {
     this.baseAt = 0;
     this.probe = undefined;
     this.sized = false;
+    this.last = { rate: 0, rtt: 0, spread: 0 };
+    this.held = 0;
+    this.round = this.trial = undefined;
+    this.wait = this.spacing = FILE_LIMITS.trialEvery;
   }
 
   /** The shortest round trip seen on this path. */
@@ -299,12 +353,14 @@ class FilePace {
 
   /**
    * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
-   * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
+   * busy with no more than `FILE_LIMITS.queueMs` of queue on it, or half its round trip on a long path
+   * (`FILE_LIMITS.queueOfBase`) (delay-based, as LEDBAT). Throughput is about
    * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
    * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
    * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
    * flight, so the queue drains first and a slow link's own queue never passes for a longer path. `floor`: the least
-   * the window is, `minWindowBytes` or the chat's share of an uplink it shares (`FileUplink.floor`).
+   * the window is, `minWindowBytes` or the chat's share of an uplink it shares (`FileUplink.floor`). A round trip that
+   * wavers on its own reads as queue here: the window is sized by rate as well (`tried`).
    */
   paced(sentAt: number, flight: number, now: number, floor: number = FILE_LIMITS.minWindowBytes, lowest = Infinity): void {
     const rtt = Math.max(1, now - sentAt);
@@ -321,16 +377,67 @@ class FilePace {
     if (rtt - this.baseRtt < FILE_LIMITS.queueMs / 2) this.baseAt = now;
     this.baseRtt = Math.min(this.baseRtt, rtt);
     if (now - this.baseAt > FILE_LIMITS.baseProbeMs) {
+      // One chunk in flight carries nothing to compare: the round trips start again after it, and a trial waits for the
+      // queue it drained to fill again (that spreads the round trips as a waver does).
       this.probe = { since: now, window: this.window };
+      this.round = this.trial = undefined;
+      this.wait = Math.max(this.wait, FILE_LIMITS.trialEvery);
       return;
     }
     // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill. On a
     // shared uplink, the queue is read against the lowest round trip any of its chats saw.
     const base = Math.min(this.baseRtt, lowest);
-    const fits = Math.max((flight * (base + FILE_LIMITS.queueMs)) / rtt, rtt - base < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
+    const queueMs = Math.max(FILE_LIMITS.queueMs, base * FILE_LIMITS.queueOfBase);
+    const fits = Math.max((flight * (base + queueMs)) / rtt, rtt - base < queueMs / 2 ? 2 * flight : 0);
     // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
-    const window = flight < this.window / 2 ? Math.max(this.window, fits) : fits;
-    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(floor, Math.round(window)));
+    const limited = flight < this.window / 2;
+    const delayed = limited ? Math.max(this.window, fits) : fits;
+    this.tried(sentAt, rtt, now, limited);
+    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(floor, Math.round(this.trial?.window ?? Math.max(delayed, this.held))));
+  }
+
+  /**
+   * Sizes the window by rate: what the delay rule holds back may be a waver of the path, not a queue. After
+   * `trialEvery` round trips a larger window is tried. On a full link the bytes it adds wait in its queue, and the
+   * round trip grows by them at the rate the path carries; where the path only wavers, the round trip stays and the
+   * larger window carries more. So a trial whose round trip grew by less than `trialPaid` of that queue is kept
+   * (`held`) and a larger one tried at once; else what was kept goes down a step, and the next trial waits twice as
+   * long. A trial adds `trialQueueMs` of queue at most, meanwhile, and goes only where the round trip wavers (`waverMs`).
+   */
+  private tried(sentAt: number, rtt: number, now: number, limited: boolean): void {
+    const round = this.round;
+    if (round) {
+      round.rtts += rtt;
+      round.squares += rtt * rtt;
+      round.count++;
+      if (limited) round.limited = true;
+    }
+    // A trial's first round trip only confirms what went before it: it lasts no longer than that.
+    const windows = this.trial?.rounds === 0 ? 0 : FILE_LIMITS.trialWindows;
+    if (round && (sentAt < round.start || this.delivered - round.delivered < windows * this.window)) return;
+    this.round = { start: now, delivered: this.delivered, rtts: 0, squares: 0, count: 0, limited: false };
+    if (!round) return;
+    if (round.limited) { this.trial = undefined; return; }
+    const trial = this.trial;
+    if (trial && ++trial.rounds < 2) return;
+    const mean = round.rtts / round.count;
+    const last = { rate: (this.delivered - round.delivered) / Math.max(1, now - round.start), rtt: mean, spread: Math.sqrt(Math.max(0, round.squares / round.count - mean * mean)) };
+    if (trial) {
+      const queued = (trial.window - trial.from) / trial.before.rate;
+      const paid = last.rtt - trial.before.rtt < queued * FILE_LIMITS.trialPaid;
+      this.held = paid ? trial.window : Math.min(this.held, trial.from) * (trial.from / trial.window);
+      this.spacing = paid ? FILE_LIMITS.trialEvery : Math.min(FILE_LIMITS.trialEvery * 8, this.spacing * 2);
+      this.wait = paid ? 0 : this.spacing;
+      this.trial = undefined;
+    }
+    this.last = last;
+    if (this.wait > 0) { this.wait--; return; }
+    if (last.spread < FILE_LIMITS.waverMs) return;
+    // Larger than the window it was measured with. On a full link what it adds is queue at that rate, ahead of the
+    // sender's texts: `trialQueueMs` of it at most, and a chunk at least (windows go by chunks), or no trial.
+    const step = Math.min(this.window * (FILE_LIMITS.trialGain - 1), last.rate * FILE_LIMITS.trialQueueMs);
+    const window = Math.round(this.window + step);
+    if (step >= FILE_LIMITS.chunkBytes && window <= FILE_LIMITS.chatWindowBytes) this.trial = { from: this.window, window, before: last, rounds: 0 };
   }
 }
 
@@ -1047,6 +1154,7 @@ export class ChatFiles {
       }
       case "pf-got": {
         if (!isInt(frame.offset) || frame.offset <= record.confirmed || frame.offset > out.next) return;
+        this.pace.delivered += frame.offset - record.confirmed;
         record.confirmed = frame.offset;
         // The last chunk this confirms says how long the path took (one sent before a resync says nothing).
         let sample: Outgoing["sends"][number] | undefined;

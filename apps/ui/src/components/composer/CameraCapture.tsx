@@ -2,19 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
-import { preferredDevice } from "../../lib/mediaDevices";
+import { cameraListed, captureCamera, preferredDevice } from "../../lib/mediaDevices";
 
 /**
  * Whether this device has a camera to take a photo with. Browsers list their devices before any permission
- * (without names), so this asks nothing; where it cannot tell, there is no Camera row.
+ * (without names), so this asks nothing; where it cannot tell, there is no Camera row. On Linux Desktop the cameras
+ * are the native ones Settings previews: the page's own is always refused there.
  */
 export function useHasCamera(): boolean {
   const [has, setHas] = useState(false);
   useEffect(() => {
     let live = true;
-    const devices = navigator.mediaDevices;
-    if (!devices?.getUserMedia || !devices.enumerateDevices) return;
-    devices.enumerateDevices().then((list) => { if (live) setHas(list.some((d) => d.kind === "videoinput")); }, () => {});
+    cameraListed().then((listed) => { if (live) setHas(listed); }, () => {});
     return () => { live = false; };
   }, []);
   return has;
@@ -41,7 +40,7 @@ export function CameraCapture({ onSend, onClose }: { onSend: (file: File) => voi
     if (photo) return;
     let live = true;
     // The camera chosen in Settings → Audio & video, or the default when it is not connected.
-    navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, deviceId: preferredDevice("videoinput") }, audio: false }).then((s) => {
+    captureCamera({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, deviceId: preferredDevice("videoinput") }, audio: false }).then((s) => {
       if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
       stream.current = s;
       if (video.current) { video.current.srcObject = s; void video.current.play().catch(() => {}); }

@@ -59,6 +59,7 @@
     },
     "label": "バックアップが必要",
     "later": "あとで",
+    "line": "{{wallet}} ウォレットをバックアップ",
     "title": "{{wallet}} に本物のお金があります"
   },
   "bark": {
@@ -765,6 +766,8 @@
     "send": "送金"
   },
   "unseen": {
+    "lineReal": "{{wallet}} に新しい {{amount}} sats",
+    "lineTest": "{{wallet}} に新しいテスト用 {{amount}} sats",
     "real": "{{place}}、新着 {{amount}} sats",
     "test": "{{place}}、新着 {{amount}} テスト sats"
   },

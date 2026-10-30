@@ -77,6 +77,38 @@ describe("the security autorelease gate's lock file check", () => {
     }
   });
 
+  // The registry URL is built from the entry's version: dot segments in both read as the package's own tarball.
+  it("refuses an npm dependency whose version is not a plain semver, even with the URL built from it", () => {
+    for (const mode of ["all", "deps"] as const) {
+      for (const version of ["4.17.21/../../../not-lodash/-/not-lodash-1.0.0", "4.17.21/%2e%2e/%2e%2e/%2e%2e/not-lodash/-/not-lodash-1.0.0", "latest"]) {
+        const run = runGate(npmBump({ "node_modules/lodash": registry("lodash", "4.17.20") }, { "node_modules/lodash": registry("lodash", version) }), mode);
+        expect(run.code, `${mode}: ${version}`).toBe(1);
+        expect(run.stderr).toContain("changes where dependencies come from: lodash");
+      }
+    }
+  });
+
+  // npm fetches an entry with no URL by its version, which can be a URL. Only a copy bundled in its parent has none.
+  it("refuses an npm dependency that loses its URL, even with a bundled copy of the same name on main", () => {
+    const bundled = { "node_modules/oxide/node_modules/tslib": { version: "2.7.0", inBundle: true, license: "0BSD" } };
+    const main = { "node_modules/oxide": registry("oxide", "4.1.0"), "node_modules/tslib": registry("tslib", "2.7.0"), ...bundled };
+    const control = runGate(npmBump(main, { ...main, "node_modules/tslib": registry("tslib", "2.8.1"), "node_modules/oxide/node_modules/tslib": { version: "2.8.1", inBundle: true } }), "deps");
+    expect(control.code, control.stderr).toBe(0);
+    for (const mode of ["all", "deps"] as const) {
+      for (const tslib of [
+        { "node_modules/tslib": { version: "https://example.invalid/tslib-2.7.0.tgz", license: "0BSD" } },
+        { "node_modules/tslib": { version: "2.7.0", license: "0BSD" } },
+        { "node_modules/tslib": { version: "2.7.0", inBundle: true } },
+        { "node_modules/lodash/node_modules/tslib": { version: "2.7.0", inBundle: true } },
+        { "node_modules/oxide/node_modules/tslib": { version: "https://example.invalid/tslib-2.7.0.tgz", inBundle: true } },
+      ]) {
+        const run = runGate(npmBump({ ...main, "node_modules/lodash": registry("lodash", "4.17.20") }, { ...main, "node_modules/lodash": registry("lodash", "4.17.20"), ...tslib }), mode);
+        expect(run.code, `${mode}: ${JSON.stringify(tslib)}`).toBe(1);
+        expect(run.stderr).toContain("changes where dependencies come from: tslib");
+      }
+    }
+  });
+
   it("refuses a workspace link turned into a download", () => {
     const run = runGate(npmBump({}, { "node_modules/@ghostly/web": registry("@ghostly/web", "9.9.9") }), "deps");
     expect(run.code).toBe(1);

@@ -857,6 +857,45 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(said).toEqual([true, false, true, false]);
   });
 
+  // Each serve kept an id in the broker (and a serve in the engine) until unserve or close, and every id it was ever
+  // given stayed for as long as the app ran: an app that served on each play grew by one a call.
+  it("an app that serves the same file on each play holds one serve: each serve needs its own unserve, and only the last ids ended are still answered", async () => {
+    const { broker, posted, host, id, app, clock } = await cinema();
+    // 40 requests a second, under the 50 an app may ask; each answered before the next.
+    let next = 10_000;
+    const play = async (type: string, args: unknown[]) => {
+      clock.t += 25;
+      const asked = next++;
+      broker.message({ id: asked, type, args });
+      await vi.waitFor(() => expect(posted[posted.length - 1]?.message.id).toBe(asked), { interval: 1 });
+      return posted[posted.length - 1]!.message;
+    };
+    const ids = new Set<string>();
+    for (let i = 0; i < 200; i++) ids.add((await play("files.serve", [id])).value as string);
+    expect(ids.size).toBe(1);
+    expect(host.serves.size).toBe(1);
+    const [serve] = ids as Set<string>;
+    expect(await host.askRange(LINK, { app, request: 1, serve: serve!, file: id, offset: 0, length: 10 })).toEqual({ app, request: 1, bytes: film.subarray(0, 10), size: film.length });
+    // It stays served until the last of its serves is unserved.
+    for (let i = 0; i < 199; i++) await play("files.unserve", [serve]);
+    expect(host.serves.size).toBe(1);
+    expect(await host.askRange(LINK, { app, request: 2, serve: serve!, file: id, offset: 0, length: 1 })).toMatchObject({ bytes: film.subarray(0, 1) });
+    await play("files.unserve", [serve]);
+    expect(host.serves.size).toBe(0);
+    // Served and unserved 40 times: an ask under one of the last ids ended is answered, one under the first is not this app's.
+    const cycled: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      const again = (await play("files.serve", [id])).value as string;
+      await play("files.unserve", [again]);
+      cycled.push(again);
+    }
+    expect(await host.askRange(LINK, { app, request: 3, serve: cycled[cycled.length - 1]!, file: id, offset: 0, length: 1 })).toEqual({ app, request: 3, error: "gone" });
+    let answered = false;
+    void host.askRange(LINK, { app, request: 4, serve: cycled[0]!, file: id, offset: 0, length: 1 }).then(() => { answered = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(answered).toBe(false);
+  });
+
   it("remote.read shares `file`'s 16 MiB a second", async () => {
     const { ask, host, clock } = await cinema(["chat"]);
     host.remote.set(SERVE, new Uint8Array(MINI_APP_LIMITS.remoteReadBytes));

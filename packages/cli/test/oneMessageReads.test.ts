@@ -31,7 +31,7 @@ function fake() {
 describe("delete", () => {
   it("reads the one message it deletes; one not there is not_found and nothing is deleted", async () => {
     const { ctx, node, whole } = fake();
-    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1" })).toEqual({ chat: "chat-one", deleted: "peer_1" });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1" })).toEqual({ chat: "chat-one", messageId: "peer_1", deleted: "peer_1", everyone: false });
     expect(node.deleteMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "peer_1" });
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: "No message k:0:1 in this chat" });
     expect(node.deleteMessage).toHaveBeenCalledOnce();
@@ -60,9 +60,9 @@ describe("delete --everyone", () => {
     const command = COMMANDS["message delete"]!;
     const parsed = parseArgs(["Alice", "me_1", "--everyone"], command.options ?? {});
     expect(command.params!(parsed, positionals(command, parsed.positionals))).toEqual({ chat: "Alice", message: "me_1", everyone: true });
-    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toEqual({ chat: "chat-one", deleted: "me_1", everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true });
     expect(node.removeMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_1" });
-    expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toEqual({ group: "g1", deleted: "mine:0:2", everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toEqual({ group: "g1", messageId: "mine:0:2", deleted: "mine:0:2", everyone: true });
     expect(node.removeMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "mine:0:2" });
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
     // What the engine refuses (a payment, say) is said as such.

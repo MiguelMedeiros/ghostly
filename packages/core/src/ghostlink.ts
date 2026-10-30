@@ -1,3 +1,4 @@
+import type { RatchetBox } from "./ratchet";
 import { DhtDelivery, type DeliveryMode, type DhtDeliveryState, type DhtDeliveryView , type DhtPacketFacts } from "./dhtDelivery";
 import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
@@ -82,6 +83,12 @@ const AUTO_CONNECT_RETRY_MS = 20_000;
  */
 const INSTANT_FAIL_MS = 100;
 const INSTANT_FAIL_RETRY_MS = 3_000;
+/**
+ * The same for the first dial after the contact came back (`peerPacketArrived`): an app whose network comes back on
+ * publishes before its listener is announced again, and a dial that fast found nobody (HyperDHT's PEER_NOT_FOUND, 200 ms
+ * at 100 ms RTT). Counted, it held the chat 41 s while the app's other chats came back in 1-3 s (DHT-direct lab, 2026-10-19).
+ */
+const BACK_INSTANT_FAIL_MS = 500;
 /** A group link with nothing to dial looks fast for the member's `_tr` on this many attempts, then at its own pace. */
 const PACKET_TRANSPORTS_FAST_ATTEMPTS = 3;
 /** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
@@ -237,6 +244,13 @@ export const HANDLED_WAIT_MS = 10_000;
  * away (a phone that put it to sleep): the chat resumes as after a restart, not as a session the contact closed.
  */
 export const WAKE_LOST_MS = 10_000;
+/**
+ * Back in front after an absence, an answer this side made to the contact's offer while it was away, still connecting
+ * this long after the wake, is let go and the chat dials as a resume. A path that exists connects within a second or
+ * two; on a phone the app had answered from the background, the connection sat there until ICE gave up (15 s), and only
+ * then did the resume dial: a chat opened on return went live 21 s after the tap (Android emulator, 2026-10-29).
+ */
+export const WAKE_ANSWER_GRACE_MS = 3_000;
 
 export interface IncomingMessage {
   id?: string;
@@ -284,6 +298,14 @@ const FILES_IN_USE_MS = 2_000;
  * once; one streaming at its limit gets about half the link, and the file the other half.
  */
 const APP_AHEAD_OF_FILES = 16 * 1024;
+
+/**
+ * How much of an app's data may be on its way to the contact, not yet handled there (WISP 1200 § In a chat): a ping
+ * follows it, and the pong says it arrived. A transport holds what it sends in flight beyond the channel's
+ * `bufferedAmount` (UDX's window, an SCTP congestion window), so on a link slower than the app sends, the local buffer
+ * stayed under its line while the queue under it grew and every chat text waited 0.5-2.3 s behind the app's data.
+ */
+const APP_IN_FLIGHT = 64 * 1024;
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
@@ -676,6 +698,8 @@ export interface GhostLinkOptions {
     peerAcceptsFile?(): boolean;
     /** This side's reactions the contact has not confirmed, oldest first: they ride on the envelopes. */
     reactions?(): readonly WireReaction[];
+    /** The chat's ratchet (WISP 4xx) and whether the contact's record lists `ratchet/1`: the floor is sealed with it. */
+    ratchet?: { box: RatchetBox; peerSupports(): boolean };
   };
   rtcAvailable?: boolean;
   /** `automatic`: the chat follows the app's rule (no transport chosen for it); `preferred` is then the rule's. Absent: automatic unless `preferred` is given. */
@@ -883,6 +907,12 @@ export class GhostLink {
   private pongsHeard = 0;
   /** The liveness ping whose pong measures the round trip: its number in `pingsSent`. */
   private rttPing = 0;
+  /**
+   * Apps' data sent on this session and not yet answered (`APP_IN_FLIGHT`): the bytes each ping that followed them
+   * covers, and those sent since the last such ping, which the next one covers.
+   */
+  private appInFlight: { ping: number; bytes: number }[] = [];
+  private appUnmarked = 0;
   /** `handled` callers, each waiting for the pong to its ping. */
   private handledWaiters: { ping: number; done: (exact: boolean | "late") => void }[] = [];
   /** The last ping's `PONG_WAIT_MS`: running until something comes back from the contact. */
@@ -1028,6 +1058,8 @@ export class GhostLink {
   private wokeUntil = 0;
   /** Back after a restart, the first automatic dial is still to go (`INSTANT_FAIL_MS`). */
   private resumeDial = false;
+  /** The contact is back (`peerPacketArrived`), and the first automatic dial since is still to go (`BACK_INSTANT_FAIL_MS`). */
+  private backDial = false;
   /** That dial failed at once: the next waits `INSTANT_FAIL_RETRY_MS`, not `dialWait`'s backoff. */
   private instantRetry = false;
 
@@ -1061,6 +1093,7 @@ export class GhostLink {
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
       ...(backsOff && { inviteMadeAt: options.madeAt ?? Date.now() }),
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
+      ...(options.dht.ratchet && { ratchet: options.dht.ratchet }),
       // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
       ...(options.reactionsSupport && {
         reactions: options.dht.reactions,
@@ -3075,14 +3108,15 @@ export class GhostLink {
    */
   private autoDial(): void {
     const tries = this.anythingToDial(), started = Date.now();
-    const resumeDial = tries && this.resumeDial;
-    if (tries) this.resumeDial = false;
+    const instantMs = !tries ? 0 : this.resumeDial ? INSTANT_FAIL_MS : this.backDial ? BACK_INSTANT_FAIL_MS : 0;
+    if (tries) this.resumeDial = this.backDial = false;
     this.instantRetry = false;
     this.lastAutoConnectAt = started;
     if (tries) this.autoConnectFailures++;
     void this.dial().catch(error => {
-      // A restart's first dial that failed at once (`INSTANT_FAIL_MS`): once more soon, and it does not count.
-      if (resumeDial && Date.now() - started < INSTANT_FAIL_MS && this.lastAutoConnectAt === started && this.autoConnectFailures > 0) {
+      // A restart's, or a contact back's, first dial that failed at once (`INSTANT_FAIL_MS`, `BACK_INSTANT_FAIL_MS`):
+      // once more soon, and it does not count.
+      if (Date.now() - started < instantMs && this.lastAutoConnectAt === started && this.autoConnectFailures > 0) {
         this.autoConnectFailures--;
         this.instantRetry = true;
         traceLink(this.myPubKeyZ32, "dial-instant-fail", { ms: Date.now() - started });
@@ -3492,7 +3526,9 @@ export class GhostLink {
    * behind an app's data on a link slower than it sends (WISP 1200 § In a chat). While a file goes, that quarter sits
    * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer. While
    * the file waits for room, the app gets no further than `APP_AHEAD_OF_FILES` ahead of it, so it cannot refill the
-   * channel each time it drains to files' line and keep the file from moving.
+   * channel each time it drains to files' line and keep the file from moving. With a contact that answers pings, it is
+   * also refused while `APP_IN_FLIGHT` of the apps' data has not been answered for: what the transport holds in flight
+   * under the channel counts too.
    */
   sendAppData(app: string, data: unknown): AppSendError | null {
     if (!this.apps.open.has(app)) return "not-open";
@@ -3504,12 +3540,28 @@ export class GhostLink {
     if (use && !files) use.appAhead = 0;
     if (this.channel.bufferedAmount >= (files ? filesCap(this.channel) : 0) + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
     if (files && files.waiting > 0 && files.appAhead >= APP_AHEAD_OF_FILES) return "too-fast";
+    if (this.peerAnswersPings && this.appUnanswered() >= APP_IN_FLIGHT) return "too-fast";
     const refused = this.apps.canSend(app, data);
     if (refused) return refused;
     const frame = JSON.stringify(appDataFrame(app, data));
     try { this.channel.send(frame); } catch { return "offline"; }
     if (files) files.appAhead = Math.min(files.appAhead + frame.length, APP_AHEAD_OF_FILES + APP_DATA_MAX_BYTES);
+    if (this.peerAnswersPings) {
+      this.appUnmarked += frame.length;
+      // One ping a round trip for small frames (a Chess move), one every quarter of the window for a stream.
+      if (this.appInFlight.length === 0 || this.appUnmarked >= APP_IN_FLIGHT / 4) this.markAppData(this.channel);
+    }
     return null;
+  }
+  /** Apps' data sent on this session that the contact has not answered for yet (`APP_IN_FLIGHT`). */
+  private appUnanswered(): number {
+    return this.appInFlight.reduce((sum, mark) => sum + mark.bytes, this.appUnmarked);
+  }
+  /** A ping after the apps' data sent since the last one: its pong says the contact handled it. */
+  private markAppData(channel: FrameChannel): void {
+    try { this.sendPing(channel, false); } catch { return; /* the session is going: a new one starts from nothing */ }
+    this.appInFlight.push({ ping: this.pingsSent, bytes: this.appUnmarked });
+    this.appUnmarked = 0;
   }
   /** Both sides offer `app-ranges/1` (and `apps/1`) on the open session: an app's files can be read from the other side. */
   get supportsAppRanges(): boolean { return this.supportsApps && this.sessionCapabilities.agreed(APP_RANGES_CAPABILITY); }
@@ -3793,7 +3845,10 @@ export class GhostLink {
     // Said at once: before, the dial below waited out its 90 s for an app that had said it was going.
     if (this.contactAway) throw engineError("contactAway");
     await this.connect();
-    if (!this.supportsPayments) throw new Error("This contact does not support payments. Both peers need an updated Ghostly.");
+    if (this.supportsPayments) return;
+    // As the app's chat says it: networks that name no wallet are a contact that offers no way until it makes one.
+    const networks = this.peerNetworks;
+    throw engineError(networks && !Object.keys(networks).length ? "contactNoWallet" : "contactNoPayments");
   }
 
   private requireLegacyCapabilities(): void {
@@ -4193,6 +4248,8 @@ export class GhostLink {
             const answered = ++this.pongsHeard;
             if (this.pingSentAt && answered >= this.rttPing) { this.rtt = Date.now() - this.pingSentAt; this.pingSentAt = 0; this.options.events?.onRtt?.(this.rtt); }
             for (const waiter of this.handledWaiters.filter(w => w.ping <= answered)) waiter.done(true);
+            while (this.appInFlight.length > 0 && this.appInFlight[0]!.ping <= answered) this.appInFlight.shift();
+            if (this.appInFlight.length === 0 && this.appUnmarked > 0 && this.channel === channel) this.markAppData(channel);
             return;
           }
           if (frame?.t === "paired-bye") {
@@ -4482,6 +4539,8 @@ export class GhostLink {
     this.pingSentAt = 0;
     this.rtt = undefined;
     this.pingsSent = this.pongsHeard = this.rttPing = 0;
+    this.appInFlight = [];
+    this.appUnmarked = 0;
     for (const waiter of [...this.handledWaiters]) waiter.done(false);
   }
   /** `live`: a liveness ping, whose pong measures the round trip. */
@@ -4610,6 +4669,7 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "peer-back", {});
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
+    this.backDial = true;
   }
 
   /**
@@ -4694,6 +4754,12 @@ export class GhostLink {
       setTimeout(() => this.maybeKnockAnswering(epoch), 0);
       return;
     }
+    // Or its answer went out while it was away, and connects still: given a moment, then let go for the resume's dial.
+    if (this.dataLink.state === "connecting" && this.answeringEpoch === this.connectionEpoch) {
+      const epoch = this.connectionEpoch;
+      setTimeout(() => this.dropAnswerAfterWake(epoch), WAKE_ANSWER_GRACE_MS);
+      return;
+    }
     // Or it dialled at that close: its offer is out already, and becomes the resume's, so its knock goes now.
     const offered = this.offered;
     if (!offered || offered.resume || offered.epoch !== this.connectionEpoch || !this.offerOut && !this.dialing) return;
@@ -4703,6 +4769,14 @@ export class GhostLink {
     offered.woke = true;
     // Still gathering: the race is scheduled once it is out, and knocks then (`scheduleRace`).
     if (!this.dialing) setTimeout(() => this.maybeKnockEarly(offered.epoch), 0);
+  }
+
+  /** The answer of `epoch`, made while the app was away, has not connected since the wake: the resume dials instead. */
+  private dropAnswerAfterWake(epoch: number): void {
+    if (epoch !== this.connectionEpoch || this.channel || this.stopped || this.resuming !== "webrtc/1") return;
+    if (this.dataLink.state !== "connecting" || this.answeringEpoch !== epoch || this.offered?.epoch === epoch) return;
+    traceLink(this.myPubKeyZ32, "wake-answer-dropped", {});
+    this.dataLink.abandon();
   }
 
   /**

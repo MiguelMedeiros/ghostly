@@ -701,13 +701,23 @@ describe("the engine passthrough", () => {
     const { ctx, node } = fake();
     const updateSettings = vi.fn(async () => undefined);
     Object.assign(node, { updateSettings });
-    for (const relayOnly of [true, false]) {
+    for (const relayOnly of [true, "yes", null]) {
       await expect(callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly } } })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("relayOnly") });
     }
     await expect(callApi(ctx, "settings.set", { relayOnly: true })).rejects.toMatchObject({ code: "bad_request" });
     expect(updateSettings).not.toHaveBeenCalled();
     await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { sendTyping: false } } });
     expect(updateSettings).toHaveBeenCalledWith({ settings: { sendTyping: false } });
+  });
+
+  // A profile an older CLI (or a dev build) turned it on in kept it for good: false was refused too, and while it is on
+  // the TURN server it needs cannot be taken away either.
+  it("still turns Hide my IP from contacts off on a profile that has it on", async () => {
+    const { ctx, node } = fake();
+    const updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { updateSettings });
+    await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly: false } } });
+    expect(updateSettings).toHaveBeenCalledWith({ settings: { relayOnly: false } });
   });
 
   it("refuses a real-money confirmation it was not given", async () => {
@@ -880,8 +890,13 @@ describe("settings", () => {
     expect(JSON.stringify(capabilities)).not.toMatch(/fcm|AUTH|VK|SPACE/);
     await expect(callApi(ctx, "settings.set", { mints: [] })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
-    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
-    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+    await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"] });
+    expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"] } });
+    // readRelays (the app's "Also use Pkarr relays") is refused with the reason: the CLI reads the relays first anyway.
+    node.updateSettings.mockClear();
+    for (const value of [false, true])
+      await expect(callApi(ctx, "settings.set", { readRelays: value })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("reads the Pkarr relays first") });
+    expect(node.updateSettings).not.toHaveBeenCalled();
     // ICE servers in WebRTC's form (urls a list) are taken; one without urls is a bad_request that says what to write.
     await callApi(ctx, "settings.set", { iceServers: [{ urls: ["stun:stun.example.org:3478", "stun:b.example.org"] }] });
     expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [{ urls: "stun:stun.example.org:3478, stun:b.example.org" }] } });

@@ -17,7 +17,7 @@ import { engineState, linkView } from "../fakeEngine";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, linkId: string | null) => string, nameIn: (linkId: string) => string | undefined = () => undefined) {
+function setup(entry: Partial<AppEntry> = {}, windowTitle?: (title: string, linkId: string | null, serving: boolean) => string, nameIn: (linkId: string) => string | undefined = () => undefined) {
   const host = memoryHost("ghostly-app://localhost/", "ghostly-app://localhost/");
   host.entry = async (ref) => ({ ref, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<p>chess</p>", ...entry });
   const handlers = new Map<string, (event: { payload: unknown }) => void>();
@@ -73,6 +73,30 @@ describe("opening an app on Desktop", () => {
     await open(REF, null);
     const titles = calls.filter((c) => c.command === "app_open").map((c) => (c.args.request as { title: string }).title);
     expect(titles).toEqual(["Chess with Ana", "Chess"]);
+  });
+
+  it("says in its window's title while the app serves the contact a file, and no longer once it stops", async () => {
+    // WISP 1200 § A read lane to the contact: the header says "sharing a file with Ana"; on Desktop the window is it.
+    const { calls, host, open, request, answer } = setup({ permissions: ["chat", "files"] }, (title, linkId, serving) => (serving ? `${title} · sharing a file with Ana` : `${title} with Ana`));
+    const titles = () => calls.filter((c) => c.command === "app_title").map((c) => [c.args.label, c.args.title]);
+    await open(REF, LINK);
+    request("app-1", { id: 0, type: "writing", args: [] });
+    await answer("app-1", 0);
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: new Uint8Array(10) }];
+    request("app-1", { id: 1, type: "files.pick", args: [] });
+    const [film] = (await answer("app-1", 1)).value as { id: string }[];
+    request("app-1", { id: 2, type: "files.serve", args: [film!.id] });
+    const serve = (await answer("app-1", 2)).value as string;
+    expect(titles()).toEqual([["app-1", "Chess · sharing a file with Ana"]]);
+    // A second serve of the same window changes nothing; the last one ended gives the window its name back.
+    request("app-1", { id: 3, type: "files.serve", args: [film!.id] });
+    const again = (await answer("app-1", 3)).value as string;
+    request("app-1", { id: 4, type: "files.unserve", args: [serve] });
+    await answer("app-1", 4);
+    expect(titles()).toHaveLength(1);
+    request("app-1", { id: 5, type: "files.unserve", args: [again] });
+    await answer("app-1", 5);
+    expect(titles()).toEqual([["app-1", "Chess · sharing a file with Ana"], ["app-1", "Chess with Ana"]]);
   });
 
   it("opens a window with the checked entry and what the person granted, and runs the web broker for it", async () => {
@@ -233,6 +257,27 @@ describe("opening an app on Desktop", () => {
     closed("app-2");
     expect(stops).toEqual(["closed", "stopped"]);
     await vi.waitFor(() => expect(host.calls.filter((c) => c.op === "chat.close")).toHaveLength(2));
+  });
+
+  it("brings the app's window to the front when it is opened again in the same chat, and its chat closes once with it", async () => {
+    const { open, request, answer, calls, closed, host } = setup();
+    // A double click: both opens find the one window.
+    expect(await Promise.all([open(REF, LINK), open(REF, LINK)])).toEqual([undefined, "shown"]);
+    request("app-1", { id: 1, type: "writing", args: [] });
+    await answer("app-1", 1);
+    // Its card, or + → Apps, pressed while it runs.
+    expect(await open(REF, LINK)).toBe("shown");
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(1);
+    expect(calls.filter((c) => c.command === "app_focus")).toEqual([{ command: "app_focus", args: { label: "app-1" } }, { command: "app_focus", args: { label: "app-1" } }]);
+    // Another chat, or alone: a window of its own.
+    expect(await open(REF, "link-2")).toBeUndefined();
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(2);
+
+    closed("app-1");
+    await vi.waitFor(() => expect(host.calls.filter((c) => c.op === "chat.close" && c.linkId === LINK)).toHaveLength(1));
+    // Closed: the next open is a new window.
+    expect(await open(REF, LINK)).toBeUndefined();
+    expect(calls.filter((c) => c.command === "app_open")).toHaveLength(3);
   });
 
   it("tears down an app whose first word is not the runner's, and one that never starts", async () => {

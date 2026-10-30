@@ -1266,18 +1266,21 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect([looks(), world.publishes]).toEqual([2, 1]);
     await dan.tick(t0 + 3_600);
     expect([looks(), world.publishes]).toEqual([3, 1]);
-    // Thirty seconds old: written again, and read back again.
+    // Thirty seconds old: written again. Patience ran out: not read back, and every ten seconds now.
     await dan.tick(t0 + 40_000);
     expect([looks(), world.publishes]).toEqual([4, 2]);
     await dan.tick(t0 + 45_000);
-    expect([looks(), world.publishes]).toEqual([5, 2]);
+    expect([looks(), world.publishes]).toEqual([4, 2]);
     await dan.tick(t0 + 50_000);
-    expect(looks()).toBe(5); // patience ran out: every ten seconds now
-    await dan.tick(t0 + 55_000);
+    expect([looks(), world.publishes]).toEqual([5, 2]);
+    // Then less often the longer it waits: a fifth of the wait, 12.6 s at 63 s.
+    await dan.tick(t0 + 62_000);
+    expect(looks()).toBe(5);
+    await dan.tick(t0 + 63_000);
     expect([looks(), world.publishes]).toEqual([6, 2]);
     // The admin's app answers: a session is up, and knocking stops.
-    await alice.tick(t0 + 55_000); await world.settle();
-    await dan.tick(t0 + 70_000);
+    await alice.tick(t0 + 63_000); await world.settle();
+    await dan.tick(t0 + 90_000);
     expect([looks(), world.publishes]).toEqual([6, 2]);
   });
 

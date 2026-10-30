@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, arrivalNow, cameAt, editKey, dropMarks, eventTime, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
+import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, JOIN_GIVE_UP_MS, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
 import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
@@ -243,6 +243,8 @@ interface Live {
   members: Map<string, number>;
   emptySince: number;
   lastLobbyPoll: number;
+  /** As a hub: my last read of my lobby was held back by the relays' budget until then, and goes again then (`pollLobby`). */
+  lobbyHeldUntil?: number;
   /** As a member: the hubs I want, and when I last wrote in each one's lobby. */
   myHubs: string[];
   lobbyWrites: Map<string, number>;
@@ -328,6 +330,9 @@ export class Communities {
   private readonly knockAt = new Map<string, number>();
   /** Joiners: how many others had a knock still being refreshed in the record I last read (they wait with me). */
   private readonly knockingWith = new Map<string, number>();
+  /** Since when this run knocks with nobody answering (`JOIN_GIVE_UP_MS`), and the joins it gave up (`Groups.giveUpJoin`). */
+  private readonly knockingSince = new Map<string, number>();
+  private readonly gaveUp = new Set<string>();
   /** Joiners: the knock record a knock read whose write the relays refused, and when it was read (`knock`). */
   private readonly knockRead = new Map<string, { n: number; knocks: Knock[]; at: number }>();
   /** My frames an edge took, and which of them carry an edit (`frame id → editKey`). */
@@ -418,7 +423,7 @@ export class Communities {
     const live = this.live.get(group.id);
     const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
     const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
-      ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
+      ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}), ...(this.gaveUp.has(group.id) && { unanswered: true }) } : undefined;
     // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
     if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
     if (!live) return [];
@@ -466,7 +471,8 @@ export class Communities {
     if (!link) throw new Error("This is not a link to a group");
     const existing = this.stored.get(link.g);
     const live = this.live.get(link.g);
-    if (existing?.joining && existing.joining.host === link.host) return link.g;
+    // Opened again while joining: a join nobody answered (`JOIN_GIVE_UP_MS`) knocks again.
+    if (existing?.joining && existing.joining.host === link.host) { await this.knockAgain(link.g); return link.g; }
     if (live) {
       const s = live.session;
       // What this device holds may be stale (it was removed while its app was closed): never taken for the answer.
@@ -505,6 +511,7 @@ export class Communities {
   /** `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`). */
   private async startJoining(link: GroupEntryLink, seedB64: string, since: number, check = false): Promise<void> {
     this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g); this.knockRead.delete(link.g);
+    this.knockingSince.delete(link.g); this.gaveUp.delete(link.g);
     const before = this.stored.get(link.g)?.joining;
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     if (before && before.linkId !== linkId) await this.host.closeEdge(before.linkId);
@@ -515,6 +522,23 @@ export class Communities {
     this.host.emit();
     traceJoin(link.g, "join.start");
     void this.knock(group, since).catch(() => {});
+  }
+
+  /** A link join nobody answered (`JOIN_GIVE_UP_MS`) knocks again, as when the link was opened: Try again. */
+  async knockAgain(groupId: string, now = this.now()): Promise<void> {
+    const group = this.stored.get(groupId);
+    if (!group?.joining || !this.gaveUp.delete(groupId)) return;
+    this.knockingSince.set(groupId, now);
+    this.lastKnock.delete(groupId); this.knocked.delete(groupId); this.knockRead.delete(groupId);
+    await this.reopenEntry(group.joining);
+    this.host.emit();
+    void this.knock(group, now).catch(() => {});
+  }
+
+  /** The joiner's side of the link's entry session, opened again where it is gone (the same key, so the same session). */
+  private async reopenEntry(joining: NonNullable<StoredGroup["joining"]>): Promise<void> {
+    if ([...this.host.entries(joining.g).values()].includes(joining.linkId)) return;
+    await this.host.openEntry({ g: joining.g, host: joining.host }, "guest", joining.seedB64, joining.host);
   }
 
   /** The check is over (answered, or nobody was at the door): the group stays as it is here. */
@@ -679,6 +703,8 @@ export class Communities {
     dropMarks(this.marks, groupId);
     this.knockingWith.delete(groupId);
     this.knockRead.delete(groupId);
+    this.knockingSince.delete(groupId);
+    this.gaveUp.delete(groupId);
     this.lineOrder.forget(MESSAGE_LINK(groupId));
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
@@ -704,13 +730,28 @@ export class Communities {
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
-      if (group.joining && (this.knocking(group, live) || group.joining.check)) {
-        const waited = now - group.joining.since, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
-        // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
-        if (!this.knocking(group, live) && waited > CHECK_MS) await this.endCheck(group);
+      if (group.joining && (this.knocking(group, live) || group.joining.check) && !this.gaveUp.has(group.id)) {
+        const knocking = this.knocking(group, live), waited = now - group.joining.since;
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
-        else if (!this.host.linkReady(group.joining.linkId, 2) && !this.host.linkSeen?.(group.joining.linkId)
-          && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
+        const answered = this.host.linkReady(group.joining.linkId, 2) || !!this.host.linkSeen?.(group.joining.linkId);
+        const since = this.knockingSince.get(group.id);
+        if (since === undefined || answered) this.knockingSince.set(group.id, now);
+        // The first tick of a run: the entry session a join gave up in the run before is back.
+        if (since === undefined) await this.reopenEntry(group.joining).catch(() => {});
+        // Nobody answered for an hour of this run: the knocks stop, and the entry session with them, until Try again.
+        else if (knocking && !answered && now - since > JOIN_GIVE_UP_MS) {
+          this.gaveUp.add(group.id);
+          countWaitingJoin(this.host, group.id, now, false);
+          traceJoin(group.id, "join.unanswered");
+          await this.host.closeEdge(group.joining.linkId).catch(() => {});
+          this.host.emit();
+          continue;
+        }
+        // Nobody answering: less often the longer it waits, at one pace with the app's other joins (`joinKnockWait`).
+        const every = joinKnockWait(waited, this.timings, countWaitingJoin(this.host, group.id, now, knocking && !answered && waited > this.timings.patienceMs));
+        // A member checking it is still in does not ask for ever: nobody at the door says nothing either way.
+        if (!knocking && waited > CHECK_MS) await this.endCheck(group);
+        else if (!answered && now - (this.lastKnock.get(group.id) ?? 0) >= (this.knocked.has(group.id) ? every : Math.min(every, UNKNOCKED_RETRY_MS))) await this.knock(group, now).catch(() => {});
         if (!live) continue;
       }
       if (!live) continue;
@@ -858,7 +899,8 @@ export class Communities {
       if (this.hubDropped(groupId, live, others, now)) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
       // And so is one whose member I dropped a while ago (`MEMBER_BACK_MS`): its app, opened again, asks there.
       const lobbyEvery = (now < live.lobbyBusyUntil || now < (live.memberBackUntil ?? 0)) && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
-      if (now - live.lastLobbyPoll >= lobbyEvery) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
+      // A read the relays held back is no reading: again when the hold ends (`lobbyHeldUntil`), not at the next turn.
+      if (now - live.lastLobbyPoll >= lobbyEvery || (!busy && now >= (live.lobbyHeldUntil ?? Infinity))) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
       await this.answerKnocks(groupId, live, now, busy);
       await this.commitLeaves(live, others.map(h => h.key), now);
     } else {
@@ -939,7 +981,11 @@ export class Communities {
         const check = live.lobbyChecks?.get(hub);
         if (check && now >= check.at) {
           live.lobbyChecks!.delete(hub);
-          if (await this.lobbyLost(groupId, live, hub, check.ts)) live.lobbyWrites.delete(hub);
+          const lost = await this.lobbyLost(groupId, live, hub, check.ts);
+          if (lost === "room") live.lobbyWrites.delete(hub);
+          // Pushed out of a full lobby: asked again once the hub has read the requests there (`lobbyPollMs`), not at the
+          // next refresh.
+          else if (lost === "full") live.lobbyWrites.set(hub, now - this.timings.lobbyWriteMs + this.timings.lobbyPollMs + Math.floor(this.random() * LOBBY_CHECK_JITTER_MS));
         }
         // A request the relays held back (the budget, while a link of mine signals) goes again in a moment, not at the
         // next refresh: the hub cannot open an edge for a member it never saw ask (a member cut off by a hub that left
@@ -1281,18 +1327,21 @@ export class Communities {
   }
 
   /**
-   * My request is not in the hub's lobby any more, and the lobby has room for it: another member's write, made from a
-   * reading from before mine, dropped it (`LOBBY_CHECK_MS`). A full lobby that pushed it out is left as it is: asking
-   * again there would push out someone else. A read that fails says nothing, and the usual refresh asks again.
+   * My request is not in the hub's lobby any more (`LOBBY_CHECK_MS`). With room for it ("room"): another member's write,
+   * made from a reading from before mine, dropped it. Full ("full"): the newer requests pushed it out, and asking again
+   * at once would push out one of them before the hub read it, so it waits for the hub's next reading. Many members a
+   * closed hub carried ask the hub left in the same second; with 6 places, the rest waited for the 20 s refresh while the
+   * lobby held requests the hub had already taken, and were cut off for up to 115 s (CLI daemons, 2026-10-19). A read
+   * that fails says nothing, and the usual refresh asks again.
    */
-  private async lobbyLost(groupId: string, live: Live, hub: string, ts: number): Promise<boolean> {
+  private async lobbyLost(groupId: string, live: Live, hub: string, ts: number): Promise<"room" | "full" | false> {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
     const records = await this.host.resolve(keys.identity.pubKeyZ32, true, true).catch(() => undefined);
     if (records === undefined) return false;
     const entries = readLobby(keys, records ?? []);
-    const lost = !entries.some(e => e.key === live.session.myKey && e.ts >= ts) && entries.length < COMMUNITY_TOPOLOGY.lobbyEntries;
-    if (lost) traceJoin(groupId, "lobby.lost");
-    return lost;
+    if (entries.some(e => e.key === live.session.myKey && e.ts >= ts)) return false;
+    traceJoin(groupId, "lobby.lost");
+    return entries.length < COMMUNITY_TOPOLOGY.lobbyEntries ? "room" : "full";
   }
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {
@@ -1300,6 +1349,12 @@ export class Communities {
     // With no edge up, where my members ask is my way back (`wayBack`).
     const back = this.wayBack(groupId, live);
     const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, !back, !back && this.doorBusy(groupId, live, now), back).catch(() => null)) ?? []);
+    // Held back by the relays' budget, the read answered the lobby as I last read it: read again when the hold ends. At
+    // the next turn (30 s while nobody asked), the members of a hub that closed, asking here, waited that long more; at
+    // the busy pace, each read 6 s apart fell in a new hold and answered the lobby as it was 20-40 s before (CLI daemons,
+    // 2026-10-20).
+    const held = this.host.readHeldBackFor?.(keys.identity.pubKeyZ32);
+    live.lobbyHeldUntil = held !== undefined && held > 0 ? now + held : undefined;
     for (const { key, ts } of entries) {
       // A member of the roster gets its edge. A key no commit names may be a member ahead of me on the roster, or one
       // whose admission lost a race, and needs an edge to find out: for a moment, and no member's (`wantAhead`).
@@ -1726,6 +1781,7 @@ export class Communities {
         this.knocked.delete(g);
         this.knockAt.delete(g);
         this.knockingWith.delete(g);
+        this.knockingSince.delete(g);
         this.knockRead.delete(g);
         await this.host.closeEdge(linkId);
         await this.reconcile(g, live, now);
@@ -1845,8 +1901,9 @@ export class Communities {
         // so neither the history nor the list of groups follows a member's clock.
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
-        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
-        const file = m.file && this.files ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
+        // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself. Not one of
+        // a message deleted for everyone that comes after its removal (`Groups.removed`): its row is not stored either.
+        const file = m.file && this.files && !this.stored.get(id)?.removedIds?.includes(m.id) ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
@@ -1879,6 +1936,8 @@ export class Communities {
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(id) ?? true,
       adminTurn: () => this.host.adminTurn?.(id) ?? Promise.resolve(true),
+      // A message deleted for everyone (WISP 400 § Delete for everyone) is noted with the group (`Groups.removed`).
+      removed: messageId => !!this.stored.get(id)?.removedIds?.includes(messageId),
       relay: frame => { if (this.live.get(id)?.hub) for (const [, linkId] of this.hearers(id, frame)) this.sendTo(linkId, frame); },
       // A catch-up answer goes a slice at a time, each once the member's app handled the last (`COMMUNITY_LIMITS.catchUpSlice`).
       ...(this.host.linkHandled && {

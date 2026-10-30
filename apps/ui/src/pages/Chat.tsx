@@ -14,8 +14,9 @@ import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
 import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
-import { takeOpenRequest, useChatApp, useOpenRequested } from "../lib/apps/running";
+import { takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
 import { openAppInChat } from "../lib/apps/installed";
+import { rowDays } from "../lib/chatDays";
 import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { appsComposerHint } from "../lib/apps/availability";
@@ -30,12 +31,16 @@ import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
+import { useComposerTranslation } from "../hooks/useComposerTranslation";
+import { keepSentOriginal } from "../lib/sentOriginals";
 import { leftOn, useChatScroll } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
+import { DaySections } from "../components/chat/DaySections";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
 import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
@@ -80,6 +85,7 @@ import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
+import { TranslateMenu, TranslateMenuItem } from "../components/ChatTranslate";
 import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
 import { setChatFolder } from "../lib/chatFolders";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
@@ -129,6 +135,14 @@ const MEDIA_PROBLEM_TEXT = {
   relay: ["calls.relayNoAnswer", "calls.relayNoAnswerNext"],
   relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
   relayOnlyNow: ["calls.relayOnlyNow", "calls.relayOnlyNowNext"],
+} as const;
+
+/** Tech Info's Status (the engine's word for the link) in the reader's language. A word not here stays as it is. */
+const STATUS_TEXT = {
+  connecting: "chat.connecting",
+  online: "chat.online",
+  offline: "chat.offline",
+  error: "connection.state.discoveryUnavailable",
 } as const;
 
 interface ChatProps {
@@ -204,6 +218,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     deleteMessage,
     setNick,
   } = useChat(params);
+  // The composer's Translate, in a chat that translates and has a language of its own.
+  const composerTranslation = useComposerTranslation(sessionId);
 
   // Only what contacts may see: the join notice names nobody while this profile does not share its name.
   useEffect(() => {
@@ -469,7 +485,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The app open in this chat, if one is: beside the chat, or over its whole width (ChatAppPanel.tsx; a full-screen
   // app always is).
   const appHere = paired && appsOn && chatLink?.id ? chatLink.id : undefined;
-  const chatApp = useChatApp(appHere);
+  const appCovers = useChatAppCovers(appHere);
   // An app the person opened here from the Apps page (its chat picker): opened once this chat shows, as + → Apps opens
   // one. What went wrong shows in + → Apps.
   const [appsError, setAppsError] = useState<string | null>(null);
@@ -491,6 +507,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
+  const [showTranslate, setShowTranslate] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
   // Off screen (another chat opened while this one stays loaded), its Tech info closes, as a message's details do (`ChatOnScreen`).
@@ -583,6 +600,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // around the message it was left on, and more as the view goes up or down.
   const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
   const rowWindow = useRowWindow(rowIds, sessionId, { opensOn: leftOn(sessionId), heads: stackHeads });
+  // The day each row goes under, over the whole timeline: a day keeps one date whichever of its rows are in the page.
+  const days = useMemo(() => rowDays(timeline.map(row => row.kind === "message" ? row.message.timestamp : row.kind === "transport" ? row.entry.since ?? row.entry.at : row.entry.at)), [timeline]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
   // A notice (joined, a call) is not a message to count. Always every message, in the page or not; a new list when the
   // window moves, so the view is put back in the same commit, before a scroll can see the rows moved.
@@ -643,16 +662,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     hasVideo: incomingHasVideo, onCall: webrtc.otherCallOn,
     answer: holdForUnlock
       // The offer goes back to the engine for the chat the unlocked app opens, which answers it at once (lib/lockedRing).
-      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
+      ? () => { if (chatLink?.id && incomingCallSignal) engine.keepCallOffer(chatLink.id, incomingCallSignal); handOverCall(sessionId, incomingCallSignal, incomingHasVideo); nav.conversation(chatPath(sessionId)); }
       : () => { webrtc.acceptCall(incomingHasVideo); if (!visible) nav.conversation(chatPath(sessionId)); },
     decline: webrtc.rejectCall,
   } : null);
   // A call answered from the lock screen before the first unlock, handed over to this chat: answered as it came.
   useEffect(() => {
     if (holdForUnlock || callState !== "incoming") return;
-    const video = takeHandedCall(sessionId);
+    const video = takeHandedCall(sessionId, incomingCallSignal);
     if (video !== undefined) webrtc.acceptCall(video);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring; `webrtc` changes with every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per ring, for the offer that rings; `webrtc` changes with every render
   }, [callState, sessionId, holdForUnlock]);
   // Under the lock it would only hold the keys: the lock screen shows the call instead.
   const locked = useIsLocked();
@@ -751,7 +770,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
-    <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
+    <div data-file-drop className={`chat-column relative flex-1 ${appCovers ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
       {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
       {webrtc.noAnswer && (
@@ -934,6 +953,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               )}
               <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              <TranslateMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowTranslate(true); }} />
               <MenuItem testId="chat-pin-toggle" onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
@@ -993,6 +1013,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               {rarerRows(() => setShowMore(false))}
             </Menu>
             <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
+            <TranslateMenu chat={sessionId} open={showTranslate} onClose={() => setShowTranslate(false)} anchorRef={menuRef} />
             <ChatFolderMenu chat={sessionId} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
           </div>
         </div>
@@ -1082,7 +1103,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 {...forwarding.rowProps(row.message)}
               />
             );
-            return drawn.map(row => {
+            return <DaySections rows={drawn} days={days} from={rowWindow.from} draw={row => {
               if (row.kind !== "message") return draw(row);
               if (stackHeads.has(row.message.id)) return null;
               const run = stacks.get(row.message.id);
@@ -1090,7 +1111,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               return <RoutineStack key={`stack:${row.message.id}`} mine={row.message.sender === "me"} cards={run.map(m => m.card as RoutineCard)}>
                 {run.map(message => draw({ kind: "message", message }))}
               </RoutineStack>;
-            });
+            }} />;
           })()}
         </div>
       </div>
@@ -1111,12 +1132,16 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         // A paired chat has no mentions; a link preview made in the composer goes with the text, and so does a reply.
         onSend={async (text, _mentions, extra) => {
           const answering = replyingRef.current;
-          const error = await sendMessage(text, answering ? { ...extra, replyTo: answering.id } : extra);
+          // A translation sent: its original is kept beside it, on this device only.
+          const { translated, ...rest } = extra ?? {};
+          const options = translated ? { ...rest, onSent: (id: string) => keepSentOriginal(sessionId, id, translated) } : extra;
+          const error = await sendMessage(text, answering ? { ...options, replyTo: answering.id } : options);
           if (!error && answering) replied(answering);
           // The engine says why in English: said here in the app's language (lib/errorText.ts), as a group's composer does.
           return error && problemLine(error, t);
         }}
         reply={replyBar}
+        translation={composerTranslation}
         // Editing one of mine (WISP 400 § Edits): the new text shows here at once and reaches the contact when it can.
         edit={editing && chatLink ? { key: editing.id, text: editing.text, snippet: replySnippet(editing.text), onClose: () => setEditing(null),
           onSave: async (text, extra) => (await engine.call("editMessage", { linkId: chatLink.id, messageId: editing.id, text, ...(extra?.preview && { preview: extra.preview }) })
@@ -1232,28 +1257,24 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.protocol")}>
-            <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
+            <TechInfoRow label={t("chat.tech.network")}
+              value={techInfo.peerToPeer ? t("chat.tech.networkPeerToPeer", { webrtc: "WebRTC DataChannel", pkarr: "Pkarr" }) : techInfo.protocol} />
             <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
+            {paired && deliveryPeer?.dhtDelivery?.forwardSecrecy && <ForwardSecrecyRow state={deliveryPeer.dhtDelivery.forwardSecrecy} />}
             <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
             <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.sync")}>
-            <TechInfoRow label={t("chat.tech.status")} value={status} />
-            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
-            <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
+            <TechInfoRow label={t("chat.tech.status")} value={status in STATUS_TEXT ? t(STATUS_TEXT[status]) : status} />
+            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${Math.round(techInfo.currentPollInterval / 1000)}s`} />
             <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
             <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
           </TechInfoSection>
           <TechInfoSection title={t("chat.tech.ackStatus")}>
-            <TechInfoRow 
-              label={t("chat.tech.myAck")} 
-              value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
+            <TechInfoRow
+              label={t("chat.tech.peerAck")}
+              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")}
             />
-            <TechInfoRow 
-              label={t("chat.tech.peerAck")} 
-              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
-            />
-            <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
           </TechInfoSection>
         </div>
         </TechInfoDialog>
@@ -1316,6 +1337,27 @@ function TechInfoSection({ title, children }: { title: string; children: React.R
       <div className="bg-surface rounded-lg p-3 space-y-1.5">
         {children}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Whether what this chat sends while the contact is away (DHT text, held messages) has keys used once (WISP 4xx): On or
+ * Off, and why behind ⓘ. A live connection has fresh keys either way, which the ⓘ says too.
+ */
+function ForwardSecrecyRow({ state }: { state: "on" | "starting" | "unsupported" | "stopped" }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const why = ({ on: "chat.tech.forwardSecrecyOnInfo", starting: "chat.tech.forwardSecrecyStartingInfo", unsupported: "chat.tech.forwardSecrecyOldAppInfo", stopped: "chat.tech.forwardSecrecyStoppedInfo" } as const)[state];
+  return (
+    <div data-testid="tech-forward-secrecy" data-state={state} className="text-xs">
+      <div className="flex justify-between items-center gap-3">
+        <span className="text-text-muted shrink-0 flex items-center gap-1.5">{t("chat.tech.forwardSecrecy")}
+          <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="tech-forward-secrecy-info" className="-my-1" /></span>
+        <span className={state === "on" ? "text-success" : "text-text-secondary"}>{t(state === "on" ? "chat.tech.forwardSecrecyOn" : "chat.tech.forwardSecrecyOff")}</span>
+      </div>
+      {open && <p id={id} className="mt-1.5 text-text-secondary leading-relaxed">{t(why)} {t("chat.tech.forwardSecrecyLive")}</p>}
     </div>
   );
 }

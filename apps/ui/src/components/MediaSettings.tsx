@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { voiceLevel } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { useMediaDevices } from "../hooks/useMediaDevices";
-import { applySpeaker, canPickSpeaker, chooseDevice, deviceSource, isMediaDenied, mediaDeniedText, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
+import { applySpeaker, canPickSpeaker, captureCamera, chooseDevice, deviceSource, isMediaDenied, mediaDeniedText, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
 import { soundUrl } from "../lib/sounds";
 import { Row, Section } from "./layout";
 import { Select, type SelectOption } from "./ui/Select";
@@ -180,8 +180,7 @@ function CameraPreview({ id, fail }: { id: string | undefined; fail: (failure: F
     let live = true;
     let stream: MediaStream | null = null;
     failRef.current(false);
-    const capture = deviceSource()?.getUserMedia ?? ((constraints: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(constraints));
-    capture({ video: from(id), audio: false }).then((s) => {
+    captureCamera({ video: from(id), audio: false }).then((s) => {
       if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
       stream = s;
       if (video.current) { video.current.srcObject = s; void video.current.play?.()?.catch(() => {}); }

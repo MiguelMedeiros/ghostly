@@ -201,6 +201,17 @@ describe("a video in the chat", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "clip.webm"));
   });
 
+  it("a .mov is tried where an MP4 plays (Chromium says no to QuickTime, yet plays an H.264 one); with no MP4 either, Download", () => {
+    canPlay = (type) => (type === "video/quicktime" ? "" : "maybe");
+    const view = show(video({ name: "IMG_0001.MOV", mime: "video/quicktime" }));
+    expect(screen.getByTestId("video-play")).toBeInTheDocument();
+    expect(screen.queryByTestId("video-problem")).toBeNull();
+    view.unmount();
+    canPlay = () => "";
+    show(video({ name: "IMG_0001.MOV", mime: "video/quicktime" }));
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MOV). Download it to watch.");
+  });
+
   it("a Download the system refuses (Desktop) says so in the language, not in the system's English", async () => {
     canPlay = (type) => (type === "video/webm" ? "" : "maybe");
     vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("Permission denied (os error 13)"));
@@ -226,6 +237,30 @@ describe("a video in the chat", () => {
     expect(screen.queryByTestId("video-player")).toBeNull();
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MP4). Download it to watch.");
     expect(screen.getByTestId("video-download")).toBeInTheDocument();
+  });
+
+  it("a picture the player cannot decode (HEVC in Chromium: sound over black, no error) says so and offers Download", async () => {
+    show(video({ name: "IMG_0042.mov", mime: "video/quicktime" }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player") as HTMLVideoElement;
+    // Chromium loads the file and plays its sound: the picture is 0 × 0 and no frame is ever drawn.
+    Object.defineProperty(player, "videoWidth", { configurable: true, value: 0 });
+    fireEvent.loadedData(player);
+    expect(screen.queryByTestId("video-player")).toBeNull();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (MOV). Download it to watch.");
+    expect(screen.getByTestId("video-download")).toBeInTheDocument();
+  });
+
+  it("a picture the player decodes goes on playing", async () => {
+    show(video());
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    const player = screen.getByTestId("video-player") as HTMLVideoElement;
+    Object.defineProperty(player, "videoWidth", { configurable: true, value: 1280 });
+    fireEvent.loadedData(player);
+    expect(screen.getByTestId("video-player")).toBe(player);
+    expect(screen.queryByTestId("video-problem")).toBeNull();
   });
 
   // covers: files.video.stream
