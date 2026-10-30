@@ -864,6 +864,8 @@ export class GhostLink {
   /** What each side announced after the handshake (`paired-capabilities`): calls, services. */
   private readonly sessionCapabilities = new SessionCapabilities(() => this.offeredCapabilities());
   private readonly pairedCalls = new PairedCalls();
+  /** The channel holding this side's call hang-up, to be sent by the transport should the page go first (`leaveHangUp`). */
+  private partingOn: FrameChannel | null = null;
   /** Typing on this session (`typing/1`): when to say `start` again, and the contact's word with its timeout. */
   private readonly typingSender = new TypingSender();
   private readonly typingReceiver = new TypingReceiver((typing, activity) => this.options.events?.onPeerTyping?.(typing, activity));
@@ -2923,6 +2925,7 @@ export class GhostLink {
     if (this.options.params.profile) {
       // Kept until cleared, so what the session could not carry goes on the next one while still fresh.
       const frame = this.pairedCalls.set(signal);
+      this.leaveHangUp();
       if (!frame) return;
       if (!this.supportsCalls || !this.channel) throw new Error(this.callsUnavailable ?? "Calls need a live connection");
       this.channel.send(JSON.stringify(frame));
@@ -2936,6 +2939,20 @@ export class GhostLink {
       }
     }
     await this.session.setCallSignal(signal);
+  }
+
+  /**
+   * Hands the transport the hang-up of the call this side is on (`PairedCalls.parting`), for it to send as the app
+   * exits should the page be gone by then: a logout or a shutdown ends the Desktop's WebView with the app, and its
+   * goodbye (`depart`) never ran, the contact's call stalling until its media gave up 16 s later. Taken back once no
+   * call of ours is on, and from a session no longer the chat's.
+   */
+  private leaveHangUp(): void {
+    const channel = this.supportsCalls && this.paired?.state.status === "ready" ? this.channel : null;
+    const frame = channel ? this.pairedCalls.parting() : null;
+    if (this.partingOn && this.partingOn !== channel) this.partingOn.parting?.(null);
+    this.partingOn = channel?.parting ? channel : null;
+    this.partingOn?.parting?.(frame ? JSON.stringify(frame) : null);
   }
 
   /** Issues an HTTP request to a service the peer advertises. */
@@ -3779,6 +3796,7 @@ export class GhostLink {
       const pending = this.pairedCalls.pending();
       if (pending) try { this.channel.send(JSON.stringify(pending)); } catch { /* the next session */ }
     }
+    if (changed.includes(CALLS_CAPABILITY)) this.leaveHangUp();
     if (changed.includes(TYPING_CAPABILITY)) {
       if (!this.supportsTyping) { this.typingSender.reset(); this.typingReceiver.clear(); }
       // A new session (a transport switch, a reconnect): the contact's reader cleared what this side said on the old
@@ -4179,6 +4197,7 @@ export class GhostLink {
           this.peerPaymentMethods = null; this.peerNetworks = null;
           this.peerHoldOverride = null;
           this.sessionCapabilities.reset();
+          this.leaveHangUp();
           this.typingSender.reset(); this.typingReceiver.clear();
           this.appsSuspended();
           this.pairedHttp?.close();
@@ -4684,6 +4703,7 @@ export class GhostLink {
     // and the contact's call went on until its media gave up (half a minute).
     const hangUp = this.supportsCalls ? this.pairedCalls.hangUp({ declineRinging: options.quitting === true }) : null;
     if (hangUp) try { this.channel.send(JSON.stringify(hangUp)); } catch { /* closing already */ }
+    this.leaveHangUp();
     try { this.channel.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: the contact's liveness finds out */ }
   }
 
@@ -4853,6 +4873,7 @@ export class GhostLink {
     this.pairedHttp?.close();
     this.pairedHttp = null;
     this.channel = this.httpHost = this.httpClient = this.files = null;
+    this.leaveHangUp();
     this.peerServicesOverride = null;
     this.peerNickOverride = null;
     this.dropPeerSaid();
