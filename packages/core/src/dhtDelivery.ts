@@ -861,6 +861,13 @@ export class DhtDelivery {
     // is by then (`RatchetBox.commitOpen`): what the content goes to may seal or open a held item, which takes that lock.
     let sealed: Uint8Array | undefined;
     const opened = this.open(packet, box, bytes => { const plain = ratchet.box.peek("floor", bytes); if (plain) sealed = bytes; return plain; });
+    // Not opened here, but in the pinned mailbox, whose address only the two participation keys give: the contact pinned
+    // this side. A side restored from a backup made before it knew that learns it here, and its next envelope starts a
+    // session the contact follows, rather than going plain to a contact that refuses plain.
+    if (!sealed && box === "pinned" && packet.pubKeyZ32 === this.pinned()?.peerAddress && this.state.peerPinned !== "seen") {
+      await this.persist({ ...this.state, peerPinned: "seen" });
+      traceLink(this.from, "dht-peer-pinned", { peerPinned: "seen", ratchet: true });
+    }
     return this.take(packet, box, opened, sealed && { commit: async order => { if (!await ratchet.box.commitOpen("floor", sealed!, order)) throw new Error("A ratcheted envelope no longer opens"); }, digest });
   }
   /** `ratchet`: the envelope was ratcheted; its state is saved once what it carried is stored, with its digest. */
