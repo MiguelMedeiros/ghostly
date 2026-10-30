@@ -114,7 +114,6 @@
     "maxFee": "Lo máximo que aceptas en comisiones",
     "maxFeeInput": "Comisión máxima en {{unit}}",
     "newAddress": "Nueva dirección",
-    "notAddress": "Esa no es una dirección de Bitcoin para esta billetera.",
     "notConnected": "{{label}} no está conectado",
     "notConnectedDefault": "La fuente Bitcoin no está conectada",
     "nothingYet": "Nada todavía",
