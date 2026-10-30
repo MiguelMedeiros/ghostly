@@ -500,6 +500,11 @@ fn open_window<R: Runtime>(
     Ok(label)
 }
 
+/// An app window's title: the Ghostly window's words for it, and whose window it is, outside the page.
+fn window_title(title: &str) -> String {
+    format!("{title} (Ghostly)")
+}
+
 /// The window, with every layer that does not depend on the platform.
 fn window_builder<'a, R: Runtime>(
     app: &'a AppHandle<R>,
@@ -519,7 +524,7 @@ fn window_builder<'a, R: Runtime>(
         .size();
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::CustomProtocol(url))
-        .title(format!("{title} (Ghostly)"))
+        .title(window_title(title))
         .on_navigation(move |to| {
             nav_app
                 .state::<AppSandboxState>()
@@ -1019,6 +1024,23 @@ pub fn app_post<R: Runtime>(
     post(&app, &label, message)
 }
 
+/// Names an app window anew (the Ghostly window only): "Chess · sharing a file with Ana" while the app serves the
+/// contact a file (WISP 1200 § A read lane to the contact), as the web's panel header says it.
+#[tauri::command]
+pub fn app_title<R: Runtime>(
+    app: AppHandle<R>,
+    label: String,
+    title: String,
+) -> Result<(), String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    let window = app.get_webview_window(&label).ok_or("No app window")?;
+    window
+        .set_title(&window_title(&title))
+        .map_err(|e| e.to_string())
+}
+
 /// Closes an app window (the Ghostly window only): the broker stopped the app.
 #[tauri::command]
 pub fn app_close<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), String> {
@@ -1028,6 +1050,21 @@ pub fn app_close<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), Str
     forget(&app, &label);
     if let Some(window) = app.get_webview_window(&label) {
         window.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Brings an app window to the front (the Ghostly window only): the person opened the app again in a chat where
+/// it already runs, which shows its window rather than opening a second one.
+#[tauri::command]
+pub fn app_focus<R: Runtime>(app: AppHandle<R>, label: String) -> Result<(), String> {
+    if !is_app_label(&label) {
+        return Err("Not an app window".into());
+    }
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        window.set_focus().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -2199,6 +2236,31 @@ mod tests {
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
         assert_eq!(refused(app.handle(), &label), None);
+    }
+
+    /// Opened again in a chat where it runs: its window comes to the front. Only an app window, and one gone is
+    /// no error (it closed while the Ghostly window asked).
+    #[test]
+    fn an_app_window_is_brought_to_the_front_and_no_other_window() {
+        let app = app();
+        let request = OpenRequest {
+            app: "ana/chess".into(),
+            title: "Chess".into(),
+            entry: "<p>chess</p>".into(),
+            internet: false,
+            view: AppView::Chat,
+        };
+        let label = open(app.handle(), request).unwrap();
+        assert_eq!(app_focus(app.handle().clone(), label.clone()), Ok(()));
+        app_close(app.handle().clone(), label.clone()).unwrap();
+        assert_eq!(app_focus(app.handle().clone(), label), Ok(()));
+        for other in ["main", "svc-1", "app-"] {
+            assert_eq!(
+                app_focus(app.handle().clone(), other.into()),
+                Err("Not an app window".into()),
+                "{other}"
+            );
+        }
     }
 
     /// A profile switch or a reload replaces the page whose brokers answered the app windows: they must not stay

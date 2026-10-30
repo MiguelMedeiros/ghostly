@@ -71,6 +71,8 @@ export type EnrollFailure =
   | "full"
   /** This device is no longer the active one. */
   | "replaced"
+  /** The network was turned off on this device while it ran. */
+  | "offline"
   | "failed";
 
 /** What a page is told of an enrollment in progress. Never a secret: the code is for the person to hand over. */
@@ -231,8 +233,8 @@ abstract class Enrollment {
     return this.end({ role: this.view.role, step: "failed", reason, ...(device ? { device } : {}) } as EnrollView);
   }
 
-  /** The person stops it, on either side. */
-  cancel(): Promise<void> { return this.fail("cancelled", "cancelled"); }
+  /** The person stops it, on either side (`offline`: by turning the network off). */
+  cancel(reason: "cancelled" | "offline" = "cancelled"): Promise<void> { return this.fail(reason, "cancelled"); }
 
   /** A step that throws (a crash a test asked for, a store that failed) ends it, except a crash: that leaves everything as it was. */
   protected guard(work: () => Promise<void>): void {

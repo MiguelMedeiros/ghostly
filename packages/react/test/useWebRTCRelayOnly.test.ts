@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CallMedia } from "@ghostly/core";
 import { FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { CallRelayError, mediaProblem } from "../src/useWebRTC";
+import { CallRelayError, ICE_DISCONNECT_GRACE_MS, mediaProblem } from "../src/useWebRTC";
 
 // covers: settings.network.relay-only
 
@@ -108,5 +108,56 @@ describe("a call while Hide my IP from contacts is on", () => {
     expect(mediaProblem(new CallRelayError("relay"))).toBe("relay");
     expect(mediaProblem(new CallRelayError("relayOnly"))).toBe("relayOnly");
     expect(new CallRelayError("relay").message).toBe("Your relay did not answer");
+  });
+});
+
+// agents#1601: the setting turned on during a call left the call's connection as it was made (STUN, policy "all"),
+// its ICE restarts on it, so a new network address still reached the contact.
+describe("Hide my IP from contacts turned on during a call", () => {
+  const up = (pc: FakePeerConnection) => act(() => { pc.setIceState("connected"); pc.setConnectionState("connected"); });
+  const kinds = (call: ReturnType<typeof renderCall>) => call.published.filter((s): s is string => s !== null).map((s) => (JSON.parse(s) as { t: string }).t);
+
+  for (const side of ["placed", "answered"] as const) it(`ends a call it ${side} on a direct path, tells the contact, and says why`, async () => {
+    const network: { iceServers: typeof TURN[]; relayOnly?: boolean } = { iceServers: [TURN] };
+    const call = renderCall(undefined, undefined, network);
+    if (side === "placed") {
+      await calling(call);
+      call.receive(remote.restarting(remote.answer(Date.now() + 1)));
+    } else {
+      call.receive(remote.restarting(remote.offer(Date.now())));
+      act(() => { void call.result.current.acceptCall(false); });
+      devices.userMedia[0].grant();
+    }
+    await settle();
+    const [pc] = FakePeerConnection.instances;
+    up(pc);
+    expect(call.result.current.callState).toBe("connected");
+    expect(pc.config.iceTransportPolicy).toBeUndefined();
+    // The engine's setting turns on (Settings, Network): the chat renders again with it.
+    network.relayOnly = true;
+    call.rerender({ signal: null });
+    await settle();
+    expect(call.result.current.callState).toBe("idle");
+    expect(kinds(call).slice(-1), "the contact is told the call ended").toEqual(["h"]);
+    expect(call.result.current.mediaProblem).toBe("relayOnlyNow");
+    expect(call.addCallEventMessage.mock.calls.map(([type]) => type).slice(-1)).toEqual(["call_ended"]);
+    // Nothing more goes out on that connection: no restart over the direct path.
+    act(() => pc.setIceState("disconnected"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(ICE_DISCONNECT_GRACE_MS + 1_000); });
+    await settle();
+    expect(kinds(call).filter((k) => k === "r")).toEqual([]);
+  });
+
+  it("leaves a call already on the relay as it is", async () => {
+    const network = { iceServers: [TURN], relayOnly: true };
+    const call = renderCall(undefined, undefined, network);
+    await calling(call);
+    call.receive(remote.restarting(remote.answer(Date.now() + 1)));
+    await settle();
+    up(FakePeerConnection.instances[0]);
+    call.rerender({ signal: null });
+    await settle();
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.mediaProblem).toBeNull();
   });
 });

@@ -109,9 +109,17 @@ describe("the data part", () => {
     expect(decodeBolt11(rawInvoice("lnbc1u", [bytesField("d", Uint8Array.of(0xff, 0xfe, 0x41))]))!.description).toBe("\ufffd\ufffdA");
   });
 
-  it("takes the last of two description fields", () => {
-    const invoice = decodeBolt11(rawInvoice("lnbc1u", [bytesField("d", new TextEncoder().encode("first")), bytesField("d", new TextEncoder().encode("second"))]))!;
-    expect(invoice.description).toBe("second");
+  it("refuses an invoice with two of the same payment hash, description hash, description or expiry field", () => {
+    const first = bytesField("p", new Uint8Array(32).fill(0x4b));
+    const second = bytesField("p", new Uint8Array(32).fill(0xdb));
+    const text = (value: string) => bytesField("d", new TextEncoder().encode(value));
+    expect(decodeBolt11(rawInvoice("lnbc1u", [first, second]))).toBeNull();
+    expect(findBolt11(`pay me ${rawInvoice("lnbc1u", [first, text("coffee"), first])}`)).toBeNull();
+    expect(decodeBolt11(rawInvoice("lnbc1u", [first, bytesField("h", new Uint8Array(32)), bytesField("h", new Uint8Array(32).fill(1))]))).toBeNull();
+    expect(decodeBolt11(rawInvoice("lnbc1u", [first, text("first"), text("second")]))).toBeNull();
+    expect(decodeBolt11(rawInvoice("lnbc1u", [first, ["x", uint(60)], ["x", uint(604_800)]]))).toBeNull();
+    // A `p` of the wrong length is skipped, not counted, as BOLT 11 asks: the 52-word one is the hash.
+    expect(decodeBolt11(rawInvoice("lnbc1u", [bytesField("p", new Uint8Array(31)), first]))!.paymentHash).toBe("4b".repeat(32));
   });
 });
 

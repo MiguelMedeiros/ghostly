@@ -52,8 +52,11 @@ export function sectionInView(boxes: readonly SectionBox[], line: number, viewBo
   return current ?? SETTINGS_SECTIONS[0];
 }
 
-/** What a setting needs to be there at all: several profiles, an updater, wake-up push, calls' devices. */
-export type SettingNeeds = "profiles" | "updates" | "wake" | "media";
+/**
+ * What a setting needs to be there at all: several profiles, an updater, wake-up push, calls' devices, translation (a
+ * `VITE_TRANSLATE` Desktop build, lib/translateSettings.ts).
+ */
+export type SettingNeeds = "profiles" | "updates" | "wake" | "media" | "translate";
 
 /** One option the menu's search finds, by its row's label or by other words people look for it by. */
 export interface SettingEntry {
@@ -75,6 +78,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "appearance", label: "settings.colorScheme", words: "settings.searchWords.mode" },
   { section: "appearance", label: "settings.chatListDensity", words: "settings.searchWords.chatList" },
   { section: "appearance", label: "settings.language", words: "settings.searchWords.language" },
+  { section: "appearance", label: "settings.translate.name", words: "settings.translate.searchWords", needs: "translate" },
   { section: "appearance", label: "settings.reduceMotion", words: "settings.searchWords.motion" },
   { section: "notifications", label: "settings.notificationSounds", words: "settings.searchWords.sounds" },
   { section: "notifications", label: "settings.cues.payments", words: "settings.cues.paymentsHint" },

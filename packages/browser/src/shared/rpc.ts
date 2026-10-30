@@ -174,7 +174,7 @@ export interface EngineApi {
   appId(params: { linkId: string; ref: string }): { app: string };
   /**
    * This side opened the app in the chat (or updated it to `version`): `open` goes now and on every session that comes
-   * back. `digest`, here and in `appSend`, `appFile` and `appStorage*`: the version the frame runs (what `appEntry` gave
+   * back. `digest`, here and in `appSend`, `appServe`, `appRemoteRead`, `appFile` and `appStorage*`: the version the frame runs (what `appEntry` gave
    * it), judged in place of the installed one when an update came while it ran. Absent: the installed version.
    */
   appOpen(params: { linkId: string; ref: string; version: string; digest?: string }): { app: string };
@@ -192,7 +192,7 @@ export interface EngineApi {
    * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
    * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
    */
-  appServe(params: { linkId: string; ref: string; file: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
+  appServe(params: { linkId: string; ref: string; file: string; digest?: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
   /** Ends a serve. */
   appUnserve(params: { linkId: string; serve: string }): void;
   /** The bytes of an `app-range` event's request and the file's size, or why it cannot be read. */
@@ -201,7 +201,7 @@ export interface EngineApi {
    * Reads a range of what the contact's app serves: at most 1 MiB, fewer at the end of the file, with the file's size;
    * or why not (`not-open`, `not-served`, `changed`, `gone`, `offline`, `peer-closed`, `failed`).
    */
-  appRemoteRead(params: { linkId: string; ref: string; serve: string; offset: number; length: number }): { bytes: Uint8Array; size: number } | { error: string };
+  appRemoteRead(params: { linkId: string; ref: string; serve: string; offset: number; length: number; digest?: string }): { bytes: Uint8Array; size: number } | { error: string };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
@@ -402,7 +402,7 @@ export interface EngineApi {
    * Saves a message on this device, or unsaves it with `remove`: `linkId` a chat's link or `group:<id>`, `messageId` the
    * message's id here or, in a 1:1 chat, the id both sides know. Nothing is sent: the mark stays in this profile here.
    */
-  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): { error: string | null };
+  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): { error: string | null; removed?: boolean };
   /** This profile's saved messages from all its chats and groups, the last saved first, each as it is now. */
   savedMessages(): SavedMessage[];
   /** `admin`: the member a leaving admin handed the role to. */

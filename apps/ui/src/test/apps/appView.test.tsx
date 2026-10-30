@@ -132,6 +132,21 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     for (const node of kept) expect(node).toHaveClass("shrink-0");
   });
 
+  it("in pt on a 320 px phone, the words that fill the line stop short of its end: some of the name shows, nothing runs under the buttons", async () => {
+    windowIs(true);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Ana", named: true }} peerKey="peer" />, { language: "pt" });
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { serving: true }));
+    const line = within(screen.getByTestId("mini-app")).getByTestId("mini-app-with");
+    expect(line).toHaveTextContent("compartilhando um arquivo com Ana");
+    // The line clips: its words, cut if they must, leave 4ch of it to the name.
+    expect(line).toHaveClass("overflow-hidden");
+    const name = within(line).getByTestId("mini-app-with-name");
+    const words = [...line.children].filter((node) => node !== name);
+    for (const node of words) expect(node).toHaveClass("max-w-[calc(100%-4ch)]", "overflow-hidden", "text-ellipsis", "whitespace-pre");
+  });
+
   it("has the chat's look in its header: the app, with the contact, and the chat's connection", async () => {
     windowIs(false);
     panel();
@@ -211,10 +226,13 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
 
     // Opened again from the chat (its card, or + → Apps): the same app, not a new one.
     await user.click(within(app).getByTestId("mini-app-back"));
-    await act(() => open(REF, "link-1"));
+    let again: "shown" | void = undefined;
+    await act(async () => { again = await open(REF, "link-1"); });
     expect(app).toBeVisible();
     expect(started).toHaveLength(1);
     expect(frame.isConnected).toBe(true);
+    // Nothing new started: the contact is not told again.
+    expect(again).toBe("shown");
   });
 
   it("a full-screen app covers the whole chat at every width, with Back to it, and never sits beside it", async () => {
@@ -329,8 +347,10 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
   it("names a Desktop app window after the app and the contact, and the app alone outside a chat", async () => {
     windowIs(false);
     panel();
-    const t = ((key: string, vars: Record<string, string>) => key === "apps.view.with" ? `${vars.title} with ${vars.name}` : key) as never;
+    const t = ((key: string, vars: Record<string, string>) => key === "apps.view.with" ? `${vars.title} with ${vars.name}` : key === "apps.view.withSharing" ? `${vars.title} · sharing a file with ${vars.name}` : key) as never;
     expect(appWithContact("Chess", "link-1", t)).toBe("Chess with Ana");
+    expect(appWithContact("Chess", "link-1", t, true)).toBe("Chess · sharing a file with Ana");
+    expect(appWithContact("Chess", null, t, true)).toBe("Chess");
     expect(appWithContact("Chess", null, t)).toBe("Chess");
     expect(appWithContact("Chess", "link-other", t)).toBe("Chess");
   });

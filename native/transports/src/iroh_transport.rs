@@ -1,5 +1,5 @@
 use iroh::{
-    endpoint::{presets, Connection},
+    endpoint::{presets, Connection, QuicTransportConfig, VarInt},
     Endpoint, EndpointAddr, RelayConfig, RelayMap, RelayMode, RelayUrl, SecretKey,
 };
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,20 @@ use std::{net::SocketAddr, time::Duration};
 
 pub const ALPN: &[u8] = b"ghostly/paired-chat/1";
 pub const MAX_FRAME: usize = 60 * 1024;
+/// Bytes a contact may send on the chat's stream before this side confirms them. QUIC's default, 1.25 MB, is sized
+/// for 100 ms: a file is about 1.37 bytes on the stream per byte of it (base64url text), so at 150 ms it carried 5.25 MiB/s
+/// on a 100 Mbit path. 4 MiB is more than a chat's files have in flight (`chatWindowBytes`, 2 MiB, as text).
+pub const STREAM_WINDOW: u32 = 4 * 1024 * 1024;
+/// Bytes a contact may send on all of a connection's streams before this side confirms them: QUIC's default has no
+/// bound, so each stream the contact opened and nobody here reads could hold a window of its own.
+pub const CONNECTION_WINDOW: u32 = 2 * STREAM_WINDOW;
+
+fn transport() -> QuicTransportConfig {
+    QuicTransportConfig::builder()
+        .stream_receive_window(VarInt::from_u32(STREAM_WINDOW))
+        .receive_window(VarInt::from_u32(CONNECTION_WINDOW))
+        .build()
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Address {
@@ -60,6 +74,7 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
     builder
         .secret_key(SecretKey::from_bytes(&seed))
         .alpns(vec![ALPN.to_vec()])
+        .transport_config(transport())
         .bind()
         .await
         .map_err(|e| e.to_string())
@@ -83,6 +98,7 @@ pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<E
         )))
         .secret_key(SecretKey::from_bytes(&seed))
         .alpns(vec![ALPN.to_vec()])
+        .transport_config(transport())
         .bind()
         .await
         .map_err(|e| e.to_string())
@@ -292,6 +308,46 @@ mod limits {
         let (a, b, outgoing, incoming) = pair(b"someone-else/1").await;
         assert_eq!(binding(&a, &outgoing).unwrap_err(), "Unexpected Iroh ALPN");
         assert_eq!(binding(&b, &incoming).unwrap_err(), "Unexpected Iroh ALPN");
+        a.close().await;
+        b.close().await;
+    }
+
+    /// What a contact may send before this side confirms it: a chat's files in flight on the chat's stream (QUIC's
+    /// 1.25 MB held a file at 5.25 MiB/s on a 150 ms path), and no more than two such windows over all its streams.
+    #[tokio::test]
+    async fn a_contact_may_have_a_chats_files_in_flight_on_its_stream_and_no_more_in_all() {
+        let a = endpoint([13; 32], true).await.unwrap();
+        let b = endpoint([14; 32], true).await.unwrap();
+        let addr = address(&b);
+        let (outgoing, incoming) = tokio::time::timeout(Duration::from_secs(25), async {
+            tokio::join!(connect(&a, &addr), async {
+                b.accept().await.unwrap().await.unwrap()
+            })
+        })
+        .await
+        .unwrap();
+        let outgoing = outgoing.unwrap();
+        // Nothing is read on b: a write finishes only as far as b lets a have bytes unconfirmed.
+        let write = |bytes: usize| {
+            let outgoing = outgoing.clone();
+            async move {
+                let (mut send, _recv) = outgoing.open_bi().await.unwrap();
+                let written =
+                    tokio::time::timeout(Duration::from_secs(3), send.write_all(&vec![7; bytes]))
+                        .await;
+                (written.is_ok(), send)
+            }
+        };
+        let window = STREAM_WINDOW as usize;
+        let (whole, _first) = write(3 * 1024 * 1024).await;
+        assert!(whole, "3 MiB in flight on one stream");
+        let (rest, _second) = write(window - 3 * 1024 * 1024).await;
+        assert!(rest, "the rest of a window on another stream");
+        let (third, _third) = write(window).await;
+        assert!(third, "a third stream up to the connection's bound");
+        let (past, _past) = write(64 * 1024).await;
+        assert!(!past, "past two windows over all streams, a contact waits");
+        drop(incoming);
         a.close().await;
         b.close().await;
     }

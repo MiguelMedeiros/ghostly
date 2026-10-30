@@ -2,7 +2,7 @@ import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalSto
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
-import { answerable, InvitationButtons, InvitationRefusal, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
+import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
@@ -13,6 +13,7 @@ import { BellIcon, MuteMenu } from "./ChatMute";
 import { useI18n } from "../contexts/I18nContext";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { appCardLine, cardLine, showsCard } from "../lib/statusCards";
+import { useInstalledApps } from "../lib/apps/installed";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
 import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
@@ -275,6 +276,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
+  // An app card names an app installed here as its bubble does (appCardLine): the list read, and the row drawn again.
+  const installed = useInstalledApps(p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
   const live = waitsForLive(p.lastMessage?.sender === "me" ? p.lastMessage : undefined, useDhtOnly(p.peerPubKey));
   const previewId = useId();
@@ -347,7 +350,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
-                : payment ?? appCardLine(p.lastMessage.card, t) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
+                : payment ?? appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
             </span>
           : <span className="italic text-text-muted">{t("chat.noMessages")}</span>}
         status={(muted || p.pinned) && <>
@@ -417,7 +420,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const { busy, refused, answer } = useInvitationAnswer(group);
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
-  const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+  const status = invitation ? (invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
       : invitationLine(invitation, t))
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
@@ -450,6 +453,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
         {invitation?.takenBack && <div className="mt-1.5 flex gap-2"><TakenBackDelete busy={busy} answer={answer} /></div>}
         {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2"><InvitationButtons busy={busy} answer={answer} /></div>}
+        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2"><LinkTryAgain busy={busy} answer={answer} /></div>}
         {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>

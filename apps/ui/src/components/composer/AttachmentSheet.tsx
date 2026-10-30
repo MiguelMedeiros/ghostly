@@ -2,18 +2,31 @@ import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode, type 
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { decodablePicture } from "../../lib/decodablePicture";
 import { formatFileSize } from "../../lib/format";
 import { DocumentGlyph } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
 
-/** A picture for each image among `files` (while the sheet is open), by position. */
+/**
+ * A picture for each image among `files` (while the sheet is open), by position: only one whose own bytes say a size
+ * the chat would draw (`decodablePicture`). Any other shows its name and size, and is sent as it is.
+ */
 function usePictures(files: File[]): (string | undefined)[] {
+  const [drawable, setDrawable] = useState<ReadonlyMap<File, boolean>>(new Map());
+  const asked = useRef(new WeakSet<File>());
+  useEffect(() => {
+    for (const file of files) {
+      if (!file.type.startsWith("image/") || asked.current.has(file)) continue;
+      asked.current.add(file);
+      void decodablePicture(file).then((yes) => setDrawable((was) => new Map(was).set(file, yes)));
+    }
+  }, [files]);
   const [urls, setUrls] = useState<(string | undefined)[]>([]);
   useEffect(() => {
-    const made = files.map((file) => file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined);
+    const made = files.map((file) => drawable.get(file) ? URL.createObjectURL(file) : undefined);
     setUrls(made);
     return () => made.forEach((url) => url && URL.revokeObjectURL(url));
-  }, [files]);
+  }, [files, drawable]);
   return urls;
 }
 
@@ -76,7 +89,11 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
             <div className="bg-black/40 flex items-center justify-center min-h-0">
               <img src={picture(0)} alt={single.name} onError={() => lost(single)} data-testid="attachment-image" className="max-w-full max-h-[55vh] object-contain" />
             </div>
-            <figcaption className="px-4 pt-2 text-xs text-text-muted truncate" data-testid="attachment-name"><bdi>{single.name}</bdi> · {formatFileSize(single.size)}</figcaption>
+            {/* The name is cut in its own direction, at its end, as in the file rows; the size stays whole beside it. */}
+            <figcaption className="px-4 pt-2 text-xs text-text-muted flex min-w-0" data-testid="attachment-name">
+              <span dir="auto" className="min-w-0 truncate">{single.name}</span>
+              <span className="shrink-0 whitespace-pre"> · {formatFileSize(single.size)}</span>
+            </figcaption>
           </figure>
         ) : (
           <ul className={`list-none m-0 p-3 overflow-y-auto min-h-0 grid gap-2 ${single ? "grid-cols-1" : "grid-cols-3"}`} data-testid="attachment-list">

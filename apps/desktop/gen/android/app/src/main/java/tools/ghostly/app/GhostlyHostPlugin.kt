@@ -74,6 +74,11 @@ class KeepArgs {
 }
 
 @InvokeArg
+class AwakeArgs {
+  var on: Boolean = false
+}
+
+@InvokeArg
 class SaveArgs {
   lateinit var path: String
   lateinit var name: String
@@ -255,7 +260,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
               leftOut.put(name)
               continue
             }
-            folder.mkdirs()
+            SharedCopies.makeFolder(folder)
             val file = File(folder, name)
             val input = resolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
             val copied = input.use { from -> file.outputStream().use { copyAtMost(from, it, left, going) } }
@@ -561,6 +566,19 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.reject("The file could not be saved there")
       }
     }
+  }
+
+  // ---- Files moving out of sight ----
+
+  /**
+   * While a file moves (`on`, Rust's `keep_awake` with files as a reason), the transfer service (TransferService.kt)
+   * keeps the app running out of sight; it stops with the last file. `held`: whether it runs now.
+   */
+  @Command
+  fun keepAwake(invoke: Invoke) {
+    val on = invoke.parseArgs(AwakeArgs::class.java).on
+    val held = if (on) TransferService.start(activity) else false.also { TransferService.stop(activity) }
+    invoke.resolve(JSObject().put("held", held))
   }
 
   // ---- System bars ----

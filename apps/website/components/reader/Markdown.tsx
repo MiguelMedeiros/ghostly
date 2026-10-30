@@ -3,6 +3,7 @@ import Markdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import GithubSlugger from "github-slugger";
 import { resolveReferenceUrl } from "@/lib/references";
+import { ScrollRegion } from "./ScrollRegion";
 
 function textOf(node: ReactNode): string {
   return Children.toArray(node)
@@ -13,6 +14,17 @@ function textOf(node: ReactNode): string {
     )
     .join("");
 }
+type HastNode = { type: string; tagName?: string; value?: string; children?: HastNode[] };
+const hastText = (node: HastNode): string => node.value ?? node.children?.map(hastText).join("") ?? "";
+
+/** "Table: Field, Type, Meaning": what the table holds, from its header row. */
+function tableName(table?: HastNode) {
+  const find = (node: HastNode | undefined, tag: string) => node?.children?.find((c) => c.tagName === tag);
+  const row = find(find(table, "thead"), "tr");
+  const heads = (row?.children ?? []).filter((c) => c.tagName === "th").map((c) => hastText(c).trim()).filter(Boolean);
+  return heads.length ? `Table: ${heads.join(", ")}` : "Table";
+}
+
 function Diagram({ source }: { source: string }) {
   const labels = new Map<string, string>();
   const nodePattern = /(\w+)\[(?:"([^"]+)"|([^\]]+))\]/g;
@@ -76,6 +88,34 @@ export function ReferenceMarkdown({
     };
     visit(tree);
   };
+  // On a phone a table of three or more columns stacks each row as a card (reader.css), so every cell carries its
+  // column's header as a label and the table says it may stack. Stacked, the boxes are blocks, so explicit roles keep
+  // it a table for a screen reader.
+  type HtmlNode = { type: string; tagName?: string; value?: string; properties?: Record<string, unknown>; children?: HtmlNode[] };
+  const tableLabels = () => (tree: HtmlNode) => {
+    const text = (node: HtmlNode): string => node.value ?? node.children?.map(text).join("") ?? "";
+    const rows = (node: HtmlNode): HtmlNode[] =>
+      node.tagName === "tr" ? [node] : (node.children ?? []).flatMap((child) => (child.tagName === "table" ? [] : rows(child)));
+    const cells = (row: HtmlNode) => (row.children ?? []).filter((cell) => cell.tagName === "th" || cell.tagName === "td");
+    const visit = (node: HtmlNode) => {
+      if (node.tagName === "table") {
+        const [head, ...body] = rows(node);
+        const labels = head ? cells(head).map((cell) => text(cell).trim()) : [];
+        if (labels.length >= 3) {
+          node.properties = { ...node.properties, dataStack: "", role: "table" };
+          const role = (child: HtmlNode, value: string) => (child.properties = { ...child.properties, role: value });
+          node.children?.forEach((group) => (group.tagName === "thead" || group.tagName === "tbody") && role(group, "rowgroup"));
+          for (const row of [head, ...body]) {
+            role(row, "row");
+            cells(row).forEach((cell) => role(cell, cell.tagName === "th" ? "columnheader" : "cell"));
+          }
+          for (const row of body) cells(row).forEach((cell, index) => (cell.properties = { ...cell.properties, dataLabel: labels[index] ?? "" }));
+        }
+      }
+      node.children?.forEach(visit);
+    };
+    visit(tree);
+  };
   const heading = (Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") =>
     function Heading({ children, id }: { children?: ReactNode; id?: string }) {
       return (
@@ -98,15 +138,10 @@ export function ReferenceMarkdown({
     h4: heading("h4"),
     h5: heading("h5"),
     h6: heading("h6"),
-    table: ({ children }) => (
-      <div
-        className="reference-table"
-        tabIndex={0}
-        role="region"
-        aria-label="Scrollable documentation table"
-      >
-        <table>{children}</table>
-      </div>
+    table: ({ node, children, ...props }) => (
+      <ScrollRegion as="div" className="reference-table" name={tableName(node as HastNode | undefined)}>
+        <table {...props}>{children}</table>
+      </ScrollRegion>
     ),
     pre: ({ children }) => {
       const code = Children.toArray(children)[0];
@@ -115,7 +150,7 @@ export function ReferenceMarkdown({
         code.props.className === "language-mermaid"
       )
         return <Diagram source={textOf(code.props.children)} />;
-      return <pre tabIndex={0}>{children}</pre>;
+      return <ScrollRegion as="pre">{children}</ScrollRegion>;
     },
     a: ({ href, children }) => (
       <a href={href}>
@@ -129,6 +164,7 @@ export function ReferenceMarkdown({
   return (
     <Markdown
       remarkPlugins={[remarkGfm, headingIds]}
+      rehypePlugins={[tableLabels]}
       skipHtml
       components={components}
       urlTransform={(url) =>

@@ -17,6 +17,8 @@ import { LANGUAGES, LOCALES, appSources, flatten, literalKeys, lookup } from "./
 const en = flatten(LOCALES.en);
 const others = LANGUAGES.filter((l) => l !== "en");
 const placeholders = (text: string) => [...new Set(text.match(/\{\{\w+\}\}/g) ?? [])];
+/** The English key a plural form (`chat.forward.messages_two`) is said for, or undefined. */
+const pluralBase = (key: string) => /^(.+)_(zero|one|two|few|many|other)$/.exec(key)?.[1];
 
 const LOCALE_DIR = join(fileURLToPath(import.meta.url), "../../../locales");
 const areaFiles = (language: string) => readdirSync(join(LOCALE_DIR, language)).filter((f) => f.endsWith(".json")).sort();
@@ -52,7 +54,8 @@ describe("every locale has the same keys as English", () => {
   });
 
   it.each(others)("%s has no key English does not have", (language) => {
-    const extra = [...flatten(LOCALES[language]).keys()].filter((key) => !en.has(key));
+    // A counted string's plural forms (`<key>_two`, `<key>_many`: translate.ts `pluralForm`) belong to its English key.
+    const extra = [...flatten(LOCALES[language]).keys()].filter((key) => !en.has(key) && !en.has(pluralBase(key) ?? ""));
     expect(extra).toEqual([]);
   });
 
@@ -63,6 +66,15 @@ describe("every locale has the same keys as English", () => {
       return placeholders(text as string).filter((p) => !translation.includes(p)).map((p) => `${key} ${p}`);
     });
     expect(lost).toEqual([]);
+  });
+
+  it.each(others)("%s gives a counted string's plural forms no {{placeholder}} its English key does not fill", (language) => {
+    const unknown = [...flatten(LOCALES[language])].flatMap(([key, value]) => {
+      const base = pluralBase(key);
+      if (!base || !en.has(base) || typeof value !== "string") return [];
+      return placeholders(value).filter((p) => !(en.get(base) as string).includes(p)).map((p) => `${key} ${p}`);
+    });
+    expect(unknown).toEqual([]);
   });
 
   it.each(others)("%s adds no {{placeholder}} English does not fill", (language) => {

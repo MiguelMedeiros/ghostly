@@ -20,6 +20,9 @@ export type SendRoute =
   | { kind: "unknown" };
 
 const TOKEN = /^cashu[AB]/i;
+// The URI schemes a token is shared behind, in the order the engine's cashu-ts strips them (lower case only: a token's
+// base64 does not survive an upper-cased QR anyway).
+const TOKEN_SCHEMES = ["web+cashu://", "cashu://", "cashu:"];
 
 // The text as the wallet is given it: no `lightning:` scheme, in lower case (a QR's text is often upper case).
 const invoiceRoute = (invoice: Bolt11Invoice): SendRoute =>
@@ -28,7 +31,9 @@ const invoiceRoute = (invoice: Bolt11Invoice): SendRoute =>
 export function routeSend(input: string): SendRoute {
   const text = input.trim();
   if (!text) return { kind: "empty" };
-  if (TOKEN.test(text)) return { kind: "token", text };
+  const scheme = TOKEN_SCHEMES.find((prefix) => text.startsWith(prefix));
+  const token = scheme ? text.slice(scheme.length) : text;
+  if (TOKEN.test(token)) return { kind: "token", text: token };
   // A BIP 21 link pays here only by its Lightning leg (the on-chain address is another card's), and only as the chat
   // reads the same link (`findLinkMoney`): never one that must not be paid, nor a fallback that is not the same payment
   // as its link (another amount, another network).

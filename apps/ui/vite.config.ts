@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { ghostlyPlatformModules, repositoryRoot } from "../../packages/browser/vite-plugin";
 import { appsTestGuard } from "../web/appsTestFlag";
+import { translateGuard } from "../web/translateFlag";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -11,7 +12,8 @@ export default defineConfig({
   // Desktop runs the shared peer too: the modules that used to call into Rust
   // for chat are swapped for the ones backed by it, as in the browser clients.
   // Only a debug build (`tauri build --debug`, `tauri dev`) carries the e2e suite's mini-app switch (VITE_APPS_TEST).
-  plugins: [appsTestGuard("desktop"), ghostlyPlatformModules(), react(), tailwindcss()],
+  // VITE_TRANSLATE: Desktop builds from 1.7.0 on (release.yml TRANSLATE_FROM); Android refused, see apps/web/translateFlag.ts.
+  plugins: [appsTestGuard("desktop"), translateGuard("desktop"), ghostlyPlatformModules(), react(), tailwindcss()],
   // Desktop's Iroh is native: the browser build of it stays out of the app.
   resolve: { alias: { "@ghostly/iroh-web": fileURLToPath(new URL("./src/desktop/noIrohWeb.ts", import.meta.url)) } },
   // The root is apps/ui (index.html, public/): the .env files stay at the repository root.
