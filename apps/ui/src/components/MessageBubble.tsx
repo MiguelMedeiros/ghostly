@@ -341,12 +341,13 @@ function SentTranslationLine({ sent, showing, onToggle }: { sent: SentOriginal; 
   );
 }
 
-/** Reply, beside a message, for a pointer: shown while the message is hovered or the button has the focus. */
+/** Reply, beside a message, for a pointer: shown while the message is hovered or the button has the focus. A wide touch
+ * screen (a phone in landscape) shows it too, so it gets the same 24 px tap target as the ⋮. */
 function ReplyAction({ onReply }: { onReply: () => void }) {
   const { t } = useI18n();
   return (
     <button type="button" data-testid="message-reply-action" onClick={onReply} title={t("chat.message.reply")} aria-label={t("chat.message.reply")}
-      className="self-center shrink-0 p-1 rounded-full text-text-muted hover:text-text-primary transition-all cursor-pointer max-md:hidden md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
+      className="relative self-center shrink-0 p-1 rounded-full text-text-muted before:absolute before:-inset-px before:content-[''] hover:text-text-primary transition-all cursor-pointer max-md:hidden md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
       <ReplyGlyph />
     </button>
   );
@@ -703,8 +704,9 @@ function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply,
         aria-haspopup="true"
         aria-expanded={open}
         onClick={() => { setPointed(undefined); setOpen((v) => !v); }}
-        // Faint but always reachable by touch; on a pointer it waits for the message to be hovered.
-        className={`p-1 rounded-full transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
+        // Faint but always reachable by touch; on a pointer it waits for the message to be hovered. The pseudo-element takes
+        // its 22 px to the 24 px a finger needs without moving the row.
+        className={`relative p-1 rounded-full before:absolute before:-inset-px before:content-[''] transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
           open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
         }`}
       >
