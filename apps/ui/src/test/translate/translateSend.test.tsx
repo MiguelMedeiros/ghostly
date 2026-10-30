@@ -78,8 +78,25 @@ describe("Translate what I send", () => {
     const translate = capitals();
     const { user, field, onSend } = setup({ language: "it", translate, detect: sure("it") }, true);
     await user.type(field, "ci vediamo domani{Enter}");
-    expect(onSend).toHaveBeenCalledWith("ci vediamo domani");
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith("ci vediamo domani"));
     expect(translate).not.toHaveBeenCalled();
+  });
+
+  it("while the draft's language is read, a second Enter sends nothing more and an edited draft stays", async () => {
+    let answer!: (guesses: { code: string; probability: number }[]) => void;
+    const slow: DetectLanguages = () => new Promise((resolve) => { answer = resolve; });
+    const { user, field, onSend } = setup({ language: "it", translate: capitals(), detect: slow }, true);
+    await user.type(field, "ci vediamo domani{Enter}{Enter}");
+    await act(async () => answer([{ code: "it", probability: 0.95 }]));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend).toHaveBeenCalledWith("ci vediamo domani");
+
+    await user.type(field, "a domani{Enter}");
+    await user.type(field, " sera");
+    await act(async () => answer([{ code: "it", probability: 0.95 }]));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(field).toHaveValue("a domani sera");
   });
 
   it("does not send what was not seen: a draft changed while it was translated shows the preview, stale", async () => {

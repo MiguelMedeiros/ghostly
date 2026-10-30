@@ -88,7 +88,8 @@ export function desktopOnlyFiles(bundle: Iterable<{ type: string; fileName: stri
 /**
  * What the build precaches: the app's page, its hashed files except the WebAssembly (wallets load theirs when
  * one is used, and they are most of the build's weight) and the Desktop-only chunks (`leaveOut`), and the static
- * files beside it. Never the update check, the sign-in callback or the worker itself.
+ * files beside it. Never the update check, the sign-in callback or the worker itself, nor the language detector's
+ * worker: a build emits it as an asset, whether it translates or not.
  */
 export function precacheList(files: readonly string[], leaveOut: readonly string[] = []): string[] {
   const left = new Set(leaveOut.map((file) => "/" + file.replace(/^\/+/, "")));
@@ -96,6 +97,7 @@ export function precacheList(files: readonly string[], leaveOut: readonly string
     .map((file) => "/" + file.replace(/^\/+/, ""))
     .filter((path) => !NEVER.has(path) && !left.has(path))
     .filter((path) => !/\.(wasm|map)$/.test(path))
+    .filter((path) => !path.startsWith("/assets/translateDetector.worker-"))
     .filter((path) => path !== "/index.html");
   return ["/", ...new Set(paths)].sort((a, b) => (a === "/" ? -1 : b === "/" ? 1 : a.localeCompare(b)));
 }

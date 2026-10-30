@@ -144,9 +144,9 @@ export function openTranslator({ home, to, detect, warn }: TranslatorOptions): T
   async function message<T extends ShownMessage>(shown: T): Promise<T & Pick<ShownMessage, "translation">> {
     if (typeof shown?.text !== "string") return shown;
     const place = shown.chat ?? "";
-    let which: ReturnType<typeof translateFrom>;
+    let which: Awaited<ReturnType<typeof translateFrom>>;
     try {
-      which = translateFrom({
+      which = await translateFrom({
         sender: shown.from === "peer" ? "peer" : "me", text: shown.text,
         file: shown.file, paymentId: shown.paymentId, card: shown.card, systemEvent: shown.event,
         mentions: shown.mentions?.map((m) => ({ o: m.offset, l: m.length })),
