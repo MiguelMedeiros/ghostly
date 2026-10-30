@@ -6,6 +6,8 @@ import { paymentStateLabel } from "./paymentWords";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Segmented, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
+import { SendScan } from "./wallet/SendScan";
+import { routeArkSend } from "../lib/sendRoute";
 import { externalLinkProps } from "../lib/externalLink";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
@@ -38,6 +40,15 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
  const [action, setAction] = useState<Action>("receive");
  const [via, setVia] = useState<"ark" | "onchain">("ark");
  const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [review, setReview] = useState<Review | null>(null);
+ /** What was scanned, pasted or read from a picture and could not fill the form. */
+ const [notUsable, setNotUsable] = useState<"refused" | "unknown" | null>(null);
+ // A link or an address fills the form, where it is shown and reviewed as a typed one is. The amount goes with it: one
+ // left from the last address is not meant for this one.
+ const given = (text: string) => {
+  const route = routeArkSend(text, "bark", bark?.network === "bitcoin" ? "mainnet" : "testnet");
+  if (route.kind !== "address") { setNotUsable(route.kind); setAddress(""); setAmount(""); return; }
+  setNotUsable(null); setAddress(route.address); setAmount(route.amountSat === undefined ? "" : String(route.amountSat));
+ };
  const [custom, setCustom] = useState(false), [provider, setProvider] = useState(""), [explorer, setExplorer] = useState("");
  const network: Network = bark?.network ?? "signet";
  const real = network === "bitcoin";
@@ -68,10 +79,14 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
     </div>}
    </div>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
-    <input aria-label={t("wallet.panel.recipient", { wallet: "Bark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bark" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={e => setAddress(e.target.value.trim())} />
+    <SendScan onText={given} disabled={busy} scanOnOpen>
+    <input aria-label={t("wallet.panel.recipient", { wallet: "Bark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bark" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={e => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
+    {notUsable === "refused" && <Notice tone="error" testId="wallet-send-refused">{t("payments.formats.unsupported")}</Notice>}
+    {notUsable === "unknown" && <Notice tone="error" testId="wallet-send-unknown">{t("wallet.panel.notAddress", { wallet: "Bark" })}</Notice>}
     <Amount value={amount} onChange={setAmount} unit={unit} />
     <Button variant="primary" className="w-full" loading={running === "review"} disabled={busy || !!review || !bark.balance || !address || !Number(amount)} onClick={() => void run(async () => { setReview(await wallet.preparePayment({ target: { method: "bark", network: bark.network!, provider: bark.provider!, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 5 * 60 * 1000 }, amount: Number(amount), feeCap: feeCap(Number(amount)), payee: address })); }, "review")}>{bark.balance ? t("wallet.panel.review") : t("wallet.panel.noBalance")}</Button>
     <Notice>{t("wallet.bark.approve")}</Notice>
+    </SendScan>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
    {intents.filter(i => i.id !== review?.id).map(i => <Button key={i.id} className="block w-full text-start" onClick={() => setReview(i)}>{t("wallet.panel.intent", { amount: formatAmount(i.amount, t.language), unit, state: paymentStateLabel(t, i.state) })}</Button>)}

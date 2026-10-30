@@ -507,6 +507,7 @@
     "network": "Red",
     "networkStuck": "Esta red no responde. Puedes cambiar a otra.",
     "noBalance": "Aún no hay saldo para enviar",
+    "notAddress": "Esa no es una dirección de {{wallet}} para esta billetera.",
     "off": "Desactivada",
     "on": "Activada",
     "onchain": "Bitcoin on-chain",
