@@ -189,7 +189,7 @@ describe("paying through the browser wallet", () => {
 describe("the engine with a browser wallet as the Lightning source", () => {
   function service(wallet: WebLNProvider) {
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-    const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+    const cashu = { balance: async () => 0 } as unknown as CashuWallet;
     const descriptor = { ...webln, create: async (_: unknown, host: { mode: "mainnet" | "testnet"; signal: AbortSignal }) => WeblnLightning.connect(wallet, host.mode, host.signal) };
     return { events, lightning: new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "web", cashu }), events, CASHU_MINT_SOURCE) };
   }

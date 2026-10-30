@@ -1074,7 +1074,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A plugin registered or left after start: the pickers show the new list. */
   private stopWatchingAdapters?: () => void;
   /** Read when a source connects, once the constructor has run. */
-  private readonly providerHost = (network: WalletNetwork) => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, fedimint: this.fedimintWallets[network], invoke: this.options.invoke });
+  private readonly providerHost = (network: WalletNetwork) => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, cashuBalance: () => this.walletView.networks?.[network].balance, fedimint: this.fedimintWallets[network], invoke: this.options.invoke });
   /**
    * The Lightning cards of each network, each through its own source (the Cashu mints, a node, a wallet connection).
    * A payment goes through the card picked for it; a request's invoice comes from the network's default for receiving.
@@ -6451,12 +6451,15 @@ export class GhostlyNode implements EngineImplementation {
           live.dataLink = "idle";
         }),
       );
+      await this.stopDeviceSet();
     } else if (!wasOnline && this.networkOn && await this.turnBeforeOnline()) {
       await this.startLinks([...this.links.keys()]);
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
+      // As at a start online: the links to the other devices, on the good read just made.
+      if (!this.options.singleDevice && knownDeviceGate()?.state === "active") void this.startDeviceSet({ justRead: true }).catch(() => {});
     } else if (wasOnline && this.networkOn && relayOnlyChanged) await this.restartLinksForRelayOnly();
     if (wasOnline && !this.networkOn) this.stopGroupEntries();
     if (wasOnline && !this.networkOn) await this.hold.stop();
@@ -6638,6 +6641,22 @@ export class GhostlyNode implements EngineImplementation {
     this.watchTombstones();
     // A device was given the secret and never finished its enrollment: the set moves to a new one by itself.
     await this.rotateIfDue().catch(() => {});
+  }
+
+  /**
+   * The network turned off: the links to the other devices stop as every other link does, and ask nothing more of a
+   * relay or the DHT. `startDeviceSet` makes them again when it comes back, with the handoff (which resumes a stopped move).
+   */
+  private async stopDeviceSet(): Promise<void> {
+    const links = this.deviceLinks;
+    if (!links) return;
+    this.deviceLinks = null;
+    this.handoffGiver = null;
+    if (this.activeTurnTimer) clearTimeout(this.activeTurnTimer);
+    this.activeTurnTimer = null;
+    // Said again on each new session, as after a start.
+    this.sentTokens.clear(); this.renewAsked.clear();
+    await links.stop().catch(() => {});
   }
 
   /** How often a running active device reads the turn (WISP 06 § When a device checks: every 10 minutes, with jitter). */
