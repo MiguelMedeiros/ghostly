@@ -154,6 +154,63 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     for (let at: HTMLElement | null = maxButton; at; at = at.parentElement) expect(at.className).not.toMatch(/\bopacity-70\b/);
   });
 
+  describe("Max on a Lightning address", () => {
+    const info: LightningAddressInfo = { id: "a-1", kind: "address", text: "shop@example.com", domain: "example.com", callbackDomain: "example.com", minSat: 5, maxSat: 1_000, description: "Coffee shop", commentAllowed: 0 };
+    const start = async (methods: Partial<WalletPlatform>, balance = 700) => {
+      qr.clipboard = "shop@example.com";
+      const rendered = show({ resolveLightningAddress: async () => info, ...methods }, "testnet", balance);
+      await rendered.user.click(screen.getByRole("tab", { name: "Send" }));
+      await rendered.user.click(screen.getByTestId("wallet-send-paste"));
+      await rendered.user.click(screen.getByTestId("lnurl-lookup"));
+      await rendered.user.click(await screen.findByTestId("lnurl-max"));
+      return rendered;
+    };
+    const asked = () => vi.fn(async (_id: string, amount: number) => ({ invoice: `inv-${amount}`, note: "n" }));
+
+    it("a mint that holds all of it but not the fee: the amount comes down to what leaves room, and goes to the review", async () => {
+      const lightningAddressInvoice = asked();
+      const quoteInvoice = vi.fn(async (text: string) => {
+        if (text === "inv-700") throw new Error("Not enough sats in your wallet: 690 sats leave room for the fee");
+        return { quote: "q", mint: TEST_MINT, amount: 690, feeReserve: 10 };
+      });
+      const { user } = await start({ lightningAddressInvoice, quoteInvoice });
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      expect(await screen.findByTestId("lnurl-review")).toHaveTextContent("690");
+      expect(lightningAddressInvoice.mock.calls.map((call) => call[1])).toEqual([700, 690]);
+    });
+
+    it("a source that quotes all of it: the fee is taken off, so the review is one the card can pay", async () => {
+      const lightningAddressInvoice = asked();
+      const quoteInvoice = vi.fn(async (text: string) => ({ quote: "q", mint: "node", amount: Number(text.slice(4)), feeReserve: 7 }));
+      const { user } = await start({ lightningAddressInvoice, quoteInvoice });
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      expect(await screen.findByTestId("lnurl-review")).toHaveTextContent("693");
+      expect(lightningAddressInvoice.mock.calls.map((call) => call[1])).toEqual([700, 693]);
+    });
+
+    it("what leaves room is below what the address takes: the refusal is said, and nothing more is asked", async () => {
+      const lightningAddressInvoice = asked();
+      const quoteInvoice = vi.fn(async () => { throw new Error("Not enough sats in your wallet: 3 sats leave room for the fee"); });
+      const { user } = await start({ lightningAddressInvoice, quoteInvoice }, 10);
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      expect(await screen.findByTestId("lnurl-error")).toBeInTheDocument();
+      expect(lightningAddressInvoice).toHaveBeenCalledTimes(1);
+    });
+
+    it("an amount typed after Max is the person's: it is never changed, the refusal is said", async () => {
+      const lightningAddressInvoice = asked();
+      const quoteInvoice = vi.fn(async () => { throw new Error("Not enough sats in your wallet: 690 sats leave room for the fee"); });
+      const { user } = await start({ lightningAddressInvoice, quoteInvoice });
+      const field = screen.getByTestId("lnurl-amount");
+      await user.clear(field);
+      await user.type(field, "695");
+      await user.click(screen.getByTestId("lnurl-invoice"));
+      expect(await screen.findByTestId("lnurl-error")).toBeInTheDocument();
+      expect(lightningAddressInvoice).toHaveBeenCalledTimes(1);
+      expect(field).toHaveValue("695");
+    });
+  });
+
   it("an invoice with no amount, and a QR that is no payment, are said plainly", async () => {
     qr.text = anyAmount();
     const quoteInvoice = vi.fn();

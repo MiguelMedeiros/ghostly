@@ -35,6 +35,7 @@
     "noMint": "No hay ningún mint configurado",
     "noTestMint": "Esta billetera no tiene un mint de prueba al que pedir monedas de prueba",
     "notEnough": "No hay suficientes sats en tu billetera",
+    "notEnoughForFee": "No hay suficientes sats en tu billetera: {{amount}} dejan margen para la comisión",
     "notPaid": "El pago no se completó",
     "selectMint": "Selecciona un mint configurado",
     "testCoinsPending": "{{host}} aún no envió las monedas de prueba",

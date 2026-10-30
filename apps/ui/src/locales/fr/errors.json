@@ -35,6 +35,7 @@
     "noMint": "Aucun mint configuré",
     "noTestMint": "Ce portefeuille n'a pas de mint de test à qui demander des pièces de test",
     "notEnough": "Pas assez de sats dans votre portefeuille",
+    "notEnoughForFee": "Pas assez de sats dans votre portefeuille : {{amount}} laissent de la place pour les frais",
     "notPaid": "Le paiement n'a pas abouti",
     "selectMint": "Sélectionnez un mint configuré",
     "testCoinsPending": "{{host}} n'a pas encore envoyé les pièces de test",
