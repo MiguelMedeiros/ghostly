@@ -636,6 +636,11 @@ export interface NodeOptions {
    */
   deferGroups?: boolean;
   /**
+   * Leave the chats this run finds saved unstarted; a chat made in the run starts as usual: a headless one-shot that
+   * makes a new invite, whose records the saved chats' publishes would hold back for the relays' next minute.
+   */
+  deferChats?: boolean;
+  /**
    * This run stays off the network whatever the `online` setting says: no chat or group starts, nothing is published
    * or read. A headless one-shot that only reads the store (`ghostly status`, `chat list`). Default: off.
    */
@@ -768,6 +773,8 @@ export class GhostlyNode implements EngineImplementation {
    * Everything that publishes, dials, polls or settles asks this, not the stored setting.
    */
   private get networkOn(): boolean { return !!this.settings.online && !this.limitedMode && !this.options.offline; }
+  /** The chats found saved at start that this run leaves unstarted (`NodeOptions.deferChats`). */
+  private readonly deferredChats = new Set<string>();
   private readonly transport: PkarrTransport;
   /** The same, for groups' requests: a relay budget keeps a chat's share from them (`CHAT_RESERVE`). */
   private readonly groupTransport: PkarrTransport;
@@ -1980,6 +1987,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.limitedMode) await this.startWallets();
 
     const links = await db.getLinks();
+    if (this.options.deferChats) for (const stored of links) if (!stored.group) this.deferredChats.add(stored.id);
     // The chat list waits for the groups, and the groups need none of the chats' histories: only their edges, which
     // have none. 50 chats of 1000 messages read first held the list blank 1.3 s at every start (2.8 s at 4x CPU).
     for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
@@ -7691,7 +7699,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private startLink(linkId: string): void {
     const live = this.links.get(linkId);
-    if (!live || live.link) return;
+    if (!live || live.link || this.deferredChats.has(linkId)) return;
     const { stored } = live;
     if (stored.group) return this.startEdge(linkId);
     if (stored.profile) live.pairing = { status: "connecting" };

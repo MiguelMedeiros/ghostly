@@ -163,6 +163,15 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
 }
 
 /**
+ * A command that makes a new chat and needs no other: a one-shot for it leaves the saved chats and the groups unstarted.
+ * Started, each saved chat put its records and its leave packet on the relays: from about ten that was the relays' 30
+ * requests a minute, and the new invite's records waited behind them (21 s instead of under one, and not published).
+ */
+export function newChatOnly(method: string): boolean {
+  return method === "invite.create";
+}
+
+/**
  * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
  * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
  * for its leave packet to be taken: 0.25 s became 3.3 s with a relay that takes 1.5 s, and 10 s with one that does not
@@ -284,7 +293,8 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Ho
 
 /**
  * How a one-shot opens the profile: `deferGroups` when the command is about one 1:1 chat (`chatOnly`) and needs
- * nothing of the groups, `offline` when it only reads or changes only this device (`offlineCall`).
+ * nothing of the groups, `deferChats` too when it makes a new chat (`newChatOnly`), `offline` when it only reads or
+ * changes only this device (`offlineCall`).
  */
 async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
   const s = await session(g, options);
@@ -1132,7 +1142,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: newChatOnly(command.method), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;
