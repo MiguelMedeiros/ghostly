@@ -21,7 +21,7 @@
     "alreadyPaying": "このインボイスはすでに支払い中です",
     "amountTooHigh": "{{max}} sats を超える金額には対応していません",
     "backInWallet": "sats はウォレットに戻りました。",
-    "backInWalletLessFee": "sats は戻りました。ミントが {{fee}} sats を手数料として受け取りました。",
+    "backInWalletLessFee": "sats は戻り、ミントが {{fee}} を受け取りました。",
     "badMintUrl": "有効なミントの URL ではありません",
     "badToken": "有効な ecash トークンではありません",
     "enterAmount": "sats で金額を入力してください",
