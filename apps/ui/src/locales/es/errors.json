@@ -21,7 +21,7 @@
     "alreadyPaying": "Esta factura ya se está pagando",
     "amountTooHigh": "No se admiten cantidades superiores a {{max}} sats",
     "backInWallet": "Los sats volvieron a tu billetera.",
-    "backInWalletLessFee": "Los sats volvieron, menos {{fee}} sats que se quedó el mint.",
+    "backInWalletLessFee": "Los sats volvieron; el mint se quedó {{fee}}.",
     "badMintUrl": "Esa no es una URL de mint válida",
     "badToken": "Ese no es un token de ecash válido",
     "enterAmount": "Escribe una cantidad en sats",

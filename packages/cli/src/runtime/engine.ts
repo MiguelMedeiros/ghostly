@@ -198,11 +198,12 @@ function irohWasmBytes(): Buffer {
 }
 
 /**
- * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `offline` starts
- * no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join through a
- * group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
+ * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `deferChats` leaves
+ * the saved chats unstarted (a one-shot that makes or joins one); `offline` starts no chat or group and publishes nothing
+ * (a one-shot that only reads); `logJoins` says the steps of a join through a group's link on stderr (a daemon, whose
+ * log that is: `joinLog.ts`).
  */
-export interface RuntimeOptions { deferGroups?: boolean; offline?: boolean; logJoins?: boolean }
+export interface RuntimeOptions { deferGroups?: boolean; deferChats?: boolean; offline?: boolean; logJoins?: boolean }
 
 /**
  * Starts the app's engine on this profile (WISP 1100 § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
@@ -312,6 +313,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),
+    ...(options.deferChats ? { deferChats: true } : {}),
     ...(options.offline ? { offline: true } : {}),
     // Tests only: group links as an app from before native ones (test/groupCompat.test.ts).
     ...(process.env.GHOSTLY_TEST_WEBRTC_GROUP_LINKS === "1" ? { webrtcGroupLinks: true } : {}),

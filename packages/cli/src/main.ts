@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
-import { here, translate } from "./commands/shared";
+import { here, since as sinceOf, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -163,6 +163,16 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
 }
 
 /**
+ * A command that makes a new chat and needs no other: a one-shot for it leaves the saved chats and the groups unstarted.
+ * Started, each saved chat put its records and its leave packet on the relays: from about ten that was the relays' 30
+ * requests a minute, and the new chat's waited behind them. A new invite took 21 s instead of under one, unpublished;
+ * a join waited its whole 60 s and left unpaired. A join of a saved chat starts that chat (the engine's `joinLink`).
+ */
+export function newChatOnly(method: string): boolean {
+  return method === "invite.create" || method === "invite.join";
+}
+
+/**
  * Calls that only read what the profile stores: a one-shot for one opens it offline (`RuntimeOptions.offline`).
  * Opened online, `status` or `chat list` started every chat, put the profile's records on the relays again and waited
  * for its leave packet to be taken: 0.25 s became 3.3 s with a relay that takes 1.5 s, and 10 s with one that does not
@@ -284,7 +294,8 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Ho
 
 /**
  * How a one-shot opens the profile: `deferGroups` when the command is about one 1:1 chat (`chatOnly`) and needs
- * nothing of the groups, `offline` when it only reads or changes only this device (`offlineCall`).
+ * nothing of the groups, `deferChats` too when it makes a new chat (`newChatOnly`), `offline` when it only reads or
+ * changes only this device (`offlineCall`).
  */
 async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
   const s = await session(g, options);
@@ -858,9 +869,9 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
+  const since = sinceOf(parsed.options) ?? readCursor(cursor);
   // Kept for the whole listen (a model loads once); its process ends with this one.
   const translator = await translatorFor(parsed.options.translate, g.home);
-  const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
   // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
   // a restart would hand every event since again (agents#1710). How it stops is the branch's below.
   let quit = (code: number): void => { process.exit(code); };
@@ -1006,6 +1017,8 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   // `edit` names the message before the text.
   const [message, ...words] = spec.message ? rest : [undefined, ...rest];
   if (!target || (spec.message && !message)) throw new CliError("usage", `ghostly ${spec.usage}`);
+  // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
+  timeout(parsed.options);
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
   let text = words.join(" ");
   if (parsed.options.text !== undefined) {
@@ -1130,7 +1143,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       return joined.answer;
     }
     return result;
-  }, { deferGroups: chatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  }, { deferGroups: chatOnly(command.method, params) || newChatOnly(command.method), deferChats: newChatOnly(command.method), offline: offlineCall(command.method, params) });
   if (translator) {
     try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
     return;

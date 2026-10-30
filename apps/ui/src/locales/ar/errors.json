@@ -21,7 +21,7 @@
     "alreadyPaying": "هذه الفاتورة قيد الدفع بالفعل",
     "amountTooHigh": "المبالغ التي تتجاوز {{max}} sats غير مدعومة",
     "backInWallet": "عادت الـ sats إلى محفظتك.",
-    "backInWalletLessFee": "عادت الـ sats، ناقص {{fee}} sats احتفظت بها دار السك.",
+    "backInWalletLessFee": "عادت الـ sats؛ واحتفظت دار السك بـ {{fee}}.",
     "badMintUrl": "هذا ليس عنوان URL صالحًا لدار سكّ",
     "badToken": "هذا ليس رمز ecash صالحًا",
     "enterAmount": "أدخل مبلغًا بوحدة sats",

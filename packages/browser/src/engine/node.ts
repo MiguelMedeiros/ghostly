@@ -642,6 +642,12 @@ export interface NodeOptions {
    */
   deferGroups?: boolean;
   /**
+   * Leave the chats this run finds saved unstarted; a chat made or joined in the run starts as usual: a headless
+   * one-shot that makes or joins one chat, whose records the saved chats' publishes would hold back for the relays' next
+   * minute.
+   */
+  deferChats?: boolean;
+  /**
    * This run stays off the network whatever the `online` setting says: no chat or group starts, nothing is published
    * or read. A headless one-shot that only reads the store (`ghostly status`, `chat list`). Default: off.
    */
@@ -774,6 +780,8 @@ export class GhostlyNode implements EngineImplementation {
    * Everything that publishes, dials, polls or settles asks this, not the stored setting.
    */
   private get networkOn(): boolean { return !!this.settings.online && !this.limitedMode && !this.options.offline; }
+  /** The chats found saved at start that this run leaves unstarted (`NodeOptions.deferChats`). */
+  private readonly deferredChats = new Set<string>();
   private readonly transport: PkarrTransport;
   /** The same, for groups' requests: a relay budget keeps a chat's share from them (`CHAT_RESERVE`). */
   private readonly groupTransport: PkarrTransport;
@@ -1167,14 +1175,14 @@ export class GhostlyNode implements EngineImplementation {
       await db.updateDelivery(linkId, messageId, state, error);
       await this.noteHold(linkId, messageId, state, error);
       const message = await db.getMessage(linkId, messageId);
-      if (message?.file && state === "failed") this.transfers.set(message.file.id, { state: "failed", transferred: 0, size: message.file.size, error });
-      else if (message?.file) {
-        // Said done in one state, then left to its record, which says so first: a view kept for each file sent through
+      if (message?.file) {
+        const transfer = state === "failed" ? { state: "failed" as const, transferred: 0, size: message.file.size, error } : { state: "done" as const, transferred: message.file.size, size: message.file.size };
+        // Its record first: it still says the "transferring" the app wrote when the file was picked, read at the next start.
+        await fileStore.updateTransfer(message.file.id, transfer).catch(() => {});
+        this.transfers.set(message.file.id, transfer);
+        // Done: said in one state, then left to its record, which says so: a view kept for each file sent through
         // storage would go into every state the engine builds until the next start.
-        const done = { state: "done" as const, transferred: message.file.size, size: message.file.size };
-        await fileStore.updateTransfer(message.file.id, done).catch(() => {});
-        this.transfers.set(message.file.id, done);
-        this.brief(message.file.id);
+        if (transfer.state === "done") this.brief(message.file.id);
       }
       if (message && state !== "failed") this.messageFeedback("sent", message);
       await this.messagesChanged(linkId, [messageId]);
@@ -1998,6 +2006,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.limitedMode) await this.startWallets();
 
     const links = await db.getLinks();
+    if (this.options.deferChats) for (const stored of links) if (!stored.group) this.deferredChats.add(stored.id);
     // The chat list waits for the groups, and the groups need none of the chats' histories: only their edges, which
     // have none. 50 chats of 1000 messages read first held the list blank 1.3 s at every start (2.8 s at 4x CPU).
     for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
@@ -2014,10 +2023,12 @@ export class GhostlyNode implements EngineImplementation {
       const messages = await db.getMessages(stored.id);
       const storedFiles = await fileStore.listForLink(stored.id);
       // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
-      // would have without the restart, and shows no transfer until it does.
-      const waiting = new Set(messages.flatMap(m => m.sender === "me" && m.delivery === "waiting" && m.file ? [m.file.id] : []));
+      // would have without the restart, and shows no transfer until it does. One that storage took for an away contact
+      // (held, or picked up since) was not interrupted either: it is sent, whatever its record says (one kept before its
+      // delivery wrote the record says "transferring" for good).
+      const notInterrupted = new Set(messages.flatMap(m => m.sender === "me" && m.file && (m.delivery === "waiting" || (m.via === "hold" && (m.delivery === "held" || m.delivery === "delivered"))) ? [m.file.id] : []));
       // A finished one shows no transfer (a file with none reads as finished): a view for each would go into every state.
-      for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !waiting.has(file.id)) this.transfers.set(file.id,
+      for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !notInterrupted.has(file.id)) this.transfers.set(file.id,
         file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
       // files/3 transfers go on where they stopped, once the chat is live again. One that ended before is settled in its
       // message, so the chat connecting reads nothing for it; only a sent one whose receipt never came is looked at then.
@@ -2817,6 +2828,8 @@ export class GhostlyNode implements EngineImplementation {
     const existing = [...this.links.values()].find((l) => l.stored.seedB64 === params.seedB64);
     if (existing) {
       if (existing.stored.profile !== params.profile) throw new Error("Invitation profile does not match the stored link");
+      // Joined again in a run that left the saved chats unstarted (`deferChats`): this one is the run's chat now.
+      if (this.deferredChats.delete(existing.stored.id) && this.networkOn) this.startLink(existing.stored.id);
       return { linkId: await this.existingLink(existing.stored.id) };
     }
     this.refuseOwnInvite(params);
@@ -7735,7 +7748,7 @@ export class GhostlyNode implements EngineImplementation {
 
   private startLink(linkId: string): void {
     const live = this.links.get(linkId);
-    if (!live || live.link) return;
+    if (!live || live.link || this.deferredChats.has(linkId)) return;
     const { stored } = live;
     if (stored.group) return this.startEdge(linkId);
     if (stored.profile) live.pairing = { status: "connecting" };

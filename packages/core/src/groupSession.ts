@@ -828,6 +828,12 @@ export class GroupSession {
     const previous = this.top;
     const roster = expectedRoster(previous.m, kind, this.myKey, subject);
     if (!roster) throw new Error("This change is not allowed");
+    // An add or a rotate only while the history, never compacted, keeps room for everyone else to get out after it: a
+    // remove each, and a leaving admin hands the role over first (as a community's `keepsRoom`). Without it, people who
+    // joined by the link and left filled it, and then nobody could be removed, leave or take the role.
+    if ((kind === "add" || kind === "rotate") && this.state.chain.length + 1 + 2 * (roster.length - 1) > MAX_GROUP_CHAIN) {
+      throw new Error("This group has reached its membership history limit. Create a new group.");
+    }
     const epoch = previous.e + 1;
     const secret = newEpochSecret();
     const draft: Omit<GroupCommit, "sig" | "c"> = { v: 1, g: this.id, e: epoch, p: commitHash(previous), k: kind, m: roster, by: this.myKey, ...(subject ? { s: subject } : {}), ts: now };

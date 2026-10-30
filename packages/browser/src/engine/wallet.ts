@@ -669,6 +669,8 @@ export class CashuWallet {
         }
         tx.oncomplete=()=>resolve();tx.onabort=tx.onerror=()=>reject(new PaymentPreflightError(engineText("reviewedSatsGone")));
       });
+      // The inputs leave the balance for "set aside" now: a mint that never answers would leave the view made before.
+      this.events.onChange();
       const wallet=await this.wallet(prepared.mint);
       const {keep,send}=await wallet.completeSwap(preview);
       return this.finishReviewedCashu(review,prepared,keep,send);

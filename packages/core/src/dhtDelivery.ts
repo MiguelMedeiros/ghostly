@@ -384,6 +384,14 @@ export class DhtDelivery {
     return this.pinnedBoxes;
   }
   private lastPublished?: DhtPacketFacts;
+  /** The envelope a trace line was last said for, per step: a packet read again says nothing new (a Desktop logs every line). */
+  private traced = new Map<string, string>();
+  private traceOnce(step: string, record: string, detail: Record<string, unknown>): void {
+    const seen = record.slice(-24);
+    if (this.traced.get(step) === seen) return;
+    this.traced.set(step, seen);
+    traceLink(this.from, step, detail);
+  }
   /** The sealed record's nonce is its first 24 bytes: 32 characters of base64. */
   private static facts(body: Body, records: GhostRecord[], key: string): DhtPacketFacts {
     return { ...(body[6] && { id: body[6][0] }), seq: body[1], issued: body[2], expires: body[3], packetBytes: measureRecords(key, records),
@@ -748,7 +756,7 @@ export class DhtDelivery {
     const records = await this.sealed(fittedEnvelope);
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
-    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
+    traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }), ...(records[0]?.label === "_dr" && { ratchet: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
     // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
     // link's heartbeat, `LinkSession.publishOnce`), so a profile's live chats never take the requests its groups need.
@@ -793,15 +801,17 @@ export class DhtDelivery {
     const peer = this.options.credentials.peerKey;
     let plaintext: string | null;
     if (ratcheted.length) {
-      // Ratcheted (WISP 4xx): only the pinned contact seals one, to this side. One that does not open says nothing.
-      if (!ratchet || !peer || sender !== peer) return null;
+      // Ratcheted (WISP 4xx): only the pinned contact seals one, to this side. One that does not open in the invite's
+      // mailbox is sealed to someone else, as a plain one below; in the pinned mailbox it says the contact pinned this side.
+      const closed = box === "invite" && sender ? { sealedToAnother: sender } : null;
+      if (!ratchet || !peer || sender !== peer) return closed;
       let opened: Uint8Array | null;
       try { opened = ratchet(fromBase64(ratcheted[0].value)); } catch { opened = null; }
-      if (!opened) return null;
+      if (!opened) return closed;
       try { plaintext = utf8Decode(opened); } catch { return null; }
     } else {
       // A ratcheted envelope of the contact's opened here: a plain one from it is refused from then on (WISP 4xx § Downgrade).
-      if (peer && this.options.ratchet?.box.heard("floor") && (!sender || sender === peer)) return null;
+      if (peer && this.options.ratchet?.box.heard("floor") && (!sender || sender === peer)) { this.traceOnce("dht-plain-refused", records[0].value, { box }); return null; }
       try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { plaintext = null; }
       // Sealed, by its hint, from `sender` to a key other than this side's: nothing to read, but who it names says something.
       if (!plaintext && sender) return { sealedToAnother: sender };
@@ -861,6 +871,8 @@ export class DhtDelivery {
     // is by then (`RatchetBox.commitOpen`): what the content goes to may seal or open a held item, which takes that lock.
     let sealed: Uint8Array | undefined;
     const opened = this.open(packet, box, bytes => { const plain = ratchet.box.peek("floor", bytes); if (plain) sealed = bytes; return plain; });
+    // Ratcheted, and not opened here: not for this side, from a session it lost, or before it pinned the contact.
+    if (!sealed) this.traceOnce("dht-ratchet-closed", ratcheted.value, { box, pinned: !!this.options.credentials.peerKey });
     // Not opened here, but in the pinned mailbox, whose address only the two participation keys give: the contact pinned
     // this side. A side restored from a backup made before it knew that learns it here, and its next envelope starts a
     // session the contact follows, rather than going plain to a contact that refuses plain.

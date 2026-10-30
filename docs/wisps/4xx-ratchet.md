@@ -7,7 +7,7 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [404](404-store-and-forward.md), [03](03-capabilities.md), [05](05-backups.md), [06](06-devices.md) |
-| Implementation | `ratchet/1` in the web app, the extension, Desktop and the CLI: the ratchet with these test vectors (`packages/core/src/ratchet.ts`), the DHT floor (`dhtDelivery.ts`), held items (`storeForward.ts`, `engine/hold.ts`); state kept out of backups and handoffs. Unit tests; the Tech Info row and end-to-end tests follow |
+| Implementation | `ratchet/1` in the web app, the extension, Desktop and the CLI: the ratchet with these test vectors (`packages/core/src/ratchet.ts`), the DHT floor (`dhtDelivery.ts`), held items (`storeForward.ts`, `engine/hold.ts`); state kept out of backups and handoffs; a Forward secrecy row in a chat's Tech Info. Unit, UI and end-to-end tests (`e2e/web/forward-secrecy.spec.ts`) |
 | Summary | What a chat sends while the contact is away, over the DHT or held, is sealed with keys used once: a key stolen later cannot open it. |
 | Availability | Available |
 | Notes | 1:1 chats, when both apps have it; groups are not covered. A live connection already agrees fresh keys every time. |
@@ -120,6 +120,7 @@ Replays are refused by the paths, not by the ratchet: a floor envelope must carr
 - **Record.** After the pin, a ratcheted envelope's sealed bytes go in a `_dr` record, base64, in place of `_dm`; the plaintext is the same `JSON([body, signature])`, padded as today. The `_dmk` hint is unchanged. A packet carries one of `_dm` or `_dr`, never both. First-contact envelopes, before the pin, stay `_dm` under the invite's key.
 - **Room.** The seal is 26 bytes longer than today's (66 against nonce and tag, 40), so the padding target is 26 bytes lower, about 35 characters of base64. Every packet of a mailbox still has one size. A text near 256 bytes with many escaped characters may no longer fit; as today, the reply's id and the hop count go first, and a text that still does not fit is held or waits for the live session.
 - **Reading the same envelope again.** A reader reads more often than the contact publishes, and a key once used is gone, so a reader remembers a digest of the last `_dr` it took and reads it as already taken, without opening it.
+- **An envelope that does not open.** In the invite's mailbox, a `_dr` whose hint names the expected contact and that does not open here says what a `_dm` sealed to another key says: someone else used the invite first ([403](403-dht-text.md)), under the same conditions, and taken back the same way. In the pinned mailbox it says the contact pinned this side.
 - **Every envelope is a message.** A keep-alive, a receipt or a mode change takes the next floor key like a text, so one look at a mailbox still does not tell them apart ([403](403-dht-text.md#what-a-mailbox-shows-revision-07)).
 
 ## Held items

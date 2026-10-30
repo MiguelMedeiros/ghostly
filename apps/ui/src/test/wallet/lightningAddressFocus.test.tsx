@@ -1,12 +1,14 @@
 import { screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { MessageBubble } from "../../components/MessageBubble";
+import { CashuWallet } from "../../components/wallet/CashuWallet";
 import { LightningAddressPay } from "../../components/wallet/LightningAddressPay";
-import { servicesPlatform, type LightningAddressInfo } from "../../lib/platform";
-import { fakeEngine, walletView } from "../fakeEngine";
+import { servicesPlatform, type LightningAddressInfo, type WalletState } from "../../lib/platform";
+import { fakeEngine, linkView, walletView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { mint, TEST_MINT } from "../payments/fixtures";
 
-// covers: payments.lnurl.card
+// covers: payments.lnurl.card, wallet.cashu.pay-invoice
 
 /**
  * Paying a Lightning address from the keyboard: the button pressed keeps the focus while it works (busy, not disabled:
@@ -68,5 +70,38 @@ describe("paying a Lightning address keeps the keyboard's place", () => {
     expect(await screen.findByTestId("lnurl-error")).toBeInTheDocument();
     expect(lookUp).toHaveFocus();
     expect(lookUp).not.toHaveAttribute("aria-busy");
+  });
+
+  /** Look up, 2,100 sats, Get invoice and Pay (test sats: no second step), then Done pressed from the keyboard. */
+  const payThenDone = async (user: ReturnType<typeof renderApp>["user"], engine: ReturnType<typeof renderApp>["engine"]) => {
+    engine.on("lnurlResolve", () => info).on("lnurlInvoice", () => ({ invoice: "lnbc-invoice", note: "Paid alice@example.com" }))
+      .on("walletQuoteInvoice", () => ({ quote: "melt-1", mint: TEST_MINT, amount: 2_100, feeReserve: 3 })).on("walletPayQuote", () => ({ paid: true }));
+    await user.click(screen.getByTestId("lnurl-lookup"));
+    await user.type(await screen.findByTestId("lnurl-amount"), "2100");
+    await user.click(screen.getByTestId("lnurl-invoice"));
+    await user.click(await screen.findByTestId("lnurl-pay"));
+    expect(await screen.findByTestId("lnurl-paid")).toBeInTheDocument();
+    screen.getByRole("button", { name: "Done" }).focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("lnurl-done")).not.toBeInTheDocument();
+  };
+
+  it("Done in a chat's address card puts the keys back on its Pay, not on the page", async () => {
+    fakeEngine.setState({ links: [linkView()], wallet: walletView({ mode: "testnet", mints: [mint(TEST_MINT, 5_000)], balance: 5_000 }) });
+    const { user, engine } = renderApp(<MessageBubble message={{ id: "m1", text: "alice@example.com", sender: "peer", timestamp: Date.now(), status: "delivered" } as never} peerPubKey="peer" />);
+    await user.click(screen.getByTestId("lnurl-pay-open"));
+    await payThenDone(user, engine);
+    await waitFor(() => expect(screen.getByTestId("lnurl-pay-open")).toHaveFocus());
+  });
+
+  it("Done on the Cashu card's Send puts the keys in the emptied paste field, not on the page", async () => {
+    const state = walletView({ mode: "testnet", mints: [mint(TEST_MINT, 5_000)], balance: 5_000 }) as WalletState;
+    fakeEngine.setState({ wallet: state });
+    const { user, engine } = renderApp(<CashuWallet wallet={servicesPlatform!.wallet} state={state} rail="cashu" onOpenCashu={() => {}} />);
+    await user.click(screen.getByTestId("wallet-send"));
+    await user.type(screen.getByTestId("wallet-pay-input"), "alice@example.com");
+    await payThenDone(user, engine);
+    expect(screen.getByTestId("wallet-pay-input")).toHaveValue("");
+    expect(screen.getByTestId("wallet-pay-input")).toHaveFocus();
   });
 });

@@ -12,7 +12,7 @@ import { ghostly } from "./support/cli";
  */
 
 const ROOT = resolve(import.meta.dirname, "../../..");
-const DOCS = ["packages/cli/SKILL.md", "packages/cli/skills/ghostly/SKILL.md", "docs/AI-AGENTS.md", "apps/website/content/agents.ts"];
+const DOCS = ["packages/cli/SKILL.md", "packages/cli/skills/ghostly/SKILL.md", "docs/AI-AGENTS.md", "apps/website/content/agents.ts", "apps/website/content/agentsThreat.ts"];
 const GLOBAL = ["--profile", "--home", "--pretty", "--help", "--version"];
 const WORD = /^[a-z][a-z-]*$/;
 /** Commands whose secret shows in `ps` and the shell's history when given as an argument: taught on stdin only. */
@@ -90,7 +90,8 @@ describe("what an agent is taught", { timeout: 180_000 }, async () => {
  * speech) instead of writing its own: the skills, the guides and the /cli and /developers/agents pages point to it.
  */
 const VOICE_AGENT = "https://github.com/MiguelMedeiros/ghostly-voice-agent";
-const POINT_TO_VOICE = [...DOCS, "packages/cli/README.md", "docs/CLI.md", "apps/website/content/cli.ts", "apps/website/scripts/llms.mjs"];
+// The threat model teaches commands (checked above) but is no setup guide.
+const POINT_TO_VOICE = [...DOCS.filter((doc) => doc !== "apps/website/content/agentsThreat.ts"), "packages/cli/README.md", "docs/CLI.md", "apps/website/content/cli.ts", "apps/website/scripts/llms.mjs"];
 
 describe("a ready voice agent", () => {
   for (const doc of POINT_TO_VOICE)

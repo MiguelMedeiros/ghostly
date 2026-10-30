@@ -59,6 +59,7 @@
     },
     "label": "需要备份",
     "later": "稍后",
+    "laterFailed": "无法推迟此提醒。请重试。",
     "line": "备份你的 {{wallet}} 钱包",
     "title": "{{wallet}} 中有真钱"
   },
@@ -767,9 +768,13 @@
   },
   "unseen": {
     "lineReal": "{{wallet}} 中有 {{amount}} 新 sats",
+    "lineRealOne": "{{wallet}} 中有 {{amount}} 新 sat",
     "lineTest": "{{wallet}} 中有 {{amount}} 新测试 sats",
+    "lineTestOne": "{{wallet}} 中有 {{amount}} 新测试 sat",
     "real": "{{place}}，新到 {{amount}} sats",
-    "test": "{{place}}，新到 {{amount}} 测试 sats"
+    "realOne": "{{place}}，新到 {{amount}} sat",
+    "test": "{{place}}，新到 {{amount}} 测试 sats",
+    "testOne": "{{place}}，新到 {{amount}} 测试 sat"
   },
   "usdt": {
     "approve": "在你批准检查之前，不会发送任何内容。",
