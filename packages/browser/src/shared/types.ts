@@ -21,6 +21,9 @@ import type { IdentityDisplay, IdentityLedger, IdentityStatus, IdentityTimelineE
 import type { DataLinkState, LinkStatus, LiveAttempt, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
 import type { CommunityState, GroupByeFrame, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
 
+/** A reaction to a message not here yet (WISP 401 § Reactions), from `by`, waiting for it until `until`. */
+export interface WaitingReaction { by: string; reaction: WireReaction; until: number }
+
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
   /**
@@ -93,6 +96,8 @@ export interface StoredLink {
   withdrawnFiles?: string[];
   /** This side's reactions the contact has not confirmed yet (WISP 401 § Reactions), in the order of their numbers. */
   reactionsOut?: WireReaction[];
+  /** The contact's reactions to messages not here yet, confirmed to them: kept here until their message lands or their wait ends. */
+  reactionsWaiting?: WaitingReaction[];
   /** The chat's pinned message (WISP 400 § Pinned message): the latest pin, either side's; `id` "" once unpinned. */
   pin?: StoredPin;
   /** This side's pin the contact has not confirmed yet (WISP 401 § Pinned message): said on each live session until it does. */
