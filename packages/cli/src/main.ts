@@ -165,10 +165,11 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
 /**
  * A command that makes a new chat and needs no other: a one-shot for it leaves the saved chats and the groups unstarted.
  * Started, each saved chat put its records and its leave packet on the relays: from about ten that was the relays' 30
- * requests a minute, and the new invite's records waited behind them (21 s instead of under one, and not published).
+ * requests a minute, and the new chat's waited behind them. A new invite took 21 s instead of under one, unpublished;
+ * a join waited its whole 60 s and left unpaired. A join of a saved chat starts that chat (the engine's `joinLink`).
  */
 export function newChatOnly(method: string): boolean {
-  return method === "invite.create";
+  return method === "invite.create" || method === "invite.join";
 }
 
 /**
