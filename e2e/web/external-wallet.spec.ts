@@ -1,4 +1,4 @@
-import { chat, connect, expect, getTestCoins, link, openChat, openWallet, say, test, useTestnet, type Peer } from "../support/fixtures";
+import { chat, connect, expect, getTestCoins, link, openChat, openWallet, say, TEST_COINS, test, useTestnet, type Peer } from "../support/fixtures";
 import { paymentCard } from "../support/payments";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
@@ -107,7 +107,8 @@ test.describe("another wallet", () => {
       await pay.getByTestId("lnurl-pay").click();
       await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 21 test sats to ${server.address("shop")}`);
       await expect(pay.getByTestId("lnurl-success")).toContainText('Thanks for "gm"');
-      await expect.poll(() => server.paid("shop"), { timeout: 30_000 }).toBe(true);
+      // The 21 sats and the mint's fee left the wallet (a refused melt gives the sats back, less a fee).
+      await expect.poll(async () => Number((await alice.page.getByTestId("wallet-balance").innerText()).replace(/[^\d]/g, ""))).toBeLessThanOrEqual(TEST_COINS - 21);
 
       // An amount outside the limits never reaches the server.
       await alice.page.getByTestId("wallet-pay-input").fill(server.address("fixed"));

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QRCodeSVG } from "qrcode.react";
 import type { Page } from "@playwright/test";
-import { expect, getTestCoins, openWallet, test, useTestnet } from "../support/fixtures";
+import { expect, getTestCoins, openWallet, TEST_COINS, test, useTestnet } from "../support/fixtures";
 import { strangerInvoice } from "../support/bolt11";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
@@ -12,9 +12,11 @@ import { endpoints } from "../infra/env.mjs";
  * frames the same way) goes to its review, then Pay. Sats move through the test mint (`E2E_MINT_URL` answers for the
  * public one when set, see support/mint.ts), worthless. The invoice is a stranger's (support/bolt11.ts): a test mint
  * marks its own invoices paid by itself, so paying one of those proves nothing. The Lightning address is served by a
- * server of this test's own (support/lnurl.ts); its invoices are the mint's, so it is paid only against the suite's own
- * mint (`E2E_MINT_URL`), which settles them inside, and the public one refuses them as already paid.
+ * server of this test's own (support/lnurl.ts), whose invoices are a stranger's too.
  */
+
+/** The card's balance, in sats. */
+const sats = async (page: Page) => Number((await page.getByTestId("wallet-balance").innerText()).replace(/[^\d]/g, ""));
 
 /** A PNG of `text`'s QR, as a screenshot of one would be: drawn by the app's own QR component, on a blank page. */
 async function qrPicture(page: Page, text: string): Promise<{ name: string; mimeType: string; buffer: Buffer }> {
@@ -76,10 +78,10 @@ test.describe("Send scans a QR", () => {
       await pay.getByTestId("lnurl-amount").fill("8");
       await pay.getByTestId("lnurl-invoice").click();
       await expect(pay.getByTestId("lnurl-review")).toContainText("Pay 8 test sats to shop@");
-      if (!process.env.E2E_MINT_URL) return;
       await pay.getByTestId("lnurl-pay").click();
       await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 8 test sats to ${server.address("shop")}`);
-      await expect.poll(() => server.paid("shop"), { timeout: 30_000 }).toBe(true);
+      // The 8 sats and the mint's fee left the card (a refused melt gives the sats back, less a fee).
+      await expect.poll(() => sats(page)).toBeLessThanOrEqual(TEST_COINS - 8);
     } finally { server.close(); }
   });
 
