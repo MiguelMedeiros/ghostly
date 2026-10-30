@@ -60,7 +60,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
   const go = (path: string, state?: Record<string, unknown>) => { onClose(false); if (variant === "sheet") nav.openUnder("/settings", path, state); else nav.place(path, state); };
   const switchTo = (other: OtherProfile) => switchProfile(other.entry.id, { avatar: other.glance?.avatar });
 
-  const itemClass = "w-full flex items-center gap-3 px-3 text-left rounded-lg cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent";
+  const itemClass = "w-full flex items-center gap-3 px-3 text-start rounded-lg cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:bg-surface-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent";
   const color = THEME_COLOR[themeOf(current.id)];
   const nickname = settings.defaultNickname || t("common.anonymous");
 
@@ -87,7 +87,7 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
         </span>
         <span className="shrink-0 flex items-center gap-0.5 text-xs text-text-secondary" aria-hidden="true">
           {t("profileSwitcher.open")}
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="m9 6 6 6-6 6" /></svg>
         </span>
       </button>
 
