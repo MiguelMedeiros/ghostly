@@ -9,6 +9,7 @@ import { DHT_POLL_INTERVALS, RelayTransport } from "@ghostly/core";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { engine } from "@ghostly/browser/platform/engine";
+import { testSwitch } from "@ghostly/browser/shared/features";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
 import { hostErrorText, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
@@ -20,31 +21,30 @@ import { translatorFor } from "../../ui/src/locales";
  * desktop app does: its poll intervals (it reaches the DHT directly, so it looks more often than a
  * browser may ask a relay), and no request budget of its own toward the relays (the desktop's Rust client
  * keeps that; here the "relays" are the test's, in the same process, or a front on that Rust client).
- * The pairing timing test is what sets it. Read once, when the peer is made.
+ * The pairing timing test is what sets it. A test build only (`testSwitch`). Read once, when the peer is made.
  */
 function testPace(): Pick<NodeOptions, "pollIntervals" | "transport"> {
-  try {
-    return localStorage.getItem("ghostly-test-pace") === "desktop"
-      ? { pollIntervals: DHT_POLL_INTERVALS, transport: new RelayTransport({ requestsPerMinute: Infinity }) } : {};
-  } catch { return {}; }
+  return testSwitch("ghostly-test-pace") === "desktop"
+    ? { pollIntervals: DHT_POLL_INTERVALS, transport: new RelayTransport({ requestsPerMinute: Infinity }) } : {};
 }
 
 /**
  * Tests only: `localStorage["ghostly-test-iroh"] = "off"` keeps Iroh out of this page's peer, so the suite stays
  * offline (Iroh would reach its public relays) and a browser is WebRTC only, as specs written before Iroh expect.
- * The fixtures set it unless a spec asks for Iroh (and then points it at the test relay). Read once.
+ * The fixtures set it unless a spec asks for Iroh (and then points it at the test relay). A test build only: against a
+ * deployed one (`E2E_WEB_URL`) the fixtures point Iroh at a closed port instead, as for the extension. Read once.
  */
 function testIroh(): boolean {
-  try { return localStorage.getItem("ghostly-test-iroh") !== "off"; } catch { return true; }
+  return testSwitch("ghostly-test-iroh") !== "off";
 }
 
 /**
  * Tests only: `localStorage["ghostly-test-reactions"] = "off"` makes this page's peer an app from before reactions
  * (WISP 401 § Reactions): it never says `react/1`, so the compatibility spec can check what an older contact sees.
- * Read once.
+ * A test build only. Read once.
  */
 function testReactions(): Pick<NodeOptions, "reactions"> {
-  try { return localStorage.getItem("ghostly-test-reactions") === "off" ? { reactions: false } : {}; } catch { return {}; }
+  return testSwitch("ghostly-test-reactions") === "off" ? { reactions: false } : {};
 }
 
 /**

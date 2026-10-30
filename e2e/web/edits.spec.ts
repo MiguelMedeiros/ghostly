@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, deployedBuild, expect, link, say, test, type Peer } from "../support/fixtures";
 
 /**
  * Editing a sent message (WISP 400 § Edits) between two web apps. Alice edits her text from its ⋮ and with ↑ in an
@@ -101,6 +101,7 @@ test("an edit made while the contact's session is gone reaches it when it is bac
 });
 
 test("a contact whose app does not show edits keeps its text and gets no second message, until its app does", { tag: ["@feature:chat.edit.wire"] }, async ({ peer }) => {
+  test.skip(deployedBuild, "a deployed build is a release build: it ignores ghostly-test-no-edit");
   test.setTimeout(6 * 60_000);
   const [alice, bob] = await Promise.all([peer("edit-old-alice"), peer("edit-old-bob")]);
   // Bob's app says no edit/1, as one from before edits.
