@@ -1,6 +1,6 @@
 import { CliError } from "../errors";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, typingFor, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, usageFields, usageOptions, wait } from "./shared";
 
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
@@ -40,9 +40,9 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { chat }) => ({ chat, hold: inRange(options, "hold", "a number of minutes", 0, HOLD_MINUTES) }),
   },
   "chat history": {
-    method: "chat.history", usage: "chat history <chat> [--limit n] [--before id|ms] [--after id|ms]", summary: "Messages, oldest first (a page)",
+    method: "chat.history", usage: "chat history <chat> [--limit n] [--before id|ms] [--after id|ms] [--translate lang]", summary: "Messages, oldest first (a page)",
     args: ["chat"],
-    options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" } },
+    options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" }, translate },
     params: ({ options }, { chat }) => ({ chat, limit: pageLimit(options), before: cursor(options.before, "before"), after: cursor(options.after, "after") }),
   },
   "chat list": { method: "chat.list", usage: "chat list [--show-secret]", summary: "Chats, newest first (a pending invite code only with --show-secret)", options: showInvite, params: ({ options }) => secret(options) },

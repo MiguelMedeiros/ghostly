@@ -371,7 +371,9 @@ describe("the Bark wallet's seed", () => {
     await expect(wallet.board()).resolves.toBe("b".repeat(64));
     expect(wallet.view.balance).toBe(5_000);
     handle.sync = async () => { throw new Error("server hiccup"); };
-    await wallet.refresh();
+    // Past the 3 s in which the board's own refresh sync is not made again.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 3_000 });
+    try { await wallet.refresh(); } finally { vi.useRealTimers(); }
     expect(wallet.view.error).toBe("Could not read the sync from the Bark server. Last values may be stale.");
     expect(logged.some((line) => line.includes("server hiccup"))).toBe(true);
     expect(leaks(mnemonic, wallet.view)).toEqual([]);

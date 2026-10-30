@@ -35,6 +35,7 @@ interface SettingsContextValue {
   updateChatListDensity: (density: ChatListDensity) => void;
   updateCheckForUpdates: (check: boolean) => void;
   updateLinkPreviews: (on: boolean) => void;
+  updateTranslateMessages: (on: boolean) => void;
   updateProfilePeek: (patch: NonNullable<AppSettings["profilePeek"]>) => void;
   randomizeNickname: () => void;
   resetSettings: () => void;
@@ -110,6 +111,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSettings((prev) => ({ ...prev, linkPreviews }));
   }, []);
 
+  const updateTranslateMessages = useCallback((translateMessages: boolean) => {
+    setSettings((prev) => ({ ...prev, translateMessages }));
+  }, []);
+
   const updateProfilePeek = useCallback((patch: NonNullable<AppSettings["profilePeek"]>) => {
     setSettings((prev) => ({ ...prev, profilePeek: { ...prev.profilePeek, ...patch } }));
   }, []);
@@ -148,6 +153,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         updateChatListDensity,
         updateCheckForUpdates,
         updateLinkPreviews,
+        updateTranslateMessages,
         updateProfilePeek,
         randomizeNickname,
         resetSettings,

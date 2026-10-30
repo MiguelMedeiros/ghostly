@@ -19,6 +19,11 @@
   "goHome": "Ir al inicio",
   "loading": "Cargando...",
   "moreInfo": "Más información",
+  "needsYou": {
+    "mark": "requiere atención",
+    "show": "Ver",
+    "title": "Te espera"
+  },
   "save": "Guardar",
   "size": {
     "b": "{{n}} B",

@@ -20,6 +20,7 @@
   "own": "这是你自己的邀请。把它分享给联系人，由对方用它加入。",
   "paste": "从剪贴板粘贴",
   "pasteScreenshot": "也可以粘贴二维码截图。",
+  "pastedTooLarge": "这张图片太大，无法读取。请粘贴一张更小的图片，或二维码的截图。",
   "placeholder": "粘贴邀请…",
   "qrReaderNotLoaded": "二维码读取器未能加载。请检查网络连接，然后重试。",
   "qrReaderReload": "二维码读取器仍未能加载。请重新加载 Ghostly。",

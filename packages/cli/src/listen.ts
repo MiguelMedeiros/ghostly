@@ -26,8 +26,21 @@ export interface ListenOptions {
   allow?: Allowlist;
   /** `--turns`: only agent turns, as `agent.turn` events. */
   turns?: boolean;
+  /** `--translate`: the event with its received message's `translation` (translate.ts), before a turn is made of it. */
+  translate?: (event: GhostlyEvent) => Promise<GhostlyEvent>;
   /** The first wait before a webhook is tried again (500 ms), doubled each time up to a minute. */
   retryMs?: number;
+  /**
+   * The cursor could not be written (a full disk): the listener stops. Run on, each event was said on stderr and the
+   * cursor stayed where it was, so a restart handed every event since then again (agents#1710). Without it, said on
+   * stderr per event as before.
+   */
+  cursorFailed?: (error: unknown) => void;
+}
+
+/** The cursor's own write failed, not the event's handling. */
+class CursorError extends Error {
+  constructor(readonly error: unknown) { super(error instanceof Error ? error.message : String(error)); }
 }
 
 /**
@@ -92,10 +105,11 @@ export interface AgentTurn extends GhostlyEvent {
    * matched it: the question's id, the button's id and its label, all this profile's own words.
    */
   press?: { messageId: string; button: string; label: string; inferred?: true };
-  untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
+  /** `translation`: `listen --translate`'s, made of the sender's text, so theirs as much. */
+  untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean }; translation?: { from: string; text: string } };
 }
 
-interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown } }
+interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown }; translation?: { from: string; text: string } }
 
 /** The turn an event starts, or null: only a contact's message, and a group message that mentions this profile. */
 export function toTurn(event: GhostlyEvent): AgentTurn | null {
@@ -119,6 +133,7 @@ function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<Agen
       text: message.text, name: message.nick ?? null, messageId: message.id,
       ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),
       ...(file ? { file: { id: file.id, name: file.name, size: file.size, mime: file.mime, voice: !!file.voice } } : {}),
+      ...(message.translation ? { translation: { from: message.translation.from, text: message.translation.text } } : {}),
     },
   };
 }
@@ -287,13 +302,21 @@ export function eventHandler(options: ListenOptions): EventHandler {
   const webhook = options.webhook ? checkWebhook(options.webhook) : null;
   let chain = Promise.resolve();
   let behind = 0;
+  let stopped = false;
+  const keep = (seq: number) => {
+    if (!options.cursor) return;
+    try { writeCursor(options.cursor, seq); } catch (error) { throw new CursorError(error); }
+  };
   const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
+    if (stopped) return;
     behind++;
     chain = chain.then(async () => {
-      const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
+      if (stopped) return;
+      const skip = () => keep(event.seq);
       if (!matches(event, options.types)) return skip();
       if (options.allow && !(await options.allow.allows(event))) return skip();
+      if (options.translate) event = await options.translate(event);
       if (options.turns) {
         const next = toTurn(event);
         if (!next) return skip();
@@ -312,12 +335,18 @@ export function eventHandler(options: ListenOptions): EventHandler {
       if (full) await options.drained?.();
       // A failed hook (an --exec exiting non-zero, an event the webhook refused) still moves the cursor: one poisonous
       // event must not stop the stream. The failure is on stderr. A webhook not answering never gets here (`post`).
-      if (options.cursor) writeCursor(options.cursor, event.seq);
+      keep(event.seq);
     }).catch((error: unknown) => {
       try {
-        process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
-        if (options.cursor) writeCursor(options.cursor, seq);
-      } catch { /* the next event moves the cursor */ }
+        if (!(error instanceof CursorError)) {
+          process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
+          keep(seq);
+        } else throw error;
+      } catch (failed) {
+        if (!(failed instanceof CursorError) || !options.cursorFailed) return; // the next event moves the cursor
+        stopped = true;
+        options.cursorFailed(failed.error);
+      }
     }).finally(() => { behind--; });
   };
   return Object.assign(handle, { behind: () => behind, idle: () => chain });

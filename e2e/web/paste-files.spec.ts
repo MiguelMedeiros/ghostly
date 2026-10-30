@@ -108,6 +108,43 @@ test("a file named in the other script reads from its start, in the sheet and in
   expect(first.right).toBeLessThanOrEqual(box.right + 1);
 });
 
+test("a picture's name too long for the sheet reads from its start in either app direction, its size still shown", { tag: ["@feature:app.composer.paste-files", "@feature:app.i18n"] }, async ({ peer }) => {
+  // The caption cut a name in the other script at its start ("…eenshot of …") and its " · size" off the end.
+  const [alice, bob] = await Promise.all([peer("alice", { mobile: true, viewport: { width: 375, height: 740 } }), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  const names = [
+    { language: "ar", name: "Screenshot of the quarterly planning meeting whiteboard.png", first: "Screenshot" },
+    { language: "en", name: "لقطة شاشة من اجتماع التخطيط الفصلي للفريق كاملة مع السبورة البيضاء والملاحظات.png", first: "لقطة" },
+  ];
+  for (const { language, name, first } of names) {
+    await alice.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await alice.page.reload();
+    await expect(alice.page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+
+    expect(await paste(alice.page, ".composer-row textarea", [{ name, type: "image/png", base64: PNG }])).toBe(false);
+    const caption = alice.page.getByTestId("attachment-sheet").getByTestId("attachment-name");
+    await expect(caption).toHaveText(`${name} · 70 B`);
+    // The box that clips: the caption's content box (no padding), as the text is cut inside it.
+    const inner = (el: Element) => {
+      const { left, right } = el.getBoundingClientRect(), style = getComputedStyle(el);
+      return { left: left + parseFloat(style.paddingLeft), right: right - parseFloat(style.paddingRight) };
+    };
+    const [box, start, size] = await Promise.all([caption.evaluate(inner), textBox(caption, first), textBox(caption, "70 B")]);
+    // Its first word and the size are drawn inside it, not under the "…" or past its edge.
+    for (const shown of [start, size]) {
+      expect(shown.left).toBeGreaterThanOrEqual(box.left - 1);
+      expect(shown.right).toBeLessThanOrEqual(box.right + 1);
+    }
+    await alice.page.keyboard.press("Escape");
+    await expect(alice.page.getByTestId("attachment-sheet")).toHaveCount(0);
+  }
+});
+
 /**
  * Whether the picture's URL still serves its bytes. Chromium keeps drawing an image whose object URL was revoked after
  * it loaded; WebKit loads it again and shows its broken "?", which is what Miguel saw.

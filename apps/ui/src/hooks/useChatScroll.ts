@@ -15,6 +15,8 @@ export const NEAR_BOTTOM_PX = 100;
 export const FAR_FROM_BOTTOM_PX = 400;
 /** The view this near an edge of the rows in the page (in heights of the view) takes a page more there (`useRowWindow`). */
 export const EDGE_VIEWS = 1.5;
+/** The pill puts the first new message this far below the view's top: under its day's date, stuck there (DaySections). */
+export const NEW_ROW_TOP_PX = 44;
 /** A hand's wheel, touch or key moves the list for this long after it (smooth scrolling, a trackpad's momentum). */
 export const HAND_MS = 1000;
 /** A jump to a message (a quote's, a search's) is on its way for at most this long, unless a hand takes over first. */
@@ -230,7 +232,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     // Not in the page (the window is elsewhere): the rows around it come in first.
     const row = el && id ? rowById(el, id) ?? (win.current?.reveal(id) ? rowById(el, id) : undefined) : undefined;
     if (!el || !row) { toBottom(); return; }
-    const top = el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - 8;
+    const top = el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top - NEW_ROW_TOP_PX;
     if (top >= el.scrollHeight - el.clientHeight - NEAR_BOTTOM_PX) { toBottom(); return; }
     clear();
     if (reducedMotion() || typeof el.scrollTo !== "function") el.scrollTop = top;

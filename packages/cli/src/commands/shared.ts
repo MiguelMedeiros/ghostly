@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
-import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl } from "@ghostly/core/statusCards";
+import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl, statusCardBytes } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
@@ -36,7 +36,9 @@ export const groupWait: Record<string, OptionSpec> = {
   wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until an edge took it (default none)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
-export const net: OptionSpec = { type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
+/** `listen`, `events` and `chat history`: received messages with `translation: { from, text }` (translate.ts). */
+export const translate: OptionSpec = { type: "string", description: "Add a translation into this language (en, pt...) to received messages, made on this machine by the translation runtime" };
+export const net: OptionSpec ={ type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
 export const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };
@@ -241,6 +243,18 @@ export function itemOf(value: string): { state: string; text: string } {
   return { state: word, text };
 }
 
+/**
+ * A card's fields past the bytes a card takes in all (`STATUS_CARD_LIMITS.bytes`, its JSON as UTF-8): a usage error
+ * (exit 2) with its size and what to cut. Every flag can be within its own bound and the card not: 20 items of 200
+ * characters past Latin (3 bytes each) take 12 KiB. Before, it failed as `bad_request` (exit 1), the whole card in it.
+ */
+function cardBytes(fields: Record<string, unknown>, flags: string): Record<string, unknown> {
+  const bytes = statusCardBytes(fields);
+  if (bytes > STATUS_CARD_LIMITS.bytes)
+    throw new CliError("usage", `The card takes ${bytes} bytes, and holds at most ${STATUS_CARD_LIMITS.bytes} in all (a character past Latin takes 2 to 4): give shorter or fewer ${flags}`);
+  return fields;
+}
+
 /** `--progress`, `--left`: a percent, or a usage error that names the flag. */
 function percent(options: Parsed["options"], flag: string): void {
   const value = options[flag];
@@ -296,7 +310,7 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   set("parent", options.parent);
   const links = cardLinks(options.link);
   if (links) fields.links = links;
-  return fields;
+  return cardBytes(fields, "--item, --step, --link or --json");
 }
 
 /**
@@ -366,7 +380,7 @@ export function routineFields(options: Parsed["options"]): Record<string, unknow
   if (next !== undefined) fields.nextRunAt = next;
   const links = cardLinks(options.link);
   if (links) fields.links = links;
-  return fields;
+  return cardBytes(fields, "--name, --schedule, --link or --json");
 }
 
 /** Options a routine command takes, beside `cardOptions`. */
@@ -387,7 +401,7 @@ export const taskOptions: Record<string, OptionSpec> = {
   progress: { type: "number", description: "Percent done, 0 to 100" },
   steps: { type: "string", description: "Steps done of total, like 2/5 (progress is worked out from them)" },
   step: { type: "string", description: "What it is doing now (200 characters)" },
-  item: { type: "list", description: "A step or log line, state:text with state pending, running, done, failed or skipped (text alone: pending). A lowercase word before the first colon must be one of them; pending:fix: x keeps the colon. The list replaces the card's (up to 20)" },
+  item: { type: "list", description: "A step or log line, state:text with state pending, running, done, failed or skipped (text alone: pending). A lowercase word before the first colon must be one of them; pending:fix: x keeps the colon. The list replaces the card's (up to 20; the card holds at most 8 KiB in all, and a character past Latin takes 2 to 4 bytes)" },
   branch: { type: "string", description: "The branch it works on" },
   "pr-url": { type: "string", description: "The pull request's https link" },
   "pr-number": { type: "number", description: "The pull request's number" },
@@ -425,7 +439,7 @@ export function usageFields(options: Parsed["options"]): Record<string, unknown>
   const resets = cardTime(options.resets, "resets");
   if (resets !== undefined) fields.resetsAt = resets;
   if (Array.isArray(options.also) && options.also.length) fields.windows = (options.also as string[]).map(usageWindowOf);
-  return fields;
+  return cardBytes(fields, "--json");
 }
 
 /** Options `usage send` takes. */

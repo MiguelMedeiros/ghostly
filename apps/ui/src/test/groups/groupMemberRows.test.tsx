@@ -4,6 +4,8 @@ import type { GroupEdgeView, GroupMemberView, GroupView } from "@ghostly/browser
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { translateWith } from "../../locales/translate";
+import { LOCALES } from "../i18n/locales";
 
 // covers: groups.connection
 
@@ -64,5 +66,19 @@ describe("GroupMembersDialog: a large roster", () => {
     expect(within(rowOf(keyOf(7))).getByTestId("group-make-admin")).toBeDisabled();
     await act(async () => { done(); await Promise.resolve(); });
     expect(within(rowOf(keyOf(7))).getByTestId("group-remove-member")).toBeEnabled();
+  });
+});
+
+// agents#1613: one missing message read plural in French, Spanish and Italian ("1 manquants", "1 faltan", "1 mancanti").
+describe("a member's missing-messages chip", () => {
+  it("is singular for one missing message in every language, and the count's own form for more", () => {
+    const one = Object.fromEntries(Object.entries(LOCALES).map(([language, dict]) => [language, translateWith(dict, language as never)("group.members.missingOne", { count: 1 })]));
+    expect(one).toMatchObject({ en: "1 missing", fr: "1 manquant", es: "falta 1", it: "1 mancante" });
+    for (const said of Object.values(one)) expect(said).toContain("1");
+    const g = group({ members: roster((m) => (m.key === keyOf(0) ? { missing: 1 } : m.key === keyOf(1) ? { missing: 3 } : {})) });
+    fakeEngine.update({ groups: [g] });
+    renderApp(<GroupMembersDialog group={g} onClose={() => {}} />);
+    expect(within(rowOf(keyOf(0))).getByText("1 missing")).toBeInTheDocument();
+    expect(within(rowOf(keyOf(1))).getByText("3 missing")).toBeInTheDocument();
   });
 });

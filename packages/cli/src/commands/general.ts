@@ -1,11 +1,11 @@
 import { CliError } from "../errors";
-import { type Command, here, since } from "./shared";
+import { type Command, here, since, translate } from "./shared";
 
 /** The profile's status, its picture, the event journal: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "events": {
-    method: "events.replay", usage: "events [--since seq]", summary: "Events the journal holds, without following",
-    options: { since: { type: "number", description: "Only events after this seq" } }, params: ({ options }) => ({ since: since(options) ?? 0 }),
+    method: "events.replay", usage: "events [--since seq] [--translate lang]", summary: "Events the journal holds, without following",
+    options: { since: { type: "number", description: "Only events after this seq" }, translate }, params: ({ options }) => ({ since: since(options) ?? 0 }),
   },
   "profile picture": {
     method: "profile.picture", usage: "profile picture <jpeg> | --clear", summary: "The picture contacts see (a square JPEG, 128 px is what the app sends)", args: ["path...?"],

@@ -164,6 +164,17 @@ pub async fn share_done(paths: Vec<PathBuf>) -> Result<(), String> {
         .map(drop)
 }
 
+#[derive(Deserialize)]
+struct Held {
+    held: bool,
+}
+
+/// Holds the transfer service (`on`) while files move, so they go on with the app out of sight, or stops it: whether
+/// it runs now.
+pub fn keep_awake(on: bool) -> Result<bool, String> {
+    Ok(call::<Held>("keepAwake", json!({ "on": on }))?.held)
+}
+
 /// The system bars around the page take its background colour, and light or dark icons to go on it.
 pub fn system_bars(color: u32, dark: bool) -> Result<(), String> {
     call::<Value>("systemBars", json!({ "color": color, "dark": dark })).map(drop)

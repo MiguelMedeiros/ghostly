@@ -89,10 +89,54 @@ export async function signAppObject(prefix: AppPrefix, value: unknown, signer: S
 }
 
 /**
+ * A faster Ed25519 check a host may give (the CLI gives node:crypto's): RFC 8032's verification without the cofactor,
+ * which compares the signature's R with the encoding of the [S]B - [k]A it computes, as OpenSSL's does. It is asked only
+ * when the key is the canonical encoding of a point not of small order and S is below the group order, and only its yes
+ * counts: R is then the canonical encoding of that point, so the strict check below says yes too. Its no, or a throw,
+ * leaves the answer to the strict check, so what verifies is exactly what verifies without it.
+ */
+export type AppSignatureFastPath = (signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array) => boolean;
+
+let fastPath: AppSignatureFastPath | null = null;
+
+/** Gives (or, with `null`, takes back) the faster check of every app signature this process verifies. */
+export function setAppSignatureFastPath(check: AppSignatureFastPath | null): void {
+  fastPath = check;
+}
+
+/** The group order L, little-endian: an S at or above it is refused by the strict check. */
+const GROUP_ORDER = Uint8Array.from([
+  0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+]);
+/** Whether each key seen lately is a canonical encoding of a point not of small order: a list repeats its publishers. */
+const keysFit = new Map<string, boolean>();
+
+function fastPathTakes(signature: Uint8Array, publicKey: Uint8Array): boolean {
+  if (signature.length !== 64 || publicKey.length !== 32) return false;
+  let below = false;
+  for (let i = 31; i >= 0; i--) {
+    if (signature[32 + i] !== GROUP_ORDER[i]) { below = signature[32 + i] < GROUP_ORDER[i]; break; }
+  }
+  if (!below) return false;
+  const id = toBase64Url(publicKey);
+  let fit = keysFit.get(id);
+  if (fit === undefined) {
+    try { fit = !ed25519.Point.fromBytes(publicKey, false).isSmallOrder(); } catch { fit = false; }
+    if (keysFit.size >= 256) keysFit.clear();
+    keysFit.set(id, fit);
+  }
+  return fit;
+}
+
+/**
  * Ed25519 verification as RFC 8032 writes it (`zip215: false`): canonical encodings of the point and the scalar only,
  * so every parser (this one, a Rust one with `verify_strict`) accepts exactly the same signatures.
  */
 function strictVerify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean {
+  if (fastPath && fastPathTakes(signature, publicKey)) {
+    try { if (fastPath(signature, message, publicKey)) return true; } catch { /* the strict check answers */ }
+  }
   try {
     return ed25519.verify(signature, message, publicKey, { zip215: false });
   } catch {
@@ -226,15 +270,15 @@ export function verifyAppRevocation(revocation: SignedAppRevocation, checked?: A
 
 /**
  * Reads `ghostly-revoke.json`: canonical bytes holding a list of signed revocations. One that does not verify refuses the
- * file, as a store index's `revoked` does.
+ * file, as a store index's `revoked` does. With `checked`, a revocation it holds is not checked again.
  */
-export function readAppRevocations(bytes: Uint8Array): { ok: true; revocations: SignedAppRevocation[] } | { ok: false; reason: CanonicalJsonRefusal | AppRevocationRefusal; detail?: string } {
+export function readAppRevocations(bytes: Uint8Array, checked?: AppRevocationsChecked): { ok: true; revocations: SignedAppRevocation[] } | { ok: false; reason: CanonicalJsonRefusal | AppRevocationRefusal; detail?: string } {
   const read = readCanonicalJson(bytes);
   if (!read.ok) return read;
   if (!Array.isArray(read.value) || read.value.length > APP_STATEMENT_LIMITS.revocations) return { ok: false, reason: "bad-revocation", detail: "Not a list of at most 4096 revocations" };
   const revocations: SignedAppRevocation[] = [];
   for (const entry of read.value) {
-    const one = readAppRevocation(entry);
+    const one = readAppRevocation(entry, checked);
     if (!one.ok) return one;
     revocations.push(one.revocation);
   }

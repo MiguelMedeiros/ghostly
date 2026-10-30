@@ -36,8 +36,30 @@ export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messag
   }
 }
 
-/** Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). */
+/**
+ * A one-shot whose text went over the live link waits this long for its receipt before it leaves (`waitForMessage`).
+ * Left at `sent`, the engine stopping took the text for unconfirmed, the next start sent it again on the DHT, and that
+ * copy took the chat's one DHT text awaiting a receipt: a script's next one-shot send waited 30 s behind it, every 5-8
+ * messages, and the last text showed "Connection closed before receipt" though the contact had it (agents#1640).
+ */
+export const ONE_SHOT_RECEIPT_MS = 2_000;
+
+/** What a timed-out wait says of what happens next: a daemon goes on, a one-shot's profile closes now. */
+const goesOn = (ctx: ApiContext) => ctx.mode === "one-shot"
+  ? "goes with this profile's next command, or keep it online with `ghostly daemon --detach`"
+  : "still goes by itself while this profile is online";
+
+/**
+ * Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). A
+ * one-shot's text sent over the live link waits a moment more for its receipt (`ONE_SHOT_RECEIPT_MS`).
+ */
 export async function waitForMessage(ctx: ApiContext, chat: string, messageId: string, target: "sent" | "delivered", ms: number): Promise<StoredMessage> {
+  const reached = await waitForDelivery(ctx, chat, messageId, target, ms);
+  if (ctx.mode !== "one-shot" || target !== "sent" || reached.delivery !== "sent" || reached.via !== "datalink") return reached;
+  return waitForDelivery(ctx, chat, messageId, "delivered", ONE_SHOT_RECEIPT_MS).catch(async () => (await node(ctx).getMessage(chat, messageId)) ?? reached);
+}
+
+async function waitForDelivery(ctx: ApiContext, chat: string, messageId: string, target: "sent" | "delivered", ms: number): Promise<StoredMessage> {
   const want = DELIVERY_RANK[target];
   const look = (message: StoredMessage | undefined) => {
     if (!message) return undefined;
@@ -56,7 +78,7 @@ export async function waitForMessage(ctx: ApiContext, chat: string, messageId: s
       try {
         const done = look(message);
         if (done) finish(null, done);
-        else if (last) finish(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is ${message?.delivery ?? "not sent yet"} and still goes by itself while this profile is online`, { messageId, delivery: message?.delivery ?? null }));
+        else if (last) finish(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is ${message?.delivery ?? "not sent yet"} and ${goesOn(ctx)}`, { messageId, delivery: message?.delivery ?? null }));
       } catch (error) { finish(error); }
     }, finish);
     const timer = setTimeout(() => check(true), ms);

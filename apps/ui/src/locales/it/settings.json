@@ -222,6 +222,20 @@
     "60": "1 ora"
   },
   "title": "Impostazioni",
+  "translate": {
+    "downloaded": "Lingue scaricate",
+    "hint": "L'impostazione predefinita per le chat che non hanno scelto",
+    "info": "I messaggi ricevuti in un'altra lingua vengono tradotti su questo dispositivo da un modello linguistico scaricato una volta. Nessun testo lascia il dispositivo e i tuoi contatti non lo sanno mai.",
+    "name": "Traduci i messaggi",
+    "none": "Nessuna lingua scaricata",
+    "pair": "{{from}} → {{to}}",
+    "remove": "Rimuovi",
+    "removeFailed": "Impossibile rimuoverla. Riprova.",
+    "removeLabel": "Rimuovi {{name}}",
+    "searchWords": "traduzione, traduzione automatica, lingue, modelli",
+    "title": "Traduci i messaggi in {{language}}",
+    "unread": "Impossibile leggere le lingue scaricate."
+  },
   "version": "Versione",
   "website": "Sito web"
 }

@@ -1,7 +1,7 @@
 {
   "name": "ghostly",
   "private": true,
-  "version": "1.5.2",
+  "version": "1.7.0",
   "type": "module",
   "scripts": {
     "predev": "npm run sync:apps",
@@ -60,6 +60,7 @@
     "@ghostly/core": "*",
     "@ghostly/react": "*",
     "@noble/hashes": "2.4.0",
+    "@qvac/langdetect-text": "0.1.3",
     "@scure/base": "2.4.0",
     "@scure/bip39": "^2.4.0",
     "@tauri-apps/api": "^2.12.4",
@@ -68,6 +69,7 @@
     "@tauri-apps/plugin-updater": "^2.14.0",
     "jsqr": "^1.4.0",
     "lowlight": "^3.3.0",
+    "mediabunny": "^1.62.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -92,7 +94,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
-    "happy-dom": "^21.0.3",
+    "happy-dom": "^21.0.4",
     "patch-package": "8.0.1",
     "playwright": "^1.63.0",
     "solc": "0.8.37",

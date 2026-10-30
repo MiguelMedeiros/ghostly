@@ -23,7 +23,9 @@ function transfer({ files = [], text = "", html = "", types = [] }: { files?: Fi
     dropEffect: "none",
   };
 }
-const png = (name = "Screenshot.png") => new File([new Uint8Array([137, 80, 78, 71])], name, { type: "image/png" });
+/** A 400 x 400 PNG's header: a picture is decoded only once its header says its size. */
+const PNG = [137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 1, 144, 0, 0, 1, 144, 8, 6, 0, 0, 0];
+const png = (name = "Screenshot.png") => new File([new Uint8Array(PNG)], name, { type: "image/png" });
 const dialog = () => screen.getByRole("dialog", { hidden: true });
 
 const getContext = HTMLCanvasElement.prototype.getContext;
@@ -82,14 +84,16 @@ describe("A QR screenshot pasted or dropped on Join", () => {
 
   describe("where the webview shows the page nothing of a copied picture (Desktop on Linux)", () => {
     /** What the desktop host holds for a paste, read back by token as Rust hands it. */
-    const held = (name: string | null, size: number, mime: string | null = null) =>
-      ({ name, size, mime, read: vi.fn(async (offset: number, length: number) => new Uint8Array(Math.max(0, Math.min(length, size - offset)))), done: vi.fn<() => void>() }) satisfies ClipboardFile;
+    const held = (name: string | null, size: number, mime: string | null = null, head = PNG) =>
+      ({ name, size, mime, read: vi.fn(async (offset: number, length: number) => { const bytes = new Uint8Array(Math.max(0, Math.min(length, size - offset))); bytes.set(head.slice(offset, offset + bytes.length)); return bytes; }), done: vi.fn<() => void>() }) satisfies ClipboardFile;
+    /** A PNG header saying `width` x `height`. */
+    const sized = (width: number, height: number) => [...PNG.slice(0, 16), ...[width, height].flatMap((n) => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]), ...PNG.slice(24)];
     afterEach(() => { fakeEngine.readClipboardFiles = undefined; });
 
     it("the app reads the picture, and its QR joins", async () => {
       const { invite } = createLink();
       qr.data = encodeInviteCode(invite);
-      const shot = held(null, 4, "image/png");
+      const shot = held(null, PNG.length, "image/png");
       fakeEngine.readClipboardFiles = vi.fn(async () => [shot]);
       const onJoin = vi.fn();
       renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
@@ -103,7 +107,7 @@ describe("A QR screenshot pasted or dropped on Join", () => {
     it("a QR copied in a web browser (Copy image: its HTML and address, no picture for the page) is read by the app", async () => {
       const { invite } = createLink();
       qr.data = encodeInviteCode(invite);
-      fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, 4, "image/png")]);
+      fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, PNG.length, "image/png")]);
       const onJoin = vi.fn();
       renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
       const html = `<meta charset="utf-8"><img src="https://example.com/qr.png">`;
@@ -116,7 +120,7 @@ describe("A QR screenshot pasted or dropped on Join", () => {
     });
 
     it("a picture copied as a file is read too, alone; a picture too large is not read, and says so", async () => {
-      const notes = held("notes.pdf", 9), code = held("invite.PNG", 4);
+      const notes = held("notes.pdf", 9), code = held("invite.PNG", PNG.length);
       fakeEngine.readClipboardFiles = vi.fn(async () => [notes, code]);
       renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
       fireEvent.paste(dialog(), { clipboardData: transfer({}) });
@@ -125,12 +129,37 @@ describe("A QR screenshot pasted or dropped on Join", () => {
       expect(notes.done).toHaveBeenCalledTimes(1);
       expect(code.done).toHaveBeenCalledTimes(1);
 
-      const huge = held(null, 12 * 1024 * 1024 + 1, "image/png");
+      const huge = held("photo.png", 12 * 1024 * 1024 + 1);
       fakeEngine.readClipboardFiles = vi.fn(async () => [huge]);
       fireEvent.paste(dialog(), { clipboardData: transfer({}) });
       await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Choose an image smaller than 12 MB."));
       expect(huge.read).not.toHaveBeenCalled();
       expect(huge.done).toHaveBeenCalledTimes(1);
+    });
+
+    it("a picture the app made a PNG of is judged by its pixels, not by how many bytes its PNG came to", async () => {
+      // A 12 MP phone photo of a QR: 14 MB once the app packs it as a PNG, while the same picture as a JPEG reads.
+      const { invite } = createLink();
+      qr.data = encodeInviteCode(invite);
+      const onJoin = vi.fn();
+      renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
+      // Past what a picture may have to be decoded here, only its header is read, and the words fit a paste.
+      const vast = held(null, 9_000_000, "image/png", sized(10_000, 6_000));
+      fakeEngine.readClipboardFiles = vi.fn(async () => [vast]);
+      fireEvent.paste(dialog(), { clipboardData: transfer({}) });
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("That picture is too large to read. Paste a smaller one, or a screenshot of the QR."));
+      expect(vast.read).toHaveBeenCalledTimes(1);
+      expect(vast.read.mock.calls[0][0]).toBe(0);
+      expect(vast.done).toHaveBeenCalledTimes(1);
+      expect(createImageBitmap).not.toHaveBeenCalled();
+
+      const photo = held(null, 13_985_607, "image/png", sized(4032, 3024));
+      fakeEngine.readClipboardFiles = vi.fn(async () => [photo]);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).toBeEnabled());
+      fireEvent.paste(dialog(), { clipboardData: transfer({}) });
+      await waitFor(() => expect(onJoin).toHaveBeenCalledTimes(1));
+      expect(onJoin.mock.calls[0][0]).toMatchObject({ seedB64: invite.seedB64 });
+      expect(photo.done).toHaveBeenCalledTimes(1);
     });
 
     it("copied files with no picture among them say so; an empty clipboard, and what the app refuses, are told apart", async () => {
@@ -148,7 +177,7 @@ describe("A QR screenshot pasted or dropped on Join", () => {
       // What the app refuses is said in the dialog's own words: the composer's point at its +, which Join has none of.
       fakeEngine.readClipboardFiles = vi.fn(async () => { throw "That picture is too large to paste"; });
       fireEvent.paste(dialog(), { clipboardData: transfer({}) });
-      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Choose an image smaller than 12 MB."));
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("That picture is too large to read. Paste a smaller one, or a screenshot of the QR."));
       fakeEngine.readClipboardFiles = vi.fn(async () => { throw "The clipboard's picture is damaged"; });
       fireEvent.paste(dialog(), { clipboardData: transfer({}) });
       await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not read the image. Try PNG or JPEG."));

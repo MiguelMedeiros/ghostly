@@ -37,7 +37,7 @@ export const commands: Record<string, Command> = {
     method: "file.save", usage: "file save [<chat>] <file> [--dir d | --path p] [--force] [--wait [--timeout s]]", summary: "Write a received file to disk (never over a file without --force; --wait: once it is all here)",
     args: ["chat?", "file"],
     options: {
-      dir: { type: "string", description: "Into this folder, under its own name" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" },
+      dir: { type: "string", description: "Into this folder, under its own name (a voice message: the name Ghostly makes for it, \"(2)\" when taken)" }, path: { type: "string", description: "To this path" }, force: { type: "boolean", description: "Replace a file there" },
       wait: { type: "boolean", description: "Wait for the transfer to finish first" }, timeout: { type: "number", description: "Seconds --wait waits (default 300)" },
     },
     params: ({ options }, a) => {

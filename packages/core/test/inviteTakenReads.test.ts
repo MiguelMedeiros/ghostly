@@ -100,6 +100,16 @@ describe("a joiner whose invite someone else used first", () => {
     expect(published, `publications: ${publishes.join(" ")}`).toBeLessThanOrEqual(12);
   }, 900_000);
 
+  // agents#1592: #3163 quieted a pinned taken chat's reads, dials and joiner-key session, but its keep-alive of the
+  // invite's shared mailbox still went every 4-6 minutes for good, gated on no pin.
+  it("writes nothing more once taken when its look-up pinned the inviter first, as one that never pinned", async () => {
+    const { second, count } = await pinnedThenTaken();
+    await run(60_000);
+    const { publishes } = await perMinute(count, 30);
+    expect(second.link.pairingProgress?.reason, "still taken").toBe("taken");
+    expect(publishes.reduce((a, b) => a + b, 0), `publications per minute: ${publishes.join(" ")}`).toBe(0);
+  }, 900_000);
+
   it("reads its online inviter slowly after a restart too, when its look-up pinned the inviter first", async () => {
     const { made, inviterKey, second, counted, count } = await pinnedThenTaken();
     let stopped = false;

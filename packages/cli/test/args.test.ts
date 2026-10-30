@@ -205,6 +205,13 @@ describe("the argument parser", () => {
     expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
     expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
     expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat accept"], ["bob"])).toEqual({ chat: "bob" });
+    const accept = (...argv: string[]) => { const c = COMMANDS["chat accept"], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    // With no method it asks what the chat takes; --off or --networks there would change nothing without a word.
+    expect(accept("bob")).toEqual({ chat: "bob" });
+    expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
+    expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
+    expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
     expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
@@ -453,6 +460,9 @@ describe("errors", () => {
     for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
     for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
     expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
+    // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
+    expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
+    expect(asCliError(engineError("contactNoPayments")).toJSON()).toEqual({ code: "refused", message: "Your contact has payments off in this chat, or needs an updated Ghostly", details: { reason: "contact_payments_off" } });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });

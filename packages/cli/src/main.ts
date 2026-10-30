@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
-import { openSync, readFileSync, rmSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
-import { here, since as sinceOf, timeout } from "./commands/shared";
+import { here, since as sinceOf, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -14,6 +14,7 @@ import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
 import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
+import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -28,6 +29,17 @@ const VERSION = packageJson.version;
  */
 const engineApi = () => import("./api");
 const engineHost = () => import("./host");
+
+/**
+ * `--translate <lang>`'s translator, or null (not asked; or the runtime is not there, said on stderr). Loaded only when
+ * asked: the app's message parser it reads costs every other command nothing.
+ */
+async function translatorFor(value: unknown, home: string): Promise<Translator | null> {
+  if (value === undefined) return null;
+  const { loadDetector, openTranslator, translateTarget } = await import("./translate");
+  const to = translateTarget(value)!;
+  return openTranslator({ home, to, detect: await loadDetector(), warn: (line) => process.stderr.write(line + "\n") });
+}
 
 interface Globals { home: string; profile: string; paths: ProfilePaths; pretty: boolean }
 
@@ -70,10 +82,49 @@ function knownProfile(g: Globals): void {
 /** A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. */
 interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void> }
 
-/** Said on stderr when the daemon runs another release than this command (it started before an upgrade). */
+/** `1.2.3`, with an optional `v`, an optional `-beta.1` prerelease and an optional `+build` that never orders. */
+const RELEASE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/** Semver order: negative when `a` is the older release, positive when it is the newer, 0 the same; null when either is not one. */
+export function compareReleases(a: string, b: string): number | null {
+  const left = RELEASE.exec(a.trim()), right = RELEASE.exec(b.trim());
+  if (!left || !right) return null;
+  for (let i = 1; i <= 3; i++) {
+    const order = Number(left[i]) - Number(right[i]);
+    if (order !== 0) return order;
+  }
+  // A prerelease is older than its release; two of one release go field by field, numbers by value and before words.
+  if (left[4] === undefined || right[4] === undefined) return (left[4] === undefined ? 1 : 0) - (right[4] === undefined ? 1 : 0);
+  const l = left[4].split("."), r = right[4].split(".");
+  for (let i = 0; i < Math.min(l.length, r.length); i++) {
+    if (l[i] === r[i]) continue;
+    const ln = /^\d+$/.test(l[i]), rn = /^\d+$/.test(r[i]);
+    if (ln && rn) return Number(l[i]) - Number(r[i]);
+    if (ln !== rn) return ln ? -1 : 1;
+    return l[i] < r[i] ? -1 : 1;
+  }
+  return l.length - r.length;
+}
+
+/**
+ * Said on stderr when the daemon runs another release than this command. An older daemon started before an upgrade:
+ * `daemon restart` runs this release. A newer one means this command is the old one (a second install, a project's
+ * pinned copy): a restart from it would start the older release, so it is told to upgrade instead.
+ */
 export function versionWarning(daemon: unknown, cli: string): string | null {
   if (typeof daemon !== "string" || daemon === cli) return null;
-  return `ghostly: the daemon runs ${daemon} and this command is ${cli}: \`ghostly daemon restart\` runs the new code`;
+  const order = compareReleases(daemon, cli);
+  if (order === 0) return null;
+  const both = `ghostly: the daemon runs ${daemon} and this command is ${cli}`;
+  if (order === null) return `${both}: \`ghostly daemon restart\` runs this command's release`;
+  if (order > 0) return `${both}, older than the daemon: upgrade the CLI (\`npm install -g @ghostlytools/cli\`)`;
+  return `${both}: \`ghostly daemon restart\` runs the new code`;
+}
+
+/** Said on stderr when `daemon restart` stopped a newer release than the one it started (an older CLI ran it). */
+export function restartWarning(before: unknown, version: string): string | null {
+  if (typeof before !== "string" || !((compareReleases(before, version) ?? 0) > 0)) return null;
+  return `ghostly: the daemon ran ${before} and this restart started ${version}, an older release: upgrade the CLI (\`npm install -g @ghostlytools/cli\`) and run \`ghostly daemon restart\` again to go back`;
 }
 
 /**
@@ -128,6 +179,8 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
   if (method === "engine.call") return typeof params.method === "string" && ENGINE_READS.includes(params.method);
   // `call auto` with no on|off says what auto-answer is.
   if (method === "call.auto") return params.on === undefined;
+  // `chat accept <chat>` with no method says what the chat takes.
+  if (method === "chat.accept") return params.method === undefined;
   return READS.has(method);
 }
 
@@ -199,9 +252,34 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
     };
     return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
   }
-  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host = await openHost(g.paths, "one-shot", VERSION, options);
+  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = await openOneShot(g, options);
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
+}
+
+/** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
+const HOLDER_WAIT_MS = 5_000;
+
+/**
+ * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
+ * terminal) is waited for: both used to fail at once, and a backgrounded send was lost unless the script checked its
+ * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step.
+ */
+async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Host> {
+  const { openHost } = await engineHost();
+  const until = Date.now() + HOLDER_WAIT_MS;
+  for (;;) {
+    try { return await openHost(g.paths, "one-shot", VERSION, options); }
+    catch (error) {
+      if (!(error instanceof CliError) || error.code !== "busy") throw error;
+      const left = until - Date.now();
+      if (left <= 0) {
+        const pid = error.details?.pid;
+        throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and was not free after ${HOLDER_WAIT_MS / 1000} s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(50 + Math.random() * 50, left)));
+    }
+  }
 }
 
 /**
@@ -250,7 +328,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
-  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
+  ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print] [--translate lang]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
     type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
@@ -258,9 +336,10 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),
     exec: o("string", "Run this command per event, the event as JSON on stdin"),
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
+    translate,
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -271,12 +350,34 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["version", "This CLI's version (also ghostly --version)"],
 ];
 
+/** A command's words before its arguments: "group send", "send", "engine". */
+const wordsOf = (usage: string) => usage.split(" ").filter((w) => /^[a-z][\w-]*$/.test(w)).slice(0, 2);
+
+/**
+ * `rows`, then each of `more` beside the rows of its first word: after the last of them (`group send` with the group
+ * commands, `identity add` with the identity ones), or at the end when none has that word. They were all appended after
+ * the table: `group send` 106 lines below the group block, `identity add` 60 below its own (agents#1606).
+ */
+function beside(rows: [string, string][], more: [string, string][]): [string, string][] {
+  const out = [...rows];
+  for (const row of more) {
+    const [first, second] = wordsOf(row[0]);
+    let at = -1;
+    if (second !== undefined) for (let i = out.length - 1; i >= 0; i--) if (wordsOf(out[i][0])[0] === first && wordsOf(out[i][0]).length > 1) { at = i; break; }
+    out.splice(at < 0 ? out.length : at + 1, 0, row);
+  }
+  return out;
+}
+
 function help(): string {
   const rows: [string, string][] = [
-    ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
-    ...Object.values(COMMANDS).filter((c) => c.method !== "events.replay").map((c) => [c.usage, c.summary] as [string, string]),
-    ...Object.values(TEXT_COMMANDS).map((c) => [c.usage, c.summary] as [string, string]),
-    ...SPECIAL.slice(7).map(([usage, summary]) => [usage, summary] as [string, string]),
+    ...beside([
+      ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
+      ...Object.values(COMMANDS).filter((c) => c.method !== "events.replay").map((c) => [c.usage, c.summary] as [string, string]),
+    ], [
+      ...Object.values(TEXT_COMMANDS).map((c) => [c.usage, c.summary] as [string, string]),
+      ...SPECIAL.slice(7).map(([usage, summary]) => [usage, summary] as [string, string]),
+    ]),
     [COMMANDS.events.usage, COMMANDS.events.summary],
   ];
   const width = 58;
@@ -558,7 +659,15 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const probe = client ? client.call("status").catch(() => null) as Promise<{ version?: string } | null> : null;
     const stopped = client ? await stopDaemon(g, client, stopFor) : null;
     const before = (await probe)?.version ?? null;
-    const started = await startDetached(g, startFor);
+    let started: Awaited<ReturnType<typeof startDetached>>;
+    try { started = await startDetached(g, startFor); }
+    catch (error) {
+      // A start that failed after the stop leaves the profile with no daemon: the answer says so, and how to start one.
+      if (stopped === null || !(error instanceof CliError) || error.code === "timeout") throw error;
+      throw new CliError(error.code, `${error.message}. The daemon (process ${stopped}) was stopped: start it again with ghostly daemon --detach`, { ...error.details, stopped });
+    }
+    const older = restartWarning(before, VERSION);
+    if (older) process.stderr.write(older + "\n");
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
@@ -637,20 +746,36 @@ function processAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
-/** A daemon in the background, running this command's code, once its socket answers. */
+/**
+ * A daemon in the background, running this command's code, once its socket answers. A one-shot command (or a listen)
+ * that opened the profile in process holds it: the child would only log that. One that ends in a moment (a bot's
+ * `send` every 200 ms, which takes the profile in the gap of a restart) is waited for, and so is one that took it
+ * between the look and the child's start; one that still holds it at `seconds` is the answer, busy with its pid.
+ */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
-  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
-  // A one-shot command (or a listen) that opened the profile in process holds it: the child would only log that.
-  heldBy(g);
-  const log = openSync(g.paths.log, "a", 0o600);
+  const until = Date.now() + seconds * 1000;
+  for (;;) {
+    if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+    if (lockOwner(g.paths) === null) {
+      const started = await spawnDaemon(g, until);
+      if (started) return started;
+    }
+    if (Date.now() >= until) { heldBy(g); throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`); }
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - Date.now()))));
+  }
+}
+
+/** `startDetached`'s child, or null when another process took the profile ahead of it and there is time to try again. */
+async function spawnDaemon(g: Globals, until: number) {
+  const log = openSync(g.paths.log, "a", 0o600), logFrom = fstatSync(log).size;
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
+  closeSync(log); // the child has its own
   child.unref();
   const spawned = { error: null as Error | null };
   // A spawn that fails outright (EAGAIN, EMFILE) sets `exitCode` to the errno before the "error" event, so the loop below
   // ends on its own; the listener swallows the otherwise uncaught event and keeps the cause for the message.
   child.once("error", (error) => { spawned.error = error; });
-  const until = Date.now() + seconds * 1000;
   let client: DaemonClient | null = null;
   // Try at once, then every 200 ms, never past `until`: a small `--timeout` gives up near-immediately instead of always
   // waiting one 200 ms poll first (the first try finds no socket yet and returns at once). A child that exited or was
@@ -663,7 +788,11 @@ async function startDetached(g: Globals, seconds: number) {
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
   }
   if (!client) {
-    heldBy(g, child.pid); // another process took the profile between the check and the child's start
+    // Another process took the profile between the look and the child's start: it holds it still, or the child's
+    // answer in the log says so (a one-shot that already ended). Tried again while there is time.
+    const lost = !spawned.error && (![null, child.pid].includes(lockOwner(g.paths)) || lostTheProfile(g.paths.log, logFrom));
+    if (lost && Date.now() < until) return null;
+    heldBy(g, child.pid);
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
     if (child.exitCode === null && child.signalCode === null && child.pid !== undefined && processAlive(child.pid)) {
       throw new CliError("timeout", `The daemon (process ${child.pid}) is still starting; ghostly daemon status shows when it is up`, { pid: child.pid, log: g.paths.log });
@@ -672,6 +801,19 @@ async function startDetached(g: Globals, seconds: number) {
   }
   client.close();
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
+}
+
+/** Whether a daemon's answer written to the log from byte `from` on is `busy`: it found the profile taken. */
+function lostTheProfile(log: string, from: number): boolean {
+  let fd: number;
+  try { fd = openSync(log, "r"); } catch { return false; }
+  try {
+    const buffer = Buffer.alloc(64 * 1024);
+    const text = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, from)).toString("utf8");
+    return text.split("\n").some((line) => {
+      try { return (JSON.parse(line) as { error?: { code?: string } }).error?.code === "busy"; } catch { return false; }
+    });
+  } finally { closeSync(fd); }
 }
 
 /**
@@ -694,6 +836,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     since: { type: "number", description: "" }, cursor: { type: "string", description: "" }, type: { type: "list", description: "" },
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
     from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
+    translate: { type: "string", description: "" },
   });
   // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
   noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
@@ -716,12 +859,25 @@ async function listenCommand(argv: string[]): Promise<void> {
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const since = sinceOf(parsed.options) ?? readCursor(cursor);
+  // Kept for the whole listen (a model loads once); its process ends with this one.
+  const translator = await translatorFor(parsed.options.translate, g.home);
+  // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
+  // a restart would hand every event since again (agents#1710). How it stops is the branch's below.
+  let quit = (code: number): void => { process.exit(code); };
+  const cursorFailed = (error: unknown) => {
+    const failure = localFileError(error, cursor) ?? asCliError(error);
+    process.stderr.write(`ghostly: could not write the cursor ${cursor}: ${failure.message}. Stopped, so that no event is handed twice\n`);
+    print({ error: failure.toJSON() });
+    quit(EXIT[failure.code]);
+  };
   const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {
     return eventHandler({
       types, turns,
+      translate: translator?.event,
       exec: parsed.options.exec as string | undefined,
       webhook: parsed.options.webhook as string | undefined,
       cursor,
+      cursorFailed,
       // With a hook, events go to the hook; --print shows them too.
       print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
       write: (line) => process.stdout.write(line + "\n"),
@@ -747,6 +903,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     // longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that answers again.
     const following = followDaemon(g.paths, client, handle, since, PAUSE_HOLD_MS, g.profile);
     const stop = () => { following.close(); process.exit(0); };
+    quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
     await following.subscribed;
     process.on("SIGINT", stop);
@@ -761,6 +918,10 @@ async function listenCommand(argv: string[]): Promise<void> {
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
+  quit = (code) => {
+    setTimeout(() => process.exit(code), 20_000).unref();
+    void served.close().then(() => host.close()).finally(() => process.exit(code));
+  };
   host.ctx.stop = stop;
   onStopSignals(stop);
   onReaderGone(stop);
@@ -909,8 +1070,8 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
     return;
   }
-  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host = await openHost(g.paths, "one-shot", VERSION);
+  const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = await openOneShot(g);
   const off = host.ctx.hub.onEvent(tell);
   try {
     const result = await callApi(host.ctx, "identity.add", params) as { done: boolean; draft?: string };
@@ -934,6 +1095,8 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   }
   const params = command.params?.(parsed, args) ?? {};
   for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key];
+  // `events` and `chat history --translate`: added here, where the runtime is, to the answer the daemon gave.
+  const translator = await translatorFor(parsed.options.translate, g.home);
   // Evidence is read here, where the file is: the daemon runs elsewhere.
   if (command.method === "identity.complete") {
     if (params.evidenceFile) {
@@ -970,6 +1133,10 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     }
     return result;
   }, { deferGroups: chatOnly(command.method, params), offline: offlineCall(command.method, params) });
+  if (translator) {
+    try { printAnswer(await (await import("./translate")).translateAnswer(result, translator)); } finally { translator.close(); }
+    return;
+  }
   printAnswer(result);
 }
 

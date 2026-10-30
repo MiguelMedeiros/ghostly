@@ -37,6 +37,7 @@
     "ask": "{{name}} にリンクを頼む",
     "contactCannot": "{{name}} のアプリはまだアプリを実行できません",
     "installed": "インストール済み",
+    "join": "参加",
     "label": "アプリ：{{title}}",
     "needsOnline": "{{title}} には二人ともオンラインである必要があります",
     "noLink": "インストール用のリンクがありません",
@@ -167,6 +168,7 @@
     "stoppedRemoved": "{{title}} を停止しました: {{store}} がこのバージョンを削除しました",
     "stoppedRevoked": "{{title}} を停止しました: 作者がこのバージョンを取り消しました",
     "with": "{{name}} との {{title}}",
-    "withName": "{{name}} と"
+    "withName": "{{name}} と",
+    "withSharing": "{{title}} · {{name}} とファイルを共有中"
   }
 }
