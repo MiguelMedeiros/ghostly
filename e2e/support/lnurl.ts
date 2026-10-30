@@ -1,15 +1,19 @@
 import { createServer, type Server } from "node:http";
-import { mintEndpoint } from "./mint";
+import { strangerInvoice } from "./bolt11";
 
 /**
  * A Lightning address server that lives in the test process, on a port of this machine: it answers
- * `/.well-known/lnurlp/<name>` (LUD-16) with a pay request (LUD-06) and hands out invoices of the test
- * mint (`E2E_MINT_URL`, or the public one) for its callback. The invoices carry the metadata as their
- * description, which is how a mint's invoice commits to it (an `h` tag is not something a mint sets).
+ * `/.well-known/lnurlp/<name>` (LUD-16) with a pay request (LUD-06) and hands out a stranger's invoice
+ * (support/bolt11.ts) for its callback, carrying the metadata as its description: one way an invoice
+ * commits to it, the other being an `h` tag.
+ *
+ * Not one of the test mint's own invoices: those pay themselves about a second after they are made, and a
+ * melt that reaches the mint after that is refused as "Invoice already paid", so a slow Pay lost the race.
+ * A stranger's invoice is paid only by the melt, by the suite's mint or the public one alike.
+ * Nothing asks a stranger whether it was paid: a test reads the payer's balance instead.
  *
  * Plain HTTP is allowed by the app only for a server on this machine, so the address reads
- * `<name>@127.0.0.1:<port>`. The mint's invoices pay themselves and a Cashu wallet pays them by melting,
- * so `paid(name)` asks the mint whether the invoice it issued was settled.
+ * `<name>@127.0.0.1:<port>`.
  */
 export interface LnurlName { description: string; minSat: number; maxSat: number; commentAllowed?: number }
 
@@ -17,13 +21,13 @@ export class LocalLnurlServer {
   private server?: Server;
   /** Every request answered, for assertions. */
   readonly requests: URL[] = [];
-  /** The invoices handed out: which name, for how much, with what comment, and the mint quote behind it. */
-  readonly invoices: { name: string; amountSat: number; comment?: string; quote: string; invoice: string }[] = [];
+  /** The invoices handed out: which name, for how much, with what comment. */
+  readonly invoices: { name: string; amountSat: number; comment?: string; invoice: string }[] = [];
   readonly names = new Map<string, LnurlName>();
 
   /** The port is taken from `from` upwards, the first free one of this test's range. */
   port = 0;
-  constructor(private readonly from: number, readonly mint = mintEndpoint()) {}
+  constructor(private readonly from: number) {}
 
   get host(): string { return `127.0.0.1:${this.port}`; }
   address(name: string): string { return `${name}@${this.host}`; }
@@ -49,15 +53,6 @@ export class LocalLnurlServer {
 
   close(): void { this.server?.closeAllConnections(); this.server?.close(); }
 
-  /** Whether the mint settled an invoice issued for `name`. */
-  async paid(name: string): Promise<boolean> {
-    for (const issued of this.invoices.filter((i) => i.name === name)) {
-      const state = await fetch(`${this.mint}/v1/mint/quote/bolt11/${issued.quote}`).then((r) => r.json() as Promise<{ state?: string }>).catch(() => ({ state: undefined }));
-      if (state.state === "PAID" || state.state === "ISSUED") return true;
-    }
-    return false;
-  }
-
   private async answer(url: URL): Promise<{ status: number; body: unknown }> {
     this.requests.push(url);
     const wellKnown = /^\/\.well-known\/lnurlp\/([a-z0-9._-]+)$/.exec(url.pathname);
@@ -73,9 +68,8 @@ export class LocalLnurlServer {
     if (!Number.isInteger(msat) || msat % 1000 !== 0 || msat < entry.minSat * 1000 || msat > entry.maxSat * 1000) return { status: 200, body: { status: "ERROR", reason: "Amount out of bounds" } };
     const comment = url.searchParams.get("comment") ?? undefined;
     if (comment && comment.length > (entry.commentAllowed ?? 0)) return { status: 200, body: { status: "ERROR", reason: "Comment too long" } };
-    const quote = await fetch(`${this.mint}/v1/mint/quote/bolt11`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ amount: msat / 1000, unit: "sat", description: this.metadata(name) }) })
-      .then((r) => r.json() as Promise<{ quote: string; request: string }>);
-    this.invoices.push({ name, amountSat: msat / 1000, comment, quote: quote.quote, invoice: quote.request });
-    return { status: 200, body: { pr: quote.request, routes: [], successAction: { tag: "message", message: comment ? `Thanks for "${comment}"` : "Thanks" } } };
+    const invoice = strangerInvoice(msat / 1000, this.metadata(name));
+    this.invoices.push({ name, amountSat: msat / 1000, comment, invoice });
+    return { status: 200, body: { pr: invoice, routes: [], successAction: { tag: "message", message: comment ? `Thanks for "${comment}"` : "Thanks" } } };
   }
 }
