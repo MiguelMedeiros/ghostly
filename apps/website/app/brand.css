@@ -1051,6 +1051,11 @@
 .br-contact p {
   line-height: 1.6;
 }
+/* With larger text the address is wider than a phone, and it has nowhere to break: it set the card's width and was cut. */
+.br-contact-mail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .br-kit {
   justify-items: start;
   gap: 12px;
