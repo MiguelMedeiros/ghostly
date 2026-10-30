@@ -1469,6 +1469,8 @@ export class HandoffTaker {
       const bytes = new Uint8Array(part.size);
       let at = 0;
       for (const chunk of part.chunks!) { bytes.set(chunk, at); at += chunk.length; }
+      // The pieces go once copied: the bundle is not held twice while it is restored.
+      part.chunks = [];
       this.bundle = { part: [part.name, part.size, part.sha256], bytes };
     }
     await this.maybeVerified();
@@ -1510,6 +1512,8 @@ export class HandoffTaker {
     const h = handoffDigest(this.turn + 1, fromBase64Url(this.peer!), this.ports.ownKey, parts);
     // Written into the staging namespace before anything is said: a crash after `handoff-verified` loses nothing.
     await this.staging!.restore(this.bundle.bytes, files);
+    // Restored: its bytes are in the staging namespace, not needed here again.
+    this.bundle = null;
     this.h = h;
     const record = await this.ports.records.read();
     await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() } });
