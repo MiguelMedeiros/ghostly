@@ -1048,6 +1048,10 @@ describe("files a contact sends", () => {
     // Asked whether it is already here: only an exact match of what was announced says yes.
     expect(await events.onFileStored({ id: wire, name: "a.txt", size: 5, mime: "text/html", timestamp: 7 })).toBe("digest-1");
     expect(await events.onFileStored({ id: wire, name: "b.txt", size: 5, mime: "text/html", timestamp: 7 })).toBeUndefined();
+    // Said done in a state, then left to its record: a view kept for each would go into every state until the next start.
+    const app = node["events"] as unknown as { onState: ReturnType<typeof vi.fn> };
+    await vi.waitFor(() => expect(app.onState.mock.calls.some(([s]) => s.transfers[file.id]?.state === "done")).toBe(true));
+    await vi.waitFor(() => expect(node.getState().transfers[file.id]).toBeUndefined());
   });
 
   it("the app has a file's transfer before the message that shows it: a file still arriving never reads as gone", async () => {
@@ -1559,6 +1563,33 @@ describe("what arrives from held storage", () => {
     expect(stored!.blob).toBeUndefined();
     expect(stored!.bytes).toBe("idb");
     expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
+  });
+
+  it("a held file, received or sent, says done in one state and then leaves the states: a device up for days carries none", async () => {
+    const chat = row();
+    const { node, events } = await started(chat);
+    const host = node["hold"]["host"] as {
+      receiveFile(linkId: string, wire: object, bytes: Uint8Array, digest: string): Promise<string | null>;
+      delivery(linkId: string, messageId: string, state: string): Promise<void>;
+    };
+    const said = new Set<string>();
+    events.onState.mockImplementation((state: { transfers: Record<string, { state: string }> }) => {
+      for (const [id, transfer] of Object.entries(state.transfers)) if (transfer.state === "done") said.add(id);
+    });
+    for (let i = 0; i < 20; i++) expect(await host.receiveFile(chat.id, { wireId: `v${i}`, name: "v.ogg", size: 4, mime: "audio/ogg", timestamp: 10 + i }, bytes("held"), "d")).toBeNull();
+    const sent = { id: `${chat.id}-out-s1`, name: "s.txt", size: 3, mime: "text/plain" };
+    await fileStore.put({ id: sent.id, linkId: chat.id, blob: new Blob(["abc"]), createdAt: 1, direction: "out", wireId: "s1",
+      metadata: { name: sent.name, size: 3, mime: sent.mime, timestamp: 1 }, transfer: { state: "transferring", transferred: 0, size: 3 } });
+    await db.addMessage({ linkId: chat.id, id: "me_1", text: "s.txt", sender: "me", timestamp: 1, via: "hold", delivery: "sending", file: sent });
+    await host.delivery(chat.id, "me_1", "held");
+    await host.delivery(chat.id, "me_1", "delivered");
+    const files = (await db.getMessages(chat.id)).flatMap((m) => m.file ? [m.file.id] : []);
+    expect(files).toHaveLength(21);
+    // Each said done once (the CLI's `file.done`, the bubble's pop), then left to its record.
+    await vi.waitFor(() => expect([...said]).toEqual(expect.arrayContaining(files)));
+    await vi.waitFor(() => expect(Object.keys(node.getState().transfers)).toEqual([]));
+    // The sent file's record says it arrived: `file wait` reads it so once the view is gone, and so does the next start.
+    expect((await fileStore.get(sent.id))!.transfer).toMatchObject({ state: "done", transferred: 3 });
   });
 });
 
