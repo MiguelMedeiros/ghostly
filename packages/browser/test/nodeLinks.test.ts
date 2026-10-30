@@ -1500,6 +1500,34 @@ describe("an away contact", () => {
     expect(node.getState().transfers[small.id]).toMatchObject({ state: "done", transferred: 3 });
   });
 
+  it.each(["held", "delivered"] as const)("a file %s through storage still reads as sent after the app restarts, not as an interrupted transfer", async (delivery) => {
+    // A voice message sent to a contact who was away: its record kept the "transferring" the app wrote when it was picked,
+    // so after a restart it said "Transfer interrupted. Retry when connected." though storage held it or it had arrived.
+    const { node, chat } = await away();
+    const file = { id: `${chat.id}-out-w5`, name: "voice.webm", size: 5, mime: "audio/webm" };
+    await fileStore.put({ id: file.id, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "out", wireId: "w5",
+      transfer: { state: "transferring", transferred: 0, size: 5 } });
+    node.sendFile({ linkId: chat.id, file, timestamp: 5 });
+    await vi.waitFor(async () => expect((await db.getMessages(chat.id))[0]).toMatchObject({ via: "hold", file: { id: file.id } }));
+    const host = node["hold"]["host"] as { delivery(linkId: string, messageId: string, state: string): Promise<void> };
+    await host.delivery(chat.id, "me_5", delivery);
+    expect((await fileStore.get(file.id))?.transfer).toMatchObject({ state: "done", transferred: 5 });
+    await node.shutdown();
+    const { node: again } = await started();
+    expect(again.getState().transfers[file.id]?.state ?? "done").toBe("done");
+  });
+
+  it("a held file kept before its delivery wrote its record (an earlier version) reads as sent after a restart", async () => {
+    const chat = row();
+    await db.putLink(chat);
+    const file = { id: `${chat.id}-out-w6`, name: "voice.webm", size: 5, mime: "audio/webm" };
+    await fileStore.put({ id: file.id, linkId: chat.id, blob: new Blob([bytes("hello")]), createdAt: 1, direction: "out", wireId: "w6",
+      transfer: { state: "transferring", transferred: 0, size: 5 } });
+    await db.addMessage({ linkId: chat.id, id: "me_6", text: "🎤", sender: "me", timestamp: 6, via: "hold", file, delivery: "delivered" });
+    const { node } = await started();
+    expect(node.getState().transfers[file.id]).toBeUndefined();
+  });
+
   it("reconnecting needs the engine online", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
