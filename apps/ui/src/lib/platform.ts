@@ -44,7 +44,11 @@ export interface PeerLinkState {
   canSendText?: boolean;
   /** Store-and-forward in this chat: the switch, what the contact said, storage and what is waiting. */
   hold?: PeerHoldState;
-  dhtDelivery?: { mode: "stream" | "dht"; peerMode?: "stream" | "dht"; authenticated: boolean; error?: string; pendingUntil?: number; maxTextBytes: number };
+  /**
+   * `forwardSecrecy` (WISP 4xx): `on`, texts over the DHT and held items have keys used once; `starting`, both apps can
+   * and it is on once both wrote; `unsupported`, the contact's app cannot; `stopped`, it no longer says it can.
+   */
+  dhtDelivery?: { mode: "stream" | "dht"; peerMode?: "stream" | "dht"; authenticated: boolean; error?: string; pendingUntil?: number; maxTextBytes: number; forwardSecrecy?: "on" | "starting" | "unsupported" | "stopped" };
   pairing?: PairingState;
   /** The transport the chat waits for, and why (WISP 100): the chat's status says so rather than a connection issue. */
   transportWait?: TransportWait;
