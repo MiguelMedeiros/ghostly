@@ -21,7 +21,7 @@
     "alreadyPaying": "此发票已在付款中",
     "amountTooHigh": "不支持超过 {{max}} sats 的金额",
     "backInWallet": "sats 已回到你的钱包。",
-    "backInWalletLessFee": "sats 已退回，铸币厂扣留了 {{fee}} sats。",
+    "backInWalletLessFee": "sats 已退回；铸币厂扣留了 {{fee}}。",
     "badMintUrl": "这不是有效的铸币厂 URL",
     "badToken": "这不是有效的 ecash 代币",
     "enterAmount": "请输入以 sats 计的金额",
