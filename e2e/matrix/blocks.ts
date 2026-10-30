@@ -794,6 +794,8 @@ export const restore: Block = {
     await b.context.close();
 
     const restored = await w.open(b.kind, `${b.name}-restored`, { phone: b.phone });
+    // The Mainnet wallet mainnetUi made comes back with the profile and reads its mint: routes stay with the old browser.
+    if (w.combo.wallet === "mainnet" && (w.combo.rail === "cashu" || w.combo.rail === "ln-mint") && b.kind === "web") await mockMainnetMints(restored.context);
     if (b.locale !== "en") await setLanguage(restored, b.locale);
     await go(restored, "#/profile");
     const again = restored.page.getByTestId("profile-backups");
