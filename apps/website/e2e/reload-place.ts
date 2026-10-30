@@ -1,12 +1,13 @@
 import { expect, type Page } from "@playwright/test";
 
-/** The story's lines a reader has on screen (below the nav). */
+/** The story's lines a reader has on screen (below the nav). Not a deck's card details (HomeDeck.tsx): the deck deals
+ * the next card by itself every few seconds, so they change with the time on the page, not with the place. */
 function linesOnScreen() {
   const lines = new Set<string>();
   for (const el of document.querySelectorAll("main h1, main h2, main h3, main h4, main p, main figcaption, main blockquote")) {
     const r = el.getBoundingClientRect();
     const text = (el.textContent ?? "").replace(/\s+/g, " ").trim();
-    if (text.length < 12 || r.height === 0 || getComputedStyle(el).visibility === "hidden" || el.closest("[aria-hidden=true], svg")) continue;
+    if (text.length < 12 || r.height === 0 || getComputedStyle(el).visibility === "hidden" || el.closest("[aria-hidden=true], svg, [role=tabpanel]")) continue;
     if (r.top >= 64 && r.bottom <= innerHeight) lines.add(text.slice(0, 60));
   }
   return [...lines];
