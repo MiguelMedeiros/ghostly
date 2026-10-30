@@ -87,6 +87,7 @@ A receiver works on a copy of its state and keeps the copy only if the item open
 | A kept key, and a session only received on | Dropped 8 days after last use | A held item lives seven days |
 | Retired session ids | The last 16 | A reader does not try to open what its path refuses anyway ([Sessions](#sessions)) |
 | Sessions only opened with | 2 | |
+| A session that lost is followed after | 10 minutes with no floor envelope in the current one | Longer than a keep-alive's four minutes |
 
 Floor keys stepped over are never kept: an envelope that was replaced unread is gone from the DHT, and a key kept for it would only help a thief who recorded it.
 
@@ -101,6 +102,7 @@ A side holds per chat the **current** session, which it seals with, and at most 
 - **Both start at once.** Each side opens the other's first item under a session it did not know. While no floor envelope of the contact's opened in this side's current session, the session whose `sid` is larger (as 8 unsigned bytes) wins on both sides; the one that lost is kept among the others to open what came under it, and never wins later.
 - **The contact starts anew.** A floor envelope under an unknown `sid` whose sequence is higher than any the contact put out in this side's current session means the contact lost its state (a restore, a move to another device) or reached a bound. Its session becomes current, and the old one stays among the others, for what the contact sent before and is still on its way (held items).
 - **From before both settled.** A floor envelope under an unknown `sid` whose sequence is not higher (an envelope still in the contact's mailbox, or a relay's older copy) is opened and kept among the others as a session that lost.
+- **A contact that lost its state as both settled.** A session that lost becomes current when floor envelopes under it keep rising in sequence while the current session has opened no floor envelope for 10 minutes: two sessions that started at once settle within one keep-alive (about four minutes), so only a contact that restored in those seconds goes on speaking in a session that lost.
 - **A late held item.** A held item under an unknown `sid` while a floor envelope of the contact's opened in the current session is opened, and its session forgotten: held items carry no floor sequence, and one can come days late.
 - **Retired.** A session dropped (replaced, expired) has its `sid` retired, and an item under a retired `sid` is refused.
 
