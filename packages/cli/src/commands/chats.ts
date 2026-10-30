@@ -1,6 +1,6 @@
 import { CliError } from "../errors";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, force, groupWait, cursor, needs, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, translate, typingFor, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, usageFields, usageOptions, wait } from "./shared";
 
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
@@ -14,7 +14,7 @@ export const commands: Record<string, Command> = {
       wait: { type: "string", choices: ["none", "sent", "delivered"], description: "none, sent (a one-shot's default in a chat) or delivered; a group takes none or sent" },
       timeout: groupWait.timeout,
     },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, button: a.button, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, button: a.button, wait: options.wait, timeout: timeout(options) }),
   },
   "button update": {
     method: "button.update", usage: BUTTON_UPDATE,
@@ -30,20 +30,20 @@ export const commands: Record<string, Command> = {
     },
     params: ({ options }, a) => {
       if (!options.chosen && options.close !== true && !options.text) throw new CliError("usage", `Give --chosen, --close or --text: ghostly ${BUTTON_UPDATE}`);
-      return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout };
+      return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
   },
   "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"], params: (_, { chat }) => ({ chat }) },
   "chat disconnect": {
     method: "chat.disconnect", usage: "chat disconnect <chat> [--hold <minutes>]", summary: "Close a chat's live session (the contact may redial; --hold keeps it on the DHT that long, 0 ends it)", args: ["chat"],
     options: { hold: { type: "number", description: "Stay off the direct link this many minutes (up to 10080): DHT only, taken back after" } },
-    params: ({ options }, { chat }) => ({ chat, hold: options.hold }),
+    params: ({ options }, { chat }) => ({ chat, hold: inRange(options, "hold", "a number of minutes", 0, HOLD_MINUTES) }),
   },
   "chat history": {
     method: "chat.history", usage: "chat history <chat> [--limit n] [--before id|ms] [--after id|ms] [--translate lang]", summary: "Messages, oldest first (a page)",
     args: ["chat"],
     options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" }, translate },
-    params: ({ options }, { chat }) => ({ chat, limit: options.limit, before: cursor(options.before, "before"), after: cursor(options.after, "after") }),
+    params: ({ options }, { chat }) => ({ chat, limit: pageLimit(options), before: cursor(options.before, "before"), after: cursor(options.after, "after") }),
   },
   "chat list": { method: "chat.list", usage: "chat list [--show-secret]", summary: "Chats, newest first (a pending invite code only with --show-secret)", options: showInvite, params: ({ options }) => secret(options) },
   "chat remove": {
@@ -63,7 +63,7 @@ export const commands: Record<string, Command> = {
   "chat wait": {
     method: "chat.wait", usage: "chat wait <chat> [--until live|text|paired] [--timeout s]", summary: "Wait for a chat to reach a state", args: ["chat"],
     options: { until: { type: "string", choices: ["live", "text", "paired"], description: "live (default), text or paired" }, timeout: { type: "number", description: "Seconds (default 60)" } },
-    params: ({ options }, { chat }) => ({ chat, until: options.until, timeout: options.timeout }),
+    params: ({ options }, { chat }) => ({ chat, until: options.until, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },
   "forward": {
     method: "chat.forward", usage: "forward <chat|group> <message>... --to <chat|group>... [--force] [--wait none|sent] [--timeout s]",
@@ -78,7 +78,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => {
       if (!Array.isArray(options.to) || !options.to.length) throw new CliError("usage", "Missing --to: ghostly forward <chat|group> <message>... --to <chat|group>... [--force] [--wait none|sent] [--timeout s]");
       refs(options.to, "to", "chat or group");
-      return { chat: a.chat, messages: (a.message ?? "").split(" ").filter(Boolean), to: options.to, force: options.force === true, wait: options.wait, timeout: options.timeout };
+      return { chat: a.chat, messages: (a.message ?? "").split(" ").filter(Boolean), to: options.to, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
   },
   "invite create": {
@@ -119,14 +119,14 @@ export const commands: Record<string, Command> = {
     summary: "Send a routine card (something a bot runs on a schedule: its last run and the next) to a chat or group",
     args: ["chat"],
     options: { id: { type: "string", description: "The routine's id, kept across updates (default: made up)" }, ...routineOptions, ...groupWait, wait: wait.wait },
-    params: ({ options }, { chat }) => ({ chat, card: needs(routineFields(options), [["name", "name"], ["schedule", "schedule"]], "routine send <chat|group> --name <name> --schedule \"every day 01:00\""), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, { chat }) => ({ chat, card: needs(routineFields(options), [["name", "name"], ["schedule", "schedule"]], "routine send <chat|group> --name <name> --schedule \"every day 01:00\""), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "routine update": {
     method: "routine.update", usage: "routine update <chat|group> <routine> [--run ok|failed|skipped[:summary]] [--next <time>] [--state active|paused] [--schedule ...] [--json json|-|file] [--force] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Update a routine card you sent: record a run, the next one, a pause (at most one update per 2.5 s; sooner ones merge)",
     args: ["chat", "routine"],
     options: { ...routineOptions, wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
-    params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "saved add": { method: "saved.add", usage: "saved add <chat|group> <message>", summary: "Save a message on this device, to find it again in `saved list` (nothing is sent)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "saved list": { method: "saved.list", usage: "saved list", summary: "Saved messages of every chat and group, the last saved first" },
@@ -136,14 +136,14 @@ export const commands: Record<string, Command> = {
     summary: "Send a task card (a bot's work: status, progress, its PR) to a chat or group; prints its id and message",
     args: ["chat"],
     options: { id: { type: "string", description: "The task's id, kept across updates (default: made up)" }, ...taskOptions, ...groupWait, wait: wait.wait },
-    params: ({ options }, { chat }) => ({ chat, card: prLinked(needs(taskFields(options), [["title", "title"]], "task send <chat|group> --title <title>"), options, "task send <chat|group> --title <title> --pr-url <url>"), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, { chat }) => ({ chat, card: prLinked(needs(taskFields(options), [["title", "title"]], "task send <chat|group> --title <title>"), options, "task send <chat|group> --title <title> --pr-url <url>"), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "task update": {
     method: "task.update", usage: "task update <chat|group> <task> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url ...] [--pr-state s] [--pr-checks c] [--tag label]... [--parent task] [--json json|-|file] [--force] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Update a task card you sent: the fields given, merged over it (at most one update per 2.5 s; sooner ones merge)",
     args: ["chat", "task"],
     options: { ...taskOptions, wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
-    params: ({ options }, a) => ({ chat: a.chat, task: a.task, card: taskFields(options), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+    params: ({ options }, a) => ({ chat: a.chat, task: a.task, card: taskFields(options), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "typing": {
     method: "chat.typing", usage: "typing <chat> [--kind typing|recording|thinking] [--status \"<text>\"] [--for s] [--stop]",
@@ -163,7 +163,7 @@ export const commands: Record<string, Command> = {
     options: { ...usageOptions, ...groupWait },
     params: ({ options }, { chat }) => {
       if (!chat && options.all !== true) throw new CliError("usage", "Name a chat or group, or give --all: ghostly usage send <chat|--all> --left <percent>");
-      return { chat, all: options.all === true, card: quota(usageFields(options), "usage send <chat|--all> --left <percent>"), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout };
+      return { chat, all: options.all === true, card: quota(usageFields(options), "usage send <chat|--all> --left <percent>"), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
   },
 };
