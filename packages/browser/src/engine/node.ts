@@ -1171,9 +1171,12 @@ export class GhostlyNode implements EngineImplementation {
       const message = await db.getMessage(linkId, messageId);
       if (message?.file) {
         const transfer = state === "failed" ? { state: "failed" as const, transferred: 0, size: message.file.size, error } : { state: "done" as const, transferred: message.file.size, size: message.file.size };
-        this.transfers.set(message.file.id, transfer);
-        // Its record too: it still says the "transferring" the app wrote when the file was picked, read at the next start.
+        // Its record first: it still says the "transferring" the app wrote when the file was picked, read at the next start.
         await fileStore.updateTransfer(message.file.id, transfer).catch(() => {});
+        this.transfers.set(message.file.id, transfer);
+        // Done: said in one state, then left to its record, which says so: a view kept for each file sent through
+        // storage would go into every state the engine builds until the next start.
+        if (transfer.state === "done") this.brief(message.file.id);
       }
       if (message && state !== "failed") this.messageFeedback("sent", message);
       await this.messagesChanged(linkId, [messageId]);
@@ -1217,7 +1220,9 @@ export class GhostlyNode implements EngineImplementation {
         live.files.receivedBytes -= wire.size;
         throw error;
       }
+      // Said in one state, then left to its record, which says done (`briefViews`).
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
+      this.brief(file.id);
       await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file,
         ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
         details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: wire.size, ...(held && { wireBytes: held.bytes }) }, ...(held && { hold: held }), completedAt: Date.now() } });
@@ -1573,7 +1578,7 @@ export class GhostlyNode implements EngineImplementation {
     groupFiles: {
       store: storedGroupFiles,
       transfers: this.transfers,
-      brief: id => { const view = this.transfers.get(id); if (view) this.briefViews.set(id, view); },
+      brief: id => this.brief(id),
       settings: () => ({ autoDownloads: this.settings.autoDownloads !== false, serveFiles: this.settings.serveFiles !== false }),
       sendFiles: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
       sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
@@ -4712,6 +4717,8 @@ export class GhostlyNode implements EngineImplementation {
     this.transfers.set(fileId, error ? { ...transfer, state: "failed", error } : { ...transfer, state: "done", transferred: transfer.size });
     const state = this.transfers.get(fileId)!;
     void fileStore.updateTransfer(fileId, state).catch(() => {});
+    // Done: said in one state, then left to its record (`briefViews`), as files/3's are (`FileDesk.finished`).
+    if (!error) this.brief(fileId);
     this.emitState();
   }
 
@@ -8995,6 +9002,12 @@ export class GhostlyNode implements EngineImplementation {
     if (this.gatedOut) return;
     this.events.onState(this.getState());
     this.dropBriefViews();
+  }
+
+  /** `id`'s view goes in the next state sent, and then away (`briefViews`). */
+  private brief(id: string): void {
+    const view = this.transfers.get(id);
+    if (view) this.briefViews.set(id, view);
   }
 
   /** A state went with the brief views: they go, so the next states do not carry them (`briefViews`). */
