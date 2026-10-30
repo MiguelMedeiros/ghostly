@@ -7,7 +7,7 @@
 | Editors | Ghostly contributors; maintainer review pending |
 | Document kind | Profile |
 | Dependencies | [400](400-chat.md), [401](401-paired-chat.md), [403](403-dht-text.md), [404](404-store-and-forward.md), [03](03-capabilities.md), [05](05-backups.md), [06](06-devices.md) |
-| Implementation | `ratchet/1` in the web app, the extension, Desktop and the CLI: the ratchet with these test vectors (`packages/core/src/ratchet.ts`), the DHT floor (`dhtDelivery.ts`), held items (`storeForward.ts`, `engine/hold.ts`); state kept out of backups and handoffs. Unit tests; the Tech Info row and end-to-end tests follow |
+| Implementation | `ratchet/1` in the web app, the extension, Desktop and the CLI: the ratchet with these test vectors (`packages/core/src/ratchet.ts`), the DHT floor (`dhtDelivery.ts`), held items (`storeForward.ts`, `engine/hold.ts`); state kept out of backups and handoffs; a Forward secrecy row in a chat's Tech Info. Unit, UI and end-to-end tests (`e2e/web/forward-secrecy.spec.ts`) |
 | Summary | What a chat sends while the contact is away, over the DHT or held, is sealed with keys used once: a key stolen later cannot open it. |
 | Availability | Available |
 | Notes | 1:1 chats, when both apps have it; groups are not covered. A live connection already agrees fresh keys every time. |
