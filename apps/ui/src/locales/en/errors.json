@@ -21,7 +21,7 @@
     "alreadyPaying": "This invoice is already being paid",
     "amountTooHigh": "Amounts above {{max}} sats are not supported",
     "backInWallet": "The sats are back in your wallet.",
-    "backInWalletLessFee": "The sats are back, less {{fee}} sats the mint kept.",
+    "backInWalletLessFee": "The sats are back; the mint kept {{fee}}.",
     "badMintUrl": "That is not a valid mint URL",
     "badToken": "That is not a valid ecash token",
     "enterAmount": "Enter an amount in sats",
