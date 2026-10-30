@@ -317,7 +317,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               <SendScan onText={given} disabled={busy} scanOnOpen={sendOpened}>
               <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(t("wallet.cashu.redeemed", { amount: formatAmount(received, t.language), unit })); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); else if (route.kind === "no-amount" && chosen) quoteFor(route.invoice, chosen); }}>
                 <textarea ref={payField} data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} autoFocus={!touchOnly()}
-                  placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => { setPayInput(e.target.value); setPayAmount(""); maxed.current = false; }} />
+                  placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => { setNotice(""); setPayInput(e.target.value); setPayAmount(""); maxed.current = false; }} />
                 {destination && <div className="bg-surface-alt rounded-xl p-3 text-text-primary" data-testid="wallet-lnurl"><LightningAddressPay key={destination} wallet={wallet} text={destination} via={rail === "cashu" ? "cashu" : undefined} onDone={() => { setPayInput(""); payField.current?.focus(); }} /></div>}
                 {pasted && (
                   <p className="text-text-primary text-sm" data-testid="wallet-pay-preview">

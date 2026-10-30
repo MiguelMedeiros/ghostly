@@ -361,6 +361,17 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     });
   });
 
+  it("a token's Redeemed goes once the field is typed in again, so it never stands beside the next payment's result", async () => {
+    const { user } = show({ receiveToken: async () => 1_000 });
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    await user.type(screen.getByTestId("wallet-pay-input"), "cashuBo2F0gaJhaUgA");
+    await user.click(screen.getByRole("button", { name: /^Redeem/ }));
+    expect(await screen.findByTestId("wallet-notice")).toHaveTextContent("Redeemed 1,000 test sats.");
+
+    await user.type(screen.getByTestId("wallet-pay-input"), "l");
+    expect(screen.queryByTestId("wallet-notice")).not.toBeInTheDocument();
+  });
+
   it("a QR that is no payment, or no QR at all, is said plainly", async () => {
     const quoteInvoice = vi.fn();
     const { user } = show({ quoteInvoice });
