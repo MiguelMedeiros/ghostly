@@ -97,7 +97,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           )}
           {action === "send" && (
             <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
-              <SendScan onText={given} disabled={busy}>
+              <SendScan onText={given} disabled={busy} scanOnOpen>
               <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
               {notUsable === "refused" && <Notice tone="error" testId="bitcoin-send-refused">{t("payments.formats.unsupported")}</Notice>}
               {notUsable === "unknown" && <Notice tone="error" testId="bitcoin-send-unknown">{t("wallet.bitcoin.notAddress")}</Notice>}

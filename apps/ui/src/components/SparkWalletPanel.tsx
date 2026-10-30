@@ -75,7 +75,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     <Address value={spark.address} testId="spark-address" note={t("wallet.spark.addressNote")} />
    </div>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
-    <SendScan onText={given} disabled={busy}>
+    <SendScan onText={given} disabled={busy} scanOnOpen>
     <input aria-label={t("wallet.spark.to")} placeholder={t("wallet.spark.toPlaceholder", { prefix: mainnet ? "spark1…" : "sparkrt1…" })} spellCheck={false} className={`${input} font-mono text-xs`} value={to} onChange={e => setTo(e.target.value.trim())} />
     {to && (!kind || invoice?.token) && <Notice tone="warning" testId="spark-address-invalid">{invoice?.token ? t("wallet.spark.tokenInvoice") : mainnet ? t("wallet.spark.notMainnet") : t("wallet.spark.notRegtest")}</Notice>}
     {invoice && !invoice.token && invoice.amount !== undefined ? <p className="text-sm text-text-primary" data-testid="spark-invoice-summary">{fillNodes(invoice.memo ? t("wallet.spark.invoiceForMemo", { unit, memo: invoice.memo }) : t("wallet.spark.invoiceFor", { unit }), { amount: <span className="font-semibold tabular-nums">{formatAmount(invoice.amount, t.language)}</span> })}</p>
