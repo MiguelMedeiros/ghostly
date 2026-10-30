@@ -272,7 +272,7 @@ function AdvancedProviders({ open, onToggle, labels, children }: { open: boolean
     <div className="space-y-2">
       <button type="button" data-testid="add-identity-advanced" aria-expanded={open} aria-controls="add-identity-advanced-list" onClick={onToggle}
         className="flex items-center gap-1.5 min-h-11 text-xs font-medium text-text-secondary hover:text-text-primary cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-90" : ""}`}><path d="m9 6 6 6-6 6" /></svg>
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${open ? "rotate-90" : "rtl:-scale-x-100"}`}><path d="m9 6 6 6-6 6" /></svg>
         {t("identities.add.advanced")}<span className="font-normal text-text-muted">· {labels.join(", ")}</span>
       </button>
       {open && <div id="add-identity-advanced-list" role="list" aria-label={t("identities.add.advancedKinds")}>{children}</div>}
