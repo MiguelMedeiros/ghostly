@@ -507,6 +507,7 @@
     "network": "网络",
     "networkStuck": "此网络没有响应。你可以切换到其他网络。",
     "noBalance": "还没有可发送的余额",
+    "notAddress": "这不是此钱包的 {{wallet}} 地址。",
     "off": "关闭",
     "on": "开启",
     "onchain": "Bitcoin 链上",

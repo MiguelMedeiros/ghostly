@@ -1,4 +1,5 @@
-import { decodeBolt11, parseLightningDestination, type Bolt11Invoice } from "@ghostly/core";
+import { decodeBolt11, parseLightningDestination, type Bolt11Invoice, type WalletNetwork } from "@ghostly/core";
+import { decodeArkAddress } from "./parse/money-ark";
 import { chainAccepts } from "./parse/money-bitcoin";
 import { findLinkMoney } from "./parse/money-more";
 
@@ -71,4 +72,21 @@ export function routeBitcoinSend(input: string, chain: string): BitcoinSendRoute
     return amountSat === undefined ? { kind: "address", address } : { kind: "address", address, amountSat };
   }
   return chainAccepts(chain, text) ? { kind: "address", address: text } : { kind: "unknown" };
+}
+
+/** What an Ark card's Send was given: an address of its own Ark and network, with the amount its link names. */
+export type ArkSendRoute = BitcoinSendRoute;
+
+/** The two Arks never pay each other, and neither pays across networks: another's address is not this card's. */
+export function routeArkSend(input: string, kind: "arkade" | "bark", network: WalletNetwork): ArkSendRoute {
+  const text = input.trim();
+  if (/^bitcoin:/i.test(text)) {
+    const money = findLinkMoney(text);
+    if (money === "refused") return { kind: "refused" };
+    if (money?.type !== "ark" || money.request.kind !== kind || money.request.network !== network) return { kind: "unknown" };
+    const { address, amountSat } = money.request;
+    return amountSat === undefined ? { kind: "address", address } : { kind: "address", address, amountSat };
+  }
+  const decoded = decodeArkAddress(text);
+  return decoded?.kind === kind && decoded.network === network ? { kind: "address", address: text.toLowerCase() } : { kind: "unknown" };
 }

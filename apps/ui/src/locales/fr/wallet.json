@@ -507,6 +507,7 @@
     "network": "Réseau",
     "networkStuck": "Ce réseau ne répond pas. Vous pouvez passer à un autre.",
     "noBalance": "Pas encore de solde à envoyer",
+    "notAddress": "Ce n'est pas une adresse {{wallet}} pour ce portefeuille.",
     "off": "Désactivé",
     "on": "Activé",
     "onchain": "Bitcoin on-chain",
