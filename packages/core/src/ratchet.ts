@@ -393,8 +393,25 @@ export class RatchetBox {
       },
     };
   }
-  /** Opens without keeping anything (a look from another profile): what a later open would give. */
+  /**
+   * Opens without keeping anything, and without the lock: a look from another profile, or the first half of a receive
+   * whose content is then stored with no lock held (`commitOpen` keeps it).
+   */
   peek(lane: RatchetLane, sealed: Uint8Array): Uint8Array | null { return ratchetOpen(this.state, this.keys(), lane, sealed)?.plaintext ?? null; }
+  /**
+   * The second half of a receive, once what `peek` gave is stored: opened again under the lock on the state as it is now
+   * (a seal or another open may have moved it meanwhile), and that state saved. False: it no longer opens (taken by a
+   * receive of the same item meanwhile), and nothing moved. So the lock is never held while content is stored, which
+   * may call back into the other lane.
+   */
+  commitOpen(lane: RatchetLane, sealed: Uint8Array, order?: number): Promise<boolean> {
+    return this.lock(async tx => {
+      const opened = tx.open(lane, sealed);
+      if (!opened) return false;
+      await opened.commit(order);
+      return true;
+    });
+  }
   heard(lane: RatchetLane): boolean { return ratchetHeard(this.state, lane); }
   /** A ratcheted item from the contact opened on either lane: this side seals with the ratchet whatever the contact's record says. */
   get heardAny(): boolean { return this.heard("floor") || this.heard("hold"); }

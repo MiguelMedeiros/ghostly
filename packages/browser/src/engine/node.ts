@@ -23,6 +23,7 @@ import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { RATCHET_CAPABILITY, RatchetBox, emptyRatchetState } from "@ghostly/core";
 import { APP_RANGE_LIMITS, chatAppId, isAppRef, isAppVersion, isServeId, publicKeyFromZ32, type AppFrameEvent, type AppRangeTask, type AppSendError } from "@ghostly/core";
 import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
@@ -379,6 +380,11 @@ interface LiveLink {
   appsOpen?: Map<string, string>;
   /** The public key of `stored.participationSeed`, derived once for that seed (`participationKeyOf`). */
   participationKey?: { seed: string; key: string };
+  /**
+   * The chat's ratchet (WISP 4xx): one per chat for as long as the engine runs, shared by the DHT floor and held items,
+   * so its one lock covers both, a link started again included.
+   */
+  ratchet?: RatchetBox;
   /**
    * The messages of mine that wait for the live link and go from `sendWaiting` (`waitsForLive`), by their id. Read from
    * the chat's history once in a run (with the chat, at the start), then kept as they are stored (`storeNewMessage`).
@@ -4771,6 +4777,21 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** The chat's connection story, for paired chats (not group edges). */
+  /**
+   * The chat's ratchet (WISP 4xx), made once per chat: its keys are read from the chat's row when used (each start of
+   * the link has credentials of its own), so a contact pinned later is the one it seals to. Saved in the row as
+   * `ratchetState`, which no backup or handoff takes along.
+   */
+  private ratchetOf(linkId: string, live: LiveLink, credentials: PairingCredentials): RatchetBox {
+    return live.ratchet ??= new RatchetBox(() => ({
+      seed: fromBase64Url(live.stored.participationSeed ?? credentials.seedB64), self: identityFromSeedB64(live.stored.participationSeed ?? credentials.seedB64).pubKeyZ32,
+      peer: live.stored.pairedPeerKey ?? credentials.peerKey!,
+      rendezvous: [identityFromSeedB64(live.stored.seedB64).pubKeyZ32, live.stored.peerPubKeyZ32], secret: fromBase64Url(live.stored.encKeyB64),
+    }), live.stored.ratchetState ?? emptyRatchetState(), async state => {
+      await db.patchLink(linkId, { ratchetState: state });
+      live.stored = { ...live.stored, ratchetState: state };
+    });
+  }
   private transportLogOf(live: LiveLink): TransportLog | undefined {
     if (!live.stored.profile || live.stored.group) return undefined;
     if (live.transportLog) return live.transportLog;
@@ -7731,6 +7752,7 @@ export class GhostlyNode implements EngineImplementation {
         // show its name as a text.
         peerAcceptsFile: () => !!live.caps?.peer?.capabilities.includes(DHT_FILE_CAPABILITY),
         reactions: () => live.stored.reactionsOut ?? [],
+        ratchet: credentials ? { box: this.ratchetOf(linkId, live, credentials), peerSupports: () => !!live.caps?.peer?.capabilities.includes(RATCHET_CAPABILITY) } : undefined,
       } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback,
