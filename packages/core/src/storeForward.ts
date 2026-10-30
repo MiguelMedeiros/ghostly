@@ -178,7 +178,7 @@ export class HoldKeys {
     if (bytes.length < MAGIC.length + 1 + 16 + 4 || !MAGIC.every((b, i) => bytes[i] === b)) throw new HoldRefusedError("format", "Not a held item");
     const version = bytes[MAGIC.length];
     if (version !== VERSION && (version !== RATCHETED || !expect.ratchet)) throw new HoldRefusedError("format", "Held item from a newer Ghostly");
-    let plain: Uint8Array | null = null, ratcheted: Uint8Array | undefined;
+    let plain: Uint8Array | null, ratcheted: Uint8Array | undefined;
     if (version === RATCHETED) {
       ratcheted = bytes.subarray(MAGIC.length + 1);
       try { plain = expect.ratchet!(ratcheted); } catch { plain = null; }

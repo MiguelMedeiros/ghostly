@@ -24,7 +24,7 @@ const item = (mailbox: string, seq: number, kind: "text" | "manifest" = "text") 
 it("a ratcheted bundle (version 2) opens in any order, each once, and an app from before refuses it as newer", async () => {
   const { alice, bob, aliceBox, bobBox } = pair();
   const mailbox = newHoldMailbox();
-  const bundles = [];
+  const bundles: Uint8Array[] = [];
   for (let seq = 1; seq <= 4; seq++) bundles.push(await alice.sealRatcheted(item(mailbox, seq), utf8Encode(`held ${seq}`), plain => aliceBox.lock(tx => tx.seal("hold", plain))));
   for (const b of bundles) { expect(b[4]).toBe(2); expect(new TextDecoder().decode(b)).not.toContain("held "); }
   expect(() => bob.open(bundles[0])).toThrow(/newer Ghostly/);
