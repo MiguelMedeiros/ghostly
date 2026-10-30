@@ -33,6 +33,8 @@ import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Page, PageAction } from "../components/layout";
 import { focusInPlace, focusLost } from "../lib/focus";
+import type { Problem } from "../lib/problemText";
+import { rawError } from "../lib/errorText";
 import { navOnly } from "../lib/navigation";
 import { playCue } from "../lib/cues";
 import { servicesPlatform, type WalletInstanceView, type WalletNetwork, type WalletPlatform, type WalletState } from "../lib/platform";
@@ -157,10 +159,16 @@ export function Wallet() {
   // Later takes the card away with the button pressed: the keys go to the next reminder, or to the network tab in view
   // (just before where the card was), not to the page.
   const putOff = useRef<string | null>(null);
+  // Refused, the card stays and says so: Later must not look like it did nothing. Its English goes behind the ⓘ.
+  const [laterProblem, setLaterProblem] = useState<{ wallet: string; problem: Problem } | null>(null);
   const later = (d: BackupDue) => {
     setPuttingOff(true);
+    setLaterProblem(null);
     putOff.current = d.id;
-    void wallet?.backupReminder({ event: "later", wallet: d.id }).catch(() => { putOff.current = null; }).finally(() => setPuttingOff(false));
+    void wallet?.backupReminder({ event: "later", wallet: d.id }).catch((e: unknown) => {
+      putOff.current = null;
+      setLaterProblem({ wallet: d.id, problem: { tone: "error", title: t("wallet.backupReminder.laterFailed"), detail: rawError(e) || undefined } });
+    }).finally(() => setPuttingOff(false));
   };
   useEffect(() => {
     if (!putOff.current || due?.id === putOff.current) return;
@@ -212,7 +220,7 @@ export function Wallet() {
             marked={{ mainnet: needs.some((item) => item.network === "mainnet"), testnet: needs.some((item) => item.network === "testnet") }}
             onChange={(n) => { setFocusPanel(false); show(n); }} label={t("wallet.page.networks")} testId="wallet-networks" tabTestId="wallet-network" idPrefix="wallet-network-tab" controls="wallet-network-panel" />
           <div role="tabpanel" id="wallet-network-panel" aria-labelledby={`wallet-network-tab-${network}`} data-testid="wallet-network-panel" data-network={network} className="space-y-6">
-            {due && <BackupReminder key={due.id} due={due} busy={puttingOff} onBackUp={() => backUp(due)} onLater={() => later(due)} />}
+            {due && <BackupReminder key={due.id} due={due} busy={puttingOff} problem={laterProblem?.wallet === due.id ? laterProblem.problem : null} onBackUp={() => backUp(due)} onLater={() => later(due)} />}
             <div key={network} className="wallet-network-view space-y-3" data-swap={swap ?? undefined} onAnimationEnd={(e) => { if (e.target === e.currentTarget) setSwap(null); }}>
               <p className="text-xs text-text-muted" data-testid="wallet-network-about">{t(network === "mainnet" ? "wallet.page.about.mainnet" : "wallet.page.about.testnet")}</p>
               {selected ? <WalletDeck network={network} cards={shown} selected={selected.id} marks={marks} onSelect={(id) => select(id, false)} onChoose={() => setFocusPanel(true)} /> : (

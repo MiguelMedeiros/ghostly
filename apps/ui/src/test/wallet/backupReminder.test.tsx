@@ -78,6 +78,22 @@ describe("the backup reminder on the Wallet page", () => {
     await waitFor(() => expect(screen.getByTestId(`wallet-network-${inView}`)).toHaveFocus());
   });
 
+  it("Later refused: the card stays and says so, the keys still on Later; pressed again, the line goes", async () => {
+    const { user, engine } = openWallet(real({ "cashu:mainnet": funded() }));
+    let refuse = true;
+    engine.on("walletBackupReminder", () => { if (refuse) throw new Error("backup reminders unavailable"); });
+    const later = await screen.findByTestId("backup-reminder-later");
+    later.focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("backup-reminder-error")).toHaveTextContent("Could not put the reminder off. Try again.");
+    expect(screen.getByTestId("backup-reminder")).toHaveAttribute("data-wallet", "cashu:mainnet");
+    expect(later).toHaveFocus();
+    refuse = false;
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("backup-reminder-error")).not.toBeInTheDocument());
+    expect(engine.callsTo("walletBackupReminder")).toHaveLength(2);
+  });
+
   it("shows nothing once backed up, while put off, or for test coins", () => {
     const { engine } = openWallet(real({ "cashu:mainnet": { funded: 1, backedUp: 2 }, "usdt:mainnet": { funded: 1, later: Date.now(), laterBalance: "5000000", laters: 1 } }));
     expect(screen.queryByTestId("backup-reminder")).not.toBeInTheDocument();

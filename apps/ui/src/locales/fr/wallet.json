@@ -59,6 +59,7 @@
     },
     "label": "sauvegarde à faire",
     "later": "Plus tard",
+    "laterFailed": "Impossible de reporter le rappel. Réessayez.",
     "line": "Sauvegardez le portefeuille {{wallet}}",
     "title": "Vous avez de l'argent réel dans {{wallet}}"
   },
