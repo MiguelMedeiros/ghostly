@@ -262,6 +262,69 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
       expect(screen.getByTestId("wallet-pay-amount")).toHaveValue("700");
     });
 
+    describe("Max", () => {
+      const start = async (methods: Partial<WalletPlatform>, balance = 700) => {
+        qr.text = anyAmount();
+        const rendered = show(methods, "testnet", balance);
+        await rendered.user.click(screen.getByRole("tab", { name: "Send" }));
+        await rendered.user.upload(screen.getByLabelText("Choose image"), picture());
+        await screen.findByTestId("wallet-pay-choose");
+        return rendered;
+      };
+      /** A mint that keeps 10 sats back for its fee. */
+      const roomFor = (room: number) => vi.fn(async (_invoice: string, _via?: "cashu", amount?: number) => {
+        if (amount! > room) throw new Error(`Not enough sats in your wallet: ${room} sats leave room for the fee`);
+        return { quote: "q-any", mint: TEST_MINT, amount: amount!, feeReserve: 10 };
+      });
+
+      it("fills all the card holds, shows it, and is a phone-sized button that does not submit", async () => {
+        const quoteInvoice = roomFor(690);
+        const { user } = await start({ quoteInvoice });
+        expect(screen.getByTestId("wallet-pay-balance")).toHaveTextContent("Balance: 700 test sats");
+        const max = screen.getByTestId("wallet-pay-max");
+        expect(max.className).toContain("max-md:min-h-11");
+        await user.click(max);
+        expect(screen.getByTestId("wallet-pay-amount")).toHaveValue("700");
+        expect(quoteInvoice).not.toHaveBeenCalled();
+      });
+
+      it("comes down to what leaves room for the fee, and goes to that review", async () => {
+        const quoteInvoice = roomFor(690);
+        const { user } = await start({ quoteInvoice });
+        await user.click(screen.getByTestId("wallet-pay-max"));
+        await user.click(screen.getByRole("button", { name: /^Pay 700/ }));
+        expect(await screen.findByTestId("wallet-pay-review")).toHaveTextContent("Pay 690 test sats");
+        expect(quoteInvoice.mock.calls.map((call) => call[2])).toEqual([700, 690]);
+      });
+
+      it("an amount typed over Max is the person's: it is refused, never lowered", async () => {
+        const quoteInvoice = roomFor(690);
+        const { user } = await start({ quoteInvoice });
+        await user.click(screen.getByTestId("wallet-pay-max"));
+        const field = screen.getByTestId("wallet-pay-amount");
+        await user.clear(field);
+        await user.type(field, "695");
+        await user.click(screen.getByRole("button", { name: /^Pay 695/ }));
+        expect(await screen.findByTestId("wallet-error")).toHaveTextContent("Not enough sats");
+        expect(quoteInvoice).toHaveBeenCalledTimes(1);
+        expect(field).toHaveValue("695");
+      });
+
+      it("a refusal for another reason stays, and is not asked again", async () => {
+        const quoteInvoice = vi.fn(async () => { throw new Error("None of your mints can pay an invoice with no amount"); });
+        const { user } = await start({ quoteInvoice });
+        await user.click(screen.getByTestId("wallet-pay-max"));
+        await user.click(screen.getByRole("button", { name: /^Pay 700/ }));
+        expect(await screen.findByTestId("wallet-error")).toHaveTextContent("None of your mints can pay an invoice with no amount");
+        expect(quoteInvoice).toHaveBeenCalledTimes(1);
+      });
+
+      it("is not offered on an empty card", async () => {
+        await start({ quoteInvoice: roomFor(0) }, 0);
+        expect(screen.queryByTestId("wallet-pay-max")).toBeNull();
+      });
+    });
+
     it("the amount typed for one invoice does not carry over to the next thing given", async () => {
       qr.text = anyAmount();
       const { user } = show({ quoteInvoice: quoted(700) });
