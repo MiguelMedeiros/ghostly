@@ -767,9 +767,13 @@
   },
   "unseen": {
     "lineReal": "{{amount}} new sats in {{wallet}}",
+    "lineRealOne": "{{amount}} new sat in {{wallet}}",
     "lineTest": "{{amount}} new test sats in {{wallet}}",
+    "lineTestOne": "{{amount}} new test sat in {{wallet}}",
     "real": "{{place}}, {{amount}} new sats",
-    "test": "{{place}}, {{amount}} new test sats"
+    "realOne": "{{place}}, {{amount}} new sat",
+    "test": "{{place}}, {{amount}} new test sats",
+    "testOne": "{{place}}, {{amount}} new test sat"
   },
   "usdt": {
     "approve": "Nothing is sent until you approve the review.",
