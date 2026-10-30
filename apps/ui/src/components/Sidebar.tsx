@@ -54,11 +54,18 @@ import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
 import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
-import { RAIL_WIDTH, RailChat, RailGroup, RailToggle } from "./ChatRail";
+import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
+
+/** New chat's mark (a bubble with a plus) and Join's (an arrow into a bubble): the list's header, and the rail's top. */
+const NEW_CHAT_PATH = "M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8";
+const JOIN_PATH = "M4 8V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H9l-5 3v-6 M2 12h12 M10 8l4 4-4 4";
+const ActionIcon = ({ d, size = 16 }: { d: string; size?: number }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={d} /></svg>
+);
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 600;
@@ -302,6 +309,9 @@ export function Sidebar() {
   /** A part of the list a dragged row would go to is marked while the row is over it. */
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
 
+  const newChat = () => void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {});
+  const openTasks = () => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"));
+  const openSaved = () => (location.pathname === "/saved" ? nav.home() : nav.place("/saved"));
   const openGroup = (id: string) => { nav.conversation(groupPath(id)); setConfirmDeleteId(null); };
   const openChat = (id: string) => { markSessionAsRead(id); nav.conversation(chatPath(id)); setConfirmDeleteId(null); };
   const groupRow = (group: (typeof groups)[number]) => (
@@ -382,6 +392,15 @@ export function Sidebar() {
         <div className="h-14 header-safe shrink-0 flex items-center justify-center bg-panel-header">
           <RailToggle ref={toggleRef} collapsed onToggle={toggleCollapsed} />
         </div>
+        {/* What the list has in its header and above its rows, which a rail of pictures would hide until unfolded:
+            New chat (a group or a folder stay in the list's New menu), Join, and Saved and Tasks while they have something.
+            New keeps the list's test id: the dialogs that lose their opener give the focus to it (NameStep, DeleteChatDialog). */}
+        <div data-testid="chat-rail-actions" className="flex shrink-0 flex-col border-b border-border py-1">
+          <RailAction testId="sidebar-new-chat" label={t("sidebar.startChat")} title={t("sidebar.newChat")} accent onClick={newChat}><ActionIcon d={NEW_CHAT_PATH} size={18} /></RailAction>
+          <RailAction testId="rail-join" label={t("join.submit")} title={t("sidebar.joinChat")} onClick={() => setShowNewChat(true)}><ActionIcon d={JOIN_PATH} size={18} /></RailAction>
+          <SidebarTasks rail active={location.pathname === "/tasks"} onOpen={openTasks} />
+          <SidebarSaved rail active={location.pathname === "/saved"} onOpen={openSaved} />
+        </div>
         <nav aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
           {listReady && railRows.map(railItem)}
         </nav>
@@ -393,13 +412,13 @@ export function Sidebar() {
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={() => void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {})} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
             <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
             <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef}>
-              <MenuItem onClick={() => { closeNewMenu(); void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {}); }} hint={t("sidebar.newMenu.chatHint")}
+              <MenuItem onClick={() => { closeNewMenu(); newChat(); }} hint={t("sidebar.newMenu.chatHint")}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
                 {t("sidebar.newMenu.chat")}
               </MenuItem>
@@ -412,7 +431,7 @@ export function Sidebar() {
               </MenuItem>
             </Menu>
           </div>
-          <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V6a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H9l-5 3v-6 M2 12h12 M10 8l4 4-4 4"/></svg><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
+          <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><ActionIcon d={JOIN_PATH} /><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
         </div>
         {/* A wide window folds the list to a rail of pictures, for more room for the open chat. */}
         {!isMobile && <RailToggle ref={toggleRef} collapsed={false} onToggle={toggleCollapsed} />}
@@ -450,8 +469,8 @@ export function Sidebar() {
         </div>
       </div>
 
-      <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
-      <SidebarSaved active={location.pathname === "/saved"} onOpen={() => (location.pathname === "/saved" ? nav.home() : nav.place("/saved"))} />
+      <SidebarTasks active={location.pathname === "/tasks"} onOpen={openTasks} />
+      <SidebarSaved active={location.pathname === "/saved"} onOpen={openSaved} />
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
