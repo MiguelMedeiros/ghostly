@@ -97,6 +97,24 @@ jobs:
           echo "translate=$translate" >> "$GITHUB_OUTPUT"
           echo "$RELEASE_TAG: translation in the Desktop app: $translate (from $TRANSLATE_FROM)"
 
+      # The app downloads its translation runtime from translation-runtime-v<RUNTIME_VERSION>, checked against RUNTIMES
+      # (apps/desktop/src/translate_models.rs). Every platform build-tauri builds pins that release's archives, or
+      # translation can never start there; this stops the release before any Desktop build is made.
+      - name: Check the translation runtime the app pins
+        if: steps.translate.outputs.translate == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version="$(node tools/scripts/translation-runtimes.mjs --version)"
+          mkdir -p translation-runtime
+          if ! gh release download "translation-runtime-v$version" --dir translation-runtime --pattern runtimes.txt --pattern '*.sha256'; then
+            echo "::error::The app pins translation runtime $version, and translation-runtime-v$version has no runtimes.txt to check it against"
+            exit 1
+          fi
+          node tools/scripts/translation-runtimes.mjs --check translation-runtime
+
   # ============================================
   # Build Tauri App for all platforms
   # ============================================
