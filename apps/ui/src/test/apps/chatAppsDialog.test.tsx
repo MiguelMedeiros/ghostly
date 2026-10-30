@@ -1,4 +1,5 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppsDialog } from "../../components/apps/ChatAppsDialog";
@@ -100,6 +101,27 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Its files are not on this device yet.");
     expect(open).not.toHaveAttribute("aria-disabled");
     expect(open).toHaveFocus();
+  });
+
+  it("an Escape in the app's panel while the card is still on its way: closed, the dialog gives the focus to the message field", async () => {
+    // The panel shows before the card goes, and closed, it gives the focus back to Open (what opened it), in this dialog.
+    run = { status: "ok" };
+    setAppOpener(vi.fn(async () => {}));
+    let deliver!: () => void;
+    fakeEngine.on("sendMessage", () => new Promise((resolve) => { deliver = () => resolve({ error: null }); }));
+    function Chat() {
+      const [apps, setApps] = useState(true);
+      return <><div className="chat-column"><textarea data-testid="message-field" /></div>
+        {apps && <ChatAppsDialog linkId="link-1" name="Ana" onClose={() => setApps(false)} />}</>;
+    }
+    const { user } = renderApp(<Chat />);
+    const open = await screen.findByTestId("chat-app-open");
+    await user.click(open);
+    await waitFor(() => expect(deliver).toBeDefined());
+    open.focus();
+    await act(async () => { deliver(); });
+    await waitFor(() => expect(screen.queryByTestId("chat-apps")).not.toBeInTheDocument());
+    expect(screen.getByTestId("message-field")).toHaveFocus();
   });
 
   it.each([{ status: "revoked" }, { status: "removed", by: [{ store: "k", name: "A store", reason: "", at: 1 }] }] as InstalledAppView["run"][])("a $status version stays Stopped, with Open off", async (taken) => {
