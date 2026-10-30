@@ -535,7 +535,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
         const { offset, length } = type === "remote.stat" ? { offset: 0, length: 1 } : readRange(args[1]);
         const read = await countedRemote(length, () => lane.read(launch.chat!.linkId, launch.ref, serve as string, offset, length), (got) => ("bytes" in got ? got.bytes.byteLength : 0));
-        if ("error" in read) refuse(RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
+        // The contact's limits (`busy`) are a wait: the app backs off and asks again, as for its own (agents#1766).
+        if ("error" in read) refuse(read.error === "busy" ? "too-fast" : RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
         const { bytes, size } = read as { bytes: Uint8Array; size: number };
         if (type === "remote.stat") return { value: { size } };
         if (bytes.byteLength > length) refuse("failed");
