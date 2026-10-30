@@ -222,7 +222,7 @@ describe("Breez as the engine's Lightning source", () => {
 
   it("seals the recovery phrase, and pays a contact's invoice through the journal", async () => {
     const events = { changed: vi.fn(), received: vi.fn(), resolved: vi.fn() } satisfies LightningEvents;
-    const cashu = { view: async () => ({ balance: 0, mints: [], history: [], feesPaid: 0 }) } as unknown as CashuWallet;
+    const cashu = { balance: async () => 0 } as unknown as CashuWallet;
     const descriptor = breezDescriptor(async () => net.sdk);
     const lightning = new LightningService("testnet", () => [cashuMint, descriptor], () => ({ platform: "extension", cashu }), events, CASHU_MINT_SOURCE);
     await lightning.start();
