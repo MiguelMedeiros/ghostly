@@ -130,7 +130,6 @@ export class CarriedTransport implements PkarrTransport {
   readonly subscribe?: PkarrTransport["subscribe"];
   readonly networkChanged?: PkarrTransport["networkChanged"];
   readonly configure?: PkarrTransport["configure"];
-  readonly publishHeld?: PkarrTransport["publishHeld"];
 
   constructor(private readonly inner: PkarrTransport, private readonly myKey: string, private readonly peerKey: string, private readonly hooks: CarriedHooks) {
     this.lastTimestamp = hooks.after ?? 0n;
@@ -139,7 +138,7 @@ export class CarriedTransport implements PkarrTransport {
     if (inner.subscribe) this.subscribe = listener => inner.subscribe!(listener);
     if (inner.networkChanged) this.networkChanged = () => inner.networkChanged!();
     if (inner.configure) this.configure = options => inner.configure!(options);
-    if (inner.publishHeld) this.publishHeld = (key, options) => inner.publishHeld!(key, options);
+    // No `publishHeld` for the link above: down, its packet goes through members whatever the relays say (`publish`).
   }
 
   describe(): { protocol: string; relays: string[] } { return this.inner.describe(); }
