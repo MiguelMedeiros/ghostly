@@ -408,7 +408,7 @@
     "forwardSecrecyOn": "Activado",
     "forwardSecrecyOnInfo": "Los textos enviados por la DHT y los mensajes guardados usan claves de un solo uso: una clave robada después no los abre.",
     "forwardSecrecyStartingInfo": "Las dos apps lo admiten. Se activa en cuanto los dos hayáis escrito.",
-    "forwardSecrecyStoppedInfo": "La app de tu contacto ya no lo admite, así que los textos esperan a una conexión en directo.",
+    "forwardSecrecyStoppedInfo": "La app de tu contacto ya no lo admite, así que los textos y los mensajes guardados esperan a una conexión en directo.",
     "identity": "Identidad",
     "lastSync": "Última sincronización",
     "messages": "Mensajes",

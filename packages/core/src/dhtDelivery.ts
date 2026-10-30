@@ -384,6 +384,14 @@ export class DhtDelivery {
     return this.pinnedBoxes;
   }
   private lastPublished?: DhtPacketFacts;
+  /** The envelope a trace line was last said for, per step: a packet read again says nothing new (a Desktop logs every line). */
+  private traced = new Map<string, string>();
+  private traceOnce(step: string, record: string, detail: Record<string, unknown>): void {
+    const seen = record.slice(-24);
+    if (this.traced.get(step) === seen) return;
+    this.traced.set(step, seen);
+    traceLink(this.from, step, detail);
+  }
   /** The sealed record's nonce is its first 24 bytes: 32 characters of base64. */
   private static facts(body: Body, records: GhostRecord[], key: string): DhtPacketFacts {
     return { ...(body[6] && { id: body[6][0] }), seq: body[1], issued: body[2], expires: body[3], packetBytes: measureRecords(key, records),
@@ -801,7 +809,7 @@ export class DhtDelivery {
       try { plaintext = utf8Decode(opened); } catch { return null; }
     } else {
       // A ratcheted envelope of the contact's opened here: a plain one from it is refused from then on (WISP 4xx § Downgrade).
-      if (peer && this.options.ratchet?.box.heard("floor") && (!sender || sender === peer)) { traceLink(this.from, "dht-plain-refused", { box }); return null; }
+      if (peer && this.options.ratchet?.box.heard("floor") && (!sender || sender === peer)) { this.traceOnce("dht-plain-refused", records[0].value, { box }); return null; }
       try { plaintext = tryDecrypt(records[0].value, sender ? this.sealedKey(sender) : this.key); } catch { plaintext = null; }
       // Sealed, by its hint, from `sender` to a key other than this side's: nothing to read, but who it names says something.
       if (!plaintext && sender) return { sealedToAnother: sender };
@@ -862,7 +870,14 @@ export class DhtDelivery {
     let sealed: Uint8Array | undefined;
     const opened = this.open(packet, box, bytes => { const plain = ratchet.box.peek("floor", bytes); if (plain) sealed = bytes; return plain; });
     // Ratcheted, and not opened here: not for this side, from a session it lost, or before it pinned the contact.
-    if (!sealed) traceLink(this.from, "dht-ratchet-closed", { box, pinned: !!this.options.credentials.peerKey });
+    if (!sealed) this.traceOnce("dht-ratchet-closed", ratcheted.value, { box, pinned: !!this.options.credentials.peerKey });
+    // Not opened here, but in the pinned mailbox, whose address only the two participation keys give: the contact pinned
+    // this side. A side restored from a backup made before it knew that learns it here, and its next envelope starts a
+    // session the contact follows, rather than going plain to a contact that refuses plain.
+    if (!sealed && box === "pinned" && packet.pubKeyZ32 === this.pinned()?.peerAddress && this.state.peerPinned !== "seen") {
+      await this.persist({ ...this.state, peerPinned: "seen" });
+      traceLink(this.from, "dht-peer-pinned", { peerPinned: "seen", ratchet: true });
+    }
     return this.take(packet, box, opened, sealed && { commit: async order => { if (!await ratchet.box.commitOpen("floor", sealed!, order)) throw new Error("A ratcheted envelope no longer opens"); }, digest });
   }
   /** `ratchet`: the envelope was ratcheted; its state is saved once what it carried is stored, with its digest. */

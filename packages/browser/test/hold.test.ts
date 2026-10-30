@@ -85,11 +85,11 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
     };
     // The chat's ratchet (WISP 4xx), on a side whose app has it; the other side's record says whether it does too.
     const mineHas = options.ratchet ? (mine.id === "link-a" ? options.ratchet.alice : options.ratchet.bob) : false;
-    const peerHas = options.ratchet ? (mine.id === "link-a" ? options.ratchet.bob : options.ratchet.alice) : false;
+    const peerHas = () => !!options.ratchet && (mine.id === "link-a" ? options.ratchet.bob : options.ratchet.alice);
     if (mineHas) {
       side.box = new RatchetBox(() => ({ seed: fromBase64Url(mine.participationSeed!), self: identityFromSeedB64(mine.participationSeed!).pubKeyZ32, peer: mine.pairedPeerKey!,
         rendezvous: [identityFromSeedB64(mine.seedB64).pubKeyZ32, mine.peerPubKeyZ32], secret: fromBase64Url(mine.encKeyB64) }), emptyRatchetState(), async () => {});
-      host.ratchet = () => ({ box: side.box!, peerSupports: () => peerHas });
+      host.ratchet = () => ({ box: side.box!, peerSupports: peerHas });
     }
     side.engine = new HoldEngine(host);
     return side as Side;
@@ -282,6 +282,20 @@ describe("store-and-forward engine", () => {
     await vi.waitFor(() => expect(b.stored.hold!.inSeq).toBe(1));
     expect(b.received).toHaveLength(0);
     expect(b.box!.heard("hold")).toBe(true);
+  });
+
+  it("holds nothing for a contact whose app stopped saying ratchet/1 after items came ratcheted: they wait for live", async () => {
+    const ratchet = { alice: true, bob: true };
+    const { a, b } = setup({ ratchet, bobStorage: true });
+    engines.push(a.engine, b.engine);
+    a.messages.set("me_1", { text: "ratcheted", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-text-1", messageId: "me_1", bytes: 10, timestamp: 1000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(1));
+    expect(b.engine.canHold("link-b")).toBe(true);
+    // Alice's app goes back to one without it: her record no longer lists ratchet/1.
+    ratchet.alice = false;
+    expect(b.engine.canHold("link-b")).toBe(false);
   });
 
   it("holds a voice message with its length and waveform, and drops a description that is not one", async () => {

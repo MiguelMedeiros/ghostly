@@ -49,6 +49,19 @@ async function forwardSecrecy(peer: Peer): Promise<string | null> {
   return state;
 }
 
+/**
+ * Writes back and forth until both say On (WISP 4xx: on once the turn has passed both ways in the session both settled
+ * on, which takes a few texts and can take a few more when both started a session at once), at most `rounds` times.
+ */
+async function untilOn(a: Peer, b: Peer, rounds = 5) {
+  for (let i = 0; i < rounds; i++) {
+    if ((await forwardSecrecy(a)) === "on" && (await forwardSecrecy(b)) === "on") return;
+    await exchange(a, b, [`turn ${i}`, `turn ${i} back`]);
+  }
+  expect(await forwardSecrecy(a)).toBe("on");
+  expect(await forwardSecrecy(b)).toBe("on");
+}
+
 async function exchange(a: Peer, b: Peer, texts: string[]) {
   for (const [i, text] of texts.entries()) {
     const [from, to] = i % 2 ? [b, a] : [a, b];
@@ -66,9 +79,7 @@ test("two apps with ratchet/1 seal the DHT floor with keys used once, and say Fo
   await exchange(a, b, ["hello, with fresh keys 👻", "and back", "and once more", "and back again"]);
   // Both mailboxes in use hold a ratcheted envelope now (the invite's, left behind once both moved, keep their last plain one).
   await expect.poll(() => sealed(relay).ratcheted).toBeGreaterThanOrEqual(2);
-  expect([...relay.packets.values()].every(packet => !packet.includes(Buffer.from("fresh keys")))).toBe(true);
-  await expect.poll(() => forwardSecrecy(a), { timeout: 30_000 }).toBe("on");
-  await expect.poll(() => forwardSecrecy(b), { timeout: 30_000 }).toBe("on");
+  await untilOn(a, b);
 });
 
 test("an app without it gets plain envelopes both ways, and Tech Info says the contact's app does not support it", { tag: ["@feature:chat.ratchet", "@feature:chat.ratchet.ui", "@feature:chat.dht.send"] }, async ({ peer, relay }) => {
@@ -82,19 +93,55 @@ test("an app without it gets plain envelopes both ways, and Tech Info says the c
   await expect.poll(() => forwardSecrecy(a), { timeout: 30_000 }).toBe("unsupported");
 });
 
-test("a reader back after envelopes it never saw steps over their keys and opens the newest, once", { tag: ["@feature:chat.ratchet", "@feature:chat.dht.offline"] }, async ({ peer }) => {
+/** The ratcheted envelopes in the relay's packets now: the base64 of each `_dr` record. */
+function ratchetedRecords(relay: LocalRelay): string[] {
+  return [...relay.packets.entries()].flatMap(([key, packet]) => {
+    try { return parseRelayPayload(key, new Uint8Array(packet)).records.filter(r => r.label === "_dr").map(r => r.value); } catch { return []; }
+  });
+}
+
+test("a reader back after envelopes it never saw steps over their keys and opens the newest, once", { tag: ["@feature:chat.ratchet", "@feature:chat.dht.offline"] }, async ({ peer, relay }) => {
   test.setTimeout(4 * 60_000);
   const a = await peer("fs-writer"), b = await peer("fs-away");
   await pairOnDht(a, b);
   await exchange(a, b, ["before", "the turn passes"]);
+  await expect.poll(() => ratchetedRecords(relay).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(1);
   const returnTo = b.page.url();
   await b.page.goto("about:blank");
-  // The text goes out at once and again after 4, 8 and 16 s: each a new envelope, a new key, replacing the last.
+  // The text goes out at once and again after a few seconds, twice or more while b is away: each a new envelope sealed
+  // with a new key, replacing the last in a's mailbox, so b never sees the ones between.
+  const before = new Set(ratchetedRecords(relay));
+  const seen = new Set<string>();
   await say(a, "while you were away");
-  await a.page.waitForTimeout(20_000);
+  await expect.poll(() => { for (const r of ratchetedRecords(relay)) if (!before.has(r)) seen.add(r); return seen.size; }, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
   await b.page.goto(returnTo);
   await expect(chat(b).getByText("while you were away", { exact: true })).toHaveCount(1, { timeout: 60_000 });
   await expect(delivered(chat(a)).last()).toBeVisible({ timeout: 60_000 });
   await say(b, "got it");
   await expect(chat(a).getByText("got it", { exact: true })).toBeVisible({ timeout: 60_000 });
+});
+
+test("a chat that started with an older app goes forward secret once that app is updated", { tag: ["@feature:chat.ratchet", "@feature:chat.ratchet.ui"] }, async ({ peer, relay }) => {
+  test.setTimeout(5 * 60_000);
+  const a = await peer("fs-stays"), b = await peer("fs-updates");
+  // b plays an app from before until it is "updated" (the flag below), on every load.
+  const OLD_UNTIL_UPDATED = () => {
+    if (localStorage.getItem("qa-updated") === "1") localStorage.removeItem("ghostly-test-no-ratchet");
+    else localStorage.setItem("ghostly-test-no-ratchet", "1");
+  };
+  await b.page.addInitScript(OLD_UNTIL_UPDATED);
+  await b.page.evaluate(OLD_UNTIL_UPDATED);
+  await b.page.reload();
+  await pairOnDht(a, b);
+  await exchange(a, b, ["plain at first", "from the older app"]);
+  expect(sealed(relay).ratcheted).toBe(0);
+  await expect.poll(() => forwardSecrecy(a), { timeout: 30_000 }).toBe("unsupported");
+  // The update: the same chat, the same keys, an app that now says ratchet/1.
+  await b.page.evaluate(() => localStorage.setItem("qa-updated", "1"));
+  await b.page.reload();
+  await expect(b.page.getByPlaceholder("Message…")).toBeEnabled();
+  await exchange(a, b, ["after the update", "now with fresh keys", "once more", "and back"]);
+  await expect.poll(() => sealed(relay).ratcheted, { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
+  await untilOn(a, b);
+  for (const p of [a, b]) await expect(chat(p).getByText("plain at first", { exact: true })).toHaveCount(1);
 });

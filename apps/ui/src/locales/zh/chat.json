@@ -408,7 +408,7 @@
     "forwardSecrecyOn": "开启",
     "forwardSecrecyOnInfo": "通过 DHT 发送的文本和暂存的消息使用一次性密钥：之后被盗的密钥也无法打开它们。",
     "forwardSecrecyStartingInfo": "双方的应用都支持。你们都发过消息后就会开启。",
-    "forwardSecrecyStoppedInfo": "联系人的应用不再支持，因此文本会等待实时连接。",
+    "forwardSecrecyStoppedInfo": "联系人的应用不再支持，因此文本和暂存的消息会等待实时连接。",
     "identity": "身份",
     "lastSync": "上次同步",
     "messages": "消息",

@@ -408,7 +408,7 @@
     "forwardSecrecyOn": "Ligado",
     "forwardSecrecyOnInfo": "Textos enviados pela DHT e mensagens guardadas usam chaves de uso único: uma chave roubada depois não as abre.",
     "forwardSecrecyStartingInfo": "Os dois apps têm suporte. Liga assim que vocês dois escreverem.",
-    "forwardSecrecyStoppedInfo": "O app do seu contato deixou de ter suporte, então os textos esperam uma conexão ao vivo.",
+    "forwardSecrecyStoppedInfo": "O app do seu contato deixou de ter suporte, então textos e mensagens guardadas esperam uma conexão ao vivo.",
     "identity": "Identidade",
     "lastSync": "Última sincronização",
     "messages": "Mensagens",

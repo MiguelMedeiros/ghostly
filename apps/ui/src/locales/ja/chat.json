@@ -408,7 +408,7 @@
     "forwardSecrecyOn": "オン",
     "forwardSecrecyOnInfo": "DHTで送るテキストと保留メッセージは使い捨ての鍵を使います。後で鍵が盗まれても開けません。",
     "forwardSecrecyStartingInfo": "両方のアプリが対応しています。お互いが書き込むとオンになります。",
-    "forwardSecrecyStoppedInfo": "相手のアプリが対応しなくなったため、テキストはライブ接続を待ちます。",
+    "forwardSecrecyStoppedInfo": "相手のアプリが対応しなくなったため、テキストと保留メッセージはライブ接続を待ちます。",
     "identity": "ID",
     "lastSync": "最終同期",
     "messages": "メッセージ",

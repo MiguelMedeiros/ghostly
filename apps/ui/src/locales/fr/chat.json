@@ -408,7 +408,7 @@
     "forwardSecrecyOn": "Activée",
     "forwardSecrecyOnInfo": "Les textes envoyés par la DHT et les messages en attente utilisent des clés à usage unique : une clé volée plus tard ne les ouvre pas.",
     "forwardSecrecyStartingInfo": "Les deux apps la prennent en charge. Elle s'active dès que vous avez écrit tous les deux.",
-    "forwardSecrecyStoppedInfo": "L'app de votre contact ne la prend plus en charge : les textes attendent une connexion en direct.",
+    "forwardSecrecyStoppedInfo": "L'app de votre contact ne la prend plus en charge : les textes et les messages en attente attendent une connexion en direct.",
     "identity": "Identité",
     "lastSync": "Dernière synchro",
     "messages": "Messages",
