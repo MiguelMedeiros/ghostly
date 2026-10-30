@@ -1,11 +1,13 @@
 import {useState} from 'react';
-import {ETHEREUM_USDT,SEPOLIA_TEST_USDT,parsePaymentAmount,type PaymentReview as Review} from '@ghostly/core';
+import {ETHEREUM_USDT,SEPOLIA_TEST_USDT,formatPaymentAmount,parsePaymentAmount,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform,WalletState} from '../lib/platform';
 import {PaymentReview} from './PaymentReview';
 import {paymentStateLabel} from './paymentWords';
 import {BackupRows} from './wallet/BackupRows';
 import {Actions,Address,Amount,Block,Button,Notice,Row,Section,Segmented,input,type Action} from './wallet/ui';
 import {useRun} from './wallet/run';
+import {SendScan} from './wallet/SendScan';
+import {routeUsdtSend} from '../lib/sendRoute';
 import {ButtonGroup,InputGroup,Truncate} from './layout';
 import {useI18n} from '../contexts/I18nContext';
 import { formatTokenAmount } from "../lib/amount";
@@ -26,6 +28,16 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
  const [recipient,setRecipient]=useState(''),[amount,setAmount]=useState(''),[gas,setGas]=useState('0.001'),[review,setReview]=useState<Review|null>(null);
  /** The gas ceiling in ETH ("0.001"), typed the person's way. */
  const gasField=useAmountText(gas,setGas,t.language??'en',18,t);
+ /** Something was scanned, pasted or read from a picture that could not fill the form. */
+ const [notUsable,setNotUsable]=useState(false);
+ // A link or an address fills the form, where it is shown and reviewed as a typed one is. The amount goes with it: one
+ // left from the last address is not meant for this one.
+ const given=(text:string)=>{
+  const route=routeUsdtSend(text,{chainId:usdt?.chainId,token:usdt?.token});
+  setNotUsable(route.kind!=='address');
+  setRecipient(route.kind==='address'?route.address:'');
+  setAmount(route.kind==='address'&&route.amount!==undefined?formatPaymentAmount(String(route.amount),usdt!.decimals!):'');
+ };
  const [password,setPassword]=useState('');
  /** A network being set up that needs more than a click: a local chain has no well-known token. */
  const [pending,setPending]=useState<Network|null>(null),[provider,setProvider]=useState(''),[token,setToken]=useState('');
@@ -52,12 +64,15 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    <Actions value={action} onChange={setAction}/>
    {action==='receive'&&<div className="bg-surface rounded-xl p-4 animate-fade-in"><Address value={usdt.address} qr={usdt.address ? `ethereum:${usdt.address}@${usdt.chainId}` : undefined} testId="usdt-address" note={network==='evm-local'?t('wallet.usdt.receiveNoteLocal',{token:label}):t('wallet.usdt.receiveNote',{token:label,place:PLACE[network]})}/></div>}
    {action==='send'&&<div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
-    <input aria-label={t('wallet.panel.recipient',{wallet:'USDT'})} placeholder={t('wallet.usdt.recipientPlaceholder')} spellCheck={false} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>setRecipient(e.target.value.trim())}/>
+    <SendScan onText={given} disabled={busy} scanOnOpen>
+    <input aria-label={t('wallet.panel.recipient',{wallet:'USDT'})} placeholder={t('wallet.usdt.recipientPlaceholder')} spellCheck={false} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>{const text=e.target.value.trim();if(/^ethereum:/i.test(text))given(text);else{setNotUsable(false);setRecipient(text);}}}/>
+    {notUsable&&<Notice tone="error" testId="wallet-send-unknown">{t('wallet.panel.notAddress',{wallet:'USDT'})}</Notice>}
     <Amount value={amount} onChange={setAmount} unit={label} decimals={usdt.decimals}/>
     <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} aria-invalid={gasField.hint?true:undefined} value={gasField.text} onChange={e=>gasField.change(e.target.value)}/>ETH</span></label>
     {gasField.hint&&<Notice tone="error" testId="usdt-gas-unclear">{gasField.hint}</Notice>}
     <Button variant="primary" className="w-full" loading={running==='review'} disabled={busy||!!review||!funded||!recipient||!Number(amount)||!gas} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));},'review')}>{funded?t('wallet.panel.review'):t('wallet.panel.noBalance')}</Button>
     <Notice>{BigInt(usdt.gasBalance)===0n?t('wallet.usdt.needsGas'):t('wallet.usdt.approve')}</Notice>
+    </SendScan>
    </div>}
    {review&&<PaymentReview key={review.id} review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
    {intents.filter(i=>i.id!==review?.id).map(i=><Button key={i.id} className="block w-full text-start" onClick={()=>setReview(i)}>{t('wallet.panel.intent',{amount:formatTokenAmount(i.amount,i.decimals,t.language),unit:i.asset,state:i.state==='settled'?t('wallet.usdt.confirmed'):paymentStateLabel(t,i.state)})}</Button>)}

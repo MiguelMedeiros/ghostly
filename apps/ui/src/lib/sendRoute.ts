@@ -2,6 +2,7 @@ import { decodeBolt11, parseLightningDestination, type Bolt11Invoice, type Walle
 import { decodeArkAddress } from "./parse/money-ark";
 import { chainAccepts } from "./parse/money-bitcoin";
 import { findLinkMoney } from "./parse/money-more";
+import { findUsdtAddress } from "./parse/money-usdt";
 
 /**
  * What the Lightning and Cashu cards' Send was given (typed, pasted, scanned or read from a picture), sorted into what
@@ -89,4 +90,21 @@ export function routeArkSend(input: string, kind: "arkade" | "bark", network: Wa
   }
   const decoded = decodeArkAddress(text);
   return decoded?.kind === kind && decoded.network === network ? { kind: "address", address: text.toLowerCase() } : { kind: "unknown" };
+}
+
+/** What the USDT card's Send was given: a recipient, with the amount (base units) a transfer of its own token names. */
+export type UsdtSendRoute = { kind: "address"; address: string; amount?: bigint } | { kind: "unknown" };
+
+/**
+ * On this card USDT is meant, so a bare address or a plain `ethereum:` link needs no "USDT" beside it, as it does in a
+ * chat (`findUsdtAddress`). The whole text must be the one thing: a link for another chain or another token is not this
+ * card's, and a link's `value` is ether, never read as USDT. Whether the chain is right when none is named is left to the review.
+ */
+export function routeUsdtSend(input: string, card: { chainId?: number; token?: string }): UsdtSendRoute {
+  const text = input.trim();
+  if (!/^ethereum:\S+$/i.test(text) && !/^0x[0-9a-fA-F]{40}$/.test(text)) return { kind: "unknown" };
+  const request = findUsdtAddress(`${text} USDT`)?.request;
+  if (!request || (request.chainId !== undefined && request.chainId !== card.chainId)) return { kind: "unknown" };
+  if (request.token && request.token !== card.token?.toLowerCase()) return { kind: "unknown" };
+  return request.amount === undefined ? { kind: "address", address: request.recipient } : { kind: "address", address: request.recipient, amount: request.amount };
 }
