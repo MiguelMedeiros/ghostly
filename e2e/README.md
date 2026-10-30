@@ -14,6 +14,10 @@ E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.conf
 npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop   # the Desktop app (Linux, Windows)
 ```
 
+A deployed app is a release build: it ignores the suite's `ghostly-test-*` storage switches. There each peer's Iroh is
+pointed at a closed port in Settings → Network (it stays off n0's public relays), and the specs that need a switch
+skip (`deployedBuild` in support/fixtures.ts; a URL on this machine is the suite's own build).
+
 Locally Playwright runs `E2E_WORKERS` workers (default 2, so parallel sessions on one machine leave each other room); CI runs 2.
 
 ## Everything, gated suites included
@@ -498,7 +502,7 @@ RustFS in `e2e/infra` (MinIO no longer publishes images anyone can pull; any S3 
 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/store-forward.spec.ts
 ```
 
-Each run makes a bucket of its own. `localStorage["ghostly-test-hold-ttl"]` (milliseconds) shortens how long an item is held, so the test can watch one expire; nothing else reads it and it never lengthens the lifetime.
+Each run makes a bucket of its own. `localStorage["ghostly-test-hold-ttl"]` (milliseconds) shortens how long an item is held, so the test can watch one expire; only a development or e2e build reads it (a release build ignores it) and it never lengthens the lifetime.
 
 ### Ark payments
 

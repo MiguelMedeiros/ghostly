@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { expect, test, type Peer } from "../support/fixtures";
+import { deployedBuild, expect, test, type Peer } from "../support/fixtures";
 import { copyInvite, pasteInvite } from "../support/clipboard";
 import { LocalRelay } from "../support/relay";
 
@@ -127,6 +127,7 @@ async function pairOnce(run: number, peer: (name: string, options?: { realRelays
 test.describe.configure({ mode: "serial" });
 
 test("a first pairing is live in seconds, step by step", { tag: ["@feature:chat.paired.pair-timing", "@feature:chat.paired.progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
+  test.skip(deployedBuild, "a deployed build is a release build: it ignores ghostly-test-pace");
   const runs = RUNS || CHECK_RUNS;
   test.setTimeout(runs * 3 * 60_000);
   const file = process.env.E2E_PAIR_OUT ?? join(process.cwd(), "test-results", "pairing-timing.jsonl");

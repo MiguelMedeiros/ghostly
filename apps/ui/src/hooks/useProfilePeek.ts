@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
+import { testSwitch } from "@ghostly/browser/shared/features";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
 import { useServicesPlatform } from "./useServicesPlatform";
@@ -8,8 +9,8 @@ import { isDesktopApp } from "../lib/externalLink";
 import { showPrivateNotification } from "../lib/notifications";
 import { PROFILE_NOTICE, clearPeek, mutedInProfile, onBattery, peekEnabled, peekNotifies, peekTargets, startPeekLoop } from "../lib/profilePeek";
 
-/** e2e: seconds between looks instead of minutes. */
-const testPace = () => { try { return Number(localStorage.getItem("ghostly-test-peek-ms")) || undefined; } catch { return undefined; } };
+/** e2e: seconds between looks instead of minutes, in a test build only. */
+const testPace = () => Number(testSwitch("ghostly-test-peek-ms")) || undefined;
 
 /**
  * Checking the other profiles of this device for new messages (WISP 04 § Checking other profiles), while this
