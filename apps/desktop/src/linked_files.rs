@@ -1179,13 +1179,17 @@ mod tests {
         let (up, e01) = (&added[1], &added[0]);
         let listed = links.list("ghostly", APP).unwrap();
         for link in &listed {
-            assert_eq!(links.entry("ghostly", APP, &link.id).unwrap().as_ref(), Some(link));
+            assert_eq!(
+                links.entry("ghostly", APP, &link.id).unwrap().as_ref(),
+                Some(link)
+            );
         }
-        assert!(links.entry("ghostly", APP, &up.id).unwrap().unwrap().available);
+        let available = |id: &str| links.entry("ghostly", APP, id).unwrap().unwrap().available;
+        assert!(available(&up.id));
         fs::write(root.join("Up.mp4"), b"01234567890").unwrap();
-        assert!(!links.entry("ghostly", APP, &up.id).unwrap().unwrap().available);
+        assert!(!available(&up.id));
         fs::remove_file(root.join("Season 1").join("E01.mp4")).unwrap();
-        assert!(!links.entry("ghostly", APP, &e01.id).unwrap().unwrap().available);
+        assert!(!available(&e01.id));
         links.forget("ghostly", APP, &e01.id).unwrap();
         assert_eq!(links.entry("ghostly", APP, &e01.id).unwrap(), None);
         assert_eq!(links.entry("ghostly", APP, &"z".repeat(22)).unwrap(), None);
