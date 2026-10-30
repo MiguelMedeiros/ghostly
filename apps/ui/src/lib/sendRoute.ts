@@ -1,4 +1,5 @@
 import { decodeBolt11, parseLightningDestination, type Bolt11Invoice } from "@ghostly/core";
+import { chainAccepts } from "./parse/money-bitcoin";
 import { findLinkMoney } from "./parse/money-more";
 
 /**
@@ -51,4 +52,23 @@ export function routeSend(input: string): SendRoute {
   } catch (error) {
     return { kind: "bad-destination", error };
   }
+}
+
+/** What the Bitcoin card's Send was given: an address on its chain, with the amount its link names. Nothing is paid here. */
+export type BitcoinSendRoute =
+  | { kind: "address"; address: string; amountSat?: number }
+  /** A `bitcoin:` link that must not be paid (BIP 21: a `req-` parameter this app does not understand, an amount it cannot read). */
+  | { kind: "refused" }
+  | { kind: "unknown" };
+
+export function routeBitcoinSend(input: string, chain: string): BitcoinSendRoute {
+  const text = input.trim();
+  if (/^bitcoin:/i.test(text)) {
+    const money = findLinkMoney(text);
+    if (money === "refused" || (money?.type === "onchain" && money.request.unsupported?.length)) return { kind: "refused" };
+    if (money?.type !== "onchain" || !chainAccepts(chain, money.request.address)) return { kind: "unknown" };
+    const { address, amountSat } = money.request;
+    return amountSat === undefined ? { kind: "address", address } : { kind: "address", address, amountSat };
+  }
+  return chainAccepts(chain, text) ? { kind: "address", address: text } : { kind: "unknown" };
 }

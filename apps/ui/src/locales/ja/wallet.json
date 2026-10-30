@@ -114,6 +114,7 @@
     "maxFee": "許容する手数料の上限",
     "maxFeeInput": "手数料の上限（{{unit}}）",
     "newAddress": "新しいアドレス",
+    "notAddress": "これはこのウォレットの Bitcoin アドレスではありません。",
     "notConnected": "{{label}} に接続されていません",
     "notConnectedDefault": "Bitcoin ソースに接続されていません",
     "nothingYet": "まだありません",
