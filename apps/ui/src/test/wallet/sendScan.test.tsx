@@ -222,7 +222,9 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     };
 
     it("asks how much, reviews that amount through the mints, and pays it", async () => {
-      qr.text = anyAmount();
+      // One invoice, compared with itself: a second made later carries a later timestamp, so it differs.
+      const invoice = anyAmount();
+      qr.text = invoice;
       const quoteInvoice = quoted(700), payQuote = vi.fn(async () => true);
       const { user } = show({ quoteInvoice, payQuote });
       await user.click(screen.getByRole("tab", { name: "Send" }));
@@ -233,7 +235,7 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
       await user.type(screen.getByTestId("wallet-pay-amount"), "700");
       await user.click(screen.getByRole("button", { name: /^Pay 700/ }));
       expect(await screen.findByTestId("wallet-pay-review")).toHaveTextContent("Pay 700 test sats");
-      expect(quoteInvoice).toHaveBeenCalledWith(anyAmount(), "cashu", 700);
+      expect(quoteInvoice).toHaveBeenCalledWith(invoice, "cashu", 700);
       await user.click(screen.getByTestId("wallet-pay-confirm"));
       expect(payQuote).toHaveBeenCalledWith("q-any", TEST_MINT, undefined, false);
     });
