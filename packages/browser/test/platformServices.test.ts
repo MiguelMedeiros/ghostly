@@ -239,7 +239,8 @@ describe("sending files", () => {
     engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
     // Picked, then changed on disk before it was read: what Chromium answers, in English in every language.
     const changed = new DOMException("The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.", "NotReadableError");
-    const picked = () => ({ name: "notes.txt", size: 5, type: "text/plain", slice: () => ({ arrayBuffer: () => Promise.reject(changed) }) }) as unknown as File;
+    // Read whole (a small file's digest) or a piece at a time, both reject as Chromium's do.
+    const picked = () => ({ name: "notes.txt", size: 5, type: "text/plain", arrayBuffer: () => Promise.reject(changed), slice: () => ({ arrayBuffer: () => Promise.reject(changed) }) }) as unknown as File;
     await expect(services.sendFile("peer-1", picked())).rejects.toThrow(`Could not read the file: ${changed.message}`);
     await expect(services.sendGroupFile!("g1", picked())).rejects.toThrow(`Could not read the file: ${changed.message}`);
     // The origin's storage full.
