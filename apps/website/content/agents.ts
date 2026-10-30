@@ -48,7 +48,6 @@ export const LINKS = {
   verify: `${DOCS}/docs/INSTALLATION.md#desktop-app`,
   queue: `${DOCS}/docs/TESTING.md#the-merge-queue`,
   threat: "/developers/agents/threat-model",
-  /** The agents FAQ, written in a sibling pull request: its path until that one lands. */
   faq: "/agents/faq",
   llms: "/llms.txt",
   testing: `${DOCS}/docs/TESTING.md`,
