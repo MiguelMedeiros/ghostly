@@ -135,11 +135,19 @@ describe("findEntities: hostile text", () => {
   });
 
   it("scans a message of addresses with no # in time that grows with its length, not its square", () => {
-    for (const unit of ["https://", "http://group1/", "https:///"]) {
-      const text = unit.repeat(Math.ceil(20_000 / unit.length));
+    /** The fastest of a few scans, in ms: a busy machine slows some of them, and never speeds one up. */
+    const cost = (text: string) => Math.min(...Array.from({ length: 5 }, () => {
       const started = performance.now();
       expect(findEntities(text)).toEqual([]);
-      expect(performance.now() - started).toBeLessThan(25);
+      return performance.now() - started;
+    }));
+    // Linear work grows 4x from a quarter of the scan's limit to all of it; the square grows 16x. The ratio holds on a
+    // loaded machine, where a fixed budget would not; the floor keeps a timer's tick on a very short scan from counting.
+    for (const unit of ["https://", "http://group1/", "https:///"]) {
+      const of = (length: number) => unit.repeat(Math.ceil(length / unit.length));
+      const quarter = cost(of(5_000));
+      const whole = cost(of(20_000));
+      expect(whole).toBeLessThan(8 * Math.max(quarter, 1));
     }
   });
 });
