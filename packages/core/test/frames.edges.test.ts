@@ -566,16 +566,31 @@ describe("wrapDataChannel", () => {
     expect(got).toEqual(["hello", Uint8Array.of(4, 5)]);
   });
 
-  it("tolerates messages and close before handlers are set, and reports close once set", () => {
+  it("tolerates messages and close before handlers are set, and reports close once", () => {
     const { dc, channel } = wrap();
     dc.message("early");
-    dc.dispatchEvent(new Event("close"));
     const onClose = vi.fn();
     channel.onClose = onClose;
+    dc.dispatchEvent(new Event("close"));
     dc.dispatchEvent(new Event("close"));
     expect(onClose).toHaveBeenCalledOnce();
     channel.close();
     expect(dc.closed).toBe(1);
+  });
+
+  it("closes once its connection ended, and hears nothing from the data channel after", () => {
+    const dc = new FakeDataChannel();
+    const ended = new AbortController();
+    const channel = wrapDataChannel(dc as unknown as RTCDataChannel, ended.signal);
+    const onClose = vi.fn(), onMessage = vi.fn();
+    channel.onClose = onClose;
+    channel.onMessage = onMessage;
+    ended.abort();
+    expect(onClose).toHaveBeenCalledOnce();
+    dc.message("late");
+    dc.dispatchEvent(new Event("close"));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onMessage).not.toHaveBeenCalled();
   });
 
   it("reports the underlying buffered amount", () => {
@@ -604,7 +619,8 @@ describe("wrapDataChannel", () => {
       expect(resolved).toBe(false);
       dc.dispatchEvent(new Event(event));
       await drained;
-      expect(remove.mock.calls.map(([name]) => name).sort()).toEqual(["bufferedamountlow", "close"]);
+      // Closed, the channel drops every listener of its own with it.
+      expect(remove.mock.calls.map(([name]) => name).sort()).toEqual(event === "close" ? ["bufferedamountlow", "close", "message"] : ["bufferedamountlow"]);
     }
   });
 });

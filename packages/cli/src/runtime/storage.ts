@@ -573,6 +573,16 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     async exportSnapshot(path: string) {
       await settled();
       const snapshot = await capture(undefined, true);
+      // A chat's ratchet (WISP 4xx) is this profile's alone, here: a backup never carries it, so a restored copy seals with
+      // keys of its own, never the ones this profile goes on using.
+      for (const db of snapshot.databases) for (const store of db.stores) {
+        if (store.name !== "links") continue;
+        store.records = store.records.map(([key, value]) => {
+          if (!value || typeof value !== "object" || !("ratchetState" in value)) return [key, value];
+          const { ratchetState: _ratchet, ...link } = value as Record<string, unknown>;
+          return [key, link];
+        });
+      }
       const fd = openSync(path, "w", 0o600);
       try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
     },

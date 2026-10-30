@@ -59,6 +59,7 @@
     },
     "label": "falta una copia",
     "later": "Más tarde",
+    "line": "Haz una copia de la cartera {{wallet}}",
     "title": "Tienes dinero real en {{wallet}}"
   },
   "bark": {
@@ -765,6 +766,8 @@
     "send": "Enviar"
   },
   "unseen": {
+    "lineReal": "{{amount}} sats nuevos en {{wallet}}",
+    "lineTest": "{{amount}} sats de prueba nuevos en {{wallet}}",
     "real": "{{place}}, {{amount}} sats nuevos",
     "test": "{{place}}, {{amount}} sats de prueba nuevos"
   },

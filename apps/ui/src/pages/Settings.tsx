@@ -16,13 +16,17 @@ import { ForkRows } from "../components/devices/Forks";
 import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
 import { GroupDownloadsRow } from "../components/settings/GroupDownloads";
+import { TranslateSettings } from "../components/settings/TranslateSettings";
+import { translateOffered } from "../lib/translateSettings";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
 import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { currentProfile, listProfiles } from "../lib/profiles";
-import { openProfileSwitcher } from "../hooks/useProfileSwitcher";
+import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitcher";
+import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
+import type { NeedsYou } from "../lib/needsYou";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { Button, Switch } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
@@ -121,6 +125,7 @@ export function Settings() {
   const profile = currentProfile();
   const myAvatar = useMyAvatar();
   const canSwitch = !!useServicesPlatform()?.features.profiles;
+  const glances = useProfileGlances();
   const peekOn = peekEnabled(settings, isDesktopApp());
   const loadPublicProfiles = useLoadPublicProfiles();
   const sendTyping = useSendTyping();
@@ -440,7 +445,7 @@ export function Settings() {
 
   // What this device has: the options it lacks are not offered, nor found by the search.
   const has = (needs: SettingNeeds) => needs === "profiles" ? canSwitch : needs === "updates" ? update.supported
-    : needs === "wake" ? canWake : hasMediaDevices();
+    : needs === "wake" ? canWake : needs === "translate" ? translateOffered() : hasMediaDevices();
   const shown = (id: SettingsSection) => id !== "media" || hasMediaDevices();
   // "Password" found by the search opens the lock's password form: to set one when there is none (no row of its own then).
   const found = (entry: SettingEntry) => { if (entry.opens === "passwordForm" && !showPasswordForm) openPasswordForm(); };
@@ -459,21 +464,27 @@ export function Settings() {
       storage: desktopUsed ? formatBytes(desktopUsed.total, t) : formatBytes(estimate?.used ?? storageInfo.used, t),
       about: update.update ? t(update.update.replaced ? "updates.replaced" : "updates.available", { version: update.update.version }) : `${t("settings.version")} ${appVersion}`,
     };
+    // What the mark on the Settings tab's picture is about (lib/needsYou): messages waiting in another profile, found
+    // in the switcher. Seen there: it goes once that profile is opened.
+    const others = !canSwitch ? undefined : glances.othersFresh ? t("profileSwitcher.othersNewLine") : glances.othersUnread ? t("profileSwitcher.othersUnreadLine") : undefined;
+    const needs: NeedsYou[] = others ? [{ id: "profiles:others", text: others, clears: "seen", show: openProfileSwitcher }] : [];
     return (
       <Page title={t("settings.title")} width="md" testId="settings-page" overlay={overlay}>
         {installApp}
-        <SettingsMenu summary={summary} shown={shown} has={has} onFound={found} onOpen={(id) => nav.open(settingsPath(id))} top={
+        <SettingsMenu summary={summary} shown={shown} has={has} onFound={found} onOpen={(id) => nav.open(settingsPath(id))} top={<>
+          <NeedsYouList items={needs} />
           <div className="bg-surface rounded-xl divide-y divide-border">
             {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
             <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
               label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
             {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
             {canSwitch && (
-              <LinkRow testId="settings-profile-switch" label={t("profileSwitcher.title")} hint={t("profileSwitcher.holdHint")}
+              <LinkRow testId="settings-profile-switch" label={<span className="inline-flex items-center gap-2">{t("profileSwitcher.title")}{others && <NeedsYouDot />}</span>}
+                hint={others ?? t("profileSwitcher.holdHint")}
                 value={listProfiles().length > 1 ? listProfiles().length : undefined} onClick={openProfileSwitcher} />
             )}
           </div>
-        } />
+        </>} />
       </Page>
     );
   }
@@ -558,6 +569,7 @@ export function Settings() {
           <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
             options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
         </Row>
+        {translateOffered() && <TranslateSettings />}
         <Row label={t("settings.reduceMotion")} hint={t("settings.reduceMotionHint")}>
           <Switch testId="settings-reduce-motion" label={t("settings.reduceMotion")} checked={settings.reduceMotion} onChange={(on) => updateReduceMotion(on)} />
         </Row>

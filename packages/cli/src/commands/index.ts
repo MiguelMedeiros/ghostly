@@ -59,8 +59,11 @@ export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "g
  */
 const ID_ARGS = new Set(["chat", "message", "group", "member", "payment", "file", "draft", "id", "card", "service", "call"]);
 
-/** A leading positional that may be left out (`name?`); a trailing one that may (`text...?`) shifts nothing. */
-const leadingOptional = (name: string) => name.endsWith("?") && !name.endsWith("...?");
+/**
+ * The positionals that may be left out ahead of a required one (`chat?` in `[<chat>] <file>`): left out, they shift the
+ * others. One with no required one after it (`<chat> [<method>]`, `text...?`) is simply missing at the end: it shifts nothing.
+ */
+const leadingOptionals = (names: readonly string[]) => names.filter((name, i) => name.endsWith("?") && !name.endsWith("...?") && names.slice(i + 1).some((after) => !after.endsWith("?")));
 
 /**
  * Which of a command's positionals take an id, by index (a trailing `...` one covers the rest). An optional `name?`
@@ -68,7 +71,7 @@ const leadingOptional = (name: string) => name.endsWith("?") && !name.endsWith("
  */
 export function idSlot(command: { args?: string[] }): (index: number) => boolean {
   const names = (command.args ?? []).map((name) => name.replace(/\?$/, ""));
-  const shift = (command.args ?? []).filter(leadingOptional).length;
+  const shift = leadingOptionals(command.args ?? []).length;
   const rest = names.findIndex((name) => name.endsWith("..."));
   const at = (index: number) => {
     const name = rest !== -1 && index >= rest ? names[rest].slice(0, -3) : names[index];
@@ -101,11 +104,11 @@ function usageNames(usage: string): (string | undefined)[] {
  */
 export function positionals(command: { usage: string; args?: string[]; words?: Record<string, readonly string[]> }, values: readonly string[]): Record<string, string | undefined> {
   let names = command.args ?? [];
-  const optional = names.filter(leadingOptional);
+  const optional = leadingOptionals(names);
   let skip = 0;
   if (optional.length) {
     skip = Math.max(0, optional.length - Math.max(0, values.length - (names.length - optional.length)));
-    names = [...optional.slice(skip).map((name) => name.slice(0, -1)), ...names.filter((name) => !leadingOptional(name))];
+    names = [...optional.slice(skip).map((name) => name.slice(0, -1)), ...names.filter((name) => !optional.includes(name))];
   }
   // Named as the usage line shows it (`<sats>`, not the parameter's `amount`).
   const shown = usageNames(command.usage);
@@ -119,6 +122,7 @@ export function positionals(command: { usage: string; args?: string[]; words?: R
       out[name.slice(0, -3)] = rest.length ? rest.join(" ") : undefined;
       return out;
     }
+    if (values[i] === undefined && names[i].endsWith("?")) continue;
     if (values[i] === undefined || values[i] === "") throw missing(i, name);
     const words = command.words?.[name];
     if (words && !words.includes(values[i])) {

@@ -59,8 +59,12 @@ export class SavedMessages {
     return undefined;
   }
 
-  /** Saves a message, or unsaves it with `remove`. Saving one already saved keeps its first time. */
-  save({ linkId, messageId, remove }: { linkId: string; messageId: string; remove?: boolean }): Promise<{ error: string | null }> {
+  /**
+   * Saves a message, or unsaves it with `remove`. Saving one already saved keeps its first time. `removed`: whether a
+   * mark went. An id that names neither a mark nor a message of the chat (a typo) is "not in this chat", as `save` says
+   * it; before, it answered done and the message meant stayed saved (agents#1580).
+   */
+  save({ linkId, messageId, remove }: { linkId: string; messageId: string; remove?: boolean }): Promise<{ error: string | null; removed?: boolean }> {
     return this.serial(async () => {
       if (typeof linkId !== "string" || !linkId) return { error: "No chat named" };
       if (typeof messageId !== "string" || !messageId) return { error: "No message named" };
@@ -69,8 +73,9 @@ export class SavedMessages {
         // A mark goes even when its row is gone: by the id it was saved with, or by the row the id names now.
         const row = await this.row(linkId, messageId);
         const next = marks.filter(m => !sameRow(m, { linkId, id: messageId }) && !(row && sameRow(m, row)));
-        if (next.length !== marks.length) { await this.write(next); this.changed(); }
-        return { error: null };
+        if (next.length !== marks.length) { await this.write(next); this.changed(); return { error: null, removed: true }; }
+        // Not saved, and there: unsaving it again is nothing to say. Not saved, and not there either: not this chat's.
+        return row ? { error: null, removed: false } : { error: "That message is not in this chat" };
       }
       const row = await this.row(linkId, messageId);
       if (!row) return { error: "That message is not in this chat" };

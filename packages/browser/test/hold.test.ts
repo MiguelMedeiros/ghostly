@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HoldKeys, HOLD_LIMITS, type PaymentRequest, type PkarrTransport, type SignedPacket, type ImageMeta, type VideoMeta, type VoiceMeta } from "@ghostly/core";
+import { createIdentity, createLink, createRelayPayload, parseRelayPayload, HoldKeys, HOLD_LIMITS, RatchetBox, emptyRatchetState, fromBase64Url, identityFromSeedB64, type PaymentRequest, type PkarrTransport, type SignedPacket, type ImageMeta, type VideoMeta, type VoiceMeta } from "@ghostly/core";
 import { HoldEngine, emptyHoldState, holdFetchTimeoutMs, type HoldHost } from "../src/engine/hold";
 import { presignS3 } from "../src/backup/s3";
 import type { HoldStore, StoredBackup } from "../src/backup/storage";
 import type { HoldState, StoredLink } from "../src/shared/types";
-// covers: chat.replies.wire, files.voice.meta, files.video.meta, files.image.meta, delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol
+// covers: chat.replies.wire, files.voice.meta, files.video.meta, files.image.meta, delivery.hold.enable, delivery.hold.text, delivery.hold.picture, delivery.hold.request, delivery.hold.tamper, delivery.hold.expiry, delivery.hold.protocol, chat.ratchet
 
 /**
  * A bucket in memory that hands out presigned addresses the way S3 does, and a relay in memory: two
@@ -43,6 +43,7 @@ function relay(): PkarrTransport & { packets: Map<string, SignedPacket>; puts: n
 }
 
 interface Side {
+  box?: RatchetBox;
   engine: HoldEngine;
   stored: StoredLink;
   messages: Map<string, { text?: string; file?: { name: string; size: number; mime: string }; request?: PaymentRequest; timestamp: number }>;
@@ -55,7 +56,7 @@ interface Side {
   refuseFiles?: string;
 }
 
-function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; loopbackStorage?: boolean; fetch?: (inner: typeof fetch) => typeof fetch } = {}) {
+function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; loopbackStorage?: boolean; fetch?: (inner: typeof fetch) => typeof fetch; ratchet?: { alice: boolean; bob: boolean } } = {}) {
   const link = createLink();
   const alice = createIdentity(), bob = createIdentity();
   const transport = relay();
@@ -82,6 +83,14 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       ...(options.loopbackStorage && { loopbackStorage: () => true }),
       now,
     };
+    // The chat's ratchet (WISP 4xx), on a side whose app has it; the other side's record says whether it does too.
+    const mineHas = options.ratchet ? (mine.id === "link-a" ? options.ratchet.alice : options.ratchet.bob) : false;
+    const peerHas = () => !!options.ratchet && (mine.id === "link-a" ? options.ratchet.bob : options.ratchet.alice);
+    if (mineHas) {
+      side.box = new RatchetBox(() => ({ seed: fromBase64Url(mine.participationSeed!), self: identityFromSeedB64(mine.participationSeed!).pubKeyZ32, peer: mine.pairedPeerKey!,
+        rendezvous: [identityFromSeedB64(mine.seedB64).pubKeyZ32, mine.peerPubKeyZ32], secret: fromBase64Url(mine.encKeyB64) }), emptyRatchetState(), async () => {});
+      host.ratchet = () => ({ box: side.box!, peerSupports: peerHas });
+    }
     side.engine = new HoldEngine(host);
     return side as Side;
   };
@@ -240,6 +249,53 @@ describe("store-and-forward engine", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(b.received).toHaveLength(3);
     expect(transport.puts).toBe(puts);
+  });
+
+  it("with ratchet/1 on both sides every held item is a ratcheted bundle, picked up in order; an app without it gets plain ones", async () => {
+    for (const bobHas of [true, false]) {
+      const { a, b, buckets } = setup({ ratchet: { alice: true, bob: bobHas } });
+      engines.push(a.engine, b.engine);
+      for (const [i, text] of ["one", "two", "three"].entries()) {
+        a.messages.set(`me_${i}`, { text, timestamp: 1000 + i });
+        await a.engine.hold("link-a", { kind: "text", id: `wire-text-${i}`, messageId: `me_${i}`, bytes: 10, timestamp: 1000 + i });
+      }
+      const items = [...buckets.alice.store.objects.entries()].filter(([name]) => !name.endsWith("manifest.ghostly-held")).map(([, bytes]) => bytes);
+      expect(items).toHaveLength(3);
+      // "GHLD" then the version: 2 sealed by the ratchet, 1 as before. The manifest stays version 1 either way.
+      for (const bytes of items) expect(bytes[4]).toBe(bobHas ? 2 : 1);
+      b.engine.start();
+      await vi.waitFor(() => expect(b.received).toHaveLength(3));
+      expect(b.received.map((r) => r.text)).toEqual(["one", "two", "three"]);
+      if (bobHas) expect(b.box!.heard("hold")).toBe(true);
+      await a.engine.stop(); await b.engine.stop();
+    }
+  });
+
+  it("a ratcheted item refused once opened still uses its key and counts: a plain item from that contact is refused after", async () => {
+    const { a, b } = setup({ ratchet: { alice: true, bob: true } });
+    engines.push(a.engine, b.engine);
+    a.files.set("link-a-out-f1", { bytes: new Uint8Array(10).fill(1), name: "big.bin", size: 10, mime: "application/octet-stream" });
+    a.messages.set("me_f", { file: { name: "big.bin", size: 10, mime: "application/octet-stream" }, timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "file", id: "wire-file-1", messageId: "me_f", ref: "link-a-out-f1", bytes: 10, timestamp: 1000 });
+    b.refuseFiles = "no room for more files";
+    b.engine.start();
+    await vi.waitFor(() => expect(b.stored.hold!.inSeq).toBe(1));
+    expect(b.received).toHaveLength(0);
+    expect(b.box!.heard("hold")).toBe(true);
+  });
+
+  it("holds nothing for a contact whose app stopped saying ratchet/1 after items came ratcheted: they wait for live", async () => {
+    const ratchet = { alice: true, bob: true };
+    const { a, b } = setup({ ratchet, bobStorage: true });
+    engines.push(a.engine, b.engine);
+    a.messages.set("me_1", { text: "ratcheted", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-text-1", messageId: "me_1", bytes: 10, timestamp: 1000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(1));
+    expect(b.engine.canHold("link-b")).toBe(true);
+    // Alice's app goes back to one without it: her record no longer lists ratchet/1.
+    ratchet.alice = false;
+    expect(b.engine.canHold("link-b")).toBe(false);
   });
 
   it("holds a voice message with its length and waveform, and drops a description that is not one", async () => {

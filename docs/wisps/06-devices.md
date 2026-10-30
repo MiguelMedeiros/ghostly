@@ -656,6 +656,7 @@ In phase 1 **a device that goes to standby keeps its frozen copy**. It makes com
 | Earlier device sets: old `D`, tombstone packet, signed `set-update`, devices not yet acknowledged | Yes, as the part `devices`, so the new active device puts the tombstones and delivers the frame | No | No | Kept, not used |
 | Chats: rendezvous seed, invite secret, participation seed, pinned contact key, trust | Yes | Secrets | No: lost keys end the chat | Frozen |
 | Per-chat counters: mailbox `sequence` and `peerSequence`, capability `rev`, hold `pointerRev`, `outSeq`, `inSeq`, `peerAck`, hold mailbox name | Yes | **Yes** | No. Lower values are dropped silently by the contact | Frozen; never used again without a handoff back |
+| A chat's ratchet state ([4xx · Forward Secrecy](4xx-ratchet.md)) | Never | n/a | Yes: the next item starts a new session with the contact | Dropped: the contact moves to the new device's session |
 | Native transport seeds per chat | Yes | No | Yes: a new seed is a new endpoint, which the capability record then describes | Frozen |
 | Sessions, dial timers, attempt counts, quotes shown but not approved, a community door's pending admissions | No (in memory) | n/a | Made again; a joiner at the door tries another hub after 30 seconds | Gone |
 | Outbox: message rows in `sending`, `queued`, `waiting`, `held`, with wire ids and resend window; pending edits, reactions, pins | Yes | Ids make a resend harmless | No | Frozen |

@@ -50,14 +50,17 @@ export function asCliError(error: unknown): CliError {
 /**
  * The engine's known errors (`EngineError`, packages/core engineErrors.ts) a bot branches on, by their `engineCode`: a
  * host or the network not answering is `unavailable` (try again later), one too slow `timeout`, a value the person gave
- * `bad_request`, money that is not there `refused`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
+ * `bad_request`, money that is not there `refused`, a contact that offers no way of paying `refused` with its reason in
+ * `details.reason`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
  */
 const ENGINE_CODES: Record<string, ErrorCode> = {
   mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable",
   hostTimedOut: "timeout", networkTimedOut: "timeout",
   invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
-  notEnoughSats: "refused", ecashAlreadySpent: "refused",
+  notEnoughSats: "refused", ecashAlreadySpent: "refused", contactNoWallet: "refused", contactNoPayments: "refused",
 };
+/** `details.reason` of an engine error a bot tells apart from others of its code. */
+const ENGINE_REASONS: Record<string, string> = { contactNoWallet: "contact_no_wallet", contactNoPayments: "contact_payments_off" };
 
 function engineKnown(error: unknown): CliError | undefined {
   if (!(error instanceof Error)) return undefined;
@@ -65,7 +68,10 @@ function engineKnown(error: unknown): CliError | undefined {
   if (typeof engineCode !== "string" || !Object.hasOwn(ENGINE_CODES, engineCode)) return undefined;
   // The app's reason for a Lightning address it could not read (a browser's CORS) is no reason in a terminal.
   if (engineCode === "lnurlUnreachable" && typeof values?.host === "string") return new CliError("unavailable", `Could not reach ${values.host}`);
-  return new CliError(ENGINE_CODES[engineCode], error.message);
+  const details = Object.hasOwn(ENGINE_REASONS, engineCode) ? { reason: ENGINE_REASONS[engineCode] } : undefined;
+  // The contact's next step, for a contact that is a bot too.
+  if (engineCode === "contactNoWallet") return new CliError("refused", `${error.message} (on a CLI: ghostly wallet create cashu)`, details);
+  return new CliError(ENGINE_CODES[engineCode], error.message, details);
 }
 
 /**
@@ -114,5 +120,11 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
   if (code === "ENAMETOOLONG") return new CliError("bad_request", `A name in ${where} is too long for this file system (at most 255 bytes)`);
+  // A full disk (or a quota) answered Node's raw "ENOSPC: no space left on device, write" as `engine`, naming nothing
+  // (agents#1710). `unavailable`: it works again once there is room, with nothing lost.
+  if (code === "ENOSPC" || code === "EDQUOT") {
+    const at = typeof path === "string" ? path : file;
+    return new CliError("unavailable", at ? `No room left for ${at}: free some space, then try again` : "No room left on the disk: free some space, then try again", { reason: "no_space", errno: code, ...(at && { path: at }) });
+  }
   return undefined;
 }

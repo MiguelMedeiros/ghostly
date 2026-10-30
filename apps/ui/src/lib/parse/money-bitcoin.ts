@@ -130,6 +130,12 @@ export function findBip21(text: string): Bip21[] {
   return found;
 }
 
+/** Whether the text holds a `bitcoin:` link too long to read (`findBip21` leaves it out). */
+export function hasLongBip21(text: string): boolean {
+  for (const match of text.matchAll(BIP21)) if (match[0].length > URI_MAX_CHARS && !insideUrl(text, match.index!)) return true;
+  return false;
+}
+
 /** Parameters this app reads; any other `req-` one makes the link one it must not pay (BIP 21). */
 const KNOWN = new Set(["amount", "label", "message", "lightning", "lno", "ark"]);
 

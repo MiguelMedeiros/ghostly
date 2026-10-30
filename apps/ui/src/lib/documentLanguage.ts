@@ -17,7 +17,19 @@ const RIGHT_TO_LEFT: ReadonlySet<Language> = new Set(["ar"]);
 /** The BCP 47 tag for `language`; one the app does not know (a hand-edited setting) reads as English, as `t()` does. */
 export const languageTag = (language: Language): string => TAGS[language] ?? TAGS.en;
 
-export const textDirection = (language: Language): "ltr" | "rtl" => (RIGHT_TO_LEFT.has(language) ? "rtl" : "ltr");
+/**
+ * `code`'s name in `language` ("Portuguese" for `pt` in English, "português" in Portuguese, "portugais" in French), or
+ * the code where the system has no name for it: any language a message may be in, not only the app's.
+ */
+export function languageName(code: string, language: Language): string {
+  try {
+    return new Intl.DisplayNames([languageTag(language)], { type: "language", fallback: "code" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+export const textDirection =(language: Language): "ltr" | "rtl" => (RIGHT_TO_LEFT.has(language) ? "rtl" : "ltr");
 
 /** Sets `<html lang>` and `<html dir>` for `language`. The entry points call it before the first render, the I18nProvider on every change. */
 export function applyDocumentLanguage(language: Language, root: HTMLElement = document.documentElement): void {

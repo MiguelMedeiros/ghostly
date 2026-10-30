@@ -129,3 +129,56 @@ test("a tap on a picture in a chat on a phone opens it large, in its own shape, 
   await pinchAt(200, 400);
   expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 });
+
+test("a long name under a picture opened large reads from its start in either app direction", { tag: ["@feature:files.image.view", "@feature:profiles.picture.viewer", "@feature:app.i18n"] }, async ({ peer }) => {
+  // The viewer's caption cut a name in the other script at its start, on a phone: its first word was under the "…".
+  const [alice, bob] = await Promise.all([peer("caption-alice"), peer("caption-bob", { mobile: true, viewport: { width: 375, height: 740 } })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  const names = [
+    { language: "ar", name: "Screenshot of the quarterly planning meeting whiteboard.png", first: "Screenshot" },
+    { language: "en", name: "لقطة شاشة من اجتماع التخطيط الفصلي للفريق كاملة مع السبورة البيضاء والملاحظات.png", first: "لقطة" },
+  ];
+  for (const { name } of names) await alice.page.getByTestId("file-input").setInputFiles({ name, mimeType: "image/png", buffer: png(300, 200) });
+  for (const { name } of names) await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: name })).toBeVisible({ timeout: 30_000 });
+
+  for (const { language, name, first } of names) {
+    await bob.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await bob.page.reload();
+    await expect(bob.page.locator("html")).toHaveAttribute("dir", language === "ar" ? "rtl" : "ltr");
+
+    await chat(bob).getByTestId("file-bubble").filter({ hasText: name }).getByRole("button").first().click();
+    const viewer = bob.page.getByTestId("avatar-viewer");
+    const caption = viewer.locator("figcaption");
+    await expect(caption).toHaveText(name);
+    // The box that clips is the caption's content box: its first word is drawn inside it, not under the "…" or past its edge.
+    const [box, start] = await Promise.all([
+      caption.evaluate((el) => {
+        const { left, right } = el.getBoundingClientRect(), style = getComputedStyle(el);
+        return { left: left + parseFloat(style.paddingLeft), right: right - parseFloat(style.paddingRight), overflows: el.scrollWidth > el.clientWidth };
+      }),
+      caption.evaluate((root, find) => {
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const at = node.textContent!.indexOf(find);
+          if (at < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + find.length);
+          const { left, right } = range.getBoundingClientRect();
+          return { left, right };
+        }
+        throw new Error(`"${find}" is not in the caption`);
+      }, first),
+    ]);
+    expect(box.overflows).toBe(true);
+    expect(start.left).toBeGreaterThanOrEqual(box.left - 1);
+    expect(start.right).toBeLessThanOrEqual(box.right + 1);
+    await bob.page.keyboard.press("Escape");
+    await expect(viewer).toHaveCount(0);
+  }
+});

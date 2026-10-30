@@ -66,6 +66,21 @@ describe("durable paired message delivery", () => {
     await db.deleteMessage(p.linkId, p.id); await p.box.received(p.wireId);
     expect(await p.row()).toBeUndefined(); await p.box.stop();
   });
+  it("a start leaves a row already queued, with its reason and window, unwritten, and still checks it", async () => {
+    const p = await setup(async () => null);
+    const reason = "No DHT receipt before it expired. It goes again when the chat is live.", until = Date.now() + 86_400_000;
+    await p.store.update(p.id, "queued", reason, { resendUntil: until });
+    const update = vi.fn(p.store.update), send = vi.fn(async () => null);
+    let ready = false;
+    const box = new Outbox({ ...p.store, update }, send, 100, undefined, { resender: { ready: () => ready }, policy: { backoffMs: [10] } });
+    await box.recover();
+    // On the engine each write marks the chat's history changed, and the CLI host then reads it whole at start.
+    expect(update).not.toHaveBeenCalled();
+    expect((await p.row())).toMatchObject({ delivery: "queued", deliveryError: reason, resendUntil: until });
+    ready = true;
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    await box.stop();
+  });
   it("keeps delivery uncertain if persisting a receipt fails", async () => {
     const p = await setup(async () => null);
     const update = p.store.update;

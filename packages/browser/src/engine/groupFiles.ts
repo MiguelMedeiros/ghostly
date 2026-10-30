@@ -196,6 +196,12 @@ interface Kept {
    * for it again (Download). Once every holder known is here, it is fetched no more (`DAMAGED`).
    */
   damaged: Set<string>;
+  /**
+   * Holders whose tail failed the check on bytes an earlier holder stored (`unclear`): whose bytes were bad is not known,
+   * so each is asked last, never left for mid-way (`leaveSlow`), and serves only from 0: its own bytes failing then
+   * count as damaged. Until its person asks for it again (Download).
+   */
+  suspect?: Set<string>;
   /** The holder its last transfer was left with (it stalled, or its person paused it): asked last, not first, next time. */
   left?: string;
 }
@@ -229,7 +235,7 @@ interface Want {
    */
   free?: Set<string>;
   /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
-  why?: "busy" | "damaged";
+  why?: "busy" | "day" | "damaged";
   /**
    * Holders that answered `busy` in this round: one of them in reach tells this device when its place frees (its
    * `group-have`), so members never heard of as holders are not asked meanwhile.
@@ -273,6 +279,7 @@ const ENDED_KEPT = 8;
 const WAITING_NOTES = {
   nobody: "Nobody you are connected to has this file yet",
   busy: "Its holders are busy; asking again soon",
+  day: "Its holders have shared all they can today; it comes when another member has it, or tomorrow",
   damaged: "It arrived damaged; ask again",
 } as const;
 /** Why a want stopped: every holder served bytes that are not the author's file. */
@@ -503,6 +510,7 @@ export class GroupFileDesk {
     }
     // Asked again: every holder is worth asking again, one that served it damaged too.
     kept.damaged.clear();
+    kept.suspect = undefined;
     if (this.deps.transfers.get(kept.id)?.state === "failed") {
       await this.deps.store.patch(kept.id, { transfer: { state: "transferring", transferred: 0, size: kept.meta.size } }).catch(() => {});
     }
@@ -718,6 +726,8 @@ export class GroupFileDesk {
     const order = [...known, ...others].filter(key => this.mayAsk(kept, want, key, edges.get(key)));
     // The holder last left for this file is asked once the others were.
     if (kept.left && order.includes(kept.left)) order.push(...order.splice(order.indexOf(kept.left), 1));
+    // Then those whose tail failed on another's bytes: asked, they serve from 0, and what came here before goes.
+    for (const key of order.filter(key => kept.suspect?.has(key))) order.push(...order.splice(order.indexOf(key), 1));
     let behind = false;
     for (const key of order) {
       const linkId = edges.get(key);
@@ -771,7 +781,7 @@ export class GroupFileDesk {
     const edges = this.deps.edges(kept.groupId);
     const other = [...want.free].some(key => {
       const linkId = edges.get(key);
-      return !!linkId && key !== want.holder && this.mayAsk(kept, want, key, linkId) && this.deps.ready(linkId)
+      return !!linkId && key !== want.holder && !kept.suspect?.has(key) && this.mayAsk(kept, want, key, linkId) && this.deps.ready(linkId)
         && !!this.edgesById.get(linkId)?.files.live && !this.askedOf(linkId, want);
     });
     if (!other) return false;
@@ -815,7 +825,8 @@ export class GroupFileDesk {
       kept.holders = kept.holders.filter(key => key !== peer);
       this.edgesById.get(linkId)?.gone.add(messageId);
     }
-    if (why === "busy") { want.why = "busy"; (want.busy ??= new Set()).add(peer); }
+    // Its day spent (agents#1672): said as such, not as "asking again soon", which held for up to a day.
+    if (why === "busy" || why === "day") { want.why = why; (want.busy ??= new Set()).add(peer); }
     want.tried.add(peer);
     want.holder = want.linkId = undefined;
     this.ask(kept);
@@ -877,7 +888,7 @@ export class GroupFileDesk {
   /**
    * Why this device does not serve a file now, or null when it does (WISP 503 § Asking, Serving limits): `refused` to
    * someone who could not read the announcement, `gone` when it is not here (`kept` undefined), `busy` when serving is
-   * off or full.
+   * off or full, `day` when this device served its bytes for the day (`serveBytesPerDay`).
    */
   private mayServe(edge: Edge, messageId: string, kept: Kept | undefined, ts: number | undefined): GroupWantRefusal | null {
     const membership = this.deps.membership(edge.groupId);
@@ -896,7 +907,7 @@ export class GroupFileDesk {
     const today = Math.floor(this.deps.now() / 86_400_000);
     if (this.served.day !== today) this.served = { day: today, bytes: 0 };
     const reserved = this.servingNow().reduce((sum, a) => sum + a.size, 0);
-    return this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay ? "busy" : null;
+    return this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay ? "day" : null;
   }
 
   /** Ends the served transfer that has held its place longest, once past `servePlaceMs`: false when none has. */
@@ -1048,7 +1059,7 @@ export class GroupFileDesk {
     // What an earlier holder's transfer stored stays, and this one goes on from there (WISP 503: the asker accepts from
     // the offset it stored): every holder serves the author's bytes, and the whole file is checked at the end.
     await kept.idle;
-    const writer = await this.deps.store.write(kept.id, !kept.fresh);
+    const writer = await this.deps.store.write(kept.id, !kept.fresh && !kept.suspect?.has(edge.peer));
     kept.fresh = false;
     const resumed = writer.offset > 0;
     if (!resumed) kept.storedBy = edge.peer;
@@ -1079,7 +1090,10 @@ export class GroupFileDesk {
         // Whole from this holder and damaged: its bytes are not the author's, and it is not asked for them again.
         if (damaged) {
           kept.stored = 0;
-          if (resumed && kept.storedBy !== edge.peer) kept.fresh = kept.unclear = true; else kept.damaged.add(edge.peer);
+          if (resumed && kept.storedBy !== edge.peer) {
+            kept.fresh = kept.unclear = true;
+            (kept.suspect ??= new Set()).add(edge.peer);
+          } else kept.damaged.add(edge.peer);
           kept.storedBy = undefined;
         }
         return (kept.idle = (damaged || kept.dropped === record.id || gone() ? writer.discard() : writer.close()).catch(() => {}));

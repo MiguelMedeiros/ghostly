@@ -94,7 +94,30 @@ const RANGE = () => IDBKeyRange.bound(PREFIX, `${PREFIX}\uffff`);
 let paying = 0;
 export const lightningPaying = (): number => paying;
 
-export async function readLightningJournal(): Promise<LightningOp[]> { return wrap<LightningOp[]>((await store(STORES.settings, "readonly")).getAll(RANGE())); }
+/**
+ * The journal as last read, for the database it was read from, while nothing wrote it since (`journalVersion`, moved
+ * by `LightningService.put`, its one writer). A start read the whole journal 38 times, 8 of them one after another
+ * before the chat list could show: with 5,000 past payments the list showed 0.25 s later (0.5-0.75 s at 4x CPU), and
+ * a CLI daemon took 0.5 s and 125 MB more to start (agents#1687). Reads in flight together share one.
+ */
+let journal: { db: IDBDatabase; version: number; ops: Promise<LightningOp[]> } | undefined;
+let journalVersion = 0;
+const journalWritten = () => { journalVersion++; journal = undefined; };
+/** The journal was written outside `LightningService.put` (a test seeding or clearing the store): read it again. */
+export const lightningJournalWritten = (): void => journalWritten();
+
+/** Every Lightning operation journaled, as copies: a caller may change what it got. */
+export async function readLightningJournal(): Promise<LightningOp[]> {
+  const settings = await store(STORES.settings, "readonly"), db = settings.transaction.db;
+  let read = journal;
+  if (!read || read.db !== db || read.version !== journalVersion) {
+    const ops = wrap<LightningOp[]>(settings.getAll(RANGE()));
+    const made = read = { db, version: journalVersion, ops };
+    journal = made;
+    ops.catch(() => { if (journal === made) journal = undefined; });
+  }
+  return (await read.ops).map((op) => ({ ...op }));
+}
 const IN_POLL_MS = 4_000;
 const OUT_POLL_MS = 15_000;
 const RECENT = 20;
@@ -356,7 +379,13 @@ export class LightningService {
   }
 
   private async get(direction: LightningOp["direction"], hash: string) { return wrap<LightningOp | undefined>((await store(STORES.settings, "readonly")).get(opKey(direction, hash))); }
-  private async put(op: LightningOp) { this.writes++; await transact([STORES.settings], (s) => { s[STORES.settings].put(op, opKey(op.direction, op.paymentHash)); }); }
+  private async put(op: LightningOp) {
+    this.writes++;
+    // Before and after: a read started while this writes may or may not see it, so it is not kept.
+    journalWritten();
+    try { await transact([STORES.settings], (s) => { s[STORES.settings].put(op, opKey(op.direction, op.paymentHash)); }); }
+    finally { journalWritten(); }
+  }
   list(): Promise<LightningOp[]> { return readLightningJournal(); }
 
   /** Crash recovery: a spend journaled as `sending` never got its answer written, so its outcome is unknown. */

@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useBackdropDismiss } from "../hooks/useDismiss";
+import { holdRow } from "../hooks/useRowWindow";
 import { usePictureZoom } from "../hooks/usePictureZoom";
 import { useI18n } from "../contexts/I18nContext";
 
@@ -42,6 +43,8 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
       back?.focus({ preventScroll: true });
     };
   }, [returnFocus]);
+  // Opened from a message (a picture in it): its row stays in the page while this is open, however many come meanwhile.
+  useEffect(() => holdRow(returnFocus?.current?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId), [returnFocus]);
   return createPortal(
     // Escape is handled here, before the page's own handlers: a panel under the viewer (a contact's identities)
     // closes on Escape at the document, and must stay open when only the viewer goes.
@@ -73,7 +76,8 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
               style={{ width: `min(${viewerWidth(natural ?? 128)}px, calc(100vw - 2rem), 70dvh)`, height: "auto", ...zoomStyle }}
               className={`aspect-square rounded-2xl object-cover shadow-2xl max-md:rounded-xl ${zoomed ? "cursor-grab active:cursor-grabbing" : "cursor-zoom-in"}`} />
           )}
-          <figcaption id={`${id}-name`} className="max-w-full truncate px-2 text-base font-medium text-white max-md:text-text-primary"><bdi>{name}</bdi></figcaption>
+          {/* `dir` on the box that cuts: the "…" goes at the name's own end, not at its start in the other direction. */}
+          <figcaption id={`${id}-name`} dir="auto" className="max-w-full truncate px-2 text-base font-medium text-white max-md:text-text-primary">{name}</figcaption>
         </figure>
       </div>
       <button type="button" aria-label={t("common.close")} data-testid="avatar-viewer-close" onClick={onClose}

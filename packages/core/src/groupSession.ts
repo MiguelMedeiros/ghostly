@@ -264,6 +264,11 @@ export interface GroupSessionHooks {
    * here, and the leave is passed on as a member passes it. Absent: yes.
    */
   adminTurn?(): Promise<boolean>;
+  /**
+   * Whether message `id` was deleted for everyone (WISP 400 § Delete for everyone), by its author or here: its frame is
+   * no longer handed to anyone (a catch-up, a member handing it on, a frame said again). Absent: none is.
+   */
+  removed?(id: string): boolean;
 }
 
 /**
@@ -1056,6 +1061,7 @@ export class GroupSession {
       // Still the newest I know: nothing says yet whether I was behind.
       if (!alone.has(ownKey(f)) || f.e >= this.epoch) continue;
       looked.add(ownKey(f));
+      if (this.isRemoved(f)) continue;
       const target = this.saidAgainEpoch(f);
       if (target === undefined) continue;
       const before = this.state.chain[f.e], key = epochKeys(this.secret(f.e)!, this.id, f.e).message;
@@ -1323,8 +1329,12 @@ export class GroupSession {
     // One I took whole already (markSeen) is dropped, signed or not, before its signature costs a check: in a mesh, every
     // member a member back hears from hands it on. A copy taken stripped is not seen yet, and goes on to be checked.
     if (this.isDuplicate(raw)) return;
-    // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was.
-    if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
+    // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was. Handed
+    // on with the author's `xs` holding, it is the author's whole frame: `xs` signs everything `sig` does and more
+    // (`messageSignedWhole`), so `sig` is not checked as well. Two checks per message were half of a catch-up's
+    // signature time, ~0.19 s of 256 messages at 1x CPU, ~1.1 s at 6x (agents#1656). No `xs`, or one that fails: `sig`.
+    const signedWhole = relayed && this.wholeSigned(raw);
+    if (!signedWhole && !verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.park(from, raw); return; }
     // Its replay window is gone (markSeen), even if a sparse set of secrets still holds its secret.
     if (raw.e < this.epoch - GROUP_LIMITS.secrets) return;
@@ -1335,7 +1345,7 @@ export class GroupSession {
     // member handing it on may have stripped (the mentions, the reply, the hop count): its text is shown, but it is
     // neither seen nor kept nor handed on, so a sync still asks for it and a whole copy completes it.
     const own = groupMessageId(raw.s, raw.e, raw.n);
-    const whole = !relayed || this.wholeSigned(raw);
+    const whole = !relayed || signedWhole;
     if (!whole) {
       if (this.provisional.has(own)) return;
       delete raw.m; delete raw.r; delete raw.f; delete raw.sc; delete raw.fl; delete raw.o; delete raw.xs;
@@ -1350,6 +1360,8 @@ export class GroupSession {
     if (text === null) return;
     // Saved below with the message, whichever way it goes.
     if (this.heardName(key, raw)) this.hooks.changed();
+    // Deleted for everyone (`hooks.removed`): it stays gone here, and is neither kept nor passed on.
+    if (this.isRemoved(raw)) { if (whole) { this.markSeen(raw); this.persistSoon(); } return; }
     const firstFrame = first && { ...raw, e: first.e, n: first.n };
     if (firstFrame && rosterHas(this.state.chain[first.e]?.m ?? [], this.myKey) && this.isDuplicate(firstFrame)) {
       // I read the first one: kept and passed on for those who could not, not shown twice.
@@ -1683,7 +1695,7 @@ export class GroupSession {
     // Counted once sent (`answers`), not here: an answer that takes this one's place before it goes still has them.
     const handed = this.leaversHanded.get(from);
     const kept = !asked.size && !this.state.leftMarks ? [] : this.kept().filter(f => {
-      if (!this.state.chain[f.e] || !rosterHas(this.state.chain[f.e].m, from) || !lacks(f)) return false;
+      if (!this.state.chain[f.e] || !rosterHas(this.state.chain[f.e].m, from) || !lacks(f) || this.isRemoved(f)) return false;
       if (asked.has(f.s)) return true;
       return !rosterHas(this.roster, f.s) && !handed?.has(frameKey(f)) && this.handsOn(f.s, f.e);
     });
@@ -1724,8 +1736,10 @@ export class GroupSession {
   }
   private ownLacked(to: string, frame: GroupSyncFrame): GroupMessageFrame[] {
     const lacks = missingIn(frame, to);
-    return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent));
+    return this.state.sent.filter(sent => this.state.chain[sent.e] && rosterHas(this.state.chain[sent.e].m, to) && lacks(sent) && !this.isRemoved(sent));
   }
+  /** A frame of a message deleted for everyone (`hooks.removed`): handed to nobody, its removal is what they get. */
+  private isRemoved(f: GroupMessageFrame): boolean { return !!this.hooks.removed?.(this.messageIdOf(f)); }
 
   // -- metadata (WISP 902 § Metadata) ---------------------------------------
 
@@ -1828,12 +1842,14 @@ export class GroupSession {
   /**
    * Who made the change a statement brings me: its signer, when they were the admin all along since the statement I
    * held (or, with none, since I got in). A new admin signs again what the last one set (`metaFollowsChain`): to a
-   * member that missed that, it is no change of theirs it can tell apart, so nobody is named.
+   * member that missed that, it is no change of theirs it can tell apart, so nobody is named. With none held, theirs is
+   * one dated after the commit that made them the admin: what they sign again keeps its date.
    */
   private metaAuthor(before: GroupMeta | undefined, s: GroupMetaStatement): string | undefined {
     const chain = this.state.chain, from = before ? before.e : chain.findIndex(c => rosterHas(c.m, this.myKey));
-    for (let e = Math.max(0, from); e <= s.e; e++) if (rosterAdmin(chain[e].m) !== s.by) return undefined;
-    return s.by;
+    let moved: number | undefined;
+    for (let e = Math.max(0, from); e <= s.e; e++) if (rosterAdmin(chain[e].m) !== s.by) { if (before) return undefined; moved = e + 1; }
+    return moved === undefined || s.ts > chain[moved].ts ? s.by : undefined;
   }
 
   /** After the chain or my secrets moved: the waiting statement, and, if I became the admin, the name and picture signed again as mine. */
@@ -1842,7 +1858,8 @@ export class GroupSession {
     this.pendingMeta = undefined;
     if (pending) await this.receiveMeta(pending.from, pending.frame);
     // Joiners accept only the current admin's statement: a new admin signs the picture again.
-    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, Date.now());
+    // Dated when it was set: a member holding nothing tells it from a change of mine by that (`metaAuthor`).
+    if (this.isAdmin && this.state.meta && this.state.meta.by !== this.myKey) await this.publishMeta(this.state.meta.body, this.state.meta.ts);
   }
 
   private async fork(reason: string): Promise<void> {

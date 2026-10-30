@@ -105,6 +105,17 @@ describe("wallets", () => {
     expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
   });
 
+  it("chat.accept with no method answers what the chat takes now and changes nothing", async () => {
+    // Found in a bug hunt: no command showed which ways of paying a chat takes; `chat accept bob` was a usage error.
+    const { ctx, node } = fake();
+    const engine = node.getState;
+    const methods = { cashu: false, lightning: true }, networks = { cashu: [], lightning: ["testnet"] };
+    node.getState = () => { const s = engine(); s.links[0] = { ...s.links[0], paymentMethods: methods, paymentNetworks: networks } as unknown as typeof s.links[0]; return s; };
+    expect(await callApi(ctx, "chat.accept", { chat: "Alice" })).toEqual({ chat: "chat-one", methods, networks });
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", on: false })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.setChatPaymentMethods).not.toHaveBeenCalled();
+  });
+
   it("removal holding money needs the person's acceptLoss", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.remove", { type: "cashu" })).rejects.toMatchObject({ code: "confirm" });
