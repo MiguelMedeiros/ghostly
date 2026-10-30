@@ -46,7 +46,7 @@ For a link with rendezvous keys *A* (mine) and *B* (the contact's), invite secre
 - Pointer identity: `identityFromSeed(derive("pointer:" + A))`; the contact's pointer address is `identityFromSeed(derive("pointer:" + B)).pubKey`. One Pkarr key per direction, distinct from the [403](403-dht-text.md) mailboxes and from presence.
 - Seal key: `HKDF-SHA256(ikm = X25519(P_me, P_peer), salt = derive("envelope"), info = "ghostly-hold-envelope/1", 32)`. Both sides derive the same key; the bundle header says which direction it is.
 
-Holding needs a pinned contact. This construction has no forward secrecy or post-compromise security, like [403](403-dht-text.md).
+Holding needs a pinned contact. This construction has no forward secrecy or post-compromise security, like [403](403-dht-text.md); [4xx · Forward Secrecy](4xx-ratchet.md) proposes both for the item bundles.
 
 ## Bundle
 

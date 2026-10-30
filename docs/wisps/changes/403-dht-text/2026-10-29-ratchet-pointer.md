@@ -1,0 +1,1 @@
+The note that this construction has no forward secrecy now points at the draft [4xx · Forward Secrecy](../../4xx-ratchet.md), which proposes keys used once for the envelopes after the pin. No wire change here.
