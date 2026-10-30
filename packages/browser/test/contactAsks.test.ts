@@ -25,6 +25,10 @@ vi.mock("../src/engine/paymentAdapters/persistence", async importOriginal => {
   };
 });
 
+// These make real stamps with a random asker key: one in twenty draws takes three times the average, and a loaded
+// runner slows each.
+vi.setConfig({ testTimeout: 30_000 });
+
 const NOW = Date.UTC(2026, 9, 16, 12);
 
 /**
