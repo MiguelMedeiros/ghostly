@@ -3,6 +3,12 @@ import { forwardRef, type HTMLAttributes } from "react";
 /** Bars never vanish entirely: silence is still a line you can aim at. */
 const MIN_HEIGHT = 12;
 
+/**
+ * How often a player moves the waveform while it plays: as often as the time label does, since each move is a style
+ * recalc of the page. The knob's glide (voice.css) lasts as long.
+ */
+export const PROGRESS_STEP_MS = 250;
+
 function Bars({ peaks, className }: { peaks: number[]; className: string }) {
   return (
     <span className={`voice-wave-bars ${className}`} aria-hidden="true">

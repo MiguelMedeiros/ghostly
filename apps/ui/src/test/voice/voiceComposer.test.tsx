@@ -353,6 +353,32 @@ describe("hands-free (locked) recording", () => {
     expect(revoked).toHaveBeenCalledWith(created.mock.results[created.mock.results.length - 1]!.value);
   });
 
+  it("moves the preview's waveform with the sound a few times a second rather than every frame", async () => {
+    await locked();
+    await wait(4_000);
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+    fireEvent.click(screen.getByTestId("voice-preview"));
+    await wait(0);
+    const player = audio.players[0]!;
+    const wave = screen.getByTestId("voice-preview-wave");
+    const writes = vi.spyOn(wave.style, "setProperty");
+    for (let ms = 0; ms < 2_000; ms += 16) {
+      player.currentTime = ms / 1000;
+      await wait(16);
+    }
+    const progress = writes.mock.calls.filter(([name]) => name === "--voice-progress");
+    // Each write is a style recalc of the page: 60 a second was about 90 ms of main thread per second.
+    expect(progress.length).toBeLessThanOrEqual(10);
+    expect(progress.length).toBeGreaterThanOrEqual(6);
+    expect(Number(wave.style.getPropertyValue("--voice-progress"))).toBeCloseTo(0.5, 1);
+
+    // Paused, it stops following.
+    fireEvent.click(screen.getByRole("button", { name: "Pause playback" }));
+    writes.mockClear();
+    await wait(2_000);
+    expect(writes.mock.calls.filter(([name]) => name === "--voice-progress")).toHaveLength(0);
+  });
+
   it("does not start the preview once Send was pressed while it was getting ready", async () => {
     await locked();
     await wait(2_000);
