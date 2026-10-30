@@ -95,12 +95,12 @@ const baseCode = (code: string) => code.toLowerCase().split(/[-_]/)[0];
  * The language the draft is written in, when the detector is sure of it; null when it cannot tell (a few letters,
  * slang, a mix). `undefined` when there are no words to translate at all.
  */
-export function draftLanguage(text: string, detect: DetectLanguages, mentions: readonly { o: number; l: number }[] = []): string | null | undefined {
+export async function draftLanguage(text: string, detect: DetectLanguages, mentions: readonly { o: number; l: number }[] = []): Promise<string | null | undefined> {
   const words = detectableText(text, mentions);
   const letters = words.match(/\p{L}/gu)?.length ?? 0;
   if (!letters) return undefined;
   if (letters < MIN_LETTERS) return null;
-  const top = detect(words.slice(0, DETECT_CHARS))[0];
+  const top = (await detect(words.slice(0, DETECT_CHARS)))[0];
   if (!top || top.probability < MIN_PROBABILITY) return null;
   const code = baseCode(top.code);
   return code === "und" ? null : code;

@@ -22,19 +22,19 @@ function setup(guesses: Record<string, LanguageGuess[]> = {}, fallback: Language
 }
 
 describe("translateFrom", () => {
-  it("translates a received text the detector is sure is in another language", () => {
+  it("translates a received text the detector is sure is in another language", async () => {
     const { options } = setup({ "Chego aí em minutos, tô preso no trânsito.": [{ code: "pt", probability: 0.93 }] });
-    expect(translateFrom(received("Chego aí em 10 minutos, tô preso no trânsito."), options)).toEqual({ from: "pt", detected: "pt" });
+    expect(await translateFrom(received("Chego aí em 10 minutos, tô preso no trânsito."), options)).toEqual({ from: "pt", detected: "pt" });
   });
 
-  it("never translates my own messages or system lines, and does not run the detector for them", () => {
+  it("never translates my own messages or system lines, and does not run the detector for them", async () => {
     const { asked, options } = setup();
-    expect(translateFrom(received("Mandei o arquivo no grupo", { sender: "me" }), options)).toEqual({ from: null, detected: null });
-    expect(translateFrom(received("Alice entrou no grupo", { sender: "system" }), options)).toEqual({ from: null, detected: null });
+    expect(await translateFrom(received("Mandei o arquivo no grupo", { sender: "me" }), options)).toEqual({ from: null, detected: null });
+    expect(await translateFrom(received("Alice entrou no grupo", { sender: "system" }), options)).toEqual({ from: null, detected: null });
     expect(asked).toEqual([]);
   });
 
-  it("leaves files, payments, status cards and call lines alone, whatever their text says", () => {
+  it("leaves files, payments, status cards and call lines alone, whatever their text says", async () => {
     const { asked, options } = setup();
     const file = { id: "f", name: "relatório.pdf", size: 1, mime: "application/pdf" };
     const card = { v: 1, kind: "task", id: "t", title: "Revisar o contrato" } as unknown as ChatMessage["card"];
@@ -43,63 +43,63 @@ describe("translateFrom", () => {
       received("Pagamento do aluguel", { paymentId: "p" }),
       received("Revisar o contrato hoje", { card }),
       received("Chamada perdida de voz", { callEvent: { type: "missed" as never } }),
-    ]) expect(translateFrom(message, options).from).toBeNull();
+    ]) expect((await translateFrom(message, options)).from).toBeNull();
     expect(asked).toEqual([]);
   });
 
-  it("does not translate a message in the app's language, but says which language it is", () => {
+  it("does not translate a message in the app's language, but says which language it is", async () => {
     const { options } = setup({}, [{ code: "en", probability: 0.97 }]);
-    expect(translateFrom(received("I'll be there in ten minutes"), options)).toEqual({ from: null, detected: "en" });
+    expect(await translateFrom(received("I'll be there in ten minutes"), options)).toEqual({ from: null, detected: "en" });
   });
 
-  it("compares the detected language by its base code, in any case", () => {
+  it("compares the detected language by its base code, in any case", async () => {
     const { options } = setup({}, [{ code: "EN-us", probability: 0.97 }]);
-    expect(translateFrom(received("I'll be there in ten minutes"), options)).toEqual({ from: null, detected: "en" });
+    expect(await translateFrom(received("I'll be there in ten minutes"), options)).toEqual({ from: null, detected: "en" });
   });
 
-  it("does not translate what the detector cannot tell", () => {
-    expect(translateFrom(received("hmmm okay then"), setup({}, [{ code: "und", probability: 1 }]).options)).toEqual({ from: null, detected: null });
-    expect(translateFrom(received("hmmm okay then"), setup({}, []).options)).toEqual({ from: null, detected: null });
+  it("does not translate what the detector cannot tell", async () => {
+    expect(await translateFrom(received("hmmm okay then"), setup({}, [{ code: "und", probability: 1 }]).options)).toEqual({ from: null, detected: null });
+    expect(await translateFrom(received("hmmm okay then"), setup({}, []).options)).toEqual({ from: null, detected: null });
   });
 
-  it("needs a probability of 0.5 or more", () => {
-    expect(translateFrom(received("Bom dia pessoal"), setup({}, [{ code: "pt", probability: 0.49 }]).options)).toEqual({ from: null, detected: null });
-    expect(translateFrom(received("Bom dia pessoal"), setup({}, [{ code: "pt", probability: 0.5 }]).options)).toEqual({ from: "pt", detected: "pt" });
+  it("needs a probability of 0.5 or more", async () => {
+    expect(await translateFrom(received("Bom dia pessoal"), setup({}, [{ code: "pt", probability: 0.49 }]).options)).toEqual({ from: null, detected: null });
+    expect(await translateFrom(received("Bom dia pessoal"), setup({}, [{ code: "pt", probability: 0.5 }]).options)).toEqual({ from: "pt", detected: "pt" });
   });
 
-  it("shows nothing for a language there is no model for, but still says which it is", () => {
+  it("shows nothing for a language there is no model for, but still says which it is", async () => {
     const { options } = setup({}, [{ code: "vo", probability: 0.8 }]);
-    expect(translateFrom(received("lol no way at all"), options)).toEqual({ from: null, detected: "vo" });
+    expect(await translateFrom(received("lol no way at all"), options)).toEqual({ from: null, detected: "vo" });
   });
 
-  it("does not translate under 4 letters, counted after emoji, links, numbers and mentions are taken out", () => {
+  it("does not translate under 4 letters, counted after emoji, links, numbers and mentions are taken out", async () => {
     const { asked, options } = setup();
     for (const text of ["ok", "sim 😂😂😂", "https://example.com/a-long-path-here ok", "123456 ok", "kkk 2025"]) {
-      expect(translateFrom(received(text), options)).toEqual({ from: null, detected: null });
+      expect(await translateFrom(received(text), options)).toEqual({ from: null, detected: null });
     }
     const mention = received("@Mariana oi", { mentions: [{ o: 0, l: 8, key: "k", name: "Mariana", me: false }] });
-    expect(translateFrom(mention, options)).toEqual({ from: null, detected: null });
+    expect(await translateFrom(mention, options)).toEqual({ from: null, detected: null });
     expect(asked).toEqual([]);
   });
 
-  it("takes a short message as the chat's language when the chat has one", () => {
+  it("takes a short message as the chat's language when the chat has one", async () => {
     const { asked, options } = setup();
-    expect(translateFrom(received("sì 👍"), { ...options, chatLanguage: "it" })).toEqual({ from: "it", detected: null });
-    expect(translateFrom(received("ok"), { ...options, chatLanguage: "en" })).toEqual({ from: null, detected: null });
-    expect(translateFrom(received("ok"), { ...options, chatLanguage: "vo" })).toEqual({ from: null, detected: null });
+    expect(await translateFrom(received("sì 👍"), { ...options, chatLanguage: "it" })).toEqual({ from: "it", detected: null });
+    expect(await translateFrom(received("ok"), { ...options, chatLanguage: "en" })).toEqual({ from: null, detected: null });
+    expect(await translateFrom(received("ok"), { ...options, chatLanguage: "vo" })).toEqual({ from: null, detected: null });
     expect(asked).toEqual([]);
   });
 
-  it("does not translate a message with no letters at all, whatever the chat's language", () => {
+  it("does not translate a message with no letters at all, whatever the chat's language", async () => {
     const { options } = setup();
     for (const text of ["😂😂", "42", "https://example.com"]) {
-      expect(translateFrom(received(text), { ...options, chatLanguage: "it" }).from).toBeNull();
+      expect((await translateFrom(received(text), { ...options, chatLanguage: "it" })).from).toBeNull();
     }
   });
 
-  it("does not translate a message that is JSON", () => {
+  it("does not translate a message that is JSON", async () => {
     const { asked, options } = setup();
-    expect(translateFrom(received('{"nome": "Ana", "cidade": "Lisboa"}'), options).from).toBeNull();
+    expect((await translateFrom(received('{"nome": "Ana", "cidade": "Lisboa"}'), options)).from).toBeNull();
     expect(asked).toEqual([]);
   });
 });
@@ -131,9 +131,9 @@ describe("detectableText", () => {
     expect(detectableText("lol no way 😂👍🏽❤️")).toBe("lol no way");
   });
 
-  it(`hands the detector at most ${DETECT_CHARS} characters`, () => {
+  it(`hands the detector at most ${DETECT_CHARS} characters`, async () => {
     const { asked, options } = setup();
-    translateFrom(received("palavra ".repeat(2_000)), options);
+    await translateFrom(received("palavra ".repeat(2_000)), options);
     expect(asked[0].length).toBeLessThanOrEqual(DETECT_CHARS);
   });
 });
