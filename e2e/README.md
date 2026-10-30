@@ -341,7 +341,9 @@ In CI it is a required check: `ci.yml` calls `desktop-macos.yml` (`macos-15`, ab
 every pull request and push (a pull request that changes only `apps/website/` or `docs/` skips it), and CI Success needs
 it. Pushes to `dev` save its compiled dependencies, which pull requests restore. It became one after 20 runs in a row passed on GitHub's
 runners. It also runs nightly on `dev`, and by hand with `repeat` (Actions → Desktop on macOS → Run workflow) to run
-the test that many times on one build, which is how to measure a suspected flake.
+the test that many times on one build, which is how to measure a suspected flake. A hung run stops after 15 minutes
+per repeat and still attaches its report. If the job fails with its steps left unfinished and no report, read the job's
+annotations: "The hosted runner lost communication" means GitHub lost the machine and no limit of ours applies.
 
 ## The combination matrix
 
