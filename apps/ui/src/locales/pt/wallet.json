@@ -593,6 +593,7 @@
   "send": {
     "balance": "Saldo: {{amount}} {{unit}}",
     "cameraUnavailable": "Câmera indisponível. Cole, digite ou escolha uma imagem.",
+    "chooseAmount": "Esta fatura não tem valor: escolha quanto pagar.",
     "clipboardEmpty": "Nada para colar. Copie uma fatura ou um endereço antes.",
     "clipboardUnavailable": "Não foi possível ler a área de transferência. Cole ou digite abaixo.",
     "image": "Escolher imagem",

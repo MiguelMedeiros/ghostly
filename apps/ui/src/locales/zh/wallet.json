@@ -593,6 +593,7 @@
   "send": {
     "balance": "余额：{{amount}} {{unit}}",
     "cameraUnavailable": "相机不可用。请粘贴、输入或选择图片。",
+    "chooseAmount": "此发票没有金额:请选择支付金额。",
     "clipboardEmpty": "没有可粘贴的内容。请先复制发票或地址。",
     "clipboardUnavailable": "无法读取剪贴板。请在下方粘贴或输入。",
     "image": "选择图片",

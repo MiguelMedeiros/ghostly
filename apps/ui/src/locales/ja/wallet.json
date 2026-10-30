@@ -593,6 +593,7 @@
   "send": {
     "balance": "残高: {{amount}} {{unit}}",
     "cameraUnavailable": "カメラを使えません。貼り付け、入力、または画像を選んでください。",
+    "chooseAmount": "この請求書には金額がありません。支払う金額を選んでください。",
     "clipboardEmpty": "貼り付けるものがありません。先に請求書かアドレスをコピーしてください。",
     "clipboardUnavailable": "クリップボードを読めませんでした。下に貼り付けるか入力してください。",
     "image": "画像を選ぶ",

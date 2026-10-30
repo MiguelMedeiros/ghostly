@@ -593,6 +593,7 @@
   "send": {
     "balance": "Balance: {{amount}} {{unit}}",
     "cameraUnavailable": "Camera unavailable. Paste, type or choose an image.",
+    "chooseAmount": "This invoice has no amount: choose how much to pay.",
     "clipboardEmpty": "Nothing to paste. Copy an invoice or an address first.",
     "clipboardUnavailable": "Could not read the clipboard. Paste or type it below.",
     "image": "Choose image",

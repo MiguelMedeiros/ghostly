@@ -211,14 +211,97 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     });
   });
 
-  it("an invoice with no amount, and a QR that is no payment, are said plainly", async () => {
-    qr.text = anyAmount();
+  describe("an invoice with no amount", () => {
+    const quoted = (amount: number) => vi.fn(async () => ({ quote: "q-any", mint: TEST_MINT, amount, feeReserve: 2 }));
+    /** The Lightning card on another source than the mints: a node, which is not asked for a chosen amount. */
+    const onSource = (methods: Partial<WalletPlatform>) => {
+      const base = networkState(walletView({ mode: "testnet", mints: [mint(TEST_MINT, 5_000)], balance: 5_000 }) as WalletState, "testnet");
+      const state = { ...base, lightning: { mode: "testnet", providerId: "lnd", status: "ready", balance: 5_000, offered: [], recent: [] } } as unknown as WalletState;
+      const wallet: WalletPlatform = Object.assign(Object.create(servicesPlatform!.wallet), { getState: () => state, ...methods });
+      return renderApp(<CashuWallet wallet={wallet} state={state} rail="lightning" onOpenCashu={() => {}} />);
+    };
+
+    it("asks how much, reviews that amount through the mints, and pays it", async () => {
+      qr.text = anyAmount();
+      const quoteInvoice = quoted(700), payQuote = vi.fn(async () => true);
+      const { user } = show({ quoteInvoice, payQuote });
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      expect(await screen.findByTestId("wallet-pay-choose")).toHaveTextContent("This invoice has no amount: choose how much to pay.");
+      expect(quoteInvoice).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: /^Pay$/ })).toBeDisabled();
+      await user.type(screen.getByTestId("wallet-pay-amount"), "700");
+      await user.click(screen.getByRole("button", { name: /^Pay 700/ }));
+      expect(await screen.findByTestId("wallet-pay-review")).toHaveTextContent("Pay 700 test sats");
+      expect(quoteInvoice).toHaveBeenCalledWith(anyAmount(), "cashu", 700);
+      await user.click(screen.getByTestId("wallet-pay-confirm"));
+      expect(payQuote).toHaveBeenCalledWith("q-any", TEST_MINT, undefined, false);
+    });
+
+    it("on Mainnet the amount chosen still goes through the real-money confirmation", async () => {
+      qr.text = anyAmount();
+      const payQuote = vi.fn(async () => true);
+      const { user } = show({ quoteInvoice: quoted(700), payQuote }, "mainnet");
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      await user.type(await screen.findByTestId("wallet-pay-amount"), "700");
+      await user.click(screen.getByRole("button", { name: /^Pay 700/ }));
+      await user.click(await screen.findByTestId("wallet-pay-confirm"));
+      expect(payQuote).not.toHaveBeenCalled();
+      expect(screen.getByTestId("review-mainnet-confirm")).toHaveTextContent("Real money");
+    });
+
+    it("a mint that refuses says so, and the amount stays to change", async () => {
+      qr.text = anyAmount();
+      const { user } = show({ quoteInvoice: async () => { throw new Error("None of your mints can pay an invoice with no amount"); } });
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      await user.type(await screen.findByTestId("wallet-pay-amount"), "700");
+      await user.click(screen.getByRole("button", { name: /^Pay 700/ }));
+      expect(await screen.findByTestId("wallet-error")).toHaveTextContent("None of your mints can pay an invoice with no amount");
+      expect(screen.getByTestId("wallet-pay-amount")).toHaveValue("700");
+    });
+
+    it("the amount typed for one invoice does not carry over to the next thing given", async () => {
+      qr.text = anyAmount();
+      const { user } = show({ quoteInvoice: quoted(700) });
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      await user.type(await screen.findByTestId("wallet-pay-amount"), "700");
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      await waitFor(() => expect(screen.getByTestId("wallet-pay-amount")).toHaveValue(""));
+    });
+
+    it("past its expiry it is not paid, whatever the amount", async () => {
+      // Made two hours ago, good for one.
+      const now = Date.now(), clock = vi.spyOn(Date, "now").mockReturnValue(now - 2 * 3_600_000);
+      const { words } = bech32.decode(fakeInvoice(1, new Uint8Array(32).fill(8)) as `${string}1${string}`, false);
+      clock.mockRestore();
+      qr.text = bech32.encode("lnbcrt", words, false);
+      const { user } = show({ quoteInvoice: quoted(700) });
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      await user.type(await screen.findByTestId("wallet-pay-amount"), "700");
+      expect(screen.getByRole("button", { name: /^Pay/ })).toBeDisabled();
+    });
+
+    it("a source that is not the mints asks no amount: it is said plainly, and nothing is quoted", async () => {
+      qr.text = anyAmount();
+      const quoteInvoice = vi.fn();
+      const { user } = onSource({ quoteInvoice });
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      expect(await screen.findByTestId("wallet-pay-no-amount")).toHaveTextContent("This invoice has no amount.");
+      expect(screen.queryByTestId("wallet-pay-amount")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Pay$/ })).toBeDisabled();
+      expect(quoteInvoice).not.toHaveBeenCalled();
+    });
+  });
+
+  it("a QR that is no payment, or no QR at all, is said plainly", async () => {
     const quoteInvoice = vi.fn();
     const { user } = show({ quoteInvoice });
     await user.click(screen.getByRole("tab", { name: "Send" }));
-    await user.upload(screen.getByLabelText("Choose image"), picture());
-    expect(await screen.findByTestId("wallet-pay-no-amount")).toHaveTextContent("This invoice has no amount.");
-    expect(screen.getByRole("button", { name: /^Pay$/ })).toBeDisabled();
 
     qr.text = "https://example.com/menu";
     await user.upload(screen.getByLabelText("Choose image"), picture());

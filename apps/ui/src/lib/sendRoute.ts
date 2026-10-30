@@ -13,7 +13,7 @@ export type SendRoute =
   | { kind: "empty" }
   | { kind: "token"; text: string }
   | { kind: "invoice"; text: string; invoice: Bolt11Invoice }
-  /** An invoice with no amount: the payer would have to choose one, which the cards cannot pay yet. */
+  /** An invoice with no amount: the payer chooses one, which only the mints can pay (WISP 203). */
   | { kind: "no-amount"; text: string; invoice: Bolt11Invoice }
   | { kind: "destination"; text: string }
   /** A Lightning address or LNURL, but one that must not be asked (plain HTTP, credentials, too long): the reason. */
