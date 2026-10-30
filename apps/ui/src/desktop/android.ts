@@ -37,7 +37,8 @@ export function followAppVisibility(listen: ListenWith, doc: Document = document
 
 /**
  * A share from another app as Rust hands it over: its text, its files on the paste shelf, by token, and the names of
- * those Android did not copy, too large to bring in (`leftOut`), not read (`unread`) or with no room for them (`noRoom`).
+ * those Android did not copy, too large to bring in (`leftOut`), not read (`unread`), with no room for them (`noRoom`)
+ * or past the most one share brings (`pastLimit`).
  */
 interface Shared {
   title: string;
@@ -46,6 +47,7 @@ interface Shared {
   leftOut?: string[];
   unread?: string[];
   noRoom?: string[];
+  pastLimit?: string[];
 }
 
 /** Where a share that waits in the picker is kept across a restart of the page (a profile switch), tokens and all. */
@@ -160,6 +162,7 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
     const leftOut = [...shared.leftOut ?? [], ...shared.files.filter((file) => !taken.includes(file)).map((file) => file.name ?? "")];
     const unread = shared.unread ?? [];
     const noRoom = shared.noRoom ?? [];
+    const pastLimit = shared.pastLimit ?? [];
     const clips: ClipboardFile[] = taken
       .map(({ token, ...file }) => ({
         ...file,
@@ -185,6 +188,7 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
       ...(leftOut.length > 0 && { leftOut }),
       ...(unread.length > 0 && { unread }),
       ...(noRoom.length > 0 && { noRoom }),
+      ...(pastLimit.length > 0 && { pastLimit }),
       read: async () => {
         // Being read: a later share no longer lets these go under it; they go when the read ends.
         if (letGo === done) letGo = null;
