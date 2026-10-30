@@ -105,6 +105,17 @@ export function fileSpace(): string {
  * found here"), which failed a voice note after all its bytes had arrived.
  */
 export async function blobDigest(blob: Blob, onProgress?: (done: number) => void): Promise<string> {
+  // A Blob this side holds in memory anyway (at most `SMALL_FILE_BYTES`, a send's small path): the platform's digest, off
+  // the page's script. noble's, a step at a time on the main thread, was 16 long tasks of 65-90 ms for 16 MiB on a
+  // phone-class CPU, ~13-16x slower than crypto.subtle (agents#1765). Read whole with `arrayBuffer()` too, not `stream()`.
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle && blob.size <= SMALL_FILE_BYTES) {
+    const bytes = await blob.arrayBuffer();
+    if (bytes.byteLength !== blob.size) throw new Error("The file is shorter than it says");
+    const digest = new Uint8Array(await subtle.digest("SHA-256", bytes));
+    onProgress?.(blob.size);
+    return digestText(digest);
+  }
   const hash = sha256.create();
   for (let done = 0; done < blob.size;) {
     const part = new Uint8Array(await blob.slice(done, Math.min(blob.size, done + FILE_BYTES_STEP)).arrayBuffer());
