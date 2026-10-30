@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bech32 } from "@scure/base";
 import { TEST_MINTS } from "@ghostly/browser/shared/mints";
 import { fakeInvoice } from "@ghostly/browser/engine/paymentAdapters/providers/testing";
@@ -233,5 +233,78 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     await waitFor(() => expect(screen.getByTestId("wallet-send-camera")).toHaveFocus());
     expect(track.stop).toHaveBeenCalled();
     srcObject.mockRestore(); play.mockRestore();
+  });
+
+  describe("Send opening with the camera", () => {
+    const track = { stop: vi.fn() };
+    const camera = () => { qr.camera = { getTracks: () => [track] } as unknown as MediaStream; };
+    const touch = (only: boolean) => vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({ media: query, matches: query === "(any-pointer: coarse)" ? only : query === "(any-pointer: fine)" ? !only : false, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }));
+    beforeEach(() => {
+      track.stop.mockClear();
+      vi.spyOn(HTMLMediaElement.prototype, "srcObject", "set").mockImplementation(() => {});
+      vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    });
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it("on a phone the camera runs as Send opens, with the keyboard left down", async () => {
+      touch(true); camera();
+      const { user } = show({});
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      expect(await screen.findByTestId("wallet-send-scan-stop")).toBeInTheDocument();
+      expect(screen.getByTestId("wallet-pay-input")).not.toHaveFocus();
+    });
+
+    it("with a mouse or trackpad the camera waits for Scan", async () => {
+      touch(false); camera();
+      const { user } = show({});
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      expect(screen.getByTestId("wallet-send-camera")).toBeInTheDocument();
+      expect(screen.queryByTestId("wallet-send-scan-stop")).not.toBeInTheDocument();
+      expect(screen.getByTestId("wallet-pay-input")).toHaveFocus();
+    });
+
+    it("no camera, or none allowed: nothing is said until the person presses Scan", async () => {
+      touch(true);
+      const { user } = show({});
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      const scan = await screen.findByTestId("wallet-send-camera");
+      await waitFor(() => expect(scan).not.toHaveAttribute("aria-disabled"));
+      expect(screen.queryByTestId("wallet-send-scan-error")).not.toBeInTheDocument();
+      await user.click(scan);
+      expect(await screen.findByTestId("wallet-send-scan-error")).toHaveTextContent("Camera unavailable");
+    });
+
+    it("Paste and Choose image work while the camera runs, and stop it", async () => {
+      touch(true); camera();
+      qr.clipboard = "shop@example.com";
+      const { user } = show({});
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await screen.findByTestId("wallet-send-scan-stop");
+      await user.click(screen.getByTestId("wallet-send-paste"));
+      expect(screen.getByTestId("wallet-pay-input")).toHaveValue("shop@example.com");
+      expect(track.stop).toHaveBeenCalled();
+      expect(screen.queryByTestId("wallet-send-scan-stop")).not.toBeInTheDocument();
+    });
+
+    it("back from a review the camera stays off: it was started for opening Send", async () => {
+      touch(true); camera();
+      qr.text = invoice;
+      const { user } = show({ quoteInvoice: async () => ({ quote: "q-5", mint: TEST_MINT, amount: 21, feeReserve: 0 }) });
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await screen.findByTestId("wallet-send-scan-stop");
+      await user.upload(screen.getByLabelText("Choose image"), picture());
+      await user.click(within(await screen.findByTestId("wallet-pay-review")).getByRole("button", { name: "Cancel" }));
+      expect(await screen.findByTestId("wallet-send-camera")).toBeInTheDocument();
+      expect(screen.queryByTestId("wallet-send-scan-stop")).not.toBeInTheDocument();
+    });
+
+    it("leaving Send stops the camera", async () => {
+      touch(true); camera();
+      const { user } = show({});
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await screen.findByTestId("wallet-send-scan-stop");
+      await user.click(screen.getByRole("tab", { name: "Receive" }));
+      expect(track.stop).toHaveBeenCalled();
+    });
   });
 });

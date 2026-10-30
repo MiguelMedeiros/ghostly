@@ -85,6 +85,36 @@ test.describe("Send scans a QR", () => {
     } finally { server.close(); }
   });
 
+  test("on a phone, Send opens with the camera running and the keyboard down; Paste stops it and reads", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    await useTestnet(alice);
+    const page = alice.page;
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    // A touch screen with no mouse (lib/touchOnly.ts), set up after the wallet is: only these two answers are changed.
+    await page.context().addInitScript(() => {
+      const real = window.matchMedia.bind(window);
+      window.matchMedia = (query: string) => query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+        ? { matches: query === "(any-pointer: coarse)", media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }
+        : real(query);
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload();
+    await openWallet(alice, "cashu-testnet");
+    await page.getByTestId("wallet-send").click();
+    // The browser's fake camera: frames are playing in the preview, not only a button that changed.
+    const preview = page.getByTestId("wallet-send-scan").locator("video");
+    await expect(page.getByTestId("wallet-send-scan-stop")).toBeVisible();
+    await expect.poll(() => preview.evaluate((video: HTMLVideoElement) => video.videoWidth > 0 && !video.paused)).toBe(true);
+    await expect(page.getByTestId("wallet-pay-input")).not.toBeFocused();
+
+    await page.evaluate(() => navigator.clipboard.writeText("shop@example.com"));
+    await page.getByTestId("wallet-send-paste").click();
+    await expect(page.getByTestId("wallet-pay-input")).toHaveValue("shop@example.com");
+    await expect(page.getByTestId("wallet-send-camera")).toBeVisible();
+    await expect(preview).toBeHidden();
+    expect(await preview.evaluate((video: HTMLVideoElement) => (video.srcObject as MediaStream | null)?.getTracks().every((track) => track.readyState === "ended") ?? true), "the camera is off").toBe(true);
+  });
+
   test("on a phone, Scan, Paste and Choose image read whole in every language", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.i18n"] }, async ({ peer }) => {
     const alice = await peer("alice");
     await useTestnet(alice);
