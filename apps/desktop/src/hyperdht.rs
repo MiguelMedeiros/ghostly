@@ -77,6 +77,8 @@ pub struct HyperState {
     next: Arc<AtomicU64>,
     runtime: Slot,
     spawned: Arc<AtomicU64>,
+    /// The page's word for the app's exit, by endpoint and connection (`paired_hyperdht_parting`), sent by `part`.
+    partings: Arc<Mutex<HashMap<(u64, u64), String>>>,
     /// Node and the script, when a test brings its own.
     program: Option<(PathBuf, PathBuf)>,
 }
@@ -105,6 +107,22 @@ impl HyperState {
     /// before it held are stopped, as `paired_hyperdht_stop` stops one. One still starting ends as "stopped".
     pub fn page_started(&self) {
         self.peers.lock().unwrap().clear();
+        self.partings.lock().unwrap().clear();
+    }
+
+    /// The app is about to exit: what the page left to be said on each connection (`paired_hyperdht_parting`, a call's
+    /// hang-up) goes to the runtime now, after whatever the page sent, so the contact hears it even when the page is
+    /// gone (a logout ends WebKit's processes with the app; the runtime outlives that SIGTERM, and sends what it was
+    /// given before it leaves with the app). Each goes once. Returns once each is queued for the runtime.
+    pub async fn part(&self) {
+        let partings: Vec<_> = self.partings.lock().unwrap().drain().collect();
+        for ((endpoint, connection), text) in partings {
+            let Ok(tx) = sender(self, endpoint) else {
+                continue;
+            };
+            let value = json!({"type":"send", "id":connection, "seq":0, "text":text});
+            let _ = tx.send(Request { value, reply: None }).await;
+        }
     }
 
     /// Starts the runtime. Called with the slot locked, so two endpoints
@@ -491,12 +509,51 @@ pub async fn paired_hyperdht_send(
         .await
         .map_err(|_| "HyperDHT endpoint closed".into())
 }
+/// The most frames held for the app's exit: two connections on each of eight endpoints.
+const MAX_PARTINGS: usize = 16;
+
+/// The frame to send on this connection as the app exits (`HyperState::part`), in place of the one before; none takes
+/// it back. Text, within a frame's budget.
+#[tauri::command]
+pub fn paired_hyperdht_parting(
+    state: State<'_, HyperState>,
+    endpoint_id: u64,
+    connection_id: u64,
+    text: Option<String>,
+) -> Result<(), String> {
+    if text
+        .as_ref()
+        .is_some_and(|text| text.is_empty() || text.len() > 60 * 1024)
+    {
+        return Err("Frame exceeds transport budget".into());
+    }
+    sender(&state, endpoint_id)?;
+    let key = (endpoint_id, connection_id);
+    let mut partings = state.partings.lock().unwrap();
+    match text {
+        Some(_) if partings.len() >= MAX_PARTINGS && !partings.contains_key(&key) => {
+            return Err("Native connection limit reached".into());
+        }
+        Some(text) => {
+            partings.insert(key, text);
+        }
+        None => {
+            partings.remove(&key);
+        }
+    }
+    Ok(())
+}
 #[tauri::command]
 pub fn paired_hyperdht_close(
     state: State<'_, HyperState>,
     endpoint_id: u64,
     connection_id: u64,
 ) -> Result<(), String> {
+    state
+        .partings
+        .lock()
+        .unwrap()
+        .remove(&(endpoint_id, connection_id));
     sender(&state, endpoint_id)?
         .try_send(Request {
             value: json!({"type":"close", "id":connection_id}),
@@ -506,6 +563,11 @@ pub fn paired_hyperdht_close(
 }
 #[tauri::command]
 pub fn paired_hyperdht_stop(state: State<'_, HyperState>, endpoint_id: u64) {
+    state
+        .partings
+        .lock()
+        .unwrap()
+        .retain(|(endpoint, _), _| *endpoint != endpoint_id);
     state.peers.lock().unwrap().remove(&endpoint_id);
 }
 
@@ -974,6 +1036,59 @@ mod runtime_tests {
         // The next endpoint starts it again.
         start(&app, 4).await.unwrap();
         assert_eq!(spawned(&app), 2);
+    }
+
+    /// The page left a call's hang-up for its exit and is gone by then (a logout): the runtime says it on the
+    /// connection, once. One taken back, or left on a connection the page closed, is not said.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exiting_says_what_the_page_left_to_be_said() {
+        let app = app();
+        let (events_a, mut page_a) = page();
+        let (events_b, mut page_b) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events_a)
+            .await
+            .unwrap();
+        let b = paired_hyperdht_start(app.handle().clone(), app.state(), seed(2), events_b)
+            .await
+            .unwrap();
+        let connection = paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+            .await
+            .unwrap();
+        assert_eq!(next(&mut page_a).await["type"], "open");
+        let incoming = next(&mut page_b).await;
+
+        let hang_up = r#"{"t":"paired-call","s":"{\"t\":\"h\",\"ts\":1700000000001}"}"#;
+        for text in [String::new(), "x".repeat(60 * 1024 + 1)] {
+            assert_eq!(
+                paired_hyperdht_parting(app.state(), a.id, connection, Some(text)).unwrap_err(),
+                "Frame exceeds transport budget"
+            );
+        }
+        assert_eq!(
+            paired_hyperdht_parting(app.state(), 99, connection, Some(hang_up.into())).unwrap_err(),
+            "HyperDHT endpoint closed"
+        );
+        paired_hyperdht_parting(app.state(), a.id, connection, Some("older".into())).unwrap();
+        paired_hyperdht_parting(app.state(), a.id, connection, Some(hang_up.into())).unwrap();
+        // From b: taken back, and one on a connection b's page closed.
+        let back = incoming["id"].as_u64().unwrap();
+        paired_hyperdht_parting(app.state(), b.id, back, Some("taken back".into())).unwrap();
+        paired_hyperdht_parting(app.state(), b.id, back, None).unwrap();
+        paired_hyperdht_parting(app.state(), b.id, 77, Some("closed".into())).unwrap();
+        paired_hyperdht_close(app.state(), b.id, 77).unwrap();
+
+        let state = app.state::<HyperState>();
+        state.part().await;
+        state.part().await;
+        let frame = next(&mut page_b).await;
+        assert_eq!(
+            (&frame["type"], &frame["id"], &frame["text"]),
+            (&json!("frame"), &incoming["id"], &json!(hang_up))
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(page_a.try_recv().is_err(), "nothing came from b");
+        assert!(page_b.try_recv().is_err(), "said once");
+        assert!(state.partings.lock().unwrap().is_empty());
     }
 
     /// A contact's frame of 60 KiB of control characters, six bytes each once written as JSON (a line of 360 KiB),

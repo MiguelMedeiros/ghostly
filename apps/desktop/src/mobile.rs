@@ -33,6 +33,11 @@ pub mod hyperdht {
     }
 
     #[tauri::command]
+    pub fn paired_hyperdht_parting() -> Result<(), String> {
+        Err(NOT_HERE.into())
+    }
+
+    #[tauri::command]
     pub fn paired_hyperdht_send() -> Result<(), String> {
         Err(NOT_HERE.into())
     }
