@@ -37,7 +37,7 @@ export function LiveWaveform({ levels, bars = 40, className = "" }: { levels: nu
   return (
     <div className={`voice-live flex-1 min-w-0 ${className}`} aria-hidden="true" data-testid="voice-live">
       {padded.map((level, i) => (
-        <span key={i} style={{ height: `${Math.max(8, Math.min(1, level) * 100)}%` }} />
+        <span key={i} style={{ transform: `scaleY(${Math.max(0.08, Math.min(1, level))})` }} />
       ))}
     </div>
   );

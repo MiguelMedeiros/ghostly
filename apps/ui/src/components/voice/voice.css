@@ -74,9 +74,10 @@
 }
 .voice-live span {
   flex: 0 0 2px;
+  height: 100%;
   border-radius: 2px;
   background: currentColor;
-  transition: height 80ms linear;
+  /* A transform, not a height, and no transition: 20 readings a second kept every bar moving, the page drawn at each frame. */
 }
 
 /* The recording bar sits over the composer row; the mic button stays where the finger is. */
