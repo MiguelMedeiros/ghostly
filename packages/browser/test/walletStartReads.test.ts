@@ -56,10 +56,12 @@ it("a start reads the proofs and the payment reviews a few times, not once per w
     await new Promise((resolve) => setTimeout(resolve, 3_000));
   });
   console.log(`START READS: proofs ${reads.proofs}, reviews ${reads.intents}`);
-  // The balance still comes from the proofs.
+  // The balance still comes from the proofs, and the Cashu Lightning source shows the same.
   expect(started.getState().wallet.networks?.testnet.balance).toBe(PROOFS);
-  // Of them, 5 are the Cashu Lightning source's balance as its cards open, not the wallets' view.
-  expect(reads.proofs, "whole reads of the proofs store").toBeLessThanOrEqual(8);
+  expect(started.getState().wallet.networks?.testnet.lightning.balance).toBe(PROOFS);
+  // The Cashu Lightning source's balance, read as its cards open, read the whole proofs store 4-5 more times: it is
+  // the wallets' last view now.
+  expect(reads.proofs, "whole reads of the proofs store").toBeLessThanOrEqual(3);
   expect(reads.intents, "whole reads of the payment reviews").toBeLessThanOrEqual(3);
 }, 20_000);
 

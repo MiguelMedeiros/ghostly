@@ -1074,7 +1074,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A plugin registered or left after start: the pickers show the new list. */
   private stopWatchingAdapters?: () => void;
   /** Read when a source connects, once the constructor has run. */
-  private readonly providerHost = (network: WalletNetwork) => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, fedimint: this.fedimintWallets[network], invoke: this.options.invoke });
+  private readonly providerHost = (network: WalletNetwork) => ({ platform: this.options.platform ?? "web" as const, cashu: this.wallet, cashuBalance: () => this.walletView.networks?.[network].balance, fedimint: this.fedimintWallets[network], invoke: this.options.invoke });
   /**
    * The Lightning cards of each network, each through its own source (the Cashu mints, a node, a wallet connection).
    * A payment goes through the card picked for it; a request's invoice comes from the network's default for receiving.
