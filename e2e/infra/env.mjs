@@ -24,6 +24,7 @@ export const VARIABLES = {
   GHOSTLY_FEDIMINT_REGTEST: ["1", "Fedimint suites: a one-guardian federation, its LND gateway and an LND peer"],
   GHOSTLY_CLN_REGTEST: ["1", "Core Lightning source suites: two CLN nodes with a channel"],
   GHOSTLY_LND_REGTEST: ["1", "LND source suites: two LND nodes with a channel, REST from the page"],
+  GHOSTLY_MINT_LND_REGTEST: ["1", "Cashu suites on real Lightning: mintd on an LND node with a channel to a peer"],
   GHOSTLY_NWC_REGTEST: ["1", "Nostr Wallet Connect suites: two Alby Hubs on two LND nodes, a local relay"],
   GHOSTLY_USDT_LOCAL: ["1", "USDT suites: the local EVM chain with the test token deployed"],
   GHOSTLY_WEBLN_REGTEST: ["1", "WebLN suites: two LND nodes behind the injected browser wallets"],
@@ -33,6 +34,7 @@ export const VARIABLES = {
   // matrix) read the same names for ranges of their own.
   E2E_WEB_PORT: ["47100", "Port the suite serves the web build on (vite preview); LND's restcors allows this origin"],
   E2E_MINT_URL: ["http://127.0.0.1:47090", "Cashu test mint answering for testnut.cashu.space (support/mint.ts)"],
+  GHOSTLY_MINT_LND_URL: ["http://127.0.0.1:47098", "Cashu mint on a real LND node (support/mint-lnd-regtest), under its own address"],
   E2E_LNURL_PORT: ["47110", "First port the in-process Lightning address server tries (support/lnurl.ts; ten ports)"],
 
   // The regtest chain.
@@ -120,6 +122,7 @@ export const endpoints = {
   ark: { server: read("GHOSTLY_ARK_SERVER_URL"), esplora: read("GHOSTLY_ARK_ESPLORA_URL") },
   bark: { server: read("GHOSTLY_BARK_SERVER_URL"), esplora: read("GHOSTLY_BARK_ESPLORA_URL") },
   lnd: { alice: read("GHOSTLY_LND_ALICE_URL"), bob: read("GHOSTLY_LND_BOB_URL") },
+  mintOnLnd: read("GHOSTLY_MINT_LND_URL"),
   webln: { alice: read("GHOSTLY_WEBLN_ALICE_URL"), bob: read("GHOSTLY_WEBLN_BOB_URL") },
   cln: { alice: read("GHOSTLY_CLN_ALICE_WS"), bob: read("GHOSTLY_CLN_BOB_WS") },
   nwc: {
