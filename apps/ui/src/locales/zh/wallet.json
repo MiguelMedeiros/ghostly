@@ -114,7 +114,6 @@
     "maxFee": "你接受的最高手续费",
     "maxFeeInput": "最高手续费（{{unit}}）",
     "newAddress": "新地址",
-    "notAddress": "这不是此钱包的 Bitcoin 地址。",
     "notConnected": "{{label}} 未连接",
     "notConnectedDefault": "Bitcoin 来源未连接",
     "nothingYet": "暂无记录",

@@ -114,7 +114,6 @@
     "maxFee": "Most you accept in fees",
     "maxFeeInput": "Maximum fee in {{unit}}",
     "newAddress": "New address",
-    "notAddress": "That is not a Bitcoin address for this wallet.",
     "notConnected": "{{label}} is not connected",
     "notConnectedDefault": "The Bitcoin source is not connected",
     "nothingYet": "Nothing yet",

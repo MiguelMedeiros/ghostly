@@ -114,7 +114,6 @@
     "maxFee": "أقصى ما تقبله من رسوم",
     "maxFeeInput": "الحد الأقصى للرسوم ({{unit}})",
     "newAddress": "عنوان جديد",
-    "notAddress": "هذا ليس عنوان Bitcoin لهذه المحفظة.",
     "notConnected": "{{label}} غير متصل",
     "notConnectedDefault": "مصدر Bitcoin غير متصل",
     "nothingYet": "لا شيء بعد",

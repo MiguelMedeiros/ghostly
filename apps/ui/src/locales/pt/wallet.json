@@ -114,7 +114,6 @@
     "maxFee": "O máximo que você aceita de taxa",
     "maxFeeInput": "Taxa máxima em {{unit}}",
     "newAddress": "Novo endereço",
-    "notAddress": "Este não é um endereço Bitcoin para esta carteira.",
     "notConnected": "{{label}} não está conectado",
     "notConnectedDefault": "A fonte Bitcoin não está conectada",
     "nothingYet": "Nada ainda",
