@@ -18,7 +18,7 @@ export function BackupReminder({ due, busy, onBackUp, onLater }: { due: BackupDu
       <Row label={<span className="font-medium">{t("wallet.backupReminder.title", { wallet: WALLET_NAME[due.type] })}</span>}
         hint={t(unprotected ? "wallet.backupReminder.bodyUnprotected" : "wallet.backupReminder.body")} info={t(`wallet.backupReminder.info.${due.backup}`)}>
         <Button variant="primary" data-testid="backup-reminder-go" onClick={onBackUp}>{t(`wallet.backupReminder.go.${due.backup}`)}</Button>
-        <Button data-testid="backup-reminder-later" disabled={busy} onClick={onLater}>{t("wallet.backupReminder.later")}</Button>
+        <Button data-testid="backup-reminder-later" loading={busy} onClick={onLater}>{t("wallet.backupReminder.later")}</Button>
       </Row>
     </div>
   );
