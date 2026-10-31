@@ -75,6 +75,19 @@ export async function textFromStdin(read: StdinRead, command: string, asked: boo
   return text.replace(/\n$/, "");
 }
 
+/**
+ * `identity complete <draft>` with neither --evidence-file nor --stdin, stdin not a terminal: asked with nothing first,
+ * since a published record takes none; a draft that answers it takes a tool's output (`details.needs`) is asked again
+ * with what was piped, read as a send reads its text.
+ */
+export async function completeWithPipedEvidence(call: (params: Record<string, unknown>) => Promise<unknown>, params: Record<string, unknown>, read: StdinRead, note: (text: string) => void): Promise<unknown> {
+  try { return await call(params); } catch (error) {
+    if (!(error instanceof CliError) || error.details?.needs !== "evidence") throw error;
+  }
+  const evidence = await readUnasked(read, note, { what: "what the tool printed", missing: "Missing what the tool printed", command: `identity complete ${String(params.draft)}`, as: "--evidence-file f" });
+  return call({ ...params, evidence });
+}
+
 /** What `readUnasked` says: `what` is waited for, `missing` is the usage error's title, `as` the other way to give it. */
 interface Unasked { what: string; missing: string; command: string; as: string }
 

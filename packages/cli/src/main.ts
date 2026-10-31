@@ -14,7 +14,7 @@ import { jsonOut } from "./jsonOut";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
@@ -1118,6 +1118,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   // `events` and `chat history --translate`: added here, where the runtime is, to the answer the daemon gave.
   const translator = await translatorFor(parsed.options.translate, g.home);
   // Evidence is read here, where the file is: the daemon runs elsewhere.
+  const pipedEvidence = command.method === "identity.complete" && !params.evidenceFile && !params.stdin && process.stdin.isTTY !== true;
   if (command.method === "identity.complete") {
     if (params.evidenceFile) {
       try { params.evidence = readFileSync(params.evidenceFile as string, "utf8"); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
@@ -1144,7 +1145,9 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
       const warning = secretValuesWarning(list, params.type, params.provider, lineValues);
       if (warning) process.stderr.write(`ghostly: ${warning}\n`);
     }
-    const result = await s.call(command.method, params) as Record<string, unknown>;
+    const result = await (pipedEvidence
+      ? completeWithPipedEvidence((p) => s.call(command.method, p), params, readStdin, (note) => process.stderr.write(`ghostly: ${note}\n`))
+      : s.call(command.method, params)) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.
     if (command.method === "invite.join" && s.mode === "one-shot") {
       const joined = await oneShotJoinWait(s, result, typeof params.label === "string" ? params.label : undefined);
