@@ -18,7 +18,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 ghostly-transports = { path = "../../native/transports" }
-iroh = "=1.3.0"
+iroh = "=1.4.1"
 # `macos-proxy`: the sandbox spike's proxy that goes nowhere (src/app_sandbox.rs, test driver only).
 tauri = { version = "2", features = ["macos-proxy"] }
 tauri-plugin-process = "2"
