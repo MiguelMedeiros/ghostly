@@ -117,6 +117,13 @@ export const UNUSED_INVITE_WAIT_MAX_MS = 3 * 60_000;
  * hunt 1014-0136, 2026-10-14).
  */
 export const UNUSED_INVITE_READS_PER_MINUTE = 10;
+/**
+ * An invite this side made that nobody used, once no longer awaited, puts its key and its mailbox out this often, not
+ * every `PRESENCE_HEARTBEAT`: 20 of them added about 17 relay writes a minute for as long as the app ran (bug hunt,
+ * 2026-10-30). Not longer: a joiner goes live sooner while it finds both still good, the packet within `PRESENCE_WINDOW`
+ * and the envelope unexpired. At 30 minutes the slowest of 6 joins took 235 s, against 86 s of 9 at the heartbeat's pace.
+ */
+export const UNUSED_INVITE_UPKEEP_MS = 8 * 60_000;
 /** The keys and mailboxes of unused invites read slowly over each transport (an app's relays). */
 const unusedInviteReaders = new WeakMap<PkarrTransport, Set<object>>();
 /** Counts `reader` (an invite's key or mailbox) among the unused ones read over `transport` while `unused`, or no longer: how many there are. */
@@ -257,6 +264,8 @@ export interface LinkSessionOptions {
    * longer awaited, read less often while nobody is there (`unusedInviteWait`).
    */
   invite?: () => boolean;
+  /** Whether this is an invite this side made that nobody used yet (not one it joined): its upkeep slows too (`UNUSED_INVITE_UPKEEP_MS`). */
+  ownInvite?: () => boolean;
 }
 
 /** With `firstPublish: "after-first-poll"`, the first packet goes out by then whatever happened. */
@@ -309,6 +318,8 @@ export class LinkSession {
   private readonly awaitingSince: number;
   /** This side's invite, nobody used yet (`LinkSessionOptions.invite`). */
   private readonly invite: () => boolean;
+  /** This side's own invite, nobody used yet (`LinkSessionOptions.ownInvite`). */
+  private readonly ownInvite: () => boolean;
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
   /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
@@ -374,6 +385,7 @@ export class LinkSession {
     this.resumeReads = !!options.resumed;
     this.awaitingSince = Math.min(options.awaitingSince ?? this.startedAt, this.startedAt);
     this.invite = options.invite ?? (() => false);
+    this.ownInvite = options.ownInvite ?? (() => false);
   }
 
   get peerPresence(): PeerPresence {
@@ -690,9 +702,15 @@ export class LinkSession {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = setTimeout(() => {
       if (!this.running) return;
-      if (this.getServices() !== undefined) void this.publish(true).catch(() => {});
+      if (this.getServices() !== undefined && !this.upkeepWaits()) void this.publish(true).catch(() => {});
       this.scheduleHeartbeat();
     }, PRESENCE_HEARTBEAT);
+  }
+
+  /** An unused invite of this side's, no longer awaited, whose packet went out less than `UNUSED_INVITE_UPKEEP_MS` ago. */
+  private upkeepWaits(): boolean {
+    const now = Date.now();
+    return this.ownInvite() && !this.presence.online && !this.connected && now - this.awaitingSince >= AWAITING_PEER_MS && now - this.lastPublishedAt < UNUSED_INVITE_UPKEEP_MS - PRESENCE_HEARTBEAT / 2;
   }
 
   /**

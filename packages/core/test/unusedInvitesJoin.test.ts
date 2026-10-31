@@ -30,6 +30,38 @@ it("15 unused invites read a few times a minute between them, and a join on one 
 });
 
 /**
+ * Their writes kept the pace the reads left (bug hunt, 2026-10-30): a key and a mailbox every 4 minutes each, for as long as the
+ * app ran. Past its awaiting window an unused invite writes both half as often, and a join on one still goes live.
+ */
+it("15 unused invites write about half as often, and a join 40 minutes later still goes live", async () => {
+  const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+  const made = Array.from({ length: 15 }, () => invitation());
+  const app = pkarr.transport();
+  const inviters = made.map((m) => open(m.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
+  for (const inviter of inviters) inviter.link.setChatActive(false);
+  await vi.advanceTimersByTimeAsync(10 * 60_000);
+  const before = pkarr.publishes;
+  await vi.advanceTimersByTimeAsync(30 * 60_000);
+  // At the heartbeat's pace: 30 keys and mailboxes every 4 minutes, 7.5 writes a minute. Every 8 minutes: 3.75.
+  const perMinute = (pkarr.publishes - before) / 30;
+  expect(perMinute).toBeLessThan(5);
+  expect(perMinute).toBeGreaterThanOrEqual(3);
+  const joiner = open(made[6].joiner, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+  expect(await untilLive(inviters[6], joiner, 210_000)).toBeLessThan(210_000);
+}, 60_000);
+
+it("a joined chat whose inviter never came keeps its 4-minute writes: the inviter, back, looks for them", async () => {
+  const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+  const made = invitation();
+  const joiner = open({ ...made.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+  joiner.link.setChatActive(false); joiner.link.session.setActive(false);
+  await vi.advanceTimersByTimeAsync(15 * 60_000);
+  const before = pkarr.publishes;
+  await vi.advanceTimersByTimeAsync(20 * 60_000);
+  expect(pkarr.publishes - before).toBeGreaterThanOrEqual(8);
+});
+
+/**
  * The other side (bug hunt 1014-0136): 15 chats joined on invites whose inviter never came back (it deleted the chat,
  * its app is gone, the code was dead) were read at the background pace for as long as the app ran, 30 reads a minute,
  * twice what 15 unused invites cost their inviter. A joined chat whose inviter was never seen backs off the same way,
