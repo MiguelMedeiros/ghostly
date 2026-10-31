@@ -287,6 +287,28 @@ it("a received file that stopped arriving is asked for again, from where it stan
   expect((await db.getMessages(t.id)).filter((m) => m.id === "peer_ask-000001")).toHaveLength(1);
 }, 60_000);
 
+it("a received file is said done only once that is kept: the app gone before, it arrives again after the restart", async () => {
+  const t = await setup();
+  // The page goes away with the done record of the file still on its way to the database: it never lands.
+  let lost = true;
+  const patch = fileStore.patch.bind(fileStore);
+  const spy = vi.spyOn(fileStore, "patch").mockImplementation((id, change) =>
+    lost && change.wire3?.direction === "in" && change.wire3.id === "cut-000001" && change.wire3.state === "done" ? new Promise(() => {}) : patch(id, change));
+  cleanup.push(async () => spy.mockRestore());
+  t.offer("cut-000001", 632);
+  await vi.waitFor(async () => expect((await t.incoming("cut-000001"))?.transfer?.state).toBe("done"));
+  const { fileId } = (await t.incoming("cut-000001"))!;
+  // Long enough for a done said at once to reach the contact.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(t.records.get("out:cut-000001")?.state, "the contact is not told it is done before it is kept").toBe("verifying");
+  lost = false;
+  await t.restartApp();
+  await vi.waitFor(async () => expect((await fileStore.get(fileId))?.wire3?.state).toBe("done"), { timeout: 15_000 });
+  expect(t.records.get("out:cut-000001")?.state).toBe("done");
+  expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(632));
+  expect((await db.getMessages(t.id)).filter((m) => m.id === "peer_cut-000001")).toHaveLength(1);
+}, 60_000);
+
 it("sends a file to a contact with files/3, and cancels one on both sides", async () => {
   const t = await setup();
   const put1 = (wireId: string, size: number) => put(t, wireId, size);

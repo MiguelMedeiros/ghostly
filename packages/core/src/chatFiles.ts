@@ -232,6 +232,12 @@ export interface ChatFilesHost {
    * sending, stored when receiving); `progress` says only that moved, so keeping it can wait.
    */
   changed(record: FileTransferRecord, transferred: number, progress: boolean): void;
+  /**
+   * Resolves once what `changed` was given so far is kept, so a restart finds it. A receiver says a file is done
+   * (`pf-done`) only then: said before, a restart found it unfinished while its sender had it done, and asking for it
+   * again got no answer. Absent: `changed` keeps it at once.
+   */
+  kept?(): Promise<void>;
   /** Bytes a file may still take here, or null when the platform does not say. */
   room?(): Promise<number | null>;
   /**
@@ -908,7 +914,7 @@ export class ChatFiles {
       const { record } = existing;
       if (record.file.size !== file.size || record.file.name !== file.name) { this.send({ t: "pf-refuse", id, why: "invalid" }); return; }
       switch (record.state) {
-        case "done": this.send({ t: "pf-done", id }); return;
+        case "done": this.sayDone(id); return;
         case "declined": this.send({ t: "pf-refuse", id, why: "declined" }); return;
         case "cancelled":
           // Cancelled here stays cancelled; stopped by the sender (it could not read its file), it is taken again.
@@ -1071,7 +1077,7 @@ export class ChatFiles {
 
   private async onSum(entry: Entry, frame: Record<string, unknown>): Promise<void> {
     const { record } = entry, incoming = entry.in!;
-    if (record.state === "done") { this.send({ t: "pf-done", id: record.id }); return; }
+    if (record.state === "done") { this.sayDone(record.id); return; }
     if (record.state !== "active" || incoming.verifying || !incoming.target) return;
     if (frame.size !== record.file.size || typeof frame.digest !== "string" || !DIGEST.test(frame.digest)) return;
     const digest = frame.digest;
@@ -1089,13 +1095,23 @@ export class ChatFiles {
       record.digest = digest;
       record.confirmed = record.file.size;
       this.end(entry, "done");
-      this.send({ t: "pf-done", id: record.id });
+      this.sayDone(record.id);
     } else {
       await incoming.target.then((t) => t.discard()).catch(() => {});
       this.end(entry, "failed", "The file arrived damaged and was deleted. Ask for it again.");
       this.send({ t: "pf-refuse", id: record.id, why: "damaged" });
     }
     this.startNext();
+  }
+
+  /**
+   * `pf-done` once the host kept the file's done record (`kept`). Not kept (the app gone first), the sender still
+   * waits, offers it again on the next session, and the receiver answers from what it kept.
+   */
+  private sayDone(id: string): void {
+    const kept = this.host.kept?.().catch(() => {});
+    if (!kept) { this.send({ t: "pf-done", id }); return; }
+    void kept.then(() => this.send({ t: "pf-done", id }));
   }
 
   // ─── Frames ─────────────────────────────────────────────────────────────
