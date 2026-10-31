@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { CommunityMessageFrame, DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -916,11 +916,11 @@ export interface StoredMessage {
   /** A group message someone else sent that names me (or everyone). */
   mentioned?: true;
   /**
-   * A private group's message from another member: the frame it came in (sealed, signed by its author), kept on the
-   * group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`, WISP 902 § Catch-up). The engine's
-   * own: a row goes to a page without it (`withoutFrame`).
+   * A private group's message from another member, or a community's from anyone: the frame it came in (sealed, signed
+   * by its author), kept on the group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`,
+   * `COMMUNITY_LIMITS.store`). The engine's own: a row goes to a page without it (`withoutFrame`).
    */
-  frame?: GroupMessageFrame;
+  frame?: GroupMessageFrame | CommunityMessageFrame;
   /** How this message travelled, as the engine saw it go or come (the message's details view). */
   details?: MessageDetails;
   /** A link preview that came with the text (WISP 401 § Link previews): made by the sender's app, never fetched here. */

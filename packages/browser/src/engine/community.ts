@@ -386,9 +386,10 @@ export class Communities {
   async load(groups: StoredGroup[]): Promise<void> {
     for (const group of groups) {
       this.stored.set(group.id, group);
-      if (group.community) this.attach(group.community);
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
       const history = await this.store.getMessages(MESSAGE_LINK(group.id));
+      // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`) too, not from its record alone.
+      if (group.community) this.attach(group.community, history.flatMap(m => m.frame ? [{ id: m.id, frame: m.frame as CommunityMessageFrame }] : []));
       loadMarks(this.marks, group, history);
       this.host.loaded?.(group.id, history);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
@@ -1877,7 +1878,8 @@ export class Communities {
 
   // -- internals -------------------------------------------------------------------------------
 
-  private attach(state: CommunityState): void {
+  /** `rows`: what the group's rows hold to hand on (none yet for a group just made or joined). */
+  private attach(state: CommunityState, rows: { id: string; frame: CommunityMessageFrame }[] = []): void {
     const id = state.id;
     const session: CommunitySession = new CommunitySession(state, {
       save: async next => {
@@ -1909,14 +1911,18 @@ export class Communities {
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) });
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }), ...(m.frame && { frame: m.frame }) });
         placing(stored !== false);
         // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645).
-        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return;
+        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return false;
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
+        // On its row now. A copy I had already changes no row: the state keeps its frame.
+        return stored !== false;
       },
+      // A row of its own, small (`forgetFrame` on the host).
+      forgetFrame: rowId => { void this.host.forgetFrame?.(MESSAGE_LINK(id), rowId).catch(() => {}); },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
       // Who holds which files (WISP 503) is the file desk's; anything else the engine's.
       app: m => this.deliver(id, () => m.frame.t === GROUP_HAVE_FRAME ? this.files?.communityApp(id, m.sender, m.frame) : this.host.communityApp?.(id, m.sender, m.frame)),
@@ -1948,7 +1954,7 @@ export class Communities {
           return edge && this.host.linkHandled ? this.host.linkHandled(edge) : Promise.resolve(false);
         },
       }),
-    });
+    }, rows);
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], hubClocks: new HubClocks(() => session.myKey, HUB_CLOCK_READ_GAP_MS), head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),

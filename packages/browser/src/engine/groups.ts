@@ -747,9 +747,9 @@ export class Groups {
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
       const history = await this.store.getMessages(MESSAGE_LINK(group.id));
       const framed = history.filter(m => m.frame);
-      this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame!) })));
+      this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame as GroupMessageFrame) })));
       // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`), not from its own record.
-      if (group.state) this.attach(group.state, framed.map(m => m.frame!));
+      if (group.state) this.attach(group.state, framed.map(m => m.frame as GroupMessageFrame));
       if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
       loadMarks(this.marks, group, history);
       this.host.loaded?.(group.id, history);
