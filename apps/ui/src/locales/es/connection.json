@@ -27,7 +27,7 @@
   "dhtOnly": "Solo DHT",
   "directBlocked": {
     "hint": "Las conexiones directas están bloqueadas en esta red (¿una VPN o un cortafuegos?). Los chats siguen funcionando por relays, pero conectan más despacio.",
-    "info": "Este aviso desaparece cuando una conexión directa funciona. Un relay ve qué dispositivos hablan y cuándo, nunca lo que dicen. Las llamadas necesitan un servidor TURN (Configuración, Red).",
+    "info": "Este aviso desaparece cuando una conexión directa funciona. Un relay ve qué dispositivos hablan y cuándo, nunca lo que dicen. Las llamadas necesitan un servidor TURN (Ajustes, Red).",
     "title": "Conexiones directas bloqueadas"
   },
   "discovery": {

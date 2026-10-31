@@ -37,7 +37,7 @@ export const groupWait: Record<string, OptionSpec> = {
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
 /** `listen`, `events` and `chat history`: received messages with `translation: { from, text }` (translate.ts). */
-export const translate: OptionSpec = { type: "string", description: "Add a translation into this language (en, pt...) to received messages, made on this machine by the translation runtime" };
+export const translate: OptionSpec = { type: "string", description: "Not in this build yet (no language detector): messages print untranslated. Meant to add a translation into this language (en, pt...) to received messages, made on this machine" };
 export const net: OptionSpec ={ type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
 export const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
@@ -97,6 +97,12 @@ export const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "
 /** A pending chat's invite code lets whoever reads it take the chat: printed only when asked for. */
 export const showInvite: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print a pending chat's invite code (whoever has it can take the chat)" } };
 export const secret = (options: Parsed["options"]) => (options["show-secret"] === true ? { showSecret: true } : {});
+
+/**
+ * `--kind` of the typing commands: another word is a usage error (exit 2) before the profile opens, not the API's
+ * "kind must be one of" (exit 1). The words are core's TYPING_KINDS, written out: the package is not loaded here.
+ */
+export const typingKind: OptionSpec = { type: "string", choices: ["typing", "recording", "thinking"], description: "typing (default), recording (a voice note) or thinking" };
 
 /**
  * `--for` of the typing commands: the seconds it is kept on, 1 to 600, and never with `--stop`. A usage error (exit 2)

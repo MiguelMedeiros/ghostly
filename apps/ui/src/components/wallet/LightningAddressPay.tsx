@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { parseLightningDestination } from "@ghostly/core";
+import { parseEngineError, parseLightningDestination } from "@ghostly/core";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
 import { CASHU_MINT_SOURCE, holdsLess, spendable } from "../walletCardData";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
@@ -37,6 +37,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const [confirming, setConfirming] = useState(false);
   /** The amount typed the person's way ("1.000" sats in Portuguese); `amount` is what it means, or "" while unclear. */
   const amountField = useAmountText(amount, setAmount, t.language ?? "en", 0, t);
+  /** Max was pressed and the amount not typed over: it comes down by the fee, as all the card holds leaves none for it. */
+  const maxed = useRef(false);
   const real = wallet.getState()?.mode !== "testnet";
   /** Test sats say so wherever an amount shows, as the Cashu panel does. */
   const unit = satsIn(t, real ? "mainnet" : "testnet");
@@ -110,7 +112,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
           <div className="flex flex-wrap gap-2">
             <button type="button" className={primary} disabled={over !== undefined} {...working} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
-            <button type="button" className={quiet} disabled={busy} onClick={() => { setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
+            <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
           </div>
         )}
         {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
@@ -119,17 +121,30 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   }
 
   const fixed = info.minSat === info.maxSat;
-  // What the paying card holds, and the most of it this address takes (Max): the review still says when the fee
-  // makes it too much.
+  // What the paying card holds, and the most of it this address takes (Max): asking for its invoice takes the fee off.
   const state = wallet.getState();
   const holds = state ? spendable(via === "cashu" ? "cashu" : "lightning", state) : undefined;
   const max = holds === undefined ? undefined : Math.min(holds, info.maxSat);
   // Not a <form>: this panel lives inside the wallet's Send form, and a form in a form submits the page.
   const getInvoice = () => { if (!busy && Number(amount)) void run(async () => {
-    const got = await wallet.lightningAddressInvoice(info.id, Number(amount), comment || undefined);
-    const quoted = await wallet.quoteInvoice(got.invoice, via);
-    if (quoted.amount !== Number(amount)) throw new Error(t("wallet.lightning.mismatch"));
-    setInvoice(got); setQuote(quoted);
+    // The fee is known only from a quote of an invoice, so a Max asks again for what it leaves: twice at most, as a fee
+    // may grow a little with another invoice. What is left below the address's least is the refusal, or the review's say.
+    let sats = Number(amount);
+    for (let again = maxed.current ? 2 : 0; ; again--) {
+      let room: number;
+      try {
+        const got = await wallet.lightningAddressInvoice(info.id, sats, comment || undefined);
+        const quoted = await wallet.quoteInvoice(got.invoice, via);
+        if (quoted.amount !== sats) throw new Error(t("wallet.lightning.mismatch"));
+        room = maxed.current && holds !== undefined && sats + quoted.feeReserve > holds ? holds - quoted.feeReserve : sats;
+        if (room === sats || !again || room < info.minSat) { setAmount(String(sats)); setInvoice(got); setQuote(quoted); return; }
+      } catch (cause) {
+        const refusal = parseEngineError(cause instanceof Error ? cause.message : String(cause));
+        room = refusal?.code === "notEnoughForFee" ? Number(refusal.values.amount) : 0;
+        if (!maxed.current || !again || room < info.minSat || room >= sats) throw cause;
+      }
+      sats = room;
+    }
   }); };
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !composition.composing(e)) { e.preventDefault(); e.stopPropagation(); getInvoice(); } };
   return (
@@ -142,19 +157,19 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       <label className="flex items-baseline gap-2 bg-black/20 rounded-lg px-3 py-2 focus-within:ring-1 focus-within:ring-accent">
         <input data-testid="lnurl-amount" inputMode="numeric" placeholder="0" aria-label={t("wallet.ui.amountIn", { unit })} autoFocus={!fixed} disabled={fixed}
           className={`min-w-0 flex-1 bg-transparent border-none outline-none ${dense ? "text-lg" : "text-2xl"} font-semibold tabular-nums`}
-          aria-invalid={amountField.hint ? true : undefined} value={fixed ? amount : amountField.text} onChange={(e) => amountField.change(e.target.value)} onKeyDown={onEnter} />
+          aria-invalid={amountField.hint ? true : undefined} value={fixed ? amount : amountField.text} onChange={(e) => { maxed.current = false; amountField.change(e.target.value); }} onKeyDown={onEnter} />
         <span className="text-xs opacity-70 shrink-0">{unit}</span>
       </label>
       {amountField.hint && <p role="alert" className="text-xs m-0 text-danger-ink" data-testid="amount-unclear">{amountField.hint}</p>}
       {/* The line's dim is its text's only: Max keeps full-strength ink and the panel's phone-sized target. */}
       {holds !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} m-0 flex flex-wrap items-center gap-2`} data-testid="lnurl-balance">
         <span className="opacity-70">{t("wallet.send.balance", { amount: formatAmount(holds, t.language), unit })}</span>
-        {!fixed && max !== undefined && max >= info.minSat && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => setAmount(String(max))}>{t("wallet.send.max")}</button>}
+        {!fixed && max !== undefined && max >= info.minSat && <button type="button" className="min-h-6 max-md:min-h-11 rounded-md px-2.5 py-1 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => { maxed.current = true; setAmount(String(max)); }}>{t("wallet.send.max")}</button>}
       </p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={!Number(amount)} {...working} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
-        <button type="button" className={quiet} disabled={busy} onClick={() => { setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
+        <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
       </div>
       {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
     </div>

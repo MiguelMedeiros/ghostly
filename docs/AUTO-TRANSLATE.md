@@ -224,6 +224,8 @@ Measured on Desktop Linux (see Spike). The pressure is RAM, not CPU:
 - **CPU:** 20-50 ms per message; a cold first message 150-170 ms. A catch-up of 30 messages: 0.6-0.8 s one by one,
   0.3 s with `runBatch`. So arrivals are batched (up to 30 per call), and only the messages on screen (plus the
   next screenful) are translated, never a whole history.
+- **The detector:** evaluating its 2 MB dictionary stopped the page about 500 ms in WebKitGTK, so it loads and runs in a
+  worker. Each detection is under 1 ms.
 - **Long messages:** a 983-character message took 106-120 ms. Above 4 000 characters, the bubble offers
   **Translate** instead of doing it by itself.
 - **Battery (phones, later):** not measured. A phone CPU will be slower than this desktop one, and the 250 MB per

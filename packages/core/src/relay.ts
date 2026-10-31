@@ -43,6 +43,8 @@ const isGroupRead = (who: Asker): boolean => who.group && !who.write && !who.bac
 const isTurnRead = (who: Asker): boolean => !who.write && !who.door && (who.background || !who.group);
 /** A write that goes first once the budget frees a request (see `WRITE_FIRST_MS`): a chat's or a group's, never a background one. */
 const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.background ? null : who.group ? "group" : "chat");
+/** A key's turn neither asked nor read in the last minute: it is dropped, and asking again starts a new one (`TURNS_PRUNE_MS`). */
+const staleTurn = (turn: { servedAt: number; askedAt: number }, now: number): boolean => now - Math.max(turn.askedAt, turn.servedAt) >= 60_000;
 
 /**
  * Public Pkarr relays. They are generic Pkarr infrastructure (an HTTP bridge to
@@ -225,6 +227,11 @@ const WATCH_TURN_MS = 5_000;
  * minutes, their contacts online and offering, and showed them offline at 6 minutes (CLI bug hunt, 2026-10-13).
  */
 const READ_TURN_MS = 5_000;
+/**
+ * The keys' turns asked and read over a minute ago are dropped at most this often: walking every key on each ask cost in
+ * proportion to the chats, 12-14% of an idle web app's script with 200 chats.
+ */
+const TURNS_PRUNE_MS = 1_000;
 /**
  * A 1:1 chat's read the budget held back this long without a break is starved: it goes before the writes that wait
  * (`WRITE_FIRST_MS`) and past the background share, within the minute, the key held back longest first. A daemon back
@@ -416,6 +423,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly readTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; watch: boolean; lane: string }>();
   /** Per key read in turn (`isTurnRead`), when a read of it last went out and when it last asked (`READ_TURN_MS`). */
   private readonly keyTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; who: Asker }>();
+  /** When `readTurns` and `keyTurns` last dropped their stale turns (`TURNS_PRUNE_MS`). */
+  private readonly turnsPrunedAt = new Map<Map<string, unknown>, number>();
   /** Groups' reads (not background ones) on each relay in the last `GROUP_RATION_WINDOW_MS`. */
   private readonly spentGroupReads = new Map<string, number[]>();
   /** When a group's read last found each relay's minute full: its reads there are rationed for `GROUP_RATION_MS`. */
@@ -1321,9 +1330,9 @@ export class RelayTransport implements PkarrTransport {
 
   /** A group's read of `key`, or a chat's watch read, asks: it waits for its turn from now on, unless it is taken (`readsAhead`). */
   private readAsked(key: string, who: Asker, now: number): void {
-    for (const [other, turn] of this.readTurns) if (now - Math.max(turn.askedAt, turn.servedAt) >= 60_000) this.readTurns.delete(other);
+    this.pruneTurns(this.readTurns, now);
     const turn = this.readTurns.get(key);
-    this.readTurns.set(key, { servedAt: turn?.servedAt ?? -Infinity, askedAt: now, waiting: true, watch: isWatch(who) || isChatWatch(who), lane: watchLane(who) });
+    this.readTurns.set(key, { servedAt: turn && !staleTurn(turn, now) ? turn.servedAt : -Infinity, askedAt: now, waiting: true, watch: isWatch(who) || isChatWatch(who), lane: watchLane(who) });
   }
 
   /**
@@ -1344,8 +1353,16 @@ export class RelayTransport implements PkarrTransport {
 
   /** A read of `key` that takes turns asks: it waits for its turn from now on, unless it is taken (`turnAhead`). */
   private turnAsked(key: string, who: Asker, now: number): void {
-    for (const [other, turn] of this.keyTurns) if (now - Math.max(turn.askedAt, turn.servedAt) >= 60_000) this.keyTurns.delete(other);
-    this.keyTurns.set(key, { servedAt: this.keyTurns.get(key)?.servedAt ?? -Infinity, askedAt: now, waiting: true, who });
+    this.pruneTurns(this.keyTurns, now);
+    const turn = this.keyTurns.get(key);
+    this.keyTurns.set(key, { servedAt: turn && !staleTurn(turn, now) ? turn.servedAt : -Infinity, askedAt: now, waiting: true, who });
+  }
+
+  /** Drops the turns asked and read over a minute ago, at most once in `TURNS_PRUNE_MS` (or when the clock went back). */
+  private pruneTurns<T extends { servedAt: number; askedAt: number }>(turns: Map<string, T>, now: number): void {
+    if (Math.abs(now - (this.turnsPrunedAt.get(turns) ?? -Infinity)) < TURNS_PRUNE_MS) return;
+    this.turnsPrunedAt.set(turns, now);
+    for (const [key, turn] of turns) if (staleTurn(turn, now)) turns.delete(key);
   }
 
   /**

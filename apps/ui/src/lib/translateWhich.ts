@@ -16,7 +16,7 @@ export interface LanguageGuess {
   probability: number;
 }
 
-export type DetectLanguages = (text: string) => readonly LanguageGuess[];
+export type DetectLanguages = (text: string) => readonly LanguageGuess[] | Promise<readonly LanguageGuess[]>;
 
 export interface TranslateWhichOptions {
   /** What received messages are translated into. */
@@ -96,10 +96,10 @@ const baseCode = (code: string) => code.toLowerCase().split(/[-_]/)[0];
  * taken to be in the chat's language, when it has one; anything else in what the detector is sure of. The app's
  * language and a language with no model are shown as they are.
  */
-export function translateFrom(
+export async function translateFrom(
   message: Pick<ChatMessage, "sender" | "text" | "file" | "paymentId" | "card" | "callEvent" | "systemEvent" | "mentions">,
   { appLanguage, detect, canTranslate, chatLanguage }: TranslateWhichOptions,
-): TranslateWhich {
+): Promise<TranslateWhich> {
   if (message.sender !== "peer") return NONE;
   if (message.file || message.paymentId || message.card || message.callEvent || message.systemEvent) return NONE;
 
@@ -110,7 +110,7 @@ export function translateFrom(
     language && language !== UNDETERMINED && language !== appLanguage && canTranslate(language) ? language : null;
   if (letters < MIN_LETTERS) return { from: usable(chatLanguage && baseCode(chatLanguage)), detected: null };
 
-  const top = detect(text.slice(0, DETECT_CHARS))[0];
+  const top = (await detect(text.slice(0, DETECT_CHARS)))[0];
   if (!top || top.probability < MIN_PROBABILITY) return NONE;
   const detected = baseCode(top.code);
   if (detected === UNDETERMINED) return NONE;

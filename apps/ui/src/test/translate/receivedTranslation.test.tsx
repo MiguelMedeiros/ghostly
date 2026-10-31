@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const runtime = vi.hoisted(() => ({ translateTexts: vi.fn(), desktop: true }));
+const runtime = vi.hoisted(() => ({ translateTexts: vi.fn(), desktop: true, slowDetector: false }));
 vi.mock("../../desktop/translate", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../desktop/translate")>(),
   translateTexts: runtime.translateTexts,
@@ -12,8 +12,11 @@ vi.mock("../../lib/externalLink", async (importOriginal) => ({
 }));
 // The detector the app will load (`@qvac/langdetect-text`), as a few words of each language.
 vi.mock("../../lib/translateDetector", () => ({
-  loadDetector: async () => (text: string) => /olá|tudo|você|chego|amanhã|obrigad/i.test(text) ? [{ code: "pt", probability: 0.95 }]
-    : /hola|gracias|mañana/i.test(text) ? [{ code: "es", probability: 0.95 }] : [{ code: "en", probability: 0.95 }],
+  loadDetector: async () => (text: string) => {
+    const guesses = /olá|tudo|você|chego|amanhã|obrigad/i.test(text) ? [{ code: "pt", probability: 0.95 }]
+      : /hola|gracias|mañana/i.test(text) ? [{ code: "es", probability: 0.95 }] : [{ code: "en", probability: 0.95 }];
+    return runtime.slowDetector ? new Promise((resolve) => setTimeout(() => resolve(guesses), 5)) : guesses;
+  },
 }));
 
 import { MessageBubble } from "../../components/MessageBubble";
@@ -67,6 +70,7 @@ beforeEach(() => {
   vi.stubGlobal("IntersectionObserver", FakeObserver);
   vi.stubEnv("VITE_TRANSLATE", "1");
   runtime.desktop = true;
+  runtime.slowDetector = false;
   runtime.translateTexts.mockReset();
   runtime.translateTexts.mockImplementation(async (pair: string, texts: string[]) => english(pair, texts));
   settings(true);
@@ -92,6 +96,14 @@ describe("a received message shows its translation, with Show original", () => {
     await user.click(within(line).getByRole("button", { name: "Show translation" }));
     expect(within(body).getByTestId("message-text")).toHaveTextContent("Hi, how are you?");
     expect(asked()).toHaveLength(1);
+  });
+
+  it("a short message takes the language of the one before it, however long the detector takes", async () => {
+    runtime.slowDetector = true;
+    chat([received("Olá, tudo bem?"), received("sim")]);
+    await seen(bubbles());
+    await waitFor(() => expect(asked().flatMap(([, texts]) => texts)).toContain("sim"));
+    expect(asked().every(([pair]) => pair === "pt-en")).toBe(true);
   });
 
   it("shows the original until the translation comes, with no line meanwhile", async () => {

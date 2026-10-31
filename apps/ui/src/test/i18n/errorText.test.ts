@@ -189,6 +189,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Ecash from mint.example is not accepted", `${BROWSER}/engine/wallet.ts`, " is not accepted"],
   ["Add a mint in Settings first", `${BROWSER}/engine/wallet.ts`],
   ["Not enough sats in your wallet", CODES],
+  ["Not enough sats in your wallet: 690 sats leave room for the fee", CODES, ": {amount} sats leave room for the fee"],
   ["The Lightning payment did not go through. The sats are back in your wallet.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet."],
   ["The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet, less "],
   // Never alone: the start of the two above, said on its own before what came back.
@@ -652,7 +653,10 @@ describe("errors in the app's language", () => {
     const pt = translators.pt;
     expect(errorText("No mint could create an invoice: mint.example did not answer", pt)).toBe("Nenhum mint conseguiu criar uma fatura. mint.example não respondeu");
     expect(errorText("The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", pt))
-      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram, menos 2 sats que ficaram com o mint.");
+      .toBe("O pagamento Lightning não foi concluído. Os sats voltaram; o mint ficou com 2.");
+    for (const translate of Object.values(translators)) {
+      expect(errorText("Invoice already paid The sats are back in your wallet, less 1 sat the mint kept as its fee.", translate)).not.toMatch(/\b1 sats/);
+    }
     expect(errorText("Refused: Already paid by another member of the group. 1200 sats came back; the mint kept 2 as its fee.", pt))
       .toBe("O pagamento foi recusado. Já foi pago por outro membro do grupo. 1.200 sats voltaram; o mint ficou com 2.");
     expect(errorText("You sent many files to this group just now. Wait 7 minutes.", pt)).toBe("Você enviou muitos arquivos a este grupo agora há pouco. Espere 7 minutos e envie de novo.");

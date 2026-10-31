@@ -78,7 +78,7 @@
     },
     "sameDevice": {
       "copy": "Ripristina comunque come copia",
-      "firstProfile": "Il primo profilo non si può eliminare. Per sostituirlo, cancella i suoi dati in Impostazioni.",
+      "firstProfile": "Il primo profilo non si può eliminare. Per sostituirlo, cancella i suoi dati in Opzioni.",
       "hint": "Entrambi agirebbero come la stessa persona per i tuoi contatti. Sostituisci l'originale, o non usarli tutti e due.",
       "info": "Se sono attivi entrambi, i messaggi possono arrivare all'uno o all'altro. Sostituisci ripristina la copia, passa a quella e poi propone di eliminare l'originale, con i soliti controlli.",
       "replace": "Sostituisci l'originale",

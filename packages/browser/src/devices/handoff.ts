@@ -799,8 +799,10 @@ export class HandoffGiver {
     });
     const parts = [...send];
     if (pass === 2) {
-      const bundle = await this.ports.source.bundle();
-      const digest = toBase64Url(sha256(bundle));
+      // This device is frozen: every run of pass 2 sends the same bundle, and a link back from a blink goes on where it was.
+      this.bundleMade ??= this.ports.source.bundle().then((bytes) => ({ bytes, digest: toBase64Url(sha256(bytes)) }));
+      const made = this.bundleMade;
+      const { bytes: bundle, digest } = await made.catch((error: unknown) => { if (this.bundleMade === made) this.bundleMade = null; throw error; });
       parts.push(["db/peer", bundle.length, digest]);
       out.push({ name: "db/peer", size: bundle.length, read: async (offset, length) => bundle.subarray(offset, offset + length) });
       this.bundlePart = ["db/peer", bundle.length, digest];
@@ -828,6 +830,7 @@ export class HandoffGiver {
     else this.arm(HANDOFF_TIMINGS.verifiedMs, () => this.backToActive());
   }
   private bundlePart: HandoffPart | null = null;
+  private bundleMade: Promise<{ bytes: Uint8Array; digest: string }> | null = null;
   private paused = false;
   private stallTimer: ReturnType<typeof setInterval> | undefined;
   private laterParts: HandoffPart[] = [];
@@ -878,6 +881,7 @@ export class HandoffGiver {
       handoff: { ...record.handoff!, step: "released", release, at: this.now(), secret: undefined },
     });
     if (this.timer) clearTimeout(this.timer);
+    this.bundleMade = null;
     this.phase = "released";
     // The wrong passwords counted here go with the profile: a device does not get fresh tries on each new active one.
     this.out({ ...handoffReleaseFrame(release), ...(record.handoffAttempts ? { a: record.handoffAttempts } : {}) });
@@ -891,6 +895,7 @@ export class HandoffGiver {
     // Once: the wait for the taker and the wait for a copy that stopped can both end here.
     if (this.phase === "released" || this.phase === "failed") return;
     this.sender.stop();
+    this.bundleMade = null;
     clearInterval(this.stuckTimer);
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     this.phase = "failed";
@@ -901,7 +906,7 @@ export class HandoffGiver {
 
   private begin(key: string, id: string, record: DeviceRecord): void {
     this.peer = key; this.id = id; this.turn = record.turn; this.deviceName = name(record, key);
-    this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null;
+    this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null; this.bundleMade = null;
     this.offerHellos.clear();
     this.sender = new PartSender(this.now);
   }
@@ -914,7 +919,7 @@ export class HandoffGiver {
     if (this.timer) clearTimeout(this.timer);
     this.phase = "idle";
     this.failure = failure;
-    this.pake = null; this.have = null; this.planned = null; this.secret = null;
+    this.pake = null; this.have = null; this.planned = null; this.secret = null; this.bundleMade = null;
     this.changed();
   }
 
@@ -1372,7 +1377,7 @@ export class HandoffTaker {
     const staged = await this.staging!.held();
     const digests = [...staged.map((file) => file.sha256), ...(record?.heldFiles ?? []).map((file) => file.sha256)];
     const partial: Record<string, number> = {};
-    for (const part of this.incoming.values()) if (!part.done && part.got > 0 && part.id) partial[part.name] = part.got;
+    for (const part of this.incoming.values()) if (!part.done && part.got > 0) partial[part.name] = part.got;
     for (const frame of handoffHaveFrames(digests, partial)) this.out(frame);
   }
 
@@ -1401,9 +1406,12 @@ export class HandoffTaker {
       for (const id of ids[held.sha256] ?? []) if (!staged.has(id)) copies.push({ fromId: held.id, file: { id, size: held.size, sha256: held.sha256 } });
     }
     if (copies.length) try { await this.staging!.copyHeld(copies); } catch { /* sent again below on a later pass */ }
+    // This device said it held part of a bundle, and the giver made another: it is sending that one from the wrong byte.
+    let saidOtherBundle = false;
     for (const [partName, size, digest] of parts) {
       const known = this.incoming.get(partName);
       if (known && known.size === size && known.sha256 === digest && !known.done) continue;
+      if (known && !known.id && !known.done && known.got > 0) saidOtherBundle = true;
       const fileDigest = filePartDigest(partName);
       const id = fileDigest ? ids[fileDigest]?.[0] : undefined;
       if (fileDigest && !id) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
@@ -1414,6 +1422,7 @@ export class HandoffTaker {
     }
     this.totals = { bytes: 0, total };
     this.changed();
+    if (saidOtherBundle) await this.sendHave();
     await this.maybeVerified();
   }
 
@@ -1460,6 +1469,8 @@ export class HandoffTaker {
       const bytes = new Uint8Array(part.size);
       let at = 0;
       for (const chunk of part.chunks!) { bytes.set(chunk, at); at += chunk.length; }
+      // The pieces go once copied: the bundle is not held twice while it is restored.
+      part.chunks = [];
       this.bundle = { part: [part.name, part.size, part.sha256], bytes };
     }
     await this.maybeVerified();
@@ -1501,6 +1512,8 @@ export class HandoffTaker {
     const h = handoffDigest(this.turn + 1, fromBase64Url(this.peer!), this.ports.ownKey, parts);
     // Written into the staging namespace before anything is said: a crash after `handoff-verified` loses nothing.
     await this.staging!.restore(this.bundle.bytes, files);
+    // Restored: its bytes are in the staging namespace, not needed here again.
+    this.bundle = null;
     this.h = h;
     const record = await this.ports.records.read();
     await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() } });

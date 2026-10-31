@@ -1,4 +1,4 @@
-import { BUTTONS_CAPABILITY, STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
+import { BUTTONS_CAPABILITY, BUTTON_STYLES, STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
 import { bool, chatOrGroup, messageOf, node, num, oneOf, str, type Method, type Params } from "./apiKit";
@@ -16,8 +16,9 @@ import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 /**
  * `--button id:Label` (again for each, 1 to 6), `--style id=primary|neutral|danger`, `--once` and `--id`, as the
  * method's parameters: `buttons` and `buttonsId`. Nothing when no `--button` is given. The label may hold colons: the
- * id ends at the first one. Two labels that read the same (ignoring case and spaces at the ends), or a label that is
- * another button's id, are a usage error here; other bounds (ids, labels, how many) are the card's, checked when it is sent.
+ * id ends at the first one. An id given twice, two labels that read the same (ignoring case and spaces at the ends), a
+ * label that is another button's id, or a style not listed are a usage error here, before the profile opens; other
+ * bounds (ids, labels, how many) are the card's, checked when it is sent.
  */
 export function buttonsOf(options: Parsed["options"]): { buttons: Record<string, unknown>[]; buttonsId?: string } | undefined {
   const given = Array.isArray(options.button) ? options.button as string[] : [];
@@ -31,6 +32,8 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
     if (colon < 1 || colon === value.length - 1) throw new CliError("usage", `--button takes id:Label, like yes:Yes, not ${JSON.stringify(value)}`);
     return { id: value.slice(0, colon), label: value.slice(colon + 1).trim() };
   });
+  const twice = buttons.findIndex((button, at) => buttons.findIndex((other) => other.id === button.id) !== at);
+  if (twice !== -1) throw new CliError("usage", `--button ${JSON.stringify(given[twice])} repeats the id ${JSON.stringify(buttons[twice].id)}: each button takes its own`);
   // Two buttons a typed answer could not tell apart: the same label, or a label that is another's id (ignoring case).
   const clash = buttonLabelClash(buttons);
   if (clash) {
@@ -43,7 +46,9 @@ export function buttonsOf(options: Parsed["options"]): { buttons: Record<string,
     const eq = value.indexOf("=");
     const button = eq > 0 ? buttons.find((b) => b.id === value.slice(0, eq)) : undefined;
     if (!button) throw new CliError("usage", `--style takes id=primary|neutral|danger for one of the buttons, not ${JSON.stringify(value)}`);
-    button.style = value.slice(eq + 1);
+    const style = value.slice(eq + 1);
+    if (!(BUTTON_STYLES as readonly string[]).includes(style)) throw new CliError("usage", `--style ${JSON.stringify(value)}: a button's style is ${BUTTON_STYLES.join(", ")}`);
+    button.style = style;
   }
   if (options.once === true) for (const button of buttons) button.once = true;
   return { buttons, ...(options.id !== undefined && { buttonsId: String(options.id) }) };

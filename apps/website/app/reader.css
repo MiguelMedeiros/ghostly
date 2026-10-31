@@ -349,6 +349,11 @@
     max-height: none;
     order: 2;
   }
+  /* The list comes first in the HTML and goes under the article: until the article's end has arrived, a paint would
+     show the list alone at the top, then the article would push it off the screen. */
+  .reader-layout:not(:has(.reader-foot)) .reader-side {
+    display: none;
+  }
   .reader-all {
     border-top: 1px solid var(--line);
     padding-top: 20px;
@@ -372,6 +377,9 @@
   color: #cdd6e2;
   font-size: 16.5px;
   line-height: 1.75;
+  /* A slash list (A/B/C) is one word: with larger text or spacing it ran past a phone's screen. break-word, not
+     anywhere, so a table's columns keep their widths. */
+  overflow-wrap: break-word;
 }
 .reader-prose > * + * {
   margin-top: 1em;

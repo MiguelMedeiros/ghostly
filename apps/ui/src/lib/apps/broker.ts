@@ -93,9 +93,10 @@ interface BrokerOptions {
   /**
    * Whether the app is on screen now. A `files.pick` from one that is not (its chat's panel hidden, another chat or
    * page showing) is refused (`too-fast`): its sheet would come up over what the person is doing, take the focus from
-   * the box they type in, and name an app they cannot see. None: always (a Desktop app window).
+   * the box they type in, and name an app they cannot see. On Desktop the sheet is in the Ghostly window, so an app
+   * whose own window does not have the focus would pull that window over what the person is doing.
    */
-  shown?: () => boolean;
+  shown?: () => boolean | Promise<boolean>;
   /** The app serves a file to its contact now (true), or no longer (false): the panel's header says so. */
   serving?: (on: boolean) => void;
   now?: () => number;
@@ -462,9 +463,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
         const options = pickOptions(args[0]);
-        if (picking || now() < pickAgainAt || !shown()) refuse("too-fast");
+        if (picking || now() < pickAgainAt) refuse("too-fast");
         picking = true;
         try {
+          if (!await shown()) refuse("too-fast");
           return { value: await files.pick(launch.ref, launch.title, options, alive.signal) as unknown as MiniAppJson };
         } catch (error) {
           if (refusalOf(error) === "cancelled") pickAgainAt = now() + PICK_AFTER_CANCEL_MS;

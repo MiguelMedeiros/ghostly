@@ -44,6 +44,24 @@ describe("desktop linked files", () => {
     ]);
   });
 
+  it("serve's lookup asks the host for its one link, not the app's whole library", async () => {
+    // files.serve found its link in linked_files_list: with 100 000 links, every file looked at on disk and about 15 MB
+    // of JSON to the page and of the app's reads that second.
+    const link = { id: "a".repeat(22), path: "Films/Up.mp4", size: 3, modified: 1, available: true };
+    const calls: [string, Record<string, unknown> | undefined][] = [];
+    const invoke = async <T,>(command: string, args?: Record<string, unknown>) => {
+      calls.push([command, args]);
+      return (command === "linked_files_entry" ? (args?.id === link.id ? link : null) : []) as T;
+    };
+    const host = desktopLinkedFiles(invoke, () => "ghostly_ab", () => text, clicks);
+    expect(await host.entry!("key/cinema", link.id)).toEqual(link);
+    expect(await host.entry!("key/cinema", "z".repeat(22))).toBeNull();
+    expect(calls).toEqual([
+      ["linked_files_entry", { space: "ghostly_ab", appRef: "key/cinema", id: link.id }],
+      ["linked_files_entry", { space: "ghostly_ab", appRef: "key/cinema", id: "z".repeat(22) }],
+    ]);
+  });
+
   it("passes the host's refusals on as errors", async () => {
     const host = desktopLinkedFiles(async () => { throw "cancelled: Nothing was picked"; }, () => "ghostly", () => text, clicks);
     await expect(host.pick("key/cinema", "Cinema", { folder: true, accept: [] })).rejects.toThrow(/^cancelled: /);
@@ -134,6 +152,7 @@ function desktop() {
   const invoke = (async (command: string, args: Record<string, unknown> = {}) => {
     calls.push({ command, args });
     if (command === "app_open") return `app-${++labels}`;
+    if (command === "app_focused") return true;
     if (command === "linked_files_pick_cancel") { cleared++; return undefined; }
     if (command === "linked_files_pick") {
       const begun = cleared;

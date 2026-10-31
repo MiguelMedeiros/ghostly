@@ -1,7 +1,7 @@
 {
   "name": "ghostly",
   "private": true,
-  "version": "1.7.1",
+  "version": "1.7.2",
   "type": "module",
   "scripts": {
     "predev": "npm run sync:apps",
@@ -113,6 +113,7 @@
   "overrides": {
     "solc": {
       "tmp": "0.2.7"
-    }
+    },
+    "minimatch": "11.0.3"
   }
 }

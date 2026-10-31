@@ -14,6 +14,7 @@ import {
   PRESENCE_WINDOW,
   presenceSeenAt,
   RELAY_POLL_INTERVALS,
+  SIGNAL_OUT_READS,
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
@@ -557,7 +558,7 @@ describe("LinkSession presence and signals", () => {
     await expect(a.s.setRtcSignal(null, true)).rejects.toThrow("relay down");
   });
 
-  it("marks as signaling the publish of a new offer or answer and the fast reads for the answer to its offer, nothing else", async () => {
+  it("marks as signaling the publish of a new offer or answer, the fast reads for the answer to its offer and the first ones after its answer, nothing else", async () => {
     const { a } = pair({ getServices: () => [] });
     a.s.start();
     await settle();
@@ -580,6 +581,20 @@ describe("LinkSession presence and signals", () => {
     a.s.pollNow();
     await settle();
     expect(lastRead()).toMatchObject({ urgent: true });
+    expect(lastRead()).not.toHaveProperty("signal");
+    // An answer: its first fast reads are signaling (the offerer may have given up the offer it answered and made another).
+    await a.s.setRtcSignal('{"t":"a"}');
+    expect(lastPublish()).toEqual({ signal: true });
+    // (The first read is the one a new signal makes at once.)
+    await settle();
+    expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    for (let i = 1; i < SIGNAL_OUT_READS; i++) {
+      a.s.pollNow();
+      await settle();
+      expect(lastRead()).toMatchObject({ urgent: true, signal: true });
+    }
+    a.s.pollNow();
+    await settle();
     expect(lastRead()).not.toHaveProperty("signal");
     await a.s.stop(false);
   });

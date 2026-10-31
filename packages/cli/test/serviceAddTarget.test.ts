@@ -25,6 +25,9 @@ describe("service add's target", () => {
     ["http://127.0.0.2:4773", /^refused: /],
     ["https://example.com", /^refused: Only a web app on this machine/],
     ["nope", /^bad_request: Not a URL/],
+    // agents#1907: port 0 is no port a web app listens on, so every contact who opened it got a failure.
+    ["http://127.0.0.1:0", /^bad_request: Port 0 is not a port a web app can listen on: http:\/\/127\.0\.0\.1:0\/$/],
+    ["http://localhost:0/app", /^bad_request: Port 0 is not a port/],
   ])("%s is the person's to fix, not the engine failing", async (target, said) => {
     expect(await add(target)).toMatch(said);
   });

@@ -461,7 +461,7 @@ const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const workflowText = (base, workflows) =>
-  `Merge train: this pull request changes a workflow (${workflows.map((f) => f.replaceAll("<", "&lt;")).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission (then remove \`queue:failed\`).`;
+  `Merge train: this pull request changes a workflow (${workflows.map((f) => f.replaceAll("<", "&lt;")).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -469,7 +469,7 @@ const conflictText = (base, reason) =>
     : `Merge train: this pull request conflicts with \`${base}\` (or with the pull requests ahead of it), so it left the line. Rebase it onto \`origin/${base}\` (or merge \`origin/${base}\` into it), push, and add \`queue\` again once CI is green.`;
 
 const missingText = (base) =>
-  `Merge train: git could not fetch its head (GitHub has no \`refs/pull/<number>/head\` for it, and its branch is not in this repository or no longer holds that head), so it left the line and the rest of \`${base}\`'s line goes on without it. Push to its branch (or open it again from a new one), then remove \`queue:failed\`.`;
+  `Merge train: git could not fetch its head (GitHub has no \`refs/pull/<number>/head\` for it, and its branch is not in this repository or no longer holds that head), so it left the line and the rest of \`${base}\`'s line goes on without it. Push to its branch (or open it again from a new one), then add \`queue\` again once CI is green (the train takes \`queue:failed\` off).`;
 
 /** The label and the comment a pull request leaves the line with, for each reason a build or a rebase drops it. */
 const leaving = (base, reason) => (reason === "missing" ? [LABEL.failed, missingText(base)] : [reason === "empty" ? null : LABEL.conflict, conflictText(base, reason)]);

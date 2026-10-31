@@ -27,7 +27,7 @@
   "dhtOnly": "DHT seule",
   "directBlocked": {
     "hint": "Les connexions directes sont bloquées sur ce réseau (un VPN ou un pare-feu ?). Les discussions passent quand même par des relais, mais se connectent plus lentement.",
-    "info": "Cette note disparaît quand une connexion directe fonctionne. Un relais voit quels appareils se parlent et quand, jamais ce qu'ils disent. Les appels ont besoin d'un serveur TURN (Paramètres, Réseau).",
+    "info": "Cette note disparaît quand une connexion directe fonctionne. Un relais voit quels appareils se parlent et quand, jamais ce qu'ils disent. Les appels ont besoin d'un serveur TURN (Réglages, Réseau).",
     "title": "Connexions directes bloquées"
   },
   "discovery": {

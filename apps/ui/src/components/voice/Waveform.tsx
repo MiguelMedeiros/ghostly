@@ -3,6 +3,12 @@ import { forwardRef, type HTMLAttributes } from "react";
 /** Bars never vanish entirely: silence is still a line you can aim at. */
 const MIN_HEIGHT = 12;
 
+/**
+ * How often a player moves the waveform while it plays: as often as the time label does, since each move is a style
+ * recalc of the page. The knob's glide (voice.css) lasts as long.
+ */
+export const PROGRESS_STEP_MS = 250;
+
 function Bars({ peaks, className }: { peaks: number[]; className: string }) {
   return (
     <span className={`voice-wave-bars ${className}`} aria-hidden="true">
@@ -37,7 +43,7 @@ export function LiveWaveform({ levels, bars = 40, className = "" }: { levels: nu
   return (
     <div className={`voice-live flex-1 min-w-0 ${className}`} aria-hidden="true" data-testid="voice-live">
       {padded.map((level, i) => (
-        <span key={i} style={{ height: `${Math.max(8, Math.min(1, level) * 100)}%` }} />
+        <span key={i} style={{ transform: `scaleY(${Math.max(0.08, Math.min(1, level))})` }} />
       ))}
     </div>
   );

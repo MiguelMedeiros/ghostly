@@ -233,6 +233,7 @@ export function MessageInput({
   const sending = useRef(false);
   /** An edit being saved: Enter again meanwhile saves nothing more. */
   const saving = useRef(false);
+  const readingDraft = useRef(false);
   const onSendRef = useRef(onSend); onSendRef.current = onSend;
   const draftIdRef = useRef(draftId); draftIdRef.current = draftId;
   const mounted = useRef(true);
@@ -421,7 +422,14 @@ export function MessageInput({
       }
       return;
     }
-    if (sendsTranslated && !previewOpen && sendTranslatedNow()) return;
+    if (sendsTranslated && !previewOpen) {
+      // A second press while the draft's language is read does nothing: the first decides.
+      if (readingDraft.current) return;
+      readingDraft.current = true;
+      try { if (await sendTranslatedNow()) return; } finally { readingDraft.current = false; }
+      // Changed meanwhile: it stays a draft, rather than send what was not seen.
+      if (textRef.current !== text) return;
+    }
     // The words leave the field now, with what goes with them (the members named, the preview), and wait their turn.
     await queue({ words: text, named: picker.compose(text), preview: linkPreview.preview ?? undefined });
   };
@@ -478,11 +486,12 @@ export function MessageInput({
    * detector is sure of the draft's. Unsure of either, the preview opens instead (asking which language in a group
    * with several). False when the draft goes as typed: no words, or already in the chat's language.
    */
-  const sendTranslatedNow = (): boolean => {
+  const sendTranslatedNow = async (): Promise<boolean> => {
     const to = translation?.language ?? null;
     const source = text.trim(), named = picker.compose(text);
-    const from = translation?.detect ? draftLanguage(source, translation.detect, named) : null;
+    const from = translation?.detect ? await draftLanguage(source, translation.detect, named) : null;
     if (from === undefined || from === to) return false;
+    if (textRef.current !== text) return true;
     // Send already passed the guard on the draft: its translation does not ask again.
     guardedDraft.current = source;
     if (!to || from === null) { drafting.start(text, named); return true; }

@@ -69,6 +69,15 @@ export const OFFER_STEP_MAX = 4;
 /** An offer to a saved contact is looked at for an answer as long as its attempt lasts (`CONNECT_TIMEOUT_MS`), not 45 s. */
 export const OFFER_LOOK_MS = 90_000;
 /**
+ * The first fast reads after a new offer or answer of this side's went out are signaling (`PkarrRequestOptions.signal`),
+ * as the reads for the answer to an offer to a saved contact are all along. An answer's: the offer it answered may be
+ * given up by then (its attempt ended before it read the answer, or the answer was refused), and the offerer's next one,
+ * made at once, is what both sides wait on. 3 at the relays' fast pace cover 6 s. As plain reads, an extension back
+ * from Offline with its relay minute spent never read its contact's new offer and answered the old one again: the
+ * matrix's chat stayed "On DHT · retrying live" for 45 s (E2E full, 2026-10-30).
+ */
+export const SIGNAL_OUT_READS = 3;
+/**
  * How long a link looks fast when its peer, or the peer's offer, is due any moment. The peer that
  * dials does so as soon as it sees the other one here, and its offer lands in its packet a moment
  * after its presence did: without this the side that answers left the offer to a background poll
@@ -304,6 +313,8 @@ export class LinkSession {
   private fastPollUntil = 0;
   /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
   private fastStepsAfter = 0;
+  /** Fast reads still signaling since this side's last new offer or answer went out (`SIGNAL_OUT_READS`). */
+  private signalReadsLeft = 0;
   /** When the last `expectPeer` window ends (or ended): the pace slows down from there step by step. */
   private expectUntil = 0;
   /**
@@ -462,6 +473,8 @@ export class LinkSession {
   setFastPoll(fast: boolean, offer = false): void {
     this.fastPollUntil = fast ? Date.now() + (offer ? OFFER_LOOK_MS : FAST_POLL_MAX_MS) : 0;
     this.fastStepsAfter = fast && offer ? Date.now() + OFFER_FAST_MS : 0;
+    // The signal this window is for goes out next (`SIGNAL_OUT_READS`): the reads left for the last one end.
+    this.signalReadsLeft = 0;
     if (fast) this.pollNow();
   }
 
@@ -719,20 +732,8 @@ export class LinkSession {
 
   private async publishOnce(advertise: boolean, upkeep = false): Promise<number> {
     const rtcSignal = advertise ? this.rtcSignal : null;
-    const built = buildLinkRecords(
-      this.identity.pubKeyZ32,
-      {
-        messages: this.sentBuffer,
-        ackTimestamp: this.myAck,
-        nick: this.nick,
-        callSignal: this.callSignal,
-        rtcSignal,
-        services: advertise ? this.getServices() : undefined,
-        transports: advertise ? this.transports : null,
-      },
-      this.encKey,
-    );
     const started = Date.now();
+    let keptMessages: number;
     try {
       // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`). Written while this
       // link watches for a contact that went away, the packet is what that contact, back, looks for first (`watch`).
@@ -752,6 +753,24 @@ export class LinkSession {
       const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
         : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
       this.wroteInBackground = options?.background === true;
+      // No relay takes it now: refused before it is built, as before it is signed (`RelayTransport.publishDated`). With
+      // 200 chats on the web, the packets built for that were a quarter of the script of a page left alone.
+      const held = this.transport.publishHeld?.(this.identity.pubKeyZ32, options);
+      if (held) throw held;
+      const built = buildLinkRecords(
+        this.identity.pubKeyZ32,
+        {
+          messages: this.sentBuffer,
+          ackTimestamp: this.myAck,
+          nick: this.nick,
+          callSignal: this.callSignal,
+          rtcSignal,
+          services: advertise ? this.getServices() : undefined,
+          transports: advertise ? this.transports : null,
+        },
+        this.encKey,
+      );
+      keptMessages = built.keptMessages;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
@@ -764,6 +783,7 @@ export class LinkSession {
     // Signaling's fast window counts from when its signal went out: one the relays' budget held back for most of the
     // window (an offer held 50 s) would otherwise have its answer read at the background pace (2026-09-27).
     const signalOut = !!rtcSignal && rtcSignal !== this.rtcSignalOut;
+    this.signalReadsLeft = signalOut ? SIGNAL_OUT_READS : rtcSignal ? this.signalReadsLeft : 0;
     if (signalOut && this.fastPollUntil > 0) {
       const lapsed = this.fastPollUntil <= Date.now() || (this.fastStepsAfter > 0 && this.fastStepsAfter <= Date.now());
       this.fastPollUntil = Math.max(this.fastPollUntil, Date.now() + (this.fastStepsAfter ? OFFER_LOOK_MS : FAST_POLL_MAX_MS));
@@ -776,7 +796,7 @@ export class LinkSession {
     traceLink(this.identity.pubKeyZ32, "publish", { ms, rtc: !!rtcSignal, advertise });
     this.events.onPublish?.({ ms, rtc: !!rtcSignal, ...(signalOut && { signalOut }) });
     this.discoveryResult("publish");
-    return built.keptMessages;
+    return keptMessages;
   }
 
   /**
@@ -805,8 +825,10 @@ export class LinkSession {
       // A look that can wait (nobody watching, nothing expected) says so: a transport with a request
       // budget spends only part of it on those, and keeps the rest for links that are signaling.
       const pace = this.pace();
-      // This side's offer is out, and this read looks for its answer: signaling (`PkarrRequestOptions.signal`).
-      const signal = pace === "fast" && this.fastStepsAfter > 0 && this.rtcSignalOut !== null;
+      // This side's offer is out, and this read looks for its answer, or its offer or answer just went out
+      // (`SIGNAL_OUT_READS`): signaling (`PkarrRequestOptions.signal`).
+      const signal = pace === "fast" && this.rtcSignalOut !== null && (this.fastStepsAfter > 0 || this.signalReadsLeft > 0);
+      if (signal && !this.fastStepsAfter) this.signalReadsLeft--;
       const watch = !signal && this.watching();
       // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.

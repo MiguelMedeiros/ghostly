@@ -294,8 +294,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {moving && transfer.stage !== "asking" && (
         <div className="h-1 mx-2 mb-1 rounded-full bg-black/20 overflow-hidden" data-testid="file-progress">
           <div
-            className={`h-full transition-[width] duration-200 ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
-            style={{ width: `${(transfer.transferred / Math.max(1, transfer.size)) * 100}%` }}
+            className={`h-full origin-left rtl:origin-right ${transfer.stage === "paused" || transfer.stage === "waiting" ? "bg-text-primary/40" : "bg-accent"}`}
+            style={{ transform: `scaleX(${Math.min(1, transfer.transferred / Math.max(1, transfer.size))})` }}
           />
         </div>
       )}

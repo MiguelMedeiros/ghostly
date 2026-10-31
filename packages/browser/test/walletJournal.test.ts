@@ -297,12 +297,21 @@ describe("Lightning out", () => {
     return wallet.payQuote(quote, at, note);
   };
 
+  it("a mint that holds the amount but not its fee says the most that leaves room for the fee", async () => {
+    seed("proofs", [stored(64, "a", POOR), stored(32, "b", POOR)]);
+    // 96 sats, 90 to pay and 10 of fee: 86 leave room for it.
+    await expect(setup([POOR]).wallet.quoteInvoice(INVOICE)).rejects.toThrow(/^Not enough sats in your wallet: 86 sats leave room for the fee$/);
+    // The mint that can send the most is the one named, whichever was asked last.
+    seed("proofs", [stored(64, "a", POOR), stored(32, "b", POOR), stored(8, "c", MINT)]);
+    await expect(setup([POOR, MINT]).wallet.quoteInvoice(INVOICE)).rejects.toThrow(/: 86 sats leave room for the fee$/);
+  });
+
   it("quotes from the first mint that can afford the invoice, and says why when none can", async () => {
     extra.createMeltQuoteBolt11.mockImplementation(async () => meltQuote("UNPAID"));
     seed("proofs", [stored(8, "p", POOR)]);
     await expect(setup([POOR, MINT]).wallet.quoteInvoice(`  ${INVOICE}  `)).resolves.toEqual({ quote: "m1", mint: MINT, amount: 90, feeReserve: 10 });
     expect(extra.createMeltQuoteBolt11).toHaveBeenCalledWith(POOR, INVOICE);
-    await expect(setup([POOR]).wallet.quoteInvoice(INVOICE)).rejects.toThrow("Not enough sats in your wallet");
+    await expect(setup([POOR]).wallet.quoteInvoice(INVOICE)).rejects.toThrow(/^Not enough sats in your wallet$/);
     await expect(setup([]).wallet.quoteInvoice(INVOICE)).rejects.toThrow("Add a mint in Settings first");
     extra.createMeltQuoteBolt11.mockRejectedValue("invoice expired");
     await expect(setup().wallet.quoteInvoice(INVOICE)).rejects.toThrow("invoice expired");

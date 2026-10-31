@@ -561,7 +561,8 @@ export function GroupChat() {
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
       // Mine, as the group carried it (a text, a card, a file): taken off every member's device (WISP 400 § Delete for everyone).
       onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend
-        ? () => { void engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).then(result => { if (!result.error) forgetSentOriginal(groupChat(groupId), m.id); }).catch(() => {}); } : undefined}
+        // A refusal (limited mode) rejects, and the bubble says it under the message.
+        ? () => engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).then(result => { if (result.error) throw new Error(result.error); forgetSentOriginal(groupChat(groupId), m.id); }) : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
       onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
       onSave={m.event ? undefined : () => void setSaved(`group:${groupId}`, m.id, savedHere.has(m.id)).catch(() => {})} saved={savedHere.has(m.id)} />;

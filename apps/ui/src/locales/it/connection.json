@@ -27,7 +27,7 @@
   "dhtOnly": "Solo DHT",
   "directBlocked": {
     "hint": "Le connessioni dirette sono bloccate su questa rete (una VPN o un firewall?). Le chat funzionano comunque tramite relay, ma si connettono più lentamente.",
-    "info": "Questa nota scompare quando una connessione diretta funziona. Un relay vede quali dispositivi si parlano e quando, mai cosa dicono. Le chiamate richiedono un server TURN (Impostazioni, Rete).",
+    "info": "Questa nota scompare quando una connessione diretta funziona. Un relay vede quali dispositivi si parlano e quando, mai cosa dicono. Le chiamate richiedono un server TURN (Opzioni, Rete).",
     "title": "Connessioni dirette bloccate"
   },
   "discovery": {
@@ -127,7 +127,7 @@
     "dhtOff": "Testi brevi tramite DHT, anche offline",
     "dhtOn": "Testi brevi tramite DHT, senza connessione diretta · scegline un altro per uscire",
     "group": "Connessione di questa chat",
-    "hyperdhtNeeds": "HyperDHT richiede Ghostly Desktop o un relay HyperDHT nelle Impostazioni",
+    "hyperdhtNeeds": "HyperDHT richiede Ghostly Desktop o un relay HyperDHT nelle Opzioni",
     "inUse": "In uso",
     "needsDesktop": "{{transport}} richiede Ghostly Desktop",
     "noWebrtc": "Questa app non ha WebRTC",

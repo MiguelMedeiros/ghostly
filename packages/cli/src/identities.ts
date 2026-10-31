@@ -72,7 +72,7 @@ async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string,
     throw new CliError("bad_request", error instanceof Error ? error.message : String(error));
   }
   if (!normalized) throw new CliError("bad_request", `Not a ${p.subject?.label ?? "subject"} ${p.label} takes`);
-  const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays });
+  const days = params.days === undefined ? undefined : num(params, "days", 0, { min: 1, max: p.validity.maxDays, whole: true });
   return node(ctx).beginIdentityProof({ provider: p.id, subject: normalized, ...(days ? { validityDays: days } : {}) });
 }
 

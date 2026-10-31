@@ -1274,6 +1274,8 @@ export class CashuWallet {
   async quoteInvoice(invoice: string, network?: WalletNetwork): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
     let lastError: unknown = new Error("Add a mint in Settings first");
     let mints = this.getMints(network);
+    /** The most any mint asked could pay with its fee on top: a Max comes down to it. */
+    let room = 0;
     const decoded = decodeBolt11(invoice);
     if (!decoded) throw new Error("That is not an invoice this wallet can pay");
     if (decoded.amountSat === null) throw new Error("Invoices without an amount are not supported");
@@ -1290,8 +1292,10 @@ export class CashuWallet {
         const feeReserve = quote.fee_reserve.toNumber();
         // The amount shown is the invoice's: a quote for another invoice or amount is never paid.
         if (quoteMismatch(quote, decoded.invoice, decoded.amountSat)) throw new Error(MINT_QUOTE_MISMATCH);
-        if ((await this.balanceAt(mint)) < amount + feeReserve) {
-          lastError = engineError("notEnoughSats");
+        const balance = await this.balanceAt(mint);
+        if (balance < amount + feeReserve) {
+          room = Math.max(room, balance - feeReserve);
+          lastError = room > 0 ? engineError("notEnoughForFee", { amount: room }) : engineError("notEnoughSats");
           continue;
         }
         this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve });
