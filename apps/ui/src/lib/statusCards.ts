@@ -1,6 +1,7 @@
 import { ACTIVE_TASK_STATUSES, taskProgress, usageLeft, type RoutineCard, type RunResult, type StatusCard, type TaskCard, type TaskStatus, type UsageCard } from "@ghostly/core";
 import type { Translate } from "../contexts/I18nContext";
 import { installedApps } from "./apps/installed";
+import { sharedRows } from "./chatRows";
 
 /*
  * The status cards of a chat or group, as its Tasks panel lists them (WISP 405 · Status Cards): the newest message of
@@ -109,17 +110,58 @@ export const ROUTINE_STACK_MIN = 3;
  * message: the chat draws a run as one row (`RoutineStack`). `messageOf` is a row's message, if it is one.
  */
 export function routineStacks<R, M extends { id: string; card?: StatusCard; sender: string; member?: string }>(rows: readonly R[], messageOf: (row: R) => M | undefined): Map<string, M[]> {
-  const stacks = new Map<string, M[]>();
-  let run: M[] = [];
-  const end = () => { if (run.length >= ROUTINE_STACK_MIN) stacks.set(run[0].id, run); run = []; };
-  for (const row of rows) {
-    const m = messageOf(row);
+  return stacksOf(routineRuns(rows, messageOf, [], 0));
+}
+
+/**
+ * `routineStacks` for one chat's rows as its list changes: the runs before the first row a new list does not have the
+ * same (or before the run still going there, which the new rows may go on) are the ones found before, and only the
+ * rows after are read.
+ */
+export function routineStacksReader<R, M extends { id: string; card?: StatusCard; sender: string; member?: string }>(messageOf: (row: R) => M | undefined): (rows: readonly R[]) => Map<string, M[]> {
+  let list: readonly R[] = [];
+  let runs: RoutineRun<M>[] = [];
+  let stacks = new Map<string, M[]>();
+  return rows => {
+    if (rows === list) return stacks;
+    let from = sharedRows(list, rows);
+    const last = from ? messageOf(rows[from - 1]!) : undefined;
+    if (last?.card?.kind === "routine") {
+      while (from > 0) {
+        const m = messageOf(rows[from - 1]!);
+        if (m?.card?.kind !== "routine" || (m.member ?? m.sender) !== (last.member ?? last.sender)) break;
+        from--;
+      }
+    }
+    let kept = runs.length;
+    while (kept > 0 && runs[kept - 1]!.at >= from) kept--;
+    runs = routineRuns(rows, messageOf, runs.slice(0, kept), from);
+    list = rows;
+    stacks = stacksOf(runs);
+    return stacks;
+  };
+}
+
+/** A run of routine cards from one sender, at least `ROUTINE_STACK_MIN`, and the index of its first row. */
+interface RoutineRun<M> { at: number; run: M[] }
+
+/** `runs`, the runs before row `from` (none going on there), with those of the rows from it on. */
+function routineRuns<R, M extends { id: string; card?: StatusCard; sender: string; member?: string }>(rows: readonly R[], messageOf: (row: R) => M | undefined, runs: RoutineRun<M>[], from: number): RoutineRun<M>[] {
+  let run: M[] = [], at = from;
+  const end = () => { if (run.length >= ROUTINE_STACK_MIN) runs.push({ at, run }); run = []; };
+  for (let i = from; i < rows.length; i++) {
+    const m = messageOf(rows[i]!);
     if (m?.card?.kind !== "routine") { end(); continue; }
     if (run.length && (run[0].member ?? run[0].sender) !== (m.member ?? m.sender)) end();
+    if (!run.length) at = i;
     run.push(m);
   }
   end();
-  return stacks;
+  return runs;
+}
+
+function stacksOf<M extends { id: string }>(runs: readonly RoutineRun<M>[]): Map<string, M[]> {
+  return new Map(runs.map(({ run }) => [run[0]!.id, run]));
 }
 
 /** How many tasks are still going: the number on the Tasks button. */
