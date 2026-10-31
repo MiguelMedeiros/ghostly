@@ -48,7 +48,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, ref: a.ref, noCard: options["no-card"] === true }),
   },
   "app publish": {
-    method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>]",
+    method: "app.publish", usage: "app publish <dir> --key <file> [--out <file>] [--sequence n]",
     summary: "Bundle and sign an app (WISP 1200): <dir>/ghostly-app.json and every other file in <dir> become one .ghostlyapp, its sequence one more than the bundle at --out (default <dir>/app.ghostlyapp)",
     args: ["dir"],
     options: {
