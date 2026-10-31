@@ -68,7 +68,7 @@ export const commands: Record<string, Command> = {
     method: "wallet.receive", usage: "wallet receive <sats> [--network testnet] [--card <id>]", summary: "A Lightning invoice to be paid",
     args: ["amount"], options: { network: net, card }, params: ({ options }, { amount }) => ({ amount: sats(amount), network: options.network, card: options.card }),
   },
-  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem [<cashu-token>]", summary: "Take the ecash of a Cashu token (its mint must be one of yours); the token on stdin keeps it out of ps", args: ["token?"], params: (_, { token }) => ({ token }) },
+  "wallet redeem": { method: "wallet.redeem", usage: "wallet redeem [<cashu-token> | -]", summary: "Take the ecash of a Cashu token (its mint must be one of yours); the token on stdin keeps it out of ps", args: ["token?"], params: (_, { token }) => ({ token }) },
   "wallet remove": {
     method: "wallet.remove", usage: "wallet remove <type> [--network testnet] [--card <id>] [--accept-loss]", summary: "Remove a wallet; refused while it holds money or waits for some, unless --accept-loss",
     args: ["type"], words: { type: WALLET_TYPES }, options: { network: net, card: card, "accept-loss": { type: "boolean", description: "What it holds on this device is lost without its backup" } },
