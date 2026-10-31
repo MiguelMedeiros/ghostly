@@ -48,6 +48,10 @@ ghostly send alice "hello"                     # {"chat":"â€¦","messageId":"me_â
 ghostly listen                                 # one JSON event per line, until stopped
 ```
 
+With no relay answering, `invite create` still gives a good invite: don't make another. It answers `"published":false`
+with a `reason` and a `note` (and `retryInMs` when the relays' request budget holds it back), and the invite goes out by
+itself once a relay answers, while a daemon runs for the profile.
+
 An echo bot ([examples/echo-bot.sh](examples/echo-bot.sh); the event arrives on the command's stdin, never in its
 arguments, so a contact's text cannot reach the shell):
 

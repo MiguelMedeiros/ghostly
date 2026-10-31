@@ -80,7 +80,7 @@ describe("ChatConnection: what the header says", () => {
   // Offline. The header said "Connection issue" in red, with the relays' raw English, until the network came back.
   it.each<[string, Partial<LinkView>]>([
     ["no relay reachable", { textDelivery: "dht", dataLink: "idle", pairing: ready(), dhtDelivery: { error: "Could not read DHT delivery: No Pkarr relay reachable" } as LinkView["dhtDelivery"] }],
-    ["discovery that could not be published", { dataLink: "idle", discoveryError: "Could not publish discovery: Publish failed on every relay: Error: Discovery relay is cooling down; retry shortly" }],
+    ["discovery that could not be published", { dataLink: "idle", discoveryError: "Could not publish discovery: Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly" }],
     ["a live session the network has not dropped yet", { pairing: ready() }],
   ])("says Offline when the device has no network, whatever the relays answer: %s", (_, link) => {
     vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
