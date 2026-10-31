@@ -29,6 +29,25 @@ for (const path of ["/roadmap", "/developers"]) {
   });
 }
 
+for (const path of ["/roadmap", "/developers"]) {
+  test(`${path}: Close on a block's details hands the keyboard focus back to the block`, async ({ page }) => {
+    await page.goto(path, { waitUntil: "networkidle" });
+    // Once React runs (the nav's chevron is disabled until then): before that a block opens nothing.
+    await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 45_000 });
+    const block = page.locator(".bgrid-block").filter({ has: page.locator(".bgrid-name", { hasText: /^Tor$/ }) });
+    await block.focus();
+    await page.keyboard.press("Enter");
+    const details = page.getByRole("region", { name: "Tor" });
+    await expect(details).toBeVisible();
+
+    await details.locator(".bgrid-close").focus();
+    await page.keyboard.press("Enter");
+    await expect(details).toHaveCount(0);
+    await expect(block).toHaveAttribute("aria-expanded", "false");
+    await expect(block).toBeFocused();
+  });
+}
+
 test("/roadmap: axe finds nothing serious, wide or on a phone", async ({ page }) => {
   for (const width of [1280, 375]) {
     await page.setViewportSize({ width, height: 812 });

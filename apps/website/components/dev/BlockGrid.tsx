@@ -1,7 +1,7 @@
 "use client";
 
 import { IntentLink } from "@/components/site/IntentLink";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BLOCKS, DIMS, PRESETS, type Block, type PresetId } from "@/lib/composition";
 import { LEVELS, type Level } from "@/lib/status";
 import { LevelBadge } from "@/components/site/Level";
@@ -53,6 +53,8 @@ export function BlockGrid({
   const [stage, setStage] = useState(mode === "stages" ? 0 : LEVELS.length - 1);
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // The block whose details are open: Close removes itself from the page, so the focus goes back here.
+  const opener = useRef<HTMLButtonElement>(null);
 
   const on = useMemo(() => {
     if (mode === "compose") return new Set(BLOCKS.filter(PRESETS.find((p) => p.id === preset)!.blocks).map((bl) => bl.id));
@@ -80,7 +82,15 @@ export function BlockGrid({
         <div className="bgrid-detail-head">
           <h4>{bl.name}</h4>
           <LevelBadge level={bl.level} small />
-          <button type="button" className="bgrid-close" onClick={() => setSelected(null)} aria-label={t.close}>
+          <button
+            type="button"
+            className="bgrid-close"
+            onClick={() => {
+              opener.current?.focus();
+              setSelected(null);
+            }}
+            aria-label={t.close}
+          >
             ×
           </button>
         </div>
@@ -192,7 +202,10 @@ export function BlockGrid({
                     data-on={on.has(bl.id)}
                     data-level={bl.level}
                     aria-expanded={selected === bl.id}
-                    onClick={() => setSelected(selected === bl.id ? null : bl.id)}
+                    onClick={(e) => {
+                      opener.current = e.currentTarget;
+                      setSelected(selected === bl.id ? null : bl.id);
+                    }}
                   >
                     <span className="bgrid-name">{bl.name}</span>
                     <span className="bgrid-level" data-level={bl.level}>
