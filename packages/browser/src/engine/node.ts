@@ -1463,6 +1463,12 @@ export class GhostlyNode implements EngineImplementation {
     },
     // Someone reacted to a message of mine: a quiet notice, never a message's sound or an unread count.
     notify: (chat, key) => this.feedback("reaction", `${chat}:${key}`, chat),
+    // A contact's reactions to messages not here yet, on the chat's record before they are confirmed: a stop keeps them.
+    keep: async (chat, reactionsWaiting) => {
+      const live = this.links.get(chat);
+      if (live) live.stored = { ...live.stored, reactionsWaiting };
+      await db.patchLink(chat, { reactionsWaiting });
+    },
     // A group member's reaction that waited for its window: still a member, as `receiveGroupReaction` asked when it came.
     believed: (chat, by) => {
       const membership = this.membership(chat.slice("group:".length));
@@ -2030,6 +2036,8 @@ export class GhostlyNode implements EngineImplementation {
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
       const note = latestReaction(messages);
       if (note) this.reactionNotes.set(stored.id, note);
+      // The contact's reactions that waited for their message when the engine stopped wait again (or land, if it did).
+      if (stored.reactionsWaiting?.length) await this.reactions.restore(stored.id, stored.reactionsWaiting, messages);
       if (stored.profile) await this.outboxFor(stored.id).recover(messages);
     }
     this.transfersRestored = true;
