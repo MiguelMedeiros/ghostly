@@ -132,11 +132,44 @@ describe("plan", () => {
 
 describe("a push to dev whose tree a pull request already tested", () => {
   it("runs only Tauri Backend, which saves the Cargo cache, and CI Success accepts that plan", () => {
-    expect(plan(null, { draft: false, tested: true })).toMatchObject({ rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
+    expect(plan(null, { draft: false, tested: true })).toMatchObject({ lint: false, rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
     expect(plan(null, { draft: false }).tested).toBe(false);
     const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
     expect(ci).toContain('if [[ "$DRAFT" != "true" && "$TESTED" != "true" && ( "$FULL" != "true"');
     expect(ci).toContain('if [[ "$TESTED" == "true" && "$PUSH_TO_DEV" != "true" ]]; then');
+  });
+
+  // agents#1830: lint and types ran again on a tree they had passed (2 to 3.5 min), and Tauri Backend built and tested
+  // it (3 to 4 min) to save a Cargo cache that was already there on 29 of 33 pushes.
+  it("skips lint and types, and Tauri Backend stops at the cache lookup when dev's Cargo cache for its key is saved", () => {
+    expect(plan(null, { draft: false }).lint).toBe(true);
+    expect(plan(null, { draft: true }).lint).toBe(true);
+    expect(plan(["docs/A.md"], { draft: false }).lint).toBe(true);
+    expect(plan(null, { draft: false, superseded: true }).lint).toBe(false);
+    const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+    const job = (id: string) => ci.match(new RegExp(`^  ${id}:\n[\\s\\S]*?(?=^  [\\w-]+:\n|(?![\\s\\S]))`, "m"))?.[0] ?? "";
+    expect(job("changes")).toContain("lint: ${{ steps.plan.outputs.lint }}");
+    expect(job("frontend-checks")).toMatch(/^ {4}needs: changes\n {4}if: needs\.changes\.outputs\.lint == 'true'$/m);
+    expect(job("ci-success")).toContain("LINT: ${{ needs.changes.outputs.lint }}");
+    expect(job("ci-success")).toContain('! ok "$FRONTEND_CHECKS" "$LINT"');
+
+    const steps = job("tauri").split(/^(?= {6}- name: )/m).slice(1);
+    const named = (name: string) => steps.findIndex((s) => s.startsWith(`      - name: ${name}\n`));
+    const lookup = steps[named("Is the Cargo cache saved already")] ?? "";
+    // Only on a tested push, the exact key Restore Cargo and Save Cargo use, and no download.
+    expect(lookup).toContain("if: needs.changes.outputs.tested == 'true'");
+    expect(lookup).toContain("lookup-only: true");
+    expect(lookup).toContain("key: ${{ steps.cargo-key.outputs.key }}");
+    expect(lookup).not.toContain("restore-keys");
+    expect(steps[named("Restore Cargo")]).toContain("key: ${{ steps.cargo-key.outputs.key }}");
+    expect(steps[named("Save Cargo")]).toContain("key: ${{ steps.cargo-cache.outputs.cache-primary-key }}");
+    // Every step from Restore Cargo to the last test is off on a hit; pruning and saving already need the tests to pass.
+    const from = named("Restore Cargo");
+    const to = named("Test (native/transports)");
+    expect(from).toBeGreaterThan(named("Is the Cargo cache saved already"));
+    expect(to).toBeGreaterThan(from);
+    for (const step of steps.slice(from, to + 1)) expect(step).toMatch(/^ {8}if: steps\.cargo-saved\.outputs\.cache-hit != 'true'( &&.*)?$/m);
+    expect(steps[named("Keep only what this build used in the saved Cargo cache")]).toContain("steps.test.outcome == 'success'");
   });
 
   // dev's new commit, its tree, and the batch's head that holds that tree (tested at 20:54, landed at 21:01).
