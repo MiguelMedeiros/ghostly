@@ -9,7 +9,7 @@ import { ENGINE_PARAMS } from "../src/engineMethods";
 import { asCliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { allowlist } from "../src/listen";
-import { chatJson, isLive } from "../src/views";
+import { chatDetailsJson, chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
 import { ONE_SHOT_RECEIPT_MS } from "../src/waits";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
@@ -844,6 +844,15 @@ describe("groups", () => {
     const { ctx, node } = fake();
     await callApi(ctx, "group.send", { group: "Crew", text: "@Ana ping", mentions: ["Ana"] });
     expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g1", text: "@Ana ping", mentions: [{ k: "abcd1234zz", o: 0, l: 4 }] });
+  });
+});
+
+describe("chat show names who keeps a chat on DHT only", () => {
+  it("says the contact's delivery mode beside this side's, null before the contact told it", () => {
+    const peerDht = link("c", { deliveryMode: "stream", textDelivery: "dht", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    expect(chatDetailsJson(peerDht)).toMatchObject({ live: false, deliveryMode: "stream", peerDeliveryMode: "dht" });
+    expect(chatDetailsJson(link("c", { deliveryMode: "dht", dhtDelivery: { mode: "dht", peerMode: "stream", authenticated: true, maxTextBytes: 256 } }))).toMatchObject({ deliveryMode: "dht", peerDeliveryMode: "stream" });
+    expect(chatDetailsJson(link("c"))).toMatchObject({ peerDeliveryMode: null });
   });
 });
 
