@@ -16,7 +16,7 @@ import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
 import { takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
 import { openAppInChat } from "../lib/apps/installed";
-import { rowDays } from "../lib/chatDays";
+import { rowDaysReader } from "../lib/chatDays";
 import { readContactNick, rowPicker, type NickRead } from "../lib/chatRows";
 import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
@@ -98,7 +98,7 @@ import { useSameValue } from "../hooks/useSameValue";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
 import { TransportLine } from "../components/TransportTimeline";
-import { timelineMerger } from "../lib/transportEvents";
+import { timelineMerger, type TimelineRow } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
 import { cardOn } from "../lib/chatPayments";
 import { formatAt } from "../lib/time";
@@ -589,10 +589,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
   // A long chat has a window of its rows in the page, never the whole history (useRowWindow): its last ones, or those
   // around the message it was left on, and more as the view goes up or down.
-  const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
+  // Read, as the days below, only from the rows a new timeline does not have the same as the one before.
+  const [pickRowId] = useState(() => rowPicker<TimelineRow<ChatMessage>, string>(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`));
+  const rowIds = useMemo(() => pickRowId(timeline), [pickRowId, timeline]);
   const rowWindow = useRowWindow(rowIds, sessionId, { opensOn: leftOn(sessionId), heads: stackHeads });
   // The day each row goes under, over the whole timeline: a day keeps one date whichever of its rows are in the page.
-  const days = useMemo(() => rowDays(timeline.map(row => row.kind === "message" ? row.message.timestamp : row.kind === "transport" ? row.entry.since ?? row.entry.at : row.entry.at)), [timeline]);
+  const [readDays] = useState(() => rowDaysReader<TimelineRow<ChatMessage>>(row => row.kind === "message" ? row.message.timestamp : row.kind === "transport" ? row.entry.since ?? row.entry.at : row.entry.at));
+  const days = useMemo(() => readDays(timeline), [readDays, timeline]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
   // A notice (joined, a call) is not a message to count. Always every message, in the page or not; a new list when the
   // window moves, so the view is put back in the same commit, before a scroll can see the rows moved.
