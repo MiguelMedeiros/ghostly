@@ -4,6 +4,7 @@ import { MESSAGE_CHANGES_TICK_MS } from "@ghostly/browser/platform/engine";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
 import { UpdateProvider } from "../../contexts/UpdateContext";
+import { foldText } from "../../lib/chatSearch";
 import { loadSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { Chat } from "../../pages/Chat";
@@ -14,8 +15,7 @@ import { renderApp } from "../render";
 
 /*
  * Where the engine sends a page each chat's newest page only (the extension's pages), the chat that opens shows, searches
- * and jumps over its whole history, and the chat list's search reads every chat's messages: each asks for the whole
- * histories it reads, while it reads them. A chat list with nothing searched asks for none.
+ * and jumps over its whole history. The chat list's search asks for none: the engine searches what it did not send.
  */
 
 // The real sync (the setup stubs it out).
@@ -60,16 +60,35 @@ describe("a page sent each chat's newest page", () => {
     expect(loadSession("open")!.messages).toHaveLength(N);
   });
 
-  it("asks for every chat's whole history while the chat list searches, and none before", async () => {
+  it("finds a chat by a message older than its page through the engine, and asks for no whole history", async () => {
     const a = reloadedChat("ana");
     const b = reloadedChat("bea");
     fakeEngine.update({ links: [a.link, b.link] });
     const { user, engine } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    // The engine reads the histories it keeps: "ana message 1" is in ana's (its rows 1, 10 to 19, 100 to 199), and bea's has no "ana".
+    engine.on("chatsFound", ({ query, linkIds }) => linkIds.filter((id) => (id === a.linkId ? a : b).history.some((m) => foldText(m.text).includes(query))));
     engine.newestPage(a.linkId, a.history.slice(-PAGE));
     engine.newestPage(b.linkId, b.history.slice(-PAGE));
     await tick();
+    const box = screen.getByPlaceholderText("Search chats...");
+    // Only in the oldest messages, which neither the page nor the stored copy holds.
+    await user.type(box, "ana message 1");
+    await tick();
     expect(engine.historyAsks).toEqual([]);
-    await user.type(screen.getByPlaceholderText("Search chats..."), "message 3");
-    expect([...engine.historyAsks].sort()).toEqual([a.linkId, b.linkId]);
+    expect(engine.callsTo("chatsFound").slice(-1)[0]).toEqual({ query: "ana message 1", linkIds: [a.linkId, b.linkId] });
+    expect(screen.queryByText("ana")).not.toBeNull();
+    expect(screen.queryByText("bea")).toBeNull();
+  });
+
+  it("asks the engine nothing where every chat's whole history is here", async () => {
+    const a = reloadedChat("cal");
+    fakeEngine.update({ links: [a.link] });
+    const { user, engine } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    engine.messages(a.linkId, a.history);
+    await tick();
+    await user.type(screen.getByPlaceholderText("Search chats..."), "cal message 1");
+    await tick();
+    expect(engine.callsTo("chatsFound")).toEqual([]);
+    expect(screen.queryByText("cal")).not.toBeNull();
   });
 });

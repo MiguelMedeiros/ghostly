@@ -127,7 +127,7 @@ class EngineClient {
   }
 
   /**
-   * While held, this chat's whole history is here for a reader that shows all of it (the chat open, a search): asked for
+   * While held, this chat's whole history is here for a reader that shows all of it (the chat open): asked for
    * now if only its newest page is, and whenever only its newest page comes later (a page that connects again). The
    * returned function lets it go.
    */
