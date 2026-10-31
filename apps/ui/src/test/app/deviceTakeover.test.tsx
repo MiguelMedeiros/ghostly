@@ -256,6 +256,35 @@ describe("Manage groups from this device", () => {
     await waitFor(() => expect(engine.callsTo("setGroupManage")).toEqual([{ groupId: "group-1", on: true }]));
   });
 
+  it("a refusal to turn it on says so under the warning, and Confirm keeps the focus while it runs", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user, engine } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    let refuse!: (e: Error) => void;
+    engine.on("setGroupManage", () => new Promise<void>((_, reject) => { refuse = reject; }));
+    await user.click(await screen.findByTestId("group-manage-open"));
+    const confirm = screen.getByTestId("group-manage-confirm");
+    await user.click(confirm);
+    expect(confirm).not.toBeDisabled();
+    expect(confirm).toHaveAttribute("aria-busy", "true");
+    expect(confirm).toHaveFocus();
+    // Pressed again while it runs: nothing more is asked.
+    await user.click(confirm);
+    expect(engine.callsTo("setGroupManage")).toHaveLength(1);
+    await act(async () => { refuse(new Error("settings could not be saved")); });
+    expect(screen.getByTestId("group-manage-problem")).toHaveTextContent("settings could not be saved");
+    expect(confirm).not.toHaveAttribute("aria-busy");
+    expect(confirm).toHaveFocus();
+  });
+
+  it("Turn on hands the focus to the warning's Cancel, and Cancel hands it back to Turn on", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    await user.click(await screen.findByTestId("group-manage-open"));
+    expect(screen.getByTestId("group-manage-cancel")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("group-manage-open")).toHaveFocus();
+  });
+
   it("is not shown where admin work is on", async () => {
     fakeEngine.update({ groups: [adminGroup()] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
