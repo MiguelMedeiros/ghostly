@@ -1,7 +1,7 @@
 import { base64, base64url, hex } from "@scure/base";
 import { decodeBolt11 } from "@ghostly/core";
 import type { InvoiceStatus, LightningCapabilities, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
-import { NothingSpentError, type ProviderHost, type ProviderNetwork, type ProviderSettings } from "./types";
+import { NothingSpentError, SourceConfigError, type ProviderHost, type ProviderNetwork, type ProviderSettings } from "./types";
 
 /**
  * Lightning through the person's own LND node, over its REST API (the gateway LND serves next to gRPC).
@@ -12,6 +12,8 @@ import { NothingSpentError, type ProviderHost, type ProviderNetwork, type Provid
  *    `letsencryptdomain`).
  *  - desktop: the `lnd_request` Tauri command (apps/desktop/src/lnd.rs). No CORS, and when a certificate is
  *    given it is pinned: the node must present exactly that one, whatever the address says.
+ * Only the desktop can pin: anywhere else a source with a certificate is refused before the node is contacted,
+ * rather than sending the macaroon to whatever certificate the platform trusts.
  *
  * The macaroon is read before anything is contacted: one that can do more than Ghostly needs (admin, on-chain
  * sends, baking macaroons) is refused, and what it allows decides what the source can do (an invoice-only
@@ -212,7 +214,9 @@ export function fetchTransport(url: string, macaroon: string, signal?: AbortSign
         } catch (error) {
           if (deadline.signal.aborted || closed.signal.aborted || signal?.aborted) throw error;
           const origin = globalThis.location?.origin;
-          throw Object.assign(new Error(`Could not reach the node. From a browser it must allow ${origin ? `this origin (restcors=${origin})` : "Ghostly's origin (restcors)"} and have a certificate the browser trusts.`), { cause: error });
+          // Without a page (the CLI's Node) there is no CORS: only the address and the certificate can be at fault.
+          const hint = origin ? `From a browser it must allow this origin (restcors=${origin}) and have a certificate the browser trusts.` : "Check its address, and that its certificate is one this device trusts.";
+          throw Object.assign(new Error(`Could not reach the node. ${hint}`), { cause: error });
         }
         if (!response.body) return { status: response.status, lines: [], timedOut: false };
         const reader = response.body.getReader(), decoder = new TextDecoder();
@@ -423,14 +427,17 @@ export const lnd: LightningProviderDescriptor = {
     { name: "macaroon", label: "Macaroon (hex)", kind: "secret", placeholder: "0201036c6e64…",
       help: `Never the admin macaroon: bake one with ${LND_BAKE} (only invoices:… to receive only).` },
     { name: "certificate", label: "TLS certificate", kind: "secret", optional: true, placeholder: "-----BEGIN CERTIFICATE-----…",
-      help: "Desktop: the node's tls.cert, pinned (the node must present exactly this one). Leave empty for a certificate from a public authority." },
+      help: "Desktop only: the node's tls.cert, pinned (the node must present exactly this one). Leave empty for a certificate from a public authority; anywhere else it must stay empty." },
   ],
   experimental: true,
   validate(settings) { lndSettings(settings); },
   async create(settings, host) {
     const { url, macaroon, scope, certificate } = lndSettings(settings);
-    const transport = host.platform === "desktop" && host.invoke
-      ? tauriTransport(host.invoke, url, macaroon.hex, certificate)
+    const desktop = host.platform === "desktop" && host.invoke;
+    // `fetch` cannot pin: taking the certificate here would send the macaroon to any certificate the platform trusts.
+    if (certificate && !desktop) throw new SourceConfigError("Only the desktop app can pin the node's TLS certificate. Leave the certificate empty here: the node then needs a certificate this device trusts.");
+    const transport = desktop
+      ? tauriTransport(desktop, url, macaroon.hex, certificate)
       : fetchTransport(url, macaroon.hex, host.signal);
     return new LndLightning(transport, scope);
   },
