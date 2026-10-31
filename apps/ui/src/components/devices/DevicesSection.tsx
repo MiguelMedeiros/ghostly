@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
-import { listNames, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
+import { listNamesFor, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
@@ -14,6 +14,7 @@ import { HandoffProgress, MoveDialog } from "./Handoff";
 import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
 import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { nextOf, said } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 import { problemText, type Problem } from "../../lib/problemText";
 
 /** The refusals that come from this device's wallets (WISP 06 § Wallets). */
@@ -63,6 +64,7 @@ export function DevicesSection() {
   const full = devices.length >= MAX_DEVICES;
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
   const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
+  const waiting = listNamesFor(view?.waiting?.map((w) => w.name) ?? [], language);
   return (
     <Section title={t("devices.section.title")} testId="profile-devices">
       {/* Four devices, the most a profile has (WISP 06): the button stays, off, and the line says why. */}
@@ -89,20 +91,20 @@ export function DevicesSection() {
           onRemove={() => { setRemoved(null); setRemoving({ key: device.key, name: device.name }); }} />
       ))}
       {view?.unfinishedGrants?.map((grant) => (
-        <Row key={grant.key} testId="device-row-unfinished" leading={<DeviceGlyph name={grant.name} />} label={grant.name}
+        <Row key={grant.key} testId="device-row-unfinished" leading={<DeviceGlyph name={grant.name} />} label={<bdi>{grant.name}</bdi>}
           hint={t("devices.section.unfinished")} info={t("devices.section.unfinishedInfo")} />
       ))}
       {removed && (
         <Row testId="device-removed" leading={<DeviceGlyph name={removed} />} label={removed}
           hint={t("devices.section.removed")} info={t("devices.remove.doneInfo")} />
       )}
-      {view?.waiting?.length ? <Row testId="device-waiting" label={t("devices.section.waiting", { devices: listNames(view.waiting.map((w) => w.name), language) })} /> : null}
+      {view?.waiting?.length ? <Row testId="device-waiting" label={fillNames(t("devices.section.waiting", { devices: waiting[0] }), waiting[1])} /> : null}
       {view?.foreignSet && <Row testId="device-foreign-set" label={t("devices.section.foreign")} />}
       {thisActive && view?.secretOffer && (
-        <Row testId="device-secret-offer" label={view.secretOffer.device ? t("devices.secret.offer", { device: view.secretOffer.device }) : t("devices.secret.offerUnnamed")} info={t("devices.secret.info")}>
+        <Row testId="device-secret-offer" label={view.secretOffer.device ? fillNames(t("devices.secret.offer"), { device: view.secretOffer.device }) : t("devices.secret.offerUnnamed")} info={t("devices.secret.info")}>
           {view.secretOffer.lost && <Button data-testid="device-secret-offer-lost" onClick={() => setLost(true)}>{t("devices.remove.lost")}</Button>}
           {stopped
-            ? <Button variant="primary" data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{t("devices.secret.removeOffer", { device: stopped.name })}</Button>
+            ? <Button variant="primary" data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{fillNames(t("devices.secret.removeOffer"), { device: stopped.name })}</Button>
             : <Button variant="primary" data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>}
           <Button data-testid="device-secret-offer-dismiss" onClick={() => ask("dismiss", engine.call("deviceSecretOfferDismiss"))}>{t("devices.secret.notNow")}</Button>
         </Row>
@@ -126,8 +128,8 @@ export function DevicesSection() {
         </div>
       )}
       {handoff?.failure === "password" && handoff.role === "giver" && (
-        <Row testId="handoff-wrong-password" label={t("devices.handoff.wrongPassword", { device: handoff.device })}>
-          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
+        <Row testId="handoff-wrong-password" label={fillNames(t("devices.handoff.wrongPassword"), { device: handoff.device })}>
+          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{fillNames(t("devices.handoff.allowAgain"), { device: handoff.device })}</Button>
         </Row>
       )}
       {handoff?.failure === "password" && handoff.role === "giver" && refused.allow && <div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
@@ -135,7 +137,7 @@ export function DevicesSection() {
       {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
         const name = devices.find((device) => device.key === handoff.key)?.name || handoff.device || t("devices.join.otherDevice");
         return (
-          <Row testId="handoff-stopped" label={t(FAILURES[handoff.failure], { device: name })} hint={nextOf(FAILURES[handoff.failure], t, { device: name })}>
+          <Row testId="handoff-stopped" label={fillNames(t(FAILURES[handoff.failure]), { device: name })} hint={fillNames(nextOf(FAILURES[handoff.failure], t), { device: name })}>
             <Button data-testid="handoff-try-again" onClick={() => setMoving({ key: handoff.key, name })}>{t("devices.handoff.tryAgain")}</Button>
           </Row>
         );
@@ -180,7 +182,7 @@ function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove
   }, [focus, busy, onFocused]);
   const menuLabel = t("devices.section.menu", { device: device.name });
   return (
-    <Row testId="device-row" leading={<DeviceGlyph name={device.name} active={device.active} />} label={device.name}
+    <Row testId="device-row" leading={<DeviceGlyph name={device.name} active={device.active} />} label={<bdi>{device.name}</bdi>}
       hint={<>
         <span data-testid="device-state">{state}</span>
         {!device.self && <>
@@ -192,7 +194,7 @@ function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove
         </>}
         {checked && <span data-testid="device-check-result" role="status" className="block">{checked}</span>}
       </>}>
-      {canMove && <Button ref={move} data-testid="device-move" onClick={onMove}>{t("devices.handoff.moveTo", { device: device.name })}</Button>}
+      {canMove && <Button ref={move} data-testid="device-move" onClick={onMove}>{fillNames(t("devices.handoff.moveTo"), { device: device.name })}</Button>}
       {(canCheck || canRemove) && (
         <div ref={anchor} className="relative">
           <button ref={menu} type="button" data-testid="device-menu" aria-haspopup="true" aria-expanded={open} aria-label={menuLabel} title={menuLabel} onClick={() => setOpen((was) => !was)}

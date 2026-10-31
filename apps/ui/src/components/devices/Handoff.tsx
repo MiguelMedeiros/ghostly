@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { FAILURES, dayText, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
@@ -12,6 +12,7 @@ import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog"
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { nextOf } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 
 /*
  * The handoff's screens (WISP 06 § User experience, "Handoff progress", "Failures"): Use here with the password on a
@@ -47,20 +48,20 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
   const failed = view.step === "failed";
   const done = view.step === "done";
   const percent = view.total > 0 ? Math.min(100, Math.floor((view.bytes / view.total) * 100)) : 0;
-  const line = failed ? t(FAILURES[view.failure ?? "failed"], { device, wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" })
+  const line = failed ? fillNames(t(FAILURES[view.failure ?? "failed"], { wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" }), { device })
     // A wake push went to the other device (a phone that suspended the app): the person opens Ghostly there.
-    : view.step === "connecting" ? (view.woken ? t("devices.handoff.fail.woken", { device }) : t("devices.handoff.step.connecting", { device }))
+    : view.step === "connecting" ? (view.woken ? fillNames(t("devices.handoff.fail.woken"), { device }) : fillNames(t("devices.handoff.step.connecting"), { device }))
       : view.step === "authorizing" ? t("devices.handoff.step.authorizing")
         : view.step === "copying" ? t("devices.handoff.step.copy")
           : view.step === "paused" ? t("devices.handoff.step.paused", { percent })
             : view.step === "ready" ? t("devices.handoff.step.ready")
               : view.step === "rest" ? t("devices.handoff.step.rest")
                 : view.step === "checking" ? t("devices.handoff.step.checking")
-                  : view.step === "switching" ? (view.role === "giver" ? t("devices.handoff.movingTo", { device }) : t("devices.handoff.step.switching"))
+                  : view.step === "switching" ? (view.role === "giver" ? fillNames(t("devices.handoff.movingTo"), { device }) : t("devices.handoff.step.switching"))
                     : view.step === "settling" ? t("devices.handoff.step.settling")
                       : view.step === "finishing" ? t("devices.handoff.step.finishing")
-                        : done ? (view.role === "taker" ? t("devices.handoff.step.done") : t("devices.handoff.step.doneGiver", { device }))
-                          : t("devices.handoff.step.connecting", { device });
+                        : done ? (view.role === "taker" ? t("devices.handoff.step.done") : fillNames(t("devices.handoff.step.doneGiver"), { device }))
+                          : fillNames(t("devices.handoff.step.connecting"), { device });
   // Beside the line and not in it: the line is read aloud when it changes, and the bytes change at every read of the copy.
   const amount = view.step === "copying" ? t("devices.handoff.step.copyAmount", { done: sizeText(view.bytes, t), total: sizeText(view.total, t) }) : undefined;
   const cancellable = !failed && ["connecting", "authorizing", "copying", "paused", "ready", "rest", "checking"].includes(view.step);
@@ -75,15 +76,15 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
   }, [cancellable]);
   const current = STEP_OF[view.step];
   const at = current ? STEPS.indexOf(current) : done ? STEPS.length : -1;
-  const short: Record<Step, string> = {
-    connecting: t("devices.handoff.step.connecting", { device }), copying: t("devices.handoff.step.copy"), ready: t("devices.handoff.step.ready"),
+  const short: Record<Step, ReactNode> = {
+    connecting: fillNames(t("devices.handoff.step.connecting"), { device }), copying: t("devices.handoff.step.copy"), ready: t("devices.handoff.step.ready"),
     rest: t("devices.handoff.step.rest"), checking: t("devices.handoff.step.checking"), switching: t("devices.handoff.step.switching"), settling: t("devices.handoff.step.settle"),
   };
   return (
     <div ref={root} tabIndex={-1} data-testid="handoff-progress" data-step={view.step} data-role={view.role} data-failure={view.failure} data-woken={view.woken ? "true" : undefined} className="space-y-3 text-start focus:outline-none">
       <p className="font-semibold text-text-primary">{t("devices.handoff.title")}</p>
       {failed || done || !current ? (
-        failed ? <Notice testId="handoff-line" tone="error" className="" title={line} next={nextOf(FAILURES[view.failure ?? "failed"], t, { device, wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" })} />
+        failed ? <Notice testId="handoff-line" tone="error" className="" title={line} next={fillNames(nextOf(FAILURES[view.failure ?? "failed"], t, { wallet: walletNameOf(view.wallet), date: view.expiresAt !== undefined ? dayText(view.expiresAt, language) : "" }), { device })} />
           : <p data-testid="handoff-line" role="status" className="text-text-primary">{line}</p>
       ) : (
         <ol className="space-y-1.5" aria-label={t("devices.handoff.title")}>
@@ -120,7 +121,7 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
       )}
       {view.step === "copying" && view.role === "giver" && <p className="text-xs text-text-muted">{t("devices.handoff.step.keepUsing")}</p>}
       {phone && !failed && !done && view.role === "taker" && <p data-testid="handoff-keep-open" className="text-xs text-text-muted">{t("devices.handoff.keepOpen")}</p>}
-      {!!view.later && <p data-testid="handoff-later-note" className="text-xs text-text-muted">{t("devices.handoff.laterNote", { size: sizeText(view.later, t), device })}</p>}
+      {!!view.later && <p data-testid="handoff-later-note" className="text-xs text-text-muted">{fillNames(t("devices.handoff.laterNote", { size: sizeText(view.later, t) }), { device })}</p>}
       {view.newer && <p className="text-xs text-text-muted">{t("devices.handoff.newer")}</p>}
       {!failed && view.role === "giver" && (view.stays ?? []).map((stay) => (
         <p key={`${stay.type}:${stay.network}`} data-testid="handoff-stays" className="text-xs text-text-muted">
@@ -159,7 +160,7 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   };
   return (
     <DeviceDialog title={t("devices.handoff.useHereTitle")} onClose={onClose} testId="handoff-use-here-dialog">
-      <p className="text-text-secondary">{t("devices.handoff.passwordHint", { device })}</p>
+      <p className="text-text-secondary">{fillNames(t("devices.handoff.passwordHint"), { device })}</p>
       <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         <input type="password" autoFocus autoComplete="current-password" data-testid="handoff-password" aria-label={t("devices.password.current")} placeholder={t("devices.password.current")}
           aria-invalid={!!error || undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />
@@ -191,7 +192,7 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
   return (
     <div data-testid="handoff-offer" className="space-y-3">
       <div className="space-y-1">
-        <p className="font-semibold text-text-primary">{t("devices.handoff.offerTitle", { device })}</p>
+        <p className="font-semibold text-text-primary">{fillNames(t("devices.handoff.offerTitle"), { device })}</p>
         <p className="text-sm text-text-secondary">{t("devices.handoff.offerHint", { size: sizeText(view.offer ?? 0, t) })}</p>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -215,9 +216,9 @@ export function MoveDialog({ device, deviceKey, onClose }: { device: string; dev
     });
   }, [deviceKey, device, t]);
   return (
-    <DeviceDialog title={t("devices.handoff.moveTo", { device })} onClose={onClose} testId="handoff-move-dialog">
+    <DeviceDialog title={fillNames(t("devices.handoff.moveTo"), { device })} onClose={onClose} testId="handoff-move-dialog">
       {error && <Notice problem={error} testId="handoff-move-error" className="" />}
-      {!error && !view && <p role="status" className="text-text-secondary">{t("devices.handoff.waitingOffer", { device })}</p>}
+      {!error && !view && <p role="status" className="text-text-secondary">{fillNames(t("devices.handoff.waitingOffer"), { device })}</p>}
       {view && <HandoffProgress view={view} onCancel={() => engine.call("deviceHandoffCancel")} />}
       {error && <button type="button" onClick={onClose} className={quietButton}>{t("common.close")}</button>}
     </DeviceDialog>
