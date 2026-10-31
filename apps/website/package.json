@@ -47,6 +47,9 @@
   },
   "overrides": {
     "sharp": "0.35.5",
-    "postcss": "8.5.24"
+    "postcss": "8.5.24",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.3"
+    }
   }
 }
