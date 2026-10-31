@@ -17,6 +17,7 @@ import { Notice } from "../wallet/ui";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
 import { problemText, type Problem } from "../../lib/problemText";
 import { said } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 import { keepFocusIn } from "../../lib/focus";
 
 /** How long a profile whose wallets are still loading is asked again before the join gives up and says why. */
@@ -222,7 +223,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
           {view.step === "finishing" && <Status>{t("devices.join.finishing")}</Status>}
           {(view.step === "done" || view.step === "unfinished") && <>
             <p data-testid="device-join-done" data-step={view.step} className="text-text-primary">{view.step === "done" ? t("devices.join.done") : t("devices.join.unfinished")}</p>
-            {kept === false && <Notice tone="warning" testId="device-join-persist">{t("devices.join.persist", { device: view.device || t("devices.join.otherDevice") })}</Notice>}
+            {kept === false && <Notice tone="warning" testId="device-join-persist">{fillNames(t("devices.join.persist"), { device: view.device || t("devices.join.otherDevice") })}</Notice>}
             {view.step === "done" && kept !== false
               ? <Status>{t("devices.join.opening")}</Status>
               : <button type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: true })} className={primaryButton}>{t("devices.join.continue")}</button>}

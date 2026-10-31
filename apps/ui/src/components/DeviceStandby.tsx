@@ -4,7 +4,7 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
 import { useLockPassedNow } from "../contexts/LockScreenContext";
-import { listNames, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
+import { listNamesFor, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
 import { DeviceGlyph } from "./devices/DeviceGlyph";
@@ -15,6 +15,7 @@ import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
 import { useComputerAwake } from "../lib/keepAwake";
 import { said } from "../lib/notices";
+import { fillNames } from "../lib/fillNodes";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 
@@ -43,17 +44,17 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const reenroll = !!gate.reenroll && (gate.state === "moving" || gate.state === "removed");
   const title = unfinished ? t("devices.standby.unfinished.title")
     : reenroll ? t("devices.standby.reenroll.title")
-    : restored ? (gate.activeDevice ? t("devices.restore.activeOn", { device: gate.activeDevice }) : t("devices.restore.activeOnUnnamed"))
+    : restored ? (gate.activeDevice ? fillNames(t("devices.restore.activeOn"), { device: gate.activeDevice }) : t("devices.restore.activeOnUnnamed"))
     : gate.state === "standby"
-      ? (gate.activeDevice ? t("devices.standby.title.standby", { device: gate.activeDevice }) : t("devices.standby.title.standbyUnnamed"))
+      ? (gate.activeDevice ? fillNames(t("devices.standby.title.standby"), { device: gate.activeDevice }) : t("devices.standby.title.standbyUnnamed"))
       : t(`devices.standby.title.${gate.state}`);
   const hint = unfinished
-    ? (gate.activeDevice ? t("devices.standby.unfinished.hint", { device: gate.activeDevice }) : t("devices.standby.unfinished.hintUnnamed"))
+    ? (gate.activeDevice ? fillNames(t("devices.standby.unfinished.hint"), { device: gate.activeDevice }) : t("devices.standby.unfinished.hintUnnamed"))
     : restored ? t("devices.takeover.restoredHint")
     : reenroll ? t("devices.standby.reenroll.hint")
-    : gate.state === "moving" && gate.activeDevice ? t("devices.standby.hint.movingOn", { device: gate.activeDevice })
-    : gate.state === "removed" && gate.activeDevice ? t("devices.standby.hint.removedFrom", { device: gate.activeDevice })
-    : gate.state === "superseded" && gate.activeDevice ? t("devices.standby.hint.supersededBy", { device: gate.activeDevice })
+    : gate.state === "moving" && gate.activeDevice ? fillNames(t("devices.standby.hint.movingOn"), { device: gate.activeDevice })
+    : gate.state === "removed" && gate.activeDevice ? fillNames(t("devices.standby.hint.removedFrom"), { device: gate.activeDevice })
+    : gate.state === "superseded" && gate.activeDevice ? fillNames(t("devices.standby.hint.supersededBy"), { device: gate.activeDevice })
     : t(`devices.standby.hint.${gate.state}`);
   // A handoff froze this device or installed what it took: the pages start again into the gate.
   // The read at start found another device's turn just after the unlock: that unlock carries, if it still stands.
@@ -208,6 +209,7 @@ function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) 
  */
 function SetNotice({ names }: { names: string[] }) {
   const { t, language } = useI18n();
+  const [list, named] = listNamesFor(names, language);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const answer = (wrong: boolean) => {
@@ -216,7 +218,7 @@ function SetNotice({ names }: { names: string[] }) {
   };
   return (
     <div className={`${PANEL} space-y-3`} data-testid="device-set-notice">
-      <p data-testid="device-set-notice-title" className="font-semibold text-text-primary break-words">{t("devices.standby.notice.title", { devices: listNames(names, language) })}</p>
+      <p data-testid="device-set-notice-title" className="font-semibold text-text-primary break-words">{fillNames(t("devices.standby.notice.title", { devices: list }), named)}</p>
       <p className="text-text-secondary">{t("devices.standby.notice.hint")}</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button type="button" data-testid="device-set-notice-wrong" disabled={busy} onClick={() => answer(true)} className={`${SCREEN_QUIET} sm:order-1`}>{t("devices.standby.notice.wrong")}</button>
@@ -272,7 +274,7 @@ function Links() {
             <li key={device.key} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <DeviceGlyph name={device.name} active={device.active} />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-text-primary">{device.name}</p>
+                <p dir="auto" className="truncate text-text-primary">{device.name}</p>
                 <p className="text-xs text-text-muted">
                   {device.active ? `${t("devices.section.active")} · ` : ""}
                   <span className="inline-flex items-center gap-1">
