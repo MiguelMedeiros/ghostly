@@ -394,6 +394,11 @@ export interface EngineApi {
    */
   messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
   /**
+   * The 1:1 chats among `linkIds` with a message whose text holds `query`, folded as the pages fold (`shared/fold.ts`):
+   * the chat list's search over histories a page holds only the newest page of (the extension's), read in the engine.
+   */
+  chatsFound(params: { query: string; linkIds: string[] }): string[];
+  /**
    * Every task and routine card of this profile, from all its chats and groups, oldest first (WISP 405 · Status Cards
    * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.
    */

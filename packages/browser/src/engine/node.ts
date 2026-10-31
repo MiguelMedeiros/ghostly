@@ -114,6 +114,7 @@ import {
 } from "@ghostly/core";
 import type { AppRangeAsk, AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { SavedMessages } from "./saved";
+import { ChatTextSearch } from "./chatSearch";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
@@ -718,7 +719,7 @@ export const LIMITED_MODE_ERROR = "Ghostly could not check which device is activ
  */
 export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi>([
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
-  "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
+  "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage", "chatsFound",
   "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
   // Saved messages are marks on this device only, a settings record (`engine/saved.ts`): nothing is sent. Refused,
   // the Saved page stayed blank with no word and Save did nothing (agents#1694).
@@ -2692,6 +2693,17 @@ export class GhostlyNode implements EngineImplementation {
   /** A chat's or a group's history, as a page gets it (`withoutFrame`). */
   async getMessages(linkId: string): Promise<StoredMessage[]> {
     return (await db.getMessages(linkId)).map(withoutFrame);
+  }
+
+  /**
+   * The 1:1 chats among `linkIds` with a message whose text holds `query`, whatever the case and the accents: the chat
+   * list's search, read here so a page that holds each chat's newest page only is not sent every whole history for it.
+   */
+  async chatsFound(params: { query: string; linkIds: string[] }): Promise<string[]> {
+    if (typeof params?.query !== "string") throw new Error("query: the text to search for");
+    if (!Array.isArray(params.linkIds)) throw new Error("linkIds: the ids of the chats to search");
+    const chats = params.linkIds.filter(linkId => { const link = this.links.get(linkId); return !!link && !link.stored.group; });
+    return this.chatSearch.found(chats, params.query);
   }
 
   /** The ids of the messages deleted in a chat (`deletedIds`, the newest `MAX_DELETED_IDS`): a whole history goes with them. */
@@ -6472,6 +6484,8 @@ export class GhostlyNode implements EngineImplementation {
   /** Groups whose admin work is off on this device since a forced takeover or a restore. */
   private groupAdminOff = new Set<string>();
   private readonly saved = new SavedMessages(() => this.emitState());
+  /** The chat list's search over the chats' histories (`chatsFound`): each chat read once, and again after it changes. */
+  private readonly chatSearch = new ChatTextSearch(linkId => db.getMessages(linkId));
 
   /**
    * Raises the counters a copy from older state must raise, once (`devices/raise.ts`): the raise a forced takeover wrote
@@ -8748,6 +8762,7 @@ export class GhostlyNode implements EngineImplementation {
    * the whole history. A host that takes whole histories only (no `onMessageChanges`) gets the whole history, as before.
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
+    this.chatSearch.changed(linkId);
     // The chat list's reaction line quotes its message: an edit of that message changes the quote too, and a delete (here
     // or for everyone) takes the line back to the reaction before it that still stands.
     const reacted = this.reactionNotes.get(linkId);
