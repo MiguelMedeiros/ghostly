@@ -202,6 +202,17 @@ function serviceOf(ctx: ApiContext, params: Params): string {
   return serviceId;
 }
 
+/**
+ * A port the person chose that could not be taken, in words that name it. Before, one in use was Node's EADDRINUSE as
+ * `engine`, and one not allowed read as a file (`localFileError`): "Not allowed to write or read the path".
+ */
+function portError(error: unknown, port: number): unknown {
+  const { code } = (error ?? {}) as { code?: unknown };
+  if (port && code === "EADDRINUSE") return new CliError("busy", `Port ${port} is in use on this machine: choose another, or leave out --port`);
+  if (port && (code === "EACCES" || code === "EPERM")) return new CliError("refused", `Port ${port} is not allowed for this user: choose another, or leave out --port`);
+  return error;
+}
+
 export const SERVICE_METHODS: Record<string, Method> = {
   async "service.list"(ctx) {
     return { services: state(ctx).services.map((s) => ({ id: s.id, name: s.name, target: s.target, enabled: s.enabled, sharedWith: s.sharedWith ?? [], requests: s.requests })) };
@@ -253,11 +264,17 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const link = chatOf(ctx, params);
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
+    const port = num(params, "port", 0, { min: 0, max: 65535, whole: true });
     const already = open.get(key);
-    if (already) return { chat: link.id, service, url: already.url };
+    if (already) {
+      // Another port asked for: the link on this one, with exit 0, left a script that was told a port on the wrong one.
+      const on = (already.server.address() as AddressInfo).port;
+      if (port && port !== on) throw new CliError("busy", `That service is open here on port ${on}: ghostly service close ${link.id} ${service} first, or leave out --port`);
+      return { chat: link.id, service, url: already.url };
+    }
     if (!link.peerServices?.some((s) => s.id === service)) throw new CliError("not_found", `The contact shares no service ${service} (or is not live)`);
     const peer = link.peerPubKeyZ32;
-    const opened = await openServiceServer((request) => node(ctx).request(peer, service, request), num(params, "port", 0, { min: 0, max: 65535 }));
+    const opened = await openServiceServer((request) => node(ctx).request(peer, service, request), port).catch((error: unknown) => { throw portError(error, port); });
     open.set(key, opened);
     return { chat: link.id, service, url: opened.url };
   },
