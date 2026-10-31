@@ -69,6 +69,7 @@ import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
+import { working } from "../lib/focus";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
 
@@ -820,20 +821,36 @@ function ManageHere({ groupId }: { groupId: string }) {
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  // Turn on and Cancel each take the other's place: the focus they had goes across, not to the page.
+  const turnOn = useRef<HTMLButtonElement>(null), cancel = useRef<HTMLButtonElement>(null);
+  const pressed = useRef(false);
+  useEffect(() => {
+    if (!pressed.current) return;
+    pressed.current = false;
+    (asking ? cancel : turnOn).current?.focus({ preventScroll: true });
+  }, [asking]);
+  const ask = (on: boolean) => { pressed.current = true; setProblem(null); setAsking(on); };
+  const confirm = () => {
+    if (busy) return;
+    setBusy(true); setProblem(null);
+    void engine.call("setGroupManage", { groupId, on: true }).catch(e => setProblem(problemText(e, t))).finally(() => setBusy(false));
+  };
   return (
     <div role="status" data-testid="group-manage-off" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1">{t("devices.manage.off")}</span>
-        {!asking && <button type="button" data-testid="group-manage-open" onClick={() => setAsking(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
+        {!asking && <button ref={turnOn} type="button" data-testid="group-manage-open" onClick={() => ask(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
       </div>
       {asking && (
         <div className="flex flex-wrap items-center gap-2">
           <span data-testid="group-manage-warning" className="min-w-0 flex-1 text-danger-ink">{t("devices.manage.warning")}</span>
-          <button type="button" data-testid="group-manage-confirm" disabled={busy} onClick={() => { setBusy(true); void engine.call("setGroupManage", { groupId, on: true }).finally(() => setBusy(false)); }}
-            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer disabled:opacity-40">{t("devices.manage.confirm")}</button>
-          <button type="button" onClick={() => setAsking(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
+          <button type="button" data-testid="group-manage-confirm" {...working(busy)} onClick={confirm}
+            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40">{t("devices.manage.confirm")}</button>
+          <button ref={cancel} type="button" data-testid="group-manage-cancel" onClick={() => ask(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
         </div>
       )}
+      {problem && <Notice problem={problem} testId="group-manage-problem" className="text-xs" />}
     </div>
   );
 }
