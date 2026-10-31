@@ -639,6 +639,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintAlreadyJoined: "errors.engine.fedimintAlreadyJoined",
   fedimintConnecting: "errors.engine.fedimintConnecting",
   fedimintNotEnough: "errors.engine.fedimintNotEnough",
+  fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheard",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnet",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnet",
   walletAway: "errors.engine.walletAway",
@@ -652,6 +653,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
 const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   cannotSubmitAgain: "errors.engine.cannotSubmitAgainNext",
   fedimintRealOnTestnet: "errors.engine.fedimintRealOnTestnetNext",
+  fedimintRedeemUnheard: "errors.engine.fedimintRedeemUnheardNext",
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",

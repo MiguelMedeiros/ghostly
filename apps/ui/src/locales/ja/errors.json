@@ -81,6 +81,8 @@
     "fedimintNotInvite": "Fedimint の招待コードではありません。fed1 で始まります",
     "fedimintRealOnTestnet": "このフェデレーションは実際のビットコインを保持しています",
     "fedimintRealOnTestnetNext": "Mainnet の Fedimint ウォレットに追加してください。",
+    "fedimintRedeemUnheard": "このノートについてフェデレーションから応答がありません",
+    "fedimintRedeemUnheardNext": "しばらくしても残高に反映されない場合は、もう一度貼り付けてください。",
     "fedimintTestOnMainnet": "このフェデレーションはテストネットワーク {{chain}} 上にあります",
     "fedimintTestOnMainnetNext": "Testnet の Fedimint ウォレットに追加してください。",
     "feeAboveLimit": "手数料が上限を超えています",
