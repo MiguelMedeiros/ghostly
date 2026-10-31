@@ -122,9 +122,9 @@ Other workflows:
 | Workflow | What | When |
 |---|---|---|
 | Security (`security.yml`) | known advisories in the lock files (OSV, `tools/scripts/security-scan.mjs`) | pull requests, pushes, every morning |
-| E2E (`e2e.yml`) | web and extension e2e, the Desktop specs on Linux, compatibility with v0.4.0 | before every release (`release.yml` calls it) and by hand |
+| E2E (`e2e.yml`) | web and extension e2e, the Desktop specs on Linux, compatibility with older releases | before every release (`release.yml` calls it) and by hand |
 | E2E (full) (`e2e-full.yml`) | `npm run e2e:full` (gated suites included) and the combination matrix | nightly on `dev` and by hand |
-| E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0 | nightly, before every release, by hand |
+| E2E (compatibility) (`e2e-compat.yml`) | the current web app against a real v0.4.0, v1.1.4, v1.1.5 and the newest release | nightly, before every release, by hand |
 | Desktop on macOS (`desktop-macos.yml`) | as in CI | also nightly, and by hand with `repeat` |
 | Merge queue (`merge-queue.yml`) | the merge train: lands pull requests labelled `queue` on `dev` and `epic/*` in batches ([below](#the-merge-queue)) | when `queue` or `queue:priority` is added (not the train's own `queue:conflict` and `queue:failed`), when CI ends on the head of a queued pull request or of a batch (not a run that was cancelled, and not CI on a pull request that is not in line: the workflow starts and lists no base, so no train runs), on a person's push to `dev` and `epic/*` (not the train's own), every 5 minutes, by hand |
 | Desktop media streaming (`desktop-media.yml`) | a 100 MB video plays and seeks from the stored file in WebKitGTK (Linux) and WebView2 (Windows), `e2e/desktop/video-stream.spec.ts` | pull requests that touch the file stream, the file store or the video bubble (not drafts: leaving draft runs it); nightly; by hand |
