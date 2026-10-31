@@ -207,6 +207,14 @@ export function listNames(names: readonly string[], language: string): string {
   return names.join(", ");
 }
 
+/**
+ * The list of names for a sentence, each to be put back in its own direction: `[list, named]`, the list with a stand-in
+ * per name and the names by stand-in, for `fillNames(t(key, { devices: list }), named)` (lib/fillNodes.tsx).
+ */
+export function listNamesFor(names: readonly string[], language: string): [string, Record<string, string>] {
+  return [listNames(names.map((_, i) => `{{name${i}}}`), language), Object.fromEntries(names.map((name, i) => [`name${i}`, name]))];
+}
+
 const JOIN_REQUEST = "ghostly_join_device";
 
 /**

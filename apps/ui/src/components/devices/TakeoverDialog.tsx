@@ -9,6 +9,7 @@ import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { said } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 
 /**
  * A forced takeover (WISP 06 § Forced takeover): "My other device is lost or broken" on a standby that holds a copy, and
@@ -51,13 +52,13 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
     } finally { setBusy(false); }
   };
   return (
-    <DeviceDialog title={device ? t("devices.takeover.title", { device }) : t("devices.takeover.titleUnnamed")} onClose={onClose} testId="takeover-dialog">
+    <DeviceDialog title={device ? fillNames(t("devices.takeover.title"), { device }) : t("devices.takeover.titleUnnamed")} onClose={onClose} testId="takeover-dialog">
       <div className="space-y-2">
         <p className="flex items-start gap-1.5 text-text-secondary">
-          <span className="min-w-0">{restored ? t("devices.takeover.hintRestored") : t("devices.takeover.hint", { device: other })}</span>
+          <span className="min-w-0">{restored ? t("devices.takeover.hintRestored") : fillNames(t("devices.takeover.hint"), { device: other })}</span>
           <InfoButton open={info} onToggle={() => setInfo(!info)} controls={`${id}-info`} testId="takeover-info" className="mt-px" />
         </p>
-        {info && <p id={`${id}-info`} data-testid="takeover-info-text" className="rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{t("devices.takeover.info", { device: other })}</p>}
+        {info && <p id={`${id}-info`} data-testid="takeover-info-text" className="rounded-lg bg-surface-hover px-3 py-2 text-xs leading-5 text-text-secondary">{fillNames(t("devices.takeover.info"), { device: other })}</p>}
       </div>
       {ownSet && <p data-testid="takeover-own-set" className="text-text-secondary">{t("devices.takeover.ownSetHint")}</p>}
       {!restored && !ownSet && (
@@ -79,7 +80,7 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
           aria-invalid={refused === "password" || undefined} value={password} onChange={(event) => setPassword(event.target.value)} className={field} />}
         {device && (
           <label className="block space-y-1">
-            <span className="text-text-secondary">{t("devices.takeover.confirm", { device })}</span>
+            <span className="text-text-secondary">{fillNames(t("devices.takeover.confirm"), { device })}</span>
             <input ref={nameInput} type="text" data-testid="takeover-name" autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder={device}
               aria-invalid={refused === "name" || undefined} value={name} onChange={(event) => setName(event.target.value)} className={field} />
           </label>

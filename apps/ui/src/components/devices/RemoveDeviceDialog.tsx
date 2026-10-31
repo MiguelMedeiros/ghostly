@@ -7,6 +7,7 @@ import { DeviceDialog, dangerButton, primaryButton, quietButton } from "./Device
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 import { said } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 
 /**
  * Remove (WISP 06 § User experience, Remove): "Remove <device>?", what it means, and "Lost or stolen", which shows the
@@ -30,7 +31,7 @@ export function RemoveDeviceDialog({ device, deviceKey, onClose, onRemoved }: { 
   };
   if (checklist) return <LostChecklist device={device} onClose={onClose} onRemove={() => { setChecklist(false); void remove(); }} />;
   return (
-    <DeviceDialog title={t("devices.remove.title", { device })} onClose={onClose} testId="device-remove">
+    <DeviceDialog title={fillNames(t("devices.remove.title"), { device })} onClose={onClose} testId="device-remove">
       <p className="text-text-secondary">{t("devices.remove.text")}</p>
       <p className="text-text-muted text-xs">{t("devices.remove.copy")}</p>
       {busy && <p role="status" data-testid="device-remove-busy" className="text-text-secondary">{t("devices.remove.removing")}</p>}
@@ -68,7 +69,7 @@ export function LostChecklist({ device, onClose, onRemove }: { device?: string; 
           { testId: "device-lost-chats", title: t("devices.lost.chats"), hint: t("devices.lost.chatsHint") },
         ].filter((line): line is { testId: string; title: string; hint?: string } => !!line).map((line, index) => <Line key={`${line.testId}:${line.title}`} n={index + 1} {...line} />)}
       </ol>
-      {onRemove && device && <button type="button" data-testid="device-lost-remove" onClick={onRemove} className={primaryButton}>{t("devices.lost.remove", { device })}</button>}
+      {onRemove && device && <button type="button" data-testid="device-lost-remove" onClick={onRemove} className={primaryButton}>{fillNames(t("devices.lost.remove"), { device })}</button>}
       <button type="button" data-testid="device-lost-done" onClick={onClose} className={quietButton}>{t("devices.lost.done")}</button>
     </DeviceDialog>
   );
