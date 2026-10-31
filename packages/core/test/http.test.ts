@@ -41,6 +41,9 @@ describe("local targets", () => {
       "file:///etc/passwd",
       "http://localhost:3400/?x=1",
       "http://0.0.0.0:80",
+      "http://127.0.0.1:0",
+      "localhost:0/app",
+      "http://[::1]:0",
     ]) {
       expect(() => parseLocalTarget(bad), bad).toThrow();
     }
