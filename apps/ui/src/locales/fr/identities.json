@@ -214,7 +214,7 @@
     "removeNote": "Les contacts avec qui vous l'avez partagée sont informés qu'elle n'est plus partagée, et une révocation est publiée pour qu'ils le voient même si vous ne vous reconnectez jamais. Une copie qu'ils ont gardée ne peut pas être effacée.",
     "renew": "L'ajouter à nouveau",
     "renewHint": "Ajoutez-la à nouveau pour la renouveler, puis retirez celle-ci.",
-    "shareHint": "Partagez-la depuis les Identités d'une discussion, un contact à la fois.",
+    "shareHint": "Partagez-la avec le + d'une discussion, un contact à la fois.",
     "takeDownFailed": "Ce qu'elle a publié n'a pas pu être retiré. Vous pouvez retirer la preuve sans cela : les contacts la verront quand même révoquée.",
     "title": "Les vôtres"
   },

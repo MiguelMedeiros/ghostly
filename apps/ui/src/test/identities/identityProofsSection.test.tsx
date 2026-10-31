@@ -5,6 +5,7 @@ import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { IdentityProofsSection } from "../../components/identities/IdentityProofsSection";
 import { date } from "../../lib/identities";
 import { linkView } from "../fakeEngine";
+import { LANGUAGES, lookup } from "../i18n/locales";
 import { renderApp as render } from "../render";
 import { DAY, identitiesView, now, proofView, sharedView } from "./views";
 
@@ -147,6 +148,14 @@ describe("IdentityProofsSection", () => {
     expect(chats[0]).toHaveTextContent("Shared · verified by your contact");
     await user.click(within(chats[0]).getByTestId("identity-shared-stop"));
     expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }]);
+  });
+
+  it("a proof not shared yet points at the + in a chat, the only place that shares it, in every language", () => {
+    const { engine } = renderApp(<IdentityProofsSection />);
+    act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
+    expect(screen.getByTestId("identity-panel-sharing")).toHaveTextContent("Share it from the + in a chat, one contact at a time.");
+    // A chat's Identities panel cannot share: it sends a person to the + too.
+    for (const language of LANGUAGES) expect(lookup(language, "identities.mine.shareHint"), language).toContain("+");
   });
 
   it("asks before removing the chosen card, says what removing does, and asks the engine", async () => {
