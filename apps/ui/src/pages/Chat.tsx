@@ -17,6 +17,7 @@ import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
 import { takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
 import { openAppInChat } from "../lib/apps/installed";
 import { rowDays } from "../lib/chatDays";
+import { readContactNick, rowPicker, type NickRead } from "../lib/chatRows";
 import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { appsComposerHint } from "../lib/apps/availability";
@@ -37,7 +38,7 @@ import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
 import { keepSentOriginal } from "../lib/sentOriginals";
-import { leftOn, useChatScroll } from "../hooks/useChatScroll";
+import { leftOn, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
@@ -530,29 +531,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     }
   }, [sessionId]);
 
+  const nickRead = useRef<NickRead | undefined>(undefined);
   useEffect(() => {
-    // From the newest back, to the first that names the contact: a reversed copy of the whole history was made for it on
-    // every message that came.
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]!;
-      if (msg.sender !== "peer" && !(msg.sender === "system" && msg.id.startsWith("peer_"))) continue;
-      if (msg.nick) {
-        const nick = peerDisplayName(msg.nick);
-        if (nick && nick !== peerNick) {
-          setPeerNick(nick);
-        }
-        return;
-      }
-
-      const joinMatch = msg.text.match(/^👋 (.+) joined$/);
-      if (joinMatch && joinMatch[1]) {
-        const extractedNick = peerDisplayName(joinMatch[1]);
-        if (extractedNick && extractedNick !== peerNick) {
-          setPeerNick(extractedNick);
-        }
-        return;
-      }
-    }
+    nickRead.current = readContactNick(messages, nickRead.current);
+    const nick = nickRead.current.nick && peerDisplayName(nickRead.current.nick);
+    if (nick && nick !== peerNick) setPeerNick(nick);
   }, [messages, peerNick]);
 
   const startEditLabel = () => {
@@ -611,8 +594,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
   // A notice (joined, a call) is not a message to count. Always every message, in the page or not; a new list when the
   // window moves, so the view is put back in the same commit, before a scroll can see the rows moved.
+  const [pickScrollRow] = useState(() => rowPicker<ChatMessage, ScrollRow>(m => m.sender === "system" ? undefined : { id: m.id, mine: m.sender === "me" }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
-  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
+  const scrollRows = useMemo(() => pickScrollRow(messages).slice(), [pickScrollRow, messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible, window: rowWindow });
   const search = useChatSearch({ messages, chat: sessionId, active: visible, t, returnFocus: optionsRef });
 
@@ -691,7 +675,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
   const phoneHeader = usePhoneHeader();
   // The tasks still going and the routines not paused: a phone's ⋮ counts them, and has Tasks while there is one.
-  const goingCards = useMemo(() => goingCardCount(cardEntries(messages)), [messages]);
+  const [pickCardRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => panelCard(m.card) ? m : undefined));
+  const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
+  const goingCards = useMemo(() => goingCardCount(cardEntries(cardRows)), [cardRows]);
   useEffect(() => { setTasksOpen(false); setShowMore(false); }, [sessionId]);
 
   if (!params) {
@@ -913,7 +899,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             phone={phoneHeader} />
           <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
-          <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
+          <TasksButton rows={cardRows} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
