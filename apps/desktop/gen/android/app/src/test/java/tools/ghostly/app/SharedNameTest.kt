@@ -38,4 +38,16 @@ class SharedNameTest {
   fun aStemOfSpacesBecomesFile() {
     assertEquals("file.txt", SharedName.of(" ".repeat(300) + ".txt", 0))
   }
+
+  @Test(timeout = 1_000)
+  fun shortensAVeryLongNameQuickly() {
+    // 200,000 CJK characters took about 40 s when each pass re-encoded the whole stem.
+    val name = SharedName.of("文".repeat(200_000) + ".jpg", 0)
+    assertEquals("文".repeat(83) + ".jpg", name)
+  }
+
+  @Test
+  fun trailingSpacesPastTheCutStillGo() {
+    assertEquals("a.txt", SharedName.of("a" + " ".repeat(1_000) + "b".repeat(300) + ".txt", 0))
+  }
 }
