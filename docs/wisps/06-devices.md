@@ -681,6 +681,8 @@ In phase 1 **a device that goes to standby keeps its frozen copy**. It makes com
 | Profile registry entry (local name, color) | Name and color move as settings; the local profile id is each device's own | No | Yes | Kept |
 | Local caches: public profiles read, link previews, last-seen balances | Yes | No | Yes | Frozen |
 
+**Disappearing messages** ([400](400-chat.md#disappearing-messages); planned for 1.5, not built). A frozen copy is never written, so it can never sweep. So messages under a timer, and their files, leave the copy before it freezes: the releasing device deletes them as the last step of the release, once the taker has confirmed it holds them. That is the one write this needs past the read-only rule of a releasing device; a handoff cancelled before it keeps them. The handoff carries each message's deadline and when it was first shown, so the active device sweeps them when the releasing one would have.
+
 ### Forced takeover
 
 For a device that is lost, broken or wiped while it was active. Only a device with a frozen copy, or a copy restored from a backup, can do it. The person chooses **My other device is lost or broken**, answers **Lost or stolen?**, and confirms by typing the lost device's name. The device then:
