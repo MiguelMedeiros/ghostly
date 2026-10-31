@@ -99,6 +99,12 @@ export const showInvite: Record<string, OptionSpec> = { "show-secret": { type: "
 export const secret = (options: Parsed["options"]) => (options["show-secret"] === true ? { showSecret: true } : {});
 
 /**
+ * `--kind` of the typing commands: another word is a usage error (exit 2) before the profile opens, not the API's
+ * "kind must be one of" (exit 1). The words are core's TYPING_KINDS, written out: the package is not loaded here.
+ */
+export const typingKind: OptionSpec = { type: "string", choices: ["typing", "recording", "thinking"], description: "typing (default), recording (a voice note) or thinking" };
+
+/**
  * `--for` of the typing commands: the seconds it is kept on, 1 to 600, and never with `--stop`. A usage error (exit 2)
  * that names the flag: before, the API's own check answered ("for must be a number from 1 to 600", exit 1).
  */

@@ -92,6 +92,19 @@ describe("the button flags", () => {
     expect(() => flags("send", ["Alice", "x", "--once"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/--once goes with --button/) }));
   });
 
+  it("refuse a style not listed and an id given twice before the profile opens, naming the flag (exit 2)", () => {
+    // Before, the card's own check answered after the profile opened: bad_request, exit 1, the whole card in details.
+    const refused = (argv: string[]) => { try { flags("send", argv); } catch (error) { return error as CliError; } throw new Error("not refused"); };
+    const style = refused(["Alice", "q", "--button", "a:A", "--style", "a=pink"]);
+    expect(style).toMatchObject({ code: "usage", message: '--style "a=pink": a button\'s style is primary, neutral, danger' });
+    expect(EXIT[style.code]).toBe(2);
+    expect(refused(["Alice", "q", "--button", "a:A", "--style", "a="])).toMatchObject({ code: "usage" });
+    const twice = refused(["Alice", "q", "--button", "x:A", "--button", "x:B"]);
+    expect(twice).toMatchObject({ code: "usage", message: '--button "x:B" repeats the id "x": each button takes its own' });
+    expect(EXIT[twice.code]).toBe(2);
+    expect(() => flags("group send", ["Sala", "q", "--button", "x:A", "--button", "y:B", "--button", "x:C"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/"x:C" repeats the id "x"/) }));
+  });
+
   it("refuse two buttons a typed answer could not tell apart, naming the duplicate (exit 2)", () => {
     const refused = (argv: string[]) => { try { flags("send", argv); } catch (error) { return error as CliError; } throw new Error("not refused"); };
     const same = refused(["Alice", "Ok?", "--button", "yes:Yes", "--button", "no:No", "--button", "sure: YES "]);
