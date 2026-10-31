@@ -6,7 +6,7 @@ import { CommunityWorld, type Peer } from "./communityWorld";
 /**
  * A community's message is stored with the frame it came in (`StoredMessage.frame`), as a private group's is: the
  * record no longer carries the store of 256 frames, which cost each member 128 KB a message received and 247 KB a
- * message sent once it was full (CLI daemons, agents#1958).
+ * message sent once it was full (CLI daemons).
  */
 async function communityOf(names: string[]): Promise<{ world: CommunityWorld; peers: Peer[]; id: string }> {
   const world = new CommunityWorld();

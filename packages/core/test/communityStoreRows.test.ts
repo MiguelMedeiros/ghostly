@@ -4,7 +4,7 @@ import { COMMUNITY_LIMITS, CommunitySession, type CommunityFrame, type Community
 // covers: groups.community.catch-up
 
 /*
- * agents#1958: what a community's session keeps to hand on stays whole in memory; what it saves leaves out the frames an
+ * What a community's session keeps to hand on stays whole in memory; what it saves leaves out the frames an
  * app holds with its messages (`rows`), which come back when it starts again.
  */
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
