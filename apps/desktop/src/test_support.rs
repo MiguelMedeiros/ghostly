@@ -411,3 +411,45 @@ pub fn saved_by_a_window(
     saved.sort();
     saved
 }
+
+/// Runs the ignored test `name` (its full path) in a child run of this test binary, with every proxy variable
+/// pointing at a listener here and nothing in `no_proxy`: a client reads them once per process. Asserts the child
+/// passed and returns how many connections the proxy was handed.
+pub fn proxied_run(name: &str) -> usize {
+    let proxy = listener();
+    let address = format!("http://{}", proxy.local_addr().unwrap());
+    let used = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = used.clone();
+    std::thread::spawn(move || {
+        for stream in proxy.incoming() {
+            let Ok(mut stream) = stream else { return };
+            count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = std::io::Write::write_all(
+                &mut stream,
+                b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            );
+        }
+    });
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+    child.args(["--ignored", "--exact", name, "--test-threads=1"]);
+    for variable in ["NO_PROXY", "no_proxy"] {
+        child.env_remove(variable);
+    }
+    for variable in [
+        "HTTP_PROXY",
+        "http_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ] {
+        child.env(variable, &address);
+    }
+    let output = child.output().unwrap();
+    let log = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        log.contains("1 passed"),
+        "the child run did not pass:\n{log}"
+    );
+    used.load(std::sync::atomic::Ordering::SeqCst)
+}
