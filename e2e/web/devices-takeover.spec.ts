@@ -74,12 +74,18 @@ test("the standby takes over with the password, the contact keeps chatting with 
   const reopenedAt = Date.now();
   phone.page = await phone.context.newPage();
   await phone.page.goto(phoneUrl);
-  await untilShown(phone.page, phone.page.getByTestId("device-standby").and(phone.page.locator("[data-state=superseded]")));
-  await expect(phone.page.getByTestId("device-standby-title")).toHaveText("This device was replaced");
+  // Its stored state is still `active`: the read at start, after the unlock, finds the higher turn, shows the screen a
+  // moment and starts the page again into the gate, where the lock asks once more. So the screen is waited for through
+  // the lock, and once more after the contact's round trip, when only the page after that reload can be showing it.
+  const replaced = phone.page.getByTestId("device-standby").and(phone.page.locator("[data-state=superseded]"))
+    .filter({ has: phone.page.getByTestId("device-standby-title").getByText("This device was replaced", { exact: true }) });
+  await untilShown(phone.page, replaced);
   await expect(phone.page.getByTitle("New Chat")).toBeHidden();
   await say(contact, "still with the desktop");
   await expect(chat(desktop).getByText("still with the desktop")).toBeVisible({ timeout: 180_000 });
   await expect(chat(contact).getByText("the desktop took over")).toBeVisible();
+  await untilShown(phone.page, replaced);
+  await expect(phone.page.getByTitle("New Chat")).toBeHidden();
   expect(lines.filter((line) => line.t >= reopenedAt && line.step === "peer-departed")).toEqual([]);
   test.info().annotations.push({ type: "measure", description: JSON.stringify({ takeoverToActiveMs: reopenedAt - tookAt }) });
 });
