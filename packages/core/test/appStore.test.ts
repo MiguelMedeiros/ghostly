@@ -286,6 +286,26 @@ describe("signing a store", () => {
     expect(reason(checkAppListing({ ...entry, expires: 1 }, { strict: true }))).toBe("unknown-key");
   });
 
+  it("a listing.json with a key written twice is refused by a store's strict read, whichever value comes last", async () => {
+    const v1 = await buildAppBundle(DRAFT, [ENTRY], publisher);
+    const entry = { ref: REF, sequence: 1, digest: v1.digest, urls: [RAW], title: "Chess", tagline: "Chess" };
+    const other = `${"B".repeat(42)}A`;
+    const reason = (r: { ok: boolean; reason?: string }) => (r.ok ? "accepted" : r.reason);
+    const once = JSON.stringify(entry, null, 2);
+    expect(reason(readAppListing(once))).toBe("accepted");
+    // A reviewer reading the file sees the first digest; JSON.parse keeps the last.
+    const twice = once.replace(/\n}$/, `,\n  "digest": "${other}"\n}`);
+    const read = readAppListing(twice);
+    expect(reason(read)).toBe("not-json");
+    expect(read.ok ? "" : read.detail).toContain("digest");
+    // Written with an escape, it is the same key.
+    expect(reason(readAppListing(once.replace(/\n}$/, `,\n  "\\u0074itle": "Chess 2"\n}`)))).toBe("not-json");
+    // The same name in another object, a string value that reads like a key, and nested listings stay fine.
+    expect(reason(readAppListing(JSON.stringify({ ...entry, urls: [RAW], title: "digest", tagline: "\"digest\": x" })))).toBe("accepted");
+    // A client reads as it reads an index entry, the last value as JSON.parse takes it.
+    expect(reason(readAppListing(twice, { strict: false }))).toBe("accepted");
+  });
+
   it("refuses an index past 16 MiB before reading it", () => {
     const read = readAppStore(new Uint8Array(APP_STORE_LIMITS.indexBytes + 1), new Uint8Array(0), APPS_NOW);
     expect(read.ok ? "accepted" : read.reason).toBe("too-large");
