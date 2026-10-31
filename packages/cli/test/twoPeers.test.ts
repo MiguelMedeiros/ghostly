@@ -672,7 +672,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(started.statement).toMatch(/^Ghostly identity proof v1: I control ssh:/);
     const signature = execFileSync("ssh-keygen", ["-Y", "sign", "-n", "ghostly", "-f", key], { input: started.statement as string }).toString();
     error(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: "not a signature" }), "bad_request", 1);
-    const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: signature }));
+    // Nothing given: where to give it, not the API's "evidence is required"; piped without --stdin, read as a send's text.
+    expect(error(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: "" }), "usage", 2).message)
+      .toBe(`Missing what ssh-keygen printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${started.draft as string})`);
+    const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: signature }));
     const proof = done.proof as { id: string; provider: string };
     expect(proof.provider).toBe("ssh");
     expect((ok(await as(alice, "identity", "list")).proofs as { id: string }[]).map((p) => p.id)).toContain(proof.id);

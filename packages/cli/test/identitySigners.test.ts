@@ -114,4 +114,25 @@ describe("identity signers on Node", () => {
     } finally { run.mockRestore(); }
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   }, 15_000);
+
+  // `identity complete <draft>` with nothing said "evidence is required", the API's word, naming neither way to give it.
+  it("asks for a tool's missing output by where the CLI takes it, and a published record for none", async () => {
+    const { ctx, node } = fake();
+    let n = 0;
+    node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => ({
+      draftId: `d${++n}`, binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) },
+    }));
+    node.completeIdentityProof.mockResolvedValue({ id: "p1", provider: "domain", subject: "example.com", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] });
+    const ssh = await callApi(ctx, "identity.add", { provider: "ssh", subject: `SHA256:${"A".repeat(43)}`, signer: "ssh-keygen" }) as { draft: string };
+    for (const evidence of [undefined, "", " \n"]) {
+      await expect(callApi(ctx, "identity.complete", { draft: ssh.draft, evidence })).rejects.toMatchObject({
+        code: "usage", details: { needs: "evidence" },
+        message: `Missing what ssh-keygen printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${ssh.draft})`,
+      });
+    }
+    expect(node.completeIdentityProof).not.toHaveBeenCalled();
+    const domain = await callApi(ctx, "identity.add", { provider: "domain", subject: "example.com", signer: "dns" }) as { draft: string };
+    await expect(callApi(ctx, "identity.complete", { draft: domain.draft })).resolves.toMatchObject({ done: true });
+    expect(node.completeIdentityProof).toHaveBeenCalledWith({ draftId: domain.draft, evidence: { method: "dns" } });
+  });
 });
