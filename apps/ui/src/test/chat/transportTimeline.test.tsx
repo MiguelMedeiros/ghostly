@@ -1,10 +1,10 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { PairedTransport } from "@ghostly/core";
+import type { IdentityTimelineEntry, PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportLine } from "../../components/TransportTimeline";
 import { ChatConnection } from "../../components/ChatConnection";
-import { liveAttemptText, mergeTimeline, shortReason, transportEventText, transportLineDetails, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
+import { liveAttemptText, mergeTimeline, timelineMerger, shortReason, transportEventText, transportLineDetails, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
 import { problemText } from "../../lib/problemText";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "../i18n/locales";
@@ -233,6 +233,60 @@ describe("transport lines in the timeline", () => {
     ]);
     expect(rows.map(r => r.kind === "message" ? r.message.id : r.kind === "transport" ? `${r.entry.id}+${r.earlier.map(e => e.id).join("")}` : r.entry.id))
       .toEqual(["a+", "m1", "d+bc", "m2", "e+"]);
+  });
+});
+
+describe("a chat's timeline as its list changes", () => {
+  type Row = { id: string; timestamp: number };
+  /** Each field read of a message counts. */
+  function counted(rows: Row[]) {
+    const reads = { n: 0 };
+    return { reads, rows: rows.map(m => new Proxy(m, { get(target, key, receiver) { reads.n++; return Reflect.get(target, key, receiver); } })) };
+  }
+  const lines = [line({ id: "a", at: 5 }), line({ id: "b", at: 1_500 }), line({ id: "c", kind: "flapping", since: 2_500, at: 9_000 })];
+  const shares = [{ id: "s", at: 3_500 } as IdentityTimelineEntry];
+
+  it("reads only the rows after those the list has the same, and keeps the rows before them", () => {
+    const merge = timelineMerger<Row>();
+    const { reads, rows } = counted(Array.from({ length: 1_000 }, (_, i) => ({ id: `m${i}`, timestamp: i * 10 })));
+    const before = merge(rows, lines, shares);
+    reads.n = 0;
+    // A message comes; the newest rows are handed out anew, as the stored copy does.
+    const list = [...rows.slice(0, 995), ...rows.slice(995).map(m => ({ ...m })), { id: "m1000", timestamp: 10_000 }];
+    const after = merge(list, lines, shares);
+    expect(reads.n).toBeLessThan(20);
+    expect(after).toEqual(mergeTimeline(list, lines, shares));
+    expect(after.slice(0, 990)).toEqual(before.slice(0, 990));
+    after.slice(0, 990).forEach((row, k) => { if (row !== before[k]) expect.fail(`row ${k} is a new object`); });
+  });
+
+  it("gives what mergeTimeline gives, whatever happens to the list, its lines and its shares", () => {
+    // A small generator with a fixed seed: the same lists on every run.
+    let seed = 7;
+    const pick = (n: number) => { seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648; return seed % n; };
+    const merge = timelineMerger<Row>();
+    let list: Row[] = [], log: TransportEntry[] = [], ids: IdentityTimelineEntry[] = [], next = 0;
+    const steps: (() => void)[] = [
+      // A message comes, now or a while back (a clock off).
+      () => { list = [...list, { id: `m${next}`, timestamp: next++ * 10 - pick(30) }]; },
+      // The newest rows handed out anew.
+      () => { list = [...list.slice(0, -3), ...list.slice(-3).map(m => ({ ...m }))]; },
+      // A row deleted.
+      () => { list = list.filter((_, i) => i !== pick(list.length || 1)); },
+      // A transport line, a flapping one with its start, or an identity share.
+      () => { log = [...log, line({ id: `l${next}`, at: next++ * 10 - pick(50) })]; },
+      () => { log = [...log, line({ id: `f${next}`, kind: "flapping", since: next * 10 - 40, at: next++ * 10 })]; },
+      () => { ids = [...ids, { id: `s${next}`, at: next++ * 10 - pick(50) } as IdentityTimelineEntry]; },
+      // The same lines as a new copy, or none, as a new empty list.
+      () => { log = [...log]; },
+      () => { if (!pick(4)) { log = []; ids = []; } },
+    ];
+    for (let k = 0; k < 800; k++) {
+      steps[pick(steps.length)]();
+      const lines = log.length || pick(2) ? log : [], shared = ids.length || pick(2) ? ids : [];
+      expect(merge(list, lines, shared), `step ${k}`).toEqual(mergeTimeline(list, lines, shared));
+    }
+    expect(list.length).toBeGreaterThan(50);
   });
 });
 
