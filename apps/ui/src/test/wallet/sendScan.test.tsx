@@ -535,6 +535,37 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
       } finally { qr.asked = null; }
     });
 
+    it("typing in the field stops the camera, and Scan starts it again", async () => {
+      touch(true); camera();
+      const { user } = show({});
+      await user.click(screen.getByRole("tab", { name: "Send" }));
+      await screen.findByTestId("wallet-send-scan-stop");
+      await user.click(screen.getByTestId("wallet-pay-input"));
+      expect(track.stop).toHaveBeenCalled();
+      expect(screen.queryByTestId("wallet-send-scan-stop")).not.toBeInTheDocument();
+      await user.keyboard("shop@example.com");
+      expect(screen.getByTestId("wallet-pay-input")).toHaveValue("shop@example.com");
+      expect(screen.getByTestId("wallet-pay-input")).toHaveFocus();
+      await user.click(screen.getByTestId("wallet-send-camera"));
+      expect(await screen.findByTestId("wallet-send-scan-stop")).toBeInTheDocument();
+    });
+
+    it("a field taken while the camera's question stands lets go of a camera allowed after it", async () => {
+      touch(true); camera();
+      let allow = () => {};
+      qr.asked = new Promise((resolve) => { allow = resolve; });
+      try {
+        const { user } = show({});
+        await user.click(screen.getByRole("tab", { name: "Send" }));
+        expect(screen.getByTestId("wallet-send-camera")).toHaveAttribute("aria-disabled", "true");
+        await user.click(screen.getByTestId("wallet-pay-input"));
+        expect(screen.getByTestId("wallet-send-camera")).not.toHaveAttribute("aria-disabled");
+        allow();
+        await waitFor(() => expect(track.stop).toHaveBeenCalled());
+        expect(screen.queryByTestId("wallet-send-scan-stop")).not.toBeInTheDocument();
+      } finally { qr.asked = null; }
+    });
+
     it("back from a review the camera stays off: it was started for opening Send", async () => {
       touch(true); camera();
       qr.text = invoice;
