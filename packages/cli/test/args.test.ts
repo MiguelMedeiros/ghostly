@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
-import { GhostlyHttpError, engineError } from "@ghostly/core";
+import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
@@ -335,6 +335,11 @@ describe("the argument parser", () => {
       usage(name, [target, "--stop", "--for", "30"], "--for keeps it on: not with --stop");
       expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
+      // A kind no typing takes: before, the API answered after the profile opened ("kind must be one of …", exit 1).
+      usage(name, [target, "--kind", "foo"], "--kind takes typing, recording or thinking, not \"foo\"");
+      usage(name, [target, "--kind", ""], "--kind takes typing, recording or thinking, not \"\"");
+      expect(COMMANDS[name].options!.kind.choices).toEqual(TYPING_KINDS);
+      expect(params(name, [target, "--kind", "recording"])).toMatchObject({ kind: "recording" });
     }
     // A rate no call takes: before, the API's own check answered after the profile opened ("rate must be …", exit 1),
     // and `call answer` only once a call rang.
