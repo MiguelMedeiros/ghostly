@@ -238,6 +238,7 @@ describe("runs of a member's messages (authorsOf)", () => {
 
 describe("authors kept from one render to the next (authorsMemo)", () => {
   const A = "a".repeat(52), B = "b".repeat(52);
+  const NOON_AT = new Date(2026, 8, 29, 12, 0).getTime();
   const roster = (nick = "Ana") => ({ members: [{ key: A, nick, role: "member" as const, me: false, online: true, missing: 0 }, { key: B, role: "member" as const, me: false, online: true, missing: 0 }], formerNames: {} });
   const rows = [{ id: "1", sender: "peer", member: A, timestamp: 1 }, { id: "2", sender: "peer", member: B, timestamp: 2 }, { id: "3", sender: "peer", member: B, timestamp: 3 }];
 
@@ -255,18 +256,84 @@ describe("authors kept from one render to the next (authorsMemo)", () => {
     const memo = authorsMemo();
     const first = memo(rows, new Map(), roster(), new Set(), () => undefined);
     const more = [...rows, { id: "4", sender: "peer", member: B, timestamp: 4 }];
+    expect(first.get("3")).toMatchObject({ last: true });
     const grown = memo(more, new Map(), roster(), new Set(), () => undefined);
-    expect(grown).not.toBe(first);
+    expect(grown.get("3")).toMatchObject({ last: false });
     expect(grown.get("4")).toMatchObject({ first: false, last: true });
     // Folded under another row: out of the runs.
     const folded = memo(more, new Map([["4", "3"]]), roster(), new Set(), () => undefined);
     expect(folded.has("4")).toBe(false);
     expect(folded.get("3")).toMatchObject({ last: true });
-    const hidden = memo(more, new Map([["4", "3"]]), roster(), new Set(["x"]), () => undefined);
-    expect(hidden).not.toBe(folded);
-    const renamed = memo(more, new Map([["4", "3"]]), roster("Anna"), new Set(["x"]), () => undefined);
+    // A note shown under its payment's bubble: out of the runs, and the run it was in ends before it.
+    const paid = [...more, { id: "5", sender: "peer", member: B, timestamp: 5, groupPay: { id: "x" } }, { id: "6", sender: "peer", member: B, timestamp: 6 }];
+    expect(memo(paid, new Map([["4", "3"]]), roster(), new Set(), () => undefined).get("6")).toMatchObject({ first: true });
+    const hidden = memo(paid, new Map([["4", "3"]]), roster(), new Set(["x"]), () => undefined);
+    expect(hidden.get("6")).toMatchObject({ first: false, last: true });
+    const renamed = memo(paid, new Map([["4", "3"]]), roster("Anna"), new Set(["x"]), () => undefined);
     expect(renamed.get("1")).toMatchObject({ name: "Anna" });
-    const pictured = memo(more, new Map([["4", "3"]]), roster("Anna"), new Set(["x"]), key => key === B ? "data:image/png;base64,AA" : undefined);
+    const pictured = memo(paid, new Map([["4", "3"]]), roster("Anna"), new Set(["x"]), key => key === B ? "data:image/png;base64,AA" : undefined);
     expect(pictured.get("2")).toMatchObject({ picture: "data:image/png;base64,AA" });
+  });
+
+  it("reads only the last run again for a new message in a long group, not its whole history", () => {
+    // 20,000 rows: a message in it cost twice what it did in a 50-row group, the walk over every row for each new list.
+    let reads = 0;
+    const row = (i: number, member = i % 3 ? A : B) => {
+      const m = { id: String(i), timestamp: i * 60_000, member };
+      return Object.defineProperty(m, "sender", { get: () => (reads++, "peer"), enumerable: true }) as typeof m & { sender: string };
+    };
+    let list = Array.from({ length: 20_000 }, (_, i) => row(i));
+    const memo = authorsMemo(), none = new Map<string, string>();
+    memo(list, none, roster(), new Set(), () => undefined);
+    for (let i = 20_000; i < 20_010; i++) {
+      list = [...list, row(i, B)];
+      reads = 0;
+      const authors = memo(list, none, roster(), new Set(), () => undefined);
+      expect(reads).toBeLessThan(100);
+      expect(authors.get(String(i))).toMatchObject({ key: B, last: true });
+    }
+    // The new rows are one run of B's after A's last message: the name over the first, the picture beside the last.
+    const authors = memo(list, none, roster(), new Set(), () => undefined);
+    expect(authors.get("19999")).toMatchObject({ key: A, last: true });
+    expect(authors.get("20000")).toMatchObject({ first: true, last: false });
+    expect(authors.get("20009")).toMatchObject({ first: false, last: true });
+  });
+
+  it("reads the run before again when the first of the last one is folded under another", () => {
+    const memo = authorsMemo();
+    const list = [{ id: "1", sender: "peer", member: A, timestamp: 1 }, { id: "2", sender: "peer", member: B, timestamp: 2 }, { id: "3", sender: "peer", member: A, timestamp: 3 }];
+    memo(list, new Map(), roster(), new Set(), () => undefined);
+    // 3 folded and a new row of B's: it goes on 2's run, which ended at 3 before.
+    const authors = memo([...list, { id: "4", sender: "peer", member: B, timestamp: 4 }], new Map([["3", "1"]]), roster(), new Set(), () => undefined);
+    expect(authors.get("2")).toMatchObject({ first: true, last: false });
+    expect(authors.get("4")).toMatchObject({ first: false, last: true });
+  });
+
+  it("finds what a walk of the whole history does, however the list changes at its end", () => {
+    // A seeded mix of new rows, a row changed or gone at the end, folds and unfolds near it, and notes hidden.
+    let seed = 7;
+    const next = (n: number) => (seed = Math.imul(seed, 1103515245) + 12345 >>> 0) % n;
+    const make = (i: number, time: number) => {
+      const kind = next(10);
+      return { id: `r${i}`, timestamp: time, sender: kind === 0 ? "me" : "peer", ...(kind > 0 && { member: next(2) ? A : B }),
+        ...(kind === 9 && { event: "joined" }), ...(kind === 8 && { groupPay: { id: `p${i}` } }) };
+    };
+    let made = 0, time = NOON_AT;
+    let list = Array.from({ length: 200 }, () => make(made++, (time += 60_000)));
+    let folded = new Map<string, string>();
+    let hidden = new Set<string>();
+    const memo = authorsMemo();
+    for (let step = 0; step < 1000; step++) {
+      const change = next(8);
+      if (change < 3) list = [...list, ...Array.from({ length: 1 + next(3) }, () => make(made++, (time += next(2) ? 60_000 : RUN_GAP_MS + 1)))];
+      else if (change === 3) list = [...list.slice(0, -1 - next(3))];
+      else if (change === 4) list = [...list.slice(0, -1), make(made++, time)];
+      else if (change === 5) folded = new Map([...folded, [list[list.length - 1 - next(4)]!.id, "head"]]);
+      else if (change === 6) folded = new Map([...folded].filter(() => next(3) > 0));
+      else hidden = new Set(list.filter(m => m.groupPay && next(2)).map(m => m.groupPay!.id));
+      const kept = memo(list, folded, roster(), new Set(hidden), () => undefined);
+      const whole = authorsOf(list.filter(m => !folded.has(m.id)), roster(), hidden, () => undefined);
+      expect(new Map(kept)).toEqual(whole);
+    }
   });
 });
