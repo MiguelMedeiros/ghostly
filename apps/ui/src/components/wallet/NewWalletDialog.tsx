@@ -165,7 +165,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
 
         {chosen && chosenOffer ? (
           <div className="space-y-3" data-testid="new-wallet-step">
-            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); setApiKey(""); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">{t("wallet.new.back")}</button>
+            {/* A line of small text on a desktop, 24 px high on a phone, as the app's other small buttons are. */}
+            <button type="button" data-testid="new-wallet-back" disabled={busy} onClick={() => { setChosen(null); setPhase(null); setApiKey(""); }} className="text-xs text-text-secondary hover:text-text-primary cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed max-md:min-h-6">{t("wallet.new.back")}</button>
             <div className="flex items-center gap-3">
               <Mark type={chosen} />
               <div className="min-w-0">
