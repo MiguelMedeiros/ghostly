@@ -594,7 +594,7 @@ describe("invite create", () => {
   it("a daemon answers at once when the relays' request budget holds the invite back, and says when it goes", async () => {
     const held = inviting("daemon", { stage: "publishing", relayWaitUntil: 1_042_000 });
     await vi.advanceTimersByTimeAsync(0);
-    expect(held.answer()).toEqual({ chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false, retryInMs: 42_000 });
+    expect(held.answer()).toEqual({ chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false, retryInMs: 42_000, note: expect.stringContaining("once a relay answers") });
 
     // Published first: so it says, with no wait.
     const out = inviting("daemon", { stage: "publishing" });
@@ -604,6 +604,18 @@ describe("invite create", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(out.answer()).toMatchObject({ published: true });
     expect(out.answer()).not.toHaveProperty("retryInMs");
+    expect(out.answer()).not.toHaveProperty("reason");
+    expect(out.answer()).not.toHaveProperty("note");
+  });
+
+  it("says why when no relay took the invite, and that the invite still goes out", async () => {
+    const failed = inviting("daemon", { stage: "failed", reason: "publish", retryable: true, detail: "Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(failed.answer()).toEqual({
+      chat: "inv1", invite: "ghostly1abc", link: expect.stringContaining("ghostly1abc"), published: false,
+      reason: "Publish failed on every relay: Error: https://a.test did not answer a moment ago; retry shortly",
+      note: "The invite is good: it goes out by itself once a relay answers, while a daemon runs for this profile",
+    });
   });
 
   it("a one-shot still waits for the invite to go out before it leaves, and says when it did not", async () => {

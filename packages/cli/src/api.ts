@@ -250,8 +250,16 @@ const METHODS: Record<string, Method> = {
     const progress = await waitForState(ctx, (s) => { const p = progressOf(s); return p && (p.stage !== "publishing" || (ctx.mode === "daemon" && p.relayWaitUntil)) ? p : undefined; }, 20_000, "the invite to be published")
       .catch(() => progressOf(state(ctx)));
     const published = !!progress && progress.stage !== "publishing" && progress.reason !== "publish";
-    const waitUntil = published ? undefined : progress?.relayWaitUntil;
-    return { chat: linkId, invite: inviteCode, link: inviteLink(inviteCode), published, ...(waitUntil !== undefined && { retryInMs: Math.max(0, waitUntil - Date.now()) }) };
+    const answer = { chat: linkId, invite: inviteCode, link: inviteLink(inviteCode), published };
+    if (published) return answer;
+    // Not out yet is not lost: the link works, so nobody should make another. Said here, not only in `chat show`.
+    const waitUntil = progress?.relayWaitUntil;
+    return {
+      ...answer,
+      ...(waitUntil !== undefined && { retryInMs: Math.max(0, waitUntil - Date.now()) }),
+      ...(progress?.detail && { reason: progress.detail }),
+      note: "The invite is good: it goes out by itself once a relay answers, while a daemon runs for this profile",
+    };
   },
   async "invite.join"(ctx, params) {
     let invite = str(params, "invite", true).trim();
