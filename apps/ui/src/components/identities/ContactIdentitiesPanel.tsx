@@ -25,6 +25,7 @@ import { PublicProfileDetails } from "./PublicProfileDetails";
 import "./contact-panel.css";
 import { deckArrows } from "../deck/arrows";
 import { problemLine } from "../../lib/problemText";
+import { fillNames } from "../../lib/fillNodes";
 
 type Entry = { id: typeof GHOSTLY; ghostly: true; card: IdCardContent } | { id: string; ghostly?: false; r: ReceivedIdentityView; card: IdCardContent };
 type Received = Extract<Entry, { r: ReceivedIdentityView }>;
@@ -202,15 +203,15 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
             <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
-            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{t("identities.contact.nameFrom", { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
+            {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
           </span>
         </div>
         {card.lookup && <PublicProfileDetails provider={r.provider} profile={card.profile} testId="chat-identity-public-profile" />}
         <dl className="contact-card-facts">
           <dt>{t("identities.contact.proves")}</dt>
-          <dd>{card.attested ? (r.verified.attester ? t("identities.contact.attested", { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
+          <dd>{card.attested ? (r.verified.attester ? fillNames(t("identities.contact.attested"), { attester: r.verified.attester }) : t("identities.contact.attestedByProvider")) : t("identities.contact.holderOnly")}</dd>
           <dt>{t("identities.contact.how")}</dt>
-          <dd>{r.verified.source}</dd>
+          <dd><bdi>{r.verified.source}</bdi></dd>
           <dt>{t("identities.contact.checked")}</dt>
           <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt, t.language), last: dateTime(r.checkedAt, t.language) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt, t.language) })}</dd>
           <dt>{t("identities.contact.validity")}</dt>

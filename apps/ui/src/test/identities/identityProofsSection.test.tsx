@@ -370,4 +370,15 @@ describe("IdentityProofsSection", () => {
       expect(screen.getByTestId("where")).toHaveTextContent("/profile");
     });
   });
+
+  it("in Arabic, keeps how a proof was checked and who attests it each in its own direction", () => {
+    // English in an Arabic paragraph, isolated: the bracket and the period stay with the words they belong to.
+    const { engine } = renderApp(<IdentityProofsSection />, { language: "ar" });
+    act(() => engine.update({ identityProofs: [proofView({ id: "a", provider: "oidc", subject: "https://accounts.google.com",
+      verified: { subject: "https://accounts.google.com#1234", source: "Nostr signature (NIP-01, BIP-340)", attester: "accounts.google.com (OIDC)" } })] }));
+    const line = within(panel()).getByText((_, el) => el?.tagName === "P" && !!el.textContent?.startsWith("Nostr signature"));
+    expect([...line.querySelectorAll("bdi")].map(bdi => bdi.textContent)).toEqual(["Nostr signature (NIP-01, BIP-340)", "accounts.google.com (OIDC)", "accounts.google.com (OIDC)"]);
+    expect(line.textContent).toMatch(/^Nostr signature \(NIP-01, BIP-340\)\. يقول accounts\.google\.com \(OIDC\) إن/);
+    expect(line.textContent).not.toContain("{{");
+  });
 });
