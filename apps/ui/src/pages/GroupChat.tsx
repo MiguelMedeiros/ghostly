@@ -7,7 +7,7 @@ import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { DaySections } from "../components/chat/DaySections";
-import { leftOn, leftScrolledUp, useChatScroll } from "../hooks/useChatScroll";
+import { leftOn, leftScrolledUp, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
@@ -18,7 +18,7 @@ import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
-import { panelCard, routineStacks } from "../lib/statusCards";
+import { panelCard, routineStacksReader } from "../lib/statusCards";
 import { rowPicker } from "../lib/chatRows";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
 import { keepSentOriginal } from "../lib/sentOriginals";
@@ -39,7 +39,7 @@ import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
-import { rowDays } from "../lib/chatDays";
+import { rowDaysReader } from "../lib/chatDays";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatNamesForPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
@@ -108,6 +108,16 @@ function toChatMessage(message: StoredMessage, names: RosterNames): ChatMessage 
     ...(message.edit && { edit: message.edit }), ...(message.forwarded && { forwarded: message.forwarded }), ...(message.card && { card: message.card }),
     // A file or voice message a member announced (WISP 503): its bubble, its bytes fetched from whoever holds them.
     ...(message.file && { file: message.file }) };
+}
+
+/** `toChatMessage` under one roster's names, once per row. */
+function chatMessageMaker(names: RosterNames): (message: StoredMessage) => ChatMessage {
+  const made = new WeakMap<StoredMessage, ChatMessage>();
+  return message => {
+    let chatMessage = made.get(message);
+    if (!chatMessage) made.set(message, chatMessage = toChatMessage(message, names));
+    return chatMessage;
+  };
 }
 
 /** A member as a reply's quote names them: me, the roster's name, or for a key no longer in the roster its former name or its start. */
@@ -261,6 +271,7 @@ const JUST_JOINED_MS = 5 * 60_000;
  */
 const LONG_KNOCK_MS = 2 * 60_000;
 const NO_MESSAGES: StoredMessage[] = [];
+const NO_ROWS: readonly ChatMessage[] = [];
 
 /** True once `ms` have passed since `since` (none: never), re-rendering when they do. */
 function usePast(since: number | undefined, ms: number): boolean {
@@ -325,8 +336,10 @@ export function GroupChat() {
   const [readReplies] = useState(() => replyIndexer(true));
   const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
-  const buttonsOf = useMemo(() => buttonsViews(messages, m => replyRef(m, true)), [messages]);
-  const presses = useMemo(() => compactPresses(messages, m => replyRef(m, true)), [messages]);
+  const [pickButtonRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
+  const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
+  const buttonsOf = useMemo(() => buttonsViews(buttonRows, m => replyRef(m, true)), [buttonRows]);
+  const presses = useMemo(() => compactPresses(buttonRows, m => replyRef(m, true)), [buttonRows]);
   const [showMembers, setShowMembers] = useState(false);
   /** The member whose name or picture above a message opened the members, marked there. */
   const [focusMember, setFocusMember] = useState<string>();
@@ -369,11 +382,11 @@ export function GroupChat() {
   const namesKey = rosterNamesKey(group);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `namesKey` is all of the group the names read
   const names = useMemo(() => group && rosterNames(group, t, settings.defaultNickname), [namesKey, settings.defaultNickname, t]);
-  const shown = useMemo(() => names ? messages.filter(m => !m.event && !m.groupPay).map(m => toChatMessage(m, names)) : [], [messages, names]);
+  // Each row made once per roster, and only the rows that changed read for the list (see Chat.tsx): a long group has thousands.
+  const shownOf = useMemo(() => chatMessageMaker(names!), [names]);
+  const pickShown = useMemo(() => rowPicker<StoredMessage, ChatMessage>(m => m.event || m.groupPay ? undefined : shownOf(m)), [shownOf]);
+  const shown = useMemo(() => names ? pickShown(messages) : NO_ROWS, [names, pickShown, messages]);
   const forwarding = useForwarding(group ? `group:${groupId}` : undefined, shown);
-  // By id: a row looks its message up once per draw, and a long group has thousands of rows.
-  const shownById = useMemo(() => new Map(shown.map(c => [c.id, c])), [shown]);
-  const shownOf = (m: StoredMessage) => shownById.get(m.id) ?? toChatMessage(m, names!);
   // Members learn my name on the edges, as a contact does on a chat: the engine must know it here too.
   const engineNick = state?.settings.nick;
   useEffect(() => {
@@ -411,7 +424,8 @@ export function GroupChat() {
   // Left or deleted here: what this device keeps of it goes, and so does what plays from it (no bar naming it after).
   const goneHere = () => { forgetGroupLocal(groupId); stopPlayingFrom(groupPath(groupId), true); };
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
-  const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
+  const [readStacks] = useState(() => routineStacksReader<StoredMessage, StoredMessage>(m => m));
+  const stacks = useMemo(() => readStacks(messages), [readStacks, messages]);
   // The Tasks button's rows: those with a task or a routine, found in the rows that changed (see Chat.tsx).
   const [pickCardRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => panelCard(m.card) ? m : undefined));
   const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
@@ -419,14 +433,26 @@ export function GroupChat() {
   // Who wrote each message, over the whole history: worked out again only when what it reads changes (`authorsMemo`).
   const [authorsFor] = useState(authorsMemo);
   // A long group has a window of its rows in the page, never the whole history (useRowWindow, see Chat.tsx).
-  const rowIds = useMemo(() => messages.map(m => m.id), [messages]);
+  const [pickRowId] = useState(() => rowPicker<StoredMessage, string>(m => m.id));
+  const rowIds = useMemo(() => pickRowId(messages), [pickRowId, messages]);
   const rowWindow = useRowWindow(rowIds, groupId ?? "", { opensOn: leftOn(groupId ?? ""), heads: stackHeads });
   // The day each row goes under, over the whole history (see Chat.tsx).
-  const days = useMemo(() => rowDays(messages.map(m => m.timestamp)), [messages]);
+  const [readDays] = useState(() => rowDaysReader<StoredMessage>(m => m.timestamp));
+  const days = useMemo(() => readDays(messages), [readDays, messages]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the members'.
   // Always every message, in the page or not; a new list when the window moves (see Chat.tsx).
+  const [pickScrollRow] = useState(() => rowPicker<StoredMessage, ScrollRow>(m => m.event || m.groupPay ? undefined : { id: m.id, mine: m.sender === "me" }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
-  const scrollRows = useMemo(() => messages.filter(m => !m.event && !m.groupPay).map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
+  const scrollRows = useMemo(() => pickScrollRow(messages).slice(), [pickScrollRow, messages, rowWindow.from, rowWindow.to]);
+  // The rows a page's every draw looks at (it draws on each engine state, up to 20 a second), found in the rows that
+  // changed: the payments' notes, this device's own payment bubbles, and my own "You joined" lines.
+  const [pickNote] = useState(() => rowPicker<StoredMessage, GroupPayNote>(m => m.groupPay));
+  const noteRows = useMemo(() => pickNote(messages), [pickNote, messages]);
+  const notes = useMemo(() => new Map(noteRows.map(note => [note.id, note])), [noteRows]);
+  const [pickPaymentRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => m.paymentId && !m.groupPay ? m : undefined));
+  const paymentRows = useMemo(() => pickPaymentRow(messages), [pickPaymentRow, messages]);
+  const [pickMyJoin] = useState(() => rowPicker<StoredMessage, number>(m => m.event === "joined" && !m.member ? m.timestamp : undefined));
+  const myJoins = useMemo(() => pickMyJoin(messages), [pickMyJoin, messages]);
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
@@ -535,9 +561,8 @@ export function GroupChat() {
   const others = group.members.filter(m => !m.me);
   const reachable = others.filter(m => m.online).length;
   // Payments: this device's own bubbles (from the desk, over an edge) and the notes the group shares about them.
-  const notes = new Map<string, GroupPayNote>(messages.filter(m => m.groupPay).map(m => [m.groupPay!.id, m.groupPay!]));
   // A note is left out of the timeline only when one of these bubbles is about it: its own caption, or a payment answering it.
-  const ownNotes = new Set(messages.filter(m => m.paymentId && !m.groupPay && (captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId]?.requestId))
+  const ownNotes = new Set(paymentRows.filter(m => captionOf(state, notes, m, group.myKey) || state.payments[m.paymentId!]?.requestId)
     .map(m => noteIdOf(state, m.paymentId!)));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
@@ -597,7 +622,7 @@ export function GroupChat() {
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
     : joiningText(stage, group.name, group.profile === "community", t);
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
-  const justJoined = messages.some(m => m.event === "joined" && !m.member && Date.now() - m.timestamp < JUST_JOINED_MS);
+  const justJoined = myJoins.some(at => Date.now() - at < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
   const community = group.profile === "community" ? group.community : undefined;
   // Why I am out of it (removed, left, forked, lost), as the engine says it, in the app's language; else its status in a word.
