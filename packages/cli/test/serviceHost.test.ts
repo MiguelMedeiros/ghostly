@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { request as httpRequest } from "node:http";
+import { createServer as createNetServer, Server as NetServer, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
@@ -78,6 +79,55 @@ describe("closing an opened service", () => {
     expect((await stream).aborted).toBe(true);
     await vi.waitFor(() => expect(signal?.aborted).toBe(true));
     await expect(get(service, "/", { cookie })).rejects.toThrow(/ECONNREFUSED/);
+  });
+});
+
+/** `service open --port`: the port asked for, or a refusal that names it. */
+describe("opening a service on a given port", () => {
+  const link = { id: "portchat", peerPubKeyZ32: "portpeer", peerServices: [{ id: "app", name: "App" }] };
+  const ctx = { mode: "daemon", runtime: { server: { node: { getState: () => ({ links: [link], groups: [] }) } } } } as unknown as ApiContext;
+  const openOn = (port?: number) => SERVICE_METHODS["service.open"](ctx, { chat: link.id, service: "app", port }) as Promise<{ url: string }>;
+  const portOf = (url: string) => Number(new URL(url).port);
+  afterEach(async () => { await SERVICE_METHODS["service.close"](ctx, { chat: link.id, service: "app" }).catch(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); });
+  /** A port free a moment ago, as the system hands them out. */
+  const freePort = async () => {
+    const probe = createNetServer();
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+    const { port } = probe.address() as AddressInfo;
+    await new Promise((r) => probe.close(r));
+    return port;
+  };
+
+  it("a port in use says so and names it, not Node's EADDRINUSE as the engine failing", async () => {
+    const taken = createNetServer();
+    await new Promise<void>((r) => taken.listen(0, "127.0.0.1", r));
+    const { port } = taken.address() as AddressInfo;
+    await expect(openOn(port)).rejects.toMatchObject({ code: "busy", message: `Port ${port} is in use on this machine: choose another, or leave out --port` });
+    await new Promise((r) => taken.close(r));
+    // Nothing stayed open: the same port works once it is free.
+    expect(portOf((await openOn(port)).url)).toBe(port);
+  });
+
+  it("a port this user may not take says so and names it, not \"the path\"", async () => {
+    vi.spyOn(NetServer.prototype, "listen").mockImplementationOnce(function (this: NetServer) {
+      process.nextTick(() => this.emit("error", Object.assign(new Error("listen EACCES: permission denied 127.0.0.1:80"), { code: "EACCES", syscall: "listen" })));
+      return this;
+    });
+    await expect(openOn(80)).rejects.toMatchObject({ code: "refused", message: "Port 80 is not allowed for this user: choose another, or leave out --port" });
+  });
+
+  it("open already: another port is refused, naming the one it is on; no port, 0 or the same one answers its link", async () => {
+    const port = await freePort();
+    const { url } = await openOn(port);
+    expect(portOf(url)).toBe(port);
+    const other = port === 65535 ? port - 1 : port + 1;
+    await expect(openOn(other)).rejects.toMatchObject({ code: "busy", message: `That service is open here on port ${port}: ghostly service close ${link.id} app first, or leave out --port` });
+    for (const same of [undefined, 0, port]) expect((await openOn(same)).url).toBe(url);
+  });
+
+  it("the API takes a whole number only, for a socket caller too", async () => {
+    await expect(openOn(1.5)).rejects.toMatchObject({ code: "bad_request", message: "port must be a whole number from 0 to 65535" });
   });
 });
 

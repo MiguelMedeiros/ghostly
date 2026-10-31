@@ -20,6 +20,10 @@ describe("number flags out of range", () => {
       // It printed a made-up gap first, then the whole journal (with --webhook: "holding event -1 (events.gap)").
       [["listen", "--since", "-1"], "--since takes a seq from 0 up, not -1"],
       [["listen", "--since", "0.5", "--webhook", "http://127.0.0.1:5660/hook"], "--since takes a seq from 0 up, not 0.5"],
+      // It answered "start ghostly daemon --detach first" here, and past that the API's or Node's words.
+      [["service", "open", "bob", "web", "--port", "65536"], "--port takes a whole number from 0 to 65535, not 65536"],
+      [["service", "open", "bob", "web", "--port", "-1"], "--port takes a whole number from 0 to 65535, not -1"],
+      [["service", "open", "bob", "web", "--port", "1.5"], "--port takes a whole number from 0 to 65535, not 1.5"],
     ];
     const seen = [];
     for (const [args] of cases) {
