@@ -8,13 +8,14 @@ import { ChatFolderHeader, OtherChatsHeader } from "./ChatFolderHeader";
 import { OTHER_CHATS_ID, createFolder, folderChatsId, inOrder, movePinnedBeside, setChatFolder, setFolderFolded, setOthersFolded, setSectionOrder, useChatFolders } from "../lib/chatFolders";
 import { FolderNameDialog } from "./chat/ChatFolderDialogs";
 import { FolderIcon } from "./chat/ChatFolderMenu";
-import { groupChat } from "../lib/chatMute";
+import { groupChat, mentionsNotify, mutedUntil } from "../lib/chatMute";
+import type { GroupView } from "@ghostly/browser/shared/types";
 import { formatListTime } from "../lib/chatList";
 import { foldText } from "../lib/chatSearch";
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
-import { groupPath, groupRouteId, invitationRow } from "../lib/groups";
+import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useLabelsFit } from "../hooks/useLabelsFit";
 import { Menu, MenuItem } from "./Menu";
@@ -32,6 +33,7 @@ import {
   isSessionPinned,
   setSessionPinned,
   deleteSession,
+  getLastReadCount,
   getUnreadCount,
   markSessionAsRead,
   ensureSession,
@@ -97,6 +99,16 @@ function groupsFound<G extends { name: string }>(groups: G[], search: string): G
 
 /** The pinned chats among `sessions`, as the list shows them. (Outside the component, as `groupsFound`.) */
 const pinnedRows = (sessions: ChatSession[]): string[] => sessions.filter(s => isSessionPinned(s.id)).map(s => s.id);
+
+/**
+ * What the list shows beyond the chats and groups themselves, which only its look every few seconds brings: what each
+ * row's time says (the app's language does not matter: only whether it changed), and what is stored apart from the chat,
+ * where another page of the app writes with no word to this one (read marks, pins, a mute, which also ends by itself).
+ */
+const listExtras = (sessions: ChatSession[], groups: GroupView[]): string => [
+  ...sessions.map(s => [formatListTime(s.lastSyncAt ?? s.createdAt), getLastReadCount(s.id), isSessionPinned(s.id), !!getInviteCode(s.id), mutedUntil(s.id)].join()),
+  ...groups.map(g => [formatListTime(g.lastMessageAt), groupReadAt(g.id), mutedUntil(groupChat(g.id)), mentionsNotify(groupChat(g.id))].join()),
+].join("\n");
 
 export function Sidebar() {
   const nav = useAppNavigation();
@@ -190,9 +202,16 @@ export function Sidebar() {
 
   const { syncingSessions } = useBackgroundPoller(activeSessionId);
 
-  const refreshSessions = useCallback(() => {
+  const lastRead = useRef<{ sessions: ChatSession[]; extras: string } | undefined>(undefined);
+  const refreshSessions = useCallback((onlyIfChanged = false) => {
     // Read through the page's one cache: a long chat whose stored text changed is parsed once for every reader (`listShownSessions`).
     const updated = listShownSessions();
+    const extras = listExtras(updated, engine.state?.groups ?? []);
+    const last = lastRead.current;
+    lastRead.current = { sessions: updated, extras };
+    // The look every few seconds draws only what it brings: the same chats are the same objects (`listShownSessions`).
+    // Anyone else who calls this asks for a draw: a pin changes no chat, and `session-updated` is all it says.
+    if (onlyIfChanged && last?.extras === extras && last.sessions.length === updated.length && updated.every((s, i) => s === last.sessions[i])) return;
 
     setSessions(updated);
     // A chat deleted elsewhere takes its pending "Delete?" with it.
@@ -201,8 +220,8 @@ export function Sidebar() {
 
   useEffect(() => {
     refreshSessions();
-    const interval = setInterval(refreshSessions, 3000);
-    
+    const interval = setInterval(() => refreshSessions(true), 3000);
+
     const handleSessionUpdate = () => refreshSessions();
     window.addEventListener("session-updated", handleSessionUpdate);
     
