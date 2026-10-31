@@ -151,6 +151,7 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const submit = async () => {
+    if (busy || !password) return;
     setBusy(true); setError(null);
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
     catch (cause) { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); }
@@ -168,7 +169,8 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
           <Switch checked={later} onChange={setLater} label={t("devices.handoff.later")} testId="handoff-later" />
         </label>
         {error && <Notice problem={error} className="" />}
-        <button type="submit" data-testid="handoff-start" disabled={busy || !password} className={primaryButton}>{t("devices.handoff.useHere")}</button>
+        {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}
+        <button type="submit" data-testid="handoff-start" disabled={!password} aria-disabled={busy || undefined} aria-busy={busy || undefined} className={primaryButton}>{t("devices.handoff.useHere")}</button>
       </form>
     </DeviceDialog>
   );

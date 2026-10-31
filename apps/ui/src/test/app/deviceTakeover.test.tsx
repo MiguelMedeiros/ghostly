@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toBase64Url } from "@ghostly/core";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { ProfileBackups } from "../../components/ProfileBackups";
@@ -180,6 +180,42 @@ describe("the forced takeover on the standby screen", () => {
     await user.click(screen.getByTestId("takeover-go"));
     expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Wrong password.");
     expect(engine.callsTo("deviceTakeover")).toEqual([{ password: "not it", name: "Phone", lost: false }]);
+  });
+
+  it("the keyboard stays in the form during the check, which runs once, and a wrong password gets the focus back", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "superseded", activeDevice: "Phone" }} />);
+    let refuse = () => {};
+    engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "Phone", copy: "frozen", password: true }));
+    engine.on("deviceTakeover", () => new Promise((_, reject) => { refuse = () => reject(new Error("takeover-password: Wrong password.")); }));
+    await user.click(await screen.findByTestId("takeover-open"));
+    await user.type(screen.getByTestId("takeover-password"), "not it");
+    await user.type(screen.getByTestId("takeover-name"), "Phone");
+    await user.click(screen.getByTestId("takeover-lost-no"));
+    await user.click(screen.getByTestId("takeover-go"));
+    // A disabled button would drop the focus to the page for the half minute of the check.
+    expect(await screen.findByTestId("takeover-checking")).toBeInTheDocument();
+    expect(screen.getByTestId("takeover-go")).toBeEnabled();
+    expect(screen.getByTestId("takeover-go")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("deviceTakeover")).toHaveLength(1);
+    act(() => refuse());
+    expect(await screen.findByTestId("takeover-error")).toHaveTextContent("Wrong password.");
+    expect(screen.getByTestId("takeover-password")).toHaveFocus();
+    expect(screen.getByTestId("takeover-password")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByTestId("takeover-go")).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("Use here keeps the keyboard on its button while the pull starts, and starts it once", async () => {
+    const { user, engine } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    engine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    engine.on("deviceHandoffPull", () => new Promise(() => {}));
+    await user.click(await screen.findByTestId("handoff-use-here"));
+    await user.type(screen.getByTestId("handoff-password"), "a long lock password");
+    await user.click(screen.getByTestId("handoff-start"));
+    expect(screen.getByTestId("handoff-start")).toBeEnabled();
+    expect(screen.getByTestId("handoff-start")).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("deviceHandoffPull")).toHaveLength(1);
   });
 
   it("a standby with a frozen copy offers My other device is lost or broken; one without a copy offers nothing", async () => {
