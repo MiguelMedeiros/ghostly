@@ -111,11 +111,11 @@ describe("Send on the Bitcoin card: scan, paste or picture", () => {
     const field = screen.getByLabelText("Bitcoin recipient address");
     await user.type(field, "bitcoin:");
     expect(field).toHaveValue("bitcoin:");
-    expect(screen.queryByTestId("bitcoin-send-refused")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("bitcoin-send-unknown")).not.toBeInTheDocument();
     await user.type(screen.getByTestId("bitcoin-amount"), "1000");
     expect(field).toHaveValue("bitcoin:");
-    expect(screen.getByTestId("bitcoin-send-refused")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+    expect(screen.getByTestId("bitcoin-send-unknown")).toHaveTextContent("That is not a Bitcoin address for this wallet.");
+    expect(screen.getByRole("button", { name: "Review payment" })).toBeDisabled();
   });
 
   it("another chain's address fills nothing, and says so; a link that must not be paid is refused", async () => {
