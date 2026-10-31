@@ -23,9 +23,12 @@ export class EngineServer implements PeerServer {
   private readonly clients = new Set<EngineClientSink>();
   /**
    * Per client, the chats and groups whose whole history it was sent. It hears only what changes in those; one it
-   * does not have yet is sent whole first (read once, when its first change comes), then what changes.
+   * does not have yet is sent first (read once, when its first change comes), then what changes: whole, or as its newest
+   * page to a client that attached for those (`newest`).
    */
   private readonly histories = new WeakMap<EngineClientSink, Set<string>>();
+  /** The clients that attached with `newest`, and how many rows of a chat they get before they ask for the rest. */
+  private readonly newest = new WeakMap<EngineClientSink, number>();
   /** Per chat or group, what is still being sent (a whole history being read): what comes next waits for it. */
   private readonly sending = new Map<string, Promise<void>>();
   /**
@@ -91,6 +94,8 @@ export class EngineServer implements PeerServer {
     const sent = new Set<string>();
     if (read) for (const id of read.ids) if ((this.changedAt.get(id) ?? 0) <= read.mark) sent.add(id);
     this.histories.set(client, sent);
+    if (scope.newest) this.newest.set(client, scope.newest);
+    else this.newest.delete(client);
     void this.ready.then(async () => {
       if (!this.clients.has(client)) return;
       client.post({ kind: "state", state: this.node.getState() });
@@ -235,13 +240,21 @@ export class EngineServer implements PeerServer {
       this.post(client, { kind: "message-changes", linkId, ...changes });
     }
     if (!behind.length) return;
-    // Its whole history, read now: it holds these changes already, and what changes next follows it.
-    return this.node.getMessages(linkId).then((messages) => {
-      for (const client of behind) {
-        if (!this.clients.has(client)) continue;
-        if (this.post(client, this.historyEvent(linkId, messages))) this.histories.get(client)?.add(linkId);
-      }
-    });
+    return this.catchUp(linkId, behind);
+  }
+
+  /**
+   * A chat or group these clients do not have, read now: it holds the changes that brought it here, and what changes next
+   * follows it. A client that attached with `newest` gets that page, and asks for the rest when it shows the chat: a group
+   * is in no attach, and the first message of each one went whole, as JSON, to every tab, whether or not one showed it.
+   */
+  private async catchUp(linkId: string, behind: EngineClientSink[]): Promise<void> {
+    let whole: StoredMessage[] | undefined;
+    for (const client of behind) {
+      const newest = this.newest.get(client);
+      const event = newest ? await this.newestOf(linkId, newest) : this.historyEvent(linkId, whole ??= await this.node.getMessages(linkId));
+      if (this.clients.has(client) && this.post(client, event)) this.histories.get(client)?.add(linkId);
+    }
   }
 
   private post(client: EngineClientSink, event: EngineEvent): boolean {
