@@ -209,6 +209,16 @@ export function inviteTaken(link: LinkView): void {
   if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 
+/**
+ * A chat on DHT only opens no live session: the engine refused `chat connect` as `engine`, "Both peers must choose a
+ * live method first", which read as if this side had to change something. Refused instead, naming whose choice it is
+ * (`details.reason`): the contact's (`peer-dht-only`, nothing to do here but wait), or this side's (`dht-only`).
+ */
+export function dhtOnly(link: LinkView): void {
+  if (link.deliveryMode === "dht") throw new CliError("refused", "This chat is on DHT only on this side: choose a live method first (chat transport auto)", { reason: "dht-only" });
+  if (link.dhtDelivery?.peerMode === "dht") throw new CliError("refused", "Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT", { reason: "peer-dht-only" });
+}
+
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
 export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
   const found = findChatOrGroup(state(ctx).links, state(ctx).groups, ref);

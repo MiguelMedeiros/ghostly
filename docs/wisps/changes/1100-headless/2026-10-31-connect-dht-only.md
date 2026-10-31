@@ -1,0 +1,1 @@
+`chat connect` on a chat on DHT only answers `refused` (exit 1) with `details.reason`: `peer-dht-only` while the contact keeps the chat on DHT only, `dht-only` for this side's own choice. A hold of this side's is still ended first. Before, the engine's refusal came as `engine`, "Both peers must choose a live method first", even when this side had.
