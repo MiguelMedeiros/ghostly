@@ -92,8 +92,8 @@ describe("a HyperDHT-only chat whose first dials after a restart fail", () => {
     goes.stopped = goes.link.stop(false);
     await run(10_000);
     if (failMs > 0) { world.native.dialsLost.add("goes"); world.native.dialFailMs = failMs; }
-    const steps: string[] = [];
-    setLinkTraceSink(line => { steps.push((JSON.parse(line) as { step: string }).step); });
+    const steps: string[] = [], lines: { me: string; step: string }[] = [];
+    setLinkTraceSink(line => { const parsed = JSON.parse(line) as { me: string; step: string }; steps.push(parsed.step); lines.push(parsed); });
     goes = startApp(world, "goes", made.inviter, { side: made.joiner, name: "stays" }, goes.dhtState, true);
     const back = Date.now();
     // As in the lab: the knock and the dial right after it fail, and the path works a moment later.
@@ -104,6 +104,11 @@ describe("a HyperDHT-only chat whose first dials after a restart fail", () => {
     console.log(`dials fail after ${failMs} ms: live again ${liveMs} ms, restarted app's reads to live ${reads}, dial-backoff steps ${backoffs}`);
     expect(liveMs, "from the restart to live on both sides").toBeLessThanOrEqual(liveBy);
     expect(reads, "reads by the restarted app until live").toBeLessThanOrEqual(readsBy);
+    // The Desktop writes every step to its log: a look during a wait says nothing the wait's first line did not.
+    for (const me of new Set(lines.map(line => line.me))) {
+      const mine = lines.filter(line => line.me === me && line.step.startsWith("dial")).map(line => line.step).join(",");
+      expect(mine, "at most one dial-backoff line per wait").not.toMatch(/dial-backoff,dial-backoff/);
+    }
   }, 240_000);
 });
 
