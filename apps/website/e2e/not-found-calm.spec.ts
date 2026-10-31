@@ -44,7 +44,7 @@ test.describe(() => {
 
     // The still: the ghost, the 404, the words and the two links.
     await expect(page.locator('main svg path[filter="url(#ghost-glow-404)"]')).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("404");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName("404: Page not found");
     await expect(page.getByRole("heading", { level: 2 })).toBeVisible();
     await expect(page.getByRole("link", { name: "Go Home" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Read the WISPs" })).toBeVisible();

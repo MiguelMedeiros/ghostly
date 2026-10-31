@@ -196,32 +196,36 @@ export function NotFoundScene() {
           </div>
         </div>
 
-        {/* 404 text */}
+        {/* 404 text. The digits are drawn only (the 0 is a box of its own, so a reader heard "4 0 4"): the heading
+            says what happened. */}
         <h1 className="text-8xl md:text-9xl font-bold mb-4 tracking-tighter">
-          <span className="bg-gradient-to-r from-cyan-400 via-cyan-300 to-cyan-500 bg-clip-text text-transparent">
-            4
-          </span>
-          <span className="relative inline-block mx-2">
-            <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-transparent opacity-50">
-              0
+          <span className="sr-only">404: Page not found</span>
+          <span aria-hidden="true">
+            <span className="bg-gradient-to-r from-cyan-400 via-cyan-300 to-cyan-500 bg-clip-text text-transparent">
+              4
             </span>
-            <svg
-              className="animate-spin-slow absolute inset-0 w-full h-full"
-              viewBox="0 0 100 100"
-            >
-              <circle
-                cx="50"
-                cy="50"
-                r="40"
-                fill="none"
-                stroke="rgba(34, 211, 238, 0.3)"
-                strokeWidth="2"
-                strokeDasharray="10 5"
-              />
-            </svg>
-          </span>
-          <span className="bg-gradient-to-r from-cyan-500 via-cyan-300 to-cyan-400 bg-clip-text text-transparent">
-            4
+            <span className="relative inline-block mx-2">
+              <span className="bg-gradient-to-r from-cyan-300 to-cyan-400 bg-clip-text text-transparent opacity-50">
+                0
+              </span>
+              <svg
+                className="animate-spin-slow absolute inset-0 w-full h-full"
+                viewBox="0 0 100 100"
+              >
+                <circle
+                  cx="50"
+                  cy="50"
+                  r="40"
+                  fill="none"
+                  stroke="rgba(34, 211, 238, 0.3)"
+                  strokeWidth="2"
+                  strokeDasharray="10 5"
+                />
+              </svg>
+            </span>
+            <span className="bg-gradient-to-r from-cyan-500 via-cyan-300 to-cyan-400 bg-clip-text text-transparent">
+              4
+            </span>
           </span>
         </h1>
 
