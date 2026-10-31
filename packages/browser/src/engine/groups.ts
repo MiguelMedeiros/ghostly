@@ -716,10 +716,10 @@ export class Groups {
   }
 
   /**
-   * Writes what the private groups' sessions still have to save (`GROUP_LIMITS.saveWithinMs`), and the removals taken
-   * since the last save (`saveSoon`): the app is stopping.
+   * Writes what the private groups' sessions and the communities' still have to save (`GROUP_LIMITS.saveWithinMs`, a
+   * second), and the removals taken since the last save (`saveSoon`): the app is stopping.
    */
-  async flush(): Promise<void> { await Promise.allSettled([...[...this.sessions.values()].map(session => session.flush()), this.saveUnsaved()]); }
+  async flush(): Promise<void> { await Promise.allSettled([...[...this.sessions.values()].map(session => session.flush()), this.communities.flush(), this.saveUnsaved()]); }
 
   /**
    * A group's record written within `GROUP_LIMITS.saveWithinMs`, for what may change many times a second (a catch-up

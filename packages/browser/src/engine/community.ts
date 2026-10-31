@@ -354,6 +354,8 @@ export class Communities {
   }
   /** Resolves once what was received so far has been handed on (tests). */
   async idle(): Promise<void> { await Promise.all([...this.deliveries.values()]); }
+  /** Writes what the sessions still have to save (each saves within a second what it receives): the app is stopping. */
+  async flush(): Promise<void> { await Promise.allSettled([...this.live.values()].map(live => live.session.flush())); }
 
   /** The clock: the last tick's time (the engine ticks every second), so every decision reads one clock. */
   private time = 0;
