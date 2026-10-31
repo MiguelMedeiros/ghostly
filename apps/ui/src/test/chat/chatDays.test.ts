@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { byDay, dayLabel, dayOf, rowDays } from "../../lib/chatDays";
+import { byDay, dayLabel, dayOf, rowDays, rowDaysReader } from "../../lib/chatDays";
 import { translateWith } from "../../locales/translate";
 import en from "../../locales/en";
 
@@ -27,6 +27,45 @@ describe("the day each row goes under", () => {
     const days = rowDays([0, NaN, at(2026, 10, 29), NaN]);
     expect(days.slice(0, 2)).toEqual([NaN, NaN]);
     expect(days.slice(2)).toEqual([dayOf(at(2026, 10, 29)), dayOf(at(2026, 10, 29))]);
+  });
+});
+
+describe("the days of a chat's rows as its list changes", () => {
+  type Row = { id: string; at: number };
+
+  it("reads only the rows a new list does not have the same, and gives what rowDays gives", () => {
+    const reads = { n: 0 };
+    const read = rowDaysReader<Row>(row => { reads.n++; return row.at; });
+    const rows: Row[] = Array.from({ length: 1_000 }, (_, i) => ({ id: `m${i}`, at: at(2026, 1, 1) + i * 3_600_000 }));
+    read(rows);
+    reads.n = 0;
+    // A message comes; the newest rows are handed out anew, as the stored copy does.
+    const list = [...rows.slice(0, 995), ...rows.slice(995).map(m => ({ ...m })), { id: "new", at: at(2026, 3, 1) }];
+    expect(read(list)).toEqual(rowDays(list.map(row => row.at)));
+    expect(reads.n).toBe(6);
+    expect(read(list)).toBe(read(list));
+  });
+
+  it("gives what rowDays gives, whatever happens to the list", () => {
+    // A small generator with a fixed seed: the same lists on every run.
+    let seed = 11;
+    const pick = (n: number) => { seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648; return seed % n; };
+    const read = rowDaysReader<Row>(row => row.at);
+    let list: Row[] = [], next = 0;
+    const steps: (() => void)[] = [
+      // A row comes, some hours on, or dated earlier than the one above (a clock behind), or with no time.
+      () => { list = [...list, { id: `m${next++}`, at: at(2026, 1, 1) + next * 5 * 3_600_000 }]; },
+      () => { list = [...list, { id: `m${next++}`, at: at(2026, 1, 1) + (next - pick(40)) * 5 * 3_600_000 }]; },
+      () => { list = [...list, { id: `m${next++}`, at: pick(2) ? NaN : 0 }]; },
+      // The newest rows handed out anew, or one deleted.
+      () => { list = [...list.slice(0, -3), ...list.slice(-3).map(m => ({ ...m }))]; },
+      () => { list = list.filter((_, i) => i !== pick(list.length || 1)); },
+    ];
+    for (let k = 0; k < 600; k++) {
+      steps[pick(steps.length)]();
+      expect(read(list), `step ${k}`).toEqual(rowDays(list.map(row => row.at)));
+    }
+    expect(list.length).toBeGreaterThan(50);
   });
 });
 
