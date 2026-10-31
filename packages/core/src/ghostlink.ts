@@ -1170,6 +1170,7 @@ export class GhostLink {
       pollIntervals: options.pollIntervals,
       awaitingSince: options.madeAt,
       ...(backsOff && { invite: () => !options.pairing!.credentials.peerKey || !!this.dht?.unanswered }),
+      ...(invite && { ownInvite: () => !options.pairing!.credentials.peerKey && !options.pairing!.credentials.expectedPeerKey }),
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
       // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC
