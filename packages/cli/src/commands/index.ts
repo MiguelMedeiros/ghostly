@@ -33,11 +33,11 @@ export const COMMANDS: Record<string, Command> = {
 /** Commands that take text (argument or stdin), with the secret guard and delivery waits. */
 export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "group"; message?: true; usage: string; summary: string; args: string[]; options: Record<string, OptionSpec> }> = {
   "send": {
-    method: "chat.send", target: "chat", args: ["chat", "text...?"], usage: "send <chat> [text...] [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent|delivered]", summary: "Send a message (text from arguments or stdin); --button puts buttons under it, each label its own (case aside)",
+    method: "chat.send", target: "chat", args: ["chat", "text...?"], usage: "send <chat> [text...] [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent|delivered] [--timeout s]", summary: "Send a message (text from arguments or stdin); --button puts buttons under it, each label its own (case aside)",
     options: { stdin: { type: "boolean", description: "Read the text from stdin" }, force, reply, ...buttonOptions, ...wait },
   },
   "edit": {
-    method: "chat.edit", target: "chat", message: true, args: ["chat", "message", "text...?"], usage: "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed]", summary: "Replace the text of a message you sent (the id send gave; in a group, group edit)",
+    method: "chat.edit", target: "chat", message: true, args: ["chat", "message", "text...?"], usage: "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed] [--timeout s]", summary: "Replace the text of a message you sent (the id send gave; in a group, group edit)",
     options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, wait: { type: "string", choices: ["none", "confirmed"], description: "none or confirmed (default: none with a daemon, confirmed without)" }, timeout: wait.timeout },
   },
   "group send": {

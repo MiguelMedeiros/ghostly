@@ -32,7 +32,7 @@ describe("ghostly edit", () => {
     expect(parsed.positionals).toEqual(["alice", "me_w", "Done"]);
     expect(parsed.options).toMatchObject({ stdin: true, wait: "confirmed" });
     expect(TEXT_COMMANDS.edit).toMatchObject({ method: "chat.edit", message: true });
-    expect(TEXT_COMMANDS.edit.usage).toBe("edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed]");
+    expect(TEXT_COMMANDS.edit.usage).toBe("edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed] [--timeout s]");
     expect(parseArgs(["alice", "me_w", "--text", "-starts with a dash"], TEXT_COMMANDS.edit.options).options.text).toBe("-starts with a dash");
     // A wire id may start with a dash: in the message's place it is an id, not an option.
     const dashed = "-" + "A".repeat(21);

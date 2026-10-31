@@ -343,7 +343,7 @@ function writeWhole(path: string, bytes: Uint8Array): void {
 }
 
 /**
- * `app publish <dir> --key <file> [--out <file>]`: `<dir>/ghostly-app.json` (the manifest without `publisher`,
+ * `app publish <dir> --key <file> [--out <file>] [--sequence n]`:`<dir>/ghostly-app.json` (the manifest without `publisher`,
  * `sequence` and `files`) and every other file in `<dir>` become one signed bundle, by default `<dir>/app.ghostlyapp`.
  * The sequence is `--sequence` (higher than the bundle already at `--out`'s), else one more than that bundle's (or
  * the source's `sequence`, if higher, else 1). The
