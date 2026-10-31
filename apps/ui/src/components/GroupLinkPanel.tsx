@@ -75,8 +75,8 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   if (!url) return <div className={large ? "text-center" : "mt-4"} data-testid="group-link" data-state="off">
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
     <p className="mt-1 text-sm text-text-muted">{t("group.link.off")}</p>
-    <button ref={enableButton} disabled={busy || full} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id }), true)} data-testid="group-link-enable"
-      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
+    <button ref={enableButton} disabled={full} aria-disabled={busy || undefined} onClick={() => { if (!busy) void run(() => engine.call("enableGroupLink", { groupId: group.id }), true); }} data-testid="group-link-enable"
+      className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 
@@ -94,11 +94,13 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   // On a phone the panel's everyday buttons (Share, Copy, this one) are a thumb's height, as the two that end the link.
   const qrToggle = <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:min-h-11 max-md:px-3">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>;
   // On a phone the two that end the shared link are a thumb's height, on a row of their own: not one mis-tap from Show QR.
+  // While the engine works they are aria-disabled, not disabled: the ask dialog gives the focus back to the one pressed,
+  // and a disabled button drops it to the page (New link stays, as do both on a refusal).
   const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 max-md:basis-full max-md:gap-2 ${large ? "justify-center" : ""}`}>
-    <button disabled={busy} onClick={() => setAsking("reset")} data-testid="group-link-reset"
-      title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
-    <button disabled={busy} onClick={() => setAsking("disable")} data-testid="group-link-disable"
-      title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.disable")}</button>
+    <button aria-disabled={busy || undefined} onClick={() => { if (!busy) setAsking("reset"); }} data-testid="group-link-reset"
+      title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+    <button aria-disabled={busy || undefined} onClick={() => { if (!busy) setAsking("disable"); }} data-testid="group-link-disable"
+      title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.disable")}</button>
     {asking && <GroupLinkAskDialog kind={asking} onClose={() => setAsking(null)}
       onConfirm={() => { const reset = asking === "reset"; setAsking(null); void run(() => reset ? engine.call("enableGroupLink", { groupId: group.id, reset: true }) : engine.call("disableGroupLink", { groupId: group.id }), !reset); }} />}
   </div>;
