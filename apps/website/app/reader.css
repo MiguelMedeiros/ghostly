@@ -324,8 +324,7 @@
   display: grid;
   /* An auto track takes the longest unbreakable entry's width (a source path), and every entry runs past the box. */
   grid-template-columns: minmax(0, 1fr);
-  gap: 4px;
-  margin-top: 12px;
+  margin-top: 10px;
   columns: 2;
   font-size: 14px;
 }
@@ -333,7 +332,11 @@
   padding-left: 16px;
   font-size: 13px;
 }
+/* A line of 13-14 px text is 15-19 px high, by font: each entry is a 24 px target, and its padding is the space between rows. */
 .reader-toc a {
+  display: inline-block;
+  min-height: 24px;
+  padding-block: 2px;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
