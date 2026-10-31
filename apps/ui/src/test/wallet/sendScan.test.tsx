@@ -13,11 +13,11 @@ import { renderApp } from "../render";
 // covers: wallet.cashu.send-scan, wallet.cashu.pay-invoice, wallet.lnurl.address, payments.mainnet-confirm
 
 /** What the next QR read finds (a picture or the camera), and what the clipboard holds. */
-const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null, camera: null as MediaStream | null, held: null as Promise<void> | null }));
+const qr = vi.hoisted(() => ({ text: null as string | null, clipboard: null as string | null, camera: null as MediaStream | null, held: null as Promise<void> | null, asked: null as Promise<void> | null }));
 vi.mock("../../lib/qrReader", async (original) => ({
   ...await original<typeof import("../../lib/qrReader")>(),
   readQrImage: async () => qr.text,
-  qrCamera: async () => { if (qr.camera) return qr.camera; throw new Error("NotAllowedError"); },
+  qrCamera: async () => { await qr.asked; if (qr.camera) return qr.camera; throw new Error("NotAllowedError"); },
   qrFrameReader: () => Object.assign(async () => null, { ready: Promise.resolve(), close: () => {} }),
   scanQrFrames: async () => {},
 }));
@@ -500,6 +500,39 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
       expect(screen.getByTestId("wallet-pay-input")).toHaveValue("shop@example.com");
       expect(track.stop).toHaveBeenCalled();
       expect(screen.queryByTestId("wallet-send-scan-stop")).not.toBeInTheDocument();
+    });
+
+    it("Paste works while the camera's question stands, and a camera allowed after it is let go", async () => {
+      touch(true); camera();
+      let allow = () => {};
+      qr.asked = new Promise((resolve) => { allow = resolve; });
+      qr.clipboard = "shop@example.com";
+      try {
+        const { user } = show({});
+        await user.click(screen.getByRole("tab", { name: "Send" }));
+        // Scan has asked already, and does not ask twice.
+        expect(screen.getByTestId("wallet-send-camera")).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByTestId("wallet-send-paste")).not.toHaveAttribute("aria-disabled");
+        await user.click(screen.getByTestId("wallet-send-paste"));
+        expect(screen.getByTestId("wallet-pay-input")).toHaveValue("shop@example.com");
+
+        allow();
+        await waitFor(() => expect(track.stop).toHaveBeenCalled());
+        expect(screen.queryByTestId("wallet-send-scan-stop")).not.toBeInTheDocument();
+        expect(screen.getByTestId("wallet-send-camera")).not.toHaveAttribute("aria-disabled");
+      } finally { qr.asked = null; }
+    });
+
+    it("Choose image works while the camera's question stands", async () => {
+      touch(true); camera();
+      qr.asked = new Promise(() => {});
+      qr.text = invoice;
+      try {
+        const { user } = show({ quoteInvoice: async () => ({ quote: "q-6", mint: TEST_MINT, amount: 21, feeReserve: 0 }) });
+        await user.click(screen.getByRole("tab", { name: "Send" }));
+        await user.upload(screen.getByTestId("wallet-send-image"), picture());
+        expect(await screen.findByText(/Two coffees/)).toBeInTheDocument();
+      } finally { qr.asked = null; }
     });
 
     it("back from a review the camera stays off: it was started for opening Send", async () => {
