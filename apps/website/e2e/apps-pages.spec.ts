@@ -235,7 +235,7 @@ test.describe("once the released Ghostly has Apps", () => {
     // the home page's. Read it where people see it.
     for (const url of [`${LIVE}/apps/nothing.here`, `${LIVE}/apps/gone.${PREFIX.a}`, `${HIDDEN}/apps/${CHESS}`]) {
       await page.goto(url);
-      await expect(page.getByRole("heading", { level: 1 })).toHaveText("404");
+      await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName("404: Page not found");
       await expect(page, url).toHaveTitle("Page not found | Ghostly");
     }
   });
