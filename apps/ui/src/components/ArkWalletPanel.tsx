@@ -13,6 +13,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
 import { problemText } from "../lib/problemText";
+import { exactText } from "../lib/exactText";
 
 type Network = "bitcoin" | "mutinynet" | "signet" | "regtest";
 /** Where each network's wallet connects unless someone types another provider. */
@@ -81,7 +82,7 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
    {!!ark.incoming && <Notice tone="warning" testId="ark-incoming">{t("wallet.ark.incoming", { amount: formatAmount(ark.incoming, t.language), unit })}</Notice>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <SendScan onText={given} disabled={busy} scanOnOpen>
-    <input aria-label={t("wallet.panel.recipient", { wallet: "Ark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Ark" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={e => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
+    <input aria-label={t("wallet.panel.recipient", { wallet: "Ark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Ark" })} {...exactText} className={`${input} font-mono text-xs`} value={address} onChange={e => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
     {notUsable === "refused" && <Notice tone="error" testId="wallet-send-refused">{t("payments.formats.unsupported")}</Notice>}
     {notUsable === "unknown" && <Notice tone="error" testId="wallet-send-unknown">{t("wallet.panel.notAddress", { wallet: "Ark" })}</Notice>}
     <Amount value={amount} onChange={setAmount} unit={unit} />
@@ -102,8 +103,8 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
    </Row>}
    {ready && <><Row label={t("wallet.ark.provider")} hint={ark.provider && <Truncate className="font-mono">{ark.provider}</Truncate>}><Button disabled={!canReplace} onClick={() => { setCustom(!custom); setProvider(ark.provider ?? ""); setExplorer(NETWORKS[network].explorer); }}>{custom ? t("common.cancel") : t("wallet.panel.change")}</Button></Row>
    {custom && <Block>
-    <input aria-label={t("wallet.ark.providerInput")} className={`${input} font-mono text-xs`} value={provider} onChange={e => setProvider(e.target.value)} spellCheck={false} />
-    <input aria-label={t("wallet.ark.explorer")} className={`${input} font-mono text-xs`} value={explorer} onChange={e => setExplorer(e.target.value)} spellCheck={false} />
+    <input aria-label={t("wallet.ark.providerInput")} className={`${input} font-mono text-xs`} value={provider} onChange={e => setProvider(e.target.value)} {...exactText} />
+    <input aria-label={t("wallet.ark.explorer")} className={`${input} font-mono text-xs`} value={explorer} onChange={e => setExplorer(e.target.value)} {...exactText} />
     <Button variant="primary" disabled={busy} loading={running === "provider"} onClick={() => void run(async () => { await use(network, { provider, explorer }); setCustom(false); }, "provider")}>{t("wallet.ark.useProvider")}</Button>
    </Block>}
    <Row label={t("wallet.panel.autoRenewal")} hint={network === "regtest" ? t("wallet.ark.renewalRegtest") : t("wallet.ark.renewalOpen")} value={network === "regtest" ? t("wallet.panel.off") : t("wallet.panel.on")} />

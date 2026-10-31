@@ -50,6 +50,17 @@ function show(methods: Partial<WalletPlatform>, network: "testnet" | "mainnet" =
 describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
   beforeEach(() => { qr.text = null; qr.clipboard = null; qr.camera = null; qr.held = null; });
 
+  it("a phone's keyboard is told not to change what is typed into Send or a mint's address", async () => {
+    const { user } = show({});
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    for (const field of [screen.getByTestId("wallet-pay-input"), screen.getByTestId("wallet-mint-url")]) {
+      expect(field).toHaveAttribute("autocapitalize", "none");
+      expect(field).toHaveAttribute("autocorrect", "off");
+      expect(field).toHaveAttribute("spellcheck", "false");
+    }
+    expect(screen.getByTestId("wallet-mint-url")).toHaveAttribute("inputmode", "url");
+  });
+
   it("a picture of an invoice's QR opens its review; Pay pays it and the result leads back to Send", async () => {
     qr.text = `LIGHTNING:${invoice.toUpperCase()}`;
     const quoted: string[] = [];

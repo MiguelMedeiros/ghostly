@@ -13,6 +13,7 @@ import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
 import { formatAt } from "../lib/time";
 import { problemText } from "../lib/problemText";
+import { exactText } from "../lib/exactText";
 
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
@@ -76,7 +77,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
    </div>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <SendScan onText={given} disabled={busy} scanOnOpen>
-    <input aria-label={t("wallet.spark.to")} placeholder={t("wallet.spark.toPlaceholder", { prefix: mainnet ? "spark1…" : "sparkrt1…" })} spellCheck={false} className={`${input} font-mono text-xs`} value={to} onChange={e => setTo(e.target.value.trim())} />
+    <input aria-label={t("wallet.spark.to")} placeholder={t("wallet.spark.toPlaceholder", { prefix: mainnet ? "spark1…" : "sparkrt1…" })} {...exactText} className={`${input} font-mono text-xs`} value={to} onChange={e => setTo(e.target.value.trim())} />
     {to && (!kind || invoice?.token) && <Notice tone="warning" testId="spark-address-invalid">{invoice?.token ? t("wallet.spark.tokenInvoice") : mainnet ? t("wallet.spark.notMainnet") : t("wallet.spark.notRegtest")}</Notice>}
     {invoice && !invoice.token && invoice.amount !== undefined ? <p className="text-sm text-text-primary" data-testid="spark-invoice-summary">{fillNodes(invoice.memo ? t("wallet.spark.invoiceForMemo", { unit, memo: invoice.memo }) : t("wallet.spark.invoiceFor", { unit }), { amount: <span className="font-semibold tabular-nums">{formatAmount(invoice.amount, t.language)}</span> })}</p>
      : <Amount value={amount} onChange={setAmount} unit={unit} testId="spark-amount" />}

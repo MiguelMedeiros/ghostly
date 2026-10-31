@@ -65,6 +65,13 @@ describe("Send on the Ark and Bark cards: scan, paste or picture", () => {
     };
     const field = () => screen.getByLabelText(`${name} recipient address`);
 
+    it("a phone's keyboard is told not to change a typed address", async () => {
+      await show();
+      expect(field()).toHaveAttribute("autocapitalize", "none");
+      expect(field()).toHaveAttribute("autocorrect", "off");
+      expect(field()).toHaveAttribute("spellcheck", "false");
+    });
+
     it("a picture of a link fills the address and the amount, and nothing is reviewed until the person asks", async () => {
       qr.text = `bitcoin:?ark=${mine}&amount=0.00001`;
       const { user, engine } = await show();

@@ -415,6 +415,9 @@ describe("the picker, while a wallet is made", () => {
     await user.click(await screen.findByTestId("wallet-add"));
     await user.click(screen.getByTestId("new-wallet-type-fedimint"));
     expect(screen.getByTestId("new-wallet-step")).toHaveTextContent("Testnet Fedimint");
+    // An invite is an exact text: a phone's keyboard is told not to change it.
+    expect(screen.getByTestId("new-wallet-invite")).toHaveAttribute("autocapitalize", "none");
+    expect(screen.getByTestId("new-wallet-invite")).toHaveAttribute("autocorrect", "off");
     expect(screen.queryByTestId("new-wallet-type-arkade")).not.toBeInTheDocument();
     await user.click(screen.getByTestId("new-wallet-back"));
     expect(screen.getByTestId("new-wallet-type-arkade")).toBeInTheDocument();

@@ -4,6 +4,7 @@ import { downloadJson } from "./run";
 import { InputGroup } from "../layout";
 import { focusLost } from "../../lib/focus";
 import { useI18n } from "../../contexts/I18nContext";
+import { exactText } from "../../lib/exactText";
 
 type Open = "none" | "phrase" | "backup" | "restore";
 
@@ -63,7 +64,7 @@ export function BackupRows({ name, reveal, exportBackup, restorePhrase, restoreF
       </Row>}
       {open === "restore" && restorePhrase && restoreFile && (
         <Block>
-          <textarea aria-label={t("wallet.backup.phrase")} rows={2} autoComplete="off" spellCheck={false} placeholder={t("wallet.backup.phrase")} className={`${input} font-mono resize-none`} value={restore} onChange={(e) => setRestore(e.target.value)} />
+          <textarea aria-label={t("wallet.backup.phrase")} rows={2} autoComplete="off" {...exactText} placeholder={t("wallet.backup.phrase")} className={`${input} font-mono resize-none`} value={restore} onChange={(e) => setRestore(e.target.value)} />
           <Button variant="primary" disabled={busy || !restore.trim()} loading={running === "backup-restore-phrase"} onClick={() => void run(async () => { await restorePhrase(restore.trim()); setRestore(""); toggle("none"); }, "backup-restore-phrase")}>{t("wallet.backup.restorePhrase")}</Button>
           <label className="block text-xs text-text-muted">{t("wallet.backup.orFile")}
             <input type="file" accept="application/json,.json" className={`${input} mt-1`} onChange={(e) => { const f = e.target.files?.[0]; if (f && f.size <= 16 * 1024 * 1024) void f.text().then(setFile); }} />
