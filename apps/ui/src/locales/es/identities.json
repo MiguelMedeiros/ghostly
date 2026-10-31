@@ -214,7 +214,7 @@
     "removeNote": "Los contactos con quienes la compartiste reciben aviso de que ya no se comparte, y se publica una revocación para que lo vean aunque nunca te vuelvas a conectar. Una copia que hayan guardado no se puede borrar.",
     "renew": "Añadirla de nuevo",
     "renewHint": "Añádela de nuevo para renovarla; luego quita esta.",
-    "shareHint": "Compártela desde Identidades de un chat, un contacto a la vez.",
+    "shareHint": "Compártela desde el + de un chat, un contacto a la vez.",
     "takeDownFailed": "Lo que publicó no se pudo retirar. Puedes quitar la prueba sin ello: los contactos la seguirán viendo revocada.",
     "title": "Tuyas"
   },
