@@ -48,6 +48,35 @@ for (const path of ["/roadmap", "/developers"]) {
   });
 }
 
+for (const [path, group, count] of [
+  ["/roadmap", "Stages", 3],
+  ["/developers", "Compositions", 4],
+] as const) {
+  test(`${path}: the map's ${group.toLowerCase()} are one tab stop and the arrow keys move the check`, async ({ page }) => {
+    await page.goto(path, { waitUntil: "networkidle" });
+    await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 45_000 });
+    const radios = page.locator(".bgrid-controls [role=radiogroup]").getByRole("radio");
+    await expect(radios).toHaveCount(count);
+    const tabStops = () => radios.evaluateAll((all) => all.filter((r) => (r as HTMLElement).tabIndex >= 0).length);
+    expect(await tabStops(), "tab stops").toBe(1);
+
+    await radios.nth(0).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(radios.nth(1)).toHaveAttribute("aria-checked", "true");
+    await expect(radios.nth(1)).toBeFocused();
+    await expect(radios.nth(0)).toHaveAttribute("aria-checked", "false");
+    expect(await tabStops(), "tab stops after an arrow").toBe(1);
+
+    await page.keyboard.press("ArrowLeft");
+    await page.keyboard.press("ArrowLeft");
+    await expect(radios.nth(count - 1), "ArrowLeft on the first wraps to the last").toBeFocused();
+    await expect(radios.nth(count - 1)).toHaveAttribute("aria-checked", "true");
+    await page.keyboard.press("Home");
+    await expect(radios.nth(0)).toBeFocused();
+    await expect(radios.nth(0)).toHaveAttribute("aria-checked", "true");
+  });
+}
+
 test("/roadmap: axe finds nothing serious, wide or on a phone", async ({ page }) => {
   for (const width of [1280, 375]) {
     await page.setViewportSize({ width, height: 812 });
