@@ -2197,7 +2197,7 @@ export class GhostlyNode implements EngineImplementation {
     const start = await check.catch((): StartCheck => ({ limited: true }));
     this.startChecking = false;
     if (this.shuttingDown) return;
-    if (start.gated) { await this.stopReplaced({ ...start.gated, reload: true }); return; }
+    if (start.gated) { await this.stopReplaced({ ...start.gated, reload: true, keepUnlocked: true }); return; }
     if (start.limited) { this.emitState(); this.readTurnWhileLimited(); return; }
     // What the limited start kept as it was stored: the files of groups this device no longer has go, as at a full start.
     await this.groups.files?.sweep((await db.getGroups()).map((group) => group.id)).catch(() => {});

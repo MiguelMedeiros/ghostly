@@ -113,7 +113,7 @@ describe("the active device's start, while its turn read is out", () => {
     server!.attach({ post: (event) => { if (event.kind === "device-gate") gates.push(event.gate); } });
     read.answer();
     await vi.waitFor(() => expect(gates).toHaveLength(1));
-    expect(gates[0]).toMatchObject({ state: "superseded", activeDevice: "Phone", reload: true });
+    expect(gates[0]).toMatchObject({ state: "superseded", activeDevice: "Phone", reload: true, keepUnlocked: true });
     expect(await readDeviceRecord(databaseName())).toMatchObject({ state: "superseded", copy: "frozen", activeSlot: 1 });
     expect(network.puts()).toEqual([]);
   });

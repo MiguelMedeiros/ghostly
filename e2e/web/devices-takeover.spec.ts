@@ -61,7 +61,9 @@ test("the standby takes over with the password, the contact keeps chatting with 
   await dialog.getByTestId("takeover-password").fill(DEVICE_SET_PASSWORD);
   const tookAt = Date.now();
   await dialog.getByTestId("takeover-go").click();
-  await untilShown(desktop.page, desktop.page.getByTitle("New Chat"), { timeout: 240_000 });
+  // The password was just typed: the reload into the profile does not ask for it again.
+  await expect(desktop.page.getByTitle("New Chat")).toBeVisible({ timeout: 240_000 });
+  await expect(desktop.page.getByText("Ghostly is locked")).toHaveCount(0);
 
   // The contact keeps chatting with it, both ways.
   await openTheChat(desktop);
@@ -75,8 +77,8 @@ test("the standby takes over with the password, the contact keeps chatting with 
   phone.page = await phone.context.newPage();
   await phone.page.goto(phoneUrl);
   // Its stored state is still `active`: the read at start, after the unlock, finds the higher turn, shows the screen a
-  // moment and starts the page again into the gate, where the lock asks once more. So the screen is waited for through
-  // the lock, and once more after the contact's round trip, when only the page after that reload can be showing it.
+  // moment and starts the page again into the gate, with that unlock carried. So the lock asks once, and after the
+  // contact's round trip only the page after that reload can be showing the screen.
   const replaced = phone.page.getByTestId("device-standby").and(phone.page.locator("[data-state=superseded]"))
     .filter({ has: phone.page.getByTestId("device-standby-title").getByText("This device was replaced", { exact: true }) });
   await untilShown(phone.page, replaced);
@@ -84,7 +86,8 @@ test("the standby takes over with the password, the contact keeps chatting with 
   await say(contact, "still with the desktop");
   await expect(chat(desktop).getByText("still with the desktop")).toBeVisible({ timeout: 180_000 });
   await expect(chat(contact).getByText("the desktop took over")).toBeVisible();
-  await untilShown(phone.page, replaced);
+  await expect(replaced).toBeVisible();
+  await expect(phone.page.getByText("Ghostly is locked")).toHaveCount(0);
   await expect(phone.page.getByTitle("New Chat")).toBeHidden();
   expect(lines.filter((line) => line.t >= reopenedAt && line.step === "peer-departed")).toEqual([]);
   test.info().annotations.push({ type: "measure", description: JSON.stringify({ takeoverToActiveMs: reopenedAt - tookAt }) });
