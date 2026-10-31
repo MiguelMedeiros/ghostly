@@ -2,12 +2,12 @@ import { expect, link, test } from "../support/fixtures";
 
 /**
  * The admin's members dialog from the keyboard: after each action the focus is somewhere in the dialog that says what
- * happened, never on the page. A rename (saved or let go) turned its field and Save disabled and then took them away, so
+ * happened, never on the page. New link was disabled while it ran, after the question had given it the focus back. A rename (saved or let go) turned its field and Save disabled and then took them away, so
  * Chromium handed the focus to <body>; Remove picture and Invite were disabled while they ran, then went. A screen
  * reader said nothing, and the next Tab started over from the dialog's first control. happy-dom keeps the focus on a
  * disabled button, so only a real browser shows it.
  */
-test("the members dialog's Rename, Remove picture and Invite keep the keyboard's focus in the dialog", { tag: ["@feature:groups.rename", "@feature:groups.picture.set", "@feature:groups.invite"] }, async ({ peer }) => {
+test("the members dialog's Rename, Remove picture, Invite and New link keep the keyboard's focus in the dialog", { tag: ["@feature:groups.rename", "@feature:groups.picture.set", "@feature:groups.invite", "@feature:groups.link.replace"] }, async ({ peer }) => {
   test.setTimeout(5 * 60_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
@@ -72,4 +72,16 @@ test("the members dialog's Rename, Remove picture and Invite keep the keyboard's
   const row = dialog.getByTestId("group-invite-contact");
   await expect(row).toContainText("Invited…", { timeout: 60_000 });
   await expect(row).toBeFocused();
+
+  // New link, confirmed with Enter: back on New link, which stays, once the new link is shown.
+  const url = dialog.getByTestId("group-link-url"), before = await url.inputValue();
+  const reset = dialog.getByTestId("group-link-reset");
+  await reset.focus();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Tab");
+  await expect(page.getByTestId("group-link-ask-confirm")).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(url).not.toHaveValue(before);
+  await expect(reset).not.toHaveAttribute("aria-disabled");
+  await expect(reset).toBeFocused();
 });

@@ -439,6 +439,49 @@ describe("GroupLinkPanel", () => {
     expect(screen.getByTestId("group-link-share")).toHaveFocus();
   });
 
+  it("New link from the keyboard keeps the focus on New link while it runs and after", async () => {
+    const view = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
+    const { user, engine } = view;
+    let done = () => {};
+    engine.on("enableGroupLink", () => new Promise<{ link: string }>(resolve => { done = () => resolve({ link: entryLink }); }));
+    const reset = screen.getByTestId("group-link-reset");
+    reset.focus();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(screen.getByTestId("group-link-ask-confirm")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: id, reset: true }]);
+    // Not disabled while it runs: the question gives the focus back to it, and a disabled button drops it to the page.
+    expect(reset).not.toBeDisabled();
+    expect(reset).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByTestId("group-link-disable")).not.toBeDisabled();
+    expect(reset).toHaveFocus();
+    // A second press does not ask again.
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
+    await act(async () => { done(); });
+    view.rerender(<GroupLinkPanel group={admin({ entryLink: encodeGroupEntryLink({ g: id, host: createIdentity().pubKeyZ32 }) })} />);
+    expect(reset).not.toHaveAttribute("aria-disabled");
+    expect(reset).toHaveFocus();
+  });
+
+  it("Turn on the link keeps the focus on it when the engine refused", async () => {
+    const { user, engine } = renderApp(<GroupLinkPanel group={admin()} />);
+    let fail = () => {};
+    engine.on("enableGroupLink", () => new Promise((_, reject) => { fail = () => reject(new Error("Only the admin can do that")); }));
+    const enable = screen.getByTestId("group-link-enable");
+    enable.focus();
+    await user.keyboard("{Enter}");
+    expect(enable).not.toBeDisabled();
+    expect(enable).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("enableGroupLink")).toHaveLength(1);
+    await act(async () => { fail(); });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Only the admin can do that");
+    expect(enable).not.toHaveAttribute("aria-disabled");
+    expect(enable).toHaveFocus();
+  });
+
   it("does not take the focus when the link goes off without a press here, or when the engine refused", async () => {
     const view = renderApp(<><input data-testid="elsewhere" /><GroupLinkPanel group={admin({ entryLink })} /></>);
     const { user, engine } = view;
