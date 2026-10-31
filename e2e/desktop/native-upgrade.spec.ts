@@ -58,6 +58,17 @@ const transport = (p: DesktopPerson) => p.app.attribute('[data-testid="connectio
 
 const NATIVE = /^label:Connected · (Iroh|HyperDHT)/;
 
+/**
+ * Whether a chat showed the DHT before it went live (`seen`, all its states), or was live already by the time the
+ * DHT text reached it (`atText`, its states then): the native link can come up within a second of the join, before
+ * the screen ever shows the DHT floor, and then there was no DHT state to show.
+ */
+const onDhtFirst = (seen: string[], atText: string[]): boolean => {
+  if (atText.some((s) => NATIVE.test(s))) return true;
+  const live = seen.findIndex((s) => NATIVE.test(s));
+  return seen.slice(0, live < 0 ? seen.length : live).some((s) => s === "stage:on-dht" || s.startsWith("label:On DHT") || s.startsWith("status:On DHT"));
+};
+
 /** Each app's own log (`ghostly.log`, apps/desktop/src/diagnostics.rs): its link-trace lines say what it dialled and why. */
 function attachLogs(name: string, home: string): void {
   const find = (dir: string): string[] => readdirSync(dir, { withFileTypes: true })
@@ -99,6 +110,7 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
     // A text while there is no live link yet goes over the DHT; the chat is usable from the start.
     await a.say("first, over the DHT");
     await expect.poll(() => count(b, "first, over the DHT"), { timeout: 180_000, message: "bia gets the DHT text" }).toBe(1);
+    const bAtText = await states(b);
 
     // Then both go live on a native transport, dialled from the other's capability record.
     for (const p of [a, b]) {
@@ -110,16 +122,15 @@ test("two Desktop apps without WebRTC go live on Iroh or HyperDHT from the DHT, 
     expect(onA).toMatch(/^(iroh|hyperdht)\/1$/);
     test.info().annotations.push({ type: "transport", description: onA! });
 
-    // Each side never failed and went live on the native transport. The joiner shows the DHT before it is live; the
+    // Each side never failed and went live on the native transport. The joiner shows the DHT before it is live, unless
+    // it was live already when the DHT text reached it (seen on Omarchy, live 240 ms after the join, 2026-10-31); the
     // inviter may go from "Waiting for your contact" straight to live when the native link comes up before its chat
     // shows the DHT floor (seen on GitHub runners, 2026-09-29), which is fine: the DHT text above already proved the
     // chat was usable before the link.
     for (const p of [a, b]) {
       const seen = await states(p);
-      const live = seen.findIndex((s) => NATIVE.test(s));
-      expect(live, `${p.name} went live natively: ${seen.join(" → ")}`).toBeGreaterThanOrEqual(0);
-      const before = seen.slice(0, live);
-      if (p === b) expect(before.some((s) => s === "stage:on-dht" || s.startsWith("label:On DHT") || s.startsWith("status:On DHT")), `${p.name} was on the DHT first: ${seen.join(" → ")}`).toBe(true);
+      expect(seen.some((s) => NATIVE.test(s)), `${p.name} went live natively: ${seen.join(" → ")}`).toBe(true);
+      if (p === b) expect(onDhtFirst(seen, bAtText), `${p.name} was on the DHT first: ${seen.join(" → ")} (at the DHT text: ${bAtText.join(" → ")})`).toBe(true);
       expect(seen, `${p.name} never showed a failed pairing`).not.toContain("stage:failed");
       test.info().annotations.push({ type: `${p.name}'s states`, description: seen.join(" → ") });
     }
