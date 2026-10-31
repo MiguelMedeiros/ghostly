@@ -1,10 +1,11 @@
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, memo, useCallback, useRef, type ReactNode } from "react";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
 import { useI18n } from "../contexts/I18nContext";
 import { groupChat, useChatMute } from "../lib/chatMute";
 import { groupReadAt, groupUnreadAt } from "../lib/groups";
+import { sameValue } from "../lib/sameValue";
 import { RAIL_SHORTCUT, railShortcutLabel } from "../hooks/useRailShortcut";
 
 /*
@@ -78,10 +79,25 @@ function RailItem({ testId, id, name, label, active, onOpen, mark, children }: {
 
 const badge = (muted: boolean) => `ring-2 ring-sidebar-bg ${muted ? "bg-text-secondary text-sidebar-bg" : "bg-accent text-on-accent"}`;
 
-/** A 1:1 chat on the rail: its unread count on the picture's corner, grey in a muted chat as in the list. */
-export function RailChat({ chatId, name, named, peerPubKey, photo, unread, active, onOpen }: {
-  chatId: string; name: string; named: boolean; peerPubKey: string; photo?: string; unread: number; active: boolean; onOpen(): void;
-}) {
+/** The latest `onOpen` given, as one function: a place on the rail is not drawn again for a new one (`ChatRow`). */
+function useLatestOpen(onOpen: () => void): () => void {
+  const latest = useRef(onOpen);
+  latest.current = onOpen;
+  return useCallback(() => latest.current(), []);
+}
+
+interface RailChatProps { chatId: string; name: string; named: boolean; peerPubKey: string; photo?: string; unread: number; active: boolean; onOpen(): void }
+
+/**
+ * A 1:1 chat on the rail. Drawn again only when what it shows changes, as a chat's row in the list is (`ChatRow`): the
+ * rail is drawn again on every engine state and every time it reads the chats again.
+ */
+export function RailChat(props: RailChatProps) {
+  return <SameRailChat {...props} onOpen={useLatestOpen(props.onOpen)} />;
+}
+
+/** Its unread count on the picture's corner, grey in a muted chat as in the list. */
+const SameRailChat = memo(function SameRailChat({ chatId, name, named, peerPubKey, photo, unread, active, onOpen }: RailChatProps) {
   const { t } = useI18n();
   const muted = useChatMute(chatId) !== undefined;
   const label = unread === 0 ? name : unread === 1 ? t("sidebar.rail.unreadOne", { name }) : t("sidebar.rail.unreadCount", { name, count: unread });
@@ -92,18 +108,23 @@ export function RailChat({ chatId, name, named, peerPubKey, photo, unread, activ
       <PeerAvatar peerPubKey={peerPubKey} label={name} named={named} photo={photo} testId="chat-rail-avatar" />
     </RailItem>
   );
+}, sameValue);
+
+/** A group on the rail, drawn again only when what it shows changes (`GroupRow`): when it was read is taken here, at each draw of the rail. */
+export function RailGroup({ group, active, onOpen }: { group: GroupView; active: boolean; onOpen(): void }) {
+  return <SameRailGroup group={group} active={active} readAt={groupReadAt(group.id)} onOpen={useLatestOpen(onOpen)} />;
 }
 
-/** A group on the rail: the list's unread dot on the picture's corner (a group counts no messages). */
-export function RailGroup({ group, active, onOpen }: { group: GroupView; active: boolean; onOpen(): void }) {
+/** The list's unread dot on the picture's corner (a group counts no messages). */
+const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpen }: { group: GroupView; active: boolean; readAt: number; onOpen(): void }) {
   const { t } = useI18n();
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const name = group.name || t("group.chat.unnamed");
-  const unread = !active && !group.invitation && groupUnreadAt(group) > groupReadAt(group.id);
+  const unread = !active && !group.invitation && groupUnreadAt(group) > readAt;
   return (
     <RailItem testId="chat-rail-group" id={groupChat(group.id)} name={name} label={unread ? t("sidebar.rail.unread", { name }) : name} active={active} onOpen={onOpen}
       mark={unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 rounded-full ${badge(muted)}`} />}>
       <GroupAvatar picture={group.picture} size={AVATAR} testId="chat-rail-avatar" className={active ? "bg-surface-alt" : "bg-surface-hover"} />
     </RailItem>
   );
-}
+}, sameValue);
