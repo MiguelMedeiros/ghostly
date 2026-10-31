@@ -214,7 +214,7 @@
     "removeNote": "I contatti con cui l'hai condivisa vengono avvisati che non è più condivisa, e viene pubblicata una revoca così la vedono anche se non ti riconnetti mai. Una copia che hanno conservato non può essere cancellata.",
     "renew": "Aggiungila di nuovo",
     "renewHint": "Aggiungila di nuovo per rinnovarla; poi rimuovi questa.",
-    "shareHint": "Condividila dalle Identità di una chat, un contatto alla volta.",
+    "shareHint": "Condividila dal + di una chat, un contatto alla volta.",
     "takeDownFailed": "Ciò che ha pubblicato non è stato rimosso. Puoi rimuovere la prova senza: i contatti la vedranno comunque revocata.",
     "title": "Le tue"
   },
