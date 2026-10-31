@@ -163,6 +163,7 @@ export const commands: Record<string, Command> = {
     options: { ...usageOptions, ...groupWait },
     params: ({ options }, { chat }) => {
       if (!chat && options.all !== true) throw new CliError("usage", "Name a chat or group, or give --all: ghostly usage send <chat|--all> --left <percent>");
+      if (chat && options.all === true) throw new CliError("usage", "Name a chat or group or give --all, not both: ghostly usage send <chat|--all> --left <percent>");
       return { chat, all: options.all === true, card: quota(usageFields(options), "usage send <chat|--all> --left <percent>"), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
   },
