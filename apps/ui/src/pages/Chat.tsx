@@ -47,7 +47,7 @@ import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { messageSnippet, quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -506,7 +506,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
-  const quoteIndex = useMemo(() => replyIndex(messages, false, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId]);
+  const [readReplies] = useState(() => replyIndexer());
+  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);

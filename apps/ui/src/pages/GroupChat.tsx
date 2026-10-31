@@ -55,7 +55,7 @@ import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType,
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
-import { messageSnippet, quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
@@ -320,7 +320,8 @@ export function GroupChat() {
   /** The message of mine the composer edits (WISP 902 § Edits). */
   const [editing, setEditing] = useState<StoredMessage | null>(null);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
-  const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
+  const [readReplies] = useState(() => replyIndexer(true));
+  const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => replyRef(m, true)), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => replyRef(m, true)), [messages]);
