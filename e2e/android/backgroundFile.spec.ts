@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import type { Locator } from "@playwright/test";
 import { chat } from "../support/fixtures";
-import { expect, pairWithWeb, test, type AndroidApp } from "./support/android";
+import { expect, pairWithWeb, PKG, test, type AndroidApp } from "./support/android";
 
 /**
  * A file keeps moving while the app is out of sight: in the background (Home) or with the screen off. Android freezes
@@ -102,4 +102,24 @@ test("a file sent keeps moving with the screen off", { tag: ["@feature:android.f
   };
   const away = await whileAway(app, side, off, on);
   expect(movedOn(away), `moved on with the screen off: ${away.seen.join(", ")}`).toBe(true);
+});
+
+test("a file through at once leaves the app running, and the service stopped", { tag: ["@feature:android.files.background", "@gated"] }, async ({ app }) => {
+  // The page's start and stop as a file of a few bytes sends them, before Android has the service in the foreground:
+  // stopped then, Android ended the whole app ("did not then call Service.startForeground()").
+  for (const gap of [0, 5, 20]) {
+    await app.page.evaluate(async (gap) => {
+      const { invoke } = (window as unknown as { __TAURI_INTERNALS__: { invoke(command: string, args: unknown): Promise<unknown> } }).__TAURI_INTERNALS__;
+      for (let round = 0; round < 5; round++) {
+        const on = invoke("keep_awake", { on: true, files: true });
+        if (gap) await new Promise((done) => setTimeout(done, gap));
+        await Promise.all([on, invoke("keep_awake", { on: false, files: false })]);
+        await new Promise((done) => setTimeout(done, 300));
+      }
+    }, gap);
+  }
+  // Android ends an app this way a few seconds after the stop.
+  await new Promise((done) => setTimeout(done, 10_000));
+  expect(app.adb.tryRun("shell", "pidof", PKG).out.trim(), "the app still runs").toBe(app.pid);
+  await expect.poll(() => /TransferService/.test(app.adb.tryRun("shell", "dumpsys", "activity", "services", PKG).out), { message: "the service stopped" }).toBe(false);
 });
