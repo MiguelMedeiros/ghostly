@@ -8,7 +8,7 @@ import { InfoButton } from "../layout/Section";
  * gutters and at most 24rem, scrolling inside when it is taller than the window. Escape closes it and gives the focus
  * back to what opened it.
  */
-export function DeviceDialog({ title, onClose, testId, children }: { title: string; onClose(): void; testId: string; children: ReactNode }) {
+export function DeviceDialog({ title, onClose, testId, children }: { title: ReactNode; onClose(): void; testId: string; children: ReactNode }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);

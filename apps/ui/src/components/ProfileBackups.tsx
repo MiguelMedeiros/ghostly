@@ -15,6 +15,7 @@ import { BackupProgress } from "./BackupProgress";
 import { Select } from "./ui/Select";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 import { said } from "../lib/notices";
+import { fillNames } from "../lib/fillNodes";
 
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
 type Open = "none" | "backup" | "restore" | "s3";
@@ -226,7 +227,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
       )}
       {open === "restore" && guarded && (
         <Field testId="restore-guard" label={<span className="font-semibold" data-testid="restore-guard-title" data-case={guarded.guard.case}>{
-          guarded.guard.case === "active" ? (guarded.guard.device ? t("devices.restore.activeOn", { device: guarded.guard.device }) : t("devices.restore.activeOnUnnamed"))
+          guarded.guard.case === "active" ? (guarded.guard.device ? fillNames(t("devices.restore.activeOn"), { device: guarded.guard.device }) : t("devices.restore.activeOnUnnamed"))
             : guarded.guard.case === "tombstone" ? t("devices.restore.tombstone") : t("devices.restore.unreadable")}</span>}
           hint={guarded.guard.case === "active" ? t("devices.restore.activeHint") : undefined}>
           {guarded.guard.case === "active" && (

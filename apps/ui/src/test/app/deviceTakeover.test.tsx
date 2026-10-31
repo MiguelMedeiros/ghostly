@@ -232,7 +232,7 @@ describe("the forced takeover on the standby screen", () => {
   it("a copy restored from a backup says where the profile is active and offers Take over, with no password", async () => {
     const { user, engine } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
     engine.on("deviceTakeoverInfo", () => ({ offered: true, device: "MacBook", copy: "restored", password: false }));
-    expect(await screen.findByText("This profile is active on MacBook")).toBeInTheDocument();
+    expect(await screen.findByTestId("device-standby-title")).toHaveTextContent("This profile is active on MacBook");
     expect(screen.queryByTestId("handoff-use-here")).toBeNull();
     await user.click(screen.getByTestId("takeover-open"));
     expect(screen.queryByTestId("takeover-password")).toBeNull();

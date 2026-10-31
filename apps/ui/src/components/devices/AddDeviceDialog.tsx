@@ -16,6 +16,7 @@ import { FieldError } from "../ui/FieldError";
 import { focusToRetype, keepFocusIn } from "../../lib/focus";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
 import { said } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 import { problemLine } from "../../lib/problemText";
 
 /**
@@ -181,7 +182,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <p data-testid="device-add-left" className="text-text-muted text-xs">{t("devices.add.left", { time: timeLeft(view.expires, now) })}</p>
       </>}
       {view?.role === "inviter" && view.step === "confirm" && <>
-        <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{t("devices.add.found", { device: view.device })}</p>
+        <p data-testid="device-add-status" data-step="confirm" className="text-text-primary">{fillNames(t("devices.add.found"), { device: view.device })}</p>
         <Digits digits={view.digits} testId="device-add-digits" />
         <div className="grid grid-cols-2 gap-3">
           <button type="button" data-testid="device-add-no-match" disabled={busy} onClick={() => void confirm(false)} className={quietButton}>{t("devices.add.noMatch")}</button>
@@ -189,9 +190,9 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         </div>
       </>}
       {view?.role === "inviter" && (view.step === "waiting" || view.step === "confirm") && !!view.refused && <Notice tone="warning" testId="device-add-refused">{t("devices.add.refused")}</Notice>}
-      {view?.role === "inviter" && view.step === "adding" && <Status testId="device-add-adding" step="adding">{t("devices.add.adding", { device: view.device })}</Status>}
+      {view?.role === "inviter" && view.step === "adding" && <Status testId="device-add-adding" step="adding">{fillNames(t("devices.add.adding"), { device: view.device })}</Status>}
       {view?.role === "inviter" && view.step === "done" && <>
-        <p data-testid="device-add-done" className="text-text-primary">{t("devices.add.done", { device: view.device })}</p>
+        <p data-testid="device-add-done" className="text-text-primary">{fillNames(t("devices.add.done"), { device: view.device })}</p>
         {!view.published && <p className="text-text-muted text-xs">{t("devices.add.notPublished")}</p>}
         <button type="button" onClick={onClose} className={primaryButton}>{t("devices.add.finish")}</button>
       </>}
