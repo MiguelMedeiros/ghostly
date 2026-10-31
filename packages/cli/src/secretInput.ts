@@ -25,10 +25,10 @@ export type StdinRead = (onData?: () => void) => Promise<string>;
 export async function secretsFromStdin(method: string, params: Record<string, unknown>, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<string | undefined> {
   const warning = (what: string) => `${what} on the command line shows in ps and the shell's history: give it on stdin instead`;
   if (method === "wallet.redeem") {
-    if (params.token !== undefined) return warning("A token");
+    if (params.token !== undefined && params.token !== "-") return warning("A token");
     const missing = () => new CliError("usage", "Missing <cashu-token>: give it as an argument or on stdin (… | ghostly wallet redeem)");
     if (tty) throw missing();
-    const token = (await readUnasked(read, note, { what: "a Cashu token", missing: "Missing <cashu-token>", command: "wallet redeem", as: "an argument" })).trim();
+    const token = (params.token === "-" ? await read() : await readUnasked(read, note, { what: "a Cashu token", missing: "Missing <cashu-token>", command: "wallet redeem", as: "an argument" })).trim();
     if (!token) throw missing();
     params.token = token;
     return undefined;
