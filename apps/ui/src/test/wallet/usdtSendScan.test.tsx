@@ -81,6 +81,25 @@ describe("Send on the USDT card: scan, paste or picture", () => {
     expect(screen.queryByDisplayValue("7")).not.toBeInTheDocument();
   });
 
+  it("a link typed a key at a time stays in the field as it is typed, and is read once the field is left", async () => {
+    const { user } = await show();
+    await user.type(field(), `ethereum:${TO}@11155111`);
+    expect(field()).toHaveValue(`ethereum:${TO}@11155111`);
+    expect(screen.queryByTestId("wallet-send-unknown")).not.toBeInTheDocument();
+    await user.tab();
+    expect(field()).toHaveValue(TO);
+  });
+
+  it("a typed link that fills nothing stays to be put right, and says so once the field is left", async () => {
+    const { user } = await show();
+    await user.type(field(), "ethereum:");
+    expect(field()).toHaveValue("ethereum:");
+    expect(screen.queryByTestId("wallet-send-unknown")).not.toBeInTheDocument();
+    await user.tab();
+    expect(field()).toHaveValue("ethereum:");
+    expect(screen.getByTestId("wallet-send-unknown")).toBeInTheDocument();
+  });
+
   it("another chain's link fills nothing, and says so", async () => {
     qr.text = `ethereum:${TO}@1`;
     const { user } = await show();

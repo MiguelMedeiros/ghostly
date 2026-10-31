@@ -6,6 +6,7 @@ import { paymentStateLabel } from "./paymentWords";
 import { Actions, Address, Amount, Button, Notice, Row, Section, Signed, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { SendScan } from "./wallet/SendScan";
+import { typedByKey } from "../lib/typedByKey";
 import { routeBitcoinSend } from "../lib/sendRoute";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
 import { changeableFields } from "./wallet/providers/sourceStatus";
@@ -38,10 +39,10 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
   /** What was scanned, pasted or read from a picture and could not fill the form. */
   const [notUsable, setNotUsable] = useState<"refused" | "unknown" | null>(null);
   // A link or an address fills the form, where it is shown and reviewed as a typed one is. The amount goes with it: one
-  // left from the last address is not meant for this one.
-  const given = (text: string) => {
+  // left from the last address is not meant for this one. A link typed by hand that fills nothing stays to be put right (`kept`).
+  const given = (text: string, kept = false) => {
     const route = routeBitcoinSend(text, bt?.network ?? "");
-    if (route.kind !== "address") { setNotUsable(route.kind); setAddress(""); setAmount(""); return; }
+    if (route.kind !== "address") { setNotUsable(route.kind); if (!kept) { setAddress(""); setAmount(""); } return; }
     setNotUsable(null); setAddress(route.address); setAmount(route.amountSat === undefined ? "" : String(route.amountSat));
   };
   const ready = bt?.status === "ready";
@@ -98,7 +99,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           {action === "send" && (
             <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
               <SendScan onText={given} disabled={busy} scanOnOpen>
-              <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
+              <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text) && !typedByKey(e)) given(text); else { setNotUsable(null); setAddress(text); } }}
+                onBlur={() => { if (/^bitcoin:/i.test(address)) given(address, true); }} />
               {notUsable === "refused" && <Notice tone="error" testId="bitcoin-send-refused">{t("payments.formats.unsupported")}</Notice>}
               {notUsable === "unknown" && <Notice tone="error" testId="bitcoin-send-unknown">{t("wallet.panel.notAddress", { wallet: "Bitcoin" })}</Notice>}
               <Amount value={amount} onChange={setAmount} unit={unit} testId="bitcoin-amount" />
@@ -106,7 +108,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
                 <input aria-label={t("wallet.bitcoin.maxFeeInput", { unit })} inputMode="numeric" className={`${input} !w-28 shrink-0`} aria-invalid={feeField.hint ? true : undefined} value={feeField.text} onChange={(e) => feeField.change(e.target.value)} /> {unit}
               </label>
               {feeField.hint && <Notice tone="error" testId="amount-unclear">{feeField.hint}</Notice>}
-              <Button variant="primary" className="w-full" loading={running === "review"} disabled={busy || !!review || !address || !Number(amount) || !feeCap} onClick={() => void run(async () => {
+              <Button variant="primary" className="w-full" loading={running === "review"} disabled={busy || !!review || !address || /^bitcoin:/i.test(address) || !Number(amount) || !feeCap} onClick={() => void run(async () => {
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));
               }, "review")}>{t("wallet.panel.review")}</Button>
               <Notice>{t("wallet.bitcoin.reviewNote")}</Notice>
