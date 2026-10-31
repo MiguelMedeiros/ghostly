@@ -98,7 +98,7 @@ import { useSameValue } from "../hooks/useSameValue";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
 import { TransportLine } from "../components/TransportTimeline";
-import { mergeTimeline } from "../lib/transportEvents";
+import { timelineMerger } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
 import { cardOn } from "../lib/chatPayments";
 import { formatAt } from "../lib/time";
@@ -470,7 +470,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // the whole history, so it is put together again only when its messages or its lines change.
   const transportLog = useSameValue(paired ? chatLink?.transportLog : undefined);
   const identityTimeline = useSameValue(paired ? chatLink?.identityTimeline : undefined);
-  const timeline = useMemo(() => mergeTimeline(messages, transportLog ?? [], identityTimeline ?? []), [messages, transportLog, identityTimeline]);
+  // A new list puts together only the rows after those it has the same as the list before.
+  const [mergeRows] = useState(() => timelineMerger<ChatMessage>());
+  const timeline = useMemo(() => mergeRows(messages, transportLog ?? [], identityTimeline ?? []), [mergeRows, messages, transportLog, identityTimeline]);
   // Forward, and Select then Forward (WISP 400 § Forwards): texts and files, to other chats and groups.
   const forwarding = useForwarding(chatLink?.id, messages);
   // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
