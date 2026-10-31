@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { COMMANDS } from "../src/commands";
+import { COMMANDS, TEXT_COMMANDS } from "../src/commands";
 // covers: headless.cli
 
 const DIR = resolve(import.meta.dirname, "../src/commands");
@@ -24,5 +24,17 @@ describe("the command files", () => {
     for (const file of AREAS) all.push(...Object.keys(((await import(`../src/commands/${file.replace(/\.ts$/, "")}`)) as { commands: object }).commands));
     expect(all.length).toBe(new Set(all).size);
     expect(Object.keys(COMMANDS).sort()).toEqual(all.sort());
+  });
+});
+
+/**
+ * The usage line is what `ghostly help`, the README and every usage error show: an option the command takes is in it,
+ * or people learn of it only from `<command> --help`.
+ */
+describe("the usage lines", () => {
+  const rows = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).filter(([, c]) => c.options);
+  it.each(rows)("%s shows every option it takes", (_, command) => {
+    const shown = (flag: string) => new RegExp(`(?<![\\w-])--${flag}(?![\\w-])`).test(command.usage);
+    expect(Object.keys(command.options!).filter((flag) => !shown(flag))).toEqual([]);
   });
 });
