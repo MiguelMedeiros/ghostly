@@ -1,7 +1,7 @@
 "use client";
 
 import { IntentLink } from "@/components/site/IntentLink";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { BLOCKS, DIMS, PRESETS, type Block, type PresetId } from "@/lib/composition";
 import { LEVELS, type Level } from "@/lib/status";
 import { LevelBadge } from "@/components/site/Level";
@@ -32,6 +32,22 @@ const REF_NAMES: Record<string, string> = {
 };
 
 const PRESET_COUNTS = Object.fromEntries(PRESETS.map((p) => [p.id, BLOCKS.filter(p.blocks).length])) as Record<PresetId, number>;
+
+/**
+ * The ARIA radio pattern on a radio group: the arrow keys, Home and End check another radio and take the focus with
+ * it, and only the checked radio is a tab stop (`tabIndex` on each one).
+ */
+function onRadioKey(e: KeyboardEvent<HTMLElement>, current: number, count: number, check: (i: number) => void) {
+  let next: number;
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (current + 1) % count;
+  else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (current - 1 + count) % count;
+  else if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = count - 1;
+  else return;
+  e.preventDefault();
+  check(next);
+  e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+}
 
 /**
  * The architecture as a flat grid: one row per area, one block per piece.
@@ -125,9 +141,29 @@ export function BlockGrid({
     <div className="bgrid" data-mode={mode}>
       {mode === "compose" ? (
         <div className="bgrid-controls">
-          <div className="composer-presets" role="radiogroup" aria-label={t.presets}>
+          <div
+            className="composer-presets"
+            role="radiogroup"
+            aria-label={t.presets}
+            onKeyDown={(e) =>
+              onRadioKey(
+                e,
+                PRESETS.findIndex((p) => p.id === preset),
+                PRESETS.length,
+                (i) => setPreset(PRESETS[i].id),
+              )
+            }
+          >
             {PRESETS.map((p) => (
-              <button key={p.id} role="radio" aria-checked={p.id === preset} className="preset" onClick={() => setPreset(p.id)}>
+              <button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={p.id === preset}
+                tabIndex={p.id === preset ? 0 : -1}
+                className="preset"
+                onClick={() => setPreset(p.id)}
+              >
                 {p.title}
                 <span className="bgrid-preset-n mono" aria-hidden="true">
                   {PRESET_COUNTS[p.id]}
@@ -144,12 +180,24 @@ export function BlockGrid({
         </div>
       ) : (
         <div className="bgrid-controls">
-          <div className="stage-rail" role="radiogroup" aria-label={t.stages!.title}>
+          <div
+            className="stage-rail"
+            role="radiogroup"
+            aria-label={t.stages!.title}
+            onKeyDown={(e) =>
+              onRadioKey(e, stage, LEVELS.length, (i) => {
+                setPlaying(false);
+                setStage(i);
+              })
+            }
+          >
             {LEVELS.map((l, i) => (
               <button
                 key={l}
+                type="button"
                 role="radio"
                 aria-checked={i === stage}
+                tabIndex={i === stage ? 0 : -1}
                 className="stage-node"
                 data-level={l}
                 data-passed={i <= stage}
