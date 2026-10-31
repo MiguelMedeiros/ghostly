@@ -73,7 +73,7 @@ test.describe("Send scans a QR", () => {
     } finally { server.close(); }
   });
 
-  test("on a phone, Send opens with the camera running and the keyboard down; Paste stops it and reads", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  test("on a phone, Send opens with the camera running and the keyboard down; Paste stops it and reads, and so does the field taken to type", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.mobile-layout"] }, async ({ peer }) => {
     const alice = await peer("alice");
     await useTestnet(alice);
     const page = alice.page;
@@ -101,6 +101,14 @@ test.describe("Send scans a QR", () => {
     await expect(page.getByTestId("wallet-send-camera")).toBeVisible();
     await expect(preview).toBeHidden();
     expect(await preview.evaluate((video: HTMLVideoElement) => (video.srcObject as MediaStream | null)?.getTracks().every((track) => track.readyState === "ended") ?? true), "the camera is off").toBe(true);
+
+    // Started again, then the person taps the field to type: the camera goes, and does not stay above the keyboard.
+    await page.getByTestId("wallet-send-camera").click();
+    await expect.poll(() => preview.evaluate((video: HTMLVideoElement) => video.videoWidth > 0 && !video.paused)).toBe(true);
+    await page.getByTestId("wallet-pay-input").click();
+    await expect(page.getByTestId("wallet-send-camera")).toBeVisible();
+    await expect(preview).toBeHidden();
+    expect(await preview.evaluate((video: HTMLVideoElement) => (video.srcObject as MediaStream).getTracks().every((track) => track.readyState === "ended")), "the camera is off").toBe(true);
   });
 
   test("on a phone, Scan, Paste and Choose image read whole in every language", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.i18n"] }, async ({ peer }) => {

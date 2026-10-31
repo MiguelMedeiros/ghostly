@@ -11,7 +11,8 @@ import { Notice } from "../ui/Notice";
  * How Send on a wallet's card is given what to pay, as a phone wallet is: Scan (the camera), Paste, or
  * Choose image (a screenshot of a QR); a picture pasted or dropped anywhere in it (`children`: the card's field, where
  * one types) is read the same way. The text found goes to `onText` as is: the card sorts it. `scanOnOpen`: the person
- * just opened Send, and on a phone the camera starts by itself, as a phone wallet's does.
+ * just opened Send, and on a phone the camera starts by itself, as a phone wallet's does; the person typing in a field
+ * instead stops it (Scan starts it again).
  */
 export function SendScan({ onText, disabled = false, scanOnOpen = false, children }: { onText: (text: string) => void; disabled?: boolean; scanOnOpen?: boolean; children?: ReactNode }) {
   const { t } = useI18n();
@@ -121,6 +122,13 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
     });
   };
 
+  // A field taken to type in stops the camera: its light and preview do not stay above the keyboard, and a QR that comes
+  // into view does not take the place of what is being typed. A picture or a paste still being read is left to finish.
+  const typing = (target: EventTarget) => {
+    const field = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== "file");
+    if (field && (scanning || asking)) stop();
+  };
+
   // `aria-disabled`, not disabled: a disabled control gives up the keyboard's focus while it runs (as wallet/ui.tsx's Button).
   const off = disabled || busy;
   const control = "inline-flex min-h-11 items-center justify-center rounded-lg text-sm font-semibold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
@@ -131,6 +139,7 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
     <div className="space-y-3" data-testid="wallet-send-scan"
       // A screenshot of a QR, dropped: read as Choose image reads one.
       onPaste={pasted}
+      onFocus={(event) => typing(event.target)} onInput={(event) => typing(event.target)}
       onDragOver={(event) => { if (dragHasFiles(event.dataTransfer)) event.preventDefault(); }}
       onDrop={(event) => { if (!dragHasFiles(event.dataTransfer)) return; event.preventDefault(); const file = droppedFiles(event.dataTransfer)[0]; if (file?.type.startsWith("image/")) { if (!off) void image(file); } else if (file) setError(t("join.imageFailed")); }}>
       <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} aspect-square w-full max-w-xs mx-auto rounded-xl bg-black object-cover`} />
