@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Fetches the Linux Desktop app of an older release, for the Desktop compatibility e2e (e2e/desktop/compat-v115.spec.ts):
+ * Fetches the Linux Desktop app of an older release, for the Desktop compatibility e2e (e2e/desktop/compat.spec.ts):
  * the current Desktop must still talk to a contact who has not updated. Unlike the web app (build-compat-web.mjs), a
  * release attaches its Desktop build, so the old app is the one people installed: the release's `.deb`, checked against
  * the release's SHA256SUMS.txt and unpacked with `dpkg-deb -x`, or with `tar` where there is no `dpkg-deb` (Arch):
@@ -14,8 +14,14 @@
  *
  *   node tools/scripts/fetch-compat-desktop.mjs                  # v1.1.5 → ~/.cache/ghostly/compat/desktop-v1.1.5/usr/bin/ghostly
  *   node tools/scripts/fetch-compat-desktop.mjs --tag v1.1.5 --force
+ *   node tools/scripts/fetch-compat-desktop.mjs --tag newest     # the newest release with a published package
  *
  *   node tools/scripts/fetch-compat-desktop.mjs --deb Ghostly_1.1.5_amd64.deb   # a package already here: no download, no checksum
+ *
+ * `--tag newest` reads the release tags from the remote, leaving out the commit under test, as the web suite does
+ * (compat-latest-release.mjs), and takes the newest whose release publishes its package. A tag whose release is still a
+ * draft, or still building, has no public SHA256SUMS.txt (404): the release before it is taken, where the web suite,
+ * which builds from the tag, takes the tag itself.
  *
  * Linux x64 only (the release's amd64 package). E2E_COMPAT_CACHE moves the cache. Prints the binary.
  * Ends with status 3 and the reason when no tool on this machine unpacks the package: the spec skips on it.
@@ -24,64 +30,102 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { remoteReleases } from "./compat-latest-release.mjs";
 import { NoUnpacker, unpackDeb } from "./unpack-deb.mjs";
 
-const args = process.argv.slice(2);
-const option = (name, fallback) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] ? args[i + 1] : fallback; };
+/** The package a release attaches for Linux x64. */
+const packageOf = (tag) => `Ghostly_${tag.slice(1)}_amd64.deb`;
 
-const tag = option("--tag", "v1.1.5");
-if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`Not a release tag: ${tag}`);
-const version = tag.slice(1);
-const cache = resolve(process.env.E2E_COMPAT_CACHE ?? join(homedir(), ".cache", "ghostly", "compat"));
-const root = join(cache, `desktop-${tag}`);
-const binary = join(root, "usr", "bin", "ghostly");
-const done = join(root, ".fetched");
-const local = option("--deb");
+/** The checksum a release's SHA256SUMS.txt gives a file, or undefined. */
+const sumOf = (sums, name) => sums.split("\n").map((line) => line.trim().split(/\s+/)).find(([, file]) => file === name)?.[0];
 
-if (local || args.includes("--force") || !existsSync(done) || !existsSync(binary)) {
-  try {
-    await fetchRelease();
-  } catch (error) {
-    if (!(error instanceof NoUnpacker)) throw error;
-    console.error(error.message);
-    process.exit(3);
+/**
+ * The first of these tags (newest first) whose release publishes its Linux package, with that release's
+ * SHA256SUMS.txt; null when none does. `sums(tag)` is the file, or null where the release has none in public.
+ */
+export async function newestPublished(tags, sums, log = () => {}) {
+  for (const tag of tags) {
+    const text = await sums(tag);
+    if (text !== null && sumOf(text, packageOf(tag))) return { tag, sums: text };
+    log(text === null ? `${tag} has no published release (a draft, or still building): trying the release before it` : `${tag}'s release has no ${packageOf(tag)}: trying the release before it`);
   }
+  return null;
 }
-console.log(binary);
 
-async function download(name) {
-  const url = `https://github.com/MiguelMedeiros/ghostly/releases/download/${tag}/${name}`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`GET ${url}: ${response.status}`);
+const releaseFile = (tag, name) => fetch(`https://github.com/MiguelMedeiros/ghostly/releases/download/${tag}/${name}`);
+
+async function download(tag, name) {
+  const response = await releaseFile(tag, name);
+  if (!response.ok) throw new Error(`GET ${response.url}: ${response.status}`);
   return Buffer.from(await response.arrayBuffer());
 }
 
+/** A release's SHA256SUMS.txt, or null where the release is not published. */
+async function publishedSums(tag) {
+  const response = await releaseFile(tag, "SHA256SUMS.txt");
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`GET ${response.url}: ${response.status}`);
+  return response.text();
+}
+
 /** The release's package, as its SHA256SUMS.txt says it is. */
-async function checked(name) {
+async function checked(tag, sums) {
+  const name = packageOf(tag);
   console.error(`Fetching ${name} from the ${tag} release`);
-  const [deb, sums] = await Promise.all([download(name), download("SHA256SUMS.txt")]);
-  const expected = sums.toString().split("\n").map((line) => line.trim().split(/\s+/)).find(([, file]) => file === name)?.[0];
+  const [deb, list] = await Promise.all([download(tag, name), sums ?? download(tag, "SHA256SUMS.txt").then(String)]);
+  const expected = sumOf(list, name);
   if (!expected) throw new Error(`${tag}'s SHA256SUMS.txt lists no ${name}`);
   const actual = createHash("sha256").update(deb).digest("hex");
   if (actual !== expected) throw new Error(`${name}: sha256 ${actual}, the release says ${expected}`);
   return deb;
 }
 
-async function fetchRelease() {
-  if (process.platform !== "linux" || process.arch !== "x64") throw new Error(`The release's Desktop package is for Linux x64, not ${process.platform} ${process.arch}`);
-  const name = `Ghostly_${version}_amd64.deb`;
-  const deb = local ? readFileSync(local) : await checked(name);
-  const actual = createHash("sha256").update(deb).digest("hex");
-
-  rmSync(root, { recursive: true, force: true });
-  mkdirSync(root, { recursive: true });
-  const file = join(cache, `.${name}`);
-  writeFileSync(file, deb);
-  try {
-    unpackDeb(file, root);
-  } finally {
-    rmSync(file, { force: true });
+async function main(args) {
+  const option = (name, fallback) => { const i = args.indexOf(name); return i >= 0 && args[i + 1] ? args[i + 1] : fallback; };
+  let tag = option("--tag", "v1.1.5");
+  let sums;
+  if (tag === "newest") {
+    const found = await newestPublished(remoteReleases(), publishedSums, (line) => console.error(line));
+    if (!found) throw new Error("No release on origin publishes its Linux package");
+    ({ tag, sums } = found);
   }
-  if (!existsSync(binary)) throw new Error(`${name} has no usr/bin/ghostly`);
-  writeFileSync(done, `${tag} ${actual}\n`);
+  if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error(`Not a release tag: ${tag}`);
+  const cache = resolve(process.env.E2E_COMPAT_CACHE ?? join(homedir(), ".cache", "ghostly", "compat"));
+  const root = join(cache, `desktop-${tag}`);
+  const binary = join(root, "usr", "bin", "ghostly");
+  const done = join(root, ".fetched");
+  const local = option("--deb");
+
+  if (local || args.includes("--force") || !existsSync(done) || !existsSync(binary)) {
+    try {
+      await fetchRelease();
+    } catch (error) {
+      if (!(error instanceof NoUnpacker)) throw error;
+      console.error(error.message);
+      process.exit(3);
+    }
+  }
+  console.log(binary);
+
+  async function fetchRelease() {
+    if (process.platform !== "linux" || process.arch !== "x64") throw new Error(`The release's Desktop package is for Linux x64, not ${process.platform} ${process.arch}`);
+    const name = packageOf(tag);
+    const deb = local ? readFileSync(local) : await checked(tag, sums);
+    const actual = createHash("sha256").update(deb).digest("hex");
+
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+    const file = join(cache, `.${name}`);
+    writeFileSync(file, deb);
+    try {
+      unpackDeb(file, root);
+    } finally {
+      rmSync(file, { force: true });
+    }
+    if (!existsSync(binary)) throw new Error(`${name} has no usr/bin/ghostly`);
+    writeFileSync(done, `${tag} ${actual}\n`);
+  }
 }
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));

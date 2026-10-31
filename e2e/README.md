@@ -234,7 +234,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop/call-devices.spec.ts` | Linux: the microphone, camera and speaker chosen in Settings (PulseAudio null sources and sinks stand in for named devices) are the ones a call uses, the call's menu switches them live, an unplugged microphone falls back and is offered back, and Settings meters the microphone and plays the test tone through Rust. Skips without PulseAudio |
 | `desktop/video-stream.spec.ts` | a 100 MB video plays and seeks from the stored file in WebKitGTK (HTTP on 127.0.0.1) and WebView2 (`http://ghostly-file.localhost/<token>`), each answer a range of at most 4 MiB; video full screen. Run by `desktop-media.yml` |
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
-| `desktop/compat-v115.spec.ts` | the current Desktop with a real v1.1.5 Desktop (the release's own Linux package): a chat from either side's invite, texts both ways over the DHT, then live on Iroh or HyperDHT with texts both ways, each shown once. See [Compatibility with older releases](#compatibility-with-older-releases) |
+| `desktop/compat.spec.ts` | the current Desktop with a real v1.1.5 Desktop and one of the newest release with a published package (each the release's own Linux package): a chat from either side's invite, texts both ways over the DHT, then live on Iroh or HyperDHT with texts both ways, each shown once. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v11.spec.ts` | the current app (mini-apps on) with a real v1.1.4, which has no apps/1: an app card reaches it as its text with the bundle URL a link, the chat goes on both ways, and + → Apps says the contact's app can't run apps. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/chat-and-group.spec.ts` | the current app with a real v1.1.5 and the newest release: a chat from either side's invite, texts delivered both ways; in a private group the old member back after its app was closed catches up from a current member, and a current member from the old one. See [Compatibility with older releases](#compatibility-with-older-releases) |
@@ -413,9 +413,12 @@ release pairs from either side's invite with texts delivered both ways, and in a
 other up (WISP 902): `compat/chat-and-group.spec.ts`. `tools/scripts/compat-latest-release.mjs` reads the newest release
 from the tags, leaving out the commit under test, so a release's gate tests it against the one before.
 `compat/release.ts` opens a peer on a release's build.
-The Desktop side, the Rust host and its native transports, which no web build runs: `desktop/compat-v115.spec.ts`
-pairs the current Desktop with a real v1.1.5 Desktop from either side's invite, over the DHT and then live on Iroh or
-HyperDHT. It runs with the other Desktop specs (`npm run test:e2e:desktop`, Linux x64).
+The Desktop side, the Rust host and its native transports, which no web build runs: `desktop/compat.spec.ts`
+pairs the current Desktop with a real v1.1.5 Desktop, and with one of the newest release, from either side's invite,
+over the DHT and then live on Iroh or HyperDHT. The newest release is read from the tags as for the web suite, but it
+must have published its package: a tag whose release is still a draft (or still building) has none in public, so the
+release before it is taken. It runs with the other Desktop specs (`npm run test:e2e:desktop`, Linux x64);
+`E2E_COMPAT_LATEST=v1.7.2` names the newest release there too.
 
 ```bash
 npm run test:e2e:compat                                        # builds v0.4.0, v1.1.4, v1.1.5 and the newest release the first time (a few minutes)
@@ -431,7 +434,9 @@ E2E_COMPAT_LATEST=v1.7.2 npm run test:e2e:compat               # that release as
 - **The old Desktop.** A release attaches its Desktop build, so nothing is built: `tools/scripts/fetch-compat-desktop.mjs`
   downloads the release's `Ghostly_<version>_amd64.deb`, checks it against the release's `SHA256SUMS.txt`, unpacks it
   with `dpkg-deb -x` (or, where there is none, as on Arch, with `tar` on the package's `data.tar.*`) into
-  `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints `usr/bin/ghostly`; the spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
+  `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints `usr/bin/ghostly`. `--tag newest`
+  takes the newest release tag, leaving out the commit under test, whose `SHA256SUMS.txt` is public and lists the
+  package (a draft's answers 404). The spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
   system libraries as the current Desktop (WebKitGTK 4.1, GStreamer). A machine where no tool unpacks the package skips
   the spec with the reason.
 - **The config.** `playwright.compat.config.ts` starts five servers (the current build, with mini-apps on as in the
