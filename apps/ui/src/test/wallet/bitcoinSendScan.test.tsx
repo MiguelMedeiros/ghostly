@@ -94,6 +94,30 @@ describe("Send on the Bitcoin card: scan, paste or picture", () => {
     expect(screen.getByTestId("bitcoin-amount")).toHaveValue("1000");
   });
 
+  it("a link typed a key at a time stays in the field as it is typed, and is read once the field is left", async () => {
+    const { user } = await show();
+    const field = screen.getByLabelText("Bitcoin recipient address");
+    await user.type(field, `bitcoin:${REGTEST}?amount=0.00001`);
+    expect(field).toHaveValue(`bitcoin:${REGTEST}?amount=0.00001`);
+    expect(screen.queryByTestId("bitcoin-send-unknown")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("bitcoin-send-refused")).not.toBeInTheDocument();
+    await user.tab();
+    expect(field).toHaveValue(REGTEST);
+    expect(screen.getByTestId("bitcoin-amount")).toHaveValue("1000");
+  });
+
+  it("a typed link that fills nothing stays to be put right, and says so once the field is left", async () => {
+    const { user } = await show();
+    const field = screen.getByLabelText("Bitcoin recipient address");
+    await user.type(field, "bitcoin:");
+    expect(field).toHaveValue("bitcoin:");
+    expect(screen.queryByTestId("bitcoin-send-refused")).not.toBeInTheDocument();
+    await user.type(screen.getByTestId("bitcoin-amount"), "1000");
+    expect(field).toHaveValue("bitcoin:");
+    expect(screen.getByTestId("bitcoin-send-refused")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review" })).toBeDisabled();
+  });
+
   it("another chain's address fills nothing, and says so; a link that must not be paid is refused", async () => {
     qr.text = MAINNET;
     const { user } = await show();
