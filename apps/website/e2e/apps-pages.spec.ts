@@ -230,6 +230,16 @@ test.describe("once the released Ghostly has Apps", () => {
     for (const path of ["/apps/nothing.here", `/apps/gone.${PREFIX.a}`, `/apps/older.${PREFIX.a}`]) expect((await request.get(LIVE + path)).status(), path).toBe(404);
   });
 
+  test("a missing app's page reads as not found in the browser's tab", async ({ page }) => {
+    // A browser gets the metadata streamed after the page: a plain request read the not-found title while the tab kept
+    // the home page's. Read it where people see it.
+    for (const url of [`${LIVE}/apps/nothing.here`, `${LIVE}/apps/gone.${PREFIX.a}`, `${HIDDEN}/apps/${CHESS}`]) {
+      await page.goto(url);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("404");
+      await expect(page, url).toHaveTitle("Page not found | Ghostly");
+    }
+  });
+
   test("the nav, the footer, the sitemap and the privacy policy name them", async ({ page, request }) => {
     await page.goto(`${LIVE}/apps`);
     const nav = page.getByRole("navigation", { name: "Main" });
