@@ -3,7 +3,7 @@ import { UI_PORT, type RuntimeMessage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
 import { extensionAtproto } from "./atproto";
-import { pageProfileIsCurrent } from "./profile";
+import { markEngineRestart, pageProfileIsCurrent } from "./profile";
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
 export const extensionHost: BrowserHost = {
@@ -34,6 +34,8 @@ export const extensionHost: BrowserHost = {
   async restartEngine() {
     const reply = await chrome.runtime.sendMessage({ target: "background", type: "restart-engine" } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "The Ghostly peer did not start again. Reopen the extension to retry.");
+    // Every other tab of the extension is on the new peer now, still showing what the old one told it.
+    markEngineRestart();
   },
 
   // Chrome's own prompt, and only from a user gesture.
