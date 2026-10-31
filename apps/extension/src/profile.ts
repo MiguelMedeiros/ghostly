@@ -35,3 +35,24 @@ export function followProfileSwitch(running: string, onSwitch: () => void): () =
   addEventListener("storage", changed);
   return () => removeEventListener("storage", changed);
 }
+
+/** Written by the page that restarted the peer, once the new one runs (`restartEngine` in host.ts). */
+export const ENGINE_RESTART_KEY = "ghostly_engine_restarted";
+
+/**
+ * Tells every other page that the peer was replaced (a clear of all data, a device added or taken over): the page
+ * that asked reloads itself, and the others start again too rather than show what the stopped peer had. A new value
+ * each time, so a second restart is heard as well.
+ */
+export function announceEngineRestart(): void {
+  try { localStorage.setItem(ENGINE_RESTART_KEY, `${Date.now()}-${Math.random().toString(36).slice(2)}`); } catch { /* the pages reconnect on their own */ }
+}
+
+/** Calls `onRestart` when another page replaced the peer. */
+export function followEngineRestart(onRestart: () => void): () => void {
+  const restarted = (event: StorageEvent) => {
+    if (event.key === ENGINE_RESTART_KEY && event.newValue) onRestart();
+  };
+  addEventListener("storage", restarted);
+  return () => removeEventListener("storage", restarted);
+}
