@@ -106,6 +106,8 @@ export class Outbox {
   private dropped = false;
   /** Sends asked for (`transmit`) whose turn is not over, each counted from the moment its row began to be stored. */
   private transmits = 0;
+  /** Those sends' message ids, each with how many of them name it (a Retry may be asked for while it goes). */
+  private onTheirWay = new Map<string, number>();
   /**
    * Rows of mine being stored by someone else (`storing`), and a count moved at each one's start and end: the last
    * look at the chat that found nothing of mine to go that this outbox did not know of was at `seen`.
@@ -193,10 +195,16 @@ export class Outbox {
    */
   transmit(id: string, { manual = false, storing }: { manual?: boolean; storing?: Promise<unknown> } = {}): Promise<void> {
     this.transmits++;
+    this.onTheirWay.set(id, (this.onTheirWay.get(id) ?? 0) + 1);
+    const over = () => {
+      this.transmits--;
+      const left = this.onTheirWay.get(id)! - 1;
+      if (left) this.onTheirWay.set(id, left); else this.onTheirWay.delete(id);
+    };
     const go = () => this.turn(async () => {
-      try { await this.transmitTurn(id, manual); } finally { this.transmits--; }
+      try { await this.transmitTurn(id, manual); } finally { over(); }
     });
-    return storing ? storing.then(go, error => { this.transmits--; throw error; }) : go();
+    return storing ? storing.then(go, error => { over(); throw error; }) : go();
   }
 
   /**
@@ -210,12 +218,12 @@ export class Outbox {
   }
 
   /**
-   * What was written before a new message and has not gone is what this outbox holds, queued, waiting or awaiting a
-   * receipt: no other send is on its way, and no row stored by someone else since the last look at the chat that found
-   * nothing this outbox did not know of.
+   * What was written before a new message and has not gone is what this outbox holds, queued, waiting, awaiting a
+   * receipt or asked to go by another send on its way (`onTheirWay`): no row stored by someone else since the last look
+   * at the chat that found nothing this outbox did not know of.
    */
   private get known(): boolean {
-    return this.transmits === 1 && !this.writes && this.seen === this.stamp;
+    return !this.writes && this.seen === this.stamp;
   }
 
   /**
@@ -223,17 +231,18 @@ export class Outbox {
    * at 10,000 messages on the CLI's store) to find what this says.
    */
   private get alone(): boolean {
-    return this.known && !this.waiting.size && !this.receipts.size;
+    return this.known && this.transmits === 1 && !this.waiting.size && !this.receipts.size;
   }
 
   /**
    * The rows a new message's look needs, itself among them: those this outbox holds, by id, where it knows them all.
    * A text sent before the last one's receipt came, or while one waits for an away contact, read the chat's whole
-   * history on the page's thread (20,000 rows per send at 20,000 messages). Past `KNOWN_ROWS`, the history costs less.
+   * history on the page's thread (20,000 rows per send at 20,000 messages), and so did each of the texts a bot asked
+   * for at the same time. Past `KNOWN_ROWS`, the history costs less.
    */
   private async look(id: string): Promise<StoredMessage[]> {
-    if (!this.store.get || !this.known || this.waiting.size + this.receipts.size > KNOWN_ROWS) return this.store.read();
-    const rows = await Promise.all([...new Set([id, ...this.waiting.keys(), ...this.receipts.keys()])].map(known => this.store.get!(known)));
+    if (!this.store.get || !this.known || this.waiting.size + this.receipts.size + this.onTheirWay.size > KNOWN_ROWS) return this.store.read();
+    const rows = await Promise.all([...new Set([id, ...this.waiting.keys(), ...this.receipts.keys(), ...this.onTheirWay.keys()])].map(known => this.store.get!(known)));
     return rows.filter((row): row is StoredMessage => !!row);
   }
 

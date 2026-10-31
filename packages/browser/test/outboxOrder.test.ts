@@ -532,6 +532,41 @@ describe("a new text while others of mine are on their way", () => {
     await c.box.stop();
   });
 
+  /**
+   * Seen 2026-10-31 on a CLI daemon at 5,000 messages, its bot sending from four workers at once: 30 of 100 texts read
+   * the chat's whole history, each send cost 24 ms of CPU against 6 ms one after the other, and texts arrived seconds late.
+   */
+  it("goes without the chat's history being read while other texts are asked for at the same time", async () => {
+    const c = long(1_000);
+    await c.box.transmit(c.add(row(1001, "sending")));
+    const reads = c.counts.reads;
+    // Each row's write still on its way when the next send is asked for, as several callers at once do.
+    let stored!: () => void;
+    const storing = new Promise<void>(resolve => { stored = resolve; });
+    const sends = [1002, 1003, 1004, 1005].map(n => c.box.transmit(c.add(row(n, "sending")), { storing }));
+    stored();
+    await Promise.all(sends);
+    expect(c.sent).toEqual(["m1001", "m1002", "m1003", "m1004", "m1005"]);
+    expect(c.counts.reads).toBe(reads);
+    await c.box.stop();
+  });
+
+  it("sends one asked for at the same time and stored first after the older one it finds on its way", async () => {
+    const c = long(1_000);
+    await c.box.transmit(c.add(row(1001, "sending")));
+    const reads = c.counts.reads;
+    let older!: () => void;
+    const olderStored = new Promise<void>(resolve => { older = resolve; });
+    const first = c.box.transmit(c.add(row(1002, "sending")), { storing: olderStored });
+    // The newer one's write is done first: its turn comes before the older one's, which still has to go before it.
+    await c.box.transmit(c.add(row(1003, "sending")), { storing: Promise.resolve() });
+    older();
+    await first;
+    expect(c.sent).toEqual(["m1001", "m1002", "m1003"]);
+    expect(c.counts.reads).toBe(reads);
+    await c.box.stop();
+  });
+
   it("reads the chat's history where many are on their way, not each of them", async () => {
     const c = long(10);
     for (let n = 11; n <= 40; n++) await c.box.transmit(c.add(row(n, "sending")));
