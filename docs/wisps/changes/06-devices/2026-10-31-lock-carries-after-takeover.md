@@ -1,0 +1,1 @@
+The lock passed in a tab now also carries across the reload after a forced takeover and the one after a read at start finds the device was replaced, with the handover marker enrollment already uses. It carries only while the lock is open and its time away is not up; a handoff's reload still asks.

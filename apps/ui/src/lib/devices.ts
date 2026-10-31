@@ -169,7 +169,8 @@ const lockHashOf = (id: string): string | null => {
 
 /**
  * Starts the app again into the gate: where the engine outlives the page (the extension), it starts again too.
- * `keepUnlocked`: the lock this tab passed carries across this one reload (a device just added, `handOverUnlock`).
+ * `keepUnlocked`: the lock this tab passed carries across this one reload (a device just added, one that took over or
+ * read at start that it was replaced, `handOverUnlock`). Never from a page whose lock is closed (`useLockPassedNow`).
  */
 export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): Promise<void> {
   try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }

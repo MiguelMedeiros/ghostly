@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../../contexts/I18nContext";
+import { useLockPassedNow } from "../../contexts/LockScreenContext";
 import { reloadIntoGate, takeoverErrorKey } from "../../lib/devices";
 import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton } from "./DeviceDialog";
@@ -16,6 +17,7 @@ import { said } from "../../lib/notices";
  */
 export function TakeoverDialog({ device, password: asks, restored, ownSet, onClose }: { device?: string; password: boolean; restored?: boolean; ownSet?: boolean; onClose(): void }) {
   const { t } = useI18n();
+  const lockPassedNow = useLockPassedNow();
   const id = useId();
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -31,8 +33,9 @@ export function TakeoverDialog({ device, password: asks, restored, ownSet, onClo
     setBusy(true); setError(null);
     try {
       const outcome = await engine.call("deviceTakeover", { password, name, lost: lost === true });
-      // Active now: the app starts again into the gate, where the engine raises its counters and starts.
-      if (outcome.kind === "start") { await reloadIntoGate(); return; }
+      // Active now: the app starts again into the gate, where the engine raises its counters and starts. The lock passed
+      // in this tab carries, if it did not close during the check.
+      if (outcome.kind === "start") { await reloadIntoGate({ keepUnlocked: lockPassedNow() }); return; }
       setError({ tone: "error", title: t(outcome.kind === "removed" ? "devices.takeover.ownSetRemoved" : outcome.kind === "wait" ? "devices.takeover.ownSetWait" : "devices.takeover.lostRace") });
     } catch (cause) {
       const key = takeoverErrorKey(cause);
