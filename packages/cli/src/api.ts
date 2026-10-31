@@ -5,7 +5,7 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -498,6 +498,7 @@ const METHODS: Record<string, Method> = {
     const link = chatOf(ctx, params);
     await releaseHold(ctx, link.id, "connect");
     inviteTaken(link);
+    dhtOnly(findChat(state(ctx).links, link.id));
     await node(ctx).connect({ linkId: link.id });
     return chatJson(findChat(state(ctx).links, link.id));
   },
