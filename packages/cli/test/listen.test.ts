@@ -147,6 +147,23 @@ describe("agent turns", () => {
 });
 
 describe("hooks", () => {
+  it("the output line writes a contact's C1 and bidi controls as \\uXXXX; the event keeps its text whole", async () => {
+    const text = "A\u009b2JB\u009d0;title\u009cC\u0085D\u202eE";
+    const lines: string[] = [];
+    for (const turns of [false, true]) {
+      const handle = eventHandler({ types: [], turns, print: true, write: (line) => { lines.push(line); } });
+      handle(received("c1", "m1", text));
+      await handle.idle();
+    }
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line).not.toMatch(/[\u0080-\u009f\u202e]/);
+      expect(line).toContain("A\\u009b2JB\\u009d0;title\\u009cC\\u0085D\\u202eE");
+    }
+    expect((JSON.parse(lines[0]) as GhostlyEvent).message).toMatchObject({ text });
+    expect((JSON.parse(lines[1]) as { untrusted: { text: string } }).untrusted.text).toBe(text);
+  });
+
   it("run without the backup passphrase in their environment", () => {
     const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_PROFILE: "bot" });
     expect(env).toEqual({ PATH: "/bin", GHOSTLY_PROFILE: "bot" });
