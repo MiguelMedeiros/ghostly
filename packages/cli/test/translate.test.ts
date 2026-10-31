@@ -127,6 +127,8 @@ describe("a received message with --translate", () => {
   });
 });
 
+const NO_DETECTOR = "ghostly: --translate cannot translate in this build of the CLI (it has no language detector yet): messages are printed untranslated";
+
 describe("without the runtime or the detector", () => {
   it("says so in one stderr line and gives no translator: the output stays as it is", () => {
     const warned: string[] = [], dir = home("translate-none");
@@ -134,7 +136,13 @@ describe("without the runtime or the detector", () => {
     expect(warned).toEqual([`ghostly: no translation runtime in ${translationPaths(dir).runtime}: messages are printed untranslated. Unpack runtime ${RUNTIME_VERSION} there and a model in ${join(translationPaths(dir).models, "<from>-<to>")}`]);
     const withRuntime = fakeHome(), said: string[] = [];
     expect(openTranslator({ home: withRuntime, to: "en", detect: null, warn: (line) => said.push(line) })).toBeNull();
-    expect(said).toEqual(["ghostly: this build of the CLI has no language detector: messages are printed untranslated"]);
+    expect(said).toEqual([NO_DETECTOR]);
+  });
+
+  it("with no detector, says that first: nobody is sent to unpack a runtime that cannot help", () => {
+    const warned: string[] = [];
+    expect(openTranslator({ home: home("translate-neither"), to: "en", detect: null, warn: (line) => warned.push(line) })).toBeNull();
+    expect(warned).toEqual([NO_DETECTOR]);
   });
 
   it("events and chat history --translate print what they print without it, and say why on stderr", async () => {
@@ -143,9 +151,12 @@ describe("without the runtime or the detector", () => {
     const asked = await ghostly(["events", "--translate", "en"], { env });
     expect(asked.code).toBe(0);
     expect(asked.json).toEqual(plain.json);
-    expect(asked.stderr).toContain("ghostly: no translation runtime in ");
-    expect(asked.stderr.trim().split("\n").filter((line) => line.includes("translation"))).toHaveLength(1);
-    expect((await ghostly(["help", "listen"], { env })).stdout).toContain("--translate <value>");
+    expect(asked.stderr).toContain(NO_DETECTOR);
+    expect(asked.stderr).not.toContain("Unpack runtime");
+    expect(asked.stderr.trim().split("\n").filter((line) => line.includes("translat"))).toHaveLength(1);
+    const help = (await ghostly(["help", "listen"], { env })).stdout;
+    expect(help).toContain("--translate <value>");
+    expect(help).toContain("Not in this build yet (no language detector)");
   });
 
   it("--translate takes a language code, checked before anything starts", async () => {

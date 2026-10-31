@@ -369,12 +369,15 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   apart, and the cursor stays before it until the bridge takes it. A 4xx or a redirect (not followed) passes the event
   as not taken.
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
-- `--translate <lang>`: received messages carry a translation ([Translation](#translation)).
+- `--translate <lang>`: received messages carry a translation, once the CLI has a language detector ([Translation](#translation)).
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
 side that invited answers once.
 
 ### Translation
+
+**Not in this build yet:** the CLI has no language detector yet, so `--translate` translates nothing: the command
+says so in one line on stderr and prints what it prints without the flag. What follows is how it works once it has one.
 
 `listen`, `events` and `chat history` take `--translate <lang>` (an ISO 639 code: `en`, `pt`, `es`...). A message a
 contact or a member sent, in another language, then carries `translation: {from, text}` beside its `text`: `from` is
