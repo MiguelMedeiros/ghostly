@@ -8,7 +8,7 @@
 let compared: { a: readonly unknown[]; b: readonly unknown[]; same: number } | undefined;
 
 /** How many rows two lists have the same from their start. */
-function sharedRows<R>(a: readonly R[], b: readonly R[]): number {
+export function sharedRows<R>(a: readonly R[], b: readonly R[]): number {
   if (compared?.a === a && compared.b === b) return compared.same;
   const most = Math.min(a.length, b.length);
   let same = 0;

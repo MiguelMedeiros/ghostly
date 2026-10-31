@@ -1,6 +1,7 @@
 import { TRANSPORTS, type IdentityTimelineEntry, type LiveAttempt, type PairedTransport, type TransportWait } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
+import { sharedRows } from "./chatRows";
 import { transportName } from "./connection";
 import { englishT, type Translate } from "../locales/translate";
 import { problemLine, problemText, sentences } from "./problemText";
@@ -198,11 +199,50 @@ export type TimelineRow<M> =
  * row, where it began (its later steps settle it in place).
  */
 export function mergeTimeline<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[], identities: readonly IdentityTimelineEntry[] = []): TimelineRow<M>[] {
+  return merge(messages, lines, identities).out;
+}
+
+/**
+ * `mergeTimeline` for one chat as its list changes. While its transport lines and identity shares are the same, the rows
+ * up to the last message the new list has the same from its start are the ones given before (the same objects), and only
+ * the rows after it are put together again: a message arriving in a chat of thousands costs what it does in a short one.
+ */
+export function timelineMerger<M extends { timestamp: number }>(): (messages: readonly M[], lines: readonly TransportEntry[], identities?: readonly IdentityTimelineEntry[]) => TimelineRow<M>[] {
+  let last: Merged<M> | undefined;
+  // A chat with none has a new empty list each time.
+  const alike = <T,>(a: readonly T[], b: readonly T[]) => a === b || (!a.length && !b.length);
+  return (messages, lines, identities = []) => {
+    const from = last && alike(last.lines, lines) && alike(last.identities, identities) ? last : undefined;
+    last = merge(messages, lines, identities, from && { ...from, same: from.messages === messages ? messages.length : sharedRows(from.messages, messages) });
+    return last.out;
+  };
+}
+
+interface Merged<M> {
+  messages: readonly M[];
+  lines: readonly TransportEntry[];
+  identities: readonly IdentityTimelineEntry[];
+  sorted: readonly TransportEntry[];
+  shares: readonly IdentityTimelineEntry[];
+  out: TimelineRow<M>[];
+  /** For each message, three numbers: the rows given up to its own, and the lines and the shares placed by then. */
+  marks: number[];
+}
+
+/**
+ * The timeline of these rows, the first `same` messages' rows taken from `from` (put together with the same lines and
+ * shares), which is not to be read again.
+ */
+function merge<M extends { timestamp: number }>(messages: readonly M[], lines: readonly TransportEntry[], identities: readonly IdentityTimelineEntry[], from?: Merged<M> & { same: number }): Merged<M> {
   const at = (e: TransportEntry) => e.since ?? e.at;
-  const sorted = [...lines].sort((a, b) => at(a) - at(b));
-  const shares = [...identities].sort((a, b) => a.at - b.at);
-  const out: TimelineRow<M>[] = [];
-  let i = 0, j = 0;
+  const sorted = from?.sorted ?? [...lines].sort((a, b) => at(a) - at(b));
+  const shares = from?.shares ?? [...identities].sort((a, b) => a.at - b.at);
+  const same = from?.same ?? 0, mark = (same - 1) * 3;
+  const out: TimelineRow<M>[] = same ? from!.out.slice(0, from!.marks[mark]) : [];
+  // The marks are this merge's alone: the one before is not read again.
+  const marks = same ? from!.marks : [];
+  marks.length = same * 3;
+  let i = same ? from!.marks[mark + 1]! : 0, j = same ? from!.marks[mark + 2]! : 0;
   const rows = (until: number) => {
     let run: TransportEntry[] = [];
     const flush = () => { if (run.length) out.push({ kind: "transport", entry: run[run.length - 1], earlier: run.slice(0, -1) }); run = []; };
@@ -214,12 +254,14 @@ export function mergeTimeline<M extends { timestamp: number }>(messages: readonl
     }
     flush();
   };
-  for (const message of messages) {
+  for (let k = same; k < messages.length; k++) {
+    const message = messages[k]!;
     rows(message.timestamp);
     out.push({ kind: "message", message });
+    marks.push(out.length, i, j);
   }
   rows(Infinity);
-  return out;
+  return { messages, lines, identities, sorted, shares, out, marks };
 }
 
 /** How long, to the second when short: the connection history is about exact moments. */
