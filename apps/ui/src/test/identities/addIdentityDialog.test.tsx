@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { newIdentityBinding } from "@ghostly/core";
 import type { BrowserHost } from "@ghostly/browser/host";
@@ -225,6 +225,40 @@ describe("AddIdentityDialog", () => {
       expect(await screen.findByTestId("add-identity-steps")).toHaveFocus();
     });
 
+    it("keeps the focus on Continue while the engine works, and there when it is refused", async () => {
+      const { user, engine } = dialog();
+      let refuse!: (e: Error) => void;
+      engine.on("beginIdentityProof", () => new Promise((_, reject) => { refuse = reject; }));
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      const start = screen.getByTestId("add-identity-start");
+      start.focus();
+      await user.keyboard("{Enter}");
+      expect(start).not.toBeDisabled();
+      expect(start).toHaveAttribute("aria-busy", "true");
+      expect(start).toHaveFocus();
+      // A second press while it waits does not begin again.
+      await user.keyboard("{Enter}");
+      expect(engine.callsTo("beginIdentityProof")).toHaveLength(1);
+      await act(async () => { refuse(new Error("declined")); });
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("declined");
+      expect(start).not.toHaveAttribute("aria-busy");
+      expect(start).toHaveFocus();
+    });
+
+    it("gives the focus to the emptied bunker:// link when the remote signer refuses", async () => {
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-nostr"));
+      // A link the signer refuses.
+      await user.type(screen.getByTestId("add-identity-field-bunker"), "bunker://abc");
+      screen.getByTestId("add-identity-start").focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Invalid bunker connection URL");
+      // The secret is not kept, so Continue cannot be pressed again: the link's field takes the keys.
+      expect(screen.getByTestId("add-identity-start")).toBeDisabled();
+      expect(screen.getByTestId("add-identity-field-bunker")).toHaveFocus();
+    });
+
     it("switches between a publish signer and an in-app one", async () => {
       const { user } = dialog();
       await user.click(screen.getByTestId("add-identity-domain"));
@@ -379,6 +413,24 @@ describe("AddIdentityDialog", () => {
       expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("Paste the whole signature, from -----BEGIN SSH SIGNATURE----- to -----END SSH SIGNATURE-----");
       // Refused in the page: nothing reached the engine.
       expect(engine.callsTo("completeIdentityProof")).toEqual([]);
+    });
+    it("keeps the focus on Verify and save while it checks, and there when it is refused", async () => {
+      const { user, engine } = dialog();
+      answerBegin();
+      let refuse!: (e: Error) => void;
+      engine.on("completeIdentityProof", () => new Promise((_, reject) => { refuse = reject; }));
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const finish = await screen.findByTestId("add-identity-finish");
+      finish.focus();
+      await user.keyboard("{Enter}");
+      expect(finish).not.toBeDisabled();
+      expect(finish).toHaveAttribute("aria-busy", "true");
+      expect(finish).toHaveFocus();
+      await act(async () => { refuse(new Error("TXT record not found")); });
+      expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("TXT record not found");
+      expect(finish).toHaveFocus();
     });
   });
 
