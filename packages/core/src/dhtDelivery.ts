@@ -10,7 +10,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
-import { AWAITING_PEER_MS, countUnusedInvite, unusedInviteWait } from "./link";
+import { AWAITING_PEER_MS, countUnusedInvite, UNUSED_INVITE_UPKEEP_MS, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { readForwarded } from "./forwards";
 import { validEditNumber } from "./pairedEdits";
@@ -755,7 +755,10 @@ export class DhtDelivery {
     // Ratcheted, the envelope is sealed only now, with the sequence saved: a key is never taken for one that does not go.
     const records = await this.sealed(fittedEnvelope);
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
-    this.lastPublish = now; this.controlDue = now + 4 * 60_000;
+    // An unused invite of this side's, no longer awaited: nobody reads this mailbox yet, so its keep-alive waits longer.
+    // Not a joined chat's: an inviter that comes back reads the joiner's envelope to find it.
+    const ownInvite = !this.options.credentials.expectedPeerKey && !this.active && this.unusedInviteAge(now) !== undefined;
+    this.lastPublish = now; this.controlDue = now + (ownInvite ? UNUSED_INVITE_UPKEEP_MS : 4 * 60_000);
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }), ...(records[0]?.label === "_dr" && { ratchet: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
     // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
