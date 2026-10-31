@@ -954,6 +954,8 @@ export class GhostLink {
   private offerReplaced?: () => void;
   private lastAutoConnectAt = 0;
   private autoConnectFailures = 0;
+  /** The wait (dial and count of failures) whose `dial-backoff` line is written: the looks during it write none. */
+  private backoffTraced = "";
   /** The look due when a failed dial's backoff ends (`lookAtRetry`). */
   private retryLook: ReturnType<typeof setTimeout> | null = null;
   /** This side's offer is out to the data link and has not reached the relays yet. */
@@ -3099,7 +3101,12 @@ export class GhostLink {
     }
     const wait = this.dialWait();
     if (Date.now() - this.lastAutoConnectAt < wait) {
-      traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) });
+      // Once per wait: the Desktop writes each line to its log, and a look every few seconds only changed `left`.
+      const backoff = `${this.lastAutoConnectAt}:${this.autoConnectFailures}`;
+      if (backoff !== this.backoffTraced) {
+        this.backoffTraced = backoff;
+        traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) });
+      }
       // The contact waits for this side's dial (the higher key, not lost from a live session, where it may come back and
       // offer): a read before the wait is over can only end here again. The look at its end is armed (`lookAtRetry`),
       // and the chat reads at its own pace until then, not every 0.7 s for the rest of an app start's window (45 reads).
