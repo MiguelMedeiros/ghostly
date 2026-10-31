@@ -1,6 +1,6 @@
 import { CliError } from "../errors";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
 
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
@@ -150,7 +150,7 @@ export const commands: Record<string, Command> = {
     summary: "Show the contact you are writing, recording or thinking (live chats; it fades after 6 s unless said again, or kept with --for; a send or --stop ends it)", args: ["chat"],
     options: {
       stop: { type: "boolean", description: "Say you stopped" },
-      kind: { type: "string", description: "typing (default), recording (a voice note) or thinking" },
+      kind: typingKind,
       status: { type: "string", description: "A short line shown instead, e.g. \"Transcribing your audio…\" (40 characters, no links)" },
       for: { type: "number", description: "Keep saying it for this many seconds (up to 600), until a send or --stop" },
     },
