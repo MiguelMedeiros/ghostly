@@ -58,7 +58,11 @@ describe("identity signers on Node", () => {
       code: "bad_request", message: "Paste your public key (the one line in ~/.ssh/id_ed25519.pub) or its SHA256: fingerprint",
     });
     await expect(callApi(ctx, "identity.add", { provider: "ssh", subject: `SHA256:${"A".repeat(43)}`, signer: "ssh-keygen", days: 400 })).rejects.toMatchObject({
-      code: "bad_request", message: "days must be a number from 1 to 365",
+      code: "bad_request", message: "days must be a whole number from 1 to 365",
+    });
+    // A part of a day got past this to the engine's own check ("Choose between 1 and 365 days", engine).
+    await expect(callApi(ctx, "identity.add", { provider: "ssh", subject: `SHA256:${"A".repeat(43)}`, signer: "ssh-keygen", days: 1.5 })).rejects.toMatchObject({
+      code: "bad_request", message: "days must be a whole number from 1 to 365",
     });
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });

@@ -5,7 +5,7 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
-import { here, since as sinceOf, timeout, translate } from "./commands/shared";
+import { here, inRange, since as sinceOf, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
@@ -1068,7 +1068,15 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     if (eq < 1) throw new CliError("usage", `--field takes name=value, not ${JSON.stringify(item)}`);
     fields[item.slice(0, eq)] = item.slice(eq + 1);
   }
-  const params = { provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout };
+  // Before the profile opens, as a usage error that names the flag: the API's own check answered once it had opened, in
+  // its parameter's words ("days must be a number from 1 to 365"), and `--days 1.5` got past it to the engine's.
+  inRange(parsed.options, "timeout", "a number of seconds", 5, 3600);
+  if (parsed.options.days !== undefined) {
+    // The most days are the provider's; an unknown provider is the API's to name.
+    const known = (await import("@ghostly/browser/proofs/registry")).IDENTITY_PROVIDERS.find((p) => p.id === provider);
+    if (known) inRange(parsed.options, "days", "a whole number", 1, known.validity.maxDays, true);
+  }
+  const params ={ provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout };
   const tell = (event: GhostlyEvent) => {
     if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
   };
