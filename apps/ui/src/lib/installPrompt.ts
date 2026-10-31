@@ -163,7 +163,13 @@ export async function promptInstall(): Promise<boolean> {
 
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  // The hint put away in another tab of this app goes from this one too.
+  const stored = (event: StorageEvent) => { if (event.key === HINT_KEY || event.key === null) listener(); };
+  window.addEventListener("storage", stored);
+  return () => {
+    listeners.delete(listener);
+    window.removeEventListener("storage", stored);
+  };
 };
 
 export function useInstallState(): InstallState {
