@@ -37,7 +37,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     fileAction: vi.fn(async () => undefined),
     disconnect: vi.fn(),
     connect: vi.fn(async () => undefined),
-    setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { if (transport === "dht") setLink(linkId, { deliveryMode: "dht", textDelivery: "dht" }); }),
+    setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
@@ -226,6 +226,29 @@ describe("chat disconnect --hold", () => {
     expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "stream" });
     expect(emitted.at(-1)).toMatchObject({ type: "chat.released", chat: "chat-one", reason: "lifted" });
     await expect(callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 10_081 })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT
+  // only kept `heldUntil` in `chat show` while the chat was live, then said it was released when nothing was held.
+  it("ends when the chat's transport is chosen meanwhile, and leaves that choice as it is", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
+    expect(emitted.at(-1)).toMatchObject({ type: "chat.released", chat: "chat-one", reason: "lifted" });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(node.setDeliveryMode).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ deliveryMode: "dht" });
+
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 });
+    await callApi(ctx, "chat.transport", { chat: "Bob", transport: "auto" });
+    expect(await callApi(ctx, "chat.get", { chat: "Bob" })).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
+    const released = emitted.length;
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(emitted.length, "no second release when the time is up").toBe(released);
+    expect(node.setDeliveryMode).not.toHaveBeenCalled();
   });
 
   it("ends by itself when the time is up, also after a restart", async () => {
