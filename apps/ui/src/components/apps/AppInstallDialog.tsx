@@ -294,6 +294,14 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   // Which button started the work in progress: that one shows it is going.
   const [pending, setPending] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  // The question takes the place of the button that asked it, and the focus went with that button: it goes to the
+  // question's Cancel (Enter again does not uninstall), and Cancel gives it back to Uninstall, never to the page.
+  const keep = useRef<HTMLButtonElement>(null), uninstall = useRef<HTMLButtonElement>(null), asked = useRef(false);
+  useEffect(() => {
+    if (!removing && !asked.current) return;
+    asked.current = true;
+    (removing ? keep : uninstall).current?.focus({ preventScroll: true });
+  }, [removing]);
   const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
     focusBack();
@@ -309,7 +317,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
+          <Button ref={keep} onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
           <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })), false, "export")}>{t("apps.app.export")}</Button>
           <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); await forgetLinkedFiles(app.ref); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
         </div>
@@ -336,7 +344,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
+        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
