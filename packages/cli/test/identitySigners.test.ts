@@ -98,4 +98,20 @@ describe("identity signers on Node", () => {
     expect(JSON.stringify(hub.replay(0))).not.toContain("s3cret");
     expect(hub.replay(0).map((e) => e.type)).toEqual(["daemon.started"]);
   });
+
+  // Nobody approved a Pubky sign-in: it ended as `engine`, "The operation was aborted due to timeout", after 300 s,
+  // naming neither the approval it waited for nor --timeout. A local double, not the public relay.
+  it("an approval that does not come in time is a timeout naming it and --timeout", async () => {
+    const { ctx, node } = fake();
+    const signer = IDENTITY_PROVIDERS.find((p) => p.id === "pubky")!.signers.find((s) => s.kind === "in-app") as InAppSigner<unknown>;
+    const run = vi.spyOn(signer, "run").mockImplementation((sctx) => new Promise((_, reject) => {
+      sctx.signal!.addEventListener("abort", () => reject(sctx.signal!.reason));
+    }));
+    try {
+      await expect(callApi(ctx, "identity.add", { provider: "pubky", timeout: 5 })).rejects.toMatchObject({
+        code: "timeout", message: "Timed out after 5 s waiting for Pubky Ring or Pubky Passport to approve the Pubky proof: --timeout <seconds> waits longer",
+      });
+    } finally { run.mockRestore(); }
+    expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  }, 15_000);
 });
