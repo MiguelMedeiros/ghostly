@@ -2,6 +2,7 @@ import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
+import { useChatsFound } from "../hooks/useChatsFound";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { ChatFolderHeader, OtherChatsHeader } from "./ChatFolderHeader";
 import { OTHER_CHATS_ID, createFolder, folderChatsId, inOrder, movePinnedBeside, setChatFolder, setFolderFolded, setOthersFolded, setSectionOrder, useChatFolders } from "../lib/chatFolders";
@@ -244,21 +245,16 @@ export function Sidebar() {
   // The identity a contact is shown as (identities/contactFace.ts): its name in the row, and found by search.
   const faceOf = useContactFaces();
   const query = foldText(search);
-  // A search reads every chat's messages: their whole histories, where the engine sent this page only their newest page
-  // (the extension's pages), are asked for while it lasts.
-  const searching = !!search;
-  useEffect(() => {
-    if (!searching) return;
-    const releases = (engine.state?.links ?? []).map((link) => engine.keepWhole(link.id));
-    return () => releases.forEach((release) => release());
-  }, [searching]);
+  // A search reads every chat's messages: the ones this page holds here, and the engine the older ones of a chat it sent
+  // this page only the newest page of (the extension's pages).
+  const foundInEngine = useChatsFound(query);
   const filtered = sessions.filter((s) => {
     if (!search) return true;
     if (found(s.label, query)) return true;
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return messagesFound(s.messages, query);
+    return messagesFound(s.messages, query) || foundInEngine.has(s.id);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
