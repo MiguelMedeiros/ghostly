@@ -6,7 +6,7 @@ export const commands: Record<string, Command> = {
   "identity cancel": { method: "identity.cancel", usage: "identity cancel <draft>", summary: "Drop a proof not finished", args: ["draft"], params: (_, a) => ({ draft: a.draft }) },
   "identity complete": {
     method: "identity.complete", usage: "identity complete <draft> [--evidence-file f | --stdin]", summary: "Finish a proof: what the tool printed, or nothing for a published record",
-    args: ["draft"], options: { "evidence-file": { type: "string", description: "The tool's output, from this file" }, stdin: { type: "boolean", description: "The tool's output, from stdin" } },
+    args: ["draft"], options: { "evidence-file": { type: "string", description: "The tool's output, from this file" }, stdin: { type: "boolean", description: "The tool's output, from stdin (piped to it without the flag is read too)" } },
     params: ({ options }, a) => {
       if (options["evidence-file"] !== undefined && options.stdin === true) throw new CliError("usage", "--evidence-file or --stdin, not both");
       return { draft: a.draft, evidenceFile: here(options["evidence-file"]), stdin: options.stdin === true };

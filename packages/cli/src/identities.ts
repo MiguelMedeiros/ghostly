@@ -147,8 +147,12 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     const statement: IdentityStatement = identityStatement(draft.binding);
     let evidence: unknown;
     try {
-      if (signer.kind === "external-tool") evidence = await signer.parse(str(params, "evidence", true), statement);
-      else if (signer.kind === "publish") evidence = await signer.evidence(statement);
+      if (signer.kind === "external-tool") {
+        // Said where the CLI takes it, not as the API's `evidence`; `details.needs`: the CLI reads a pipe then.
+        const output = str(params, "evidence");
+        if (!output?.trim()) throw new CliError("usage", `Missing what ${signer.label} printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${draft.draftId})`, { needs: "evidence" });
+        evidence = await signer.parse(output, statement);
+      } else if (signer.kind === "publish") evidence = await signer.evidence(statement);
       else throw new CliError("bad_request", "This draft needs no completion");
     } catch (error) {
       if (error instanceof CliError) throw error;
