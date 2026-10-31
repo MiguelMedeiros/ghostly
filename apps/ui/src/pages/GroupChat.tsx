@@ -18,7 +18,8 @@ import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
 import type { MemberFaceOf } from "../components/chat/SenderAvatar";
-import { routineStacks } from "../lib/statusCards";
+import { panelCard, routineStacks } from "../lib/statusCards";
+import { rowPicker } from "../lib/chatRows";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
 import { keepSentOriginal } from "../lib/sentOriginals";
 import type { SentTranslation } from "../components/MessageInput";
@@ -410,6 +411,9 @@ export function GroupChat() {
   const goneHere = () => { forgetGroupLocal(groupId); stopPlayingFrom(groupPath(groupId), true); };
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
+  // The Tasks button's rows: those with a task or a routine, found in the rows that changed (see Chat.tsx).
+  const [pickCardRow] = useState(() => rowPicker<StoredMessage, StoredMessage>(m => panelCard(m.card) ? m : undefined));
+  const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
   // Who wrote each message, over the whole history: worked out again only when what it reads changes (`authorsMemo`).
   const [authorsFor] = useState(authorsMemo);
@@ -658,7 +662,7 @@ export function GroupChat() {
         <div className="flex items-center gap-1">
           {group.status === "active" && <GroupConnection group={group} />}
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
-          <TasksButton rows={messages} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
+          <TasksButton rows={cardRows} nameOf={author => nameOf("peer", author) ?? `…${author.slice(-6)}`} faceOf={memberFace} />
           {canShare && <button ref={shareRef} onClick={() => void openShare()} data-testid="group-share" title={t("group.chat.shareHint")} aria-label={t("group.chat.shareLink")}
             className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-accent/15 px-3 text-sm font-semibold text-accent hover:bg-accent/25 max-md:min-h-11 max-md:px-2.5">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
