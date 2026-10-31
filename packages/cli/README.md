@@ -223,7 +223,8 @@ chat's own "DHT only" choice (WISP 400: either side choosing it keeps both off t
 time is up. Meanwhile text still goes over the DHT (up to 256 bytes a message; longer ones wait), files, calls and
 typing wait, and the contact's app shows the chat as DHT only. `chat connect`, or `--hold 0`, ends it early. The
 hold is kept in the profile folder: a daemon that restarts takes it back when its time is up, and a DHT only the chat
-had chosen itself (`chat transport dht`) is never undone by it. `chat show` answers `heldUntil` (a time in ms, or
+had chosen itself (`chat transport dht`) is never undone by it. A `chat transport` chosen during a hold ends the
+hold (`lifted`) and stays as chosen. `chat show` answers `heldUntil` (a time in ms, or
 null; `hold` there is the store-and-forward state, something else), and the stream says `chat.held` and
 `chat.released` (`reason`: expired, connect or lifted).
 

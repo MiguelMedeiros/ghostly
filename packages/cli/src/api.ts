@@ -489,6 +489,8 @@ const METHODS: Record<string, Method> = {
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
+    // A choice made during a hold (`chat disconnect --hold`) ends it: its time running out takes nothing back.
+    await releaseHold(ctx, link.id, "lifted", true);
     return chatDetailsJson(findChat(state(ctx).links, link.id));
   },
   /** Reconnects now; a chat held off its direct link (`chat disconnect --hold`) leaves the hold first. */
