@@ -202,6 +202,56 @@ describe("pages follow a switch made in another tab", () => {
   });
 });
 
+describe("pages follow a peer replaced from another tab", () => {
+  async function follow() {
+    const { followEngineRestart, ENGINE_RESTART_KEY } = await world.load("page", () => import("../src/profile.ts"));
+    const onRestart = vi.fn();
+    const stop = followEngineRestart(onRestart);
+    const changed = (key: string | null) =>
+      world.page.dispatchEvent(Object.assign(new Event("storage"), { key, newValue: key === null ? null : world.storage.get(key) ?? null }));
+    return { onRestart, stop, changed, key: ENGINE_RESTART_KEY };
+  }
+
+  it("marks every restart of the peer, each with a new value, once the new one runs", async () => {
+    await ensure();
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    const { ENGINE_RESTART_KEY } = await world.load("page", () => import("../src/profile.ts"));
+    expect(world.storage.has(ENGINE_RESTART_KEY)).toBe(false);
+    await extensionHost.restartEngine!();
+    const first = world.storage.get(ENGINE_RESTART_KEY);
+    expect(first).toBeTruthy();
+    await extensionHost.restartEngine!();
+    expect(world.storage.get(ENGINE_RESTART_KEY)).not.toBe(first);
+    expect(log()).toEqual(["start ghostly", "stop ghostly", "start ghostly", "stop ghostly", "start ghostly"]);
+  });
+
+  it("leaves no mark when the peer did not start again", async () => {
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    const { ENGINE_RESTART_KEY } = await world.load("page", () => import("../src/profile.ts"));
+    world.chrome.runtime.sendMessage = async () => ({ ok: false, error: "no peer" });
+    await expect(extensionHost.restartEngine!()).rejects.toThrow("no peer");
+    expect(world.storage.has(ENGINE_RESTART_KEY)).toBe(false);
+  });
+
+  it("starts again when another page marks a restart, and not for other keys", async () => {
+    const { onRestart, changed, key } = await follow();
+    changed("ghostly_app_settings");
+    changed("ghostly_profiles");
+    expect(onRestart).not.toHaveBeenCalled();
+    world.storage.set(key, "1-a");
+    changed(key);
+    expect(onRestart).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops listening when asked", async () => {
+    const { onRestart, stop, changed, key } = await follow();
+    stop();
+    world.storage.set(key, "1-a");
+    changed(key);
+    expect(onRestart).not.toHaveBeenCalled();
+  });
+});
+
 describe("a page of the profile before a switch", () => {
   it("does not reach the peer of the profile after it, and starts again instead", async () => {
     const reload = vi.fn();

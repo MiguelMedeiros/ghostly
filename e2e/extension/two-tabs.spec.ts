@@ -25,3 +25,27 @@ test("two tabs of the extension on one chat both show what comes in and what eit
   await say(ext, "from the first tab");
   await expect(chat(second).getByText("from the first tab")).toHaveCount(1, { timeout: 30_000 });
 });
+
+/**
+ * Clear all data in one tab replaces the peer the tabs share. The tab that asked starts over; the other one used to
+ * keep the deleted chat open on the new peer, and a text sent there waited forever. It starts over too now.
+ */
+test("clear all data in one tab of the extension starts the other tab over too", { tag: ["@client:extension", "@client:web", "@feature:extension.engine", "@feature:app.clear-data"] }, async ({ extensionPeer, webPeer }) => {
+  test.slow();
+  const [ext, web] = await Promise.all([extensionPeer("two-tabs-clear"), webPeer("two-tabs-clear-contact")]);
+  await pair(web, ext);
+  const second = { ...ext, page: await ext.context.newPage() };
+  await second.page.goto(ext.page.url());
+  await expect(chat(second)).toBeVisible({ timeout: 30_000 });
+
+  await ext.page.goto(ext.page.url().replace(/#.*$/, "#/settings"));
+  await ext.page.getByTestId("clear-all-data").click();
+  await ext.page.getByTestId("clear-all-data-confirm").click();
+  await expect(ext.page.getByTitle("New Chat")).toBeVisible({ timeout: 60_000 });
+
+  // The second tab no longer shows the chat that is gone, nor lets anyone write in it.
+  await expect(chat(second)).toBeHidden({ timeout: 30_000 });
+  await expect(second.page.getByPlaceholder("Message…")).toBeHidden();
+  await second.page.goto(second.page.url().replace(/#.*$/, "#/"));
+  await expect(second.page.getByText("It's quiet here...")).toBeVisible({ timeout: 30_000 });
+});
