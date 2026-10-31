@@ -55,6 +55,8 @@ export interface Resender {
 
 /** How long one turn of an outbox may hold the next one back: a send that never returns must not stop the chat. */
 const TURN_MS = 30_000;
+/** The most rows a new message's look reads one by one (`Outbox.look`). */
+const KNOWN_ROWS = 16;
 
 /**
  * A text of mine, not handed to store-and-forward, and still to go: queued, or waiting for the chat to carry it. (A
@@ -208,13 +210,31 @@ export class Outbox {
   }
 
   /**
-   * Nothing written before a new message can still wait: nothing here is queued, waiting or awaiting a receipt, no
-   * other send is on its way, and no row stored by someone else since the last look at the chat that found nothing
-   * this outbox did not know of. Each text sent read and sorted the chat's whole history (220 ms at 10,000 messages
-   * on the CLI's store) to find what this says.
+   * What was written before a new message and has not gone is what this outbox holds, queued, waiting or awaiting a
+   * receipt: no other send is on its way, and no row stored by someone else since the last look at the chat that found
+   * nothing this outbox did not know of.
+   */
+  private get known(): boolean {
+    return this.transmits === 1 && !this.writes && this.seen === this.stamp;
+  }
+
+  /**
+   * Nothing written before a new message can still wait. Each text sent read and sorted the chat's whole history (220 ms
+   * at 10,000 messages on the CLI's store) to find what this says.
    */
   private get alone(): boolean {
-    return !this.waiting.size && !this.receipts.size && this.transmits === 1 && !this.writes && this.seen === this.stamp;
+    return this.known && !this.waiting.size && !this.receipts.size;
+  }
+
+  /**
+   * The rows a new message's look needs, itself among them: those this outbox holds, by id, where it knows them all.
+   * A text sent before the last one's receipt came, or while one waits for an away contact, read the chat's whole
+   * history on the page's thread (20,000 rows per send at 20,000 messages). Past `KNOWN_ROWS`, the history costs less.
+   */
+  private async look(id: string): Promise<StoredMessage[]> {
+    if (!this.store.get || !this.known || this.waiting.size + this.receipts.size > KNOWN_ROWS) return this.store.read();
+    const rows = await Promise.all([...new Set([id, ...this.waiting.keys(), ...this.receipts.keys()])].map(known => this.store.get!(known)));
+    return rows.filter((row): row is StoredMessage => !!row);
   }
 
   /** A row of mine still to go that this outbox holds nothing of: only a look at the chat finds it. */
@@ -230,7 +250,7 @@ export class Outbox {
     // A look that began with no write of someone else's on its way, and found nothing of mine this outbox does not
     // know of: until the next such write, it says so for every send that comes alone.
     const at = this.writes ? undefined : this.stamp;
-    const messages = await this.store.read(), message = messages.find(m => m.id === id);
+    const messages = await this.look(id), message = messages.find(m => m.id === id);
     if (at !== undefined && !messages.some(m => this.unknown(m, id))) this.seen = at;
     // Nothing before it waits: it goes as it was read, with no second look at the store.
     const before = message?.delivery === "sending" ? this.before(messages, message) : [];
