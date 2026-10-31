@@ -14,8 +14,8 @@ import { fileURLToPath } from "node:url";
 
 const RELEASE = /^refs\/tags\/v(\d+)\.(\d+)\.(\d+)(\^\{\})?$/;
 
-/** The newest vX.Y.Z in `git ls-remote --tags` output whose commit is not `head`, or null. */
-export function newestRelease(lsRemote, head) {
+/** The vX.Y.Z tags in `git ls-remote --tags` output whose commit is not `head`, newest first. */
+export function releasesNewestFirst(lsRemote, head) {
   // An annotated tag has two lines; its `^{}` one, the commit it points at, is the one to compare.
   const releases = new Map();
   for (const line of lsRemote.split("\n")) {
@@ -27,12 +27,22 @@ export function newestRelease(lsRemote, head) {
   }
   const candidates = [...releases.values()].filter((release) => release.commit !== head);
   candidates.sort((a, b) => b.version.map((n, i) => n - a.version[i]).find((d) => d !== 0) ?? 0);
-  return candidates[0]?.tag ?? null;
+  return candidates.map((release) => release.tag);
+}
+
+/** The newest vX.Y.Z in `git ls-remote --tags` output whose commit is not `head`, or null. */
+export function newestRelease(lsRemote, head) {
+  return releasesNewestFirst(lsRemote, head)[0] ?? null;
+}
+
+/** The release tags on origin, newest first, leaving out the commit checked out here. */
+export function remoteReleases() {
+  const git = (...args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 26 });
+  return releasesNewestFirst(git("ls-remote", "--tags", "origin", "v*"), git("rev-parse", "HEAD").trim());
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const git = (...args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 26 });
-  const tag = newestRelease(git("ls-remote", "--tags", "origin", "v*"), git("rev-parse", "HEAD").trim());
+  const [tag] = remoteReleases();
   if (!tag) throw new Error("origin has no release tag");
   console.log(tag);
 }
