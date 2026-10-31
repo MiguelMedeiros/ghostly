@@ -116,7 +116,7 @@ import { WorkingLine } from "../components/chat/WorkingMark";
 import { useWorkingOf } from "../hooks/useWorking";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
-import { panelCard, routineStacks } from "../lib/statusCards";
+import { panelCard, routineStacksReader } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
@@ -512,8 +512,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [readReplies] = useState(() => replyIndexer());
   const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
-  const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
-  const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
+  // Both read only the questions with buttons and the replies, found in the rows that changed.
+  const [pickButtonRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
+  const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
+  const buttonsOf = useMemo(() => buttonsViews(buttonRows, m => m.ref), [buttonRows]);
+  const presses = useMemo(() => compactPresses(buttonRows, m => m.ref), [buttonRows]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
   const [showTranslate, setShowTranslate] = useState(false);
@@ -585,7 +588,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards). Found over the whole timeline, so a
   // run is the same whichever of its rows are in the page.
-  const stacks = useMemo(() => routineStacks(timeline, r => r.kind === "message" ? r.message : undefined), [timeline]);
+  const [readStacks] = useState(() => routineStacksReader<TimelineRow<ChatMessage>, ChatMessage>(r => r.kind === "message" ? r.message : undefined));
+  const stacks = useMemo(() => readStacks(timeline), [readStacks, timeline]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
   // A long chat has a window of its rows in the page, never the whole history (useRowWindow): its last ones, or those
   // around the message it was left on, and more as the view goes up or down.
