@@ -1202,8 +1202,9 @@ export class GroupSession {
   /**
    * A frame from an authenticated member over the pairwise edge. Anything malformed or unauthorized is dropped.
    * Resolves to what it took that a hub passes on to its other edges (WISP 902 · Group Mesh § Hubs): each message,
-   * edit, commit (without the secret sealed for me), metadata statement and signed leave, the first time only, so a
-   * flood among hubs stops at every member that already has it. Only what its author still in the roster signed.
+   * edit, commit (without the secret sealed for me: `handOnTo` seals it for each member), metadata statement and signed
+   * leave, the first time only, so a flood among hubs stops at every member that already has it; a commit once more when
+   * its secret comes after it (`handOnAgain`). Only what its author still in the roster signed.
    */
   handle(from: string, raw: unknown): Promise<GroupEdgeFrame[]> {
     return this.serialize(async () => {
@@ -1230,6 +1231,28 @@ export class GroupSession {
 
   /** Taken for the first time: a hub passes it on (see `handle`). */
   private took(frame: GroupEdgeFrame): void { this.passOn?.push(frame); }
+
+  /**
+   * The secret of my top epoch came after its commit, which I handed on without it: the commit goes on once more, now
+   * with it (`handOnTo`), to the members who took it from me and asked me in vain. Once per epoch, as a secret is taken once.
+   */
+  private handOnAgain(epoch: number): void {
+    if (epoch !== this.epoch || this.state.status !== "active") return;
+    const commit = this.state.chain[epoch], left = this.state.leftMarks?.[epoch];
+    this.took({ t: "group-commit", g: this.id, commit, ...(left ? { left } : {}) });
+  }
+
+  /**
+   * A frame I took, as a hub passes it on to `to` (WISP 902 · Group Mesh § Hubs): a commit with its epoch's secret sealed
+   * for `to` when `to` is in that roster and I hold the secret, as a sync answer has it, so a member need not ask for it;
+   * anything else as it is.
+   */
+  handOnTo(to: string, frame: GroupEdgeFrame): GroupEdgeFrame {
+    if (frame.t !== "group-commit" || !isZ32Key(to)) return frame;
+    const e = frame.commit.e, commit = this.state.chain[e], secret = this.secret(e);
+    if (!secret || !commit || commitHash(commit) !== commitHash(frame.commit) || !rosterHas(commit.m, to)) return frame;
+    return { ...frame, secret: sealSecret(to, secret, secretAad(this.id, e, to)) };
+  }
 
   /**
    * My leave, signed, for hubs to carry to the admin (see `GroupByeFrame`). Made while I am still a member: `leave`
@@ -1561,9 +1584,16 @@ export class GroupSession {
       const result = verifyCommit(raw, this.state.chain[e - 1] ?? null, this.id);
       // Evidence of a fork must come from whoever signed my commit for that epoch; at epoch 0 anyone can sign a genesis.
       if ("error" in result || result.commit.by !== known.by) return;
-      if (commitHash(result.commit) !== commitHash(known)) await this.fork(`Member ${from.slice(0, 8)} holds a different membership history for epoch ${e}`);
+      if (commitHash(result.commit) !== commitHash(known)) { await this.fork(`Member ${from.slice(0, 8)} holds a different membership history for epoch ${e}`); return; }
       // Heard first from an app that leaves the mark out: taken now.
-      else if (this.takeLeftMark(known, frame.left)) { this.unprune(); await this.persist(); }
+      const marked = this.takeLeftMark(known, frame.left);
+      if (marked) this.unprune();
+      // Heard first from a hub without the secret: this copy (the admin's own, or a hub's that holds it) may carry mine.
+      const sealed = this.takeSecret(e, frame.secret);
+      if (marked || sealed) await this.persist();
+      if (sealed) { this.handOnAgain(e); this.hooks.changed(); await this.replayWaiting(); }
+      // Still without it: whoever handed this copy on may hold it, when the one that handed the first did not.
+      else if (e === this.epoch && this.state.status === "active" && !this.state.secrets[e]) this.ask(from);
       return;
     }
     if (e > this.epoch + 1) {
@@ -1582,7 +1612,8 @@ export class GroupSession {
     const mark = this.takeLeftMark(result.commit, frame.left) ? frame.left : undefined;
     await this.apply(result.commit, frame.secret);
     this.took({ t: "group-commit", g: this.id, commit: result.commit, ...(mark ? { left: mark } : {}) });
-    // Handed on by a hub, the commit carries no secret sealed for me: whoever handed it on holds it, and seals it to me.
+    // Handed on by a hub that did not hold the secret, the commit carries none sealed for me: ask it, as it asks in turn,
+    // and take it from the next copy that has it, or ask whoever hands on the next (above).
     if (this.state.status === "active" && !this.state.secrets[this.epoch]) this.ask(from);
     const next = this.pendingCommits.get(this.epoch + 1);
     if (next) { this.pendingCommits.delete(this.epoch + 1); await this.receiveCommit(from, next); }
@@ -1648,7 +1679,7 @@ export class GroupSession {
     let taken = false;
     for (const entry of frame.secrets) {
       if (!entry || typeof entry !== "object" || !Number.isSafeInteger(entry.e) || entry.e < 0 || entry.e > this.epoch) continue;
-      taken = this.takeSecret(entry.e, entry.s) || taken;
+      if (this.takeSecret(entry.e, entry.s)) { taken = true; this.handOnAgain(entry.e); }
     }
     if (!taken) return;
     await this.persist();
