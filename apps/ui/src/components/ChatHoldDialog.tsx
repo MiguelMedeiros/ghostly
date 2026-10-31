@@ -44,7 +44,7 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
   const days = Math.round((hold?.ttlMs ?? 0) / 86_400_000);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in" {...backdrop}>
-      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-hold-title" data-testid="chat-hold" className="focus:outline-none w-full max-w-md bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
+      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-hold-title" data-testid="chat-hold" className="focus:outline-none w-full max-w-md max-h-full overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4">
         <div>
           <h2 id="chat-hold-title" className="text-lg font-medium text-text-primary">{t("chat.hold.title", { name })}</h2>
           <p className="text-xs text-text-muted mt-1">{t("chat.hold.intro", { name, days })}</p>
