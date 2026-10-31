@@ -22,12 +22,14 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
   const generation = useRef(0);
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** The camera was asked for and has not answered, which a browser's question can leave so for good: only Scan waits. */
+  const [asking, setAsking] = useState(false);
   const [error, setError] = useState("");
   const stop = () => {
     generation.current++;
     stream.current?.getTracks().forEach((track) => track.stop());
     stream.current = null;
-    setScanning(false); setBusy(false);
+    setScanning(false); setBusy(false); setAsking(false);
   };
   // The camera never outlives the card's Send.
   useEffect(() => () => {
@@ -45,14 +47,14 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
 
   // `quiet`: nobody pressed Scan, so a camera that is missing or not allowed is not an error to say.
   const scan = async (quiet = false) => {
-    stop(); setError(""); setBusy(true);
+    stop(); setError(""); setAsking(true);
     const current = generation.current;
     const decode = qrFrameReader();
     try {
       const camera = await qrCamera();
       if (current !== generation.current) { camera.getTracks().forEach((track) => track.stop()); return; }
-      // Running, it no longer holds the other ways back: Paste or a picture stops it and reads theirs.
-      stream.current = camera; setScanning(true); setBusy(false);
+      // It never holds the other ways back: Paste or a picture stops it, or lets go of a camera still to come, and reads theirs.
+      stream.current = camera; setScanning(true); setAsking(false);
       const element = video.current!;
       element.srcObject = camera; await element.play();
       if (current !== generation.current) return;
@@ -136,7 +138,7 @@ export function SendScan({ onText, disabled = false, scanOnOpen = false, childre
         {scanning ? <button ref={stopButton} type="button" onClick={stop} className={`${tile} border border-border text-text-secondary`} data-testid="wallet-send-scan-stop">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M6 6l12 12M18 6L6 18"/></svg>
           {t("common.cancel")}
-        </button> : <button ref={scanButton} type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void scan(); }} className={`${tile} bg-accent text-on-accent`} data-testid="wallet-send-camera">
+        </button> : <button ref={scanButton} type="button" aria-disabled={off || asking || undefined} onClick={() => { if (!off && !asking) void scan(); }} className={`${tile} bg-accent text-on-accent`} data-testid="wallet-send-camera">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
           {t("wallet.send.scan")}
         </button>}
