@@ -14,12 +14,15 @@ object SharedName {
 
   /**
    * A name over NAME_MAX loses the end of its stem, a whole character at a time, until it fits; its extension stays,
-   * so "文…文.pdf" still opens as a PDF (the CLI's `fitName`, packages/cli/src/files.ts).
+   * so "文…文.pdf" still opens as a PDF (the CLI's `fitName`, packages/cli/src/files.ts). Every character takes at
+   * least one byte, so the stem is first cut to NAME_BYTES characters: the loop below then runs at most that many
+   * times, however long the name the sharing app gave.
    */
   private fun fit(name: String): String {
     if (fits(name)) return name
     val extension = EXTENSION.find(name)?.value ?: ""
     var stem = name.dropLast(extension.length)
+    if (stem.codePointCount(0, stem.length) > NAME_BYTES) stem = stem.substring(0, stem.offsetByCodePoints(0, NAME_BYTES))
     while (stem.isNotEmpty() && !fits(stem.trimEnd() + extension)) stem = stem.substring(0, stem.offsetByCodePoints(stem.length, -1))
     return stem.trimEnd().ifEmpty { "file" } + extension
   }
