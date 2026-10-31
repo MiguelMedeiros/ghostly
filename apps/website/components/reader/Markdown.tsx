@@ -52,9 +52,9 @@ function Diagram({ source }: { source: string }) {
       )}
       <details open={!edges.length}>
         <summary>Original Mermaid diagram source</summary>
-        <pre>
+        <ScrollRegion as="pre">
           <code>{source}</code>
-        </pre>
+        </ScrollRegion>
       </details>
     </figure>
   );
