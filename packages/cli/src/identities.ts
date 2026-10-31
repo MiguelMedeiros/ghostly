@@ -100,7 +100,8 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       const values = (params.fields ?? {}) as Record<string, string>;
       if (typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) throw new CliError("bad_request", "fields must be an object of strings");
       for (const field of signer.fields ?? []) if (!field.optional && !values[field.name]) throw new CliError("bad_request", `${signer.label} needs ${field.name} (${field.label})`);
-      const signal = AbortSignal.timeout(num(params, "timeout", 300, { min: 5, max: 3600 }) * 1000);
+      const seconds = num(params, "timeout", 300, { min: 5, max: 3600 });
+      const signal = AbortSignal.timeout(seconds * 1000);
       const proof = await signer.run({
         values, signal,
         // A link or code to approve with holds the request's secret (contract.ts): to the listeners live, never the journal.
@@ -117,6 +118,10 @@ export const IDENTITY_METHODS: Record<string, Method> = {
           try { await node(ctx).cancelIdentityProof({ draftId }); } catch { /* already gone */ }
           throw error;
         }
+      }).catch((error: unknown) => {
+        // The signer gives up with the signal's own words ("The operation was aborted due to timeout"), an engine failure to a bot.
+        if (!signal.aborted || error instanceof CliError) throw error;
+        throw new CliError("timeout", `Timed out after ${seconds} s waiting for ${signer.label} to approve the ${p.label} proof: --timeout <seconds> waits longer`);
       });
       return { done: true, proof: proofJson(proof) };
     }
