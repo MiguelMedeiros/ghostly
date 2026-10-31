@@ -267,7 +267,12 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const entry = open.get(key);
     if (!entry) throw new CliError("not_found", "That service is not open here");
     open.delete(key);
-    await new Promise<void>((resolve) => entry.server.close(() => resolve()));
+    // Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
+    // Each connection's end stops the contact's answer too (`proxy`).
+    await new Promise<void>((resolve) => {
+      entry.server.close(() => resolve());
+      entry.server.closeAllConnections();
+    });
     return { closed: key };
   },
 };

@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
 import { request as httpRequest } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostlyHttpError, LIMITS, type ClientRequest, type ClientResponse } from "@ghostly/core";
 import { keepServing } from "../src/host";
-import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, openServiceServer, ownCookies, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
+import type { ApiContext } from "../src/api";
+import { hostOnlyCookie, OPEN_COOKIE, OPENED_SERVICE_CSP, openServiceServer, ownCookies, SERVICE_METHODS, setCookieName, type OpenedService, type ServiceSend } from "../src/services";
 // covers: headless.services
 
 interface Reply { status: number; headers: Record<string, string | string[] | undefined>; body: string; aborted: boolean }
@@ -47,6 +48,38 @@ async function opened(send: ServiceSend): Promise<{ service: OpenedService; cook
   const set = String(first.headers["set-cookie"]);
   return { service, cookie: set.split(";")[0] };
 }
+
+/** `service close`: an answer still streaming (a page's EventSource) ends with it, and does not hold the command. */
+describe("closing an opened service", () => {
+  it("answers at once and ends what is still streaming, on the contact's side too", async () => {
+    let signal: AbortSignal | undefined;
+    const request = async (_peer: string, _service: string, asked: ClientRequest): Promise<ClientResponse> => {
+      signal = asked.signal;
+      const body = (async function* () {
+        while (!asked.signal?.aborted) {
+          yield new TextEncoder().encode("data: tick\n\n");
+          await new Promise((r) => setTimeout(r, 5));
+        }
+      })();
+      return { status: 200, headers: [["content-type", "text/event-stream"]], body, bytes: async () => { throw new Error("gathered, not streamed"); } };
+    };
+    const link = { id: "closechat", peerPubKeyZ32: "closepeer", peerServices: [{ id: "app", name: "App" }] };
+    const ctx = { mode: "daemon", runtime: { server: { node: { getState: () => ({ links: [link], groups: [] }), request } } } } as unknown as ApiContext;
+    const params = { chat: link.id, service: "app" };
+    const { url } = (await SERVICE_METHODS["service.open"](ctx, params)) as { url: string };
+    const parsed = new URL(url), service = { host: parsed.host } as OpenedService;
+    const cookie = String((await get(service, parsed.pathname)).headers["set-cookie"]).split(";")[0];
+    const stream = get(service, "/events", { cookie });
+    await vi.waitFor(() => expect(signal).toBeDefined());
+
+    const closed = await Promise.race([SERVICE_METHODS["service.close"](ctx, params), new Promise((r) => setTimeout(() => r("still waiting"), 3000))]);
+
+    expect(closed).toEqual({ closed: "closepeer/app" });
+    expect((await stream).aborted).toBe(true);
+    await vi.waitFor(() => expect(signal?.aborted).toBe(true));
+    await expect(get(service, "/", { cookie })).rejects.toThrow(/ECONNREFUSED/);
+  });
+});
 
 /** `service open`: the contact's app under a host name of its own, for the browser that was given the link. */
 describe("an opened service's host and link", () => {
