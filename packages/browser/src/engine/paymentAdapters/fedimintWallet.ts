@@ -388,13 +388,16 @@ export class FedimintWallet {
     return null;
   }
 
-  /** Redeems notes into the federation that issued them. `done` once the ecash is ours; `failed` when they were spent. */
-  async redeemNotes(federationId: string, notes: string, ghostly: string, waitMs = 60_000): Promise<{ operationId: string; state: RedeemState | undefined }> {
+  /**
+   * Redeems notes into the federation that issued them. `done` once the ecash is ours; `failed` when they were spent.
+   * `error`: the redeem was asked for, but the client could not say how it stands (its operation is kept, to ask again).
+   */
+  async redeemNotes(federationId: string, notes: string, ghostly: string, waitMs = 60_000): Promise<{ operationId: string; state: RedeemState | undefined; error?: string }> {
     const client = this.client(federationId);
     const operationId = await client.redeem(notes.trim(), ghostly);
-    const state = await client.redeemState(operationId, waitMs);
+    const { state, error } = await client.redeemState(operationId, waitMs).then((state) => ({ state, error: undefined }), (e: unknown) => ({ state: undefined, error: e instanceof Error ? e.message : String(e) }));
     void this.refresh();
-    return { operationId, state };
+    return { operationId, state, error };
   }
   async redeemState(federationId: string, operationId: string, waitMs: number) { return this.client(federationId).redeemState(operationId, waitMs); }
 
@@ -402,7 +405,8 @@ export class FedimintWallet {
   async receiveNotes(notes: string): Promise<{ federation: string; amount: number }> {
     const found = await this.inspectNotes(notes);
     if (!found) throw new Error(this.clients.size ? "These notes are not from a federation you joined in this wallet" : "Join the federation these notes are from first");
-    const { state } = await this.redeemNotes(found.federation, notes, `wallet-${crypto.randomUUID()}`);
+    const { state, error } = await this.redeemNotes(found.federation, notes, `wallet-${crypto.randomUUID()}`);
+    if (error !== undefined) throw engineError("fedimintRedeemUnheard");
     if (state === "failed") throw new Error("These notes were already redeemed by someone");
     if (state !== "done") throw new Error("The federation is still redeeming these notes: they will show in the balance");
     return { federation: found.federation, amount: sats(found.amountMsats) };

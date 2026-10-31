@@ -81,6 +81,8 @@
     "fedimintNotInvite": "Ce n’est pas un code d’invitation Fedimint : il commence par fed1",
     "fedimintRealOnTestnet": "Cette fédération détient du vrai bitcoin",
     "fedimintRealOnTestnetNext": "Ajoutez-la à un portefeuille Fedimint Mainnet.",
+    "fedimintRedeemUnheard": "La fédération n’a pas répondu au sujet de ces notes",
+    "fedimintRedeemUnheardNext": "Si elles n’apparaissent pas bientôt dans votre solde, collez-les à nouveau.",
     "fedimintTestOnMainnet": "Cette fédération est sur {{chain}}, un réseau de test",
     "fedimintTestOnMainnetNext": "Ajoutez-la à un portefeuille Fedimint Testnet.",
     "feeAboveLimit": "Les frais dépassent votre limite",
