@@ -168,6 +168,7 @@ export function ciState(runs) {
  * unfilled. tools/scripts/test/merge-train.test.ts holds this list to ci.yml.
  */
 export const PLANNED_JOBS = {
+  "Frontend lint and types": "lint",
   "Frontend tests (app)": "full",
   "Frontend tests (packages ": "packages",
   "CLI on Linux ARM64": "packages",

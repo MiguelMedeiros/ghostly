@@ -17,11 +17,11 @@ const greenForDocs = [
   ...["Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Website browser checks (${{ matrix.shard }}/4)", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
   ...["Changed paths", "Frontend lint and types", "Frontend tests (app)", "Frontend builds", "Tauri Backend (apps/desktop)", "Website"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 20 + i })),
 ];
-/** A push to dev whose tree a green run already tested (ci-changes.mjs's testedAs): only lint, types and Tauri Backend ran. */
+/** A push to dev whose tree a green run already tested (ci-changes.mjs's testedAs): only Tauri Backend ran. */
 const greenTested = [
   ...green,
-  ...["Frontend tests (app)", "Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Frontend builds", "Website", "Website browser checks (${{ matrix.shard }}/4)", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
-  ...["Changed paths", "Frontend lint and types", "Tauri Backend (apps/desktop)"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 30 + i })),
+  ...["Frontend lint and types", "Frontend tests (app)", "Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Frontend builds", "Website", "Website browser checks (${{ matrix.shard }}/4)", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
+  ...["Changed paths", "Tauri Backend (apps/desktop)"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 30 + i })),
 ];
 
 /** A fake repository: pull requests, labels, label events, comments, CI per commit, and the base's tip. */
@@ -2136,7 +2136,7 @@ describe("a green CI run planned for other files", () => {
     const yml = readFileSync(resolve(import.meta.dirname, "../../../.github/workflows/ci.yml"), "utf8");
     // Each job's name and condition: `  <id>:`, then `    name: ...` and, within its first lines, `    if: needs.changes.outputs.<gate> == 'true'`.
     const gated = [...yml.matchAll(/^ {2}[\w-]+:\n {4}name: (.+)\n(?: {4}.+\n){0,3}? {4}if: needs\.changes\.outputs\.(\w+) == 'true'$/gm)].map((m) => ({ name: m[1], gate: m[2] }));
-    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "packages", "packages", "rust", "website", "website_e2e"]);
+    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "rust", "website", "website_e2e"]);
     // The draft tier's job is skipped in every full run: it is no path gate.
     for (const { name, gate } of gated) expect([name, gateOf(name)]).toEqual([name, gate === "affected" ? undefined : gate]);
     expect(Object.keys(PLANNED_JOBS).filter((start) => !gated.some((j) => j.name.startsWith(start)))).toEqual([]);

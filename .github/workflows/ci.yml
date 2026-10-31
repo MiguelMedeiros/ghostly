@@ -57,8 +57,9 @@ jobs:
   # (dev, main) run everything. If the lookup fails, so does this job, and CI Success with it: nothing is skipped by
   # accident.
   # A push to dev whose tree a pull request into dev's green CI Success already tested (the merge train's batch head, or
-  # a pull request merged at a head that held dev's tip; ci-changes.mjs's testedAs) runs only lint and types and Tauri Backend,
-  # whose run on dev saves the Cargo cache pull requests restore. Any doubt runs everything.
+  # a pull request merged at a head that held dev's tip; ci-changes.mjs's testedAs) runs only Tauri Backend, whose run
+  # on dev saves the Cargo cache pull requests restore, and that only builds when the cache for its key is missing.
+  # Any doubt runs everything.
   # A merge queue entry plans from everything it would put on dev (its base against its head: every queued pull
   # request up to it) and is never a draft. If that diff cannot be read it runs everything instead of failing, which
   # would drop it and every pull request behind it from the queue.
@@ -70,6 +71,7 @@ jobs:
       pull-requests: read
       actions: read
     outputs:
+      lint: ${{ steps.plan.outputs.lint }}
       rust: ${{ steps.plan.outputs.rust }}
       website: ${{ steps.plan.outputs.website }}
       website_e2e: ${{ steps.plan.outputs.website_e2e }}
@@ -150,11 +152,13 @@ jobs:
   # Frontend (src, packages, extension) - React + Vite + TypeScript
   # ============================================
   # Jobs side by side instead of one in a row (6 minutes): lint and types, the app's unit tests, the packages' unit
-  # tests in shards, and the builds. Lint and types run on every pull request, drafts included; the others on every
-  # ready one (the app's tests read files from all over the repository, apps/website/ too). A draft runs
-  # affected-tests instead.
+  # tests in shards, and the builds. Lint and types run on every pull request, drafts included (not on a push to dev
+  # whose tree already passed: see `changes`); the others on every ready one (the app's tests read files from all over
+  # the repository, apps/website/ too). A draft runs affected-tests instead.
   frontend-checks:
     name: Frontend lint and types
+    needs: changes
+    if: needs.changes.outputs.lint == 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -508,11 +512,39 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Cargo cache key
+        id: cargo-key
+        run: echo "key=${{ runner.os }}-cargo-tauri-used-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+
+      # A push to dev whose tree already passed (see `changes`) runs this job only to save the Cargo cache below, and
+      # Cargo.lock rarely changes: when dev's cache for this key is there, nothing below runs (it took 3 to 4 minutes,
+      # to save nothing). The download is skipped: only whether the key exists. The system packages' install, started in
+      # the background above, is left to the runner, which stops it when the job ends.
+      - name: Is the Cargo cache saved already
+        id: cargo-saved
+        if: needs.changes.outputs.tested == 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ steps.cargo-key.outputs.key }}
+          lookup-only: true
+
+      - name: Nothing to save
+        if: steps.cargo-saved.outputs.cache-hit == 'true'
+        env:
+          KEY: ${{ steps.cargo-key.outputs.key }}
+        run: echo "::notice::This tree already passed CI Success, and dev's Cargo cache for $KEY is saved, so nothing is built"
+
       # Crates and what they compiled to. The repository's cache is full (10 GB), so only a push to dev saves one,
       # once per Cargo.lock and toolchain, with only what that build used (see the step before Save Cargo); a pull
       # request restores dev's.
       - name: Restore Cargo
         id: cargo-cache
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -522,17 +554,19 @@ jobs:
             target/
           # "used": saved by the step before Save Cargo. The first push to dev under this name starts from the last
           # "lines" cache and saves a trimmed one; the second restore key can go once that is done.
-          key: ${{ runner.os }}-cargo-tauri-used-${{ steps.rust.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ steps.cargo-key.outputs.key }}
           restore-keys: |
             ${{ runner.os }}-cargo-tauri-used-${{ steps.rust.outputs.cachekey }}-
             ${{ runner.os }}-cargo-tauri-lines-${{ steps.rust.outputs.cachekey }}-
 
       # Every file cargo reads from here on is newer than this (atime; the runner's disk is mounted relatime).
       - name: Mark the Cargo restore
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: touch "$RUNNER_TEMP/cargo-restored"
 
       # A hung apt fails here with its log, not after the job's 6 h: a merge-train batch waited 31 min on one.
       - name: Wait for the system dependencies
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: |
           pid=$(cat "$RUNNER_TEMP/apt.pid")
           deadline=$((SECONDS + 25 * 60))
@@ -551,7 +585,7 @@ jobs:
           dpkg -s $APT_PACKAGES > /dev/null
 
       - name: Save the system packages
-        if: steps.apt-cache.outputs.cache-hit != 'true'
+        if: steps.cargo-saved.outputs.cache-hit != 'true' && steps.apt-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/apt-debs
@@ -560,24 +594,30 @@ jobs:
       # tauri-build wants every bundled resource to exist. `tauri build` fills this one
       # (tools/scripts/prepare-native-runtime.mjs); plain cargo only needs the folder.
       - name: Native runtime folder
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: mkdir -p apps/desktop/native-runtime
 
       - name: Check formatting (apps/desktop)
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: cargo fmt --manifest-path apps/desktop/Cargo.toml -- --check
 
       - name: Clippy (apps/desktop)
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: cargo clippy --manifest-path apps/desktop/Cargo.toml -- -D warnings
 
       - name: Build (apps/desktop)
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: cargo build --manifest-path apps/desktop/Cargo.toml
 
       - name: Test (apps/desktop)
         id: test
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: cargo test --manifest-path apps/desktop/Cargo.toml
 
       # The Iroh framing, limits and reconnects, on loopback: seconds, and the
       # dependencies are already built for apps/desktop.
       - name: Test (native/transports)
+        if: steps.cargo-saved.outputs.cache-hit != 'true'
         run: cargo test --manifest-path native/transports/Cargo.toml
 
       # A new Cargo.lock restores the previous one's cache and builds what changed next to it, so without this every
@@ -814,6 +854,7 @@ jobs:
           PUSH_TO_DEV: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
           CHANGES: ${{ needs.changes.result }}
           FULL: ${{ needs.changes.outputs.full }}
+          LINT: ${{ needs.changes.outputs.lint }}
           AFFECTED_GATE: ${{ needs.changes.outputs.affected }}
           RUST: ${{ needs.changes.outputs.rust }}
           WEBSITE_GATE: ${{ needs.changes.outputs.website }}
@@ -845,7 +886,7 @@ jobs:
           # Skipped only counts when `changes` chose to skip that job.
           ok() { [[ "$1" == "success" || ( "$1" == "skipped" && "$2" == "false" ) ]]; }
           summary="draft=$DRAFT tested=$TESTED changes=$CHANGES frontend-checks=$FRONTEND_CHECKS frontend-tests=$FRONTEND_TESTS packages-tests=$PACKAGES_TESTS affected-tests=$AFFECTED cli-linux-arm64=$CLI_ARM64 frontend-build=$FRONTEND_BUILD tauri=$TAURI website=$WEBSITE website-e2e=$WEBSITE_E2E desktop-media=$DESKTOP_MEDIA desktop-macos=$DESKTOP_MACOS"
-          if [[ "$CHANGES" != "success" || "$FRONTEND_CHECKS" != "success" ]] || \
+          if [[ "$CHANGES" != "success" ]] || ! ok "$FRONTEND_CHECKS" "$LINT" || \
              ! ok "$FRONTEND_TESTS" "$FULL" || ! ok "$FRONTEND_BUILD" "$FULL" || ! ok "$AFFECTED" "$AFFECTED_GATE" || \
              ! ok "$PACKAGES_TESTS" "$PACKAGES" || ! ok "$CLI_ARM64" "$PACKAGES" || ! ok "$TAURI" "$RUST" || \
              ! ok "$WEBSITE" "$WEBSITE_GATE" || ! ok "$WEBSITE_E2E" "$WEBSITE_E2E_GATE" || \
@@ -854,7 +895,7 @@ jobs:
             exit 1
           fi
           if [[ "$TESTED" == "true" ]]; then
-            echo "::notice::This tree passed CI Success on a pull request already (see Changed paths): lint, types and Tauri Backend passed again on dev."
+            echo "::notice::This tree passed CI Success on a pull request already (see Changed paths): Tauri Backend saved the Cargo cache when dev lacked it."
           fi
           if [[ "$DRAFT" == "true" ]]; then
             echo "::notice::Draft: the fast tier passed. The required CI Success comes from the full run that leaving draft (gh pr ready) starts."

@@ -5,10 +5,10 @@
 //   node tools/scripts/ci-changes.mjs --draft=false --all     # no file list: every path gate on
 //   node tools/scripts/ci-changes.mjs --draft=false --tree=T  # a push to dev: see testedAs; else as --all
 //
-// writes one `<gate>=true|false` line per gate (`rust=`, `website=`, `website_e2e=`, `app=`, `packages=`, `full=`,
-// `affected=`, `tested=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path gate may
-// only leave a job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts holds
-// the website's list to what the site's scripts actually read.
+// writes one `<gate>=true|false` line per gate (`lint=`, `rust=`, `website=`, `website_e2e=`, `app=`, `packages=`,
+// `full=`, `affected=`, `tested=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path
+// gate may only leave a job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts
+// holds the website's list to what the site's scripts actually read.
 //
 // A draft gets the fast tier: lint and types, the unit tests the change can reach (test-affected.mjs), the site's checks
 // when the site changed, and the Rust job when Rust changed. Everything else waits for the pull request to leave
@@ -203,15 +203,16 @@ async function retargeted(api, pulls) {
  *   run already tested; superseded: one a newer push's run covers (supersededBy), planned as tested
  */
 export function plan(files, { draft, tested = false, superseded = false }) {
-  // Only Tauri Backend runs: only a push to dev saves the Cargo cache that pull requests restore.
+  // Only Tauri Backend runs: only a push to dev saves the Cargo cache that pull requests restore. It looks the cache up
+  // first and builds only when this Cargo.lock and toolchain have none yet.
   if (tested || superseded) {
     tested = true;
     const why = [
       superseded
-        ? "dev already moved past this commit, and the newer head's run tests a tree that holds it: only Tauri Backend runs, to keep the Cargo cache saved"
-        : "This tree already passed CI Success: only Tauri Backend runs, to keep the Cargo cache saved",
+        ? "dev already moved past this commit, and the newer head's run tests a tree that holds it: only Tauri Backend runs, and only to save a Cargo cache this Cargo.lock lacks"
+        : "This tree already passed CI Success: only Tauri Backend runs, and only to save a Cargo cache this Cargo.lock lacks",
     ];
-    return { rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested, why };
+    return { lint: false, rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested, why };
   }
   const why = [];
   const all = files === null;
@@ -230,6 +231,7 @@ export function plan(files, { draft, tested = false, superseded = false }) {
     if (!rust) why.push("Draft without Rust changes: Tauri Backend skipped");
   }
   return {
+    lint: true,
     rust,
     website: site,
     website_e2e: site && !draft,
