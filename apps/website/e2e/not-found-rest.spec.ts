@@ -11,7 +11,7 @@ test.use({ viewport: { width: 375, height: 760 }, reducedMotion: "no-preference"
 
 test("the 404 page lays nothing out and runs no script at rest", async ({ page }) => {
   await page.goto("/no-such-page", { waitUntil: "networkidle" });
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("404");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName("404: Page not found");
   // Let the floating ghosts mount and the fonts settle.
   await page.waitForTimeout(2_000);
 
