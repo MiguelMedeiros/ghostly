@@ -22,6 +22,8 @@ function rememberTab(tab: ExpressionTab) {
 }
 
 const MARGIN = 8, GAP = 8, WIDTH = 460, HEIGHT = 440;
+/** The sheet's categories, search and switch take about 160 px: below this a phone on its side shows no emoji row. */
+const SHEET_FLOOR = 290;
 
 /**
  * Emoji and GIFs in one panel, as WhatsApp has them: category icons and a search field on top, the grid, and a
@@ -55,9 +57,11 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
       const width = viewport?.width ?? window.innerWidth, height = viewport?.height ?? window.innerHeight;
       if (phone) {
         // With the keyboard up (a search), half of what it leaves is a strip of results: take all the sheet may.
+        // On a short screen (a phone on its side) half is too little for any emoji row: take up to SHEET_FLOOR.
         const keyboard = document.documentElement.dataset.keyboard === "true";
+        const sheet = keyboard ? height * 0.82 : Math.max(height * 0.52, Math.min(height * 0.82, SHEET_FLOOR));
         setPosition({ left, right: "auto", width, bottom: Math.max(0, window.innerHeight - top - height), maxHeight: height * 0.82,
-          "--expression-height": `${Math.round(height * (keyboard ? 0.82 : 0.52))}px` } as CSSProperties);
+          "--expression-height": `${Math.round(sheet)}px` } as CSSProperties);
         return;
       }
       const rect = bounds.getBoundingClientRect();
