@@ -15,10 +15,10 @@
   "dependencies": {
     "@arkade-os/sdk": "0.4.79",
     "@atproto/jwk-webcrypto": "^0.3.4",
-    "@atproto/oauth-client": "^0.8.9",
+    "@atproto/oauth-client": "^0.9.0",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
-    "@breeztech/breez-sdk-spark": "0.26.1",
-    "@cashu/cashu-ts": "^4.11.0",
+    "@breeztech/breez-sdk-spark": "0.27.2",
+    "@cashu/cashu-ts": "^4.13.0",
     "@fedimint/core": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/fedimint-client-wasm-bundler": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
     "@fedimint/types": "0.0.0-canary-eea6a3c98909fa8e736d6dadb1f1243fd3322b27",
@@ -26,9 +26,9 @@
     "@hyperswarm/dht-relay": "0.4.3",
     "@scure/bip39": "2.4.0",
     "@scure/btc-signer": "2.4.1",
-    "@secondts/bark": "0.25.0",
+    "@secondts/bark": "0.26.1",
     "@serenity-kit/opaque": "1.1.0",
-    "@synonymdev/pubky": "0.16.2",
+    "@synonymdev/pubky": "0.17.1",
     "@tetherto/wdk-wallet-evm": "1.0.0-beta.20",
     "ethers": "6.17.0",
     "nostr-tools": "2.25.2",
@@ -41,10 +41,10 @@
   "devDependencies": {
     "@types/react": "^19.3.0",
     "@types/ws": "8.18.2",
-    "fake-indexeddb": "^6.2.5",
+    "fake-indexeddb": "^6.2.6",
     "hyperdht": "6.34.1",
     "typescript": "^5.9.3",
-    "vite": "^8.3.4",
+    "vite": "^8.3.5",
     "vitest": "^5.0.5",
     "ws": "8.22.0"
   }
