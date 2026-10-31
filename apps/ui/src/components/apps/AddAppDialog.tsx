@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppPreview, AppStorePreview, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
@@ -42,6 +42,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   const [store, setStore] = useState<AppStorePreview | null>(null);
   // Which check is the field's: a link edited while Check runs drops the answer for the link it no longer holds.
   const asked = useRef(0);
+  // The store's question takes the place of Check: the focus Check had would fall to the page, so it goes to the
+  // question's Cancel (the safe choice). Enter in the field keeps the focus there.
+  const storeCancel = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const active = document.activeElement;
+    if (store && !busy && (!active || active === document.body)) storeCancel.current?.focus({ preventScroll: true });
+  }, [store, busy]);
 
   const check = async () => {
     const typed = url.trim();
@@ -116,7 +123,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
             </div>
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
             <div className="flex justify-end gap-2">
-              <Button onClick={onClose}>{t("common.cancel")}</Button>
+              <Button ref={storeCancel} onClick={onClose}>{t("common.cancel")}</Button>
               <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{t("apps.add.addStore")}</Button>
             </div>
           </div>
