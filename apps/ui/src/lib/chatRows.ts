@@ -4,11 +4,16 @@
  * differs still holds, and a message arriving in a chat of thousands costs what it does in a short one.
  */
 
+/** The last two lists compared, and what came of it: every walk of a page compares the same two. */
+let compared: { a: readonly unknown[]; b: readonly unknown[]; same: number } | undefined;
+
 /** How many rows two lists have the same from their start. */
 function sharedRows<R>(a: readonly R[], b: readonly R[]): number {
+  if (compared?.a === a && compared.b === b) return compared.same;
   const most = Math.min(a.length, b.length);
   let same = 0;
   while (same < most && a[same] === b[same]) same++;
+  compared = { a, b, same };
   return same;
 }
 
