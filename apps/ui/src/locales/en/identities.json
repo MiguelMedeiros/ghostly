@@ -214,7 +214,7 @@
     "removeNote": "Contacts you shared it with are told it is no longer shared, and a revocation is published so they can see it even if you never reconnect. A copy they kept cannot be erased.",
     "renew": "Add it again",
     "renewHint": "Add it again to renew it; then remove this one.",
-    "shareHint": "Share it from a chat’s Identities, one contact at a time.",
+    "shareHint": "Share it from the + in a chat, one contact at a time.",
     "takeDownFailed": "What it published could not be taken down. You can remove the proof without it: contacts still see it revoked.",
     "title": "Yours"
   },
