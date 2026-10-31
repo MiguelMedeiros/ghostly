@@ -60,6 +60,8 @@ describe("usage send", () => {
     });
     expect(params(["--all", "--left", "5"])).toMatchObject({ chat: undefined, all: true, card: { left: 5 } });
     expect(() => params(["--left", "5"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/Name a chat or group, or give --all/) }));
+    // Both, as neither: a usage error (exit 2) before the profile opens, not the API's bad_request (exit 1).
+    expect(() => params(["Miguel", "--all", "--left", "5"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/not both/) }));
     expect(() => params(["Miguel", "--also", "week"])).toThrow(/--also takes window=percent/);
     expect(() => params(["Miguel", "--resets", "soon"])).toThrow(/--resets takes a time/);
     expect(() => params(["Miguel", "--left", "50", "--resets", "1791849403"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes milliseconds, not seconds: 1791849403000" }));
