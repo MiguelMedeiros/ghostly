@@ -24,6 +24,29 @@ export function openPageProfile(): string {
 export const pageProfileIsCurrent = (): boolean => pageProfile === null || pageProfile === activeNamespace();
 
 /**
+ * Set by the page that started the peer again (`restartEngine`: Clear all data, the device gate) once the new one
+ * runs. Not a profile's key: it outlives the clear.
+ */
+export const ENGINE_RESTART_KEY = "ghostly_engine_restarted";
+
+/** The other pages hear the mark and start again (`followEngineRestart`); the page that set it reloads by itself. */
+export function markEngineRestart(): void {
+  try { localStorage.setItem(ENGINE_RESTART_KEY, String(Date.now())); } catch { /* storage full or refused: no page hears it */ }
+}
+
+/**
+ * Calls `onRestart` when another page started the peer again. This page held what the old peer told it (a cleared
+ * chat open, a device that is on standby now) and would go on showing it over the new one.
+ */
+export function followEngineRestart(onRestart: () => void): () => void {
+  const restarted = (event: StorageEvent) => {
+    if (event.key === ENGINE_RESTART_KEY && event.newValue !== null) onRestart();
+  };
+  addEventListener("storage", restarted);
+  return () => removeEventListener("storage", restarted);
+}
+
+/**
  * Calls `onSwitch` when another page makes a different profile the one in use. A page runs as the profile
  * it started with; once the peer follows the switch, the page has to start again too.
  */
