@@ -3,6 +3,7 @@ import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
+import { useLockPassedNow } from "../contexts/LockScreenContext";
 import { listNames, reenrollHere, reloadIntoGate, useConnectionCheck, useDeviceSet } from "../lib/devices";
 import { HandoffOffer, HandoffProgress, UseHereDialog } from "./devices/Handoff";
 import { TakeoverDialog } from "./devices/TakeoverDialog";
@@ -29,6 +30,7 @@ const PANEL = "rounded-xl border border-border bg-surface p-4 text-start text-sm
  */
 export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const { t } = useI18n();
+  const lockPassedNow = useLockPassedNow();
   const [open, setOpen] = useState(false);
   const id = useId();
   const others = otherProfiles();
@@ -54,7 +56,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
     : gate.state === "superseded" && gate.activeDevice ? t("devices.standby.hint.supersededBy", { device: gate.activeDevice })
     : t(`devices.standby.hint.${gate.state}`);
   // A handoff froze this device or installed what it took: the pages start again into the gate.
-  useEffect(() => { if (gate.reload) void reloadIntoGate(); }, [gate.reload]);
+  // The read at start found another device's turn just after the unlock: that unlock carries, if it still stands.
+  useEffect(() => { if (gate.reload) void reloadIntoGate({ keepUnlocked: !!gate.keepUnlocked && lockPassedNow() }); }, [gate.reload, gate.keepUnlocked, lockPassedNow]);
   // The screen back in front is a screen opened again (WISP 06 § When a device checks): the turn is read once more.
   useTurnReadOnReturn(gate.state !== "unreadable");
   // What this device's push worker shows while it is not the active one, and its subscription kept (WISP 06 § Push and the phone).

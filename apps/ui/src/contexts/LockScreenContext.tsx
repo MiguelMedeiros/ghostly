@@ -19,6 +19,8 @@ interface LockScreenContextValue {
   isLocked: boolean;
   /** False until the password has been entered once since the app started: nothing of the app is rendered before that. */
   hasUnlocked: boolean;
+  /** Whether the lock stands passed right now: open, and its time away not up even if no timer has said so yet. */
+  passedNow: () => boolean;
   /** While failed attempts are being paced: when the next one is accepted. */
   retryAt: number | null;
   lock: () => void;
@@ -159,6 +161,10 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
 
   const timeoutMs = settings.lockScreen.timeoutMinutes * 60 * 1000;
 
+  const lockedNow = useRef(isLocked);
+  lockedNow.current = isLocked;
+  const passedNow = useCallback(() => !lockedNow.current && Date.now() - lastActivityRef.current < timeoutMs, [timeoutMs]);
+
   // The time away is read from the clock, not left to one timer: a timer's clock stands still while the device sleeps
   // (a phone with the screen off, a suspended laptop), so a timer alone would bring the app back unlocked after hours
   // away. Locks when the time since the last activity is up; otherwise looks again when it would be, and at least
@@ -232,7 +238,7 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   ]);
 
   return (
-    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, retryAt, lock, unlock, resetTimer, ringing, offerCall }}>
+    <LockScreenContext.Provider value={{ isLocked, hasUnlocked, passedNow, retryAt, lock, unlock, resetTimer, ringing, offerCall }}>
       {children}
     </LockScreenContext.Provider>
   );
@@ -249,6 +255,16 @@ export function useLockScreen(): LockScreenContextValue {
 /** Whether the lock screen is up; false where there is none (a part rendered on its own). */
 export function useIsLocked(): boolean {
   return useContext(LockScreenContext)?.isLocked ?? false;
+}
+
+const NOT_PASSED = () => false;
+
+/**
+ * Asks, when called, whether this page may carry the lock across a reload (`reloadIntoGate`). Read at the moment of the
+ * reload, never from a render before it: a takeover's check takes half a minute. False where there is no lock screen.
+ */
+export function useLockPassedNow(): () => boolean {
+  return useContext(LockScreenContext)?.passedNow ?? NOT_PASSED;
 }
 
 /**
