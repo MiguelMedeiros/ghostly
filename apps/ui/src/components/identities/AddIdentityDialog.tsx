@@ -15,6 +15,7 @@ import { SubjectPreviewFacts } from "./SubjectPreview";
 import { applicableSigners, useSubjectPreview } from "./useSubjectPreview";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
+import { focusLost } from "../../lib/focus";
 import { problemText, type Problem } from "../../lib/problemText";
 
 const VALIDITY = [7, 30, 90, 180, 365];
@@ -79,6 +80,11 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     const target = card ?? (step === "steps" && steps.current?.childElementCount ? steps.current : region.current && tabbables(region.current).find(el => el !== back.current));
     (target ?? dialog.current)?.focus();
   }, [step]);
+  // A refusal empties a secret (a bunker:// link), which leaves the button pressed disabled: the field to paste it again takes the keys.
+  useEffect(() => {
+    if (busy || !focusLost()) return;
+    [...region.current?.querySelectorAll<HTMLInputElement>('input[type="password"]') ?? []].find(f => !f.value)?.focus();
+  }, [busy]);
 
   /** Stopped by the person: nothing to do, and nothing was saved. */
   const cancelled = (): Problem => ({ tone: "error", title: t("identities.add.cancelled") });
@@ -193,7 +199,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             )}
             <div className="flex flex-wrap justify-end gap-2">
               <Button onClick={close}>{t("common.cancel")}</Button>
-              <Button variant="primary" data-testid="add-identity-finish" disabled={busy || (signer?.kind === "external-tool" && !pasted.trim())} onClick={finish}>{busy ? (signer?.kind === "redirect" ? t("identities.waiting") : t("identities.contact.checking")) : signer?.kind === "publish" ? t("identities.add.checkAndSave") : signer?.kind === "redirect" ? t("identities.add.continueWith", { provider: provider!.label }) : t("identities.add.verifyAndSave")}</Button>
+              <Button variant="primary" data-testid="add-identity-finish" loading={busy} disabled={signer?.kind === "external-tool" && !pasted.trim()} onClick={finish}>{busy ? (signer?.kind === "redirect" ? t("identities.waiting") : t("identities.contact.checking")) : signer?.kind === "publish" ? t("identities.add.checkAndSave") : signer?.kind === "redirect" ? t("identities.add.continueWith", { provider: provider!.label }) : t("identities.add.verifyAndSave")}</Button>
             </div>
           </div>
         ) : approval ? (
@@ -250,7 +256,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             {provider.experimental && <Notice tone="warning">{t("identities.add.experimental")}</Notice>}
             <div className="flex flex-wrap justify-end gap-2">
               {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError(cancelled()); }}>{t("common.cancel")}</Button>}
-              <Button variant="primary" data-testid="add-identity-start" disabled={busy || !signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
+              <Button variant="primary" data-testid="add-identity-start" loading={busy} disabled={!signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
                 {busy ? t("identities.waiting") : signer?.action ?? (signer?.kind === "in-app" ? t("identities.add.signWithNamed", { signer: signer.label.replace(/ \(.*\)$/, "") }) : t("identities.add.continue"))}
               </Button>
             </div>
