@@ -54,6 +54,10 @@ by IP), so about 3 invites a minute go out at once. Past that, `invite create` s
 `"published":false` and `retryInMs`: the invite goes out by itself when the relays' minute frees a request, and the
 link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
+With no relay answering at all, `invite create` answers `"published":false` with a `reason` (what the relays said) and a
+`note`. The invite is good, so don't make another: it goes out by itself once a relay answers, while a daemon runs for
+the profile.
+
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
 and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
 a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`

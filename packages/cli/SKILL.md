@@ -111,7 +111,8 @@ ghostly invite create --label alice     # {"chat","invite":"ghostly1…","link":
 ghostly chat wait alice --until live    # returns once Alice opened the link in the app
 ```
 
-Give the link to the person through the channel your owner chose. To join someone else's invite instead:
+`"published":false` (with a `reason` and a `note`) means no relay took it yet: the invite is good and goes out by itself
+while the daemon runs, so don't make another. Give the link to the person through the channel your owner chose. To join someone else's invite instead:
 `printf '%s' '<ghostly1… or https://ghostly.tools/#ghostly1…>' | ghostly invite join --label bob` (on stdin, not in `ps`
 or the shell's history). `ghostly chat list` shows every
 chat; a `<chat>` is its id, a unique prefix of it, or its name.
