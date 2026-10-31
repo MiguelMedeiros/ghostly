@@ -5,6 +5,7 @@ import { CONTACT_KEY, namedByThem } from "./apiKit";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
+import { jsonOut } from "./jsonOut";
 import { turnRef } from "./turnRefs";
 
 /**
@@ -343,7 +344,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
         if (!next) return skip();
         event = next;
       }
-      const full = options.print && options.write(JSON.stringify(event)) === false;
+      const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
