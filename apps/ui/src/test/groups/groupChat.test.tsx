@@ -46,6 +46,11 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-name")).toHaveAttribute("dir", "auto");
   });
 
+  it("makes the members line under the name a 24 px tap target on a phone", () => {
+    openGroup(active());
+    expect(screen.getByTestId("group-members").className.split(/\s+/)).toContain("max-md:min-h-6");
+  });
+
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");

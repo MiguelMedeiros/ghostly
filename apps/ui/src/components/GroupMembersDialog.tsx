@@ -153,17 +153,18 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
               <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
             </form>}
           <p className="text-xs text-text-muted">{live.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: live.members.length })}{live.epoch !== undefined && <> · {t("group.members.epoch", { epoch: live.epoch })}</>}{live.status && live.status !== "active" && <> · {groupStatusText(live.status, t)}</>}</p>
-          {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app. */}
+          {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app.
+              A line of small text on a desktop, they are a thumb's height on a phone, as the rest of the dialog is. */}
           {live.isAdmin && live.status === "active" && <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
             {naming === null && <button ref={renameButton} type="button" data-testid="group-rename" aria-disabled={busy !== null || undefined} title={t("group.rename.hint")} onClick={() => { if (busy === null) setNaming(live.name); }}
-              className="text-xs font-medium text-accent hover:underline aria-disabled:opacity-40">{t("group.rename.action")}</button>}
-            <label className={`cursor-pointer rounded text-xs font-medium text-accent hover:underline has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
+              className="text-xs font-medium text-accent hover:underline aria-disabled:opacity-40 max-md:min-h-11">{t("group.rename.action")}</button>}
+            <label data-testid="group-picture-pick" className={`inline-flex cursor-pointer items-center rounded text-xs font-medium text-accent hover:underline has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent max-md:min-h-11 ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
               {live.picture ? t("group.members.changePicture") : t("group.members.addPicture")}
               <input ref={pictureInput} data-testid="group-picture-input" type="file" accept="image/*" className="sr-only" disabled={busy !== null && busy !== "picture"}
                 onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file && busy === null) void run("picture", async () => engine.call("setGroupPicture", { groupId: live.id, picture: await avatarFromFile(file, MAX_GROUP_PICTURE_LENGTH) })); }} />
             </label>
             {live.picture && <button type="button" data-testid="group-picture-remove" aria-disabled={busy !== null || undefined} onClick={removePicture}
-              className="text-xs text-text-muted hover:text-danger aria-disabled:opacity-40">{t("group.members.removePicture")}</button>}
+              className="text-xs text-text-muted hover:text-danger aria-disabled:opacity-40 max-md:min-h-11">{t("group.members.removePicture")}</button>}
           </div>}
         </div>
       </div>
