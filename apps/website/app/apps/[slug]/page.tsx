@@ -12,7 +12,8 @@ type Props = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const app = (await appsReleased()) ? storeApp((await params).slug) : undefined;
-  if (!app) return {};
+  // Not `{}`: a browser gets the metadata streamed, and an empty one left the home page's title in the tab of a 404.
+  if (!app) notFound();
   return pageMetadata({ title: `${app.title}: Ghostly app`, description: app.tagline, path: `/apps/${app.slug}` });
 }
 
