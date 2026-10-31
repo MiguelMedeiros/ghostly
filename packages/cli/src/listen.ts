@@ -5,6 +5,7 @@ import { CONTACT_KEY, namedByThem } from "./apiKit";
 import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
+import { jsonOut } from "./jsonOut";
 import { turnRef } from "./turnRefs";
 
 /**
@@ -268,11 +269,12 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
   for (let attempt = 0; ; attempt++) {
     let down = true, status = 0;
     try {
-      // A redirect is not followed: it would post the event to wherever it points, off this machine too.
+      // A redirect is not followed: it would post the event to wherever it points, off this machine too. stderr names the
+      // bridge by its origin only: its token is in the path or query (no user:password@, `checkWebhook`).
       const response = await fetch(url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
       void response.body?.cancel().catch(() => {});
       if (response.ok) {
-        if (holding) process.stderr.write(`ghostly: the webhook at ${url.href} answers again: event ${event.seq} taken\n`);
+        if (holding) process.stderr.write(`ghostly: the webhook at ${url.origin} answers again: event ${event.seq} taken\n`);
         return true;
       }
       status = response.status;
@@ -281,7 +283,7 @@ async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<tru
     if (!down && attempt >= 2) return status;
     if (down && attempt >= 2 && !holding) {
       holding = true;
-      process.stderr.write(`ghostly: the webhook at ${url.href} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+      process.stderr.write(`ghostly: the webhook at ${url.origin} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
     }
     await new Promise((resolve) => setTimeout(resolve, wait));
     wait = Math.min(wait * 2, RETRY_MAX_MS);
@@ -342,7 +344,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
         if (!next) return skip();
         event = next;
       }
-      const full = options.print && options.write(JSON.stringify(event)) === false;
+      const full = options.print && options.write(jsonOut(event)) === false;
       if (options.exec) {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
@@ -350,7 +352,7 @@ export function eventHandler(options: ListenOptions): EventHandler {
       // A refusal passes the event for good: said with what the bridge answered, so a wrong path (404) or a missing
       // token (401) is seen in the log, not only as messages that never came.
       const answered = webhook ? await post(webhook, event, options.retryMs ?? 500) : true;
-      if (webhook && answered !== true) process.stderr.write(`ghostly: the webhook at ${webhook.href} answered ${answered}: event ${event.seq} (${event.type}) passed, not taken (a 4xx or a redirect is not tried again)\n`);
+      if (webhook && answered !== true) process.stderr.write(`ghostly: the webhook at ${webhook.origin} answered ${answered}: event ${event.seq} (${event.type}) passed, not taken (a 4xx or a redirect is not tried again)\n`);
       // An output whose reader stopped holds the next event here, not one more line in its buffer per event.
       if (full) await options.drained?.();
       // A failed hook (an --exec exiting non-zero, an event the webhook refused) still moves the cursor: one poisonous

@@ -10,6 +10,7 @@ import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULT
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
+import { jsonOut } from "./jsonOut";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
@@ -45,7 +46,7 @@ interface Globals { home: string; profile: string; paths: ProfilePaths; pretty: 
 
 let pretty = false;
 function print(value: unknown): void {
-  process.stdout.write(JSON.stringify(value, null, pretty ? 2 : undefined) + "\n");
+  process.stdout.write(jsonOut(value, pretty ? 2 : undefined) + "\n");
 }
 
 /** Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer. */

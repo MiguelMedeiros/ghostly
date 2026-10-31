@@ -4,6 +4,103 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.7.2
+
+### Security
+
+- CLI: `ghostly listen --webhook` names the bridge by its origin only on stderr, so a token in the webhook's path or query no longer reaches logs.
+- CLI: what the CLI prints writes C1 control characters and bidi controls from a message as `\uXXXX`, so a contact's text cannot act on the terminal reading `chat history` or `listen`. The JSON value is unchanged.
+
+### Fixed
+
+**Devices**
+
+- Add a device between two web apps whose direct connection never opens (a phone and a computer on the same Wi-Fi,
+  for example) now goes on over Iroh's relay after 20 seconds. Before, both screens stayed on "Connecting" until the
+  new device gave up after 2 minutes and said the devices couldn't connect, every time.
+- Two devices on web apps whose direct connection never opens now reach each other over Iroh's relay after 20 seconds,
+  so the active device and the other one stay linked. Before, the link between them never went live.
+- Moving a profile to another device goes on from where it was when the connection blinks during the last copy. Before,
+  the device giving the profile built it all again and sent it from the start, each time.
+- The device taking a move no longer holds the profile's chats and settings twice in memory while it writes them,
+  and lets them go once they are written. A phone taking a profile with long chats needs less memory to finish.
+
+**Chat**
+
+- A chat that leaves DHT only goes live even when your app has just used up its share of the relays (back from Offline,
+  say). Before, if your contact's first try did not get through and it tried again at once, your app could miss the new
+  try and keep answering the old one, and the chat stayed on "On DHT · retrying live".
+- Delete for everyone on your own message, in a group or a 1:1 chat, now says why when Ghostly refuses it (while it
+  cannot check which device is active yet), under the message, which stays. Before, it did nothing and said nothing,
+  and pressing it again did the same.
+- While a file moves, its progress bar no longer lays the page out at every frame: on the web that gives back about 100 ms of the page's time each second of the transfer.
+- Files and voice messages sent or picked up through hold storage, and files with a contact on an older app, no longer make the app slower with every one of them until it restarts. A file sent through storage also stays delivered after a restart.
+- A message's ⋮ button, and the Reply button beside it on a wide touch screen (a phone in landscape), are now 24 × 24 px for a finger instead of 22 × 22, without moving the message.
+- A contact's reaction to a message that hasn't reached you yet is no longer lost if the app stops, crashes or is closed
+  in the background before the message arrives. It is kept on your device and shows on the message once it lands. Before,
+  it was gone for good while the contact's side showed it as sent.
+- With translation on in the Desktop app, the first chat opened no longer freezes the app for about half a second while the language detector loads.
+- Listening back to a paused voice recording no longer redraws the page's style at every frame: its waveform moves 4 times a second, as a voice message's does, instead of 60 times a second.
+- While a voice message records, its live waveform takes about 60% less of the page's time: it no longer lays the page out at every frame.
+
+**CLI**
+
+- `ghostly identity add` with `--days` or `--timeout` out of range is a usage error that names the flag, before the profile opens (`--days takes a whole number from 1 to 365, not 0`); it answered after opening it, in the API's words, and `--days 1.5` reached the engine's own check.
+- `service close` answers at once while a contact's app is still streaming to a page, and ends that stream, on the contact's side too. Before, it waited for as long as the page stayed open and the stream kept coming.
+- `service open --port` says what is wrong with the port: out of range or not whole is a usage error before the profile opens, and a port in use or not allowed is named with the way out. On a service already open, asking for another port is refused and names the port it is on. Before, that answered exit 0 with a link on the other port, a port in use was Node's own error, and a port not allowed read "Not allowed to write or read the path".
+- `--translate` says at once that this build of the CLI cannot translate yet (it has no language detector), in its first warning, in `--help` and in the README. Before, the first warning sent you to unpack a translation runtime and a model, and only then said there was no detector.
+- `ghostly typing --kind` and `group typing --kind` take only typing, recording or thinking, and `send --button` refuses a
+  `--style` other than primary, neutral or danger and an id given to two buttons. A typo there is now a usage error that
+  names the flag (exit 2) before the profile opens. Before, it came back from the API as a `bad_request` (exit 1).
+- The usage lines of `ghostly help` and of usage errors show every option the command takes: `task update` and `routine update` list the card fields they can change (`--title`, `--name`, `--branch`, `--link` and the others), the card commands `--text`, `app publish` `--sequence`, and `send` and `edit` `--timeout`.
+- `wallet redeem -` reads the Cashu token from stdin, as `invite join -` and `group join -` do. Before, it took the dash itself as the token: "That is not a valid ecash token", with a warning that the token was on the command line.
+- `service add` refuses a target on port 0 (`http://127.0.0.1:0`), saying so, on the CLI and on Desktop. Before, it was added, and every contact who opened it got a failure that did not say why.
+
+**Apps**
+
+- On Desktop, an app whose window is minimized or behind another program can no longer bring the Ghostly window to the front by asking for files. It asks only while you are in its window.
+- Opening the Apps page, or an update check of the installed apps, no longer draws every message and chat row again: only the ones with an app card.
+
+**Everywhere**
+
+- A chat's update that the relays' request budget holds back no longer encrypts its packet first: with 200 chats on the web, a page left alone spends about a quarter less of its script time.
+- With many chats, each relay read no longer goes over every chat's turn to drop the old ones: with 200 chats that was about an eighth of an idle app's work.
+- In Spanish, French and Italian, Settings has one name: the phone's tab, the account bar, the page title and every
+  hint that sends you there say Ajustes, Réglages or Opzioni. Before, the page was titled Configuración, Paramètres or
+  Impostazioni, and the French and Italian hint to switch profiles told you to hold a tab no tab bar showed.
+- The web app no longer downloads the Desktop app's language detector (about 850 KB) when it is opened or installed: the browser version never uses it.
+
+**Wallets**
+
+- Paying a Lightning address: a refused payment's or invoice's error no longer stays on screen after Cancel or Back. It used to show on the step before, as if it were about the amount being typed.
+- On a narrow phone, New wallet's "Test money" badge stays inside its card in Portuguese, Spanish, Italian and French, instead of running off the screen.
+- A failed Lightning payment no longer says "less 1 sats the mint kept". It now says "The sats are back; the mint kept 1.", in all 8 languages.
+- When Later on the backup reminder is refused, the card now says "Could not put the reminder off. Try again." Before, the card just stayed with no message, so Later looked like it did nothing.
+- Back on the real-money step puts the keyboard focus back on the Pay or Send button that opened it. Done after paying a Lightning address puts it on the chat card's Pay, or in the Cashu card's emptied paste field. Later on the backup reminder puts it on the next reminder, or on the network tab in view. Before, all three left the focus on the page, so a screen reader lost its place and the next Tab started from the top.
+- Max on a Lightning address leaves room for the fee: the amount comes down by what the fee takes and goes on to the review, where it used to stop at "Not enough sats in your wallet".
+- When a single sat comes in, the Wallets page and the Wallets name say "1 new sat" (or "1 new test sat"), not "1 new sats", in every language.
+
+**Calls**
+
+- On Linux, logging out or shutting down during a call hangs it up for your contact at once, as closing the window does, instead of their call stalling and ending as failed 16 seconds later.
+
+**Website**
+
+- A visit to the website no longer keeps a phone busy for its first 10 seconds. The ghosts on the first screen stirred their hem three times when they appeared, and the page redrew itself about 60 times a second while they did: on a slow phone, a quarter of its time over those seconds. Their hem now stirs once and then rests.
+- A website page printed or saved as PDF shows all of its text. Before, the menu bar and the "Skip to content" link
+  printed over the first and last lines of every sheet, and the Privacy Policy, Terms of Service and Agents FAQ
+  printed with no title.
+
+### For developers
+
+**Apps**
+
+- On Desktop, `ghostly.files.serve(id)` looks up the one file it serves, not every file the app keeps: in a library of 100,000 files one serve no longer looks at every file on disk or spends the app's 16 MiB a second of reads, so the app's own reads right after it answer.
+
+### Thanks
+
+- Thanks to @brunotenisi (#3994) for the report in this release.
+
 ## 1.7.1
 
 ### Security
