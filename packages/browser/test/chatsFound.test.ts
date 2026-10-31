@@ -94,5 +94,7 @@ describe("chatsFound", () => {
     expect((await node.editMessage({ linkId: a.id, messageId: "m3", text: "the old soup" })).error).toBeNull();
     expect(await node.chatsFound({ query: "recipe", linkIds: [a.id, b.id] })).toEqual([b.id]);
     expect(await node.chatsFound({ query: "SOUP", linkIds: [a.id, b.id] })).toEqual([a.id]);
+    await expect(node.chatsFound({ query: "soup" } as never)).rejects.toThrow("linkIds");
+    await expect(node.chatsFound({ linkIds: [a.id] } as never)).rejects.toThrow("query");
   });
 });

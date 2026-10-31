@@ -2712,7 +2712,9 @@ export class GhostlyNode implements EngineImplementation {
    * The 1:1 chats among `linkIds` with a message whose text holds `query`, whatever the case and the accents: the chat
    * list's search, read here so a page that holds each chat's newest page only is not sent every whole history for it.
    */
-  chatsFound(params: { query: string; linkIds: string[] }): Promise<string[]> {
+  async chatsFound(params: { query: string; linkIds: string[] }): Promise<string[]> {
+    if (typeof params?.query !== "string") throw new Error("query: the text to search for");
+    if (!Array.isArray(params.linkIds)) throw new Error("linkIds: the ids of the chats to search");
     const chats = params.linkIds.filter(linkId => { const link = this.links.get(linkId); return !!link && !link.stored.group; });
     return this.chatSearch.found(chats, params.query);
   }
