@@ -78,16 +78,17 @@ export async function translateAnswer(answer: Record<string, unknown>, translato
 
 type Answer = { id?: unknown; texts?: unknown; error?: unknown } | null;
 
-/** A translator, or null when the runtime or the detector is not there: said once, and messages stay as they are. */
+/** A translator, or null when the detector or the runtime is not there: said once, and messages stay as they are. */
 export function openTranslator({ home, to, detect, warn }: TranslatorOptions): Translator | null {
   const { runtime, models } = translationPaths(home);
   const bare = join(runtime, process.platform === "win32" ? "bare.exe" : "bare"), script = join(runtime, "runtime.mjs");
-  if (!existsSync(bare) || !existsSync(script)) {
-    warn(`ghostly: no translation runtime in ${runtime}: messages are printed untranslated. Unpack runtime ${RUNTIME_VERSION} there and a model in ${join(models, "<from>-<to>")}`);
+  // The detector first: without it no runtime or model helps, so nobody is sent to unpack one for nothing.
+  if (!detect) {
+    warn("ghostly: --translate cannot translate in this build of the CLI (it has no language detector yet): messages are printed untranslated");
     return null;
   }
-  if (!detect) {
-    warn("ghostly: this build of the CLI has no language detector: messages are printed untranslated");
+  if (!existsSync(bare) || !existsSync(script)) {
+    warn(`ghostly: no translation runtime in ${runtime}: messages are printed untranslated. Unpack runtime ${RUNTIME_VERSION} there and a model in ${join(models, "<from>-<to>")}`);
     return null;
   }
 
