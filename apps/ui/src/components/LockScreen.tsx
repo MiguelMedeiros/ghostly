@@ -119,7 +119,7 @@ export function LockScreen() {
       <LockViewport />
       {/* Centred in what the keyboard leaves (`--app-height`), not in the whole screen: on a phone the field and
           Unlock sat under the keyboard. */}
-      <div className="flex items-center justify-center overflow-y-auto" style={{ height: "var(--app-height, 100%)" }}>
+      <div className="flex items-center justify-center overflow-y-auto" data-app-height style={{ height: "var(--app-height, 100%)" }}>
       <div className="w-full max-w-sm mx-4 py-4">
         {call ? (
           <RingingCard call={call} cardRef={cardRef} profile={profile} />
