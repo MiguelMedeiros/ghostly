@@ -2,7 +2,7 @@
 # A Claude Code agent on Ghostly: each turn (a message from an allowed contact, or a mention in an allowed group)
 # wakes `claude -p` with the turn on stdin, reacts 👀 and shows "thinking" meanwhile, and sends its answer as a reply.
 #
-#   GHOSTLY_AGENT_FROM="owner"      ./claude-code-agent.sh    # chats (id, prefix, name) or contact keys
+#   GHOSTLY_AGENT_FROM="owner"      ./claude-code-agent.sh    # chats (id or a label given here) or contact keys
 #   GHOSTLY_AGENT_GROUPS="team"     ./claude-code-agent.sh    # groups, where only a mention wakes it
 #
 # Needs jq and claude. Run `ghostly daemon --detach` first (or let `listen` run the profile itself).

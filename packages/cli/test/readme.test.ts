@@ -57,3 +57,23 @@ describe("the README's command table", () => {
     expect([...documented].filter((c) => !commands.includes(c))).toEqual([]);
   });
 });
+
+/**
+ * `listen --from` refuses a prefix of a chat's id and the name its contact gave itself (another contact could call
+ * itself that): the README, the Claude Code example and `listen`'s help, the first text a bot's author reads about
+ * the allowlist, say the chat's id or a label given here, as docs/CLI.md § Allowlist does.
+ */
+describe("the listen allowlist's docs", () => {
+  const example = readFileSync(resolve(import.meta.dirname, "../examples/claude-code-agent.sh"), "utf8");
+  const said = (text: string) => {
+    expect(text).toContain("a label given here");
+    expect(text).not.toMatch(/\(id, prefix, name/);
+  };
+
+  it("in the README", () => {
+    const at = readme.findIndex((line) => line.startsWith("- `--from <chat|key>`"));
+    said(readme.slice(at, at + 2).join(" "));
+  });
+  it("in the Claude Code example", () => said(example.split("\n").find((line) => line.includes('GHOSTLY_AGENT_FROM="'))!));
+  it("in listen's help", async () => said((await ghostly(["help", "listen"])).stdout.split("\n").find((line) => /^\s+--from/.test(line))!));
+});
