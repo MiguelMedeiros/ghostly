@@ -421,7 +421,7 @@ describe("listen with an allowlist and --turns", () => {
       getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew),
       getMessage: vi.fn(async (linkId: string, id: string) => (linkId === "c1" ? chat : crew).find((m) => m.id === id)),
       sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mine:1:1" })), groupTaken: () => 0,
-      react: vi.fn(async () => ({ error: null })), pinMessage: vi.fn(async () => ({ error: null })), deleteMessage: vi.fn(async () => {}), messageDetails: vi.fn(async () => ({})),
+      react: vi.fn(async () => ({ error: null })), pinMessage: vi.fn(async () => ({ error: null })), chatUnconfirmed: () => ({ reactions: [], pin: null }), deleteMessage: vi.fn(async () => {}), messageDetails: vi.fn(async () => ({})),
       forwardMessages: vi.fn(async () => ({ results: [{ messageIds: [], error: null }] })), pressButton: vi.fn(async () => ({ error: null })),
     };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;

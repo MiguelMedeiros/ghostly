@@ -942,4 +942,17 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const history = ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { text: string }[];
     expect(history.map((m) => m.text)).toEqual(["from a one-shot"]);
   });
+
+  it("react and pin as one-shots: each stays until the contact confirmed it, and the contact shows it as the command ends", async () => {
+    // Before, both answered in about a second and left with the reaction and the pin unsaid: Bob saw them only with
+    // Alice's next one-shot send. Each is a fresh process, as the send above; the same 50 s for its first dial.
+    const mine = (ok(await as(alice, "chat", "history", "bob", "--limit", "1")).messages as { id: string }[])[0]!;
+    const theirs = (ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { id: string; text: string; reactions?: unknown }[])[0]!;
+    expect(theirs.text).toBe("from a one-shot");
+    expect(ok(await as(alice, "react", "bob", mine.id, "🎈", "--timeout", "50"))).toMatchObject({ messageId: mine.id, emoji: "🎈", confirmed: true });
+    const reacted = (ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { reactions?: unknown }[])[0]!;
+    expect(reacted.reactions).toMatchObject([{ by: "peer", emoji: "🎈" }]);
+    expect(ok(await as(alice, "pin", "bob", mine.id, "--timeout", "50"))).toMatchObject({ messageId: mine.id, confirmed: true });
+    expect(ok(await as(bob, "chat", "show", "alice")).pin).toMatchObject({ messageId: theirs.id, by: "peer" });
+  });
 });
