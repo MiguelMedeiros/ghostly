@@ -306,6 +306,39 @@ describe("updates", () => {
     expect((await store.list())[0]).toMatchObject({ sequence: 3, digest: v3.digest });
   });
 
+  it("a waiting update its publisher revoked, or a store of the person's removed, goes with its files; the next version is looked for", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"], sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`, `app-${v2.digest}`].sort());
+    // Its publisher revokes 2 beside its source, which still holds it.
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v2.digest], "Broken build")]));
+    for (let visit = 0; visit < 2; visit++) expect(await store.checkUpdates()).toEqual([{ ref: v1.ref, outcome: "none", run: { status: "ok" } }]);
+    expect((await store.list())[0]).toMatchObject({ sequence: 1, digest: v1.digest });
+    expect((await store.list())[0]!.pending).toBeUndefined();
+    expect(await bundleIds()).toEqual([`app-${v1.digest}`]);
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^no-update/);
+
+    // A 3 that adds a permission waits; a store the person adds removes it, and a 4 that adds none is at the source.
+    const v3 = await bundle({ sequence: 3, permissions: ["chat", "name"], sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v3.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    await net.putStore(await storeFiles({ removed: [{ ref: v1.ref, digest: v3.digest, reason: "Malware", at: NOW_MS / 1000 }] }));
+    await store.addStore({ url: STORE_URL });
+    const v4 = await bundle({ sequence: 4, sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v4.bytes);
+    expect((await store.checkUpdates())[0]!.outcome, "the same check takes 4").toBe("updated");
+    const view = (await store.list())[0]!;
+    expect(view).toMatchObject({ sequence: 4, digest: v4.digest });
+    expect(view.pending).toBeUndefined();
+    expect(await bundleIds()).toEqual([`app-${v4.digest}`]);
+  });
+
   it("a lower sequence is never installed over a higher one", async () => {
     const { store } = await installed({ sequence: 3 });
     const old = await bundle({ sequence: 2 });
