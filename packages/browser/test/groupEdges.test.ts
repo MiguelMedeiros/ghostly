@@ -24,7 +24,7 @@ describe("edgeView: how a group's edge to one member is doing", () => {
   });
 
   it("nobody there: waiting, with when the member was last heard (the later of presence and the last open channel)", () => {
-    expect(edgeView(live({ presence: { lastPacketAt: 400 }, lastSyncAt: 300 }))).toEqual({ linkId: "edge-1", state: "waiting", lastSeenAt: 400, reconnecting: true });
+    expect(edgeView(live({ presence: { lastPacketAt: 400 }, lastSyncAt: 300 }), 1_000)).toEqual({ linkId: "edge-1", state: "waiting", lastSeenAt: 400, reconnecting: true });
     expect(edgeView(live({ presence: { lastPacketAt: 100 }, lastSyncAt: 300 })).lastSeenAt).toBe(300);
     expect(edgeView(live()).lastSeenAt).toBe(0);
   });
@@ -60,8 +60,19 @@ describe("edgeView: how a group's edge to one member is doing", () => {
     // The answering side dials nothing: no attempt to count.
     expect(edgeView(live({ link: { groupsSupport: false, dialAttempts: 0 }, lastSyncAt: 500 }))).not.toHaveProperty("attempt");
     // A session dropped is got past by itself; a refused key is not.
-    expect(edgeView(live({ link, lastSyncAt: 500, pairing: { status: "error", error: "Session receive queue full" } })).reconnecting).toBe(true);
-    expect(edgeView(live({ link, lastSyncAt: 500, pairing: { status: "error", error: "Not the member this edge belongs to" } }))).not.toHaveProperty("reconnecting");
+    expect(edgeView(live({ link, lastSyncAt: 500, pairing: { status: "error", error: "Session receive queue full" } }), 1_000).reconnecting).toBe(true);
+    expect(edgeView(live({ link, lastSyncAt: 500, pairing: { status: "error", error: "Not the member this edge belongs to" } }), 1_000)).not.toHaveProperty("reconnecting");
+  });
+
+  it("a member not seen for presence's window is not reconnecting: the app does not dial them, and the row says when they were last seen", () => {
+    const link = { groupsSupport: false, dialAttempts: 4, liveAttempt: { retryAt: 0 } };
+    const days = 3 * 24 * 3_600_000, at = 1_800_000_000_000;
+    // Live, then the member's app closed three days ago: last seen then, not "Reconnecting…" (and a pulsing icon) for good.
+    expect(edgeView(live({ link, lastSyncAt: at - days, presence: { lastPacketAt: at - days } }), at)).toEqual({ linkId: "edge-1", state: "waiting", lastSeenAt: at - days });
+    expect(edgeView(live({ link, stored: { id: "edge-1", edgeLive: true }, lastSyncAt: 0, presence: { lastPacketAt: at - days } }), at)).not.toHaveProperty("reconnecting");
+    // Within the window (10 minutes) it still is: a member who dropped a minute ago, or whose packet is fresh.
+    expect(edgeView(live({ link, lastSyncAt: at - 60_000 }), at)).toMatchObject({ reconnecting: true, attempt: 4 });
+    expect(edgeView(live({ link, lastSyncAt: at - days, presence: { lastPacketAt: at - 5_000 } }), at)).toMatchObject({ reconnecting: true });
   });
 
   it("a member never reached is not reconnecting: nothing dropped", () => {
