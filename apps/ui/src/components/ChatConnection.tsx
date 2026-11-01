@@ -52,8 +52,11 @@ type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" |
  *
  * On a phone held upright (`phone`) the header keeps the name and three buttons, this one, a call and ⋮: it is as
  * large as the two beside it there, a 44px target.
+ *
+ * While a call is on in the chat (`callOn`), DHT only is off, with why: it closes the live link the call's hang-up
+ * crosses, and the call would talk on with no way to end it from either side.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "", phone }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "", phone, callOn = false }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
@@ -66,6 +69,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   testIdPrefix?: string;
   /** A phone's header: as large as the call and ⋮ beside it. */
   phone?: boolean;
+  /** A call is on in this chat (placed, ringing in or connected), until it ends. */
+  callOn?: boolean;
 }) {
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined, pair = link?.pairing;
@@ -225,7 +230,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       {online && state?.transport?.clockOffMs !== undefined && <ClockOffHint ms={state.transport.clockOffMs} />}
       {paired && <fieldset disabled={busy || !ghostlyOnline || !link} className="mt-2">
         <legend className="sr-only">{t("connection.panel.legend")}</legend>
-        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline}
+        {link && <TransportOptions link={link} disabled={busy || !ghostlyOnline} dhtBlocked={callOn ? t("connection.option.dhtCallOn") : undefined}
           onChoose={choice => void run(() => engine.call("setChatTransport", { linkId: link.id, transport: choice }))} />}
         <label className="connection-switch-row mt-1 flex min-h-11 items-center justify-between gap-2 rounded-lg px-2.5"><span className="text-text-primary">{t("connection.panel.fallback")}</span>
           <span className="connection-switch"><input type="checkbox" role="switch" aria-label={t("connection.panel.fallback")} aria-checked={link?.transportFallback??true} checked={link?.transportFallback??true} disabled={!link || dht}
