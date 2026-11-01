@@ -158,8 +158,9 @@ export function DevicesSection() {
 /**
  * One device: its mark, its name, its state and, for another device, whether its link is connected. "Move to
  * <device>" stays on the row, the main thing to do with a device; the rest is in its menu. While a move runs (`busy`)
- * no other is offered: the engine would refuse it. `focus`: a move to this device was cancelled from the section, and
- * once it no longer runs the keyboard focus that was on Cancel comes here (Move to, else the menu).
+ * neither another move nor Remove is offered: the engine would refuse them, and the move's Cancel is right above.
+ * `focus`: a move to this device was cancelled from the section, and once it no longer runs the keyboard focus that was
+ * on Cancel comes here (Move to, else the menu).
  */
 function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove, onCheck, onRemove }: {
   device: Device; thisActive: boolean; busy: boolean; checked?: string; focus?: boolean; onFocused?(): void; onMove(): void; onCheck(): void; onRemove(): void;
@@ -174,7 +175,7 @@ function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove
     : device.active ? t("devices.section.active") : t("devices.section.standby");
   const canMove = !device.self && live && thisActive && !busy;
   const canCheck = !device.self && live;
-  const canRemove = !device.self && thisActive;
+  const canRemove = !device.self && thisActive && !busy;
   useEffect(() => {
     if (!focus || busy) return;
     onFocused?.();
