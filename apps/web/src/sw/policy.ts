@@ -8,6 +8,8 @@
  * which never reaches a worker at all; the shell is the same file for every address.
  */
 
+import { sanitizeFileName } from "../../../../packages/core/src/files";
+
 /** Where the operating system posts what is shared into the installed app (manifest `share_target`). */
 export const SHARE_TARGET_PATH = "/share-target";
 
@@ -269,10 +271,23 @@ export async function readShareBody(request: { body: ReadableStream<Uint8Array> 
   return new Blob(chunks as BlobPart[]);
 }
 
+/** Most names of the files past `MAX_SHARED_FILES` a share keeps; the rest are counted (`+N`). */
+export const MAX_PAST_LIMIT_NAMES = 8;
+
 /**
- * What a share target POST carries, bounded: files that are files, `max` bytes of them in all. Files past the count
- * cap are only named (`pastLimit`). Texts come whole: the body they came in is already bounded (`readShareBody`), and
- * a text too long for one message goes as a text file from the composer.
+ * A posted file's name as the picker and the composer show it: the one a chat would give it (`sanitizeFileName`,
+ * at most 200 characters, no invisible or direction marks). A website picks it, of any length; no file system keeps a
+ * name past a few hundred bytes, so only its start is read.
+ */
+function shareFileName(name: string): string {
+  return sanitizeFileName(name.slice(0, 1024));
+}
+
+/**
+ * What a share target POST carries, bounded: files that are files with clean names, `max` bytes of them in all. Files
+ * past the count cap are only named (`pastLimit`): the first `MAX_PAST_LIMIT_NAMES`, then how many more (`+N`). Texts
+ * come whole: the body they came in is already bounded (`readShareBody`), and a text too long for one message goes as
+ * a text file from the composer.
  */
 export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   const text = (name: string) => {
@@ -282,16 +297,21 @@ export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   let room = max;
   const files: File[] = [];
   const pastLimit: string[] = [];
+  let pastNamed = 0;
   for (const value of form.getAll("files")) {
     if (typeof value === "string" || !(value.size >= 0)) continue;
     if (files.length >= MAX_SHARED_FILES) {
-      pastLimit.push(value.name);
+      pastNamed += 1;
+      if (pastNamed <= MAX_PAST_LIMIT_NAMES) pastLimit.push(shareFileName(value.name));
       continue;
     }
     if (value.size > room) break;
     room -= value.size;
-    files.push(value);
+    const name = shareFileName(value.name);
+    // The same bytes under the clean name: a File is a view of its Blob, nothing is copied.
+    files.push(name === value.name ? value : new File([value], name, { type: value.type, lastModified: value.lastModified }));
   }
+  if (pastNamed > MAX_PAST_LIMIT_NAMES) pastLimit.push(`+${pastNamed - MAX_PAST_LIMIT_NAMES}`);
   return { title: text("title"), text: text("text"), url: text("url"), files, ...(pastLimit.length > 0 && { pastLimit }) };
 }
 

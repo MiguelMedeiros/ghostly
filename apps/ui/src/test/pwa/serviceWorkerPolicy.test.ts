@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
+import { MAX_PAST_LIMIT_NAMES, MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
@@ -209,6 +209,23 @@ describe("a share target's form", () => {
     const item = readShare(form);
     expect(item.files).toHaveLength(MAX_SHARED_FILES);
     expect(item.pastLimit).toEqual(["IMG_33.jpg", "IMG_34.jpg", "IMG_35.jpg", "IMG_36.jpg", "IMG_37.jpg", "IMG_38.jpg", "IMG_39.jpg", "IMG_40.jpg"]);
+  });
+
+  it("keeps the names a website posts as a chat would show them, and only a few of those past the cap", async () => {
+    // Any website can post here: names of any length, with invisible and direction marks, as many files as it likes.
+    const form = new FormData();
+    form.append("files", new File(["boo"], "a‮" + "x".repeat(8 * 1024 * 1024) + ".txt", { type: "text/plain", lastModified: 7 }));
+    for (let i = 1; i < MAX_SHARED_FILES; i++) form.append("files", new File(["x"], `f${i}.txt`));
+    for (let i = 0; i < 2000; i++) form.append("files", new File(["x"], "y".repeat(4096) + `\u200b${i}.jpg`));
+    const item = readShare(form);
+    const first = item.files[0]!;
+    expect(first.name).toHaveLength(200);
+    expect(first.name).toMatch(/^ax+$/);
+    expect([first.type, first.lastModified, await first.text()]).toEqual(["text/plain", 7, "boo"]);
+    expect(item.files[1]!.name).toBe("f1.txt");
+    expect(item.pastLimit).toHaveLength(MAX_PAST_LIMIT_NAMES + 1);
+    expect(item.pastLimit!.slice(0, -1).every((name) => name.length <= 200 && !name.includes("​"))).toBe(true);
+    expect(item.pastLimit![MAX_PAST_LIMIT_NAMES]).toBe(`+${2000 - MAX_PAST_LIMIT_NAMES}`);
   });
 
   it("an empty form is an empty share", () => {
