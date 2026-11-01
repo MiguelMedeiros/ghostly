@@ -97,7 +97,7 @@ export const commands: Record<string, Command> = {
     args: ["chat", "message"], options: { everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" } },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, everyone: options.everyone === true }),
   },
-  "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
+  "message details": { method: "chat.details", usage: "message details <chat|group> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "pin": {
     method: "chat.pin", usage: "pin <chat|group> <message> | --remove", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
