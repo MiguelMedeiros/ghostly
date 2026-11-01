@@ -56,6 +56,7 @@ import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
 import { RAIL_WIDTH, RailAction, RailChat, RailGroup, RailToggle } from "./ChatRail";
 import { useRailShortcut } from "../hooks/useRailShortcut";
+import { useOpenRowInView } from "../hooks/useOpenRowInView";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
@@ -391,6 +392,10 @@ export function Sidebar() {
       unread={active ? 0 : getUnreadCount(session!)} active={active} onOpen={() => openChat(session!.id)} />;
   };
 
+  // The list or the rail, whichever is drawn: the open chat's row is brought into sight in it (a reload, a link).
+  const rowsRef = useRef<HTMLDivElement>(null);
+  useOpenRowInView(rowsRef, { chat: activeSessionId, group: activeGroupId }, listReady);
+
   return (
     <div
       ref={sidebarRef}
@@ -413,7 +418,7 @@ export function Sidebar() {
           <SidebarTasks rail active={location.pathname === "/tasks"} onOpen={openTasks} />
           <SidebarSaved rail active={location.pathname === "/saved"} onOpen={openSaved} />
         </div>
-        <nav aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
+        <nav ref={rowsRef} aria-label={t("sidebar.chats")} data-testid="chat-rail" aria-busy={!listReady || undefined} className="flex flex-1 flex-col overflow-y-auto overflow-x-hidden py-1">
           {listReady && railRows.map(railItem)}
         </nav>
       </> : <>
@@ -481,7 +486,7 @@ export function Sidebar() {
       <SidebarSaved active={location.pathname === "/saved"} onOpen={openSaved} />
 
       {/* Chat List */}
-      <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
+      <div ref={rowsRef} className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
         {listReady && <>
         {shownFolders.map((folder, index) => {
           const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
