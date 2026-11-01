@@ -474,10 +474,11 @@ const METHODS: Record<string, Method> = {
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
     return { chat: link.id, messageId, deleted: messageId, everyone: false };
   },
+  /** A chat's or a group's (`group:<id>`, or its name) message, as the app's details show it; a group's said `No chat`. */
   async "chat.details"(ctx, params) {
-    const link = chatOf(ctx, params);
-    const details = await node(ctx).messageDetails({ linkId: link.id, messageId: str(params, "message", true) });
-    if (!details) throw new CliError("not_found", `No message ${String(params.message)} in this chat`);
+    const target = chatOrGroup(ctx, str(params, "chat", true));
+    const details = await node(ctx).messageDetails({ linkId: target.linkId, messageId: str(params, "message", true) });
+    if (!details) throw new CliError("not_found", `No message ${String(params.message)} in this ${target.group ? "group" : "chat"}`);
     return details;
   },
   async "chat.rename"(ctx, params) {
