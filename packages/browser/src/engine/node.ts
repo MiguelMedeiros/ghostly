@@ -228,7 +228,11 @@ import { traceJoin } from "./joinTrace";
 import { SETUP_NETWORK, WalletSetup } from "./walletSetup";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
 
-/** How long a chat waits before listening again after its HyperDHT relay went away. */
+/**
+ * How long a chat waits, on average, before listening again after its HyperDHT relay went away. Each app draws its own
+ * wait within half of it either side: a relay that restarts closes every app's socket at once, and with one fixed wait
+ * they all came back in the same instant, more listens than its one HyperDHT node sends out in time.
+ */
 const RELAY_RETRY_MS = 30_000;
 /** Native listeners an app may hold per transport (the Desktop's Rust Iroh allows eight, `paired_transport.rs`). */
 const NATIVE_SLOTS = 8;
@@ -8439,7 +8443,7 @@ export class GhostlyNode implements EngineImplementation {
         if (live.link && live.stored.profile && (!live.stored.group || this.keepsGroupNative(live.stored)) && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
           && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
       }
-    }, RELAY_RETRY_MS);
+    }, RELAY_RETRY_MS / 2 + Math.random() * RELAY_RETRY_MS);
   }
 
   /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */
