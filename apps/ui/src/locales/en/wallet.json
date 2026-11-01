@@ -232,6 +232,12 @@
     "testBalance_one": "{{amount}} test sat (worthless)",
     "testMintInvoice": "Waiting for the payment… Test mints mark every invoice paid by themselves, so this one counts only once a contact pays it in a chat. For test sats now, use Get test coins above.",
     "tokenHint": "Got an ecash token instead? Paste it under Send.",
+    "tokenRedeemedFee": "Redeemed {{amount}} sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest": "Redeemed {{amount}} test sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest_one": "Redeemed {{amount}} test sat (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest_other": "Redeemed {{amount}} test sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFee_one": "Redeemed {{amount}} sat (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFee_other": "Redeemed {{amount}} sats (the mint kept {{fee}} as its fee).",
     "tx": {
       "ecashIn": "Received ecash",
       "ecashOut": "Sent ecash",

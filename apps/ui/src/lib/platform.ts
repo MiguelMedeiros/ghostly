@@ -396,7 +396,8 @@ export interface WalletPlatform {
   /** A fresh address of the Bitcoin source to be paid on. */
   bitcoinReceiveAddress(): Promise<string>;
   bitcoinRefresh(): Promise<void>;
-  receiveToken(token: string): Promise<number>;
+  /** `amount`: what arrived; `fee`: what the mint kept of the token's face value to take it in. */
+  receiveToken(token: string): Promise<{ amount: number; fee: number }>;
   /** Null when the text is neither an ecash token nor a Cashu payment request. */
   inspectCashu(text: string): Promise<CashuInspection | null>;
   exportTokens(): Promise<{ mint: string; token: string; amount: number }[]>;

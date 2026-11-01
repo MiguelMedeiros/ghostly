@@ -290,6 +290,7 @@
     "qrTooLong": "Troppo lungo per un codice QR: copialo invece.",
     "redeem": "Riscatta",
     "redeemed": "Riscattato ✓",
+    "redeemedFee": "Riscattato ✓ (la mint ha trattenuto {{fee}} come commissione)",
     "redeeming": "Riscatto…"
   },
   "mode": {

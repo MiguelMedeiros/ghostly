@@ -6110,8 +6110,8 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async walletReceiveToken({ token }: { token: string }) {
-    const { amount } = await this.wallet.receiveToken(token.trim());
-    return { amount };
+    const { amount, fee } = await this.wallet.receiveToken(token.trim());
+    return { amount, fee };
   }
 
   /** `network`: only that network's Cashu wallet (its mints). */

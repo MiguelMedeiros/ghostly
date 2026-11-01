@@ -314,6 +314,9 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
   const id = useMemo(() => settledMoneyId(value), [value]);
   const [redeemed, setRedeemed] = useSettled(id);
   const [spent, setSpent] = useState(false);
+  // What the mint kept to take the token in, when this card redeemed it: the card shows the token's face value, which
+  // is more than arrived (agents#2255).
+  const [feeKept, setFeeKept] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const { copied, failed, copy } = useMoneyCopy(value);
@@ -390,7 +393,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
       qr={value}
     >
       {redeemed ? (
-        <span ref={redeemedLine} tabIndex={-1} className="text-accent-hover text-xs font-bold self-center focus:outline-none" data-testid="token-redeemed">{t("payments.invoice.redeemed")}</span>
+        <span ref={redeemedLine} tabIndex={-1} className="text-accent-hover text-xs font-bold self-center focus:outline-none" data-testid="token-redeemed">{feeKept > 0 ? t("payments.invoice.redeemedFee", { fee: formatAmount(feeKept, t.language) }) : t("payments.invoice.redeemed")}</span>
       ) : spent ? (
         <span ref={redeemedLine} tabIndex={-1} className="text-text-primary/65 text-xs font-bold self-center focus:outline-none" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
       ) : (
@@ -404,7 +407,8 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
               setError(null);
               setBusy(true);
               try {
-                await wallet.receiveToken(value);
+                const { fee } = await wallet.receiveToken(value);
+                setFeeKept(fee);
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {

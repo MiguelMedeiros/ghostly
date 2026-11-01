@@ -290,6 +290,7 @@
     "qrTooLong": "QR コードには長すぎます。コピーしてください。",
     "redeem": "受け取る",
     "redeemed": "受け取り済み ✓",
+    "redeemedFee": "受け取り済み ✓（mint が手数料として {{fee}} を差し引きました）",
     "redeeming": "受け取り中…"
   },
   "mode": {
