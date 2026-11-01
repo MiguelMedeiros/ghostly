@@ -138,6 +138,16 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
 const inviteShown = new WeakMap<ApiContext, () => void>();
 
 /**
+ * Refuses DHT only (a hold, `chat transport dht`) while a call is on in the chat. A call's signals cross the live
+ * link: off it, the call talked on over its own connection, and a hang-up from either side never reached the other
+ * (that call ended only when its media stalled out, 16 s later).
+ */
+function noCallOn(ctx: ApiContext, linkId: string, then: string): void {
+  const call = ctx.calls.list().find((c) => c.chat === linkId);
+  if (call) throw new CliError("busy", `A call is on in this chat: hang it up first (ghostly call hangup ${linkId}), then ${then}`, { call: call.call });
+}
+
+/**
  * Marks a new invite as the chat on screen (native listeners, the quick pace) only until it is paired: a paired chat
  * keeps its listeners anyway, and a daemon nobody looks at reads an away contact at the background pace, as its
  * other chats and the same chat after a restart do. Nor past its wait for a peer (`AWAITING_PEER_MS`): an invite
@@ -521,6 +531,7 @@ const METHODS: Record<string, Method> = {
     const name = str(params, "transport", true);
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
+    if (transport === "dht") noCallOn(ctx, link.id, "put the chat on DHT only");
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     // A choice made during a hold (`chat disconnect --hold`) ends it: its time running out takes nothing back.
     await releaseHold(ctx, link.id, "lifted", true);
@@ -546,10 +557,7 @@ const METHODS: Record<string, Method> = {
       return chatJson(findChat(state(ctx).links, link.id));
     }
     const minutes = num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
-    // A call's signals cross the live link: held off it, the call talked on over its own connection, and a hang-up
-    // from either side never reached the other (that call ended only when its media stalled out, 16 s later).
-    const call = minutes > 0 ? ctx.calls.list().find((c) => c.chat === link.id) : undefined;
-    if (call) throw new CliError("busy", `A call is on in this chat: hang it up first (ghostly call hangup ${link.id}), then hold the chat`, { call: call.call });
+    if (minutes > 0) noCallOn(ctx, link.id, "hold the chat");
     if (minutes === 0) await releaseHold(ctx, link.id, "lifted");
     else await holdChat(ctx, link, minutes);
     return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
