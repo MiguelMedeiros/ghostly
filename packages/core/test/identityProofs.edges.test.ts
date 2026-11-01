@@ -26,7 +26,8 @@ describe("bounding what a provider returns", () => {
   it("strips control and bidi-override characters, bounds lengths, and drops unknown fields", () => {
     const out = boundVerifiedIdentity({ subject: "alice", source: `\u202eDNS\u0007 ${"s".repeat(200)}`, attester: `  ${"a".repeat(300)}`, evil: "<script>" } as unknown as VerifiedIdentity);
     expect(out.source.startsWith("DNS s")).toBe(true);
-    expect(out.source).toHaveLength(120);
+    expect(out.source).toHaveLength(204);
+    expect(boundVerifiedIdentity({ subject: "alice", source: "s".repeat(700) }).source).toHaveLength(640);
     expect(out.attester).toHaveLength(253);
     expect(out).not.toHaveProperty("evil");
     expect(boundVerifiedIdentity({ subject: "alice", source: "s", attester: "\u200e\u2066" })).toEqual({ subject: "alice", source: "s" });
@@ -467,6 +468,18 @@ describe("re-checking a received proof", () => {
     const id = await received(w);
     w.state.subject = "someone-else";
     expect(await w.peers.bob.recheck(id)).toMatchObject({ status: "unconfirmed", error: "The identity changed", verified: { subject: SUBJECT } });
+  });
+
+  it("keeps a long domain's whole record name in the How line and in the reason a re-check failed", async () => {
+    // A domain may be 253 characters: a cut inside it names a record that does not exist, and the reason no longer reads as itself.
+    const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.example`;
+    const w = world();
+    w.verify.mockImplementation(async s => ({ subject: s.binding.subject, source: `DNS TXT record at _ghostly.${domain}, via Quad9, DNSSEC validated` }));
+    const id = await received(w);
+    expect(w.ledgers.bob.received[0].verified.source).toBe(`DNS TXT record at _ghostly.${domain}, via Quad9, DNSSEC validated`);
+    const reason = `No Ghostly TXT record at _ghostly.${domain} (DNS changes can take a few minutes)`;
+    w.verify.mockRejectedValue(new Error(reason));
+    expect(await w.peers.bob.recheck(id)).toMatchObject({ status: "unconfirmed", error: reason });
   });
 
   it("keeps a withdrawn proof withdrawn whatever the re-check finds", async () => {

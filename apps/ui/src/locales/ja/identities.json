@@ -119,7 +119,7 @@
     "theirProfile": "本人の公開プロフィール",
     "title": "{{name}} との ID",
     "unconfirmed": "{{status}}: 確認できませんでした",
-    "unconfirmedWhy": "{{status}}: 確認できませんでした ({{error}})",
+    "unconfirmedWhy": "{{status}}: {{error}}",
     "validity": "有効期限"
   },
   "did": {
