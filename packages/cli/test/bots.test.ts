@@ -40,6 +40,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     connect: vi.fn(async () => undefined),
     setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
+    removeLink: vi.fn(({ linkId }: { linkId: string }) => { s.links = s.links.filter((l) => l.id !== linkId); }),
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
@@ -268,6 +269,22 @@ describe("chat disconnect --hold", () => {
     calls.length = 0;
     await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
     expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+  });
+
+  // Removed mid-call, the chat was gone and its call talked on (sound both ways, `call list` naming a chat `chat show`
+  // could not find); a hang-up then had no chat to cross, and the contact's call ended only when its media stalled out.
+  it("chat remove is refused while a call is on in the chat, which stays; another chat is removed", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    await expect(callApi(ctx, "chat.remove", { chat: "Alice" })).rejects.toMatchObject({ code: "confirm" });
+    const refused = await callApi(ctx, "chat.remove", { chat: "Alice", yes: true }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toBe("A call is on in this chat: hang it up first (ghostly call hangup chat-one), then remove the chat");
+    expect(node.removeLink).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "chat.remove", { chat: "Bob", yes: true })).toEqual({ removed: "chat-two" });
+    calls.length = 0;
+    expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
+    expect(node.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
   });
 
   // The engine refused it as `engine`, "Both peers must choose a live method first", though this side had: a bot retried.
