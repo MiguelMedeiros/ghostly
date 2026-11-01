@@ -75,6 +75,49 @@ describe("react on a group", () => {
     });
     await expect(callApi(ctx, method, { chat: "Nobody", ...params })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
   });
+
+  it("group:<id>, the form pin and saved take, is that group too", async () => {
+    const { ctx } = fake();
+    await expect(callApi(ctx, "chat.send", { chat: "group:g1", text: "hi" })).rejects.toMatchObject({
+      code: "not_found", message: '"group:g1" is a group, not a chat: ghostly group send g1 [text...]', details: { group: "g1" },
+    });
+    await expect(callApi(ctx, "chat.send", { chat: "group:zed", text: "hi" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "group:zed"' });
+  });
+
+  it("message retry on a group says a group's message goes again by itself", async () => {
+    const { ctx } = fake();
+    await expect(callApi(ctx, "chat.retry", { chat: "Crew", message: "k:0:1" })).rejects.toMatchObject({
+      code: "not_found", message: `"Crew" is a group, not a chat: a group's message is not sent again by hand, it goes by itself when a member's edge opens`, details: { group: "g1" },
+    });
+    await expect(callApi(ctx, "chat.retry", { chat: "Nobody", message: "x" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
+  });
+});
+
+describe("a group command on a chat", () => {
+  it.each([
+    ["group.send", { text: "hi" }, "send Alice [text...]"],
+    ["group.edit", { message: "m1", text: "x" }, "edit Alice <message> <text...>"],
+    ["group.react", { message: "m1", emoji: "👍" }, "react Alice <message> <emoji>"],
+    ["group.typing", {}, "typing Alice"],
+    ["group.history", {}, "chat history Alice"],
+    ["group.get", {}, "chat show Alice"],
+    ["group.rename", { name: "x" }, "chat rename Alice <name...>"],
+    ["group.forget", { yes: true }, "chat remove Alice --yes"],
+  ] as const)("%s says it is a chat, with the chat command", async (method, params, command) => {
+    const { ctx } = fake();
+    for (const ref of ["Alice", "chat-one"]) {
+      await expect(callApi(ctx, method, { group: ref, ...params })).rejects.toMatchObject({
+        code: "not_found", message: `${JSON.stringify(ref)} is a chat, not a group: ghostly ${command.replace("Alice", ref)}`, details: { chat: "chat-one" },
+      });
+    }
+    await expect(callApi(ctx, method, { group: "Nobody", ...params })).rejects.toMatchObject({ code: "not_found", message: 'No group "Nobody"' });
+  });
+
+  it("one with no chat twin says where the groups are", async () => {
+    await expect(callApi(fake().ctx, "group.leave", { group: "Alice", yes: true })).rejects.toMatchObject({
+      code: "not_found", message: '"Alice" is a chat, not a group (ghostly group list)', details: { chat: "chat-one" },
+    });
+  });
 });
 
 describe("reactions on a message", () => {

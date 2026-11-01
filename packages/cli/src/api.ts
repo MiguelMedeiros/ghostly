@@ -442,7 +442,8 @@ const METHODS: Record<string, Method> = {
     return { from: from.id, results: out };
   },
   async "chat.retry"(ctx, params) {
-    const link = chatOf(ctx, params);
+    // A group has no failed message to send again: it stays in the group and goes when a member's edge opens.
+    const link = notAGroup(ctx, params, () => chatOf(ctx, params), () => "a group's message is not sent again by hand, it goes by itself when a member's edge opens");
     const messageId = str(params, "message", true);
     const message = await node(ctx).getMessage(link.id, messageId);
     if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
@@ -576,14 +577,14 @@ const METHODS: Record<string, Method> = {
     return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
   },
   async "group.get"(ctx, params) {
-    return groupJson(groupOf(ctx, params), bool(params, "showSecret"));
+    return groupJson(groupOf(ctx, params, "chat show <chat>"), bool(params, "showSecret"));
   },
   async "group.history"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = groupOf(ctx, params, "chat history <chat>");
     return historyOf(ctx, `group:${group.id}`, params, (m) => groupMessageJson(m, group));
   },
   async "group.send"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = groupOf(ctx, params, "send <chat> [text...]");
     const text = str(params, "text", true);
     checkTextSize(text);
     if (!bool(params, "force")) {
@@ -612,7 +613,7 @@ const METHODS: Record<string, Method> = {
    * `mentions`: members the new text names beyond those the message named. `sent`: no longer waiting for the pace.
    */
   async "group.edit"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = groupOf(ctx, params, "edit <chat> <message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
@@ -637,7 +638,7 @@ const METHODS: Record<string, Method> = {
     return { group: group.id, messageId, edits, sent: edges > 0 || (!!message && !message.edit?.pending), edges };
   },
   async "group.react"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = groupOf(ctx, params, "react <chat> <message> <emoji>");
     return { group: group.id, ...(await react(ctx, `group:${group.id}`, params)) };
   },
   /**
@@ -645,7 +646,7 @@ const METHODS: Record<string, Method> = {
    * how many members), with the same kinds, status rules, 6 s hold and `for`. A community does not carry typing yet.
    */
   async "group.typing"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = groupOf(ctx, params, "typing <chat>");
     if (group.profile !== "mesh") throw new CliError("unavailable", "A community does not carry typing yet: only a private group does");
     const typing = !bool(params, "stop");
     const { kind, status } = typingWord(params, typing);
@@ -674,7 +675,7 @@ const METHODS: Record<string, Method> = {
     return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
   },
   async "group.forget"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = groupOf(ctx, params, "chat remove <chat> --yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass yes (--yes) to go on");
     await node(ctx).forgetGroup({ groupId: group.id });
     return { forgotten: group.id };
@@ -823,23 +824,26 @@ export function groupSendRefused(error: string): CliError {
 }
 
 /**
- * A chat command given a group's id, prefix or name: `not_found` that says it is a group, with the group command that
- * takes it (`react` on a group, where `group react` is meant). A name no chat and no group has stays the chat's error.
+ * A chat command given a group's id, prefix or name: `not_found` that says it is a group, with `hint`: the group
+ * command that takes it (`react` on a group, where `group react` is meant), or what to do where none does. `group:<id>`,
+ * the form `pin` and `saved` take, is that group too (it read "No chat" before). A name no chat and no group has stays
+ * the chat's error.
  */
-function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: string, rest: string): T {
+function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, hint: (shown: string) => string): T {
   try { return chat(); } catch (error) {
     if (!(error instanceof CliError) || error.code !== "not_found") throw error;
     const ref = str(params, "chat", true);
+    const named = ref.startsWith("group:") ? ref.slice("group:".length) : ref;
     let group: GroupView;
-    try { group = findGroup(state(ctx).groups, ref); } catch { throw error; }
-    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}`, { group: group.id });
+    try { group = findGroup(state(ctx).groups, named); } catch { throw error; }
+    const shown = /^[\w.:-]+$/.test(named) ? named : JSON.stringify(named);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ${hint(shown)}`, { group: group.id });
   }
 }
 
 /** The chat a chat command with a group twin names: a group's name says so, with `command`, the twin (see `notAGroup`). */
 function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "") {
-  return notAGroup(ctx, params, () => chatOf(ctx, params), command, rest);
+  return notAGroup(ctx, params, () => chatOf(ctx, params), (shown) => `ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}`);
 }
 
 /**
