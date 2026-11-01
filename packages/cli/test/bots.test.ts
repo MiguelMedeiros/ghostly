@@ -253,6 +253,23 @@ describe("chat disconnect --hold", () => {
     expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
   });
 
+  // `chat transport dht` is the switch a hold makes, with the same lost hang-up: refused the same way mid-call.
+  it("chat transport dht is refused while a call is on in the chat; another transport or chat is not", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const refused = await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toMatch(/^A call is on in this chat: hang it up first \(ghostly call hangup chat-one\)/);
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "iroh/1" });
+    await callApi(ctx, "chat.transport", { chat: "Bob", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+  });
+
   // The engine refused it as `engine`, "Both peers must choose a live method first", though this side had: a bot retried.
   it("chat connect on a chat the contact keeps on DHT only is refused, naming the contact's choice", async () => {
     const { ctx, node, setLink } = fake();
