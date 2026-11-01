@@ -526,6 +526,7 @@ const METHODS: Record<string, Method> = {
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
     noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
+    ctx.calls.forgetChat(link.id);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
@@ -773,7 +774,10 @@ const METHODS: Record<string, Method> = {
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     try {
-      return (await target.call(node(ctx), args)) ?? null;
+      const result = (await target.call(node(ctx), args)) ?? null;
+      // The chat is gone, as with `chat remove`: auto-answer no longer names it.
+      if (method === "removeLink") ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+      return result;
     } catch (error) {
       // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
       // not there. Not every TypeError: Node's `fetch failed` is the network.
