@@ -46,7 +46,8 @@ test("Clear all data in one tab starts the other tab again, without the cleared 
   await ext.page.getByTestId("clear-all-data-confirm").click();
   await expect(ext.page.getByTitle("New Chat")).toBeVisible({ timeout: 60_000 });
 
-  await expect.poll(() => second.page.evaluate(() => "__beforeClear" in window), { timeout: 30_000 }).toBe(false);
+  // The reload destroys the page under an evaluate that is still running: that one only says it has not finished yet.
+  await expect.poll(() => second.page.evaluate(() => "__beforeClear" in window).catch(() => true), { timeout: 30_000 }).toBe(false);
   await expect(second.page.getByTitle("New Chat")).toBeVisible({ timeout: 60_000 });
   await expect(second.page.getByText("It's quiet here...")).toBeVisible();
   await expect(second.page.getByPlaceholder("Message…")).toHaveCount(0);
