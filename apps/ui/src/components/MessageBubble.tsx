@@ -1064,7 +1064,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               {" "}{t("chat.joined")}
             </span>
           )}
-          <span className="text-text-muted text-[10px]">{time}</span>
+          {/* Whole on one line: "02:11 م" split at its space when the text took two lines at 320 px. */}
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
         {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}
@@ -1090,7 +1091,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           {duration !== undefined && duration >= 1000 && (
             <span className="text-text-muted">({formatCallLength(duration, t)})</span>
           )}
-          <span className="text-text-muted text-[10px]">{time}</span>
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
         {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}
