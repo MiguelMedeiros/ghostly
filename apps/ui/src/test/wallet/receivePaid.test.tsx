@@ -70,15 +70,17 @@ describe("Receive's invoice reads paid only when it is paid", () => {
   it("says received to a screen reader, and keeps the focus from the invoice's Copy to Done to the amount", async () => {
     const MINT = TEST_MINTS[0];
     const view = await showInvoice(at("testnet", MINT, 5_000, []));
-    // A live region is heard only when it was there before its text: it waits, empty, beside the invoice.
-    const status = screen.queryByRole("status");
+    // A live region is heard only when it was there before its text: it waits, empty, beside the invoice (Copy backup,
+    // in the card's settings, has its own).
+    const receiveStatus = () => screen.queryAllByRole("status").find((region) => !region.closest("[data-testid=wallet-backup]")) ?? null;
+    const status = receiveStatus();
     await view.user.tab();
     expect(document.activeElement?.closest("[data-testid=wallet-invoice]")).not.toBeNull();
     const paid: Tx = { id: "tx-ours", timestamp: Date.now() + 1, mint: MINT, kind: "lightning-in", amount: 1_000, fee: 0, quote: "our-quote" };
     view.rerender(card(at("testnet", MINT, 6_000, [paid])));
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Done" }));
     expect(status).not.toBeNull();
-    expect(screen.getByRole("status")).toBe(status);
+    expect(receiveStatus()).toBe(status);
     expect(status).toHaveTextContent(/1,000 test sats received/);
     await view.user.keyboard("{Enter}");
     expect(document.activeElement).toBe(screen.getByTestId("wallet-receive-amount"));

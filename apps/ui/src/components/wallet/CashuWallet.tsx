@@ -70,7 +70,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [action, setAction] = useState<Action>("receive");
   // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
-  const { busy, running, error, setError, run } = useRun();
+  const { busy, running, error, failed, setError, run } = useRun();
   const [amount, setAmount] = useState("");
   const [invoice, setInvoice] = useState<string | null>(null);
   const [paymentHash, setPaymentHash] = useState<string | undefined>();
@@ -96,6 +96,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
+  /** The backup was just copied: said below Copy backup, where it was pressed. */
+  const [copied, setCopied] = useState(false);
+  // On a phone the card is one long column: what Add, Make primary and Copy backup answer is said by them, below, not
+  // above the Mints section, off the screen.
+  const mintsFailed = failed === "add-mint" || failed === "primary";
+  const backupFailed = failed === "backup";
   const [mintUrl, setMintUrl] = useState("");
   /** The mint whose Remove was pressed: asked about below its row (the last one: the wallet's removal). */
   const [removingMint, setRemovingMint] = useState<string | null>(null);
@@ -212,7 +218,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     if (invoicePaid && (!document.activeElement || document.activeElement === document.body)) doneButton.current?.focus();
   }, [invoicePaid]);
 
-  const choose = (next: Action) => { setAction(next); setActionChosen(true); setSendOpened(next === "send"); setError(""); setNotice(""); setInvoice(null); setQuote(null); setQuoted(null); setConfirming(false); setSent(null); };
+  const choose = (next: Action) => { setAction(next); setActionChosen(true); setSendOpened(next === "send"); setError(""); setNotice(""); setCopied(false); setInvoice(null); setQuote(null); setQuoted(null); setConfirming(false); setSent(null); };
 
   return (
     <div className="space-y-6">
@@ -372,7 +378,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           </div>
         )}
         {notice && <Notice tone="success" testId="wallet-notice">{notice}</Notice>}
-        {error && <Notice problem={error} testId="wallet-error" />}
+        {error && !mintsFailed && !backupFailed && <Notice problem={error} testId="wallet-error" />}
         {/* The reviewed payments with something left to do or read: a settled one is in the history, and a cancelled
             one (by Cancel, or past its expiry) moved nothing. Pending, on its way, unknown or failed stay. */}
         {(state.intents ?? []).filter((i) => i.method === "cashu" && i.id !== review?.id && i.state !== "settled" && i.state !== "cancelled").map((i) => (
@@ -408,7 +414,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
               <Row testId="mint-row" label={<>{mint.name}{index === 0 && <span className="text-accent ms-2 text-[10px] uppercase tracking-wider">{t("wallet.cashu.primary")}</span>}</>}
                 hint={<><span data-testid="mint-fees">{mint.info ? shortFee(t, mint.info.inputFeePpk, mintNetwork(mint.url) === "testnet") : t("wallet.cashu.unreachable")}</span><Truncate className="font-mono" title={mint.url}>{mint.url.replace(/^https?:\/\//, "")}</Truncate></>}
                 value={sats(mint.balance)}>
-                {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url))}>{t("wallet.cashu.makePrimary")}</Button>}
+                {index !== 0 && <Button onClick={() => void run(() => wallet.setPrimaryMint(mint.url), "primary")}>{t("wallet.cashu.makePrimary")}</Button>}
                 <Button ref={(button) => { if (button) removeButtons.current.set(mint.url, button); else removeButtons.current.delete(mint.url); }} variant="danger" data-testid="mint-remove" aria-expanded={state.mints.length > 1 ? removingMint === mint.url : undefined} aria-haspopup={state.mints.length === 1 ? "dialog" : undefined}
                   onClick={() => setRemovingMint(mint.url)} aria-label={t("wallet.cashu.removeMint", { name: mint.name })}>{t("wallet.cashu.remove")}</Button>
               </Row>
@@ -423,12 +429,15 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 <input ref={mintField} data-testid="wallet-mint-url" className={`${input} font-mono text-xs`} inputMode="url" {...exactText} placeholder={t("wallet.cashu.addMintPlaceholder")} value={mintUrl} onChange={(e) => setMintUrl(e.target.value)} />
                 <Button ref={addMint} type="submit" variant="primary" data-testid="wallet-add-mint" loading={running === "add-mint"} disabled={busy || !mintUrl.trim()}>{t("wallet.cashu.add")}</Button>
               </InputGroup>
+              {error && mintsFailed && <Notice problem={error} testId="wallet-error" />}
             </Block>
           </Section>
-          <Section title={t("wallet.cashu.settings")}>
+          <Section title={t("wallet.cashu.settings")} testId="wallet-backup">
             <Row label={t("wallet.cashu.copyEcash")} hint={t("wallet.cashu.copyEcashHint")}>
-              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => void run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setNotice(t("wallet.cashu.backupCopied")); }, "backup")}>{t("wallet.cashu.copyBackup")}</Button>
+              <Button loading={running === "backup"} disabled={busy || state.balance === 0} onClick={() => { setCopied(false); void run(async () => { const tokens = await wallet.exportTokens(); await navigator.clipboard.writeText(tokens.map((token) => token.token).join("\n")); setCopied(true); }, "backup"); }}>{t("wallet.cashu.copyBackup")}</Button>
+              <p role="status" className="sr-only">{copied ? t("wallet.cashu.backupCopied") : ""}</p>
             </Row>
+            {(copied || (error && backupFailed)) && <Block>{copied ? <Notice tone="success" testId="wallet-notice">{t("wallet.cashu.backupCopied")}</Notice> : error && <Notice problem={error} testId="wallet-error" />}</Block>}
           </Section>
         </>
       )}
