@@ -214,9 +214,12 @@ export function MessageInput({
    */
   const [preparing, setPreparing] = useState<File[]>([]);
   const preparingKeys = useRef(new Set<string>());
-  /** A video being converted to H.264 MP4 before it goes (`prepareVideo`): how far, and its Cancel. */
-  const [converting, setConverting] = useState<{ file: File; progress?: number } | null>(null);
-  const conversion = useRef<AbortController | null>(null);
+  /**
+   * Videos being converted to H.264 MP4 before they go (`prepareVideo`): how far each is, and each one's Cancel. A
+   * second video chosen while the first converts has its own, so Cancel stops the one the line names.
+   */
+  const [converting, setConverting] = useState<ReadonlyMap<File, number | undefined>>(new Map());
+  const conversions = useRef(new Map<File, AbortController>());
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -626,16 +629,17 @@ export function MessageInput({
         let prepared: PreparedVideo = { file };
         if (isConvertibleVideo(file)) {
           const stopper = new AbortController();
-          conversion.current = stopper;
-          setConverting({ file });
+          conversions.current.set(file, stopper);
+          const progressed = (progress: number | undefined) => setConverting((was) => new Map(was).set(file, progress));
+          progressed(undefined);
           try {
-            prepared = await prepareVideo(file, { signal: stopper.signal, onProgress: (progress) => { if (mounted.current && !stopper.signal.aborted) setConverting({ file, progress }); } });
+            prepared = await prepareVideo(file, { signal: stopper.signal, onProgress: (progress) => { if (mounted.current && !stopper.signal.aborted) progressed(progress); } });
           } catch {
             done();
             return false;
           } finally {
-            if (conversion.current === stopper) conversion.current = null;
-            if (mounted.current) setConverting(null);
+            conversions.current.delete(file);
+            if (mounted.current) setConverting((was) => { const now = new Map(was); now.delete(file); return now; });
           }
         }
         const err = await onSendFile(prepared.file).finally(done);
@@ -902,19 +906,21 @@ export function MessageInput({
       {t("composer.pasteReading")}
     </p>
   );
-  const convertingNow = converting && converting.file === preparing[0] ? converting : null;
-  const preparingLine = preparing.length > 0 && !locked && (
+  const shown = preparing[0];
+  const shownConverting = shown !== undefined && converting.has(shown);
+  const shownProgress = shown ? converting.get(shown) : undefined;
+  const preparingLine = shown && !locked && (
     <div className="flex items-center gap-3 animate-fade-in">
       <p role="status" data-testid="file-preparing" className="m-0 flex min-w-0 items-center gap-2 text-[13px] text-text-secondary">
         <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
         <span className="min-w-0 truncate">
-          {convertingNow?.progress !== undefined
-            ? t("composer.videoConverting", { name: preparing[0]!.name, percent: new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }).format(convertingNow.progress) })
-            : t("composer.filePreparing", { name: preparing[0]!.name })}
+          {shownProgress !== undefined
+            ? t("composer.videoConverting", { name: shown.name, percent: new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }).format(shownProgress) })
+            : t("composer.filePreparing", { name: shown.name })}
         </span>
       </p>
-      {convertingNow && (
-        <button type="button" data-testid="video-convert-cancel" onClick={() => conversion.current?.abort()}
+      {shownConverting && (
+        <button type="button" data-testid="video-convert-cancel" onClick={() => conversions.current.get(shown)?.abort()}
           className="shrink-0 cursor-pointer border-none bg-transparent p-0 text-[13px] font-medium text-accent hover:underline">
           {t("common.cancel")}
         </button>
