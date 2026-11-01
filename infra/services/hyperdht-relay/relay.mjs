@@ -257,7 +257,8 @@ export function addressKey(address) {
 /**
  * Starts a relay: an HTTP server whose WebSocket upgrades each carry one browser's HyperDHT (dht-relay,
  * non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream itself;
- * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts.
+ * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts and the node's state,
+ * 503 while its routing table is empty.
  *
  * options: port, host, bootstrap (host:port list), testnet (size of an in-process HyperDHT network, for tests
  * and e2e), limits, origins (allowed `Origin` values; empty allows any), proxies, cloudflare (see addressOf), log.
@@ -277,7 +278,13 @@ export async function startRelay(options = {}) {
   // Until then two browsers on this relay reach each other only by holepunching the relay's own socket, which on
   // loopback often fails. On loopback nothing stands between the nodes, so the relay says so from the start.
   const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {})
+  // When another node last answered this one. With no outgoing UDP (a firewall, a tunnel, a container network) none
+  // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
+  let answeredAt = null
+  const onresponse = dht.io.onresponse
+  dht.io.onresponse = (...args) => { answeredAt = Date.now(); return onresponse(...args) }
   await dht.ready()
+  if (dht.toArray().length === 0) log('bootstrap reached no node')
 
   const clients = new Set()
   // Each client's dht-relay session, for what it holds (`stats().held`).
@@ -289,8 +296,10 @@ export async function startRelay(options = {}) {
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
     if (request.url === '/healthz') {
-      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-      response.end(JSON.stringify({ ok: true, clients: clients.size, ...stats, firewalled: dht.firewalled }))
+      // Healthy while the node's routing table holds another node: with none, nobody reaches what it announces.
+      const reached = dht.toArray().length
+      response.writeHead(reached > 0 ? 200 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ ok: reached > 0, clients: clients.size, ...stats, firewalled: dht.firewalled, nodes: reached, sinceAnswerMs: answeredAt === null ? null : Date.now() - answeredAt }))
       return
     }
     response.writeHead(426, { 'content-type': 'text/plain' }); response.end('Ghostly HyperDHT relay: connect with a WebSocket\n')
