@@ -48,7 +48,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
   const calls: { call: string; chat: string; state: string }[] = [];
   const ctx = {
     runtime: { server: { node }, paths: { name: "default", dir } },
-    calls: { list: () => calls },
+    calls: { list: () => calls, forgetChat: () => {} },
     hub: {
       onEvent: (l: (e: GhostlyEvent) => void) => { events.add(l); return () => events.delete(l); },
       onState: (l: (s: EngineState) => void) => { states.add(l); return () => states.delete(l); },
