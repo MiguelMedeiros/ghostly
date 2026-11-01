@@ -183,7 +183,7 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
+          emulator-options: -no-window -gpu swangle -noaudio -no-boot-anim -camera-back none -camera-front none
           script: node tools/scripts/android-smoke.mjs
 
       - name: Results
