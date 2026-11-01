@@ -1,6 +1,7 @@
 {
   "fromContacts": "De tus contactos",
   "fromContactsEmpty": "Aquí aparecen las apps que comparten tus contactos.",
+  "ghostlyOnline": "Ghostly en línea",
   "goOffline": "Desconectarse: nada de lo que compartes seguirá accesible",
   "goOnline": "Conectarse",
   "letReach": "Dejar que {{contact}} acceda a {{app}}",
@@ -9,6 +10,7 @@
   "noContacts": "Todavía no hay contactos.",
   "nobodyYet": "Nadie puede abrirla hasta que elijas quién.",
   "nothingShared": "Nada compartido todavía.",
+  "offDisconnectsChats": "Al desactivarlo se desconectan todos los chats",
   "offline": "Desconectado",
   "online": "Conectado",
   "open": "Abrir {{app}}",

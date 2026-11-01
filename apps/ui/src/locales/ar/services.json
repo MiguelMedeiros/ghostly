@@ -1,6 +1,7 @@
 {
   "fromContacts": "من جهات اتصالك",
   "fromContactsEmpty": "تظهر هنا التطبيقات التي تشاركها جهات اتصالك.",
+  "ghostlyOnline": "Ghostly متصل",
   "goOffline": "اقطع الاتصال: لن يبقى شيء مما تشاركه متاحًا",
   "goOnline": "اتصل",
   "letReach": "اسمح لـ {{contact}} بالوصول إلى {{app}}",
@@ -9,6 +10,7 @@
   "noContacts": "لا جهات اتصال بعد.",
   "nobodyYet": "لا أحد يستطيع فتحه حتى تختار من.",
   "nothingShared": "لم تشارك شيئًا بعد.",
+  "offDisconnectsChats": "إيقاف هذا يقطع اتصال كل المحادثات",
   "offline": "غير متصل",
   "online": "متصل",
   "open": "افتح {{app}}",

@@ -1,6 +1,7 @@
 {
   "fromContacts": "From your contacts",
   "fromContactsEmpty": "Apps your contacts share show up here.",
+  "ghostlyOnline": "Ghostly online",
   "goOffline": "Go offline: nothing you share stays reachable",
   "goOnline": "Go online",
   "letReach": "Let {{contact}} reach {{app}}",
@@ -9,6 +10,7 @@
   "noContacts": "No contacts yet.",
   "nobodyYet": "Nobody can open it until you pick who.",
   "nothingShared": "Nothing shared yet.",
+  "offDisconnectsChats": "Turning this off disconnects every chat",
   "offline": "Offline",
   "online": "Online",
   "open": "Open {{app}}",
