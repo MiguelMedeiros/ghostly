@@ -66,6 +66,16 @@ describe("GroupMembersDialog", () => {
     expect(remove).not.toHaveClass("text-danger");
   });
 
+  // They were 24 px tall, and the close button 30, under the link panel's 44 px buttons.
+  it("Hand over admin, Remove and the close button are a thumb's height on a phone, as the link panel's buttons are", () => {
+    members_(groupView({ status: "active", isAdmin: true, members }));
+    for (const id of ["group-make-admin", "group-remove-member"]) {
+      expect(within(row(BOB)).getByTestId(id)).toHaveClass("max-md:min-h-11", "max-md:px-3");
+    }
+    expect(within(row(BOB)).getByTestId("group-member-actions")).toHaveClass("max-md:gap-2");
+    expect(within(screen.getByTestId("group-members-dialog")).getByRole("button", { name: "Close" })).toHaveClass("max-md:h-11", "max-md:w-11", "place-items-center");
+  });
+
   it("lets the admin promote or remove anyone but themselves", async () => {
     const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
     engine.on("makeGroupAdmin", () => undefined).on("removeGroupMember", () => undefined);
