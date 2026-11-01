@@ -463,6 +463,17 @@ describe("MessageBubble: system lines", () => {
     expect(screen.getByText("Audio call ended").parentElement).not.toHaveTextContent("(");
   });
 
+  // At 320 px in Arabic a two-line join line put "02:11" on one line and "م" on the next.
+  it.each([
+    ["join", { text: "", nick: "Ali", systemEvent: { type: "join", pubKey: "peer" } }],
+    ["call", { text: "Audio call ended", callEvent: { type: "call_ended", duration: 65_000 } }],
+  ] as const)("keeps the time of a two-line %s line whole on one line", (_, patch) => {
+    const { container } = renderApp(<MessageBubble message={message({ sender: "system", ...patch })} peerPubKey="peer" />, { language: "ar" });
+    const time = container.querySelector("[data-message-row] > div")!.lastElementChild!;
+    expect(time.textContent).toMatch(/\d/);
+    expect(time).toHaveClass("whitespace-nowrap", "shrink-0");
+  });
+
   it("lets a system line be deleted too, from its menu", async () => {
     const { user } = bubble({ sender: "system", text: "Call ended", callEvent: { type: "call_ended" } }, { onDelete: () => {} });
     await user.click(screen.getByTestId("message-options"));
