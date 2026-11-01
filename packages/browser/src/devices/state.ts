@@ -187,6 +187,11 @@ export interface EarlierDeviceSet {
    * device, "When the remover is gone for good"). The frame is still delivered.
    */
   foreign?: true;
+  /**
+   * The signing key of the device this move removed, until what it leaves in the profile is cleared (its wake
+   * subscription, its wallets' home marks): stored in the move's own write, so a reload or a crash after it still clears them.
+   */
+  removed?: string;
 }
 
 /**
@@ -580,7 +585,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   if (!Array.isArray(r.earlierSets) || r.earlierSets.length > MAX_EARLIER_SETS) return bad("the earlier device sets");
   for (const set of r.earlierSets as Partial<EarlierDeviceSet>[]) {
     if (!set || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return bad("an earlier device set");
-    if (set.pending.length > MAX_DEVICES || (set.foreign !== undefined && set.foreign !== true)) return bad("an earlier device set");
+    if (set.pending.length > MAX_DEVICES || (set.foreign !== undefined && set.foreign !== true) || !optional(set.removed, bytes)) return bad("an earlier device set");
   }
   if (r.setNotice !== undefined) {
     const n = r.setNotice as Partial<SetNotice> | null;
