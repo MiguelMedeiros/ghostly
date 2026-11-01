@@ -59,6 +59,7 @@ import { TranslateMenu } from "../../components/ChatTranslate";
 import { TranslateDownloadFailure } from "../../components/TranslateDownloadFailure";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
+import { setChatLanguage } from "../../lib/chatLanguage";
 import { CueChat } from "../../lib/cues";
 import { loadSettings } from "../../lib/settings";
 import { forgetTranslations } from "../../lib/translateReceived";
@@ -240,6 +241,24 @@ describe("Settings and the models on this computer", () => {
       await user.click(within(again).getByTestId("translate-download-yes"));
       await waitFor(() => expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument());
       expect(desktop.downloaded).toEqual(new Set(["pt-en", "en-pt"]));
+    });
+
+    it("closed while it downloads: a chat's question for other languages still downloads them", async () => {
+      settings("pt", false);
+      setChatLanguage("s1", "es");
+      const { user } = renderApp(<><App /><Chat messages={[]} /></>, { route: "/settings/appearance" });
+      const end = await downloading(user);
+      await user.click(screen.getByTestId("translate-download-not-now"));
+
+      await user.click(screen.getByTestId("translate-on"));
+      const question = await screen.findByTestId("translate-download");
+      expect(within(question).getByTestId("translate-download-pair")).toHaveTextContent("Espanhol para português");
+      expect(within(question).queryByTestId("translate-download-goes-on")).not.toBeInTheDocument();
+      await user.click(within(question).getByTestId("translate-download-yes"));
+      await waitFor(() => expect(asked("translation_download")).toContainEqual({ pair: "es-en" }));
+      await end();
+      await waitFor(() => expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument());
+      expect(desktop.downloaded).toEqual(new Set(["pt-en", "en-pt", "es-en"]));
     });
 
     it("Settings left, then it fails: the question is there all the same", async () => {
