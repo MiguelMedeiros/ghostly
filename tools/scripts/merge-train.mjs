@@ -741,10 +741,19 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // requests aboard that change one leave the line, saying so, and the rest board without them. Else every run
       // failed here, and the whole line waited behind them.
       if (!WORKFLOW_PUSH_REFUSED.test(`${e?.message ?? e}`)) throw e;
+      // GitHub lists no files for a pull request of 3000 or more: those leave only when none aboard lists a workflow,
+      // naming the one GitHub refused (a push still refused without the others says one of them changes it).
       const changing = [];
+      const unlisted = [];
       for (const p of aboard) {
-        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
+        const files = await gh.pullFiles(p.number);
+        if (!files) unlisted.push(p);
+        const workflows = (files ?? []).filter((f) => f.startsWith(".github/workflows/"));
         if (workflows.length) changing.push([p, workflows]);
+      }
+      if (!changing.length) {
+        const refused = `${e?.message ?? e}`.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow";
+        for (const p of unlisted) changing.push([p, [refused]]);
       }
       if (!changing.length) throw e;
       for (const [p, workflows] of changing) {
@@ -1052,8 +1061,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (!pushed.ok && WORKFLOW_PUSH_REFUSED.test(pushed.message)) {
         // As for a batch's push: it leaves the line, saying so. Else every run rebased it and was refused again, and it
         // waited for good under a comment naming a commit GitHub never took. A diff that lists no workflow (commits
-        // that change one and change it back, which the rebase replays) names the one GitHub refused.
-        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
+        // that change one and change it back, which the rebase replays) or none at all (3000 files or more) names the one
+        // GitHub refused.
+        const workflows = ((await gh.pullFiles(p.number)) ?? []).filter((f) => f.startsWith(".github/workflows/"));
         if (!workflows.length) workflows.push(pushed.message.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow");
         say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
         done.dropped.push(p.number);
