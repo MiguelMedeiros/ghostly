@@ -865,14 +865,14 @@ function ManageHere({ groupId }: { groupId: string }) {
     <div role="status" data-testid="group-manage-off" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1">{t("devices.manage.off")}</span>
-        {!asking && <button ref={turnOn} type="button" data-testid="group-manage-open" onClick={() => ask(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
+        {!asking && <button ref={turnOn} type="button" data-testid="group-manage-open" onClick={() => ask(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer max-md:min-h-11 max-md:px-3">{t("devices.manage.turnOn")}</button>}
       </div>
       {asking && (
         <div className="flex flex-wrap items-center gap-2">
           <span data-testid="group-manage-warning" className="min-w-0 flex-1 text-danger-ink">{t("devices.manage.warning")}</span>
           <button type="button" data-testid="group-manage-confirm" {...working(busy)} onClick={confirm}
-            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40">{t("devices.manage.confirm")}</button>
-          <button ref={cancel} type="button" data-testid="group-manage-cancel" onClick={() => ask(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
+            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40 max-md:min-h-11 max-md:px-3">{t("devices.manage.confirm")}</button>
+          <button ref={cancel} type="button" data-testid="group-manage-cancel" onClick={() => ask(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer max-md:min-h-11 max-md:px-3">{t("common.cancel")}</button>
         </div>
       )}
       {problem && <Notice problem={problem} testId="group-manage-problem" className="text-xs" />}
