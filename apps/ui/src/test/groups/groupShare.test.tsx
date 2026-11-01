@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupShareDialog } from "../../components/GroupLinkPanel";
+import { LeaveGroupDialog } from "../../components/LeaveGroupDialog";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -80,6 +81,20 @@ describe("the group header's Share link", () => {
     await user.click(screen.getByTestId("group-share"));
     expect(await screen.findByTestId("group-notice")).toHaveTextContent("The group is full");
     expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
+  });
+});
+
+describe("a group's long one-word name", () => {
+  const name = "Donaudampfschifffahrtsgesellschaftskapitaenswitwenrentenkassen";
+
+  it("breaks onto the next line in the title of the share dialog", () => {
+    renderApp(<GroupShareDialog group={admin({ name, entryLink: LINK })} created onClose={() => {}} />);
+    expect(screen.getByRole("heading", { name: `${name} is ready` }).className).toContain("break-words");
+  });
+
+  it.each([false, true])("breaks onto the next line in the title of the leave dialog (forget: %s)", (forget) => {
+    renderApp(<LeaveGroupDialog group={admin({ name })} forget={forget} onClose={() => {}} onConfirm={async () => {}} />);
+    expect(within(screen.getByTestId("group-leave-dialog")).getByRole("heading").className).toContain("break-words");
   });
 });
 
