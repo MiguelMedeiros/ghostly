@@ -392,9 +392,10 @@ export interface EngineApi {
   groupMessages(params: { groupId: string }): StoredMessage[];
   /**
    * A page of a chat's or a group's (`group:<id>`) history, oldest first: the latest `limit` (50 by default) messages,
-   * or those before `before` (the id of a message in it, or a time). Reads that page only, however long the chat is.
+   * or those before `before` (the id of a message in it, or a time); with `after` (the same), the oldest `limit` after
+   * it. Reads that page only, however long the chat is.
    */
-  messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
+  messagePage(params: { linkId: string; limit?: number; before?: string | number; after?: string | number }): MessagePage;
   /**
    * The 1:1 chats among `linkIds` with a message whose text holds `query`, folded as the pages fold (`shared/fold.ts`):
    * the chat list's search over histories a page holds only the newest page of (the extension's), read in the engine.
