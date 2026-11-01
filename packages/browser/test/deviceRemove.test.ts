@@ -466,6 +466,20 @@ describe("New device secret", () => {
     // The phone, removed by the second move, is in no list.
     expect(pendingFrames(desktop.record).some((p) => p.key === slot(1).key)).toBe(false);
   });
+
+  it("a device off across two moves with a device added between them still takes the newest secret", async () => {
+    const { record } = await setOf(network, 3);
+    const desktop = memory(record(0, "active")), phone = memory(record(1, "standby"));
+    // The tablet goes; the laptop is added in its slot; then a new device secret. The phone was off all along.
+    await moveSet(ports(desktop, network), { remove: slot(2).key });
+    await desktop.amend("ghostly", { deviceSet: [slot(0), slot(1), slot(3), null] });
+    await moveSet(ports(desktop, network));
+    const oldest = pendingFrames(desktop.record).find((p) => p.key === slot(1).key && p.d === record(0, "active").d)!;
+    // Its tombstone never listed the laptop: the frame lists only the devices it keeps, and the phone takes it. The
+    // laptop is in the turn record the phone reads at the new address.
+    expect(await deliver(phone, oldest.frame)).toBe(true);
+    expect(phone.record).toMatchObject({ state: "standby", d: desktop.record.d, deviceSet: [slot(0), slot(1), null, null] });
+  });
 });
 
 describe("the tombstones' hourly put", () => {

@@ -106,8 +106,13 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
     // Its record at that older address stays what the first frame carried.
     let oldRec: Uint8Array | undefined;
     try { const was = JSON.parse(set.setUpdate) as { rec?: unknown }; if (typeof was.rec === "string") oldRec = fromBase64Url(was.rec); } catch { /* none */ }
+    // Only the devices its tombstone keeps, in their slots: a device added since is in none, and a frame that names it is
+    // refused (`setUpdate.ts`). The device learns of it from the turn record it reads at the new address.
+    const setKeys = turnKeys(fromBase64Url(set.d)), tombBytes = fromBase64Url(set.tombstone);
+    const oldTomb = readTurnPacket(setKeys, tombBytes);
+    const kept = oldTomb.kind === "valid" ? turnSlots.map((slot, i) => { const was = oldTomb.record.slots[i]; return slot && was && bytesEqual(was.key, slot.key) ? slot : null; }) : turnSlots;
     const setUpdate = pending.length
-      ? JSON.stringify(await setUpdateFrame(turnKeys(fromBase64Url(set.d)).address, { ...update, tomb: fromBase64Url(set.tombstone), ...(oldRec ? { rec: oldRec } : {}) }, signer))
+      ? JSON.stringify(await setUpdateFrame(setKeys.address, { ...update, set: kept, tomb: tombBytes, ...(oldRec ? { rec: oldRec } : {}) }, signer))
       : set.setUpdate;
     earlier.push({ ...set, pending, setUpdate });
   }
