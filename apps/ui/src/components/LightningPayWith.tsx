@@ -4,6 +4,7 @@ import type { WalletPlatform } from "../lib/platform";
 import { Select } from "./ui/Select";
 import { lightningPayers } from "./walletCardData";
 import { formatAmount } from "../lib/amount";
+import { unitFor } from "./NetworkTag";
 
 /**
  * Which Lightning card pays, on a network with several: the first eligible one (ready, and holding enough when it
@@ -26,7 +27,7 @@ export function LightningPayWith({ payer, unit, disabled, testId }: { payer: Ret
   return (
     <label className="block space-y-1 text-xs">{t("payments.payWith.label")}
       <Select size="sm" aria-label={t("payments.payWith.card")} data-testid={testId} value={payer.card} disabled={disabled} onChange={payer.choose}
-        options={payer.cards.map((c) => ({ value: c.card, label: c.name, description: c.balance !== undefined ? `${formatAmount(c.balance, t.language)} ${unit}` : undefined }))} />
+        options={payer.cards.map((c) => ({ value: c.card, label: c.name, description: c.balance !== undefined ? `${formatAmount(c.balance, t.language)} ${unitFor(t, unit, c.balance)}` : undefined }))} />
     </label>
   );
 }

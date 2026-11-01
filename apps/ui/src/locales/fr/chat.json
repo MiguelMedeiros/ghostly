@@ -312,8 +312,10 @@
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Argent réel",
     "sats": "{{amount}} sats",
+    "sats_one": "{{amount}} sat",
     "testMoney": "Argent de test",
     "testSats": "{{amount}} sats de test",
+    "testSats_one": "{{amount}} sat de test",
     "usdtAddress": "Adresse USDT",
     "video": "🎬 Vidéo ({{duration}})",
     "voice": "🎤 Message vocal ({{duration}})"

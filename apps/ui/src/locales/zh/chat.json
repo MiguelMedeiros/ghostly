@@ -312,8 +312,10 @@
     "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "真实资金",
     "sats": "{{amount}} sats",
+    "sats_one": "{{amount}} sat",
     "testMoney": "测试资金",
     "testSats": "{{amount}} 测试 sats",
+    "testSats_one": "{{amount}} 测试 sat",
     "usdtAddress": "USDT 地址",
     "video": "🎬 视频 ({{duration}})",
     "voice": "🎤 语音消息 ({{duration}})"

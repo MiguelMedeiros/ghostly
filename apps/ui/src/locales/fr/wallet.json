@@ -229,6 +229,7 @@
     "setAsideInfo": "Mis de côté pour un paiement que le mint n'a pas encore confirmé. Ils partent avec le paiement ou reviennent dans votre solde dès que le mint répond.",
     "settings": "Réglages",
     "testBalance": "{{amount}} sats de test (sans valeur)",
+    "testBalance_one": "{{amount}} sat de test (sans valeur)",
     "testMintInvoice": "En attente du paiement… Les mints de test marquent chaque facture payée d’eux-mêmes, donc celle-ci ne compte que lorsqu’un contact la paie dans un chat. Pour des sats de test tout de suite, utilisez Obtenir des pièces de test plus haut.",
     "tokenHint": "Vous avez plutôt un jeton ecash ? Collez-le sous Envoyer.",
     "tx": {
@@ -250,6 +251,7 @@
     "alreadyRedeemed": "Déjà encaissé par quelqu'un.",
     "amountFee": "{{amount}} (frais {{fee}})",
     "asNotes": "{{amount}} sats en notes",
+    "asNotes_one": "{{amount}} sat en note",
     "asking": "Interrogation de ses gardiens…",
     "backup": "Sauvegarde du portefeuille",
     "backupHint": "La phrase et les fédérations ; la sauvegarde du profil contient tout",
@@ -587,7 +589,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "sats de test"
+    "mainnet_one": "sat",
+    "testnet": "sats de test",
+    "testnet_one": "sat de test"
   },
   "send": {
     "balance": "Solde : {{amount}} {{unit}}",
@@ -639,6 +643,7 @@
     "experimental": "Expérimental",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "Rejoignez d'abord une fédération avec une passerelle Lightning sur la carte Fedimint.",
       "label": "Fédération",
       "unknownNetwork": "réseau inconnu",

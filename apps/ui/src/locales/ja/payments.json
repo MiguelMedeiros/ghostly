@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "支払いを承認",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin オンチェーン",
