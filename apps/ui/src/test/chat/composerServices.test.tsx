@@ -171,3 +171,34 @@ describe("the chat's apps strip", () => {
     expect(open.getAttribute("title")).toContain(name);
   });
 });
+
+describe("Open on a contact's app that refuses", () => {
+  const openService = fakeEngine.openService;
+  // The web's refusal while a call is on screen; on Desktop, a window that cannot open.
+  const refuse = () => { fakeEngine.openService = async () => { throw new Error("A call is on. End it to open Demo."); }; };
+  afterEach(() => { fakeEngine.openService = openService; });
+
+  it("the chat's Services dialog says why under the app's row, announced, and a new press clears it", async () => {
+    localApps(true);
+    refuse();
+    const view = renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />);
+    act(() => view.engine.update({ links: [live({ peerServices: [{ id: "demo", type: "http", name: "Demo" }, { id: "wiki", type: "http", name: "Wiki" }] })] }));
+    const [demo, wiki] = screen.getAllByTestId("chat-service-from");
+    await view.user.click(within(demo!).getByTestId("chat-service-open"));
+    expect(await within(demo!).findByRole("alert")).toHaveTextContent("A call is on. End it to open Demo.");
+    expect(within(wiki!).queryByRole("alert")).not.toBeInTheDocument();
+
+    fakeEngine.openService = openService;
+    await view.user.click(within(demo!).getByTestId("chat-service-open"));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("the chat's apps strip announces its line", async () => {
+    refuse();
+    localApps(true);
+    const view = renderApp(<PeerServices peerPubKey="peer" onManage={() => {}} />);
+    act(() => view.engine.update({ links: [live({ peerServices: [{ id: "demo", type: "http", name: "Demo" }] })] }));
+    await view.user.click(await screen.findByTestId("open-service"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A call is on. End it to open Demo.");
+  });
+});

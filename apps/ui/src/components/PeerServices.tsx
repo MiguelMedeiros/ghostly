@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { problemLine } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 /**
  * The chat's apps strip: what this contact lets you open, and how many of your apps you let them
@@ -48,7 +49,7 @@ export function PeerServices({ peerPubKey, showLink = true, onManage }: { peerPu
         title={t("chat.services.manageHint")}>
         {granted.length === 1 ? t("chat.services.sharingOne") : granted.length > 0 ? t("chat.services.sharingMany", { count: granted.length }) : t("chat.services.shareOne")} · {t("chat.services.manage")}
       </button>
-      {error && <span className="text-danger text-xs shrink-0 w-full">{error}</span>}
+      {error && <Notice tone="error" className="text-xs shrink-0 w-full">{error}</Notice>}
     </div>
   );
 }
