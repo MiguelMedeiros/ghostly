@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode, type Ref } from "react";
 import { automaticTransport, type PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportIcon } from "./TransportIcon";
@@ -17,11 +17,15 @@ export type ConnectionChoice = PairedTransport | "auto" | "dht";
  * app or the contact's lacks is listed, off, with the reason in its tooltip (and under its name on a phone). Choosing a transport moves the live
  * session without reconnecting, and one that cannot connect yet is waited for (WISP 100); choosing one while on DHT
  * only leaves it. The choice is kept for the next reconnect. `onChoose` is only asked for a change.
+ *
+ * `dhtBlocked`: why DHT only cannot be chosen now (a call on in the chat: its hang-up crosses the live link DHT only
+ * closes). The option is off and says so on screen, at every width.
  */
-export function TransportOptions({ link, disabled = false, onChoose }: {
-  link: LinkView; disabled?: boolean; onChoose(choice: ConnectionChoice): void;
+export function TransportOptions({ link, disabled = false, dhtBlocked, onChoose }: {
+  link: LinkView; disabled?: boolean; dhtBlocked?: string; onChoose(choice: ConnectionChoice): void;
 }) {
   const { t } = useI18n();
+  const dhtRow = useRef<HTMLButtonElement>(null), dhtFocused = useRef(false);
   const options = transportOptions(link, t);
   const own = ownTransports(link), local = options.filter(o => own.includes(o.transport));
   // One transport in this app (web, the extension): nothing to choose between, only to know why.
@@ -29,6 +33,15 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
   const dht = link.deliveryMode === "dht";
   const current = liveTransport(link), automatic = link.transportAutomatic ?? link.preferredTransport === undefined;
   const peerDht = link.dhtDelivery?.peerMode === "dht";
+  const dhtOff = !dht ? dhtBlocked : undefined;
+  // DHT only turned off under the focus (a call rang in meanwhile): a browser drops the focus to the page, and Tab
+  // and Escape leave the panel. It goes to the group's Tab stop instead.
+  useLayoutEffect(() => {
+    if (!dhtOff || !dhtFocused.current) return;
+    dhtFocused.current = false;
+    const active = document.activeElement;
+    if (active === dhtRow.current || !active || active === document.body) dhtRow.current?.parentElement?.querySelector<HTMLElement>('[role="radio"][tabindex="0"]')?.focus({ preventScroll: true });
+  }, [dhtOff]);
   // An app with no WebRTC (Linux Desktop) puts its first native transport first.
   const automaticHint = own.includes("webrtc/1") ? t("connection.option.automaticHint")
     : t("connection.option.automaticHintNative", { transport: transportName(automaticTransport(own)) });
@@ -43,7 +56,7 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
   const rows = [
     ...(single ? [] : [{ checked: automatic && !dht, disabled }]),
     ...options.map(o => ({ checked: !dht && (single ? o.available : !automatic && link.preferredTransport === o.transport), disabled: disabled || !o.available })),
-    { checked: dht, disabled },
+    { checked: dht, disabled: disabled || !!dhtOff },
   ];
   const stop = radioTabStop(rows), offset = single ? 0 : 1;
   const tabIndex = (row: number) => (row === stop ? 0 : -1);
@@ -62,27 +75,31 @@ export function TransportOptions({ link, disabled = false, onChoose }: {
           off={!o.available ? o.reason : undefined} hint={!o.available ? o.reason : inUse ? using : waiting ? t("connection.option.chosenWaiting") : !automatic && link.preferredTransport === o.transport ? t("connection.option.chosenNotInUse") : o.relayed ? t("connection.option.throughRelay") : undefined}
           onClick={() => choose(o.transport)} label={transportName(o.transport)} />;
       })}
-      <Option testId="connection-option-dht" {...rows[rows.length - 1]} tabIndex={tabIndex(rows.length - 1)} onClick={() => choose("dht")} label={t("connection.dhtOnly")}
+      <Option ref={dhtRow} testId="connection-option-dht" {...rows[rows.length - 1]} tabIndex={tabIndex(rows.length - 1)} onClick={() => choose("dht")} label={t("connection.dhtOnly")}
+        onFocus={() => { dhtFocused.current = true; }} onBlur={() => { if (!dhtRow.current?.disabled) dhtFocused.current = false; }}
         icon={<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="m3 7 9-4 9 4-9 4Z" /><path d="m3 12 9 4 9-4M3 17l9 4 9-4" /></svg>}
-        hint={peerDht && !dht ? t("connection.option.dhtContactChose") : dht ? t("connection.option.dhtOn") : t("connection.option.dhtOff")} />
+        off={dhtOff} offShown={!!dhtOff}
+        hint={dhtOff ?? (peerDht && !dht ? t("connection.option.dhtContactChose") : dht ? t("connection.option.dhtOn") : t("connection.option.dhtOff"))} />
     </div>
   );
 }
 
-function Option({ label, hint, off, mark, icon, checked, inUse = false, disabled, tabIndex, onClick, testId }: {
-  label: string; hint?: string; off?: string; mark?: string; icon: ReactNode; checked: boolean; inUse?: boolean; disabled: boolean; tabIndex: number; onClick(): void; testId: string;
+function Option({ ref, label, hint, off, offShown = false, mark, icon, checked, inUse = false, disabled, tabIndex, onClick, onFocus, onBlur, testId }: {
+  ref?: Ref<HTMLButtonElement>; label: string; hint?: string; off?: string; offShown?: boolean; mark?: string; icon: ReactNode; checked: boolean; inUse?: boolean; disabled: boolean; tabIndex: number;
+  onClick(): void; onFocus?(): void; onBlur?(): void; testId: string;
 }) {
   return (
     // One line: the radio is what is chosen; the mark ("In use · 42 ms") is what carries the chat now, which may be
     // another row. The longer word on a row (why it is off, what it does) is its tooltip and accessible description;
-    // on a narrow screen, with no hover to show a tooltip, why an option is off is a second line too.
-    <button type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} tabIndex={tabIndex} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick}
+    // on a narrow screen, with no hover to show a tooltip, why an option is off is a second line too (`offShown`: at
+    // every width, for a reason that passes, as a call does).
+    <button ref={ref} type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} tabIndex={tabIndex} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick} onFocus={onFocus} onBlur={onBlur}
       title={hint ? `${label}: ${hint}` : undefined}
       className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-start text-xs transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover ${focus} disabled:cursor-default max-md:min-h-11 ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
       <span aria-hidden="true" className={`flex shrink-0 ${checked ? "text-accent" : ""}`}>{icon}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{label}</span>
-        {off && <span aria-hidden="true" className="text-[11px] text-text-muted md:hidden">{off}</span>}
+        {off && <span aria-hidden="true" className={`text-[11px] text-text-muted ${offShown ? "" : "md:hidden"}`}>{off}</span>}
       </span>
       {mark && <span className={`flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] ${inUse ? "text-accent" : "text-text-muted"}`}>
         {inUse && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent" />}{mark}

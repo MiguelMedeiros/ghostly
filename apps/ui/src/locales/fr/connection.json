@@ -123,6 +123,7 @@
     "chosenNotInUse": "Choisi · non utilisé",
     "chosenWaiting": "Choisi · en attente",
     "contactLacks": "L'app de votre contact ne prend pas en charge {{transport}}",
+    "dhtCallOn": "Raccrochez pour passer en DHT seule",
     "dhtContactChose": "Votre contact l'a choisi · pas de liaison directe tant que vous n'en sortez pas tous les deux",
     "dhtOff": "Textes courts via la DHT, même hors ligne",
     "dhtOn": "Textes courts via la DHT, sans liaison directe · choisissez-en un autre pour en sortir",
