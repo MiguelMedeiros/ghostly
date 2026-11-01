@@ -338,7 +338,7 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
 
 /** A key in full, copied by a click, as the chat's Tech Info has it. */
 function KeyRow({ label, value, testId }: { label: string; value: string; testId: string }) {
-  const { copied, copy } = useCopyKey(value);
+  const { copied, failed, copy } = useCopyKey(value);
   const { t } = useI18n();
   return (
     <div className="grid grid-cols-[5.5rem_1fr] gap-x-3">
@@ -346,7 +346,7 @@ function KeyRow({ label, value, testId }: { label: string; value: string; testId
       <dd className="min-w-0">
         <button type="button" data-testid={testId} onClick={copy} title={t("chat.message.copyHint")} aria-label={t("connection.panel.copyKey", { label, value })}
           className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent max-md:min-h-6 ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
-          {copied ? t("common.copied") : value}
+          {copied ? t("common.copied") : failed ? t("common.notCopied") : value}
         </button>
       </dd>
     </div>

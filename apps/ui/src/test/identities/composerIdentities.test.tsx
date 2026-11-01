@@ -404,6 +404,25 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(use()).toBeEnabled();
     });
 
+    it("says a refused copy of the key, and never Copied, with the key left to select", async () => {
+      const { user } = open({ settings: { nick: "Ghost" }, links: [withKey()], identityProofs: [proofView({ id: "a" })] });
+      await user.click(ghostly());
+      await waitFor(() => expect(screen.getByTestId("composer-identity-copy-key")).toHaveFocus());
+      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("Denied", "NotAllowedError"));
+      const exec = vi.fn(() => false);
+      Object.defineProperty(document, "execCommand", { value: exec, configurable: true });
+      try {
+        await user.click(screen.getByTestId("composer-identity-copy-key"));
+        expect(await screen.findByTestId("composer-identity-copy-error")).toHaveTextContent("Could not copy. Select the text above and copy it yourself.");
+        expect(screen.getByTestId("composer-identity-copy-error")).toHaveAttribute("role", "alert");
+        expect(screen.getByTestId("composer-identity-copy-key")).toHaveTextContent("Copy key");
+        expect(within(back()).getByTestId("composer-identity-key")).toHaveTextContent(KEY);
+      } finally {
+        writeText.mockRestore();
+        delete (document as { execCommand?: unknown }).execCommand;
+      }
+    });
+
     it("is never blocked, even before the contact's app is known", () => {
       open({ links: [linkView({ myPubKeyZ32: KEY })], identityProofs: [] });
       expect(ghostly()).not.toHaveAttribute("aria-disabled");
