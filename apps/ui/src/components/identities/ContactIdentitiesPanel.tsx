@@ -200,7 +200,10 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <ProviderMark provider={r.provider} subject={card.bound} />
           <span className="id-card-back-who">
             <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
-            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
+            {/* A domain whole, wrapped: its end names who owns it, and the face shows only that end. */}
+            {r.provider === "domain"
+              ? <span className="id-card-back-subject id-card-back-subject-whole" data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.subject}</bdi></span>
+              : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
             {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}

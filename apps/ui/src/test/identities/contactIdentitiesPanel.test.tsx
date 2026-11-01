@@ -81,6 +81,22 @@ describe("ContactIdentitiesPanel", () => {
       ]);
     });
 
+    it("shows a long domain by its end, the part that names who owns it, and the whole of it on the back", async () => {
+      // Any owner of a domain can prove github.com.<anything>.theirs: its start was all the card showed.
+      const name = "github.com.account-security-verification-and-login-session-check.e2e-jq01xlo0.ghostly.tools";
+      const { user } = open(withReceived([receivedView({ id: "r1", provider: "domain", subject: name, verified: { subject: name, source: `DNS TXT record for ${name}` } })]));
+      const face = theirs()[0]!.querySelector<HTMLElement>("[data-deck=face]")!;
+      const subject = within(face).getByTestId("identity-proof-subject");
+      expect(subject).toHaveTextContent(/^…ghostly\.tools$/);
+      expect(subject).not.toHaveTextContent("github.com");
+      // In its own direction, also in the Arabic app: the dots stay where they are.
+      expect(subject.querySelector("bdi")).toHaveAttribute("dir", "ltr");
+      const card = await turnOver(user, 0);
+      const whole = within(card).getByTestId("chat-identity-received-subject");
+      expect(whole).toHaveTextContent(name);
+      expect(whole).toHaveClass("id-card-back-subject-whole");
+    });
+
     it("turns a card over to how it was checked, and back", async () => {
       const { user } = open(withReceived([receivedView({ id: "r1", status: "unconfirmed", error: "DNS lookup failed" })]));
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
