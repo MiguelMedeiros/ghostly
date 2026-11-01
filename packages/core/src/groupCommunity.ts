@@ -1945,8 +1945,9 @@ export class CommunitySession {
     const metas = this.metaFor(from, frame.mt);
     // The group's state said once (the admin's pin) and since rolled out of the store: before the store's frames, as
     // older than all of them, under the same checks (agents#1095).
-    const inStore = new Set(this.state.store.map(frameKey));
-    const lasting = Object.values(this.state.lasting ?? {}).filter(f => !inStore.has(frameKey(f))).sort((a, b) => a.ts - b.ts);
+    // By author too (`storeKey`): another member's frame of the same number is not this one.
+    const inStore = new Set(this.state.store.map(storeKey));
+    const lasting = Object.values(this.state.lasting ?? {}).filter(f => !inStore.has(storeKey(f))).sort((a, b) => a.ts - b.ts);
     for (const stored of [...lasting, ...this.state.store]) {
       if (stored.s === from) continue;
       // What they have first: the checks below hash commits for every stored frame, and a member up to date has them
