@@ -19,8 +19,11 @@ let starting: Promise<void> | null = null;
  * events: the document, and the profile registry the document reads, are the state.
  */
 function ensureEngine(): Promise<void> {
-  starting ??= startEngine().finally(() => (starting = null));
-  return starting;
+  if (starting) return starting;
+  // Forgotten only if it is still the one in progress: a restart asked meanwhile took its place (`restartEngine`).
+  const tracked: Promise<void> = startEngine().finally(() => { if (starting === tracked) starting = null; });
+  starting = tracked;
+  return tracked;
 }
 
 async function startEngine(): Promise<void> {
@@ -44,6 +47,8 @@ function restartEngine(): Promise<void> {
   const previous = starting ?? Promise.resolve();
   const next = previous.catch(() => {}).then(replaceEngine);
   const tracked: Promise<void> = next.finally(() => { if (starting === tracked) starting = null; });
+  // The caller hears of a failure through `next`; this copy may have nobody else waiting on it.
+  tracked.catch(() => {});
   starting = tracked;
   return next;
 }
