@@ -257,6 +257,13 @@ describe("a contact's app shown over the app", () => {
     expect(sandbox.filter((flag) => flag.startsWith("allow-popups") || flag.startsWith("allow-top-navigation"))).toEqual([]);
   });
 
+  it("keeps the view's bar on screen, and draws no dialog of the browser's over it: no full screen, no alert or prompt", async () => {
+    await open("one");
+    const frame = document.querySelector("[data-testid=service-view-frame]")!;
+    expect(frame.getAttribute("allow")!.split(";").map((feature) => feature.trim())).toEqual(["clipboard-write"]);
+    expect(frame.getAttribute("sandbox")!.split(" ")).not.toContain("allow-modals");
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     setServiceWindowsCloser(closeServiceView);
     await open("one");
