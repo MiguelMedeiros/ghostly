@@ -373,6 +373,10 @@ describe("app URLs, paths and licences", () => {
       expect(isAppUrl(`https://cdn.jsdelivr.net/gh/o/r@${ref}/app.ghostlyapp`), ref).toBe(false);
     }
     expect(isAppUrl("https://cdn.jsdelivr.net/gh/o/r/app.ghostlyapp")).toBe(false);
+    for (const host of ["cdn.jsdelivr.net.", "CDN.jsdelivr.net.", "cdn.jsdelivr.net..", "fastly.jsdelivr.net.", "cdn.jsdelivr.net%2E"]) {
+      expect(isAppUrl(`https://${host}/gh/o/r@main/app.ghostlyapp`), host).toBe(false);
+    }
+    expect(isAppUrl(`https://cdn.jsdelivr.net./gh/o/r@${"a".repeat(40)}/app.ghostlyapp`)).toBe(true);
     expect(isAppUrl(`https://fastly.jsdelivr.net/gh/o/r@${"a".repeat(40)}/app.ghostlyapp`)).toBe(false);
     expect(isAppUrl(`https://cdn.jsdelivr.net/npm/chess@${"a".repeat(40)}/app.ghostlyapp`)).toBe(false);
     expect(isAppUrl("http://example.org/")).toBe(false);
