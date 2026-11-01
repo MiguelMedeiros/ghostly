@@ -75,6 +75,28 @@ for (const [path, group, count] of [
     await expect(radios.nth(0)).toBeFocused();
     await expect(radios.nth(0)).toHaveAttribute("aria-checked", "true");
   });
+
+  test(`${path}: the map's ${group.toLowerCase()} leave the browser's own chords alone, as native radios do`, async ({ page }) => {
+    await page.goto(path, { waitUntil: "networkidle" });
+    await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 45_000 });
+    const radios = page.locator(".bgrid-controls [role=radiogroup]").getByRole("radio");
+    await page.evaluate(() => {
+      const w = window as Window & { held?: string[] };
+      w.held = [];
+      window.addEventListener("keydown", (e) => {
+        if (e.defaultPrevented) w.held!.push(e.key);
+      });
+    });
+
+    await radios.nth(0).focus();
+    // Alt+Left and Alt+Right are the browser's Back and Forward, Ctrl+Home and Ctrl+End scroll the page.
+    for (const chord of ["Alt+ArrowRight", "Alt+ArrowDown", "Control+End", "Meta+ArrowRight"]) {
+      await page.keyboard.press(chord);
+      await expect(radios.nth(0), chord).toHaveAttribute("aria-checked", "true");
+      await expect(radios.nth(0), chord).toBeFocused();
+    }
+    expect(await page.evaluate(() => (window as Window & { held?: string[] }).held), "keys the picker swallowed").toEqual([]);
+  });
 }
 
 test("/roadmap: axe finds nothing serious, wide or on a phone", async ({ page }) => {
