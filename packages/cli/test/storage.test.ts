@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1102,6 +1102,78 @@ describe("messages kept in rows.db", () => {
     await store.close();
     expect(await entryCount(dir)).toBe(8);
     for (const name of readdirSync(dir)) expect(readFileSync(join(dir, name)).includes("deleted-secret"), name).toBe(false);
+  });
+
+  it("a deleted chat and its messages leave the journal once the snapshot is an hour old, at a start, a write or a close", async () => {
+    const chats = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("links", { keyPath: "id" });
+        request.result.createObjectStore("messages", { keyPath: ["linkId", "id"] }).createIndex("byLink", "linkId");
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const held = (dir: string) => readdirSync(dir).filter((name) => { const bytes = readFileSync(join(dir, name)); return bytes.includes("gone-seed") || bytes.includes("gone-text"); });
+    const age = (dir: string) => { const then = (Date.now() - 2 * 60 * 60_000) / 1000; utimesSync(join(dir, "snapshot.bin"), then, then); };
+    /** A profile whose chat (its seed in the row) and message were written, then deleted, and the store closed. */
+    const removed = async () => {
+      const dir = folder();
+      const store = await openPersistentIndexedDb(dir);
+      const d = await chats(store.factory);
+      await store.compact();
+      await tx(d, ["links", "messages"], (s) => { s.links.put({ id: "chat-1", seed: "gone-seed" }); s.messages.put({ linkId: "chat-1", id: "m1", text: "gone-text" }); });
+      await tx(d, ["links", "messages"], (s) => { s.links.delete("chat-1"); s.messages.delete(IDBKeyRange.bound(["chat-1"], ["chat-1", []])); });
+      d.close();
+      await store.close();
+      return dir;
+    };
+
+    // A snapshot younger than an hour: the short journal is kept, as it is for any write.
+    const fresh = await removed();
+    expect(held(fresh)).toEqual(["journal.bin"]);
+    const kept = await openPersistentIndexedDb(fresh);
+    opened.push(kept);
+    expect(held(fresh)).toEqual(["journal.bin"]);
+
+    // At a start.
+    const start = await removed();
+    age(start);
+    const started = await openPersistentIndexedDb(start);
+    opened.push(started);
+    expect(held(start)).toEqual([]);
+    expect(await read((await chats(started.factory)).transaction("links").objectStore("links").count())).toBe(0);
+
+    // At the next write, while the store is in use: what came before the delete goes with it.
+    const write = await removed();
+    const running = await openPersistentIndexedDb(write);
+    opened.push(running);
+    age(write);
+    await tx(await chats(running.factory), ["settings"], (s) => { s.settings.put(1, "k"); });
+    await running.flush();
+    expect(held(write)).toEqual([]);
+
+    // At a close.
+    const close = await removed();
+    const closing = await openPersistentIndexedDb(close);
+    age(close);
+    await closing.close();
+    expect(held(close)).toEqual([]);
+
+    // A journal with no delete of a chat or a message is kept however old the snapshot: a fold costs a large profile a second.
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const d = await chats(store.factory);
+    await store.compact();
+    await tx(d, ["links", "settings"], (s) => { s.links.put({ id: "chat-2", seed: "kept" }); s.settings.put(1, "k"); s.settings.delete("k"); });
+    d.close();
+    await store.close();
+    age(dir);
+    const snapshot = statSync(join(dir, "snapshot.bin")).mtimeMs;
+    opened.push(await openPersistentIndexedDb(dir));
+    expect(statSync(join(dir, "snapshot.bin")).mtimeMs).toBe(snapshot);
+    expect(readFileSync(join(dir, "journal.bin")).includes("kept")).toBe(true);
   });
 
   it("an index added by an upgrade to a store that holds messages is built in rows.db, and kept across a restart", async () => {
