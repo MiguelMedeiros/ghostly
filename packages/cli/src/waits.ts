@@ -53,6 +53,19 @@ export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messag
 export const ONE_SHOT_RECEIPT_MS = 2_000;
 
 /**
+ * Waits until the contact confirmed my reaction or pin in a 1:1 chat (WISP 401): until `pending` no longer finds it in
+ * what the contact has not confirmed (`chatUnconfirmed`). It goes on the live session, a reaction also on the DHT
+ * envelopes; one not confirmed in time is kept and said again.
+ */
+export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx)}`, { chat });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/**
  * Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). A
  * one-shot's text sent over the live link waits a moment more for its receipt (`ONE_SHOT_RECEIPT_MS`).
  */
