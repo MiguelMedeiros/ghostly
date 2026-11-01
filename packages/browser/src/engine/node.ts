@@ -3643,6 +3643,15 @@ export class GhostlyNode implements EngineImplementation {
       const row = rowId === message.id ? undefined : await db.getMessage(message.linkId, rowId);
       if (row && replyRef(row, group) === reply.id) { original = row; break; }
     }
+    // Deleted for everyone (mine, the contact's or a member's): as the sweep leaves a reply already here, "Original
+    // message deleted". A group's message goes by its own id. A chat's keeps its row's id when its reference names it
+    // (`peer_`/`me_`), else the reference, which names no row here either (a file of mine, kept by its time).
+    if (!original && group && this.groups.isRemoved(message.linkId.slice("group:".length), reply.id)) return { ...message, replyTo: { ...reply, snippet: "", messageId: reply.id } };
+    const live = group ? undefined : this.links.get(message.linkId)?.stored;
+    if (!original && live?.removedRefs?.includes(reply.id)) {
+      const row = [`peer_${reply.id}`, `me_${reply.id}`].find(id => live.deletedIds?.includes(id));
+      return { ...message, replyTo: { ...reply, snippet: "", messageId: row ?? reply.id, from: reply.from ?? (row?.startsWith("peer_") ? "peer" : "me") } };
+    }
     if (!original && !group) {
       history = await db.getMessages(message.linkId);
       original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
