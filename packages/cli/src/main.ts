@@ -678,7 +678,9 @@ async function daemonCommand(argv: string[]): Promise<void> {
     // profile (`stopDaemon`), as the stop asked. One of this release that greets late is busy: the stop's deadline waits.
     const client = await connectDaemon(g.paths);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
-    print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
+    const { pid, listen } = await stopDaemon(g, client, stopFor);
+    if (listen) process.stderr.write(listenEnded(pid));
+    print({ stopped: true, pid, ...(listen && { listen: true }) });
     return;
   }
   if (sub === "restart") {
@@ -689,7 +691,10 @@ async function daemonCommand(argv: string[]): Promise<void> {
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
     const probe = client ? client.call("status").catch(() => null) as Promise<{ version?: string } | null> : null;
-    const stopped = client ? await stopDaemon(g, client, stopFor) : null;
+    const ended = client ? await stopDaemon(g, client, stopFor) : null;
+    const stopped = ended?.pid ?? null;
+    // A listen that ran the profile ended with it: the daemon started below has no reader until one listens again.
+    if (ended?.listen) process.stderr.write(listenEnded(ended.pid));
     const before = (await probe)?.version ?? null;
     let started: Awaited<ReturnType<typeof startDetached>>;
     try { started = await startDetached(g, startFor); }
@@ -700,7 +705,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     }
     const older = restartWarning(before, VERSION);
     if (older) process.stderr.write(older + "\n");
-    print({ restarted: true, stopped, before, version: VERSION, ...started });
+    print({ restarted: true, stopped, ...(ended?.listen && { listen: true }), before, version: VERSION, ...started });
     return;
   }
   if (sub) throw unknownCommand("daemon", sub);
@@ -724,9 +729,9 @@ function seconds(parsed: Parsed, fallback: number): number {
  * as the timeout error promises. The pid is the profile lock's holder, which a daemon writes itself. On Windows
  * `process.kill` with either name is TerminateProcess: the first signal ends it, there is no second.
  */
-async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Promise<number> {
-  let pid: number, answered = true;
-  try { ({ pid } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number }); }
+async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Promise<{ pid: number; listen: boolean }> {
+  let pid: number, answered = true, listen = false;
+  try { ({ pid, listen = false } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number; listen?: boolean }); }
   catch (error) {
     // What answers on the socket and does not prove it is the profile's daemon is told nothing: a daemon of an older
     // release (it cannot prove it) is stopped as the process that holds the profile's lock, which only this user
@@ -753,14 +758,19 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
     }
     return !running();
   };
-  if (await gone()) return pid;
+  if (await gone()) return { pid, listen };
   // A wedged event loop runs no SIGTERM handler either.
   if (!answered) {
     process.stderr.write(`ghostly: the daemon (process ${pid}) did not stop on SIGTERM in ${seconds} s: killing it\n`);
     signal(pid, "SIGKILL");
-    if (await gone()) return pid;
+    if (await gone()) return { pid, listen };
   }
   throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`, { pid });
+}
+
+/** What `daemon stop` and `restart` say of a daemon that was a `listen` running the profile: that listen is over. */
+function listenEnded(pid: number): string {
+  return `ghostly: the daemon (process ${pid}) was a ghostly listen running the profile: it ended with it. Start ghostly daemon --detach, then listen through it, so that a restart does not end the listen\n`;
 }
 
 /** Throws busy, with its pid, when a process other than `except` holds the profile. */
@@ -954,7 +964,15 @@ async function listenCommand(argv: string[]): Promise<void> {
     setTimeout(() => process.exit(code), 20_000).unref();
     void served.close().then(() => host.close()).finally(() => process.exit(code));
   };
-  host.ctx.stop = stop;
+  // Asked to stop over the socket (`daemon stop`, `daemon restart`, the profile cleared): the events stop with it, so
+  // the listen says so and fails. An exit 0 read as "done": a service manager restarted nothing, and no line said why.
+  host.ctx.listen = true;
+  host.ctx.stop = () => {
+    const message = `This listen ran profile ${g.profile} as its daemon, and was stopped over the socket (ghostly daemon stop or restart, or the profile was cleared)`;
+    process.stderr.write(`ghostly: ${message}. Start ghostly daemon --detach first, then listen through it: a restart then does not end the listen\n`);
+    print({ error: new CliError("unavailable", message).toJSON() });
+    quit(EXIT.unavailable);
+  };
   onStopSignals(stop);
   onReaderGone(stop);
   // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
