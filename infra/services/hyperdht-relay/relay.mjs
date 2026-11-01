@@ -325,10 +325,13 @@ export async function startRelay(options = {}) {
       else if (request.headers['x-forwarded-for'] !== undefined) hint('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
     }
     const origin = request.headers.origin
+    // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
+    // would make the write fail with an error nobody catches, and that ends the relay for every other client.
     const refuse = (status, why) => {
       stats.refused++
       // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
       if (why) log('refused', why)
+      socket.on('error', () => {})
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
