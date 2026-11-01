@@ -75,6 +75,7 @@
     "ecashAlreadySpent": "Este ecash já foi gasto em outro lugar",
     "ecashBeingReceived": "Este ecash já está sendo recebido",
     "ecashFeeTakesAll": "A mint fica com todos os {{amount}} sats deste ecash como taxa para recebê-lo: nada foi resgatado, e quem enviou ainda pode pegá-lo de volta",
+    "ecashFeeTakesAll_one": "A mint fica com o {{amount}} sat deste ecash como taxa para recebê-lo: nada foi resgatado, e quem enviou ainda pode pegá-lo de volta",
     "ecashOtherUnit": "Este ecash está em {{unit}}: aqui só dá para resgatar ecash em sat",
     "fedimintAlreadyJoined": "Você já entrou nesta federação",
     "fedimintConnecting": "Espere a federação se conectar",

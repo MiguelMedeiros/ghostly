@@ -75,6 +75,7 @@
     "ecashAlreadySpent": "هذا الـ ecash أُنفق من قبل في مكان آخر",
     "ecashBeingReceived": "هذا الـ ecash قيد الاستلام بالفعل",
     "ecashFeeTakesAll": "تحتفظ الـ mint بكل الـ {{amount}} sats من هذا الـ ecash رسمًا لاستلامه: لم يُسترد شيء، ولا يزال بإمكان مُرسله استعادته",
+    "ecashFeeTakesAll_one": "تحتفظ الـ mint بالـ {{amount}} sat من هذا الـ ecash رسمًا لاستلامه: لم يُسترد شيء، ولا يزال بإمكان مُرسله استعادته",
     "ecashOtherUnit": "هذا الـ ecash بوحدة {{unit}}: لا يمكن هنا استرداد إلا ecash بوحدة sat",
     "fedimintAlreadyJoined": "لقد انضممت إلى هذا الاتحاد من قبل",
     "fedimintConnecting": "انتظر حتى يتصل الاتحاد",

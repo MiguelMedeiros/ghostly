@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "الموافقة على الدفع",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin على السلسلة",

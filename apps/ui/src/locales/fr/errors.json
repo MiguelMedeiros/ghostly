@@ -75,6 +75,7 @@
     "ecashAlreadySpent": "Cet ecash a déjà été dépensé ailleurs",
     "ecashBeingReceived": "Cet ecash est déjà en cours de réception",
     "ecashFeeTakesAll": "La mint garde les {{amount}} sats de cet ecash comme frais pour l’encaisser : rien n’a été encaissé, et son expéditeur peut encore le reprendre",
+    "ecashFeeTakesAll_one": "La mint garde le {{amount}} sat de cet ecash comme frais pour l’encaisser : rien n’a été encaissé, et son expéditeur peut encore le reprendre",
     "ecashOtherUnit": "Cet ecash est en {{unit}} : seul l’ecash en sat peut être encaissé ici",
     "fedimintAlreadyJoined": "Vous avez déjà rejoint cette fédération",
     "fedimintConnecting": "Attendez que la fédération se connecte",

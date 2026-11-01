@@ -320,8 +320,10 @@
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "أموال حقيقية",
     "sats": "{{amount}} ساتس",
+    "sats_one": "{{amount}} سات",
     "testMoney": "أموال تجريبية",
     "testSats": "{{amount}} ساتس تجريبية",
+    "testSats_one": "{{amount}} سات تجريبي",
     "usdtAddress": "عنوان USDT",
     "video": "🎬 فيديو ({{duration}})",
     "voice": "🎤 رسالة صوتية ({{duration}})"

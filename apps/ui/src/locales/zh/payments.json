@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "批准付款",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin 链上",

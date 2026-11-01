@@ -75,6 +75,7 @@
     "ecashAlreadySpent": "这笔 ecash 已在别处花掉",
     "ecashBeingReceived": "这笔 ecash 已在接收中",
     "ecashFeeTakesAll": "mint 会把这笔 ecash 的全部 {{amount}} sats 作为接收手续费扣下：没有兑换任何东西，发送者仍可以收回它",
+    "ecashFeeTakesAll_one": "mint 会把这笔 ecash 的 {{amount}} sat 作为接收手续费扣下：没有兑换任何东西，发送者仍可以收回它",
     "ecashOtherUnit": "这笔 ecash 的单位是 {{unit}}：这里只能兑换 sat 的 ecash",
     "fedimintAlreadyJoined": "你已经加入了这个联盟",
     "fedimintConnecting": "请等待联盟连接",

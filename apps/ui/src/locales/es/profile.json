@@ -108,6 +108,7 @@
     "backupFirst": "Descarga antes una copia",
     "backupPassphrase": "Frase de contraseña de la copia",
     "cashuSats": "{{amount}} sats en Cashu",
+    "cashuSats_one": "{{amount}} sat en Cashu",
     "confirmLabel": "Escribe el nombre del perfil para confirmar",
     "confirmPlaceholder": "Escribe {{name}}",
     "deleting": "Eliminando…",
@@ -144,5 +145,6 @@
   "restoredTag": "Restaurado",
   "restoredTagHint": "Recuperado de una copia de seguridad",
   "sats": "{{amount}} sats",
+  "sats_one": "{{amount}} sat",
   "switch": "Cambiar"
 }

@@ -229,6 +229,7 @@
     "setAsideInfo": "Apartados para un pago que el mint aún no ha confirmado. Salen con el pago o vuelven a tu saldo cuando el mint responda.",
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de prueba (sin valor)",
+    "testBalance_one": "{{amount}} sat de prueba (sin valor)",
     "testMintInvoice": "Esperando el pago… Los mints de prueba marcan toda factura como pagada por sí solos, así que esta solo cuenta cuando un contacto la paga en un chat. Para tener sats de prueba ya, usa Obtener monedas de prueba arriba.",
     "tokenHint": "¿Te dieron un token ecash? Pégalo en Enviar.",
     "tx": {
@@ -250,6 +251,7 @@
     "alreadyRedeemed": "Alguien ya lo canjeó.",
     "amountFee": "{{amount}} (comisión {{fee}})",
     "asNotes": "{{amount}} sats en notas",
+    "asNotes_one": "{{amount}} sat en nota",
     "asking": "Consultando a sus guardianes…",
     "backup": "Copia de la billetera",
     "backupHint": "La frase y las federaciones; la copia del perfil lo tiene todo",
@@ -587,7 +589,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "sats de prueba"
+    "mainnet_one": "sat",
+    "testnet": "sats de prueba",
+    "testnet_one": "sat de prueba"
   },
   "send": {
     "balance": "Saldo: {{amount}} {{unit}}",
@@ -639,6 +643,7 @@
     "experimental": "Experimental",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "Primero únete a una federación con pasarela Lightning en la tarjeta Fedimint.",
       "label": "Federación",
       "unknownNetwork": "red desconocida",

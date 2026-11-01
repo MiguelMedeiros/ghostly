@@ -312,8 +312,10 @@
     "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "本物のお金",
     "sats": "{{amount}} sats",
+    "sats_one": "{{amount}} sat",
     "testMoney": "テスト用のお金",
     "testSats": "{{amount}} テスト sats",
+    "testSats_one": "{{amount}} テスト sat",
     "usdtAddress": "USDT アドレス",
     "video": "🎬 動画 ({{duration}})",
     "voice": "🎤 ボイスメッセージ ({{duration}})"
