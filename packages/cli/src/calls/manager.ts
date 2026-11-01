@@ -684,7 +684,7 @@ export class CallManager {
   }
 
   private async stack(): Promise<CallStack> {
-    if (this.host.answers === false) throw new CliError("unavailable", "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`");
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     const stack = await (this.host.stack ?? loadCallStack)();
     if (typeof stack === "string") throw new CliError("unavailable", stack);
     return stack;
@@ -737,6 +737,9 @@ export class CallManager {
   /** The chat, if a call can go in it now; else why not (the engine's reason). */
   private callable(ref: string): LinkView {
     const link = this.link(this.chatId(ref))!;
+    // A one-shot's chat is not live yet, and never would be in time: it said "Calls need a live connection" before
+    // the daemon it needs (`stack`).
+    if (this.host.answers === false) throw new CliError("unavailable", CALLS_NEED_DAEMON);
     if (!link.profile) throw new CliError("unavailable", "Calls are in chats made since 0.4 (the chat session): this is a compatibility chat");
     if (link.callsUnavailable) throw new CliError("unavailable", link.callsUnavailable);
     return link;
@@ -746,6 +749,8 @@ export class CallManager {
     return this.auto.on && (this.auto.from.length === 0 || this.auto.from.includes(chat));
   }
 }
+
+const CALLS_NEED_DAEMON = "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`";
 
 function nameOf(link: LinkView): string | null {
   return link.label?.trim() || link.peerNick?.trim() || null;
