@@ -380,6 +380,15 @@ html[data-standalone="true"] {
   }
 }
 
+/* What the keyboard leaves of the screen (hooks/useViewportHeight.ts), written on each element that reads it
+   (`APP_HEIGHT_READERS` there): not inherited, so a new value restyles those few elements. Inherited from `<html>`,
+   each keyboard opening or closing and each turn restyled the whole document, about 60ms in WebKit with a long chat
+   open. A rule that reads it must match one of those elements. */
+@property --app-height {
+  syntax: "*";
+  inherits: false;
+}
+
 /* ── Phones: one screen at a time, sized to what is really visible ── */
 .app-shell {
   height: 100vh;
