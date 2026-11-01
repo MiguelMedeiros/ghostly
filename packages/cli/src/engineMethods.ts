@@ -177,7 +177,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   groupTaken: "{ groupId, messageId, edit? }",
   chatUnconfirmed: "{ linkId }",
   groupMessages: "{ groupId }",
-  messagePage: "{ linkId, limit?, before? }",
+  messagePage: "{ linkId, limit?, before?, after? }",
   chatsFound: "{ query, linkIds }",
   statusCardIndex: "",
   saveMessage: "{ linkId, messageId, remove? }",
