@@ -744,9 +744,9 @@ export class DeviceLinks implements DeviceLinkEngine {
 
   /** `key` holds the set under `d` (or the current one): its pending frame is done, and the old link goes. */
   private async acked(key: string, d?: string): Promise<void> {
-    const patch = acknowledged(await this.record(), key, d);
-    if (!patch) return;
-    await amendDevice(this.options.profile, patch);
+    if (!acknowledged(await this.record(), key, d)) return;
+    // Made again inside the write: a move stored since that read keeps the earlier set it added.
+    await amendDevice(this.options.profile, (current) => acknowledged(current, key, d));
     await this.refresh();
     this.changed();
   }
