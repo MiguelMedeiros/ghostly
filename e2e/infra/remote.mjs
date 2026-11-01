@@ -12,11 +12,11 @@
 //   - that host's Docker socket, as a socket here (DOCKER_HOST=unix:///tmp/ghostly-e2e-docker-<host>.sock), for
 //     Compose and the tests that run `docker` themselves. DOCKER_HOST=ssh:// opens a connection per call, and
 //     Compose makes dozens at once: sshd's MaxStartups resets them.
-//   - the support scripts' `docker exec` (chain.mjs), run by the host's own docker CLI: ~0.15 s, where this
-//     machine's CLI through the socket takes ~1 s on a busy Mac.
+//   - the support scripts' `docker exec` and `docker restart` (chain.mjs), run by the host's own docker CLI: ~0.15 s,
+//     where this machine's CLI through the socket takes ~1 s on a busy Mac.
 //
 // infra.mjs imports it first: in that process it reads --host, connects and sets the variables env.mjs reads at
-// load time. Anywhere else (the scripts and tests, with .env.e2e loaded) it only lends `exec`.
+// load time. Anywhere else (the scripts and tests, with .env.e2e loaded) it only lends `docker`.
 import { execFileSync, spawnSync } from "node:child_process";
 import { basename } from "node:path";
 
@@ -49,11 +49,11 @@ const ssh = (args, options = {}) => spawnSync("ssh", [...BASE, ...args], { encod
 const quote = (arg) => `'${String(arg).replaceAll("'", "'\\''")}'`;
 
 /**
- * `docker exec <container> <args>` on the host, over the background connection (a fresh one of its own if that
- * is down). Same contract as execFileSync: the output, or a throw with `stderr` on failure.
+ * `docker <args>` on the host, over the background connection (a fresh one of its own if that is down). Same
+ * contract as execFileSync: the output, or a throw with `stderr` on failure.
  */
-export const exec = (container, args, options) =>
-  execFileSync("ssh", [...BASE, "-S", CONTROL, HOST, ["docker", "exec", container, ...args].map(quote).join(" ")], options);
+export const docker = (args, options) =>
+  execFileSync("ssh", [...BASE, "-S", CONTROL, HOST, ["docker", ...args].map(quote).join(" ")], options);
 
 /** Whether the background connection is up. */
 export const connected = () => ssh(["-S", CONTROL, "-O", "check", HOST], { stdio: "ignore" }).status === 0;
