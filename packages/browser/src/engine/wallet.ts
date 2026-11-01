@@ -152,19 +152,32 @@ const sats = (proofs: Proof[]) => total(proofs.map((p) => ({ amount: p.amount.to
  * Whether `split` can take `amount` out of `proofs`, as it does: coins that add up exactly with the fee their receiver
  * pays to redeem them, or a swap whose inputs also pay the mint's fee for taking them in. Asks nothing of the mint.
  */
+/** Whether exact coins go as one token a payment frame carries: a wallet of many small coins can add up in hundreds. */
+const inOneFrame = (encode: typeof import("@cashu/cashu-ts").getEncodedToken, mint: string) => (send: Proof[]) =>
+  encode({ mint, proofs: send, unit: UNIT }).length <= LIMITS.maxPaymentEndpointChars;
+
 function fitsAt(wallet: Wallet, proofs: StoredProof[], amount: number): boolean {
+  return outlayAt(wallet, proofs, amount) !== undefined;
+}
+
+/**
+ * The sats `split` takes out of the wallet for `amount`, the mint's fees for the coins it takes in included, as `fitsAt`
+ * works it out: undefined when it cannot. `inOneFrame`: whether exact coins fit in one token, as `split` asks of them.
+ */
+function outlayAt(wallet: Wallet, proofs: StoredProof[], amount: number, inOneFrame = (_send: Proof[]) => true): number | undefined {
   try {
     const { send } = wallet.sendOffline(amount, asProofLike(proofs), { includeFees: true, exactMatch: true });
-    if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber()) return true;
+    if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber() && inOneFrame(send)) return sats(send);
   } catch {
     // no exact coins: a swap makes them
   }
   try {
     const outputs = amount + wallet.getFeesToInclude(amount).toNumber();
     const { send } = wallet.selectProofsToSend(asProofLike(proofs), outputs, true);
-    return send.length > 0 && sats(send) >= outputs + wallet.getFeesForProofs(send).toNumber();
+    const taken = outputs + wallet.getFeesForProofs(send).toNumber();
+    return send.length > 0 && sats(send) >= taken ? taken : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -268,7 +281,8 @@ export class CashuWallet {
    * so the same token sent again, under any id or encoding, is refused without asking the mint again.
    */
   private readonly spentTokens = new Set<string>();
-  /** Per melt quote shown to the person: the invoice, its amount and the fee reserve the mint quoted. Only these are paid. */
+  /** Per melt quote shown to the person: the invoice, its amount and the most it was said to cost in fees
+   * (the mint's reserve and the coins' own fees). Only these are paid, for no more. */
   private readonly shownQuotes = new Map<string, { request: string; amount: number; feeReserve: number }>();
 
   /**
@@ -1014,8 +1028,7 @@ export class CashuWallet {
     const among =(chosen: { secret: string }[]) => { const secrets = new Set(chosen.map((p) => p.secret)); return proofs.filter((p) => secrets.has(p.secret)); };
     try {
       const { send } = wallet.sendOffline(amount, asProofLike(proofs), { includeFees: true, exactMatch: true });
-      if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber()
-        && getEncodedToken({ mint, proofs: send, unit: UNIT }).length <= LIMITS.maxPaymentEndpointChars) return { inputs: among(send), keep: [], send };
+      if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber() && inOneFrame(getEncodedToken, mint)(send)) return { inputs: among(send), keep: [], send };
     } catch {
       // no exact coins: the mint makes them
     }
@@ -1362,13 +1375,16 @@ export class CashuWallet {
         if (quoteMismatch(quote, decoded.invoice, expected)) throw new Error(MINT_QUOTE_MISMATCH);
         // The coins the melt spends are paid for too, at a mint that charges for each coin it takes in.
         const proofs = await this.proofsAt(mint);
-        if (!fitsAt(wallet, proofs, amount + feeReserve)) {
+        const outlay = outlayAt(wallet, proofs, amount + feeReserve, inOneFrame((await loadCashu()).getEncodedToken, mint));
+        if (outlay === undefined) {
           room = Math.max(room, roomAt(wallet, proofs, feeReserve));
           lastError = room > 0 ? engineError("notEnoughForFee", { amount: room }) : engineError("notEnoughSats");
           continue;
         }
-        this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve });
-        return { quote: quote.quote, mint, amount, feeReserve };
+        // The most it can cost: the reserve, and what the split before the melt and the melt itself pay for their coins.
+        const fee = outlay - amount;
+        this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve: fee });
+        return { quote: quote.quote, mint, amount, feeReserve: fee };
       } catch (error) {
         lastError = error;
       }
@@ -1395,17 +1411,20 @@ export class CashuWallet {
 
   private async melt(quoteId: string, mint: string, note?: string, paymentId?: string): Promise<MeltOutcome> {
     const wallet = await this.wallet(mint);
-    const { MeltChangeError, OutputData } = await loadCashu();
+    const { MeltChangeError, OutputData, getEncodedToken } = await loadCashu();
     const quote = await wallet.checkMeltQuoteBolt11(quoteId);
     const inFlight = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
     if (inFlight.some((m) => m.quote === quote.quote || m.request === quote.request)) throw new Error("This invoice is already being paid");
-    // Read again from the mint: it must still be the invoice and amount shown, for no more fee than shown.
+    // Read again from the mint: it must still be the invoice and amount shown, for no more fee than shown, the coins'
+    // own fees included, out of the coins held now.
     const shown = this.shownQuotes.get(quoteId);
-    if (!shown || quote.quote !== quoteId || quoteMismatch(quote, shown.request, shown.amount) || quote.fee_reserve.toNumber() > shown.feeReserve) {
+    const needed = quote.amount.toNumber() + quote.fee_reserve.toNumber();
+    const proofs = await this.proofsAt(mint);
+    const outlay = outlayAt(wallet, proofs, needed, inOneFrame(getEncodedToken, mint));
+    if (!shown || quote.quote !== quoteId || quoteMismatch(quote, shown.request, shown.amount) || (outlay ?? needed) > shown.amount + shown.feeReserve) {
       throw new Error(MINT_QUOTE_MISMATCH);
     }
-    const needed = quote.amount.toNumber() + quote.fee_reserve.toNumber();
-    const { inputs, keep, send, swap } = await this.split(mint, needed, await this.proofsAt(mint));
+    const { inputs, keep, send, swap } = await this.split(mint, needed, proofs);
     let preview: MeltPreview<MeltQuoteBolt11Response>;
     try {
       preview = await wallet.prepareMelt("bolt11", quote, send);
