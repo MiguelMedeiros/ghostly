@@ -74,9 +74,11 @@ function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
   let dials = []
   let idle = null
+  // Once the client has gone, its servers still close one by one: none of them may arm the idle timer again.
+  let left = false
   const watchIdle = () => {
     clearTimeout(idle)
-    idle = listening > 0 ? null : setTimeout(() => drop('idle'), limits.idleMs)
+    idle = left || listening > 0 ? null : setTimeout(() => drop('idle'), limits.idleMs)
   }
   watchIdle()
   // Every HyperDHT stream the relay holds for this client: its dials and the connections its servers get, taken or
@@ -84,7 +86,6 @@ function clientDht(dht, limits, drop, gone, log) {
   // takes) and would leave them open after the client has gone, outside every limit; they all close with it. While
   // it stays, it holds at most `streams` of them: a dial past that drops it, an incoming one past that is closed.
   const streams = new Set()
-  let left = false
   const hold = stream => {
     if (left || streams.size >= limits.streams) { stream.destroy(); return stream }
     streams.add(stream)
@@ -346,6 +347,8 @@ export async function startRelay(options = {}) {
     let leave
     const gone = new Promise(resolve => { leave = resolve })
     ws.once('close', () => {
+      // A client that has closed is no longer dropped, counted or logged.
+      dropped = true
       clearInterval(ping)
       leave()
       clients.delete(ws)

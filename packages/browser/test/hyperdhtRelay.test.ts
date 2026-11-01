@@ -363,6 +363,28 @@ it("frees the slot of a client that neither listens nor dials, one that stops an
   await own.close();
 }, 60_000);
 
+it("neither drops nor logs a client that listened and then left", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 2, limits: { idleMs: 1500 }, log: (what: string, why: string) => { reasons.push(`${what} ${why}`); } });
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  // It listens, then its WebSocket closes with its server still open (a reload, a phone switching networks).
+  const socket = new WebSocket(own.url);
+  const closed = new Promise(resolve => socket.addEventListener("close", resolve));
+  const client = new RelayedDHT(new WebSocketStream(true, socket), { custodial: false }) as { createServer(): { listen(keyPair: unknown): Promise<void> } };
+  await client.createServer().listen(DHT.keyPair());
+  socket.close();
+  await closed;
+  await vi.waitFor(() => expect(own.stats().clients).toBe(0));
+  // The relay closes its server after it has gone; nothing may count it as idle once `idleMs` has passed.
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  expect(reasons.filter(reason => reason.startsWith("dropped"))).toEqual([]);
+  expect(own.stats()).toMatchObject({ accepted: 1, dropped: 0 });
+  await own.close();
+}, 60_000);
+
 it("closes every HyperDHT stream it holds for a client when the client leaves: dials under one alias, and incoming ones never taken", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { default: DHT } = await import("hyperdht");
