@@ -116,8 +116,11 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   return seconds;
 }
 
-/** The ranges the API takes (api.ts, files.ts): the most minutes of a `--hold` (a week, HOLD_MAX_MINUTES), seconds. */
-export const HOLD_MINUTES = 10_080, WAIT_SECONDS = 3600, LONG_WAIT_SECONDS = 86_400, HISTORY_LIMIT = 10_000;
+/**
+ * The ranges the API takes (api.ts, files.ts): the most minutes of a `--hold` (a week, HOLD_MAX_MINUTES), seconds;
+ * `chat connect`'s, the chat link's own wait for a contact (CONNECT_MAX_SECONDS).
+ */
+export const HOLD_MINUTES = 10_080, WAIT_SECONDS = 3600, LONG_WAIT_SECONDS = 86_400, HISTORY_LIMIT = 10_000, CONNECT_SECONDS = 90;
 
 /**
  * A number flag out of the range the API takes: a usage error (exit 2) that names the flag, before the profile opens.
