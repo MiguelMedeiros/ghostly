@@ -326,6 +326,14 @@
     "notice": "Someone reacted to your message",
     "react": "React"
   },
+  "refused": {
+    "fedimint": "Could not receive Fedimint ecash: {{reason}}",
+    "payment": "Could not receive a payment: {{reason}}",
+    "sats": "Could not receive {{amount}} sats: {{reason}}",
+    "satsFedimint": "Could not receive {{amount}} sats on Fedimint: {{reason}}",
+    "testSats": "Could not receive {{amount}} test sats: {{reason}}",
+    "testSatsFedimint": "Could not receive {{amount}} test sats on Fedimint: {{reason}}"
+  },
   "reply": {
     "cancel": "Cancel reply",
     "deleted": "Original message deleted",

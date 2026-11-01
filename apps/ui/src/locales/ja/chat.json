@@ -326,6 +326,14 @@
     "notice": "あなたのメッセージにリアクションがありました",
     "react": "リアクション"
   },
+  "refused": {
+    "fedimint": "Fedimint の ecash を受け取れませんでした：{{reason}}",
+    "payment": "支払いを受け取れませんでした：{{reason}}",
+    "sats": "{{amount}} sats を受け取れませんでした：{{reason}}",
+    "satsFedimint": "Fedimint で {{amount}} sats を受け取れませんでした：{{reason}}",
+    "testSats": "{{amount}} テスト sats を受け取れませんでした：{{reason}}",
+    "testSatsFedimint": "Fedimint で {{amount}} テスト sats を受け取れませんでした：{{reason}}"
+  },
   "reply": {
     "cancel": "返信をキャンセル",
     "deleted": "元のメッセージは削除されました",
