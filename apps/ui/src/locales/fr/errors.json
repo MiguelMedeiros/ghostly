@@ -93,6 +93,8 @@
     "invoiceExpired": "Cette facture a expiré",
     "lastMint": "C'est le dernier mint de votre portefeuille Cashu {{network}}",
     "lastMintNext": "Supprimez le portefeuille pour le retirer.",
+    "lightningRefused": "La mint a refusé ce paiement Lightning",
+    "lightningRefusedNext": "Aucun sat n’a quitté votre portefeuille. Vous pouvez réessayer sans risque.",
     "lnurlExactly": "{{domain}} demande exactement {{amount}} sats",
     "lnurlRange": "{{domain}} accepte entre {{min}} et {{max}} sats",
     "lnurlUnreachable": "{{host}} injoignable",

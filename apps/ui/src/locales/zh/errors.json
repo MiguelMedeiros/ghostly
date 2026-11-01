@@ -93,6 +93,8 @@
     "invoiceExpired": "这张发票已过期",
     "lastMint": "这是你的 {{network}} Cashu 钱包的最后一个铸币厂",
     "lastMintNext": "要移除它，请删除钱包。",
+    "lightningRefused": "mint 拒绝了这笔 Lightning 付款",
+    "lightningRefusedNext": "没有任何 sats 离开你的钱包。可以放心重试。",
     "lnurlExactly": "{{domain}} 要求正好 {{amount}} sats",
     "lnurlRange": "{{domain}} 接受 {{min}} 到 {{max}} sats",
     "lnurlUnreachable": "无法连接 {{host}}",

@@ -93,6 +93,8 @@
     "invoiceExpired": "That invoice has expired",
     "lastMint": "This is your {{network}} Cashu wallet's last mint",
     "lastMintNext": "Remove the wallet to remove it.",
+    "lightningRefused": "The mint refused this Lightning payment",
+    "lightningRefusedNext": "No sats left your wallet. It's safe to try again.",
     "lnurlExactly": "{{domain}} asks for exactly {{amount}} sats",
     "lnurlRange": "{{domain}} takes between {{min}} and {{max}} sats",
     "lnurlUnreachable": "Can't reach {{host}}",
