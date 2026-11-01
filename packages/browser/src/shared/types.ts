@@ -90,6 +90,11 @@ export interface StoredLink {
   /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
   removals?: Removal[];
   /**
+   * The ids both sides know (`replyRef`) of the messages deleted for everyone, mine or the contact's, here or not, the
+   * newest 500: a pin naming one shows as unpinned, the pin kept as it came (WISP 400 § Delete for everyone).
+   */
+  removedRefs?: string[];
+  /**
    * Files of mine whose offer went on the DHT floor (WISP 403 § Files) and that were deleted here before they went live,
    * by wire id: the next session that carries files/3 says each is cancelled (`pf-abort`), so the contact's bubble does too.
    */
