@@ -1576,7 +1576,9 @@ export class GroupSession {
       const known = this.state.chain[e];
       const result = verifyCommit(raw, this.state.chain[e - 1] ?? null, this.id);
       // Evidence of a fork must come from whoever signed my commit for that epoch; at epoch 0 anyone can sign a genesis.
-      if ("error" in result || result.commit.by !== known.by) return;
+      // And from the admin of my tip: a former admin's other history from before it handed the role on (or was taken
+      // out) drops that hand-over, so it is a stale branch, refused like any other, not a fork.
+      if ("error" in result || result.commit.by !== known.by || result.commit.by !== this.admin) return;
       if (commitHash(result.commit) !== commitHash(known)) await this.fork(`Member ${from.slice(0, 8)} holds a different membership history for epoch ${e}`);
       // Heard first from an app that leaves the mark out: taken now.
       else if (this.takeLeftMark(known, frame.left)) { this.unprune(); await this.persist(); }
