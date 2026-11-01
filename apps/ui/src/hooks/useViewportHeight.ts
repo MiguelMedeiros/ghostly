@@ -11,9 +11,16 @@ const typedInto = (element: Element | null): element is HTMLElement =>
   element instanceof HTMLElement && element.matches("input:not([type=checkbox], [type=radio], [type=range], [type=button], [type=submit], [type=file]), textarea, select, [contenteditable]:not([contenteditable=false])");
 
 /**
- * Keeps `--app-height` equal to the part of the screen that is really visible.
- * iOS does not shrink the layout viewport when the keyboard opens, so without
- * this the message input ends up underneath it.
+ * What reads `--app-height` (index.css, and `data-app-height` in components/LockScreen.tsx). The value is written on
+ * these and nowhere else: index.css registers it as not inherited, since an inherited value on `<html>` restyled the
+ * whole document at each change of the visible height, about 60ms in WebKit with a long chat open.
+ */
+export const APP_HEIGHT_READERS = ".app-shell, .two-pane, dialog, .sheet, .toast-place, .fixed.inset-0, [data-app-height]";
+
+/**
+ * Keeps `--app-height` equal to the part of the screen that is really visible, on each element that reads it
+ * (`APP_HEIGHT_READERS`, one that appears later included). iOS does not shrink the layout viewport when the keyboard
+ * opens, so without this the message input ends up underneath it.
  *
  * `data-keyboard` on `<html>` says whether a keyboard is up. Safari keeps `innerHeight` while it is, so the
  * gap between the two heights says it there; Android's resizes-content and an installed iPhone web app shrink
@@ -50,6 +57,17 @@ export function useViewportHeight() {
     let bar = 0;
     let turned = false;
     let visible = viewport.height;
+    let written = "";
+    const write = (element: Element) => (element as HTMLElement).style.setProperty("--app-height", written);
+    // A sheet, a dialog or a toast that opens later gets the height too, the keyboard up included.
+    const appeared = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.addedNodes) {
+        if (!(node instanceof Element)) continue;
+        if (node.matches(APP_HEIGHT_READERS)) write(node);
+        node.querySelectorAll(APP_HEIGHT_READERS).forEach(write);
+      }
+    });
+    appeared.observe(document.body, { childList: true, subtree: true });
     const update = () => {
       const typing = typedInto(document.activeElement);
       if (!typing) { bar = 0; turned = false; }
@@ -67,7 +85,10 @@ export function useViewportHeight() {
       // while the bar stays over the message field until the field loses the focus (iOS 26 Simulator, iPhone).
       else if (typing && turned && measured <= SHORTCUT_BAR) covered = bar;
       visible = viewport.height - (covered - measured);
-      document.documentElement.style.setProperty("--app-height", `${visible}px`);
+      if (`${visible}px` !== written) {
+        written = `${visible}px`;
+        document.querySelectorAll(APP_HEIGHT_READERS).forEach(write);
+      }
       const keyboard = covered > KEYBOARD || (covered > SHORTCUT_BAR && typing);
       // With the keyboard up the home indicator is covered, so its inset must not pad the input.
       document.documentElement.dataset.keyboard = String(keyboard);
@@ -91,6 +112,7 @@ export function useViewportHeight() {
     document.addEventListener("focusin", update);
     document.addEventListener("focusout", update);
     return () => {
+      appeared.disconnect();
       viewport.removeEventListener("resize", update);
       viewport.removeEventListener("scroll", update);
       document.removeEventListener("focusin", update);

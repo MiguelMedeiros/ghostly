@@ -1,6 +1,9 @@
 import { act, renderHook } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useViewportHeight } from "../../hooks/useViewportHeight";
+import { APP_HEIGHT_READERS, useViewportHeight } from "../../hooks/useViewportHeight";
 
 // covers: app.mobile-layout
 
@@ -20,9 +23,12 @@ function resize(height: number, innerHeight = inner, width = viewport.width) {
   act(() => { viewport.dispatchEvent(new Event("resize")); });
 }
 const keyboard = () => document.documentElement.dataset.keyboard;
-const appHeight = () => document.documentElement.style.getPropertyValue("--app-height");
+let shell: HTMLElement;
+const appHeight = () => shell.style.getPropertyValue("--app-height");
 
 beforeEach(() => {
+  shell = document.body.appendChild(document.createElement("div"));
+  shell.className = "app-shell";
   viewport = new Viewport();
   inner = 874;
   Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
@@ -32,7 +38,37 @@ afterEach(() => {
   Reflect.deleteProperty(window, "visualViewport");
   Reflect.deleteProperty(window, "innerHeight");
   delete document.documentElement.dataset.keyboard;
-  document.documentElement.style.removeProperty("--app-height");
+  shell.remove();
+});
+
+describe("what the keyboard leaves", () => {
+  it("is written on what reads it, not inherited from <html> (each change restyled the whole document)", async () => {
+    renderHook(() => useViewportHeight());
+    resize(471);
+    expect(document.documentElement.style.getPropertyValue("--app-height")).toBe("");
+    expect(appHeight()).toBe("471px");
+    const row = shell.appendChild(document.createElement("p"));
+    // A sheet that opens with the keyboard up stands on it from the start.
+    const sheet = document.body.appendChild(document.createElement("div"));
+    sheet.innerHTML = '<dialog class="sheet"></dialog>';
+    await act(async () => {});
+    expect(sheet.querySelector("dialog")?.style.getPropertyValue("--app-height")).toBe("471px");
+    expect(row.style.getPropertyValue("--app-height")).toBe("");
+    sheet.remove();
+  });
+
+  it("is registered as not inherited, and every rule that reads it is on one of the elements it is written on", () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).toMatch(/@property --app-height \{[^}]*inherits: false;/);
+    const readers = APP_HEIGHT_READERS.split(", ");
+    const rules = [...css.matchAll(/([^{};]+)\{[^{}]*var\(--app-height/g)].map((m) => m[1].trim());
+    expect(rules.length).toBeGreaterThan(5);
+    for (const selectors of rules) for (const selector of selectors.split(",")) {
+      // The element the rule styles: the last compound of its selector.
+      const subject = selector.replace(/:has\(.*\)/, "").trim().split(/\s+|>/).filter(Boolean).pop()!;
+      expect(readers.some((reader) => subject.startsWith(reader)), selector).toBe(true);
+    }
+  });
 });
 
 describe("a pinch on the page", () => {
