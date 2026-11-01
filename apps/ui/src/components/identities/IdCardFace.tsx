@@ -61,7 +61,7 @@ export function IdCardFace({ card, after, shared }: { card: IdCardContent; after
       <span className="id-card-fields">
         <span className="id-card-provider">{card.label}</span>
         {card.name && <span className="id-card-name" data-testid="id-card-name">{card.name}</span>}
-        <span className="id-card-subject" data-testid="identity-proof-subject" title={card.subject}>{card.short}</span>
+        <span className="id-card-subject" data-testid="identity-proof-subject" title={card.subject}><bdi dir="ltr">{card.short}</bdi></span>
         <span className="id-card-field id-card-field-category">{card.category}</span>
         <span className="id-card-field id-card-field-validity">{card.validity}</span>
         <span className="id-card-field id-card-field-shared">{card.shared}</span>
