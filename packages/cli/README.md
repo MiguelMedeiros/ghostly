@@ -333,7 +333,8 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). An original that was here and is
   gone (deleted on this device, or for everyone by its author) is `found: false, deleted: true`, with an empty
   `snippet`, as the apps show "Original message deleted": in history, and in the reply's events that `--since`
-  replays (the event journal keeps no text of a deleted message). Answer one with
+  replays (the event journal keeps no text of a deleted message). In history and `saved list`, an original edited
+  since the reply is quoted as it reads now, as the apps show it; a button press keeps the question it answered. Answer one with
   `ghostly send <chat> --reply <message id> "…"` (`group send` too): the id from history or from the event.
 - Reactions (WISP 400 § Reactions): `message.reaction` (a chat) and `group.reaction` (a group) say each change once:
   `{messageId, by, emoji, removed, mine}`, with `by` `me`, `peer` or a member key, `emoji` "" when taken back, `mine`
