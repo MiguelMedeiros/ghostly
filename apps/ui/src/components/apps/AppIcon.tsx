@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
+import { installedIconUrl } from "../../lib/apps/icons";
 
 /** The generic mark of an app: what a card shows before anything is checked, and an app without an icon. */
 export function AppGlyph({ size = 20 }: { size?: number }) {
@@ -13,7 +13,7 @@ export function AppGlyph({ size = 20 }: { size?: number }) {
   );
 }
 
-/** A picture of bytes on this device (a checked bundle's `icon.png`), for as long as it shows. */
+/** A picture of bytes on this device (a preview's `icon.png`), for as long as it shows. */
 function useBytesUrl(bytes: Uint8Array | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -29,16 +29,18 @@ function useBytesUrl(bytes: Uint8Array | null | undefined): string | null {
  * An app's icon: from the checked bundle only (its `icon.png`, read on this device with `appFile`, or the preview's),
  * never from a store or a card, so nobody can dress an app in someone else's picture. The generic mark otherwise.
  */
-export function AppIcon({ size = 40, icon, installed }: { size?: number; icon?: Uint8Array | null; installed?: { ref: string; icon: boolean } }) {
-  const [read, setRead] = useState<Uint8Array | null>(null);
+export function AppIcon({ size = 40, icon, installed }: { size?: number; icon?: Uint8Array | null; installed?: { ref: string; digest: string; icon: boolean } }) {
+  const [read, setRead] = useState<string | null>(null);
   const ref = installed?.icon ? installed.ref : null;
+  const digest = installed?.digest;
   useEffect(() => {
-    if (!ref) { setRead(null); return; }
+    if (!ref || !digest) { setRead(null); return; }
     let live = true;
-    engine.call("appFile", { ref, path: "icon.png" }).then((bytes) => { if (live) setRead(bytes); }, () => {});
+    installedIconUrl(ref, digest).then((url) => { if (live) setRead(url); }, () => {});
     return () => { live = false; };
-  }, [ref]);
-  const url = useBytesUrl(icon ?? read);
+  }, [ref, digest]);
+  const shown = useBytesUrl(icon);
+  const url = icon ? shown : read;
   return (
     <span className="shrink-0 grid place-items-center overflow-hidden rounded-xl bg-accent/15 text-accent" style={{ width: size, height: size }} data-testid="app-icon">
       {url ? <img src={url} alt="" draggable={false} className="w-full h-full object-cover" /> : <AppGlyph size={Math.round(size * 0.5)} />}
