@@ -78,9 +78,21 @@ export async function resolveAtprotoDid(did: string, options: AtprotoResolveOpti
  * so a handle cannot make a contact's app knock on its local network.
  */
 export async function resolveAtprotoHandle(handle: string, options: AtprotoResolveOptions): Promise<string | null> {
+  return (await lookupAtprotoHandle(handle, options)).did;
+}
+
+/**
+ * resolveAtprotoHandle, and whether the answer is one: `checked` is false when a lookup failed on the way (the
+ * resolver or the handle's website could not be reached) so the handle may point somewhere after all. A cancel
+ * throws.
+ */
+async function lookupAtprotoHandle(handle: string, options: AtprotoResolveOptions): Promise<{ did: string | null; checked: boolean }> {
+  options.signal?.throwIfAborted();
   const lookup = { fetch: options.fetch, signal: options.signal, resolver: options.resolver };
+  let dnsAnswered = false;
   try {
     const answer = await dohQuery(`_atproto.${handle}`, "TXT", lookup);
+    dnsAnswered = true;
     const dids = new Set<string>();
     for (const a of answer.answers) {
       if (a.type !== 16) continue;
@@ -88,24 +100,31 @@ export async function resolveAtprotoHandle(handle: string, options: AtprotoResol
       try { text = txtValue(a.data); } catch { continue; }
       if (text.startsWith("did=")) dids.add(text.slice(4));
     }
-    if (dids.size > 1) return null;
+    if (dids.size > 1) return { did: null, checked: true };
     const [did] = dids;
-    if (did) return isAtprotoDid(did) ? did : null;
-  } catch { /* The resolver failed: try HTTPS. */ }
-  try {
-    await assertPublicHost(handle, lookup);
-    const response = await options.fetch(`https://${handle}/.well-known/atproto-did`, { headers: { accept: "text/plain" }, maxBytes: HANDLE_DID_MAX_BYTES, signal: options.signal, redirect: "error" });
-    if (response.status !== 200) return null;
-    const did = response.text.trim();
-    return isAtprotoDid(did) ? did : null;
-  } catch { return null; }
+    if (did) return { did: isAtprotoDid(did) ? did : null, checked: true };
+  } catch { options.signal?.throwIfAborted(); /* The resolver failed: try HTTPS. */ }
+  // A handle with no public address points nowhere, if the resolver answered (a name it could not resolve may).
+  try { await assertPublicHost(handle, lookup); }
+  catch { options.signal?.throwIfAborted(); return { did: null, checked: dnsAnswered }; }
+  let response: Awaited<ReturnType<IdentityFetch>>;
+  try { response = await options.fetch(`https://${handle}/.well-known/atproto-did`, { headers: { accept: "text/plain" }, maxBytes: HANDLE_DID_MAX_BYTES, signal: options.signal, redirect: "error" }); }
+  catch { options.signal?.throwIfAborted(); return { did: null, checked: false }; }
+  const did = response.status === 200 ? response.text.trim() : "";
+  // A DNS record the resolver could not read may still name the DID.
+  return isAtprotoDid(did) ? { did, checked: true } : { did: null, checked: dnsAnswered };
 }
+
+/** Why a DID's handle is not shown: its document names none, the handle points elsewhere (or nowhere), or the lookup failed. */
+export type AtprotoHandleCheck = { handle: string; missing?: undefined } | { handle?: undefined; missing: "none" | "elsewhere" | "unchecked" };
 
 /**
  * The handle to show for a DID: the one its document claims, and only if that handle resolves back to
- * the same DID. Otherwise nothing: the card shows the DID. Never throws.
+ * the same DID. Otherwise the reason: the card shows the DID. Throws only when cancelled.
  */
-export async function verifiedAtprotoHandle(doc: AtprotoDidDocument, options: AtprotoResolveOptions): Promise<string | undefined> {
-  if (!doc.handle) return undefined;
-  try { return (await resolveAtprotoHandle(doc.handle, options)) === doc.did ? doc.handle : undefined; } catch { return undefined; }
+export async function verifiedAtprotoHandle(doc: AtprotoDidDocument, options: AtprotoResolveOptions): Promise<AtprotoHandleCheck> {
+  if (!doc.handle) return { missing: "none" };
+  const found = await lookupAtprotoHandle(doc.handle, options);
+  if (found.did === doc.did) return { handle: doc.handle };
+  return { missing: found.did || found.checked ? "elsewhere" : "unchecked" };
 }
