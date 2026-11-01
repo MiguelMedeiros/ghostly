@@ -6,7 +6,7 @@ import { jumpToMessage, messageSnippet, type ReplyIndex } from "../../lib/replie
 import { PinIcon } from "../PinIcon";
 
 const icon = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
-const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-10 max-md:h-10 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer";
+const button = "shrink-0 grid place-items-center w-8 h-8 max-md:w-11 max-md:h-11 rounded-full text-text-secondary hover:text-accent hover:bg-surface-hover transition-colors cursor-pointer";
 
 /**
  * The bar under a chat's header while a message is pinned (WISP 400 § Pinned message): a line of it, found in this

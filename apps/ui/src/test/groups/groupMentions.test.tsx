@@ -76,6 +76,15 @@ describe("the composer's @", () => {
     expect(composer()).toHaveFocus();
   });
 
+  it("gives each member a 44 px row on a phone, and the desktop keeps its rows", async () => {
+    const { user } = openGroup(active());
+    await user.type(composer(), "@");
+    for (const option of options()) {
+      expect(option).toHaveClass("py-2", "max-md:min-h-11", "max-md:py-3");
+      expect(option).not.toHaveClass("min-h-11");
+    }
+  });
+
   it("Escape closes it for that @, and Enter then sends what is there, with no mention", async () => {
     const { user, engine } = openGroup(active());
     await user.type(composer(), "mail me @al");
