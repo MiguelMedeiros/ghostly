@@ -197,9 +197,13 @@ test("the app icon's shortcuts: New chat, Scan invite, Wallets", { tag: ["@featu
   await ana.page.goBack();
   await expect(ana.page.getByTestId("chat-row")).toHaveCount(1);
 
+  // Join opens with Scan focused, and the camera starts only on a press.
   await ana.page.goto("/#/scan");
-  await expect(ana.page.getByLabel("QR camera preview")).toBeVisible();
+  await expect(ana.page.getByRole("button", { name: "Scan QR" })).toBeFocused();
   await expect(ana.page).toHaveURL(/#\/$/);
+  await expect(ana.page.getByLabel("QR camera preview")).toBeHidden();
+  await ana.page.keyboard.press("Enter");
+  await expect(ana.page.getByLabel("QR camera preview")).toBeVisible();
   await ana.page.keyboard.press("Escape");
 
   await ana.page.goto("/#/wallet");
