@@ -14,7 +14,7 @@ import { CopyButton } from "./CopyButton";
  */
 export function LinkView({ atom }: { atom: Atom<"link", { url: string }> }) {
   return (
-    <a {...externalLinkProps(atom.data.url)} dir="ltr" className="text-link underline hover:decoration-2 break-all">
+    <a {...externalLinkProps(atom.data.url)} dir="ltr" className="text-link underline hover:decoration-2 inline-block max-w-full [overflow-wrap:anywhere]">
       {shownUrl(atom.text)}
     </a>
   );
@@ -45,7 +45,7 @@ export function MdLinkView({ atom }: { atom: Atom<"md-link", MdLinkData> }) {
   let title = shown;
   try { title = `${new URL(url).hostname}\n${shown}`; } catch { /* the parser only takes addresses a URL parser reads */ }
   return showUrl
-    ? <a data-testid="rich-md-link" data-shows="url" {...externalLinkProps(url)} title={title} dir="ltr" className="text-link underline hover:decoration-2 break-all">{shown}</a>
+    ? <a data-testid="rich-md-link" data-shows="url" {...externalLinkProps(url)} title={title} dir="ltr" className="text-link underline hover:decoration-2 inline-block max-w-full [overflow-wrap:anywhere]">{shown}</a>
     : <a data-testid="rich-md-link" data-shows="text" {...externalLinkProps(url)} title={title} className="text-link underline hover:decoration-2">{labelNodes(label)}</a>;
 }
 
