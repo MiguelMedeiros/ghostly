@@ -108,6 +108,28 @@ describe("adding a proof: drafts and limits", () => {
     await expect(prove(full)).rejects.toThrow(/Remove an identity first/);
     expect(full.views()).toHaveLength(32);
   });
+
+  /**
+   * Each change saved the list as it stood before the one still being written: two proofs completed at once kept one,
+   * and a proof removed while another completed came back, its revocation gone from the profile.
+   */
+  it("keeps every change made at once: two proofs completed, one removed while another completes", async () => {
+    const { engines, ledgers, make } = await shared();
+    const draft = () => { const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() }); return { draftId, evidence: fakeKeySign(identityStatement(binding)) }; };
+    const removed = engines.a.views()[0].id;
+    expect(ledgers.a.shared.map(s => s.id)).toEqual([removed]);
+
+    const [, added] = await Promise.all([engines.a.remove({ id: removed }), engines.a.complete(draft())]);
+    const [two, three] = await Promise.all([engines.a.complete(draft()), engines.a.complete(draft())]);
+    const ids = [added.id, two.id, three.id].sort();
+    expect(engines.a.views().map(v => v.id).sort()).toEqual(ids);
+    expect((await stored<{ binding: unknown }[]>("identityProofs"))!.map(p => identityStatement(p.binding as never).id).sort()).toEqual(ids);
+    expect((await stored<{ id: string }[]>("identityRevocations"))!.map(r => r.id)).toEqual([removed]);
+
+    const again = make("a");
+    await again.load();
+    expect(again.views().map(v => v.id).sort()).toEqual(ids);
+  });
 });
 
 describe("removing a proof and its revocation", () => {
