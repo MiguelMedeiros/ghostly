@@ -224,6 +224,7 @@
   "title": "Opzioni",
   "translate": {
     "downloaded": "Lingue scaricate",
+    "downloading": "Download in corso…",
     "hint": "L'impostazione predefinita per le chat che non hanno scelto",
     "info": "I messaggi ricevuti in un'altra lingua vengono tradotti su questo dispositivo da un modello linguistico scaricato una volta. Nessun testo lascia il dispositivo e i tuoi contatti non lo sanno mai.",
     "name": "Traduci i messaggi",

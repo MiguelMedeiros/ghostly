@@ -28,7 +28,8 @@ interface Question {
 /**
  * Asked before languages download for translation (docs/AUTO-TRANSLATE.md § Model download): which ones, how big, and
  * whose servers see the request. Nothing downloads without Download; Not now has the focus, so Enter and Escape leave
- * it. Nothing at all in a build without translation (`VITE_TRANSLATE`).
+ * it, and once it downloads they close the question with the download going on. Nothing at all in a build without
+ * translation (`VITE_TRANSLATE`).
  */
 export function TranslateDownloadDialog(props: Question) {
   return translateEnabled() ? <DownloadQuestion {...props} /> : null;
@@ -73,10 +74,11 @@ function DownloadQuestion({ from, to, back, bytes, engine, busy = false, problem
       <p>{t("translate.download.body")}</p>
       {engine && <p data-testid="translate-download-engine">{t("translate.download.engine")}</p>}
     </div>
+    {busy && <p role="status" data-testid="translate-download-goes-on" className="mt-2 text-sm text-text-muted">{t("translate.download.goesOn")}</p>}
     {problem && <Notice problem={problem} testId="translate-download-failed" className="mt-3 text-sm" />}
     <div className="mt-5 flex justify-end gap-2">
       <button ref={notNow} type="button" data-testid="translate-download-not-now" onClick={onNotNow}
-        className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("translate.download.notNow")}</button>
+        className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t(busy ? "common.close" : "translate.download.notNow")}</button>
       <button type="button" data-testid="translate-download-yes" onClick={onDownload} disabled={busy} aria-busy={busy}
         className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60">{t("translate.download.download")}</button>
     </div>
