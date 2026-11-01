@@ -105,7 +105,10 @@ describe("one request from the app, over the contact's link", () => {
       [502, "unreachable", "The local service is not reachable.", "services.window.notAnswering"],
       [504, "timeout", "The local service did not answer in time.", "services.window.tooSlow"],
       [502, "redirect-blocked", "The service redirected outside of the shared target.", "services.window.elsewhere"],
-      [503, "busy", "Too many requests.", "services.window.failed"],
+      [503, "busy", "Too many requests.", "services.window.busy"],
+      [404, "unknown-service", "Unknown service.", "services.window.unshared"],
+      // A code this build does not know yet: the generic line, never the contact's English.
+      [405, "method-not-allowed", "Method not allowed.", "services.window.failed"],
     ] as const) {
       const { port, replies } = recorder();
       await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
