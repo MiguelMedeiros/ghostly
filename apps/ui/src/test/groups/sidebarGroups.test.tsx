@@ -59,6 +59,15 @@ describe("Sidebar: groups in the chat list", () => {
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  // They were 24 px tall and 8 px apart on a phone's chat list, where a Decline that went says so to the inviter.
+  it("Accept, Decline, Try again and Delete on an invitation's row are a thumb's height on a phone", () => {
+    sidebar([invitation(), { ...invitation({ accepted: true, viaLink: true, admin: "", stage: "knocked", unanswered: true }), id: "group-2" }, { ...invitation({ takenBack: true }), id: "group-3" }]);
+    for (const [id, testId] of [["group-1", "group-accept"], ["group-1", "group-decline"], ["group-2", "group-link-retry"], ["group-3", "group-taken-back-delete"]]) {
+      expect(within(row(id)).getByTestId(testId)).toHaveClass("max-md:min-h-11", "max-md:px-4");
+    }
+    expect(within(row()).getByTestId("group-accept").parentElement).toHaveClass("max-md:gap-3");
+  });
+
   it("keeps the invitation's buttons after an answer the engine refused", async () => {
     const { user, engine } = sidebar([invitation()]);
     engine.on("acceptGroupInvitation", () => { throw new Error("The admin is gone"); });

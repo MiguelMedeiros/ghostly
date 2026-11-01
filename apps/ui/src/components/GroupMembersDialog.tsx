@@ -193,7 +193,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
               : !link.groups ? <span className="text-xs text-text-muted">{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{t("group.members.inviteAction")}</button>}
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
       </ul>

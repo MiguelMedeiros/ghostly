@@ -450,9 +450,10 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
           </span>}
         />
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
-        {invitation?.takenBack && <div className="mt-1.5 flex gap-2"><TakenBackDelete busy={busy} answer={answer} /></div>}
-        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2"><InvitationButtons busy={busy} answer={answer} /></div>}
-        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2"><LinkTryAgain busy={busy} answer={answer} /></div>}
+        {/* On a phone, a thumb's height and apart: a Decline that went is said to the inviter. */}
+        {invitation?.takenBack && <div className="mt-1.5 flex gap-2 max-md:gap-3"><TakenBackDelete busy={busy} answer={answer} /></div>}
+        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2 max-md:gap-3"><InvitationButtons busy={busy} answer={answer} /></div>}
+        {invitation?.viaLink && invitation.unanswered && <div className="mt-1.5 flex gap-2 max-md:gap-3"><LinkTryAgain busy={busy} answer={answer} /></div>}
         {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>
