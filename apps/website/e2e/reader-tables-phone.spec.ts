@@ -8,7 +8,7 @@ test("the reader stacks a wide table's rows on a phone", async ({ page }) => {
   await page.goto("/wisps/1200-marketplace");
   const tables = await page.locator(".reader-prose table").evaluateAll((els) =>
     els.map((table) => {
-      const heads = [...table.querySelectorAll("thead th")].map((th) => th.textContent!.trim());
+      const heads = [...table.querySelectorAll("thead tr > *")].map((th) => th.textContent!.trim());
       const cells = [...table.querySelectorAll("tbody td")].map((td) => ({
         width: td.getBoundingClientRect().width,
         label: getComputedStyle(td, "::before").content,
