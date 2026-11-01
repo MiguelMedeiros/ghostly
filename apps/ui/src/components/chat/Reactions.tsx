@@ -114,12 +114,16 @@ function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, on
   const { t } = useI18n();
   const [more, setMore] = useState(false);
   useEffect(() => { if (!open) setMore(false); }, [open]);
+  // The one stop of the row of emoji (a toolbar's roving focus): the menu's focus lands there as the bar opens, on the
+  // one I chose if any, and its Up/Down take the whole row as one line above the Copy / Details / Select rows.
+  const [stop, setStop] = useState(() => Math.max(0, QUICK_REACTIONS.findIndex(e => e === current)));
   const choose = (emoji: string) => {
     const e = reactionEmoji(emoji);
     if (!e) return;
     onClose();
     onReact(e === current ? "" : e);
   };
+  const roving = (i: number) => ({ tabIndex: i === stop ? 0 : -1, "data-menu-item": i === stop ? "" : undefined, onFocus: () => setStop(i) });
   return <>
     <Menu open={open && !more} onClose={onClose} anchorRef={anchorRef} testId="reaction-bar" align={align} prefer="up" portal within="[data-message-list]" focusFirst label={t("chat.reactions.react")}>
       <div role="toolbar" aria-label={t("chat.reactions.react")} className="flex items-center gap-0.5 px-1"
@@ -131,38 +135,38 @@ function OpenReactionBar({ open, onClose, anchorRef, current, onReact, align, on
           all[(at + step + all.length) % all.length]?.focus();
           e.preventDefault();
         }}>
-        {QUICK_REACTIONS.map(emoji => (
+        {QUICK_REACTIONS.map((emoji, i) => (
           <button key={emoji} type="button" data-testid="reaction-quick" data-emoji={emoji} aria-pressed={current === emoji} aria-label={emoji} title={emoji}
-            onClick={() => choose(emoji)}
+            {...roving(i)} onClick={() => choose(emoji)}
             className={`w-9 h-9 max-md:w-11 max-md:h-11 rounded-full text-[22px] leading-none flex items-center justify-center transition-transform hover:scale-125 hover:bg-surface-hover cursor-pointer ${current === emoji ? "bg-accent/25" : ""}`}>
             {emoji}
           </button>
         ))}
-        <button type="button" data-testid="reaction-more" aria-label={t("chat.reactions.more")} title={t("chat.reactions.more")} onClick={() => setMore(true)}
+        <button type="button" data-testid="reaction-more" aria-label={t("chat.reactions.more")} title={t("chat.reactions.more")} {...roving(QUICK_REACTIONS.length)} onClick={() => setMore(true)}
           className="w-9 h-9 max-md:w-11 max-md:h-11 rounded-full flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-hover cursor-pointer">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
       </div>
       {onCopy && (
-        <button type="button" data-testid="reaction-bar-copy" onClick={() => { onClose(); onCopy(); }}
+        <button type="button" data-testid="reaction-bar-copy" data-menu-item onClick={() => { onClose(); onCopy(); }}
           className="mt-1 w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
           {t("common.copy")}
         </button>
       )}
       {onCopy && onCopyOriginal && (
-        <button type="button" data-testid="reaction-bar-copy-original" onClick={() => { onClose(); onCopyOriginal(); }}
+        <button type="button" data-testid="reaction-bar-copy-original" data-menu-item onClick={() => { onClose(); onCopyOriginal(); }}
           className="w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
           {t("chat.sentTranslation.copyOriginal")}
         </button>
       )}
       {onDetails && (
-        <button type="button" data-testid="reaction-bar-details" onClick={() => { onClose(); onDetails(); }}
+        <button type="button" data-testid="reaction-bar-details" data-menu-item onClick={() => { onClose(); onDetails(); }}
           className={`${onCopy ? "" : "mt-1 "}w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border`}>
           {t("chat.message.details")}
         </button>
       )}
       {onSelect && (
-        <button type="button" data-testid="reaction-bar-select" onClick={() => { onClose(); onSelect(); }}
+        <button type="button" data-testid="reaction-bar-select" data-menu-item onClick={() => { onClose(); onSelect(); }}
           className="w-full px-3 py-2 text-start text-sm text-text-secondary hover:bg-surface-hover cursor-pointer border-t border-border">
           {t("chat.forward.select")}
         </button>
