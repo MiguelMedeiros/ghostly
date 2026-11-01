@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
+import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { here, inRange, since as sinceOf, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
@@ -244,28 +244,31 @@ function waitsFor(method: string, params: Record<string, unknown>): number | und
 async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths);
-  if (client) {
-    // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
-    // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
-    // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
-    // check's answer: a daemon that answered the command answered the check sent before it.
-    const warned = warnVersion(client);
-    const call = async (m: string, p?: unknown): Promise<unknown> => {
-      const timeoutMs = answerWithin(m, (p ?? {}) as Record<string, unknown>);
-      // A call with no deadline of its own (a send, a rename, an invite) goes only once the check is answered: a daemon
-      // that has not answered `status` in 15 s does not answer, and the call, never written, cannot happen when it
-      // wakes (a daemon stopped with Ctrl+Z reads its socket again on SIGCONT). It used to wait for ever with no word.
-      if (timeoutMs === undefined && !await settlesWithin(warned, ANSWER_MS)) {
-        client.destroy();
-        throw new CliError("timeout", `The daemon did not answer in ${ANSWER_MS / 1000} s; nothing was done: \`ghostly daemon restart\` starts a fresh one`, { method: m });
-      }
-      return client.call(m, p, { timeoutMs });
-    };
-    return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
-  }
+  if (client) return throughDaemon(client);
   const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g, options);
+  if (host instanceof DaemonClient) return throughDaemon(host);
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
+}
+
+function throughDaemon(client: DaemonClient): Session {
+  // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
+  // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
+  // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
+  // check's answer: a daemon that answered the command answered the check sent before it.
+  const warned = warnVersion(client);
+  const call = async (m: string, p?: unknown): Promise<unknown> => {
+    const timeoutMs = answerWithin(m, (p ?? {}) as Record<string, unknown>);
+    // A call with no deadline of its own (a send, a rename, an invite) goes only once the check is answered: a daemon
+    // that has not answered `status` in 15 s does not answer, and the call, never written, cannot happen when it
+    // wakes (a daemon stopped with Ctrl+Z reads its socket again on SIGCONT). It used to wait for ever with no word.
+    if (timeoutMs === undefined && !await settlesWithin(warned, ANSWER_MS)) {
+      client.destroy();
+      throw new CliError("timeout", `The daemon did not answer in ${ANSWER_MS / 1000} s; nothing was done: \`ghostly daemon restart\` starts a fresh one`, { method: m });
+    }
+    return client.call(m, p, { timeoutMs });
+  };
+  return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
 }
 
 /** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
@@ -274,15 +277,20 @@ const HOLDER_WAIT_MS = 5_000;
 /**
  * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
  * terminal) is waited for: both used to fail at once, and a backgrounded send was lost unless the script checked its
- * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step.
+ * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step. A daemon takes the profile before
+ * its socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
+ * goes through it, its client the answer. Only the lock was looked at again, and a command run while the daemon started
+ * failed busy, told to start the daemon that was running.
  */
-async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Host> {
+async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
   const until = Date.now() + HOLDER_WAIT_MS;
   for (;;) {
     try { return await openHost(g.paths, "one-shot", VERSION, options); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== "busy") throw error;
+      const client = await connectDaemon(g.paths);
+      if (client) return client;
       const left = until - Date.now();
       if (left <= 0) {
         const pid = error.details?.pid;
@@ -1101,17 +1109,18 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   const tell = (event: GhostlyEvent) => {
     if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
   };
-  requireProfile(g);
-  const client = await connectDaemon(g.paths);
-  if (client) {
+  const addThroughDaemon = async (client: DaemonClient) => {
     await warnVersion(client);
     const watcher = await connectDaemon(g.paths);
     await watcher?.subscribe(undefined, tell);
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
-    return;
-  }
+  };
+  requireProfile(g);
+  const client = await connectDaemon(g.paths);
+  if (client) { await addThroughDaemon(client); return; }
   const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g);
+  if (host instanceof DaemonClient) { await addThroughDaemon(host); return; }
   const off = host.ctx.hub.onEvent(tell);
   try {
     const result = await callApi(host.ctx, "identity.add", params) as { done: boolean; draft?: string };
