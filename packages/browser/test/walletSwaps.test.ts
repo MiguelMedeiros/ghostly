@@ -136,6 +136,22 @@ describe("redeeming a token", () => {
     expect(events.onSwapSettled, "the caller has its answer").not.toHaveBeenCalled();
   });
 
+  it("a token the mint's fee takes whole is refused before the mint is asked: the coin stays unspent, nothing is booked", async () => {
+    // A 1-sat token at a mint that charges 1 sat per input: the swap had no outputs, the mint kept the coin, and the
+    // wallet booked "received 0, fee 1", a chat payment of 0 too.
+    const tiny = getEncodedToken({ mint: MINT, unit: "sat", proofs: [proof(1, "t0")] });
+    mintApi.prepareReceive.mockImplementation(async () => ({ amount: Amount.zero(), fees: Amount.from(1), keysetId: KEYSET, inputs: [proof(1, "t0")], keepOutputs: [] }) as unknown as SwapPreview);
+    // Asked, the mint takes the coin and signs nothing.
+    mintApi.completeSwap.mockResolvedValue({ keep: [], send: [] });
+    const { wallet } = setup();
+    await expect(wallet.receiveToken(tiny, "ecash-in", undefined, { payment: incoming })).rejects.toMatchObject({ engineCode: "ecashFeeTakesAll", message: "The mint keeps all 1 sats of this ecash as its fee to take it in: nothing was redeemed, and its sender can still take it back" });
+    expect(mintApi.completeSwap, "the mint is never asked to take the coin").not.toHaveBeenCalled();
+    expect(await swaps()).toEqual([]);
+    expect(await all<WalletTx>(STORES.walletTx)).toEqual([]);
+    expect(await all<StoredPayment>(STORES.payments)).toEqual([]);
+    expect(await balance()).toBe(72);
+  });
+
   it("an answer that never arrives is asked for again on the spot, and the ecash is in the wallet", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockImplementation(async () => signed((await swaps())[0]));
