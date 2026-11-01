@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { CliError } from "../src/errors";
-import { completeWithPipedEvidence, secretsFromStdin, secretValuesWarning, textFromStdin } from "../src/secretInput";
+import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, textFromStdin } from "../src/secretInput";
 // covers: headless.cli
 
 const stdin = (text: string) => async () => text;
@@ -154,6 +154,41 @@ describe("secrets from stdin, out of ps", () => {
     expect(secretValuesWarning(list, "bitcoin", undefined, ["mnemonic", "scriptType"])).toMatch(/^--value mnemonic on/);
     expect(secretValuesWarning(list, "lightning", "nwc", [])).toBeUndefined();
     expect(secretValuesWarning(undefined, "lightning", "nwc", ["uri"])).toBeUndefined();
+  });
+
+  it("identity add --stdin takes a signer's fields as name=value lines, out of ps; a --field the signer marks secret is warned about", async () => {
+    const link = "bunker://abc?relay=wss://r.example&secret=s3cr=t";
+    const piped = await identityFields(["domain=example.com"], true, ["bunker"], stdin(`bunker=${link}\n\n`));
+    expect(piped).toEqual({ fields: { domain: "example.com", bunker: link } });
+    const onLine = await identityFields([`bunker=${link}`, "domain=example.com"], false, ["bunker"], never);
+    expect(onLine.fields).toEqual({ bunker: link, domain: "example.com" });
+    expect(onLine.warning).toMatch(/^--field bunker on the command line shows in ps.*--stdin/);
+    expect(onLine.warning).not.toContain(link);
+    expect((await identityFields(["domain=example.com"], false, ["bunker"], never)).warning).toBeUndefined();
+    // A terminal would wait on the keyboard without a word.
+    await expect(identityFields([], true, ["bunker"], never, true)).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(/\| ghostly identity add <provider> --signer id --stdin/) });
+  });
+
+  it("identity add's usage errors for a field with no = never repeat the value", async () => {
+    // `--field bunker://…` with the name left out, and `--field =bunker://…`.
+    for (const item of ["bunker://abc@s3cret", "=bunker://abc?secret=s3cret"]) {
+      const error = await identityFields([item], false, [], never).catch((e: CliError) => e);
+      expect(error).toMatchObject({ code: "usage" });
+      expect((error as CliError).message).not.toContain("s3cret");
+    }
+    const error = await identityFields([], true, [], stdin("bunker://abc@s3cret\n")).catch((e: CliError) => e);
+    expect(error).toMatchObject({ code: "usage" });
+    expect((error as CliError).message).not.toContain("s3cret");
+  });
+
+  it("the secret fields of identity add are its signers' kind: secret ones, as the providers mark them", async () => {
+    const { IDENTITY_PROVIDERS } = await import("@ghostly/browser/proofs/registry");
+    const nostr = IDENTITY_PROVIDERS.find((p) => p.id === "nostr"), domain = IDENTITY_PROVIDERS.find((p) => p.id === "domain");
+    expect(identitySecretFields(nostr, "nip46")).toEqual(["bunker"]);
+    expect(identitySecretFields(nostr)).toEqual(["bunker"]);
+    expect(identitySecretFields(nostr, "nip07")).toEqual([]);
+    expect(identitySecretFields(domain, "nip05-nip46")).toEqual(["bunker"]);
+    expect(identitySecretFields(undefined)).toEqual([]);
   });
 
   // `ssh-keygen … | ghostly identity complete <draft>` left the pipe unread and said "evidence is required".
