@@ -27,7 +27,7 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * modal: Tab stays in it and the chat under it is inert. Escape, with the focus in the panel, goes Back on a phone and
  * for a full-screen app, back beside the chat from full width, and closes it beside the chat.
  */
-export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status }: {
+export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn }: {
   linkId: string;
   sessionId: string;
   contact: AppContact;
@@ -36,6 +36,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   photo?: string;
   myKey?: string;
   status?: string;
+  /** A call is on in the chat: its connection control offers no DHT only meanwhile. */
+  callOn?: boolean;
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -131,7 +133,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {/* The chat's connection control, the same as in its header. */}
-          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" />
+          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} />
           {!withBack && (
             <button type="button" data-testid="mini-app-wide" aria-pressed={wide} onClick={() => updateChatApp(linkId, { wide: !wide })}
               aria-label={t(wide ? "apps.view.beside" : "apps.view.full")} title={t(wide ? "apps.view.beside" : "apps.view.full")}

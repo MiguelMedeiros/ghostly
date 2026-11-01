@@ -123,6 +123,7 @@
     "chosenNotInUse": "選択済み · 未使用",
     "chosenWaiting": "選択済み · 待機中",
     "contactLacks": "相手のアプリは {{transport}} に対応していません",
+    "dhtCallOn": "DHT のみを使うには通話を終了してください",
     "dhtContactChose": "相手が選択 · お互いが解除するまで直接接続なし",
     "dhtOff": "短いテキストを DHT で送信（オフラインでも）",
     "dhtOn": "短いテキストを DHT で送信、直接接続なし · 解除するには別の方法を選択",
