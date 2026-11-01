@@ -92,3 +92,42 @@ it("on an app with no WebRTC, DHT only releases the native transports, still nam
     await vi.waitFor(() => expect(current().availableTransports).toEqual(["iroh/1", "hyperdht/1"]));
   } finally { await node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); }
 }, 5000);
+
+it("leaving DHT only answers before the native listeners are up; a choice out of it still waits for them", async () => {
+  const row: StoredLink = { id: "dht-only-answers-first", profile: "paired-chat/1", createdAt: 1,
+    seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+    participationSeed: createIdentity().seedB64, peerPubKeyZ32: createIdentity().pubKeyZ32, pairedPeerKey: createIdentity().pubKeyZ32 };
+  await db.putSettings({ online: true, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  await db.putLink(row);
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  const endpoint = (transport: NativeTransport): NativeEndpoint => ({ transport, descriptor: {}, connect: async () => { throw new Error("offline"); },
+    close: async () => {}, onConnection: null, onDescriptor: null });
+  // The first listener starts at once; after DHT only, each waits until `up` (Iroh's relay or the HyperDHT out of reach).
+  let starts = 0, up!: () => void;
+  const reachable = new Promise<void>(resolve => { up = resolve; });
+  const slow = (transport: NativeTransport) => async () => { if (starts++ >= 2) await reachable; return endpoint(transport); };
+  const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "local fixture", relays: [] }) };
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() },
+    { transport, automaticWallets: false, nativeTransports: { "iroh/1": slow("iroh/1"), "hyperdht/1": slow("hyperdht/1") } });
+  const current = () => node.getState().links.find(l => l.id === row.id)!;
+  const settled = async (step: Promise<void>) => { let done = false; void step.then(() => { done = true; }); await new Promise(r => setTimeout(r, 50)); return done; };
+  try {
+    await node.start();
+    node.setActiveLink({ linkId: row.id });
+    await vi.waitFor(() => expect(current().availableTransports).toEqual(["iroh/1", "hyperdht/1"]));
+    await node.setDeliveryMode({ linkId: row.id, mode: "dht" });
+    await vi.waitFor(() => expect(current().availableTransports).toEqual([]));
+    // `chat disconnect --hold 0`: back on a live link at once, the listeners still starting.
+    expect(await settled(node.setDeliveryMode({ linkId: row.id, mode: "stream" }))).toBe(true);
+    expect(current().deliveryMode).toBe("stream");
+    expect(current().availableTransports).toEqual([]);
+    await node.setDeliveryMode({ linkId: row.id, mode: "dht" });
+    // A transport chosen out of DHT only needs its listener: that one waits, as before.
+    const chosen = node.setChatTransport({ linkId: row.id, transport: "iroh/1" });
+    expect(await settled(chosen)).toBe(false);
+    up();
+    await chosen;
+    expect(current().preferredTransport).toBe("iroh/1");
+    await vi.waitFor(() => expect(current().availableTransports).toEqual(["iroh/1", "hyperdht/1"]));
+  } finally { up(); await node.shutdown(); await db.deleteLink(row.id); vi.unstubAllGlobals(); }
+}, 5000);

@@ -4742,13 +4742,26 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
+  /**
+   * DHT only, or back to a live link. Back, it answers once the link has left DHT only: the native listeners start
+   * behind it and join the chat as each comes up (`registerEndpoint`). It waited for them before, 10 to 25 s with
+   * Iroh's relay or the HyperDHT out of reach, so `chat disconnect --hold 0` blocked that long.
+   */
   async setDeliveryMode({ linkId, mode }: { linkId: string; mode: DeliveryMode }): Promise<void> {
+    await this.switchDeliveryMode(linkId, mode, false);
+  }
+
+  /** `setDeliveryMode`; `native`: back on a live link, wait for its native listeners too (a choice that names one). */
+  private async switchDeliveryMode(linkId: string, mode: DeliveryMode, native: boolean): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || !live.link || (mode !== "stream" && mode !== "dht")) throw new Error("Delivery method unavailable.");
     await db.patchLink(linkId, { deliveryMode: mode });
     live.stored = { ...live.stored, deliveryMode: mode };
     await live.link.setDeliveryMode(mode);
-    if (mode === "stream") await this.ensureNativeEndpoints(linkId);
+    if (mode === "stream") {
+      const listening = this.ensureNativeEndpoints(linkId);
+      if (native) await listening;
+    }
     this.observeTransport(linkId);
     this.emitState();
   }
@@ -4797,7 +4810,7 @@ export class GhostlyNode implements EngineImplementation {
       const preferredTransport = transport === "auto" ? undefined : transport;
       live.stored = { ...live.stored, preferredTransport };
       await db.patchLink(linkId, { preferredTransport });
-      await this.setDeliveryMode({ linkId, mode: "stream" });
+      await this.switchDeliveryMode(linkId, "stream", true);
     }
     if (transport !== "auto") {
       // A choice on the wire too; out of DHT only, the log leaves the row to the one that says so (it names it).
