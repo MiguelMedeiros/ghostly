@@ -73,6 +73,10 @@ describe("app open", () => {
     await expect(callApi(ctx, "app.open", { chat: "Nobody", ref: REF })).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("names a command that starts the daemon when none runs (there is no `daemon start`)", async () => {
+    await expect(callApi(fake({ mode: "one-shot" }).ctx, "app.open", { chat: "Alice", ref: REF })).rejects.toMatchObject({ message: expect.stringContaining("ghostly daemon --detach") });
+  });
+
   it("says why in the engine's words when the chat cannot carry an app", async () => {
     const { ctx, node } = fake();
     node.appOpen.mockRejectedValueOnce(new Error("This chat is not paired yet"));
