@@ -530,6 +530,8 @@
   },
   "relays": {
     "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل",
+    "noneAnswered": "لم تستجب المرحّلات",
+    "noneAnsweredNext": "تحقّق من اتصالك، ثم أعد المحاولة.",
     "notAddress": "ليس عنوان مرحّل: {{address}}",
     "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}"
   },

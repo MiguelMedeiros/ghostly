@@ -526,6 +526,8 @@
   },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",
+    "noneAnswered": "中继没有响应",
+    "noneAnsweredNext": "请检查网络连接，然后重试。",
     "notAddress": "这不是中继地址：{{address}}",
     "useHttps": "请使用 https:// 中继地址：{{address}}"
   },

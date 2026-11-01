@@ -526,6 +526,8 @@
   },
   "relays": {
     "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",
+    "noneAnswered": "リレーが応答しませんでした",
+    "noneAnsweredNext": "接続を確認して、もう一度お試しください。",
     "notAddress": "リレーのアドレスではありません：{{address}}",
     "useHttps": "https:// のリレーアドレスを使ってください：{{address}}"
   },
