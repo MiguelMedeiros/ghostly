@@ -233,6 +233,21 @@ describe("DID signatures", () => {
     expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view)).toThrow(/not list under authentication or assertionMethod/);
   });
 
+  it("takes a key listed under two ids when one of them may sign", () => {
+    const k = keyOn("Ed25519");
+    const did = "did:web:example.com";
+    const vm = (id: string) => ({ id, type: "Multikey", publicKeyMultibase: k.did.slice(8) });
+    for (const order of [["#enc", "#sig"], ["#sig", "#enc"]]) {
+      const view = parseDidDocument(did, { id: did, verificationMethod: order.map(vm), authentication: ["#sig"] });
+      expect(checkDidJws(k.jws({}), messages, view).key.id, order.join()).toBe(`${did}#sig`);
+      expect(checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view).key.id, order.join()).toBe(`${did}#sig`);
+    }
+    // Named by its id that may not sign, it is still refused.
+    const view = parseDidDocument(did, { id: did, verificationMethod: [vm("#enc"), vm("#sig")], authentication: ["#sig"] });
+    expect(() => checkDidJws(k.jws({ kid: "#enc" }), messages, view)).toThrow(/#enc, which the DID document does not list/);
+    expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, "#enc")).toThrow(/#enc, which the DID document does not list/);
+  });
+
   it("parses only JWS it can check", () => {
     const k = keyOn("Ed25519");
     const sig = b64u(new Uint8Array(64));
