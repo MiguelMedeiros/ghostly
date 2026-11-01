@@ -1362,6 +1362,12 @@ export class Apps {
       const revokeRead = new Set<string>();
       const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
       app = withRevocations(app, before ?? []);
+      // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
+      if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
+        await this.removeBundle(app.pending.bytes, app.pending.digest);
+        const { pending: _p, ...rest } = app;
+        app = rest;
+      }
       for (const [url, want] of candidates) {
         // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
         // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
