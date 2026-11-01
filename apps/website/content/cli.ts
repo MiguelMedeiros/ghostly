@@ -53,7 +53,7 @@ const SCOPE: { level: Level; key: string }[] = [
   { level: "available", key: "services" },
   { level: "available", key: "calls" },
   { level: "available", key: "npm" },
-  { level: "planned", key: "dht" },
+  { level: "available", key: "dht" },
   { level: "planned", key: "wallets" },
   { level: "planned", key: "binary" },
 ];
@@ -105,7 +105,7 @@ export const cli = {
       services: "Shared services",
       calls: "Voice calls, the audio handed to your program",
       npm: "On npm as @ghostlytools/cli",
-      dht: "Reading the DHT directly (relays for now)",
+      dht: "The Mainline DHT read directly, beside the Pkarr relays",
       wallets: "Bark wallets",
       binary: "A single binary, without Node",
     } as Record<string, string>,
