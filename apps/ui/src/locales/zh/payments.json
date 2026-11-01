@@ -289,6 +289,7 @@
     "qrTooLong": "内容太长，无法生成二维码：请改为复制。",
     "redeem": "兑换",
     "redeemed": "已兑换 ✓",
+    "redeemedFee": "已兑换 ✓（mint 扣下 {{fee}} 作为手续费）",
     "redeeming": "兑换中…"
   },
   "mode": {

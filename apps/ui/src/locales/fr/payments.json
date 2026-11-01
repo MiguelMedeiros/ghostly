@@ -289,6 +289,7 @@
     "qrTooLong": "Trop long pour un QR code : copiez-le plutôt.",
     "redeem": "Encaisser",
     "redeemed": "Encaissé ✓",
+    "redeemedFee": "Encaissé ✓ (la mint a gardé {{fee}} comme frais)",
     "redeeming": "Encaissement…"
   },
   "mode": {

@@ -231,6 +231,12 @@
     "testBalance": "{{amount}} sats di prova (senza valore)",
     "testMintInvoice": "In attesa del pagamento… I mint di prova segnano da soli ogni fattura come pagata, quindi questa conta solo quando un contatto la paga in una chat. Per avere subito sats di prova, usa Ottieni monete di prova qui sopra.",
     "tokenHint": "Hai ricevuto un token ecash? Incollalo in Invia.",
+    "tokenRedeemedFee": "{{amount}} sats riscattati (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFeeTest": "{{amount}} sats di prova riscattati (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFeeTest_one": "{{amount}} sat di prova riscattato (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFeeTest_other": "{{amount}} sats di prova riscattati (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFee_one": "{{amount}} sat riscattato (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFee_other": "{{amount}} sats riscattati (la mint ha trattenuto {{fee}} come commissione).",
     "tx": {
       "ecashIn": "Ecash ricevuto",
       "ecashOut": "Ecash inviato",
