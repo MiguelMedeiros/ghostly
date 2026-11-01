@@ -638,7 +638,7 @@ const METHODS: Record<string, Method> = {
   /**
    * WISP 902 § Edits: the whole new text of one of my messages in a group. It shows here at once and goes to the members
    * (a private group's over the edges that are up, the others when theirs open; a community's through the group).
-   * `mentions`: members the new text names beyond those the message named. `sent`: no longer waiting for the pace.
+   * `mentions`: members the new text names beyond those the message named. `sent`: whether an edge took it, as for group send.
    */
   async "group.edit"(ctx, params) {
     const group = groupOf(ctx, params, "edit <chat> <message> <text...>");
@@ -663,7 +663,8 @@ const METHODS: Record<string, Method> = {
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
     const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
-    return { group: group.id, messageId, edits, sent: edges > 0 || (!!message && !message.edit?.pending), edges };
+    // Before 2026-11-01 `sent` was also true for an edit no edge had taken, once it no longer waited for the pace.
+    return { group: group.id, messageId, edits, sent: edges > 0, edges };
   },
   async "group.react"(ctx, params) {
     const group = groupOf(ctx, params, "react <chat> <message> <emoji>");
