@@ -7,6 +7,10 @@ import { loadSettings } from "../../ui/src/lib/settings";
 import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
 import { translatorFor } from "../../ui/src/locales";
 import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
+import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+
+// A contact's app tabs close when the profile locks, as Desktop's windows do: the worker serves them, page or not.
+setServiceWindowsCloser(() => void chrome.runtime.sendMessage({ target: "background", type: "close-services" } satisfies RuntimeMessage).catch(() => {}));
 
 /** The viewer tab's error page in the profile's language, as it is now. */
 export function viewerPage(): ViewerPage {
@@ -57,6 +61,11 @@ export const extensionHost: BrowserHost = {
   },
 
   async openService(peerPubKeyZ32, serviceId, tag) {
+    // A page of the profile before a switch: the peer runs the other one now, which must not serve this one's app.
+    if (!pageProfileIsCurrent()) {
+      startAsProfileInUse();
+      throw new Error("Switching profiles…");
+    }
     const reply = await chrome.runtime.sendMessage({
       target: "background",
       type: "open-service",
