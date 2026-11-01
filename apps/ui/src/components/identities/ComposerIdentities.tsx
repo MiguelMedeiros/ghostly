@@ -4,7 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import { useOutsideDismiss } from "../../hooks/useDismiss";
 import { useCopyKey } from "../../hooks/useCopyKey";
-import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineState, useNewProof } from "../../lib/identities";
+import { addableProviders, daysLeft, date, expiringSoon, providerLabel, sharedStatus, useEngineState, useEngineValue, useNewProof } from "../../lib/identities";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { ComposerSheet, ComposerSheetHead, ForwardArrow } from "../ComposerSheet";
 import { Deck } from "../deck/Deck";
@@ -24,10 +24,12 @@ type Shared = NonNullable<LinkView["identities"]>["shared"][number];
 /** Shared in this chat, or about to be: what the card shows as shared. */
 const isOn = (s?: Shared) => !!s && s.status !== "withdrawn" && s.status !== "withdrawal-pending";
 
-/** How many of this profile's identities the chat's contact sees: the + menu's Identity row says it. */
+/**
+ * How many of this profile's identities the chat's contact sees: the + menu's Identity row says it. The composer asks,
+ * always on screen in a chat: it draws again when the count changes, not on every engine state.
+ */
 export function useSharedIdentityCount(peerKey?: string): number {
-  const link = useEngineState()?.links.find(l => !!peerKey && l.peerPubKeyZ32 === peerKey);
-  return link?.identities?.shared.filter(isOn).length ?? 0;
+  return useEngineValue(state => state?.links.find(l => !!peerKey && l.peerPubKeyZ32 === peerKey)?.identities?.shared.filter(isOn).length ?? 0);
 }
 
 /** The last card: a blank one that adds an identity. */
