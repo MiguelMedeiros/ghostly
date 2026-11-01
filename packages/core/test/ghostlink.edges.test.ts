@@ -595,6 +595,16 @@ describe("what a paired peer says about itself", () => {
     expect(onGroupsSupport).toHaveBeenCalledWith(true);
   });
 
+  it("turns groups on once a session: off again, a later announcement does not turn them back on", async () => {
+    const onGroupsSupport = vi.fn();
+    const t = linkedPair([{}, { groupsSupport: true, events: { onGroupsSupport } }]);
+    await t.ready();
+    for (let i = 0; i < 50; i++) t.toB({ t: "paired-groups", v: i % 2 ? [2] : [1, 2] });
+    await t.settle("b");
+    expect(onGroupsSupport.mock.calls).toEqual([[true], [false]]);
+    expect(t.b.groupsSupport).toBe(false);
+  });
+
   it("answers a reconnect request and ignores an unexpected acknowledgement", async () => {
     const t = linkedPair();
     await t.ready();
