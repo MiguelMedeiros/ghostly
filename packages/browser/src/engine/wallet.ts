@@ -219,6 +219,10 @@ const backInWallet = (lost: number) => lost > 0
   ? `The sats are back in your wallet, less ${lost} sat${lost === 1 ? "" : "s"} the mint kept as its fee.`
   : "The sats are back in your wallet.";
 
+/** A mint's own words for a refusal, as one short line: the reason at the end of `lightningRefused`. */
+const mintReason = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
+
 /** Every proof and swap stored, as `CashuWallet.readStored` read them. */
 export interface StoredCashu { proofs: StoredProof[]; swaps: PendingSwap[] }
 
@@ -1448,12 +1452,14 @@ export class CashuWallet {
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
       const outcome = await this.settleMelt(melt).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
-        // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
         const lost = this.takeFailedFee(melt.quote);
         // Its ecash was spent somewhere else: said in plain words, whatever the mint's own were.
         if (this.spentAway.delete(melt.quote)) throw Object.assign(engineError("ecashAlreadySpent"), { cause: error });
+        // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
         if (lost > 0) throw Object.assign(new Error(`${error instanceof Error ? error.message : String(error)} ${backInWallet(lost)}`), { cause: error });
-        throw error;
+        // Refused, the quote unpaid and every proof back unspent: nothing left the wallet. Said in the app's words, the
+        // mint's own kept as the reason (and in the text, where "already paid" is read: InvoiceBubble.tsx).
+        throw Object.assign(engineError("lightningRefused", { reason: mintReason(error) }), { cause: error });
       }
       return outcome;
     }
