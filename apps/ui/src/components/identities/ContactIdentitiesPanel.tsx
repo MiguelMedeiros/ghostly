@@ -144,7 +144,7 @@ function TheirCards({ t, entries, link, links, name, nostr, initial }: { t: Tran
  * chat in full, to copy, whether it is verified (codes compared), and since when the chat exists.
  */
 function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Translate; card: IdCardContent; link: LinkView; name: string; turning: boolean; onCards: () => void }) {
-  const { copied, copy } = useCopyKey(card.subject);
+  const { copied, failed, copy } = useCopyKey(card.subject);
   return (
     <div className="id-card-back contact-card-back" data-testid="chat-identity-back" data-provider={GHOSTLY} data-status={card.status}>
       <div className="id-card-back-band">
@@ -171,6 +171,7 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
         <div className="flex flex-wrap gap-2">
           <button type="button" className="contact-card-action" data-testid="chat-identity-copy-key" disabled={turning} onClick={copy}>{copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}</button>
         </div>
+        {failed && <p role="alert" className="id-card-back-note" data-testid="chat-identity-copy-error">{t("identities.add.copyError")}</p>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{card.mrz ?? machineLine(card.label, card.subject)}</span>
     </div>

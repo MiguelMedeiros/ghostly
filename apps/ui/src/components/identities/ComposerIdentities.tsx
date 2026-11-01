@@ -252,7 +252,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
   turning: boolean; done: "shared" | "stopped" | "only" | null; error: string;
   actionRef: RefObject<HTMLButtonElement | null>; onShareOnly: () => void; onCards: () => void;
 }) {
-  const { copied, copy } = useCopyKey(card.subject);
+  const { copied, failed, copy } = useCopyKey(card.subject);
   const working = busy === GHOSTLY;
   const state = others === 0 ? t("identities.ghostly.onlyThis", { contact }) : others === 1 ? t("identities.ghostly.alsoSeesOne", { contact }) : t("identities.ghostly.alsoSees", { contact, count: others });
   return (
@@ -286,6 +286,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
             {copied ? t("identities.ghostly.copied") : t("identities.ghostly.copyKey")}
           </button>
         </div>}
+        {failed && <p role="alert" className="id-card-back-note" data-testid="composer-identity-copy-error">{t("identities.add.copyError")}</p>}
         {error && <p role="alert" className="m-0 text-xs text-danger" data-testid="composer-identities-error">{error}</p>}
       </div>
       <span className="id-card-mrz id-card-back-mrz" aria-hidden="true">{card.mrz ?? machineLine(card.label, card.subject)}</span>
