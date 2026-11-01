@@ -20,15 +20,26 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 
 // After any update check (the engine's scheduled one included), once a screen has read the list or an app runs: a
 // version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`). The engine says
-// the same after an uninstall, to every page: the app's frames stop wherever they run.
-engine.onAppsChecked(() => { if (apps !== null || appsRunning()) void refreshInstalledApps(); });
+// the same after an uninstall, to every page: the app's frames stop wherever they run. A first read still on its way
+// may have started before the check ended: it is read again too.
+engine.onAppsChecked(() => { if (apps !== null || loading || appsRunning()) void refreshInstalledApps(); });
+
+/** How many reads were asked: of two on their way at once, the one asked last is what shows. */
+let asked = 0;
 
 /** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
   // An engine from before built-in apps (the extension's, another tab's) has no `appBuiltIns`: none offered.
   const builtIns = engine.call("appBuiltIns").catch((): BuiltInAppOffer[] => []);
-  loading = engine.call("appList").then(async (list) => { offers = await builtIns; apps = list; tell(); stopTakenDown(list); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
-  return loading;
+  const mine = ++asked;
+  // One that a later read overtook waits for that one, so what is awaited is the list as it is now.
+  const read: Promise<void> = engine.call("appList").then(async (list) => {
+    const offered = await builtIns;
+    if (mine !== asked) return loading ?? undefined;
+    offers = offered; apps = list; tell(); stopTakenDown(list);
+  }, () => { if (mine !== asked) return loading ?? undefined; apps ??= []; tell(); }).finally(() => { if (loading === read) loading = null; });
+  loading = read;
+  return read;
 }
 
 /** For tests: forget what was read. */
@@ -36,6 +47,7 @@ export function forgetInstalledApps(): void {
   apps = null;
   offers = [];
   loading = null;
+  asked++;
 }
 
 /**
