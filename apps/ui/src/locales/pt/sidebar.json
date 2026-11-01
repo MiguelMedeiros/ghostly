@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "Recolher lista de conversas",
     "expand": "Expandir lista de conversas",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, você foi mencionado",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, mensagens não lidas",
     "unreadCount": "{{name}}, {{count}} mensagens não lidas",

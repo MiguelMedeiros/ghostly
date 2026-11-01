@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "Comprimi l'elenco chat",
     "expand": "Espandi l'elenco chat",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, sei stato menzionato",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, messaggi non letti",
     "unreadCount": "{{name}}, {{count}} messaggi non letti",

@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "チャット一覧を折りたたむ",
     "expand": "チャット一覧を展開",
+    "invitation": "{{name}}、{{status}}",
+    "mention": "{{name}}、あなたがメンションされました",
     "title": "{{action}}（{{keys}}）",
     "unread": "{{name}}、未読メッセージあり",
     "unreadCount": "{{name}}、未読メッセージ {{count}} 件",

@@ -20,6 +20,16 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
     : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members }) : t("sidebar.group.invitedByUnknown", { members });
 }
 
+/** What an invitation's row says it waits for: a contact's invitation in one line, or where a join through a link is. */
+export function invitationStatus(group: GroupView, t: Translate): string {
+  const invitation = group.invitation!;
+  return invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+    : invitationLine(invitation, t);
+}
+
+/** Whether the invitation's row offers a button: Accept and Decline, Delete once taken back, or Try again on a link nobody answered. */
+export const invitationWaitsForMe = (invitation: Invitation) => answerable(invitation) || !!invitation.takenBack || (!!invitation.viaLink && !!invitation.unanswered);
+
 /**
  * Whether Accept and Decline are offered: not answered yet, or accepted with no answer from the inviter's app. Not once
  * taken back, nor for a join through a link (a link nobody answered offers Try again, `LinkTryAgain`).
