@@ -194,11 +194,15 @@ const MULTICODEC: { prefix: [number, number]; curve: DidCurve | "X25519"; length
 
 /** A public key on its curve, validated; ECDSA keys compressed. */
 function curveKey(curve: DidCurve, bytes: Uint8Array): Uint8Array {
+  let smallOrder: boolean;
   try {
-    if (curve === "Ed25519") { if (bytes.length !== 32) throw new Error(); ed25519.Point.fromBytes(bytes); return bytes; }
-    const point = (curve === "secp256k1" ? secp256k1 : p256).Point.fromBytes(bytes);
-    return point.toBytes(true);
+    if (curve !== "Ed25519") return (curve === "secp256k1" ? secp256k1 : p256).Point.fromBytes(bytes).toBytes(true);
+    if (bytes.length !== 32) throw new Error();
+    smallOrder = ed25519.Point.fromBytes(bytes).isSmallOrder();
   } catch { throw new DidError(`That ${curve} key is not a valid point`); }
+  // No secret key goes with a point of small order, and one "verifies" a constant signature of any text.
+  if (smallOrder) throw new DidError("That Ed25519 key is a point of small order, which no secret key goes with");
+  return bytes;
 }
 
 /** A `z…` multibase (base58btc) multicodec key. X25519 and unknown codecs are `undefined`. */
@@ -397,7 +401,7 @@ function signingInput(jws: DidJws, message: Uint8Array): Uint8Array | undefined 
 
 function verifyWith(key: DidKey, signature: Uint8Array, message: Uint8Array, format: "compact" | "der" = "compact"): boolean {
   try {
-    if (key.curve === "Ed25519") return format === "compact" && ed25519.verify(signature, message, key.publicKey);
+    if (key.curve === "Ed25519") return format === "compact" && ed25519.verify(signature, message, key.publicKey, { zip215: false });
     // ECDSA over SHA-256 of the message, either half of s (JOSE does not require low S).
     return (key.curve === "secp256k1" ? secp256k1 : p256).verify(signature, message, key.publicKey, { prehash: true, lowS: false, format });
   } catch { return false; }

@@ -89,11 +89,10 @@ export function didDhtKey(did: string): { z32: string; publicKey: Uint8Array } {
   const publicKey = fromZ32(z32);
   // 52 characters carry 260 bits: the last four must be zero, or two DIDs would name one key.
   if (toZ32(publicKey) !== z32) throw invalid();
-  try {
-    ed25519.Point.fromBytes(publicKey);
-  } catch {
-    throw invalid();
-  }
+  // Nor a point of small order: no secret key goes with one, and it "verifies" a constant signature of any packet.
+  let fit: boolean;
+  try { fit = !ed25519.Point.fromBytes(publicKey).isSmallOrder(); } catch { fit = false; }
+  if (!fit) throw invalid();
   return { z32, publicKey };
 }
 
@@ -162,7 +161,9 @@ function jwkOf(type: number, bytes: Uint8Array, alg: string, kid: string): DidDh
   const kind = KEY_TYPES[type];
   if (type === 0) {
     if (bytes.length !== 32) throw malformed("an Ed25519 key is not 32 bytes");
-    try { ed25519.Point.fromBytes(bytes); } catch { throw malformed("an Ed25519 key is not a point of the curve"); }
+    let smallOrder: boolean;
+    try { smallOrder = ed25519.Point.fromBytes(bytes).isSmallOrder(); } catch { throw malformed("an Ed25519 key is not a point of the curve"); }
+    if (smallOrder) throw malformed("an Ed25519 key is a point of small order, which no secret key goes with");
     return { kty: "OKP", crv: "Ed25519", x: toBase64Url(bytes), alg, kid };
   }
   if (type === 3) {

@@ -86,10 +86,10 @@ A listing is the DID controller's claim, not a proof: the listed identity did no
 
 `resolveDidDht(did, { fetch, relays, signal })` in `@ghostly/core` reads any did:dht, bounded and strict:
 
-- The DID is exactly `did:dht:` and 52 canonical z-base-32 characters of an Ed25519 point: no path, query or fragment.
+- The DID is exactly `did:dht:` and 52 canonical z-base-32 characters of an Ed25519 point not of small order: no path, query or fragment.
 - One GET `<relay>/<key>` at a time (Pkarr relays and did:dht gateways answer the same request), the next relay only after a 404, an error or a packet that does not check out; at most 1072 bytes; the BEP44 signature is checked against the DID's key.
 - The root record is exactly `_did.<key>`; other records are `_<name>._did` or, as Pkarr clients that append the key write them, `_<name>._did.<key>`. Records of the key that are not did:dht records are ignored, and so are did:dht records this version does not know (`_prv`).
-- Version 0 only; `vm` lists `k0`, which is type 0 and the DID's own key; every reference names a listed key or service; keys of types 0 to 3 are checked as curve points, and are named by `id=` or their [RFC 7638](https://datatracker.ietf.org/doc/html/rfc7638) thumbprint; service endpoints, `alsoKnownAs` entries and controllers are URIs or DIDs; each record and property appears once. Anything else is refused as malformed.
+- Version 0 only; `vm` lists `k0`, which is type 0 and the DID's own key; every reference names a listed key or service; keys of types 0 to 3 are checked as curve points (an Ed25519 one not of small order), and are named by `id=` or their [RFC 7638](https://datatracker.ietf.org/doc/html/rfc7638) thumbprint; service endpoints, `alsoKnownAs` entries and controllers are URIs or DIDs; each record and property appears once. Anything else is refused as malformed.
 - A root record reading `deactivated` resolves with `deactivated: true` in the metadata and a document holding the id alone. The metadata's `versionId` is the sequence number and `updated` its date.
 
 Errors say what happened, for a person: not a did:dht, nothing published, not signed by the DID's key, malformed, no relay answered. Contacts' DIDs and the DID identity providers use this resolver.
@@ -108,7 +108,7 @@ Errors say what happened, for a person: not a did:dht, nothing published, not si
 
 ## Conformance
 
-A client MUST publish a profile's DID only under that profile's DID key, never under a chat's participation key or a proof key; MUST keep `alsoKnownAs` empty unless the person listed identities, and SHOULD warn before the first one; MUST keep one packet per key within 1000 bytes; MUST use a sequence number in seconds that only increases; SHOULD refresh the packet at least every two hours while online. A resolver MUST verify the BEP44 signature against the DID's key and MUST refuse a malformed document rather than guess.
+A client MUST publish a profile's DID only under that profile's DID key, never under a chat's participation key or a proof key; MUST keep `alsoKnownAs` empty unless the person listed identities, and SHOULD warn before the first one; MUST keep one packet per key within 1000 bytes; MUST use a sequence number in seconds that only increases; SHOULD refresh the packet at least every two hours while online. A resolver MUST verify the BEP44 signature against the DID's key as RFC 8032 writes it (not ZIP-215) and MUST refuse a malformed document rather than guess.
 
 ## Test evidence
 
