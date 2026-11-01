@@ -867,6 +867,11 @@ export class GhostLink {
   private peerNickOverride: string | null = null;
   /** Group protocol versions the peer announced on this session; null until it does. */
   private peerGroupVersions: number[] | null = null;
+  /**
+   * Groups were on on this session. Off again, they stay off until the next session: each "on" runs a group edge's
+   * whole opening, and the peer says its versions once a session.
+   */
+  private peerGroupsWereOn = false;
   /** What each side announced after the handshake (`paired-capabilities`): calls, services. */
   private readonly sessionCapabilities = new SessionCapabilities(() => this.offeredCapabilities());
   private readonly pairedCalls = new PairedCalls();
@@ -4222,6 +4227,7 @@ export class GhostLink {
           this.peerPaymentMethods = null; this.peerNetworks = null;
           this.peerHoldOverride = null;
           this.sessionCapabilities.reset();
+          this.peerGroupsWereOn = false;
           this.leaveHangUp();
           this.typingSender.reset(); this.typingReceiver.clear();
           this.appsSuspended();
@@ -4442,7 +4448,9 @@ export class GhostLink {
           if (frame?.t === "paired-groups") {
             if (!Array.isArray(frame.v) || frame.v.length > 8 || !frame.v.every(v => Number.isSafeInteger(v) && v > 0)) return;
             const before = this.groupsSupport;
+            if (!before && this.peerGroupsWereOn && frame.v.includes(1)) return;
             this.peerGroupVersions = frame.v as number[];
+            if (this.groupsSupport) this.peerGroupsWereOn = true;
             if (this.groupsSupport !== before) this.options.events?.onGroupsSupport?.(this.groupsSupport);
             return;
           }
@@ -4919,6 +4927,7 @@ export class GhostLink {
     this.typingSender.reset(); this.typingReceiver.clear();
     this.appsSuspended();
     this.emitFilesSession();
+    this.peerGroupsWereOn = false;
     if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);
     if (wasNative) this.options.events?.onDataLinkState?.("idle");
