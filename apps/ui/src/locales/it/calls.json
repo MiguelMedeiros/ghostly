@@ -12,6 +12,7 @@
   "decline": "Rifiuta",
   "devices": {
     "back": "{{name}} è tornato",
+    "failed": "Impossibile usare {{name}}. La chiamata continua con quello che aveva.",
     "lost": "{{name}} scollegato. Uso quello predefinito.",
     "menu": "Dispositivi",
     "switchBack": "Torna a usarlo"
