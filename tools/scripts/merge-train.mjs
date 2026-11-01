@@ -752,7 +752,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         done.dropped.push(p.number);
         await leave(p, LABEL.failed, workflowText(base, workflows));
       }
-      return board(prs.filter((p) => !changing.some(([c]) => c === p)), next, extra);
+      // From the ones aboard: those the build dropped have left the line already, and building them again drops them twice.
+      return board(aboard.filter((p) => !changing.some(([c]) => c === p)), next, extra);
     }
     const title = `train: ${aboard.length} into ${base} (${aboard.map((p) => `#${p.number}`).join(" ")})`;
     const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, extra, built.commits) });
