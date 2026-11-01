@@ -722,6 +722,25 @@ describe("a run of the train", () => {
     await expect(repo.run()).rejects.toThrow(/unable to access/);
   });
 
+  it("drops a conflicting pull request once when the batch's push is then refused for a workflow", async () => {
+    // The batch is built again without the one that changes a workflow: built from the whole line, the one that
+    // conflicted was dropped a second time, with a second comment and its labels taken off again.
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14]) repo.add(n);
+    repo.conflicts.add(13);
+    repo.files.set(12, [".github/workflows/ci.yml"]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if (sha.split(":")[1]?.split(",").includes("12")) throw new Error("! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml` without `workflows` permission)");
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 14]);
+    expect(r.dropped).toEqual([13, 12]);
+    expect(r.log.filter((line: string) => line.startsWith("DROP #13"))).toHaveLength(1);
+    expect(repo.comments.get(13)).toHaveLength(1);
+  });
+
   it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
     // A file name can hold the train's marks: quoted as is in the drop comment, the train's own comment then read as
     // #12's position comment, naming a head pushed later, and one still in line (queue:priority added during that run)
