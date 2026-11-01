@@ -358,6 +358,8 @@ const ownKey = (f: { e: number; n: number }) => `${f.e}:${f.n}`;
 
 /** What a frame weighs in a log, roughly: its boxes plus the fixed fields around them. */
 const frameKey = (f: GroupMessageFrame) => `${f.s}:${f.e}:${f.n}`;
+/** One edit of a message, by its number: an edit handed already, apart from the message's own `frameKey`. */
+const editKey = (f: GroupEditFrame) => `${f.s}:${f.e}:${f.n}:v${f.v}`;
 /** What a kept frame counts for against `GROUP_LIMITS.relayBytes`. */
 export const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + (f.fl?.c.length ?? 0) + (f.nk?.c.length ?? 0) + 400;
 
@@ -504,9 +506,9 @@ export class GroupSession {
     this.answers = new CatchUpAnswers({
       send: (to, frame) => {
         // A leaver's frame counts as handed once it goes (`receiveSync`): one in an answer replaced first is in the next.
-        if (frame.t === "group-msg" && !rosterHas(this.roster, frame.s)) {
+        if ((frame.t === "group-msg" || frame.t === GROUP_EDIT_FRAME) && !rosterHas(this.roster, frame.s)) {
           const handed = this.leaversHanded.get(to) ?? new Set<string>();
-          this.leaversHanded.set(to, handed.add(frameKey(frame)));
+          this.leaversHanded.set(to, handed.add(frame.t === GROUP_EDIT_FRAME ? editKey(frame) : frameKey(frame)));
         }
         return hooks.send(to, frame);
       },
@@ -868,7 +870,17 @@ export class GroupSession {
     if (this.state.relay?.length) this.state.relay = prune(this.state.relay, false);
     if (this.onRows?.length) this.onRows = prune(this.onRows, true);
     this.pruned.splice(0, this.pruned.length - GROUP_LIMITS.relay);
-    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s));
+    // An author out of the roster edits nothing any more, but its removals stand: a member away when one was said still
+    // takes it from me (WISP 902 § Edits).
+    if (this.state.relayEdits?.length) this.state.relayEdits = this.state.relayEdits.filter(f => rosterHas(this.roster, f.s) || this.isRemovalEdit(f));
+  }
+
+  /** Whether a kept edit is a removal (WISP 400 § Delete for everyone): its box, under its epoch's key, says `rm`. */
+  private isRemovalEdit(frame: GroupEditFrame): boolean {
+    const secret = this.secret(frame.e);
+    const plain = secret && decryptText(epochKeys(secret, this.id, frame.e).message, editAad(frame), frame.nn, frame.c);
+    if (!plain) return false;
+    try { return (JSON.parse(plain) as { rm?: unknown } | null)?.rm === true; } catch { return false; }
   }
 
   /** The frames `pruneRelay` dropped that are handed on again now (a removal's `left` mark came after it), back in their logs. */
@@ -1410,11 +1422,14 @@ export class GroupSession {
   /**
    * An edit of a member's own message, from its author's edge or handed on by another member: believed only while its
    * author is still in the roster (someone removed edits nothing), and the member handing it on too; for an epoch the
-   * author and I were both members of, with the author's signature over the whole frame and a box that opens. One for
-   * an epoch or a secret not here yet waits, as a message does. Taken, it is kept to hand on in turn.
+   * author and I were both members of, with the author's signature over the whole frame and a box that opens. A removal
+   * of an author out of the roster still stands, handed on by a member: it only takes away what the author wrote while
+   * in, and a member away when it was said would keep the message for good. One for an epoch or a secret not here yet
+   * waits, as a message does. Taken, it is kept to hand on in turn.
    */
   private async receiveEdit(from: string, raw: unknown): Promise<void> {
-    if (!isEditFrame(raw) || raw.s === this.myKey || !rosterHas(this.roster, raw.s) || !rosterHas(this.roster, from)) return;
+    if (!isEditFrame(raw) || raw.s === this.myKey || !rosterHas(this.roster, from)) return;
+    const member = rosterHas(this.roster, raw.s);
     if (!verify(fromBase64Url(raw.sig), editSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.parkEdit(from, raw); return; }
     const commit = this.state.chain[raw.e];
@@ -1428,6 +1443,7 @@ export class GroupSession {
     if (!body || typeof body !== "object" || !validEditText(body.text)) return;
     if (body.rm !== undefined && body.rm !== true) return;
     const rm = body.rm === true;
+    if (!member && !rm) return;
     if (!rm && !cardEditNumber(raw.v)) return;
     // A removal (WISP 400 § Delete for everyone) is its fallback text alone: no mentions, no card.
     const k = rm ? [] : validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s && this.admin === raw.s);
@@ -1717,10 +1733,15 @@ export class GroupSession {
       answer.push(f);
     }
     // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
+    const readable = (f: GroupEditFrame) => !!this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from);
     for (const author of asked) {
-      const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from));
+      const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && readable(f));
       answer.push(...edits.slice(-GROUP_LIMITS.handOnEdits));
     }
+    // And the removals of authors out of the roster (all `pruneRelay` keeps of theirs), whom nobody names in `ask`: each
+    // once to each member, as a leaver's messages go.
+    const gone = (this.state.relayEdits ?? []).filter(f => !rosterHas(this.roster, f.s) && readable(f) && !handed?.has(editKey(f)));
+    answer.push(...gone.slice(-GROUP_LIMITS.handOnEdits));
     // Or last, those after every message.
     answer.push(...metas.map(m => m.frame));
     this.handOut(from, answer);

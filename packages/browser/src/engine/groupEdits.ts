@@ -240,13 +240,14 @@ export class GroupEdits {
 
   /**
    * An edit from a member, authenticated as `sender` by the group. Believed only while the sender is in the group (a
-   * removed member's edits are dropped) and only of the sender's own message; the highest number wins. One of a message
+   * removed member's edits are dropped) and only of the sender's own message; the highest number wins. In a private
+   * group a removal stands once its author is out too (`outlives`): the group took it under the epoch rules. One of a message
    * not here yet waits a minute for it. Past `EDIT_RECEIVE_LIMIT` a window from one member, the rest wait for the next
    * window (`hold`): a catch-up hands back every edit of an author at once, and one dropped is never handed again.
    */
   async receive(groupId: string, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const membership = this.host.membership(groupId);
-    if (!membership?.members.has(sender) || sender === membership.me || !edit.id.startsWith(`${sender}:`)) return "dropped";
+    if (!membership || !(membership.members.has(sender) || outlives(membership, edit)) || sender === membership.me || !edit.id.startsWith(`${sender}:`)) return "dropped";
     const key = `${groupId}\n${sender}`;
     let pace = this.receivePace.get(key);
     if (!pace) this.receivePace.set(key, pace = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS, this.now));
@@ -288,8 +289,9 @@ export class GroupEdits {
     if (this.stopped || !group || !waiting || !pace) return;
     for (const [id, edit] of [...waiting]) {
       const membership = this.host.membership(groupId);
-      // Out of the group meanwhile (the member, or me): nothing of it is believed.
-      if (!membership?.members.has(sender)) { waiting.clear(); break; }
+      // Out of the group meanwhile (the member, or me): nothing of it is believed, but for a private group's removals.
+      if (!membership) { waiting.clear(); break; }
+      if (!membership.members.has(sender) && !outlives(membership, edit)) { waiting.delete(id); continue; }
       if (!pace.take()) break;
       // Unless a higher one took its place while the last was applied.
       if (waiting.get(id) !== edit) continue;
@@ -440,4 +442,13 @@ export class GroupEdits {
     for (const [key, timer] of this.heldTimers) if (groupId === undefined || key.startsWith(`${groupId}\n`)) { clearTimeout(timer); this.heldTimers.delete(key); }
     if (groupId === undefined) this.held.clear(); else this.held.delete(groupId);
   }
+}
+
+/**
+ * A private group's removal (WISP 902 § Edits): it stands once its author left or was removed, since it only takes
+ * away what the author wrote while in. The group's session checked it (signed by the author, for an epoch the author
+ * and I were both in, handed on by a member). A community's member out of it edits nothing at all.
+ */
+function outlives(membership: { community: boolean }, edit: GroupEdit): boolean {
+  return edit.rm === true && !membership.community;
 }

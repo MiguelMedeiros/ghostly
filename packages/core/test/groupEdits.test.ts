@@ -151,6 +151,35 @@ describe("group-edit frames (a private group)", () => {
     expect(mesh.of(carol)).toEqual([]);
   });
 
+  for (const how of ["leaves", "is removed"] as const) {
+    it(`a removal said while a member was away reaches it after its author ${how}; an edit does not`, async () => {
+      const { mesh, alice, bob, carol } = await trio();
+      const gone = ((await bob.sendText("delete me")) as { id: string }).id;
+      const edited = ((await bob.sendText("edit me")) as { id: string }).id;
+      await mesh.settle();
+      // Carol is away; Bob deletes one for everyone, edits the other, and is out of the group.
+      mesh.setEdge(carol, alice, false); mesh.setEdge(carol, bob, false);
+      await bob.sendEdit(gone, { v: 1, ts: 1, text: REMOVED_TEXT, remove: true });
+      await bob.sendEdit(edited, { v: 1, ts: 2, text: "edited" });
+      await mesh.settle();
+      expect(mesh.of(alice).map(e => e.id)).toEqual([gone, edited]);
+      if (how === "leaves") await bob.leave(); else await alice.remove(bob.myKey);
+      await mesh.settle();
+      expect(alice.others).toEqual([carol.myKey]);
+      // Carol is back and catches up from Alice: Bob is no one to ask for any more.
+      mesh.setEdge(carol, alice, true);
+      await alice.handle(carol.myKey, clone(carol.syncFrame([])));
+      await mesh.settle();
+      expect(carol.others).toEqual([alice.myKey]);
+      expect(mesh.of(carol)).toEqual([{ id: gone, sender: bob.myKey, e: 1, ts: 1, m: REMOVED_TEXT, rm: true }]);
+      // Once to each member: a later sync hands it no more.
+      const before = mesh.sent.length;
+      await alice.handle(carol.myKey, clone(carol.syncFrame([])));
+      await mesh.settle();
+      expect(mesh.sent.slice(before).some(f => f.frame.t === GROUP_EDIT_FRAME)).toBe(false);
+    });
+  }
+
   it("someone admitted after the message is not sent its edits, and could not open them", async () => {
     const { mesh, alice, bob, carol } = await trio();
     const id = ((await bob.sendText("old news")) as { id: string }).id;
