@@ -290,6 +290,12 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
   });
 
+  it("Cancel joining is a thumb's height on a phone", () => {
+    // It was 24 px tall, the only way off the joining card.
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }), profile: "community" });
+    expect(screen.getByTestId("group-joining-cancel")).toHaveClass("max-md:min-h-11", "max-md:px-3");
+  });
+
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");

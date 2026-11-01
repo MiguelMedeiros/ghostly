@@ -55,6 +55,14 @@ test("on a phone the admin's members list shows each member's name", { tag: ["@f
     expect(box!.x).toBeGreaterThanOrEqual(dialogBox!.x);
     expect(box!.x + box!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
   }
+  // Hand over admin, Remove and the close button are a thumb's height too (24 and 30 px), apart, and inside the dialog.
+  const [promoteBox, removeTall, closeBox] = await Promise.all([row.getByTestId("group-make-admin").boundingBox(), row.getByTestId("group-remove-member").boundingBox(), admin.page.getByTestId("group-members-dialog").getByRole("button", { name: "Close" }).boundingBox()]);
+  for (const box of [promoteBox, removeTall, closeBox]) {
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+  }
+  expect(closeBox!.width).toBeGreaterThanOrEqual(44);
+  expect(removeTall!.x - (promoteBox!.x + promoteBox!.width)).toBeGreaterThanOrEqual(8);
   await testInfo.attach("members-link-panel-375", { body: await admin.page.screenshot(), contentType: "image/png" });
 
   // Remove and Hand over admin, from the keyboard: closed, each question gives the focus back to the button that asked,
