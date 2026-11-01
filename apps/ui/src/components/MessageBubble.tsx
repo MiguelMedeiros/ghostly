@@ -415,10 +415,23 @@ const linkPictureBox = ({ width, height }: ImageMeta): React.CSSProperties => ({
 });
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
+type Segmenter = { segment(text: string): Iterable<{ segment: string }> };
+const SegmenterCtor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
+const graphemeSegmenter = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: "grapheme" }) : null;
+/**
+ * The emoji a person sees, spaces aside: a family, a flag or a skin-toned thumb is one, however many UTF-16 units it
+ * takes. Where the browser cannot tell characters apart, code points.
+ */
+const emojiCount = (text: string) => {
+  const parts = graphemeSegmenter ? Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment) : Array.from(text);
+  return parts.filter((part) => part.trim()).length;
+};
+
+/** Up to 6 emoji and nothing else show big. */
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
     /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
-  return emojiPattern.test(text.trim()) && text.trim().length <= 12;
+  return emojiPattern.test(text.trim()) && emojiCount(text) <= 6;
 }
 
 function TailSvg({ side }: { side: "left" | "right" }) {

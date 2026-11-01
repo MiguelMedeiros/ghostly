@@ -373,7 +373,13 @@ describe("MessageBubble: text", () => {
     expect(screen.getByText("🎉👻")).toHaveClass("text-[42px]");
   });
 
-  it.each([["words with an emoji", "nice 🎉"], ["too many emoji", "🎉🎉🎉🎉🎉🎉🎉"]])("shows %s at the normal size", (_, text) => {
+  // Families, flags and skin tones are 4-11 UTF-16 units each: the limit counts the emoji a person sees.
+  it.each([["two families", "👨‍👩‍👧‍👦👨‍👩‍👧‍👦"], ["three skin-toned thumbs", "👍🏽👍🏽👍🏽"], ["three flags", "🇧🇷🇯🇵🇸🇦"], ["six emoji with spaces", "🎉 🎉 🎉 🎉 🎉 🎉"]])("shows %s big", (_, text) => {
+    bubble({ text });
+    expect(screen.getByText(text)).toHaveClass("text-[42px]");
+  });
+
+  it.each([["words with an emoji", "nice 🎉"], ["too many emoji", "🎉🎉🎉🎉🎉🎉🎉"], ["seven families", "👨‍👩‍👧‍👦".repeat(7)]])("shows %s at the normal size", (_, text) => {
     bubble({ text });
     expect(screen.getByText(text)).not.toHaveClass("text-[42px]");
   });
