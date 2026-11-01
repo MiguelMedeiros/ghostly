@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { setBrowserHost } from "@ghostly/browser/host";
 import { startSessionSync } from "@ghostly/browser/platform/sync";
 import { Root } from "../../ui/src/Root";
-import { PeerLockUnavailable, becomeThePeer } from "@ghostly/browser/inPageHost";
+import { PeerLockUnavailable, becomeThePeer, untilAskedFor } from "@ghostly/browser/inPageHost";
 import { webHost } from "./host";
 import { gateSounds } from "./sounds";
 import { openDeviceGate } from "@ghostly/browser/devices/gate";
@@ -27,7 +27,7 @@ import { profileDatabase } from "../../ui/src/lib/profileData";
 import { activeProfileId } from "../../ui/src/lib/profiles";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
-import { SHARE_FORWARD_AFTER_MS, askForShare, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
+import { SHARE_FORWARD_AFTER_MS, askForShare, followNewVersion, forwardShare, listenForShares, openedForShare, registerServiceWorker } from "./pwa/serviceWorker";
 
 // A build for the e2e suite runs mini-apps through the real runner and broker before the app has a screen for them.
 if (import.meta.env.VITE_APPS_TEST === "1") void import("../../ui/src/lib/apps/testHook").then((hook) => hook.installAppsTestHook());
@@ -39,6 +39,8 @@ const root = createRoot(document.getElementById("root")!);
 // is registered in every tab, including one that waits for another below.
 watchInstallPrompt();
 registerServiceWorker();
+// Another tab took a new version: this one reloads into it rather than run the build whose files its worker deleted.
+const mayStart = followNewVersion();
 // Wake-up push (WISP 401 § Wake-up push): this app can be woken while closed; Settings shows the switch.
 setPushPlatform({ supported: pushSupported, subscribe: subscribePush, current: currentPush, unsubscribe: unsubscribePush, syncTable: syncWakeTable, syncText: syncWakeText });
 // GNOME Web and other WebKitGTK browsers before 2.52 keep the sounds' output running: waking it froze the page.
@@ -71,8 +73,9 @@ function cannotRun(missing: Essential[], error?: unknown): Promise<never> {
 const missing = await missingEssentials();
 if (missing.length) await cannotRun(missing);
 
+const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
 let isPeer = false;
-await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () => {
+await becomeThePeer(peerLock, () => {
   // Opened for a share while the app runs in another tab: that tab gets it. Not at once: a share posted from this
   // same tab (the system opens the app's window for it) replaces a page that holds the lock a moment longer on its
   // way out, and a forward then would hand the share to that page as it goes. Once the lock is this tab's, it asks.
@@ -81,6 +84,8 @@ await becomeThePeer(profile ? `ghostly-peer-${profile}` : "ghostly-peer", () => 
   root.render(<OtherTab sharing={!!sharing} t={profileTranslator()} />);
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
+// A tab that waited while another took a new version reloads into it instead, once that tab asked for the lock again.
+await mayStart(() => untilAskedFor(peerLock));
 
 isPeer = true;
 // The device state, before anything of the profile starts (WISP 06 § The gate): one small local read. A profile that

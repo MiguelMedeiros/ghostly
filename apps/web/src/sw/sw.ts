@@ -61,8 +61,8 @@ worker.addEventListener("install", (event) => {
 });
 
 worker.addEventListener("activate", (event) => {
-  // Only ever active on a first install, after Reload (the page reloads at once), or with no tab open: taking
-  // the open pages swaps nothing under anyone.
+  // Only ever active on a first install, after Reload (the page reloads at once), or with no tab open. Another
+  // tab of the old build, taken here with its files deleted, reloads into this one (`followNewVersion`).
   if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
     const names = await caches.keys();
