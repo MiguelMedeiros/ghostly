@@ -7,7 +7,7 @@ import type { Translate, TranslationKey } from "../locales/translate";
 
 let closer: (() => void) | null = null;
 
-/** How to close them: set by the Desktop host; nowhere else has such windows. */
+/** How to close them: set by the Desktop host, the extension's (its viewer tabs) and the web's (its drawn view). */
 export function setServiceWindowsCloser(next: (() => void) | null): void {
   closer = next;
 }
