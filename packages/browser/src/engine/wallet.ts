@@ -936,6 +936,9 @@ export class CashuWallet {
         // The same coins in another token (another memo): one coin is one redeem, never another swap counted again.
         const redeeming = new Set(written.flatMap((s) => (swapOf(s).inputs ?? []).map((p) => p.secret)));
         if (preview.inputs.some((p) => redeeming.has(p.secret))) throw engineError("ecashBeingReceived");
+        // A mint whose fee to take the token in is all of it would spend the coin and give nothing back: refused before the
+        // mint is asked, so the token stays unspent and its sender can still take it back.
+        if (preview.amount.toNumber() <= 0) throw engineError("ecashFeeTakesAll", { amount: String(faceValue) });
         // The outputs are for what is left after the mint's fee, so the records are known before the mint is asked.
         swap = { id: swapId(), mint, kind: "receive", swap: serializeSwapPreview(preview), createdAt: Date.now(), token, ...records(preview.amount.toNumber()) };
         await committed((await store(STORES.swaps, "readwrite")).put(swap));

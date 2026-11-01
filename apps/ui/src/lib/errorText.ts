@@ -626,6 +626,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   parkedSigned: "errors.engine.parkedSigned",
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
   ecashBeingReceived: "errors.engine.ecashBeingReceived",
+  ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",

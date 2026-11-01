@@ -29,6 +29,7 @@ export const ENGINE_ERRORS = {
   noSharedMint: "You share no mint with this contact",
   ecashAlreadySpent: "This ecash was already spent somewhere else",
   ecashBeingReceived: "This ecash is already being received",
+  ecashFeeTakesAll: "The mint keeps all {amount} sats of this ecash as its fee to take it in: nothing was redeemed, and its sender can still take it back",
   ecashOtherUnit: "This ecash is in {unit}: only sat ecash can be redeemed here",
   reviewedEcashSpent: "The ecash for this payment was already spent somewhere else. Nothing was sent, and your balance now shows what the mint still holds.",
   reviewedSatsGone: "The sats this payment was reviewed with went to another payment. Nothing was sent: review it again.",
