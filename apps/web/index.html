@@ -13,6 +13,19 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Ghostly</title>
+    <!-- What a link to the app shows where it is shared (a chat, a post): the manifest's description, and the
+         website's share image. Absolute and on the website, so a copy of the app served from another host shows the
+         same card; no og:url, so the card links to the address that was shared. -->
+    <meta name="description" content="Chat, calls, files, sats and your localhost apps, peer to peer. It all exists while you are online." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Ghostly" />
+    <meta property="og:title" content="Ghostly" />
+    <meta property="og:description" content="Chat, calls, files, sats and your localhost apps, peer to peer. It all exists while you are online." />
+    <meta property="og:image" content="https://ghostly.tools/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Ghostly: two friendly ghosts, Boo and Casper, talking peer to peer" />
+    <meta name="twitter:card" content="summary_large_image" />
     <!-- What the page says when the app cannot start (public/boot-guard.js): a plain script, before the bundle. -->
     <script src="/boot-guard.js"></script>
   </head>
