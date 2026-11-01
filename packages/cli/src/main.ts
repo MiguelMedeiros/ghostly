@@ -1130,8 +1130,10 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     try { params.credential = params.file === "-" ? await readStdin() : readFileSync(params.file as string, "utf8"); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
     catch (error) { throw localFileError(error, params.file as string) ?? new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
-    // Nothing read is said of the file or stdin given, not as the API's missing `credential`.
-    if (!params.credential) throw new CliError("bad_request", params.file === "-" ? "Nothing on stdin: give the SD-JWT VC the issuer sent" : `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
+    // Nothing read is said of the file or stdin given, not as the API's missing `credential`; nothing on stdin as a
+    // join or a redeem says it, a usage error.
+    if (!params.credential && params.file === "-") throw new CliError("usage", "Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
+    if (!params.credential) throw new CliError("bad_request", `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
     delete params.file;
   }
   // Before stdin adds its own: only the --value names came on the command line.
