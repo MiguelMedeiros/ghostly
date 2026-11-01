@@ -1,6 +1,7 @@
 {
   "fromContacts": "来自联系人",
   "fromContactsEmpty": "联系人共享的应用会显示在这里。",
+  "ghostlyOnline": "Ghostly 在线",
   "goOffline": "离线：你共享的内容都将无法访问",
   "goOnline": "上线",
   "letReach": "允许 {{contact}} 访问 {{app}}",
@@ -9,6 +10,7 @@
   "noContacts": "还没有联系人。",
   "nobodyYet": "在你选择谁可以访问之前，没人能打开它。",
   "nothingShared": "还没有共享任何内容。",
+  "offDisconnectsChats": "关闭后，所有聊天都会断开连接",
   "offline": "离线",
   "online": "在线",
   "open": "打开 {{app}}",
