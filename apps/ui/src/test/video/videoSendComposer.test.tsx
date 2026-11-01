@@ -17,7 +17,8 @@ const onSend = vi.fn<(text: string) => Promise<string | null>>();
 const onSendFile = vi.fn<(file: File) => Promise<string | null>>();
 
 const composer = () => renderApp(<LockScreenProvider><MessageInput onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
-const mov = () => new File(["iphone video"], "IMG_0001.MOV", { type: "video/quicktime" });
+/** The same video each time it is picked: its name, size and date. */
+const mov = () => new File(["iphone video"], "IMG_0001.MOV", { type: "video/quicktime", lastModified: 1_700_000_000_000 });
 
 beforeEach(() => {
   onSend.mockReset().mockResolvedValue(null);
@@ -150,5 +151,62 @@ describe("a video chosen to send", () => {
     await user.upload(screen.getByTestId("file-input"), new File(["%PDF"], "notes.pdf", { type: "application/pdf" }));
     await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
     expect(converter.convert).not.toHaveBeenCalled();
+  });
+});
+
+describe("a video still converting when the chat is left", () => {
+  const inChat = () => <LockScreenProvider><MessageInput draftId="video-left" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>;
+
+  it("is on the chat's line again when it is opened, and picked again there it is converted and sent once", async () => {
+    let finish!: () => void;
+    const convert = vi.fn((_file: File, { onProgress }: PrepareOptions) => new Promise<PreparedVideo>((resolve) => {
+      onProgress?.(0.42);
+      finish = () => resolve({ file: new File(["mp4"], "IMG_0001.mp4", { type: "video/mp4" }) });
+    }));
+    converter.convert = convert;
+    const first = renderApp(inChat());
+    await first.user.upload(screen.getByTestId("media-input"), mov());
+    await screen.findByRole("progressbar", { name: "Converting IMG_0001.MOV to MP4…" });
+    first.unmount();
+
+    const back = renderApp(inChat());
+    expect(screen.getByRole("progressbar", { name: "Converting IMG_0001.MOV to MP4…" })).toHaveTextContent("42%");
+    expect(screen.getByTestId("video-convert-cancel")).toBeInTheDocument();
+    await back.user.upload(screen.getByTestId("media-input"), mov());
+    finish();
+
+    await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
+    expect(convert).toHaveBeenCalledTimes(1);
+    expect(onSendFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("Cancel back in the chat stops it", async () => {
+    converter.convert = (_file, { onProgress, signal }) => new Promise((_resolve, reject) => {
+      onProgress?.(0.1);
+      signal?.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError")));
+    });
+    const first = renderApp(inChat());
+    await first.user.upload(screen.getByTestId("media-input"), mov());
+    await screen.findByTestId("video-convert-cancel");
+    first.unmount();
+
+    const { user } = renderApp(inChat());
+    await user.click(screen.getByTestId("video-convert-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
+  it("sent as it is meanwhile, the sender is told when back in the chat", async () => {
+    let finish!: () => void;
+    converter.convert = (file) => new Promise((resolve) => { finish = () => resolve({ file, asIs: true }); });
+    const first = renderApp(inChat());
+    await first.user.upload(screen.getByTestId("media-input"), mov());
+    await screen.findByTestId("file-preparing");
+    first.unmount();
+    finish();
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
+
+    renderApp(inChat());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sent IMG_0001.MOV as it is: this device can't convert it.");
   });
 });

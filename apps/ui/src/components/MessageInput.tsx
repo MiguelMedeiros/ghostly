@@ -1,5 +1,5 @@
 import { getSessionDraft, setSessionDraft } from "../lib/storage";
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, type ClipboardEvent, type ReactNode } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useId, type ClipboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { PaymentComposer } from "./PaymentComposer";
 import { ComposerIdentityPicker, useSharedIdentityCount } from "./identities/ComposerIdentities";
@@ -39,6 +39,7 @@ import { languageName } from "../lib/documentLanguage";
 import { carryMentions } from "../lib/translateDraft";
 import { translateEnabled } from "../lib/translateFlag";
 import { isConvertibleVideo, prepareVideo, type PreparedVideo } from "../lib/videoSend";
+import { cancelConverting, claimFiles, converted, endConverting, endPreparing, releaseFiles, sayInChat, startConverting, startPreparing, useFilesOnTheirWay } from "../lib/filesOnTheirWay";
 
 interface MessageInputProps {
   draftId?: string;
@@ -143,7 +144,6 @@ const TOAST_DURATION = 5_000;
 const PROGRESS_EVERY_MS = 250;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
-const fileKey = (file: File) => `${file.name}\n${file.size}\n${file.lastModified}`;
 
 /**
  * The chat's composer, laid out as WhatsApp's: [+] [emoji/GIF] [message] in one rounded field, and the mic (send
@@ -210,18 +210,6 @@ export function MessageInput({
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
-  /**
-   * Files on their way, until the chat has them: said on screen (a group's large file is copied and hashed for seconds
-   * before anything shows), and one picked again meanwhile is not sent twice (a group keeps both for good).
-   */
-  const [preparing, setPreparing] = useState<File[]>([]);
-  const preparingKeys = useRef(new Set<string>());
-  /**
-   * Videos being converted to H.264 MP4 before they go (`prepareVideo`): how far each is, and each one's Cancel. A
-   * second video chosen while the first converts has its own, so Cancel stops the one the line names.
-   */
-  const [converting, setConverting] = useState<ReadonlyMap<File, number | undefined>>(new Map());
-  const conversions = useRef(new Map<File, AbortController>());
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -340,6 +328,17 @@ export function MessageInput({
     toastMs.current = readingTime(msg, language, TOAST_DURATION);
     runToast();
   }, [language, runToast]);
+
+  /**
+   * Files on their way, until the chat has them: said on screen (a group's large file is copied and hashed for seconds
+   * before anything shows), and one picked again meanwhile is not sent twice (a group keeps both for good). A video is
+   * converted to H.264 MP4 before it goes (`prepareVideo`): how far each is, and each one's Cancel (a second video chosen
+   * while the first converts has its own, so Cancel stops the one the line names). Kept per chat, as its draft is:
+   * they go on after the chat is left, and are on its line again when it is opened (lib/filesOnTheirWay.ts).
+   */
+  const ownFilesId = useId();
+  const filesId = draftId ?? ownFilesId;
+  const { preparing, converting } = useFilesOnTheirWay(filesId, showToast);
 
   // The draft translated on Translate, shown above the field until something is sent.
   const drafting = useDraftTranslation({ config: translation, appLanguage: language, onFailure: (reason: DraftTranslationFailure, pair: string) => {
@@ -617,31 +616,27 @@ export function MessageInput({
   /** One after the other, as + → Document sends them; the first that cannot go stops the rest. False then. */
   const sendChosen = async (chosen: File[]): Promise<boolean> => {
     if (!onSendFile || disabled || fileUnavailable) return false;
-    // The same file picked again (another File, the same name, size and date) while the first is still on its way.
-    const fresh = chosen.filter((file) => !preparingKeys.current.has(fileKey(file)));
-    fresh.forEach((file) => preparingKeys.current.add(fileKey(file)));
+    // The same file picked again (another File, the same name, size and date) while the first is still on its way,
+    // also from before the chat was left and opened again.
+    const id = filesId;
+    const fresh = claimFiles(id, chosen);
     try {
       for (const file of fresh) {
-        setPreparing((was) => [...was, file]);
-        const done = () => {
-          preparingKeys.current.delete(fileKey(file));
-          if (mounted.current) setPreparing((was) => was.filter((other) => other !== file));
-        };
+        startPreparing(id, file);
+        const done = () => { releaseFiles(id, [file]); endPreparing(id, file); };
         // A video the receiver may not play goes as H.264 MP4; Cancel while it converts sends neither it nor the rest.
         let prepared: PreparedVideo = { file };
         if (isConvertibleVideo(file)) {
           const stopper = new AbortController();
-          conversions.current.set(file, stopper);
-          const progressed = (progress: number | undefined) => setConverting((was) => new Map(was).set(file, progress));
-          progressed(undefined);
+          startConverting(id, file, stopper);
           // The line takes the latest progress at most every PROGRESS_EVERY_MS, not each sample.
-          let latest: number | undefined;
+          let latest = 0;
           let shownAt = -Infinity;
           let pending: ReturnType<typeof setTimeout> | undefined;
           const show = () => {
             pending = undefined;
             shownAt = Date.now();
-            if (mounted.current && !stopper.signal.aborted) progressed(latest);
+            if (!stopper.signal.aborted) converted(id, file, latest);
           };
           const onProgress = (progress: number) => {
             latest = progress;
@@ -657,18 +652,18 @@ export function MessageInput({
             return false;
           } finally {
             clearTimeout(pending);
-            conversions.current.delete(file);
-            if (mounted.current) setConverting((was) => { const now = new Map(was); now.delete(file); return now; });
+            endConverting(id, file);
           }
         }
         const err = await onSendFile(prepared.file).finally(done);
-        if (err) { showToast(err); return false; }
-        if (prepared.asIs) showToast(t("composer.videoSentAsIs", { name: file.name }));
+        // Said in the chat, or there when it is opened again: the chat may have been left meanwhile.
+        if (err) { sayInChat(id, err); return false; }
+        if (prepared.asIs) sayInChat(id, t("composer.videoSentAsIs", { name: file.name }));
       }
       return true;
     } finally {
       // The first that cannot go stops the rest: they can be picked again.
-      fresh.forEach((file) => preparingKeys.current.delete(fileKey(file)));
+      releaseFiles(id, fresh);
     }
   };
 
@@ -947,7 +942,7 @@ export function MessageInput({
         </span>
       )}
       {shownConverting && (
-        <button type="button" data-testid="video-convert-cancel" onClick={() => conversions.current.get(shown)?.abort()}
+        <button type="button" data-testid="video-convert-cancel" onClick={() => cancelConverting(filesId, shown)}
           className="shrink-0 cursor-pointer border-none bg-transparent p-0 text-[13px] font-medium text-accent hover:underline">
           {t("common.cancel")}
         </button>
