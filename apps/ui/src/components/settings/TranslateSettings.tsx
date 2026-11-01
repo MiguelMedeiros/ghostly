@@ -57,8 +57,9 @@ export function TranslateSettings() {
       <Row label={title} hint={t("settings.translate.hint")} info={t("settings.translate.info")} testId="settings-translate-row">
         <Switch testId="settings-translate" label={title} checked={settings.translateMessages} onChange={(on) => {
           updateTranslateMessages(on);
-          // Turned on with no language here: what it needs is asked before anything downloads.
-          if (on && unread === null && lines.length === 0) void ask(settings.language);
+          // Turned on: what the app's language is missing is asked before anything downloads, whatever other pairs are
+          // here (a chat set to On brought its own). Nothing is asked when both ways are here.
+          if (on && unread === null) void ask(settings.language);
         }} />
       </Row>
       {question}
