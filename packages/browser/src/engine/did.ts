@@ -59,6 +59,8 @@ export class ProfileDid {
   private inFlight: Promise<void> | null = null;
   private again = false;
   private unlisten: (() => void) | undefined;
+  /** The last `samePacket` answer. */
+  private compared: { payload: string; uris: string; same: boolean } | undefined;
 
   constructor(private host: ProfileDidHost) {}
 
@@ -111,12 +113,13 @@ export class ProfileDid {
   view(): ProfileDidView | undefined {
     if (!this.stored) return undefined;
     const published = this.stored.published;
+    const alsoKnownAs = this.alsoKnownAs(this.listed());
     return {
       id: this.id,
       listed: this.listed(),
-      alsoKnownAs: this.alsoKnownAs(this.listed()),
+      alsoKnownAs,
       ...(published ? { published: { at: published.at, versionId: String(published.seq) } } : {}),
-      upToDate: !!published && this.samePacket(published.payload),
+      upToDate: !!published && this.samePacket(published.payload, alsoKnownAs),
       ...(this.error ? { error: this.error } : {}),
     };
   }
@@ -209,6 +212,7 @@ export class ProfileDid {
   }
 
   private alsoKnownAs(ids: string[]): string[] {
+    if (ids.length === 0) return [];
     const listable = this.host.listable();
     return [...new Set(ids.map(id => listable.get(id)).filter((uri): uri is string => !!uri))];
   }
@@ -218,13 +222,19 @@ export class ProfileDid {
     return fromBase64Url(this.stored.publicKey);
   }
 
-  /** Whether `payload` carries the document as it is now. Never throws: the engine's state is built from it. */
-  private samePacket(payload: string): boolean {
+  /**
+   * Whether `payload` carries the document as it is now. Never throws: the engine's state is built from it. Every state
+   * asks, and the document follows from the key and its URIs alone, so it is encoded again only when those URIs or `payload` change.
+   */
+  private samePacket(payload: string, alsoKnownAs = this.alsoKnownAs(this.listed())): boolean {
+    const uris = alsoKnownAs.join(" ");
+    if (this.compared?.payload === payload && this.compared.uris === uris) return this.compared.same;
+    let same = false;
     try {
-      return bytesEqual(fromBase64Url(payload).subarray(HEADER), encodeDidDhtPacket(this.document()));
-    } catch {
-      return false;
-    }
+      same = bytesEqual(fromBase64Url(payload).subarray(HEADER), encodeDidDhtPacket(didDhtDocument(this.publicKey(), { alsoKnownAs })));
+    } catch { /* not the same */ }
+    this.compared = { payload, uris, same };
+    return same;
   }
 
   /**
