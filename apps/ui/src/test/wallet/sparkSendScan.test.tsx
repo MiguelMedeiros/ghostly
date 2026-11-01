@@ -34,6 +34,14 @@ describe("Send on the Spark card: scan, paste or picture", () => {
     return rendered;
   };
 
+  it("a phone's keyboard is told not to change a typed address", async () => {
+    await show();
+    const field = screen.getByLabelText("Spark address or invoice");
+    expect(field).toHaveAttribute("autocapitalize", "none");
+    expect(field).toHaveAttribute("autocorrect", "off");
+    expect(field).toHaveAttribute("spellcheck", "false");
+  });
+
   it("a picture of an address fills it, and asks the amount; nothing is reviewed until the person asks", async () => {
     qr.text = ADDRESS;
     const { user, engine } = await show();

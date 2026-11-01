@@ -3,6 +3,7 @@ import { isRecoveryPhrase, newRecoveryPhrase } from "@ghostly/browser/engine/pay
 import { Button, Notice, Segmented, input } from "../ui";
 import type { ProviderFormProps } from "./forms";
 import { useI18n } from "../../../contexts/I18nContext";
+import { exactText } from "../../../lib/exactText";
 
 /**
  * Breez's form: the wallet is Ghostly's to make, so a new one gets a recovery phrase made here, shown
@@ -38,7 +39,7 @@ export function BreezForm({ descriptor, mode, busy, saving = false, onSubmit }: 
       ) : (
         <label className="block space-y-1">
           <span className="text-xs text-text-secondary">{t("wallet.source.breez.phrase")}</span>
-          <textarea aria-label={t("wallet.source.breez.phrase")} className={`${input} font-mono text-xs resize-none`} rows={3} spellCheck={false} placeholder={t("wallet.source.breez.phrasePlaceholder")} value={restored} onChange={(e) => setRestored(e.target.value)} />
+          <textarea aria-label={t("wallet.source.breez.phrase")} className={`${input} font-mono text-xs resize-none`} rows={3} {...exactText} placeholder={t("wallet.source.breez.phrasePlaceholder")} value={restored} onChange={(e) => setRestored(e.target.value)} />
           {invalid && <span className="block text-[11px] text-danger" data-testid="breez-phrase-invalid">{t("wallet.source.breez.invalid")}</span>}
         </label>
       )}

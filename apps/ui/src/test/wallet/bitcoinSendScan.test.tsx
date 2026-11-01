@@ -55,6 +55,15 @@ describe("Send on the Bitcoin card: scan, paste or picture", () => {
     return rendered;
   };
 
+  it("a phone's keyboard is told not to change a typed address: with a capital first letter it is no address", async () => {
+    await show();
+    const field = screen.getByLabelText("Bitcoin recipient address");
+    expect(field).toHaveAttribute("autocapitalize", "none");
+    expect(field).toHaveAttribute("autocorrect", "off");
+    expect(field).toHaveAttribute("spellcheck", "false");
+    expect(routeBitcoinSend(`B${REGTEST.slice(1)}`, "regtest")).toEqual({ kind: "unknown" });
+  });
+
   it("a picture of a link fills the address and the amount, and nothing is reviewed until the person asks", async () => {
     qr.text = `bitcoin:${REGTEST}?amount=0.00001`;
     const { user, engine } = await show();

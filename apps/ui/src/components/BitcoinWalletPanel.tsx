@@ -17,6 +17,7 @@ import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemText } from "../lib/problemText";
+import { exactText } from "../lib/exactText";
 
 /** The most the person accepts to pay in fees unless they change it; the review shows the real fee. */
 const DEFAULT_FEE_CAP = 2_000;
@@ -99,7 +100,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           {action === "send" && (
             <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
               <SendScan onText={given} disabled={busy} scanOnOpen>
-              <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={(e) => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text) && !typedByKey(e)) given(text); else { setNotUsable(null); setAddress(text); } }}
+              <input aria-label={t("wallet.panel.recipient", { wallet: "Bitcoin" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bitcoin" })} {...exactText} className={`${input} font-mono text-xs`} value={address} onChange={(e) => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text) && !typedByKey(e)) given(text); else { setNotUsable(null); setAddress(text); } }}
                 onBlur={() => { if (/^bitcoin:/i.test(address)) given(address, true); }} />
               {notUsable === "refused" && <Notice tone="error" testId="bitcoin-send-refused">{t("payments.formats.unsupported")}</Notice>}
               {notUsable === "unknown" && <Notice tone="error" testId="bitcoin-send-unknown">{t("wallet.panel.notAddress", { wallet: "Bitcoin" })}</Notice>}

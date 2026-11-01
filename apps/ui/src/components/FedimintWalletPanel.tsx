@@ -12,6 +12,7 @@ import { formatAmount } from "../lib/amount";
 import { fillNodes } from "../lib/fillNodes";
 import { problemText } from "../lib/problemText";
 import { focusLost } from "../lib/focus";
+import { exactText } from "../lib/exactText";
 
 /** A Fedimint backup file is read whole into the page: anything larger is not one. */
 const MAX_BACKUP_FILE = 1024 * 1024;
@@ -118,7 +119,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
   const join = <Section title={federations.length ? t("wallet.fedimint.joinAnother") : t("wallet.fedimint.join")}>
     <Block>
       <p className="text-xs text-text-muted">{t("wallet.fedimint.about")}</p>
-      <textarea aria-label={t("wallet.fedimint.inviteInput")} data-testid="fedimint-invite" rows={2} spellCheck={false} placeholder="fed1…" className={`${input} font-mono text-xs resize-none`} value={invite}
+      <textarea aria-label={t("wallet.fedimint.inviteInput")} data-testid="fedimint-invite" rows={2} {...exactText} placeholder="fed1…" className={`${input} font-mono text-xs resize-none`} value={invite}
         onChange={(e) => { setInvite(e.target.value.trim()); setPreview(null); }} />
       {!preview ? <Button ref={look} data-testid="fedimint-preview" disabled={busy || !invite} loading={running === "look"} onClick={() => void run(async () => setPreview(await wallet.fedimintPreview(invite)), "look")}>{running === "look" ? t("wallet.fedimint.asking") : t("wallet.fedimint.look")}</Button>
         : <div className="space-y-3">
@@ -152,7 +153,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
           </>}
           <div className="space-y-2">
             <p className="text-xs text-text-secondary">{t("wallet.fedimint.notesIn")}</p>
-            <textarea aria-label={t("wallet.fedimint.notesInInput")} data-testid="fedimint-notes-in" rows={2} spellCheck={false} className={`${input} font-mono text-xs resize-none`} value={notesIn} onChange={(e) => { setNotesIn(e.target.value.trim()); setReceived(""); }} />
+            <textarea aria-label={t("wallet.fedimint.notesInInput")} data-testid="fedimint-notes-in" rows={2} {...exactText} className={`${input} font-mono text-xs resize-none`} value={notesIn} onChange={(e) => { setNotesIn(e.target.value.trim()); setReceived(""); }} />
             <Button data-testid="fedimint-redeem" disabled={busy || !notesIn} loading={running === "redeem"} onClick={() => void run(async () => { const r = await wallet.fedimintReceiveNotes(notesIn); setNotesIn(""); setReceived(t("wallet.fedimint.redeemed", { amount: formatAmount(r.amount, t.language), unit })); }, "redeem")}>{t("wallet.fedimint.redeem")}</Button>
             {received && <Notice tone="success" testId="fedimint-redeemed">{received}</Notice>}
           </div>
@@ -205,8 +206,8 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
     <Section title={t("wallet.fedimint.restore")}>
       <Row label={t("wallet.fedimint.fromBackup")} hint={federations.length ? t("wallet.fedimint.fromBackupHintJoined") : t("wallet.fedimint.fromBackupHint")}><Button disabled={!!federations.length && open !== "restore"} onClick={() => setOpen(open === "restore" ? "none" : "restore")}>{open === "restore" ? t("common.cancel") : t("wallet.fedimint.restore")}</Button></Row>
       {open === "restore" && <Block>
-        <textarea aria-label={t("wallet.fedimint.phraseInput")} rows={2} spellCheck={false} placeholder={t("wallet.fedimint.phrase")} className={`${input} font-mono resize-none`} value={phrase} onChange={(e) => setPhrase(e.target.value)} />
-        <textarea aria-label={t("wallet.fedimint.invitesInput")} rows={2} spellCheck={false} placeholder={t("wallet.fedimint.invitesPlaceholder")} className={`${input} font-mono text-xs resize-none`} value={restoreInvites} onChange={(e) => setRestoreInvites(e.target.value)} />
+        <textarea aria-label={t("wallet.fedimint.phraseInput")} rows={2} {...exactText} placeholder={t("wallet.fedimint.phrase")} className={`${input} font-mono resize-none`} value={phrase} onChange={(e) => setPhrase(e.target.value)} />
+        <textarea aria-label={t("wallet.fedimint.invitesInput")} rows={2} {...exactText} placeholder={t("wallet.fedimint.invitesPlaceholder")} className={`${input} font-mono text-xs resize-none`} value={restoreInvites} onChange={(e) => setRestoreInvites(e.target.value)} />
         <Button variant="primary" disabled={busy || !phrase.trim() || !restoreInvites.trim()} loading={running === "restore-phrase"} onClick={() => void run(async () => { const r = await wallet.fedimintRestorePhrase(phrase, restoreInvites.split(/\s+/).filter(Boolean)); setPhrase(""); setRestoreInvites(""); setOpen("none"); if (r.failed.length) throw new Error(t("wallet.fedimint.restoreFailed", { count: r.joined, failed: r.failed.join("; ") })); }, "restore-phrase")}>{t("wallet.fedimint.restorePhrase")}</Button>
         <label className="block text-xs text-text-muted">{t("wallet.fedimint.fileInput")}
           <input type="file" accept="application/json,.json" className={`${input} mt-1`} onChange={(e) => pickBackup(e.target)} />
