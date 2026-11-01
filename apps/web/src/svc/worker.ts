@@ -47,6 +47,22 @@ function plain(status: number, text: string): Response {
   return new Response(text, { status, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "content-security-policy": frameAncestors() } });
 }
 
+const escape = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * The app's words for a request it could not answer, as a page in the profile's language and direction (`lang`,
+ * `dir`, from the app's page), in place of a plain-text one: no script, nothing loaded, its style its own.
+ */
+export function said(status: number, text: string, lang?: string, dir?: string): Response {
+  if (!lang && !dir) return plain(status, text);
+  const language = lang && /^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/.test(lang) ? ` lang="${lang}"` : "";
+  const direction = dir === "rtl" || dir === "ltr" ? ` dir="${dir}"` : "";
+  const html = `<!doctype html><html${language}${direction}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${escape(text)}</title>`
+    + `<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font:15px/1.5 system-ui,sans-serif;text-align:center}p{max-width:32em;margin:0}</style>`
+    + `</head><body><p>${escape(text)}</p></body></html>`;
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `${frameAncestors()}; default-src 'none'; style-src 'unsafe-inline'` } });
+}
+
 /** The bridge page open on this origin, among its pages: the one way to the app, and so to the contact. */
 function bridge(all: WindowClient[]): WindowClient | undefined {
   // Framed, as the app frames it: a bridge page opened on its own (by another site, say) has no way to the app.
@@ -136,7 +152,7 @@ async function forward(event: FetchEvent): Promise<Response> {
         try { controller.close(); } catch { /* already closed */ }
         port.close();
       } else if (reply?.type === "error") {
-        if (!answered) { answered = true; clearTimeout(timer); resolve(plain(reply.status, reply.text)); }
+        if (!answered) { answered = true; clearTimeout(timer); resolve(said(reply.status, reply.text, reply.lang, reply.dir)); }
         else { try { controller.error(new Error(reply.text)); } catch { /* already closed */ } }
         port.close();
       }

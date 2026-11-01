@@ -33,6 +33,8 @@
     "elsewhere": "{{app}} intentó llevarte a otro sitio, fuera de lo que comparte tu contacto.",
     "failed": "La solicitud falló.",
     "notAnswering": "{{app}} no responde en el equipo de tu contacto. Pídele que compruebe que está en marcha.",
+    "offline": "Tu contacto está desconectado, así que {{app}} no puede abrirse ahora. Se abrirá de nuevo aquí cuando vuelva.",
+    "retry": "Reintentar",
     "tooSlow": "{{app}} no respondió a tiempo en el equipo de tu contacto. Vuelve a intentarlo en un momento.",
     "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea."
   },

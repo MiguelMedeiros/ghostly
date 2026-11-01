@@ -33,6 +33,8 @@
     "elsewhere": "{{app}} ha provato a mandarti altrove, fuori da ciò che il tuo contatto condivide.",
     "failed": "La richiesta non è riuscita.",
     "notAnswering": "{{app}} non risponde sul computer del tuo contatto. Chiedi al tuo contatto di controllare che sia in esecuzione.",
+    "offline": "Il tuo contatto è offline, quindi {{app}} non può aprirsi ora. Si riaprirà qui quando tornerà.",
+    "retry": "Riprova",
     "tooSlow": "{{app}} non ha risposto in tempo sul computer del tuo contatto. Riprova tra un momento.",
     "unreachable": "Questo servizio non è raggiungibile. I servizi esistono finché il loro fantasma è online."
   },

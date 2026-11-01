@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, MAX_RESPONSE_BYTES, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { callWindowOn } from "../../../ui/src/lib/serviceWindows";
 
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
@@ -12,9 +12,23 @@ export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
 
 /**
  * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
- * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own.
+ * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own. `tooSlow`: no
+ * answer before the services worker would give up with words of its own. `offline` and `retry`: the view's notice
+ * while the contact is offline.
  */
-export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+export interface OpenerWords { unreachable: string; failed: string; close: string; callOn: string; tooSlow: string; offline: string; retry: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
+
+/**
+ * Whether the contact is offline now (`offline`), and a way to hear when that may have changed (`watch`, which returns
+ * how to stop hearing it): the open view says so over the app, rather than leaving its last page up.
+ */
+export interface ContactPresence { offline: () => boolean; watch: (changed: () => void) => () => void }
+
+/**
+ * The page answers a request a little before the services worker gives up on it (`HEAD_TIMEOUT_MS`), so what the
+ * person reads is the profile's words in its language, never the worker's English.
+ */
+export const ANSWER_BY_MS = HEAD_TIMEOUT_MS - 5_000;
 
 /**
  * The label of one contact's app as this profile opens it: `viewerTag` (this side's key for the chat, so another
@@ -68,9 +82,27 @@ export class CookieJar {
 export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords): Promise<void> {
   const request = readRequest(data);
   if (!request) { port.close(); return; }
-  const post = (reply: ServiceReply, transfer: Transferable[] = []) => port.postMessage(reply, transfer);
+  // Once an error went, nothing more does: the port is the worker's, and it took that as the whole answer.
+  let ended = false;
+  const post = (reply: ServiceReply, transfer: Transferable[] = []) => {
+    if (ended) return;
+    if (reply.type === "error") {
+      ended = true;
+      // Said in the profile's language and direction, as the app's page reads them.
+      const root = typeof document === "undefined" ? null : document.documentElement;
+      if (root?.lang) reply = { ...reply, lang: root.lang };
+      if (root?.dir === "rtl" || root?.dir === "ltr") reply = { ...reply, dir: root.dir };
+    }
+    port.postMessage(reply, transfer);
+  };
   const stop = new AbortController();
   port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
+  let headed = false;
+  const late = setTimeout(() => {
+    if (headed) return;
+    post({ type: "error", status: 504, text: words.tooSlow });
+    stop.abort();
+  }, ANSWER_BY_MS);
   try {
     const cookie = jar.header();
     const headers = request.headers.filter(([name]) => name.toLowerCase() !== "cookie");
@@ -87,6 +119,9 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
       if (name.toLowerCase() === "set-cookie") jar.take(value);
       else out.push([name, value]);
     }
+    headed = true;
+    clearTimeout(late);
+    if (ended) return;
     post({ type: "head", status: answer.status, headers: out });
     for await (const chunk of answer.body) {
       if (stop.signal.aborted) break;
@@ -99,6 +134,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     if (!gone && !stop.signal.aborted) console.warn("Service request failed:", error);
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
+    clearTimeout(late);
     port.close();
   }
 }
@@ -135,7 +171,7 @@ function leaveViewEntry(): void {
  * Shows a contact's app full screen over the app, on its own origin under `host`, with a bar to close it. One at a
  * time: opening another closes the one before.
  */
-export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords }): Promise<void> {
+export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords; presence?: ContactPresence }): Promise<void> {
   handingOver = true;
   try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
@@ -172,7 +208,41 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   frame.setAttribute("allow", "fullscreen; clipboard-write");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.style.cssText = "flex:1;width:100%;border:0;background:#fff";
-  view.append(bar, frame);
+  // While the contact is offline: said here, in the app's look and the person's language and direction (the view is
+  // the app's page), in place of the contact's last page; its requests are answered as unreachable meanwhile.
+  const notice = document.createElement("div");
+  notice.dataset.testid = "service-view-offline";
+  notice.setAttribute("role", "status");
+  notice.hidden = true;
+  notice.style.cssText = "flex:1;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;color:var(--color-text-primary,#eee);font:15px/1.5 system-ui,sans-serif";
+  const said = document.createElement("p");
+  said.style.cssText = "margin:0;max-width:32em";
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.dataset.testid = "service-view-retry";
+  retry.textContent = options.words.retry;
+  retry.style.cssText = "min-height:40px;padding:0 16px;border:1px solid var(--color-border,#333);border-radius:8px;background:transparent;color:inherit;font:600 14px system-ui,sans-serif;cursor:pointer";
+  notice.append(said, retry);
+  view.append(bar, notice, frame);
+  const src = `${origin}${BRIDGE_PAGE}`;
+  /** The notice while the contact is offline; once back, the app again, loaded anew (its last page may be stale). */
+  const present = () => {
+    const offline = options.presence?.offline() ?? false;
+    if (offline === !notice.hidden) return;
+    if (offline) {
+      said.textContent = options.words.offline;
+      notice.hidden = false;
+      notice.style.display = "flex";
+      frame.style.display = "none";
+      if (view.contains(document.activeElement) && document.activeElement !== close) close.focus({ preventScroll: true });
+    } else {
+      notice.hidden = true;
+      notice.style.display = "none";
+      frame.style.display = "";
+      frame.src = src;
+    }
+  };
+  retry.addEventListener("click", present);
 
   const ports = new Set<MessagePort>();
   const onMessage = (event: MessageEvent) => {
@@ -189,7 +259,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
   const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
+  let unwatch = () => {};
   const end = () => {
+    unwatch();
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey);
     removeEventListener("popstate", onPop);
@@ -209,8 +281,12 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   addEventListener("popstate", onPop);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
-  frame.src = `${origin}${BRIDGE_PAGE}`;
+  frame.src = src;
   for (const el of shut) el.setAttribute("inert", "");
   document.body.append(view);
   close.focus();
+  if (options.presence) {
+    unwatch = options.presence.watch(present);
+    present();
+  }
 }
