@@ -153,12 +153,21 @@ export function checkWebhook(url: string): URL {
   return parsed;
 }
 
+/**
+ * The event number a cursor file holds, or undefined when there is no file (a first start: live events). A file that is
+ * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and what it holds:
+ * taken as no cursor, the listener started at the journal's end and skipped every event since the last one handled,
+ * without a word, and its next write replaced the file.
+ */
 export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
   let text: string;
   try { text = readFileSync(path, "utf8"); } catch (error) { throw localFileError(error, path) ?? error; }
-  const value = Number(text.trim());
-  return Number.isInteger(value) && value >= 0 ? value : undefined;
+  const trimmed = text.trim();
+  const value = trimmed === "" ? NaN : Number(trimmed);
+  if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
+  const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
+  throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
 }
 
 /**

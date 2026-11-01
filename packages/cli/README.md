@@ -309,7 +309,9 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
 - A message's `from` is `me`, `peer`, or `system` for a group's own line in `group history` (`event`: created, joined,
   renamed, …; the stream says it as `group.event`): nobody wrote it, whatever `member` key it carries.
 - `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
-  Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled.
+  Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled. A cursor
+  file that holds no event number (empty, edited by hand) is refused at start (`bad_request`, naming the file): fix or
+  remove it, or give `--since`.
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
   waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` (with `kind` and, when given, `status`; again when either changes) and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
   announced itself; not a message), `chat.announced`, `message.received` (`message.nick`: the name the contact gave), `message.sent`, `message.delivery`
