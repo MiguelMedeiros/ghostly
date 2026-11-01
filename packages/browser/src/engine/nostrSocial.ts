@@ -43,6 +43,10 @@ export function effectiveNostrSettings(s: NostrSocialSettings | undefined): Nost
 }
 
 interface Draft { subject: string; template: EventTemplate; at: number; kind: "note" | "follow" | "unfollow" | "profile" }
+type Follows = NonNullable<NostrContactCache["follows"]>;
+type Notes = NonNullable<NostrContactCache["notes"]>;
+type Hints = NonNullable<NonNullable<NostrContactView["follows"]>["hints"]>;
+type ShownNotes = NonNullable<NostrContactView["notes"]>;
 
 /**
  * The Nostr social layer, engine side: what a contact's proven key lets the person *see* (profile, follows,
@@ -57,6 +61,8 @@ export class NostrSocial {
   private loadingOwn = new Set<string>();
   private errors = new Map<string, string>();
   private drafts = new Map<string, Draft>();
+  private hints = new WeakMap<Follows, { mine: object; myKey: string; keys: string; subject: string; hints: Hints }>();
+  private shownNotes = new WeakMap<Notes, { lists: NostrMuteList[]; subject: string; view: ShownNotes }>();
 
   constructor(private host: NostrSocialHost) {}
 
@@ -128,6 +134,7 @@ export class NostrSocial {
     if (subjects.length === 0) return undefined;
     const cache = this.host.readContacts(linkId) ?? {};
     const myKeys = this.host.ownSubjects();
+    const muteLists = myKeys.map(s => this.own[s]?.mute?.list).filter((m): m is NostrMuteList => !!m);
     return subjects.map(subject => {
       const c = cache[subject];
       const view: NostrContactView = { subject, npub: npub(subject) };
@@ -135,22 +142,37 @@ export class NostrSocial {
       if (c?.follows) {
         view.follows = { fetchedAt: c.follows.fetchedAt, relays: c.follows.relays, stale: this.stale(c.follows.fetchedAt), count: c.follows.follows.length, eventAt: c.follows.eventAt };
         const mine = myKeys.map(k => ({ key: k, follows: this.own[k]?.follows })).find(x => x.follows);
-        if (mine?.follows) {
-          const h = followHints(c.follows.follows, mine.follows.follows, myKeys, subject);
-          view.follows.hints = { followsYou: h.followsYou, youFollow: h.youFollow, mutual: h.mutual.length, myKey: mine.key, myFollowsAt: mine.follows.fetchedAt };
-        }
+        if (mine?.follows) view.follows.hints = this.hintsOf(c.follows, mine.follows, mine.key, myKeys, subject);
       }
-      if (c?.notes) {
-        const authorMuted = this.muteLists().some(m => m.pubkeys.includes(subject));
-        const shown = authorMuted ? [] : c.notes.notes.filter(n => !this.muted(n, subject));
-        view.notes = { fetchedAt: c.notes.fetchedAt, relays: c.notes.relays, notes: shown.map(n => ({ id: n.id, createdAt: n.createdAt, content: n.content, reply: n.reply })), more: !c.notes.exhausted, hidden: c.notes.notes.length - shown.length, authorMuted };
-      }
+      if (c?.notes) view.notes = this.notesOf(c.notes, muteLists, subject);
       const loading = this.loading.get(`${linkId}:${subject}`);
       if (loading) view.loading = loading;
       const error = this.errors.get(`${linkId}:${subject}`);
       if (error) view.error = error;
       return view;
     });
+  }
+
+  /** How a contact's follows meet the person's. Every state asks; a list that changes is a new object. */
+  private hintsOf(theirs: Follows, mine: { follows: string[]; fetchedAt: number }, myKey: string, myKeys: string[], subject: string): Hints {
+    const keys = myKeys.join(" ");
+    const kept = this.hints.get(theirs);
+    if (kept?.mine === mine && kept.myKey === myKey && kept.keys === keys && kept.subject === subject) return kept.hints;
+    const h = followHints(theirs.follows, mine.follows, myKeys, subject);
+    const hints: Hints = { followsYou: h.followsYou, youFollow: h.youFollow, mutual: h.mutual.length, myKey, myFollowsAt: mine.fetchedAt };
+    this.hints.set(theirs, { mine, myKey, keys, subject, hints });
+    return hints;
+  }
+
+  /** A contact's posts as shown, past the person's mute lists. Every state asks; a list that changes is a new object. */
+  private notesOf(notes: Notes, lists: NostrMuteList[], subject: string): ShownNotes {
+    const kept = this.shownNotes.get(notes);
+    if (kept && kept.subject === subject && kept.lists.length === lists.length && kept.lists.every((list, i) => list === lists[i])) return kept.view;
+    const authorMuted = lists.some(m => m.pubkeys.includes(subject));
+    const shown = authorMuted ? [] : notes.notes.filter(n => !lists.some(m => !!mutedBecause(n, subject, m)));
+    const view: ShownNotes = { fetchedAt: notes.fetchedAt, relays: notes.relays, notes: shown.map(n => ({ id: n.id, createdAt: n.createdAt, content: n.content, reply: n.reply })), more: !notes.exhausted, hidden: notes.notes.length - shown.length, authorMuted };
+    this.shownNotes.set(notes, { lists, subject, view });
+    return view;
   }
 
   // -- contacts -----------------------------------------------------------------------------------
