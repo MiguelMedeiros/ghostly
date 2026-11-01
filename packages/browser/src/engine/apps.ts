@@ -1270,7 +1270,14 @@ export class Apps {
     if (plan.action === "refuse") fail(plan.decision, "This update can no longer be installed");
     const { pending: _p, ...without } = installed;
     const next = this.versionRecord(without, read.bundle, pending.bytes, pending.from, installed.store);
-    await this.putApp(next);
+    // Only over the record read above: an app uninstalled meanwhile (another tab, Uninstall while Update was busy) is
+    // not put back on the new version with its data gone, and one changed meanwhile is left as it is.
+    if (!(await this.putAppIfUnchanged(next, installed))) {
+      const now = await this.app(ref);
+      if (!now) fail("not-installed", "This app is not installed");
+      if (now.digest === pending.digest) return this.view(now, await this.stores());
+      fail("no-update", "This update can no longer be installed");
+    }
     await this.removeBundle(installed.bytes, installed.digest);
     return this.view(next, stores);
   }
