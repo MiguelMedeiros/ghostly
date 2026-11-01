@@ -224,6 +224,7 @@
   "title": "Réglages",
   "translate": {
     "downloaded": "Langues téléchargées",
+    "downloading": "Téléchargement…",
     "hint": "Le choix par défaut des discussions qui n’ont pas choisi",
     "info": "Les messages reçus dans une autre langue sont traduits sur cet appareil par un modèle de langue téléchargé une fois. Aucun texte ne quitte l’appareil, et vos contacts n’en savent rien.",
     "name": "Traduire les messages",
