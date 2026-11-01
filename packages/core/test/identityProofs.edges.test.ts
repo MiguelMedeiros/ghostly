@@ -455,6 +455,33 @@ describe("re-checking a received proof", () => {
     expect((await w.peers.bob.recheck(id)).verified.display).toEqual({ source: "kind-0", fetchedAt: NOW + 1, name: "Alice B" });
   });
 
+  it("keeps a withdraw, and a name looked up, that land while the provider is checking", async () => {
+    const w = world();
+    const id = await received(w);
+    let answer!: () => void;
+    w.verify.mockImplementationOnce(async () => { await new Promise<void>(r => { answer = r; }); return { subject: SUBJECT, source: "Test" }; });
+    const check = w.peers.bob.recheck(id);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    const display = { source: "kind-0", fetchedAt: NOW, name: "Alice" };
+    w.ledgers.bob.received[0].display = display;
+    await w.peers.bob.receive({ t: "idp-withdraw", id });
+    answer();
+    expect(await check).toMatchObject({ status: "withdrawn", display });
+    expect(w.ledgers.bob.received[0]).toMatchObject({ status: "withdrawn", display, checkedAt: NOW });
+  });
+
+  it("keeps a proof found revoked revoked when the contact's withdraw arrives later", async () => {
+    const w = world();
+    const id = await received(w);
+    w.state.revoked.add(id);
+    expect((await w.peers.bob.recheck(id)).status).toBe("revoked");
+    const timeline = structuredClone(w.ledgers.bob.timeline);
+    await w.peers.bob.receive({ t: "idp-withdraw", id });
+    expect(w.ledgers.bob.received[0].status).toBe("revoked");
+    expect(w.ledgers.bob.timeline).toEqual(timeline);
+    expect(w.sent("idp-withdrawn").map(f => f.frame)).toEqual([{ t: "idp-withdrawn", id }]);
+  });
+
   it("treats a failing revocation lookup as not revoked", async () => {
     const w = world();
     const id = await received(w);

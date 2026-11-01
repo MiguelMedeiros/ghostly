@@ -388,23 +388,32 @@ export class IdentityExchange {
     const r = this.options.storage.read().received.find(x => x.id === id);
     if (!r) throw new Error("Unknown identity");
     if (r.status === "revoked") return r;
-    let next: ReceivedIdentity;
-    const settled = r.status === "withdrawn";
     if (await this.options.revoked?.(identityStatement(r.binding)).catch(() => false)) {
-      next = { ...r, status: "revoked", checkedAt: this.now(), error: undefined };
-      await this.options.storage.update(l => this.log({ ...l, received: l.received.map(x => x.id === id ? next : x) },
-        { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "revoked" }));
-      return next;
+      return await this.settleRecheck(id, x => x.status === "revoked" ? x : { ...x, status: "revoked", checkedAt: this.now(), error: undefined },
+        { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "revoked" }) ?? r;
     }
     if (revocationOnly) return r;
+    let outcome: (x: ReceivedIdentity) => ReceivedIdentity;
     try {
       const verified = boundVerifiedIdentity(await this.options.verify(identityStatement(r.binding), r.evidence));
       if (verified.subject !== r.verified.subject) throw new Error("The identity changed");
-      next = { ...r, verified: { ...verified, display: verified.display ?? r.verified.display }, checkedAt: this.now(), status: settled ? "withdrawn" : "verified", error: undefined };
+      outcome = x => ({ ...x, verified: { ...verified, display: verified.display ?? x.verified.display }, checkedAt: this.now(), status: "verified", error: undefined });
     } catch (e) {
-      next = { ...r, checkedAt: this.now(), status: settled ? "withdrawn" : "unconfirmed", error: shortError(e) };
+      const error = shortError(e);
+      outcome = x => ({ ...x, checkedAt: this.now(), status: "unconfirmed", error });
     }
-    await this.options.storage.update(l => ({ ...l, received: l.received.map(x => x.id === id ? next : x) }));
+    // Applied to the record as it is once the check is back: a withdraw or revocation that landed meanwhile holds.
+    return await this.settleRecheck(id, x => x.status === "revoked" ? x : x.status === "withdrawn" ? { ...outcome(x), status: "withdrawn" } : outcome(x)) ?? r;
+  }
+  private async settleRecheck(id: string, outcome: (x: ReceivedIdentity) => ReceivedIdentity, event?: IdentityTimelineEvent): Promise<ReceivedIdentity | undefined> {
+    let next: ReceivedIdentity | undefined;
+    await this.options.storage.update(l => {
+      const x = l.received.find(y => y.id === id);
+      if (!x) return l;
+      next = outcome(x);
+      const out = { ...l, received: l.received.map(y => y.id === id ? next! : y) };
+      return event && x.status !== "revoked" ? this.log(out, event) : out;
+    });
     return next;
   }
 
@@ -433,8 +442,9 @@ export class IdentityExchange {
           // A durable write only for a proof this side actually received and still holds: a withdraw naming an
           // unknown (or already-withdrawn) id is only acknowledged, never written, so it cannot be repeated for a
           // durable write each time. The ack is always sent (a share the contact refused is withdrawn this way too).
+          // A revoked one stays revoked: the owner revoked it everywhere, which says more than a withdraw from here.
           const r = this.options.storage.read().received.find(x => x.id === id);
-          if (r && r.status !== "withdrawn")
+          if (r && r.status !== "withdrawn" && r.status !== "revoked")
             await this.options.storage.update(l => this.log(
               { ...l, received: l.received.map(x => x.id === id ? { ...x, status: "withdrawn" as const } : x) },
               { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" }));
