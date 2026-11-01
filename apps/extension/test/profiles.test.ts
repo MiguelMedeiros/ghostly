@@ -72,6 +72,55 @@ describe("clearing the profile's data", () => {
     expect(await ensure()).toEqual({ ok: true });
     expect(log()).toHaveLength(3);
   });
+
+  it("asked while a peer was still starting: a page that opens during it waits for the new peer, not the stopping one", async () => {
+    // The first document's script runs only when let go, so the restart is asked while that start goes on.
+    let loadFirst!: () => void;
+    const loaded = new Promise<void>((resolve) => (loadFirst = resolve));
+    const createDocument = world.onCreateDocument;
+    world.onCreateDocument = async () => {
+      world.onCreateDocument = createDocument;
+      void loaded.then(createDocument);
+    };
+    const first = ensure();
+    await settle();
+    const restart = world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" });
+    await settle();
+    loadFirst();
+    while (!engineControl().servers.length) await settle(1);
+    // The stopped peer takes a moment to say goodbye.
+    let stopped!: () => void;
+    engineControl().servers[0].node.shutdown = () => new Promise<void>((resolve) => (stopped = () => { log().push("stop ghostly"); resolve(); }));
+    expect(await first).toEqual({ ok: true });
+
+    let answered = false;
+    const page = ensure().then((reply) => { answered = true; return reply; });
+    await settle(20);
+    expect(answered).toBe(false);
+    stopped();
+    expect(await restart).toEqual({ ok: true });
+    expect(await page).toEqual({ ok: true });
+    expect(log()).toEqual(["start ghostly", "stop ghostly", "start ghostly"]);
+  });
+
+  it("that fails leaves nothing unhandled in the worker: the page hears why", async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      await ensure();
+      // The new document never answers.
+      world.onCreateDocument = async () => {};
+      expect(await world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" })).toEqual({
+        ok: false,
+        error: "Error: The Ghostly peer did not start. Reopen the extension to retry.",
+      });
+      await settle(20);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  }, 10_000);
 });
 
 describe("switching", () => {
