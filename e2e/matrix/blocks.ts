@@ -150,9 +150,8 @@ async function away(actor: Actor): Promise<() => Promise<void>> {
 async function setOnline(actor: Actor, online: boolean): Promise<void> {
   await go(actor, "#/services");
   const toggle = actor.page.getByTestId("online-toggle");
-  const want = online ? /Online/ : /Offline/;
-  if (!want.test((await toggle.textContent()) ?? "")) await toggle.click();
-  await expect(toggle).toHaveText(want);
+  if ((await toggle.getAttribute("aria-checked")) !== String(online)) await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", String(online));
 }
 
 /** DHT only is one of the connection choices; off leaves it for Automatic (a browser's one transport). */

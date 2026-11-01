@@ -1,6 +1,7 @@
 {
   "fromContacts": "連絡先から",
   "fromContactsEmpty": "連絡先が共有したアプリがここに表示されます。",
+  "ghostlyOnline": "Ghostly オンライン",
   "goOffline": "オフラインにする：共有中のものに届かなくなります",
   "goOnline": "オンラインにする",
   "letReach": "{{contact}} に {{app}} へのアクセスを許可",
@@ -9,6 +10,7 @@
   "noContacts": "連絡先はまだありません。",
   "nobodyYet": "相手を選ぶまで誰も開けません。",
   "nothingShared": "まだ何も共有していません。",
+  "offDisconnectsChats": "オフにすると、すべてのチャットの接続が切れます",
   "offline": "オフライン",
   "online": "オンライン",
   "open": "{{app}} を開く",
