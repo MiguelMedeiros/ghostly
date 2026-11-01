@@ -70,6 +70,8 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   nostrLoadContact: "{ linkId, subject, what, more? }",
   nostrForgetContact: "{ linkId, subject }",
   nostrLoadOwn: "{ subject }",
+  nostrOwnFollows: "{ subject }",
+  nostrContactNotes: "{ linkId, subject }",
   nostrLookup: "NostrLookupRequest",
   nostrDraft: "NostrDraftRequest",
   nostrPublish: "{ draftId, event }",
