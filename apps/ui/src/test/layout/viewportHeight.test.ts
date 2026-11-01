@@ -57,6 +57,18 @@ describe("what the keyboard leaves", () => {
     sheet.remove();
   });
 
+  it("is written again on a new width, where a panel can have become a sheet with the same height", () => {
+    renderHook(() => useViewportHeight());
+    const panel = document.body.appendChild(document.createElement("div"));
+    try {
+      panel.className = "sheet";
+      resize(874, 874, 500);
+      expect(panel.style.getPropertyValue("--app-height")).toBe("874px");
+    } finally {
+      panel.remove();
+    }
+  });
+
   it("is registered as not inherited, and every rule that reads it is on one of the elements it is written on", () => {
     const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     expect(css).toMatch(/@property --app-height \{[^}]*inherits: false;/);

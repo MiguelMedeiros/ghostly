@@ -76,6 +76,8 @@ export function useViewportHeight() {
         width = viewport.width;
         tallest = viewport.height;
         if (bar) turned = true;
+        // And a panel can become a sheet at the new width (the emoji panel does) with the same height: written again.
+        written = "";
       }
       tallest = Math.max(tallest, viewport.height);
       const measured = Math.max(window.innerHeight - viewport.height, tallest - viewport.height);
