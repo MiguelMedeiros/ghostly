@@ -74,7 +74,7 @@ function ChatLinkIntake() {
   locked.current = isLocked;
   /** The invite a link brought while locked: the last one, kept in memory only. */
   const [held, setHeld] = useState<SessionKeys | null>(null);
-  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | null>(null);
+  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | "join.chatGone" | null>(null);
 
   const open = useCallback((keys: SessionKeys) => {
     // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
@@ -119,9 +119,11 @@ function ChatLinkIntake() {
       return;
     }
     const session = decodePart(rest);
-    if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && session !== null && loadSession(session)) return; // an ordinary chat address
-    // Whatever it was, it leaves the address bar and the history: it may hold a key.
-    setInvalid(INVITE_REFUSAL_MESSAGE[reading.reason]);
+    const chatAddress = protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && session !== null;
+    if (chatAddress && loadSession(session)) return; // an ordinary chat address
+    // Whatever it was, it leaves the address bar and the history: it may hold a key. The address of a chat no longer
+    // on this device (a bookmark, a link kept from before it was deleted) says so, as a group's does, not "not an invite".
+    setInvalid(chatAddress && reading.reason === "not-ghostly" ? "join.chatGone" : INVITE_REFUSAL_MESSAGE[reading.reason]);
     navigate("/", { replace: true });
   }, [pathname, hash, navigate, open]);
 
