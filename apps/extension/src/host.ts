@@ -3,7 +3,7 @@ import { UI_PORT, type RuntimeMessage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
 import { extensionAtproto } from "./atproto";
-import { markEngineRestart, pageProfileIsCurrent } from "./profile";
+import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
 export const extensionHost: BrowserHost = {
@@ -17,7 +17,7 @@ export const extensionHost: BrowserHost = {
     // Another tab switched profiles since this page started: it starts again as that one (ui/main.tsx)
     // rather than show one profile's pages over the other's peer.
     if (!pageProfileIsCurrent()) {
-      location.reload();
+      startAsProfileInUse();
       throw new Error("Switching profiles…");
     }
     const ready = await chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" } satisfies RuntimeMessage);
