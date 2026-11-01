@@ -166,11 +166,17 @@ test("the app icon's shortcuts: New chat, Scan invite, Wallets", { tag: ["@featu
   await ana.page.waitForFunction(() => document.readyState === "complete");
   expect(await ana.page.evaluate(() => navigator.serviceWorker.getRegistration().then((r) => !!r))).toBe(false);
   await ana.page.goto("/#/new");
+  // Any site can send the browser here: New opens with Chat focused, and only a press makes the chat.
+  await expect(ana.page.getByTestId("sidebar-new-menu")).toBeVisible();
+  await expect(ana.page).toHaveURL(/#\/$/);
+  await expect(ana.page.getByTestId("chat-row")).toHaveCount(0);
+  await ana.page.keyboard.press("Enter");
   await expect(ana.page.getByTestId("invite-card")).toBeVisible();
   await expect(ana.page).toHaveURL(/#\/chat\//);
   await expect(ana.page.getByTestId("chat-row")).toHaveCount(1);
-  // The shortcut left the history: Back does not make another chat.
+  // The shortcut left the history: Back does not open New again, nor make another chat.
   await ana.page.goBack();
+  await expect(ana.page.getByTestId("sidebar-new-menu")).toBeHidden();
   await expect(ana.page.getByTestId("chat-row")).toHaveCount(1);
 
   await ana.page.goto("/#/scan");
