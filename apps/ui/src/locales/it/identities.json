@@ -119,7 +119,7 @@
     "theirProfile": "il suo profilo pubblico",
     "title": "Identità con {{name}}",
     "unconfirmed": "{{status}}: non è stato possibile confermarla",
-    "unconfirmedWhy": "{{status}}: non è stato possibile confermarla ({{error}})",
+    "unconfirmedWhy": "{{status}}: {{error}}",
     "validity": "Validità"
   },
   "did": {

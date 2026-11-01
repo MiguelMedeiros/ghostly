@@ -119,7 +119,7 @@
     "theirProfile": "对方的公开资料",
     "title": "与 {{name}} 的身份",
     "unconfirmed": "{{status}}：无法确认",
-    "unconfirmedWhy": "{{status}}：无法确认（{{error}}）",
+    "unconfirmedWhy": "{{status}}：{{error}}",
     "validity": "有效期"
   },
   "did": {
