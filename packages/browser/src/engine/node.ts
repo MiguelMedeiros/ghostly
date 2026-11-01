@@ -5159,6 +5159,11 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** How many edges took my message (or its edit number `edit`) so far: what `group send --wait sent` waits for. */
   groupTaken({ groupId, messageId, edit }: { groupId: string; messageId: string; edit?: number }): number { return this.groups.taken(groupId, messageId, edit); }
+  /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed: what `react` and `pin` wait for. */
+  chatUnconfirmed({ linkId }: { linkId: string }): { reactions: number[]; pin: number | null } {
+    const stored = this.links.get(linkId)?.stored;
+    return { reactions: (stored?.reactionsOut ?? []).map((r) => r.n), pin: stored?.pinOut?.n ?? null };
+  }
 
   /**
    * Reacts to a message of a chat or a group (WISP 400 § Reactions): shown here at once; a 1:1 chat keeps it until the

@@ -387,6 +387,8 @@ export interface EngineApi {
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
   groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
+  /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed yet. */
+  chatUnconfirmed(params: { linkId: string }): { reactions: number[]; pin: number | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
   /**
    * A page of a chat's or a group's (`group:<id>`) history, oldest first: the latest `limit` (50 by default) messages,
