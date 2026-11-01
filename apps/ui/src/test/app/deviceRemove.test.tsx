@@ -122,6 +122,14 @@ describe("the money checklist", () => {
     expect(screen.getByTestId("device-lost-lines").firstElementChild).toBe(screen.getByTestId("device-lost-storage"));
     expect(screen.queryByTestId("device-lost-remove")).toBeNull();
   });
+
+  it("Remove <device> keeps its space: the sentence is one inline piece inside the flex button", () => {
+    renderApp(<LostChecklist device="Hunt Phone" onClose={() => {}} onRemove={() => {}} />);
+    const button = screen.getByTestId("device-lost-remove");
+    // In a flex box "Remove " and the name's <bdi> would be two flex items, and the item's trailing space is not drawn.
+    expect([...button.childNodes].map((node) => node.nodeName)).toEqual(["SPAN"]);
+    expect(button).toHaveTextContent("Remove Hunt Phone");
+  });
 });
 
 describe("the standby screen after a removal", () => {
