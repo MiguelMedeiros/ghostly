@@ -70,8 +70,12 @@ GHOSTLY_HYPERDHT_TESTNET=3 node server.mjs       # its own HyperDHT network (tes
 docker compose up -d --build                     # the container, limits and all (docker-compose.yml)
 ```
 
-`GET /healthz` answers with the counts (clients, accepted, refused, dropped). The log has counts and reasons
-only: never a key, an address or anyone's traffic.
+`GET /healthz` answers with the counts (clients, accepted, refused, dropped) and the HyperDHT node's state: `nodes`
+in its routing table, `firewalled`, and `sinceAnswerMs` since another node last answered it (`null`: never). It is
+`ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
+firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
+says `bootstrap reached no node` then. The log has counts and reasons only: never a key, an address or anyone's
+traffic.
 
 ## Cost, measured
 
