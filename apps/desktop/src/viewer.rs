@@ -32,6 +32,15 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(test)]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
+/// Added to every answer a contact's app gets served, after the contact's own
+/// policies: a WebView enforces every policy it is sent, so the contact's own
+/// cannot widen it. Its scripts, forms, pictures, frames and the rest reach its
+/// own origin and public https sites (and inline, data: and blob: content),
+/// never plain http, so not a service on this machine or the local network,
+/// which WebKitGTK has no guard of its own against. The same value as
+/// `OPENED_SERVICE_CSP` in `packages/cli/src/services.ts` (`service open`).
+const SERVICE_CSP: &str = "default-src 'self' https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'self' https: wss:; form-action 'self' https:";
+
 #[derive(Default)]
 pub struct ViewerState {
     /// Window label → what it shows. The window decides where a request goes, not its URL.
@@ -360,9 +369,18 @@ pub async fn handle<R: tauri::Runtime>(
     };
 
     let mut response = Response::builder().status(answer.status);
+    // One header, its policies joined by commas: on macOS wry keeps only the
+    // last of two headers with the same name.
+    let mut policies = Vec::new();
     for (name, value) in &answer.headers {
-        response = response.header(name.as_str(), value.as_str());
+        if name.eq_ignore_ascii_case("content-security-policy") {
+            policies.push(value.as_str());
+        } else {
+            response = response.header(name.as_str(), value.as_str());
+        }
     }
+    policies.push(SERVICE_CSP);
+    response = response.header("content-security-policy", policies.join(", "));
     response
         .body(STANDARD.decode(answer.body_b64).unwrap_or_default())
         .unwrap_or_else(|_| {
@@ -887,13 +905,28 @@ mod routing_tests {
             carried["id"].as_u64().unwrap(),
             ServiceResponse {
                 status: 201,
-                headers: vec![("x-served-by".into(), "atlas".into())],
+                headers: vec![
+                    ("x-served-by".into(), "atlas".into()),
+                    ("Content-Security-Policy".into(), "default-src *".into()),
+                    ("content-security-policy".into(), "img-src *".into()),
+                ],
                 body_b64: STANDARD.encode(b"created"),
             },
         );
         let response = tauri::async_runtime::block_on(pending).unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         assert_eq!(response.headers()["x-served-by"], "atlas");
+        // The contact's policies stay, and Ghostly's comes after them: all are enforced.
+        let policies: Vec<_> = response
+            .headers()
+            .get_all("content-security-policy")
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+        assert_eq!(
+            policies,
+            [format!("default-src *, img-src *, {SERVICE_CSP}")]
+        );
         assert_eq!(response.body(), b"created");
         assert!(app
             .state::<ViewerState>()
@@ -901,6 +934,14 @@ mod routing_tests {
             .lock()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn the_policy_is_the_one_service_open_adds() {
+        let cli = include_str!("../../../packages/cli/src/services.ts");
+        assert!(cli.contains(&format!(
+            "export const OPENED_SERVICE_CSP = \"{SERVICE_CSP}\";"
+        )));
     }
 
     #[test]
