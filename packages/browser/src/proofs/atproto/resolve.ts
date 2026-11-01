@@ -1,4 +1,4 @@
-import { atprotoDidMethod, isAtprotoDid, parseAtprotoDidDocument, txtValue, type AtprotoDidDocument } from "@ghostly/core";
+import { atprotoDidMethod, IdentityCheckUnavailable, isAtprotoDid, parseAtprotoDidDocument, txtValue, type AtprotoDidDocument } from "@ghostly/core";
 import type { IdentityFetch } from "../contract";
 import { assertPublicHost, dohQuery, type DohResolverId } from "../domain";
 
@@ -51,7 +51,7 @@ export function didDocumentUrl(did: string, plc = plcDirectory()): string {
  */
 export async function assertPublicServer(host: string, options: AtprotoResolveOptions): Promise<void> {
   try { await assertPublicHost(host, { fetch: options.fetch, signal: options.signal, resolver: options.resolver }); }
-  catch (e) { throw new Error(`The account's server ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`); } // eslint-disable-line preserve-caught-error -- The domain check's message says why; ES2020 has no Error.cause.
+  catch (e) { throw new IdentityCheckUnavailable(`The account's server ${host} was not contacted: ${e instanceof Error ? e.message : String(e)}`); }
 }
 
 /** A DID's document, checked (parseAtprotoDidDocument). Throws a message people can read. */
@@ -63,10 +63,11 @@ export async function resolveAtprotoDid(did: string, options: AtprotoResolveOpti
     response = await options.fetch(url, { headers: { accept: "application/did+ld+json, application/json" }, maxBytes: DID_DOCUMENT_MAX_BYTES, signal: options.signal, redirect: "error" });
   } catch (e) {
     // eslint-disable-next-line preserve-caught-error -- A message people can act on; the library's error stays out of the UI (ES2020 has no Error.cause).
-    throw new Error(/too large/i.test(String(e)) ? "The account's DID document is too large" : "The account's DID could not be resolved");
+    if (/too large/i.test(String(e))) throw new Error("The account's DID document is too large");
+    throw new IdentityCheckUnavailable("The account's DID could not be resolved");
   }
   if (response.status === 404 || response.status === 410) throw new Error("The account's DID is not registered, or was deactivated");
-  if (response.status !== 200) throw new Error("The account's DID could not be resolved");
+  if (response.status !== 200) throw new IdentityCheckUnavailable("The account's DID could not be resolved");
   let doc: unknown;
   try { doc = JSON.parse(response.text); } catch { throw new Error("The account's DID document is malformed"); }
   return parseAtprotoDidDocument(doc, did);
