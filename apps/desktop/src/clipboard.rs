@@ -265,17 +265,13 @@ pub fn encode_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, S
 }
 
 /// The files of a paste the page may read: regular files only (a copied folder is not sent),
-/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes. On Linux arboard splits
-/// the file manager's `text/uri-list` on '\n' alone, so each path keeps the '\r' of its CRLF line
-/// end (RFC 2483, as GTK and Qt write it): dropped here, or no copied file was ever found.
+/// each once, at most [`MAX_PASTED_FILES`], with their names and sizes. On Linux arboard drops the
+/// CRLF line end of the file manager's `text/uri-list` (RFC 2483, as GTK and Qt write it) before
+/// decoding, so a '\r' left at the end of a path is the file's own name (`%0D`) and stays.
 pub fn pasted_files(paths: Vec<PathBuf>) -> Vec<(PathBuf, String, u64)> {
     let mut seen = std::collections::HashSet::new();
     paths
         .into_iter()
-        .map(|path| {
-            let trimmed = path.to_str().and_then(|p| p.strip_suffix('\r'));
-            trimmed.map(PathBuf::from).unwrap_or(path)
-        })
         .filter(|path| path.is_absolute() && seen.insert(path.clone()))
         .filter_map(|path| {
             let meta = std::fs::metadata(&path).ok()?;
@@ -945,15 +941,20 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// Nautilus, Dolphin and Thunar offer "file:///…/a%20b.txt\r\nfile:///…/c.txt\r\n"; arboard
-    /// splits it on '\n' and hands back each path with its '\r'.
+    /// Nautilus, Dolphin and Thunar offer "file:///…/a%20b.txt\r\nfile:///…/c.txt%0D\r\n"; arboard
+    /// drops each line's CRLF before decoding, so a '\r' left on a path is the file name's own.
     #[test]
-    fn files_from_a_crlf_uri_list_are_found() {
+    fn a_copied_file_whose_name_ends_in_a_carriage_return_is_the_one_pasted() {
         let dir = scratch();
         std::fs::write(dir.join("a b.txt"), b"ab").unwrap();
-        std::fs::write(dir.join("c.txt"), b"c").unwrap();
-        let carriage = |name: &str| PathBuf::from(format!("{}\r", dir.join(name).display()));
-        let paths = vec![carriage("a b.txt"), carriage("c.txt")];
+        std::fs::write(dir.join("twin.txt\r"), b"the copied one").unwrap();
+        std::fs::write(dir.join("twin.txt"), b"other").unwrap();
+        std::fs::write(dir.join("lone.txt\r"), b"lone").unwrap();
+        let paths = vec![
+            dir.join("a b.txt"),
+            dir.join("twin.txt\r"),
+            dir.join("lone.txt\r"),
+        ];
         let app = paste_app(PasteSource::fixed(move || Ok(Pasted::Files(paths.clone()))));
         let main = main_window(&app);
         let items = files(&main).unwrap();
@@ -961,8 +962,18 @@ mod tests {
             .iter()
             .map(|i| (i.name.clone().unwrap(), i.size))
             .collect();
-        assert_eq!(named, vec![("a b.txt".into(), 2), ("c.txt".into(), 1)]);
-        assert_eq!(bytes(&main, &items[0].token, 10).unwrap(), b"ab");
+        assert_eq!(
+            named,
+            vec![
+                ("a b.txt".into(), 2),
+                ("twin.txt\r".into(), 14),
+                ("lone.txt\r".into(), 4)
+            ]
+        );
+        assert_eq!(
+            bytes(&main, &items[1].token, 20).unwrap(),
+            b"the copied one"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 
