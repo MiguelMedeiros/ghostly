@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, resetEngine } from "./fakeEngine";
 import { bootExtension, restartServiceWorker, useProfile } from "./extension";
@@ -202,6 +202,36 @@ describe("pages follow a switch made in another tab", () => {
   });
 });
 
+describe("a page that follows a switch starts again where the profile in use was left", () => {
+  // This page showed a group of the profile before the switch: that id means nothing to the profile after it.
+  async function startAgain(): Promise<{ hash: string; reloads: number }> {
+    const page = { hash: "#/group/AAAAAAAAAAAAAAAAAAAAAA", reloads: 0 };
+    Object.assign(globalThis, {
+      location: { get hash() { return page.hash; }, reload: () => page.reloads++ },
+      history: { replaceState: (_state: unknown, _title: string, url: string) => (page.hash = url) },
+    });
+    const { startAsProfileInUse } = await world.load("page", () => import("../src/profile.ts"));
+    startAsProfileInUse();
+    return page;
+  }
+
+  afterEach(() => {
+    delete (globalThis as { location?: unknown }).location;
+    delete (globalThis as { history?: unknown }).history;
+  });
+
+  it("on the chat list, for a profile never left on a page", async () => {
+    useProfile(world, WORK);
+    expect(await startAgain()).toEqual({ hash: "#/", reloads: 1 });
+  });
+
+  it("on the page that profile was left on", async () => {
+    useProfile(world, WORK);
+    world.storage.set(`ghostly_${WORK}_last_route`, "/chat/BBBBBBBBBBBBBBBBBBBBBB");
+    expect(await startAgain()).toEqual({ hash: "#/chat/BBBBBBBBBBBBBBBBBBBBBB", reloads: 1 });
+  });
+});
+
 describe("pages follow a peer started again in another tab", () => {
   const stored = (key: string, newValue: string | null) => world.page.dispatchEvent(Object.assign(new Event("storage"), { key, newValue }));
 
@@ -233,7 +263,8 @@ describe("pages follow a peer started again in another tab", () => {
 describe("a page of the profile before a switch", () => {
   it("does not reach the peer of the profile after it, and starts again instead", async () => {
     const reload = vi.fn();
-    Object.assign(globalThis, { location: { reload } });
+    const replaceState = vi.fn();
+    Object.assign(globalThis, { location: { reload }, history: { replaceState } });
     try {
       const { openPageProfile } = await world.load("page", () => import("../src/profile.ts"));
       const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
@@ -244,10 +275,12 @@ describe("a page of the profile before a switch", () => {
       useProfile(world, WORK);
       await expect(extensionHost.connect(() => {}, () => {})).rejects.toThrow("Switching profiles");
       expect(reload).toHaveBeenCalledTimes(1);
+      expect(replaceState).toHaveBeenCalledWith(null, "", "#/");
       expect(world.callsTo("runtime.connect")).toHaveLength(1);
       expect(log()).toEqual(["start ghostly"]);
     } finally {
       delete (globalThis as { location?: unknown }).location;
+      delete (globalThis as { history?: unknown }).history;
     }
   });
 });
