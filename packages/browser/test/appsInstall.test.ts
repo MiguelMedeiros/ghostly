@@ -339,6 +339,35 @@ describe("updates", () => {
     }
   });
 
+  it("an update the person accepts while a check reads the publisher's revocations stays accepted", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // The Apps page opens (a check starts) and the person presses Update while it reads ghostly-revoke.json.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reading!: () => void;
+    const started = new Promise<void>((resolve) => { reading = resolve; });
+    const answer = net.fetch.getMockImplementation()!;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/ghostly-revoke.json")) { reading(); await held; }
+      return answer(input, init);
+    });
+    const check = store.checkUpdates();
+    await started;
+    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    release();
+    await check;
+    const after = (await store.list())[0]!;
+    expect(after, "the check does not put back the version it read").toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat", "name"], run: { status: "ok" } });
+    expect(after.pending).toBeUndefined();
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+    net.fetch.mockImplementation(answer);
+  });
+
   it("with no app installed the check asks nothing", async () => {
     await net.putStore(await storeFiles());
     expect(await apps(net).checkUpdates()).toEqual([]);
