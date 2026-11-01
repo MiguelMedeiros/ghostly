@@ -140,7 +140,8 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
 /**
  * Refuses DHT only (a hold, `chat transport dht`) while a call is on in the chat. A call's signals cross the live
  * link: off it, the call talked on over its own connection, and a hang-up from either side never reached the other
- * (that call ended only when its media stalled out, 16 s later).
+ * (that call ended only when its media stalled out, 16 s later). Removing the chat (`chat remove`) is refused the same
+ * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross.
  */
 function noCallOn(ctx: ApiContext, linkId: string, then: string): void {
   const call = ctx.calls.list().find((c) => c.chat === linkId);
@@ -523,6 +524,7 @@ const METHODS: Record<string, Method> = {
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
+    noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
     return { removed: link.id };
   },
