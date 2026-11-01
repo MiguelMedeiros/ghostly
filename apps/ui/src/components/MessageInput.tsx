@@ -139,6 +139,8 @@ interface Outgoing { words: string; named: GroupMention[]; preview?: LinkPreview
 
 const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
+/** How often the line takes a video conversion's progress: the converter tells each sample. */
+const PROGRESS_EVERY_MS = 250;
 
 /** The same file on disk, picked again: a picker gives a new File each time. */
 const fileKey = (file: File) => `${file.name}\n${file.size}\n${file.lastModified}`;
@@ -632,12 +634,29 @@ export function MessageInput({
           conversions.current.set(file, stopper);
           const progressed = (progress: number | undefined) => setConverting((was) => new Map(was).set(file, progress));
           progressed(undefined);
+          // The line takes the latest progress at most every PROGRESS_EVERY_MS, not each sample.
+          let latest: number | undefined;
+          let shownAt = -Infinity;
+          let pending: ReturnType<typeof setTimeout> | undefined;
+          const show = () => {
+            pending = undefined;
+            shownAt = Date.now();
+            if (mounted.current && !stopper.signal.aborted) progressed(latest);
+          };
+          const onProgress = (progress: number) => {
+            latest = progress;
+            if (pending !== undefined) return;
+            const wait = shownAt + PROGRESS_EVERY_MS - Date.now();
+            if (wait <= 0) show();
+            else pending = setTimeout(show, wait);
+          };
           try {
-            prepared = await prepareVideo(file, { signal: stopper.signal, onProgress: (progress) => { if (mounted.current && !stopper.signal.aborted) progressed(progress); } });
+            prepared = await prepareVideo(file, { signal: stopper.signal, onProgress });
           } catch {
             done();
             return false;
           } finally {
+            clearTimeout(pending);
             conversions.current.delete(file);
             if (mounted.current) setConverting((was) => { const now = new Map(was); now.delete(file); return now; });
           }
@@ -915,10 +934,18 @@ export function MessageInput({
         <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
         <span className="min-w-0 truncate">
           {shownProgress !== undefined
-            ? t("composer.videoConverting", { name: shown.name, percent: new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }).format(shownProgress) })
+            ? t("composer.videoConverting", { name: shown.name })
             : t("composer.filePreparing", { name: shown.name })}
         </span>
       </p>
+      {/* Outside the status: a screen reader is told the conversion once, not each percent. */}
+      {shownProgress !== undefined && (
+        <span role="progressbar" data-testid="video-convert-progress" aria-label={t("composer.videoConverting", { name: shown.name })}
+          aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(shownProgress * 100)}
+          className="shrink-0 text-[13px] tabular-nums text-text-secondary">
+          {new Intl.NumberFormat(language, { style: "percent", maximumFractionDigits: 0 }).format(shownProgress)}
+        </span>
+      )}
       {shownConverting && (
         <button type="button" data-testid="video-convert-cancel" onClick={() => conversions.current.get(shown)?.abort()}
           className="shrink-0 cursor-pointer border-none bg-transparent p-0 text-[13px] font-medium text-accent hover:underline">
