@@ -111,3 +111,42 @@ it("deleting a profile deletes its Breez databases (both of the SDK's), and neve
   expect(left, "the other profile's wallet stays").toEqual(expect.arrayContaining(sdkFiles(keptName)));
   expect(await breezDatabasesOf(`ghostly_${gone.id}`)).toEqual([]);
 });
+
+// covers: devices.gate
+it("deleting a profile deletes the fork a handoff left of it on this device, its keys and linked files with it (WISP 06)", async () => {
+  const { putDeviceRecord } = await import("./helpers/deviceRecord");
+  const { closeDevicesDb, readDeviceRecord } = await import("../src/devices/store");
+  const { setHandoffProfileHost } = await import("../src/devices/handoffHost");
+  const { handoffProfileHost } = await import("../../../apps/ui/src/lib/handoffProfile");
+  const { pointProfile } = await import("../../../apps/ui/src/lib/profiles");
+  setHandoffProfileHost(handoffProfileHost("test", "web"));
+  try {
+    // The profile ran on `ghostly_forkedold1`; a handoff installed `ghostly_forkednew1` and kept the old one as a fork.
+    const gone = await makeProfile("forkedold1", { "barkWallet-mode-testnet": { config: { walletId: "bark-fork", network: "signet" } } });
+    await makeDatabase("ghostly-bark-bark-fork");
+    await makeDatabase("ghostly_forkedold1-files");
+    localStorage.setItem("ghostly_forkedold1_sess1", "an old chat");
+    await makeDatabase("ghostly_forkednew1");
+    pointProfile("ghostly_forkedold1", "ghostly_forkednew1");
+    localStorage.setItem("ghostly_forkednew1_sess1", "the chat now");
+    await makeProfile("forkedkep1", {});
+    localStorage.setItem("ghostly_forkedkep1_sess1", "another profile's chat");
+    await putDeviceRecord({ v: 1, profile: "ghostly_forkednew1", state: "active", saved: 1, turn: 1, rev: 0, deviceSet: [], takeovers: 0, earlierSets: [], forks: ["ghostly_forkedold1", "ghostly_forkedkep1"] });
+
+    await deleteProfile(gone.id);
+
+    const left = await databases();
+    expect(left).not.toContain("ghostly_forkednew1");
+    expect(left, "the fork goes").not.toContain("ghostly_forkedold1");
+    expect(left, "its linked files").not.toContain("ghostly_forkedold1-files");
+    expect(left, "its wallets' own storage").not.toContain("ghostly-bark-bark-fork");
+    expect(localStorage.getItem("ghostly_forkedold1_sess1"), "its chats").toBeNull();
+    expect(localStorage.getItem("ghostly_forkednew1_sess1")).toBeNull();
+    expect(left, "never a profile on the list, whatever the record says").toContain("ghostly_forkedkep1");
+    expect(localStorage.getItem("ghostly_forkedkep1_sess1")).toBe("another profile's chat");
+    expect(await readDeviceRecord("ghostly_forkednew1")).toBeNull();
+  } finally {
+    setHandoffProfileHost(null);
+    await closeDevicesDb();
+  }
+});
