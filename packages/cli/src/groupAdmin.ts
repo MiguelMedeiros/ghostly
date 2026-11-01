@@ -79,7 +79,7 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
     return view(ctx, group.id, params);
   },
   async "group.rename"(ctx, params) {
-    const group = groupOf(ctx, params);
+    const group = groupOf(ctx, params, "chat rename <chat> <name...>");
     const name = groupName(str(params, "name", true));
     if (!name) throw new CliError("bad_request", `A group's name is 1 to ${MAX_GROUP_NAME_LENGTH} characters on one line`);
     await node(ctx).renameGroup({ groupId: group.id, name });
