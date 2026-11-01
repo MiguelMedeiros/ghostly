@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MESSAGE_CHANGES_TICK_MS } from "@ghostly/browser/platform/engine";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
@@ -78,6 +78,63 @@ describe("a page sent each chat's newest page", () => {
     expect(engine.callsTo("chatsFound").slice(-1)[0]).toEqual({ query: "ana message 1", linkIds: [a.linkId, b.linkId] });
     expect(screen.queryByText("ana")).not.toBeNull();
     expect(screen.queryByText("bea")).toBeNull();
+  });
+
+  it("drops a chat found by an older message once that message is deleted, with the same search still typed", async () => {
+    const a = reloadedChat("dan");
+    const b = reloadedChat("eve");
+    fakeEngine.update({ links: [a.link, b.link] });
+    const { user, engine } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    let history = a.history.filter((m) => m.id === "peer_1").concat(a.history.slice(-PAGE));
+    engine.on("chatsFound", ({ query, linkIds }) => linkIds.filter((id) => id === a.linkId && history.some((m) => foldText(m.text).includes(query))));
+    engine.newestPage(a.linkId, a.history.slice(-PAGE));
+    engine.newestPage(b.linkId, b.history.slice(-PAGE));
+    await tick();
+    await user.type(screen.getByPlaceholderText("Search chats..."), "dan message 1");
+    await tick();
+    expect(screen.queryByText("dan")).not.toBeNull();
+    // Deleted in the engine: the page only hears the id, of a row it never held.
+    history = history.filter((m) => !foldText(m.text).includes("dan message 1"));
+    act(() => engine.emit({ kind: "message-changes", linkId: a.linkId, messages: [], deleted: ["peer_1"] }));
+    await waitFor(() => expect(screen.queryByText("dan")).toBeNull());
+  });
+
+  it("finds a chat by an older message when its newest page comes after the search was typed", async () => {
+    const a = reloadedChat("fay");
+    fakeEngine.update({ links: [a.link] });
+    const { user, engine } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    engine.on("chatsFound", ({ query, linkIds }) => linkIds.filter((id) => id === a.linkId && a.history.some((m) => foldText(m.text).includes(query))));
+    await user.type(screen.getByPlaceholderText("Search chats..."), "fay message 1");
+    await tick();
+    expect(screen.queryByText("fay")).toBeNull();
+    act(() => engine.newestPage(a.linkId, a.history.slice(-PAGE)));
+    await waitFor(() => expect(screen.queryByText("fay")).not.toBeNull());
+  });
+
+  it("asks the engine again once per burst of changes, and not for a change in a chat it did not ask about", async () => {
+    const a = reloadedChat("gil");
+    const whole = reloadedChat("hal");
+    fakeEngine.update({ links: [a.link, whole.link] });
+    const { user, engine } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    engine.on("chatsFound", () => []);
+    engine.newestPage(a.linkId, a.history.slice(-PAGE));
+    engine.messages(whole.linkId, whole.history);
+    await tick();
+    await user.type(screen.getByPlaceholderText("Search chats..."), "x");
+    await tick();
+    const asked = engine.callsTo("chatsFound").length;
+    expect(engine.callsTo("chatsFound").slice(-1)[0]).toEqual({ query: "x", linkIds: [a.linkId] });
+    act(() => engine.emit({ kind: "message-changes", linkId: whole.linkId, messages: [], deleted: ["peer_1"] }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+    expect(engine.callsTo("chatsFound")).toHaveLength(asked);
+    for (let i = 0; i < 5; i++) {
+      act(() => engine.emit({ kind: "message-changes", linkId: a.linkId, messages: [], deleted: [`peer_${i}`] }));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+    }
+    await act(() => new Promise((resolve) => setTimeout(resolve, 600)));
+    const again = engine.callsTo("chatsFound").length - asked;
+    expect(again).toBeGreaterThan(0);
+    expect(again).toBeLessThan(5);
   });
 
   it("asks the engine nothing where every chat's whole history is here", async () => {
