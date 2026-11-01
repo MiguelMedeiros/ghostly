@@ -3808,10 +3808,13 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
+    // A removal names the contact's message by its wire id, which a message of mine goes by too: one naming mine takes
+    // no reference, or the replies quoting mine would lose its line and its pin would go.
+    const ref = edit.rm && !await this.namesMine(linkId, edit.id);
     if (live.stored.deletedIds?.includes(id)) {
       // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line, and
       // a pin of it goes.
-      if (edit.rm) {
+      if (ref) {
         this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
         if (!live.stored.removedRefs?.includes(edit.id)) {
           live.stored = { ...live.stored, removedRefs: withRemovedRef(live.stored.removedRefs, edit.id) };
@@ -3829,7 +3832,7 @@ export class GhostlyNode implements EngineImplementation {
       // after it, `spent_` and a token's digest): never forgotten ahead, or a contact could hide the line of a payment
       // or request it sends next, which a removal never takes (`canRemove`; agents#1587). No text or file has such an id.
       if (!message && PAYMENT_LINE_ID.test(edit.id)) return true;
-      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, message ?? true);
+      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, ref && (message ?? true));
       return true;
     }
     const message = await db.getMessage(linkId, id);
@@ -4298,6 +4301,14 @@ export class GhostlyNode implements EngineImplementation {
     return entry.done;
   }
 
+  /** Whether a 1:1 chat's wire id names a message of mine: here, deleted here, removed, or a file or payment of mine. */
+  private async namesMine(linkId: string, wireId: string): Promise<boolean> {
+    const stored = this.links.get(linkId)?.stored, row = `me_${wireId}`;
+    if (stored?.deletedIds?.includes(row) || stored?.removals?.some(r => r.id === row || r.wireId === wireId)) return true;
+    for (const id of [row, ...await this.rowsNamed(linkId, wireId)]) if ((await db.getMessage(linkId, id))?.sender === "me") return true;
+    return false;
+  }
+
   /**
    * Forgets one message of a chat on this device, the bytes of its file and any transfer of it, and keeps its id so a
    * copy that comes again is not stored: a delete here, or the contact's own removal (WISP 400 § Delete for everyone),
@@ -4356,8 +4367,11 @@ export class GhostlyNode implements EngineImplementation {
   private async forgetQuotes(linkId: string, removed: RemovedQuotes): Promise<string[]> {
     const byRef = new Map<string, string>();
     for (const [id, ref] of removed) if (ref !== undefined) byRef.set(ref, id);
-    // The removed message a reply quotes: by its id here, or by the reference both sides know it by.
-    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byRef.get(reply.id);
+    // The removed message a reply quotes: by its id here, or by the reference both sides know it by, which a 1:1 chat's
+    // message of mine and one of the contact's may share: a quote that says who wrote it takes only that side's.
+    const side = (id: string) => id.startsWith("peer_") ? "peer" : id.startsWith("me_") ? "me" : undefined;
+    const byReference = (reply: MessageReply) => { const id = byRef.get(reply.id); return id === undefined || !reply.from || !side(id) || side(id) === reply.from ? id : undefined; };
+    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byReference(reply);
     const ids = (await db.getMessages(linkId)).filter(m => { const id = quoted(m.replyTo); return id !== undefined && (m.replyTo!.snippet || m.replyTo!.messageId !== id); }).map(m => m.id);
     if (!ids.length) return [];
     await db.patchMessages(linkId, ids, m => { const id = quoted(m.replyTo); return id === undefined ? null : { replyTo: { ...m.replyTo!, snippet: "", messageId: id } }; });
