@@ -558,7 +558,7 @@ function DeviceMenu({ devices }: { devices: CallDevices }) {
   );
 }
 
-/** A device went away and the default took over, or the chosen one is back, with the way to switch to it. */
+/** A device went away and the default took over, the chosen one is back (with the way to switch to it), or one chosen could not be used. */
 function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   const { t } = useI18n();
   const notice = devices.notice!;
@@ -566,7 +566,7 @@ function DeviceNoticeBar({ devices }: { devices: CallDevices }) {
   return (
     <div role="status" data-testid="call-device-notice" data-type={notice.type} data-kind={notice.kind}
       className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] flex items-center gap-3 rounded-lg bg-black/70 px-3 py-2 text-xs text-white">
-      <span className="min-w-0 truncate">{t(notice.type === "lost" ? "calls.devices.lost" : "calls.devices.back", { name })}</span>
+      <span className="min-w-0 truncate">{t(notice.type === "lost" ? "calls.devices.lost" : notice.type === "failed" ? "calls.devices.failed" : "calls.devices.back", { name })}</span>
       {notice.type === "back" && (
         <button type="button" data-testid="call-device-switch-back" onClick={devices.switchBack}
           className="shrink-0 rounded-full bg-accent text-on-accent px-2.5 py-1 font-medium cursor-pointer hover:bg-accent-hover">
