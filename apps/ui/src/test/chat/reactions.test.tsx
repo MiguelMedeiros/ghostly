@@ -188,6 +188,19 @@ describe("chips under the bubble", () => {
     fireEvent.click(chip);
     expect(onReact).toHaveBeenCalledWith("👍");
   });
+
+  // Who reacted was joined with ", " in every language: "أنت, Bo" read as English punctuation in a translated line.
+  it.each([
+    ["ar", "Alice وBo"],
+    ["ja", "Alice、Bo"],
+    ["en", "Alice, Bo"],
+  ] as const)("lists who reacted the way %s lists them", async (language, who) => {
+    renderApp(<MessageBubble message={message({ reactions: { peer: r("👍"), k1: r("👍", 2) } })} peerPubKey="peer" onReact={() => {}} reactionName={names} />, { language });
+    const chip = await screen.findByTestId("reaction-chip");
+    expect(chip).toHaveAccessibleName(new RegExp(`${who}$`));
+    fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+    expect(await screen.findByTestId("reaction-who")).toHaveTextContent(who);
+  });
 });
 
 describe("the chat list and notices", () => {

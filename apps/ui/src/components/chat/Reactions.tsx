@@ -6,6 +6,7 @@ import { EmojiTab } from "../composer/EmojiTab";
 import { SmileIcon } from "../composer/icons";
 import type { ReactionChip } from "../../lib/reactions";
 import { touchOnly } from "../../lib/touchOnly";
+import { listText } from "../../lib/listText";
 
 /*
  * Reactions to a message (WISP 400 § Reactions), as the chat shows them: a quick bar of six and "+" for any emoji,
@@ -31,7 +32,8 @@ export function ReactionChips({ chips, onReact, align }: { chips: ReactionChip[]
   return (
     <div data-testid="reaction-chips" className={`relative flex flex-wrap gap-1 mt-[-6px] mb-1 z-[1] ${align === "end" ? "justify-end" : "justify-start"}`}>
       {chips.map(chip => {
-        const label = t("chat.reactions.chipLabel", { emoji: chip.emoji, names: chip.who.join(", ") });
+        const names = listText(chip.who, t);
+        const label = t("chat.reactions.chipLabel", { emoji: chip.emoji, names });
         return (
           <span key={chip.emoji} className="relative">
             <button type="button" data-testid="reaction-chip" data-emoji={chip.emoji} data-mine={chip.mine || undefined} aria-pressed={chip.mine} aria-label={label}
@@ -56,7 +58,7 @@ export function ReactionChips({ chips, onReact, align }: { chips: ReactionChip[]
             </button>
             {who === chip.emoji && (
               <span role="tooltip" data-testid="reaction-who" className={`absolute bottom-full mb-1 z-20 w-max max-w-[14rem] rounded-md border border-border bg-surface-alt px-2 py-1 text-xs text-text-primary shadow-lg whitespace-normal ${align === "end" ? "end-0" : "start-0"}`}>
-                <span aria-hidden="true" className="me-1">{chip.emoji}</span>{chip.who.join(", ")}
+                <span aria-hidden="true" className="me-1">{chip.emoji}</span>{names}
               </span>
             )}
           </span>
