@@ -271,8 +271,9 @@ export function Apps() {
   useEffect(() => {
     if (!available) return;
     void reloadStores();
-    // The update check, as the page opens (WISP 1200 § Updates): nothing goes out while no app is installed.
-    void engine.call("appCheckUpdates").then(() => Promise.all([refreshInstalledApps(), reloadStores()]), () => {});
+    // The update check, as the page opens (WISP 1200 § Updates): nothing goes out while no app is installed. The engine
+    // tells every page that it ran (`apps-checked`), and the installed apps are read again for that, not here a second time.
+    void engine.call("appCheckUpdates").then(() => reloadStores(), () => {});
   }, [available, reloadStores]);
 
   if (state === "checking") return null;
