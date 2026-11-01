@@ -1533,22 +1533,31 @@ export class CashuWallet {
    */
   async forget(mints: readonly string[], acceptLoss = false): Promise<void> {
     const at = new Set(mints);
-    const melts = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
-    if (melts.some((m) => at.has(m.mint))) throw new Error("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.");
+    const inFlight = async () => {
+      const melts = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
+      if (melts.some((m) => at.has(m.mint))) throw new Error("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.");
+    };
+    await inFlight();
     // A swap still written down may hold ecash of these mints. They are asked once more, and a swap they cannot
     // settle now is not cut off: the removal is refused until it is. One that holds nothing any more goes with the rest.
     await this.pollSwaps(mints).catch(() => {});
-    const open = (await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll())).filter((s) => at.has(s.mint) && !s.released);
-    // One that may never settle (its mint is gone, or cannot say what it signed) goes only when the person, shown
-    // what it is about, agreed to let it go.
-    if (open.length > 0 && !acceptLoss) throw new Error("An exchange of ecash with this wallet's mint is not finished yet: wait for the mint to answer, or confirm that what it would bring is lost to remove the wallet.");
-    const proofs = (await this.allProofs()).filter((p) => at.has(p.mint));
-    const quotes = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).filter((q) => at.has(q.mint));
-    const swaps = (await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll())).filter((s) => at.has(s.mint));
-    await transact([STORES.proofs, STORES.quotes, STORES.swaps], (stores) => {
-      for (const p of proofs) stores[STORES.proofs].delete(p.secret);
-      for (const q of quotes) stores[STORES.quotes].delete(q.quote);
-      for (const s of swaps) stores[STORES.swaps].delete(s.id);
+    // Checked again and deleted under every one of these mints' locks: a payment or a send that was splitting its ecash
+    // meanwhile (no payment written down yet) ends its turn first, and one that went on to the mint refuses the removal
+    // instead of losing its reserved ecash.
+    await this.lockedAll(mints, async () => {
+      await inFlight();
+      const open = (await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll())).filter((s) => at.has(s.mint) && !s.released);
+      // One that may never settle (its mint is gone, or cannot say what it signed) goes only when the person, shown
+      // what it is about, agreed to let it go.
+      if (open.length > 0 && !acceptLoss) throw new Error("An exchange of ecash with this wallet's mint is not finished yet: wait for the mint to answer, or confirm that what it would bring is lost to remove the wallet.");
+      const proofs = (await this.allProofs()).filter((p) => at.has(p.mint));
+      const quotes = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).filter((q) => at.has(q.mint));
+      const swaps = (await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll())).filter((s) => at.has(s.mint));
+      await transact([STORES.proofs, STORES.quotes, STORES.swaps], (stores) => {
+        for (const p of proofs) stores[STORES.proofs].delete(p.secret);
+        for (const q of quotes) stores[STORES.quotes].delete(q.quote);
+        for (const s of swaps) stores[STORES.swaps].delete(s.id);
+      });
     });
     for (const mint of mints) { this.wallets.delete(mint); this.names.delete(mint); this.infos.delete(mint); }
   }
@@ -1607,6 +1616,11 @@ export class CashuWallet {
       next.catch(() => {}),
     );
     return next;
+  }
+
+  /** `task` under the locks of every one of `mints`, taken in one order (no other task holds two, so none waits on this one). */
+  private lockedAll<T>(mints: readonly string[], task: () => Promise<T>): Promise<T> {
+    return [...new Set(mints)].sort().reduceRight<() => Promise<T>>((inner, mint) => () => this.locked(mint, inner), task)();
   }
 
   private async allProofs(): Promise<StoredProof[]> {
