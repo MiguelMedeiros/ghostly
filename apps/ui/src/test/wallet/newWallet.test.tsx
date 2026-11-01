@@ -67,6 +67,36 @@ describe("a profile with no wallet yet", () => {
     expect(screen.queryByTestId("wallet-first-error-usdt")).not.toBeInTheDocument();
   });
 
+  it("with the keys: Start and Try again keep the focus while they work and when they fail", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: empty() });
+    let answer: (() => void) | undefined;
+    engine.on("walletCreate", (params) => new Promise((_, refuse) => {
+      answer = () => refuse(new Error(`Could not create the Mainnet ${params.type} wallet: unreachable. Nothing was saved; try again.`));
+    }));
+    const settle = async () => { await waitFor(() => expect(answer).toBeDefined()); const a = answer!; answer = undefined; await act(async () => a()); };
+
+    const start = await screen.findByTestId("wallet-first-mainnet");
+    start.focus();
+    await user.keyboard("{Enter}");
+    expect(start).toHaveAttribute("aria-busy", "true");
+    expect(start).toHaveFocus();
+    await settle(); // Cashu
+    await settle(); // USDT
+    expect(await screen.findByTestId("wallet-first-error-usdt")).toBeInTheDocument();
+    expect(start).toHaveFocus();
+
+    const retry = screen.getByTestId("wallet-first-retry-cashu");
+    retry.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("wallet-first-retry-cashu")).toHaveFocus();
+    await settle();
+    expect(screen.getByTestId("wallet-first-error-cashu")).toBeInTheDocument();
+    expect(screen.getByTestId("wallet-first-retry-cashu")).toHaveFocus();
+    // The other one's failure is still said.
+    expect(screen.getByTestId("wallet-first-error-usdt")).toBeInTheDocument();
+  });
+
   it("a first setup that made nothing gives way to a wallet made with New: its card shows, not the setup", async () => {
     const { user, engine } = renderApp(<Wallet />);
     engine.update({ wallet: empty() });

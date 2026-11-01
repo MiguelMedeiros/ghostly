@@ -32,18 +32,22 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
 }) {
   const { t } = useI18n();
   const [busy, setBusy] = useState<WalletNetwork | null>(null);
+  /** The one wallet Try again is making again: its line and its button stay, so the button keeps the focus. */
+  const [retrying, setRetrying] = useState<WalletType | null>(null);
   const [made, setMade] = useState<string[]>([]);
   const [failed, setFailed] = useState<{ type: WalletType; network: WalletNetwork; problem: Problem }[]>([]);
 
-  const start = async (network: WalletNetwork, types: WalletType[] = firstKinds(network, offers)) => {
-    setBusy(network); setFailed([]); onStart();
+  const start = async (network: WalletNetwork, types: WalletType[] = firstKinds(network, offers), retry?: WalletType) => {
+    setBusy(network); setRetrying(retry ?? null); if (!retry) setFailed([]); onStart();
     const done: string[] = [], problems: typeof failed = [];
     // One after the other: each is whole or not there at all, and a failure says which.
     for (const type of types) {
       try { done.push((await wallet.create({ type, network })).id); }
       catch (e) { problems.push({ type, network, problem: problemText(e, t) }); }
     }
-    setBusy(null); setMade((m) => [...m, ...done]); setFailed(problems);
+    setBusy(null); setRetrying(null); setMade((m) => [...m, ...done]);
+    // A retry's line is replaced where it stands (or goes, once made); the other failures stay said.
+    setFailed((before) => retry ? before.flatMap((f) => f.type !== retry ? [f] : problems) : problems);
     if (done.length && !problems.length) onMade(done[0]);
   };
 
@@ -57,15 +61,16 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
         <p className="text-sm text-text-secondary">{t("wallet.first.text")}</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button variant="primary" data-testid="wallet-first-testnet" disabled={!!busy} onClick={() => void start("testnet")}>{busy === "testnet" ? t("wallet.first.creating") : t("wallet.first.startTestnet")}</Button>
-        <Button data-testid="wallet-first-mainnet" disabled={!!busy} onClick={() => void start("mainnet")}>{busy === "mainnet" ? t("wallet.first.creating") : t("wallet.first.startMainnet")}</Button>
+        {/* Busy, not disabled, while it works: a disabled button drops the keys' focus to the page, and it stayed there on a failure. */}
+        <Button variant="primary" data-testid="wallet-first-testnet" loading={busy === "testnet" && !retrying} disabled={!!busy} onClick={() => void start("testnet")}>{busy === "testnet" && !retrying ? t("wallet.first.creating") : t("wallet.first.startTestnet")}</Button>
+        <Button data-testid="wallet-first-mainnet" loading={busy === "mainnet" && !retrying} disabled={!!busy} onClick={() => void start("mainnet")}>{busy === "mainnet" && !retrying ? t("wallet.first.creating") : t("wallet.first.startMainnet")}</Button>
       </div>
       <p className="text-xs text-text-muted">{t("wallet.first.networks")}</p>
       {busy && <Notice testId="wallet-first-progress">{t("wallet.first.progress")}</Notice>}
       {failed.map((f) => (
         <div key={f.type} className="flex flex-wrap items-center gap-2">
           <Notice problem={f.problem} testId={`wallet-first-error-${f.type}`} />
-          <Button data-testid={`wallet-first-retry-${f.type}`} disabled={!!busy} onClick={() => void start(f.network, [f.type])}>{t("wallet.first.retry", { wallet: NAME[f.type] })}</Button>
+          <Button data-testid={`wallet-first-retry-${f.type}`} loading={retrying === f.type} disabled={!!busy} onClick={() => void start(f.network, [f.type], f.type)}>{t("wallet.first.retry", { wallet: NAME[f.type] })}</Button>
         </div>
       ))}
       {made.length > 0 && failed.length > 0 && <Button onClick={() => onMade(made[0])}>{t("wallet.first.openMade")}</Button>}
