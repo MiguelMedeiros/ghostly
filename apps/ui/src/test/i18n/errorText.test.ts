@@ -468,6 +468,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
   ["Not a relay address: ftp//x", `${BROWSER}/nostr/relay.ts`, "Not a relay address: ${value.slice(0, 40)}"],
+  ["No relay answered", `${BROWSER}/engine/nostrSocial.ts`, "throw new Error(\"No relay answered\")"],
+  ["No relay answered", `${BROWSER}/profiles/activity.ts`, "throw new Error(\"No relay answered\")"],
+  ["No relay answered", `${BROWSER}/profiles/readers.ts`, "throw new Error(\"No relay answered\")"],
   // Held items for an away contact (WISP 404): a message's line, and the chat's hold line and dialog.
   ["An item held for an away contact is at most 8 MB.", `${BROWSER}/engine/hold.ts`, "An item held for an away contact is at most "],
   ["Held messages need S3 storage (Profile → Backups) and a pinned contact.", `${BROWSER}/engine/hold.ts`],
