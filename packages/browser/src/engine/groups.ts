@@ -191,10 +191,13 @@ export interface GroupsHost {
 
 /** The key an edit of message `id` goes by in `FramesTaken`. */
 export const editKey = (id: string, e: number) => `${id}#e${e}`;
+/** The key my reaction numbered `n` goes by in `FramesTaken` (the number is mine in the group, whatever the message). */
+export const reactionKey = (n: number) => `#r${n}`;
 
 /**
  * Which of my frames an edge took (handed to an open session), per group: what `ghostly group send --wait sent` waits
- * for. A message by its id, an edit by `editKey`. A group has no receipts: this is as far as the author can see.
+ * for. A message by its id, an edit by `editKey`, a reaction by `reactionKey`. A group has no receipts: this is as far
+ * as the author can see.
  */
 export class FramesTaken {
   private readonly counts = new Map<string, number>();
@@ -870,17 +873,19 @@ export class Groups {
   /** A community group (`group-community/1`) rather than a private one. */
   isCommunityGroup(groupId: string): boolean { return this.isCommunity(groupId); }
   /** Through a community group: an application frame to everyone, or a payload sealed to one member. */
-  sendCommunityApp(groupId: string, frame: Record<string, unknown>): Promise<void> { return this.communities.sendApp(groupId, frame); }
+  sendCommunityApp(groupId: string, frame: Record<string, unknown>, key?: string): Promise<void> { return this.communities.sendApp(groupId, frame, key); }
   sendCommunityPair(groupId: string, to: string, payload: Record<string, unknown>): Promise<void> { return this.communities.sendPair(groupId, to, payload); }
 
   /**
-   * How many edges took my message `messageId` (or its edit number `edit`) so far: in a private group, members' edges;
-   * in a community, the edges to my hubs, which pass it on. 0 while none did.
+   * How many edges took my message `messageId` (or its edit number `edit`, or my reaction numbered `reaction`) so far:
+   * in a private group, members' edges; in a community, the edges to my hubs, which pass it on. 0 while none did.
    */
-  taken(groupId: string, messageId: string, edit?: number): number {
-    const key = edit ? editKey(messageId, edit) : messageId;
+  taken(groupId: string, messageId: string, edit?: number, reaction?: number): number {
+    const key = reaction ? reactionKey(reaction) : edit ? editKey(messageId, edit) : messageId;
     return this.isCommunity(groupId) ? this.communities.taken(groupId, key) : this.frames.count(groupId, key);
   }
+  /** An edge of a private group took a frame of mine the engine said on it (a reaction): `key` as `taken` reads it. */
+  noteTaken(groupId: string, key: string): void { this.frames.add(groupId, key); }
 
   /**
    * Says an edit of my message to the group (WISP 902 § Edits): over the edges of a private group (to member `to`

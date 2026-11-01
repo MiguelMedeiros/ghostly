@@ -23,15 +23,17 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
 }
 
 /**
- * Waits until an edge took my group message, or its edit number `edit` (WISP 902: a group has no receipts, so this is
- * as far as the author sees): a member's edge in a private group, an edge to one of my hubs in a community.
+ * Waits until an edge took my group message, or its edit number `edit`, or my reaction to it numbered `reaction`
+ * (WISP 902: a group has no receipts, so this is as far as the author sees): a member's edge in a private group, an
+ * edge to one of my hubs in a community.
  */
-export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | undefined, ms: number): Promise<number> {
+export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messageId: string, edit: number | { reaction: number } | undefined, ms: number): Promise<number> {
   const until = Date.now() + ms;
+  const which = typeof edit === "object" ? edit : edit ? { edit } : {};
   for (;;) {
-    const taken = node(ctx).groupTaken({ groupId, messageId, ...(edit ? { edit } : {}) });
+    const taken = node(ctx).groupTaken({ groupId, messageId, ...which });
     if (taken > 0) return taken;
-    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: no member's edge took it yet. It stays in the group and goes when one opens, while this profile is online`, { messageId, ...(edit ? { edits: edit } : {}) });
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: no member's edge took it yet. It stays in the group and goes when one opens, ${ctx.mode === "one-shot" ? "with this profile's next command that opens the group, or keep it online with `ghostly daemon --detach`" : "while this profile is online"}`, { messageId, ...("edit" in which ? { edits: which.edit } : which) });
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }

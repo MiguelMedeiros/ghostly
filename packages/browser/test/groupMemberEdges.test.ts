@@ -344,3 +344,30 @@ describe("a member's pins in a private group are paced, and one that changes not
     expect(shown()?.id).toBe(absent);
   });
 });
+
+/**
+ * A group has no receipts: `group react --wait sent` waits for an edge to take my reaction (`groupTaken`), as `group
+ * send` does for a message. A one-shot's reaction counted for nothing, so the CLI could only leave before it went.
+ */
+describe("my reaction in a private group counts once an edge took it", () => {
+  it("each open edge that takes it counts; one that was down counts when it opens and hears it again", async () => {
+    const { node, groupId, members: [bob, away] } = await adminOf(["bob", "away"]);
+    const chat = `group:${groupId}`;
+    const { messageId } = await node.sendGroupMessage({ groupId, text: "react to me" }) as { messageId: string };
+    const first = await node.react({ linkId: chat, messageId, emoji: "👍" });
+    expect(first).toEqual({ error: null, n: expect.any(Number) });
+    const taken = (n: number) => node.groupTaken({ groupId, messageId, reaction: n });
+    expect(frames(bob).filter(f => f.t === "group-react")).toHaveLength(1);
+    expect(taken(first.n!)).toBe(1);
+    // A new reaction is a new number: the old one taken says nothing of it, and it is not taken while nobody is there.
+    bob.wire.open = false;
+    bob.events.onDataLinkState("closed");
+    const second = await node.react({ linkId: chat, messageId, emoji: "🎉" });
+    expect(second.n).toBeGreaterThan(first.n!);
+    expect(taken(second.n!)).toBe(0);
+    // The member that was away comes up and hears my latest reaction again: that edge took it.
+    await away.comeUp();
+    await vi.waitFor(() => expect(taken(second.n!)).toBe(1));
+    expect(frames(away).filter(f => f.t === "group-react")).toMatchObject([{ n: second.n, e: "🎉" }]);
+  }, 30_000);
+});

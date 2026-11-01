@@ -159,7 +159,7 @@ export interface EngineApi {
    * here or the id both sides know it by, `emoji` one emoji, or "" to take this side's reaction back. One reaction per
    * person per message: a new one replaces the old.
    */
-  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean };
+  react(params: { linkId: string; messageId: string; emoji: string }): { error: string | null; refused?: boolean; n?: number };
   /**
    * Pins a message (WISP 400 § Pinned message), or unpins with `remove`: `linkId` a chat's link or `group:<id>`,
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
@@ -385,8 +385,11 @@ export interface EngineApi {
   sendGroupMessage(params: { groupId: string; text: string; mentions?: GroupMention[]; replyTo?: string; card?: StatusCard }): { error: string | null; messageId?: string; refused?: boolean };
   /** A press on a button of someone else's message in a chat or a group (`group:<id>`), WISP 406 · Message Buttons. */
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
-  /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
-  groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
+  /**
+   * How many edges took my message `messageId` (or its edit number `edit`, or my reaction numbered `reaction`, the `n`
+   * of `react`): members' edges in a private group, hubs' in a community.
+   */
+  groupTaken(params: { groupId: string; messageId: string; edit?: number; reaction?: number }): number;
   groupMessages(params: { groupId: string }): StoredMessage[];
   /**
    * A page of a chat's or a group's (`group:<id>`) history, oldest first: the latest `limit` (50 by default) messages,

@@ -780,6 +780,8 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(sent).toMatchObject({ group: created.group, messageId: expect.any(String), sent: expect.any(Boolean) });
     const event = await listen.waitFor((l) => l.type === "group.message", 60_000);
     expect(event).toMatchObject({ group: joined.group, message: { id: sent.messageId, text: "hey @Bob", mentioned: true, nick: "Alice bot", member: expect.any(String) } });
+    // A reaction answers once an edge took it, as the message does: a group has no receipts.
+    expect(ok(await as(bob, "group", "react", "Bot crew", sent.messageId as string, "👀", "--wait", "sent"))).toMatchObject({ sent: true, edges: expect.any(Number) });
 
     // The admin's tools: a picture everyone sees (only the admin sets it), a new link (the old one stops working),
     // a fresh secret. A picture that is not a JPEG is refused before the engine is asked.

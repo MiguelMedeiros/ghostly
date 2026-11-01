@@ -203,7 +203,7 @@ import { TEST_COINS_SATS, faucetError } from "./paymentAdapters/testCoins";
 import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } from "./messageDetails";
 import { db } from "./db";
 import { settleAhead } from "./arrival";
-import { Groups, meshEdgeIntervals, otherEndSeen } from "./groups";
+import { Groups, meshEdgeIntervals, otherEndSeen, reactionKey } from "./groups";
 import { AUTHOR_ORDER_ROOM } from "./groupAuthorOrder";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
@@ -5144,21 +5144,27 @@ export class GhostlyNode implements EngineImplementation {
     }
     return { results };
   }
-  /** How many edges took my message (or its edit number `edit`) so far: what `group send --wait sent` waits for. */
-  groupTaken({ groupId, messageId, edit }: { groupId: string; messageId: string; edit?: number }): number { return this.groups.taken(groupId, messageId, edit); }
+  /**
+   * How many edges took my message (or its edit number `edit`, or my reaction numbered `reaction`, as `react` gave it)
+   * so far: what `group send` and `group react --wait sent` wait for.
+   */
+  groupTaken({ groupId, messageId, edit, reaction }: { groupId: string; messageId: string; edit?: number; reaction?: number }): number { return this.groups.taken(groupId, messageId, edit, reaction); }
 
   /**
    * Reacts to a message of a chat or a group (WISP 400 § Reactions): shown here at once; a 1:1 chat keeps it until the
-   * contact confirms it (the live session, or DHT envelopes meanwhile), a group sends it to its members.
+   * contact confirms it (the live session, or DHT envelopes meanwhile), a group sends it to its members. In a group, `n`
+   * is its number, for `groupTaken`.
    */
-  async react({ linkId, messageId, emoji }: { linkId: string; messageId: string; emoji: string }): Promise<{ error: string | null; refused?: boolean }> {
+  async react({ linkId, messageId, emoji }: { linkId: string; messageId: string; emoji: string }): Promise<{ error: string | null; refused?: boolean; n?: number }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to react in" };
     if (linkId.startsWith("group:")) {
       const groupId = linkId.slice("group:".length);
       // Not a member (removed, say): refused with the reason the group shows, and nothing is kept here.
       if (!this.membership(groupId)) return { error: this.groups.view(groupId)?.statusReason ?? "You are not in this group", refused: true };
       const result = await this.reactions.mine(linkId, messageId, emoji);
-      return "error" in result ? result : this.sendGroupReaction(groupId, result.reaction);
+      if ("error" in result) return result;
+      const sent = await this.sendGroupReaction(groupId, result.reaction);
+      return sent.error ? sent : { error: null, n: result.reaction.n };
     }
     const live = this.links.get(linkId);
     if (!live || live.stored.group) return { error: "No such chat" };
@@ -5214,17 +5220,28 @@ export class GhostlyNode implements EngineImplementation {
     else if (upTo) this.flushReactions(linkId);
   }
 
-  /** A group reaction goes to every member: over each edge in a private group, through the group in a community. */
+  /**
+   * A group reaction goes to every member: over each edge in a private group, through the group in a community. Each
+   * edge that takes it counts for `groupTaken` (`reactionKey`), as a message does.
+   */
   private async sendGroupReaction(groupId: string, reaction: WireReaction): Promise<{ error: string | null }> {
     if (this.groups.isCommunityGroup(groupId)) {
-      try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_REACTION_FRAME, ...wireReaction(reaction) }); return { error: null }; }
+      try { await this.groups.sendCommunityApp(groupId, { t: COMMUNITY_REACTION_FRAME, ...wireReaction(reaction) }, reactionKey(reaction.n)); return { error: null }; }
       catch (error) { return { error: error instanceof Error ? error.message : String(error) }; }
     }
     // Signed, so that hubs pass it on to members I have no edge with (older apps read the wire fields only).
     const frame = { t: GROUP_REACTION_FRAME, g: groupId, ...wireReaction(reaction), ...this.groups.signReaction(groupId, wireReaction(reaction)) };
     // An edge that is down hears it when it opens (`resendGroupReactions`).
-    for (const edge of this.memberEdges(groupId).values()) { try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ } }
+    for (const edge of this.memberEdges(groupId).values()) this.sayGroupReaction(groupId, this.links.get(edge)?.link, frame);
     return { error: null };
+  }
+
+  /** My reaction frame on one edge of a private group: whether the edge took it (counted for `groupTaken`). */
+  private sayGroupReaction(groupId: string, link: GhostLink | null | undefined, frame: WireReaction & { t: string; g: string }): boolean {
+    if (!link) return false;
+    try { link.sendGroupFrame(frame); } catch { return false; }
+    this.groups.noteTaken(groupId, reactionKey(frame.n));
+    return true;
   }
 
   /** A group's history read in flight for edges that opened, by chat: its callers of the moment share it. */
@@ -5254,7 +5271,7 @@ export class GhostlyNode implements EngineImplementation {
     const mine = groupReactionsToResend(await this.edgeOpenHistory(`group:${groupId}`), REACTION_LIMITS.pending);
     const link = this.links.get(linkId)?.link;
     const say = (batch: WireReaction[]) => {
-      for (const reaction of batch) { try { link?.sendGroupFrame({ t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) }); } catch { return; } }
+      for (const reaction of batch) if (!this.sayGroupReaction(groupId, link, { t: GROUP_REACTION_FRAME, g: groupId, ...reaction, ...this.groups.signReaction(groupId, reaction) })) return;
     };
     say(mine.slice(0, REACTION_LIMITS.send));
     // A second past the window, so the first ones have left it on the member's side whatever the edge's delay.

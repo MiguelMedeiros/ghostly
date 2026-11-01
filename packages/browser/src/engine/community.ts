@@ -579,11 +579,13 @@ export class Communities {
   }
 
   /** An application frame to everyone in the group (WISP 903 · Group Community § Payments). */
-  async sendApp(groupId: string, frame: Record<string, unknown>): Promise<void> {
+  /** `key`: what taking the frame takes, for `taken` (a reaction's `reactionKey`). */
+  async sendApp(groupId: string, frame: Record<string, unknown>, key?: string): Promise<void> {
     const live = this.live.get(groupId);
     if (!live) throw new Error("You are not in this group yet");
     const result = await live.session.sendApp(frame, this.host.myNick?.(), this.now());
     if ("error" in result) throw new Error(result.error);
+    if (key) this.carry(groupId, result.id, key);
   }
 
   /** An edit of my message, through the group like any frame (WISP 903 · Group Community § Edits). An error when it cannot go now. */
@@ -592,12 +594,15 @@ export class Communities {
     if (!live) return "You are not in this group yet";
     const result = await live.session.sendEdit({ id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }), ...(edit.rm && { remove: true }) }, this.host.myNick?.(), this.now());
     if ("error" in result) return result.error;
-    // The edit rides in a frame of its own: what takes that frame (now, or in a catch-up later) takes the edit.
-    const key = editKey(edit.id, edit.e);
-    this.carriers.set(result.id, key);
-    if (this.carriers.size > 512) this.carriers.delete(this.carriers.keys().next().value!);
-    for (let i = 0; i < this.frames.count(groupId, result.id); i++) this.frames.add(groupId, key);
+    this.carry(groupId, result.id, editKey(edit.id, edit.e));
     return null;
+  }
+
+  /** What rides in a frame of its own (an edit, a reaction): what takes that frame (now, or in a catch-up later) takes it. */
+  private carry(groupId: string, id: string, key: string): void {
+    this.carriers.set(id, key);
+    if (this.carriers.size > 512) this.carriers.delete(this.carriers.keys().next().value!);
+    for (let i = 0; i < this.frames.count(groupId, id); i++) this.frames.add(groupId, key);
   }
 
   /** A payload for one member only, sealed to them and carried by the group (hubs relay it, members keep it for them). */

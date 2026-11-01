@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, here, showSecret, secret, cursor, pageLimit, typingFor, typingKind } from "./shared";
+import { type Command, groupWait, here, showSecret, secret, cursor, pageLimit, timeout, typingFor, typingKind } from "./shared";
 
 /** Groups: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -61,9 +61,13 @@ export const commands: Record<string, Command> = {
     },
   },
   "group react": {
-    method: "group.react", usage: "group react <group> <message> <emoji> [--remove]", summary: "React to a group's message with one emoji; --remove takes yours back",
-    args: ["group", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
-    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: a.emoji, remove: options.remove === true }),
+    method: "group.react", usage: "group react <group> <message> <emoji> [--remove] [--wait none|sent] [--timeout s]", summary: "React to a group's message with one emoji; --remove takes yours back",
+    args: ["group", "message", "emoji...?"],
+    options: {
+      remove: { type: "boolean", description: "Take your reaction back" },
+      wait: { ...groupWait.wait, description: "none or sent: until an edge took it (default: none with a daemon, sent without)" }, timeout: groupWait.timeout,
+    },
+    params: ({ options }, a) => ({ group: a.group, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "group remove": {
     method: "group.remove", usage: "group remove <group> <member> [--show-secret]", summary: "Remove a member (admin)", args: ["group", "member"],

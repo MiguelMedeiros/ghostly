@@ -636,9 +636,18 @@ const METHODS: Record<string, Method> = {
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
     return { group: group.id, messageId, edits, sent: edges > 0 || (!!message && !message.edit?.pending), edges };
   },
+  /**
+   * WISP 400 § Reactions in a group, which has no receipts: `edges` says how many took it, `sent` whether one did.
+   * `wait: sent` (a one-shot's default: what is not said yet leaves with the process) stays until an edge took it.
+   */
   async "group.react"(ctx, params) {
     const group = groupOf(ctx, params);
-    return { group: group.id, ...(await react(ctx, `group:${group.id}`, params)) };
+    const wait = oneOf(params, "wait", ["none", "sent"] as const, ctx.mode === "one-shot" ? "sent" : "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
+    const { n, ...said } = await react(ctx, `group:${group.id}`, params);
+    const edges = !n ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, said.messageId, { reaction: n }, ms)
+      : node(ctx).groupTaken({ groupId: group.id, messageId: said.messageId, reaction: n });
+    return { group: group.id, ...said, sent: edges > 0, edges };
   },
   /**
    * WISP 902 · Group Mesh § Typing: `chat.typing` in a private group, said on the edges that are open (`reached`: to
@@ -783,15 +792,18 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
   if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; call ${method} with --force if you mean to`, { kind: secret.kind });
 }
 
-/** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
-async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {
+/**
+ * Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). In a
+ * group, `n` is the reaction's number, for `groupTaken`.
+ */
+async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean; n?: number }> {
   const messageId = str(params, "message", true);
   const removed = bool(params, "remove");
   const emoji = removed ? "" : str(params, "emoji");
   if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
   if (result.error) throw new CliError(result.refused ? "refused" : /not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
-  return { messageId, emoji: emoji || null, removed };
+  return { messageId, emoji: emoji || null, removed, ...(result.n ? { n: result.n } : {}) };
 }
 
 /**
