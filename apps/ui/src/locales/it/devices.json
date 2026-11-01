@@ -18,6 +18,15 @@
     "tryAgain": "Riprova",
     "waiting": "In attesa dell’altro tuo dispositivo…"
   },
+  "defaultName": {
+    "app": "App per {{os}}",
+    "browser": "Browser",
+    "desktop": "Computer",
+    "on": "{{browser}} su {{os}}",
+    "phone": "Telefono",
+    "short": "{{browser}}, {{os}}",
+    "tablet": "Tablet"
+  },
   "fail": {
     "cancelled": "Interrotto. Non è stato aggiunto nulla.",
     "chat": "Questo è un invito a una chat. Usa Unisciti nell’elenco delle chat.",

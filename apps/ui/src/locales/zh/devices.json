@@ -18,6 +18,15 @@
     "tryAgain": "重试",
     "waiting": "正在等待你的另一台设备…"
   },
+  "defaultName": {
+    "app": "{{os}} 应用",
+    "browser": "浏览器",
+    "desktop": "电脑",
+    "on": "{{os}} 上的 {{browser}}",
+    "phone": "手机",
+    "short": "{{browser}}，{{os}}",
+    "tablet": "平板"
+  },
   "fail": {
     "cancelled": "已停止，未添加任何内容。",
     "chat": "这是聊天邀请。请在聊天列表中使用“加入”。",
