@@ -5,6 +5,7 @@ import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
+import { NAME, aroundName } from "./aroundName";
 import { useInstalledApp } from "../../lib/apps/installed";
 import { appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
@@ -41,8 +42,9 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // Installed here: the app's own checked title and version, the one Open starts, never the sender's words for it.
   const title = app ? app.title : card.title;
   const version = app ? app.version : card.version;
+  // A long name is cut alone, never "opened it here" after it: a 20-letter nickname on a 320 px phone lost the words.
   const who = mine ? (card.opened ? t("apps.card.youOpened") : t("apps.card.youShared"))
-    : card.opened ? t("apps.card.opened", { name: contact }) : t("apps.card.shared", { name: contact });
+    : aroundName(t(card.opened ? "apps.card.opened" : "apps.card.shared", { name: NAME }), contact, "app-card-name");
   const waiting = appsUnavailable(platform?.getPeer(peerKey), title, contact, t);
   const open = (runAnyway = false) => {
     setError(null); setRemoved(false);
@@ -58,7 +60,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
             <span dir="auto" className="truncate min-w-0">{title}</span>
             {version && <>{" "}<span className="shrink-0 whitespace-nowrap">{version}</span></>}
           </p>
-          <p className="text-xs text-text-secondary truncate">{who}</p>
+          <p data-testid="app-card-who" className={`text-xs text-text-secondary ${mine ? "truncate" : "flex min-w-0 overflow-hidden whitespace-nowrap"}`}>{who}</p>
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} />
             <span data-testid="app-card-check">{app ? t("apps.card.installed") : t("apps.card.notChecked")}</span>
