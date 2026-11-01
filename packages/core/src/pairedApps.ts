@@ -32,7 +32,7 @@ export const APP_RATE_LIMIT = 50;
 export const APP_RATE_WINDOW_MS = 1_000;
 /** Data frames a sender sends per app per window: under the receiver's limit, so an `open` or `close` always fits. */
 export const APP_SEND_LIMIT = APP_RATE_LIMIT - 2;
-/** Distinct apps the peer may have open on one session; an `open` for one more is dropped. */
+/** Distinct apps the peer may have open on one session, held ones counted; an `open` for one more is dropped. */
 export const APP_PEER_OPEN_MAX = 16;
 /** The longest version an `open` carries. */
 export const APP_VERSION_MAX = 64;
@@ -187,8 +187,11 @@ class RateWindows {
  */
 export class AppSessions {
   private readonly peer = new Map<string, string>();
-  /** What the peer had open on a session that ended, held for `APP_RESUME_GRACE_MS` until it says so again. */
-  private readonly held = new Map<string, string>();
+  /**
+   * What the peer had open on a session that ended, until it says so again: each with its version and the time its
+   * grace ends, counted from the suspension that took it from the peer.
+   */
+  private readonly held = new Map<string, { version: string; until: number }>();
   private received = new RateWindows(APP_RATE_LIMIT, 4 * APP_PEER_OPEN_MAX);
   private sent = new RateWindows(APP_SEND_LIMIT, 4 * APP_PEER_OPEN_MAX);
 
@@ -212,7 +215,9 @@ export class AppSessions {
     const app = parsed.a;
     if ("d" in parsed) return this.open.has(app) && this.peer.has(app) ? { app, d: parsed.d } : null;
     if (parsed.o === "close") return this.peer.delete(app) || this.held.delete(app) ? { app, o: "close" } : null;
-    if (!this.peer.has(app) && this.peer.size >= APP_PEER_OPEN_MAX) return null;
+    // A held app the peer says open again moves back without growing what it has; each new one counts the held too,
+    // or every quick re-dial would take another 16.
+    if (!this.peer.has(app) && !this.held.has(app) && this.peer.size + this.held.size >= APP_PEER_OPEN_MAX) return null;
     this.held.delete(app);
     this.peer.set(app, parsed.v);
     return { app, o: "open", v: parsed.v };
@@ -242,10 +247,11 @@ export class AppSessions {
   /**
    * The session ended or was replaced, and another may follow at once: what the peer had open is held, not closed (no
    * event now). Nothing is sent to a held app; an `open` on the next session takes it back, a `close` closes it, and
-   * `heldExpired` closes the rest once `APP_RESUME_GRACE_MS` has passed.
+   * `heldExpired` closes the rest once `graceMs` has passed since the suspension that held each.
    */
-  sessionSuspended(): void {
-    for (const [app, version] of this.peer) this.held.set(app, version);
+  sessionSuspended(graceMs = APP_RESUME_GRACE_MS): void {
+    const until = this.now() + graceMs;
+    for (const [app, version] of this.peer) this.held.set(app, { version, until });
     this.peer.clear();
     this.received.clear();
     this.sent.clear();
@@ -254,10 +260,17 @@ export class AppSessions {
   /** Whether any of the peer's apps is held, waiting for its next session. */
   get holding(): boolean { return this.held.size > 0; }
 
-  /** The grace is over: each app still held is closed, with `offline`. */
+  /** When the next held app's grace ends; undefined when none is held. */
+  get heldUntil(): number | undefined {
+    let first: number | undefined;
+    for (const { until } of this.held.values()) if (first === undefined || until < first) first = until;
+    return first;
+  }
+
+  /** Each app held whose grace is over is closed, with `offline`; the ones held later keep theirs. */
   heldExpired(): AppFrameEvent[] {
-    const closed = [...this.held.keys()].map((app): AppFrameEvent => ({ app, o: "close", offline: true }));
-    this.held.clear();
+    const now = this.now(), closed: AppFrameEvent[] = [];
+    for (const [app, { until }] of this.held) if (until <= now) { this.held.delete(app); closed.push({ app, o: "close", offline: true }); }
     return closed;
   }
 }
