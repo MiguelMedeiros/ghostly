@@ -138,7 +138,8 @@ describe("planning a removal", () => {
     expect(first.slots[2]).toBeNull();
     // The tombstone closes the old address and lists the devices that stay; the frame carries it, signed for that address.
     const earlier = plan.patch.earlierSets!.at(-1)!;
-    expect(earlier).toMatchObject({ d: active.d, pending: [slot(1).key] });
+    expect(earlier).toMatchObject({ d: active.d, pending: [slot(1).key], removed: slot(2).key });
+    expect((await planSetMove(active, signers[0])).patch.earlierSets!.at(-1)!.removed, "a new secret removes nobody").toBeUndefined();
     const tomb = opened(oldKeys, fromBase64Url(earlier.tombstone));
     expect(tomb.tombstone).toBe(true);
     expect(tomb.slots.map((s) => s && toBase64Url(s.key))).toEqual([slot(0).key, slot(1).key, null, null]);
@@ -222,6 +223,8 @@ describe("a crash of the remover at every step", () => {
       const newKeys = keysOf(desktop.record);
       expect(opened(oldKeys, network.held(oldKeys)).tombstone).toBe(false);
       if (point === "stored") expect(network.held(newKeys)).toBeNull();
+      // The write keeps who was removed: the next start clears what that device leaves in the profile (`finishRemovals`).
+      expect(desktop.record.earlierSets.at(-1)!.removed).toBe(slot(2).key);
       const resumed = ports(desktop, network);
       await resumeSetMove(resumed);
       expect(toBase64Url(network.held(newKeys)!)).toBe(desktop.record.turnPacket);

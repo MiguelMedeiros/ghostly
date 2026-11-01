@@ -111,7 +111,7 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
       : set.setUpdate;
     earlier.push({ ...set, pending, setUpdate });
   }
-  earlier.push({ d: record.d, tombstone: toBase64Url(tomb), setUpdate: JSON.stringify(frame), pending: staying(slots.flatMap((slot) => (slot ? [slot.key] : []))) });
+  earlier.push({ d: record.d, tombstone: toBase64Url(tomb), setUpdate: JSON.stringify(frame), pending: staying(slots.flatMap((slot) => (slot ? [slot.key] : []))), ...(removed ? { removed: removed.key } : {}) });
   return {
     removed, frame,
     patch: {
