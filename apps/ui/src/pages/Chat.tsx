@@ -1378,8 +1378,9 @@ function TechInfoRow({ label, value, mono, copyable }: { label: string; value: s
       <span className="text-text-muted shrink-0">{label}</span>
       {copyable ? (
         <button
+          type="button"
           onClick={handleCopy}
-          className={`text-end break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
+          className={`text-end break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors max-md:min-h-6 ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
           title={t("chat.message.copyHint")}
         >
           {copied ? t("common.copied") : value}

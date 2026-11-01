@@ -388,6 +388,25 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
 }
 
+/**
+ * What installing `version` over `installed` does, for the install screen and for Install alike: the update rule, and an
+ * equivocation for another bundle at the number of the update waiting (two different versions of that number exist).
+ */
+function installDecision(installed: InstalledApp | undefined, version: AppVersion): ReturnType<typeof appUpdateDecision> | "new" {
+  if (!installed) return "new";
+  if (installed.pending && installed.pending.sequence === version.sequence && installed.pending.digest !== version.digest) return "equivocation";
+  return appUpdateDecision(installed, version);
+}
+
+/**
+ * Whether `now` is still the record `was`: the same install, version, waiting update, files and mark. A store pinned or
+ * unpinned meanwhile is not a change here: the update check unpins on its own (`removeStore`).
+ */
+function sameRecord(now: InstalledApp | undefined, was: InstalledApp): boolean {
+  return !!now && now.installedAt === was.installedAt && now.digest === was.digest && now.pending?.digest === was.pending?.digest
+    && now.bytes === was.bytes && now.equivocation?.digest === was.equivocation?.digest;
+}
+
 /** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`, counter rows included. */
 const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []]);
 /** The app's own rows of one scope: its counter row left out. */
@@ -659,15 +678,16 @@ export class Apps {
     try { await committed((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
   }
   /**
-   * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
-   * one transaction: an app uninstalled (or installed again) while the update check was reading is not put back.
+   * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
+   * transaction: an app uninstalled (or installed again) while the update check was reading is not put back, nor is the
+   * version it read over an update the person accepted meanwhile.
    */
-  private async putAppIfInstalled(app: InstalledApp, installedAt: number): Promise<boolean> {
+  private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp): Promise<boolean> {
     const tx = (await openDb()).transaction(STORES.apps, "readwrite");
     let put = false;
     const read = tx.objectStore(STORES.apps).get(app.ref);
     read.onsuccess = () => {
-      if ((read.result as InstalledApp | undefined)?.installedAt !== installedAt) return;
+      if (!sameRecord(read.result as InstalledApp | undefined, was)) return;
       tx.objectStore(STORES.apps).put(app);
       put = true;
     };
@@ -1143,7 +1163,8 @@ export class Apps {
     const { manifest, digest } = bundle;
     const version = versionOf(manifest, digest);
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
-    const decision = installed ? appUpdateDecision(installed, version) : "new";
+    // What Install will answer: a clash with the update waiting is one too.
+    const decision = installDecision(installed, version);
     const install = decision === "other-app" ? "new" : decision;
     const asks = install === "new" ? [...manifest.permissions] : install === "update" ? manifest.permissions.filter((p) => !installed!.permissions.includes(p)) : [];
     const listedBy = this.listedBy(version.ref, stores);
@@ -1173,8 +1194,7 @@ export class Apps {
     const run = this.runStatus(version, this.storeViews(stores), installed?.revocations);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
-    const pendingClash = installed?.pending && installed.pending.sequence === version.sequence && installed.pending.digest !== digest;
-    const decision = installed ? (pendingClash ? "equivocation" : appUpdateDecision(installed, version)) : "new";
+    const decision = installDecision(installed, version);
     if (decision === "rollback") fail("rollback", "A newer version of this app is installed");
     if (decision === "equivocation") {
       await this.putApp({ ...installed!, equivocation: { sequence: version.sequence, digest, at: this.now() } });
@@ -1288,6 +1308,8 @@ export class Apps {
       if (!(await this.hasBundle(listed.bytes, listed.digest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
       const first = await this.app(listed.ref);
       if (!first) continue;
+      // The record as stored when this check last read or wrote it: what it writes back must still be there.
+      let stored = first;
       let app = first;
       let outcome: AppCheckOutcome = "none";
       let wrote: { bytes: FileBytesKind; digest: string } | undefined;
@@ -1376,9 +1398,9 @@ export class Apps {
           const next = this.versionRecord(app, bundle, kind, url, app.store);
           const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
           if (passed) delete next.pending;
-          // Uninstalled while it downloaded: not put back.
-          if (!(await this.putAppIfInstalled(next, first.installedAt))) break;
-          app = next;
+          // Uninstalled while it downloaded, or changed by the person: not put back.
+          if (!(await this.putAppIfUnchanged(next, stored))) break;
+          app = stored = next;
           if (passed) await this.removeBundle(passed.bytes, passed.digest);
           await this.removeBundle(old.bytes, old.digest);
           outcome = "updated";
@@ -1402,7 +1424,7 @@ export class Apps {
       const current = await this.app(app.ref);
       if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
       app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
-      if (!(await this.putAppIfInstalled(app, first.installedAt))) {
+      if (!(await this.putAppIfUnchanged(app, stored))) {
         if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
         continue;
       }

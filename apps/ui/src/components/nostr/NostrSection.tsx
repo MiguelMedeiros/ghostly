@@ -8,6 +8,7 @@ import { Block, Button, Notice, Row, Section, Switch, input } from "../wallet/ui
 import { FieldGrid, InputGroup } from "../layout";
 import { NostrPublishDialog } from "./NostrPublishDialog";
 import { problemLine } from "../../lib/problemText";
+import { exactText } from "../../lib/exactText";
 
 
 /**
@@ -44,7 +45,7 @@ export function NostrSection() {
           <p className="text-text-muted text-xs mt-0.5">{t("identities.nostr.relaysHint")}</p>
         </div>
         <InputGroup as="form" onSubmit={e => { e.preventDefault(); void saveRelays(); }}>
-          <textarea id="nostr-relays" data-testid="nostr-relays" value={relays} onChange={e => setDraft(e.target.value)} rows={2} spellCheck={false} className={`${input} font-mono text-xs`} placeholder="wss://…" />
+          <textarea id="nostr-relays" data-testid="nostr-relays" value={relays} onChange={e => setDraft(e.target.value)} rows={2} {...exactText} className={`${input} font-mono text-xs`} placeholder="wss://…" />
           <Button type="submit" data-testid="nostr-relays-save" disabled={!relaysChanged}>{t("common.save")}</Button>
         </InputGroup>
       </Block>
@@ -114,10 +115,10 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
           {!view.profile && <Notice>{t("identities.nostr.loadFirst")}</Notice>}
           <FieldGrid>
             <input data-testid="nostr-profile-name" aria-label={t("identities.nostr.name")} placeholder={t("identities.nostr.name")} maxLength={64} value={fields.displayName} onChange={e => setFields({ ...fields, displayName: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-handle" aria-label={t("identities.nostr.handle")} placeholder={t("identities.nostr.handle")} maxLength={64} value={fields.name} onChange={e => setFields({ ...fields, name: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-nip05" aria-label={t("identities.nostr.nip05")} placeholder={t("identities.nostr.nip05Placeholder")} maxLength={253} value={fields.nip05} onChange={e => setFields({ ...fields, nip05: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-website" aria-label={t("identities.nostr.website")} placeholder="https://…" maxLength={512} value={fields.website} onChange={e => setFields({ ...fields, website: e.target.value })} className={input} />
-            <input data-testid="nostr-profile-picture" aria-label={t("identities.nostr.picture")} placeholder={t("identities.nostr.picturePlaceholder")} maxLength={2048} value={fields.picture} onChange={e => setFields({ ...fields, picture: e.target.value })} className={input} />
+            <input data-testid="nostr-profile-handle" aria-label={t("identities.nostr.handle")} placeholder={t("identities.nostr.handle")} maxLength={64} value={fields.name} onChange={e => setFields({ ...fields, name: e.target.value })} {...exactText} className={input} />
+            <input data-testid="nostr-profile-nip05" aria-label={t("identities.nostr.nip05")} placeholder={t("identities.nostr.nip05Placeholder")} maxLength={253} value={fields.nip05} onChange={e => setFields({ ...fields, nip05: e.target.value })} {...exactText} className={input} />
+            <input data-testid="nostr-profile-website" aria-label={t("identities.nostr.website")} placeholder="https://…" maxLength={512} value={fields.website} onChange={e => setFields({ ...fields, website: e.target.value })} {...exactText} className={input} />
+            <input data-testid="nostr-profile-picture" aria-label={t("identities.nostr.picture")} placeholder={t("identities.nostr.picturePlaceholder")} maxLength={2048} value={fields.picture} onChange={e => setFields({ ...fields, picture: e.target.value })} {...exactText} className={input} />
           </FieldGrid>
           <textarea data-testid="nostr-profile-about" aria-label={t("identities.nostr.about")} placeholder={t("identities.nostr.about")} rows={2} maxLength={500} value={fields.about} onChange={e => setFields({ ...fields, about: e.target.value })} className={input} />
           <p className="text-[11px] text-text-muted">{t("identities.nostr.fieldsNote")}</p>

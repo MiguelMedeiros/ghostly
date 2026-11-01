@@ -163,6 +163,23 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
   });
 
+  it("the install screen says equivocation for a bundle that clashes with the update waiting, as Install answers", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // Another bundle at the waiting update's number, with other bytes: it offered Update, and Install then refused it.
+    const twin = await bundle({ sequence: 2, permissions: ["chat", "name"], entry: "<p>another version 2" });
+    net.put(BUNDLE_URL, twin.bytes);
+    expect(await store.preview({ url: BUNDLE_URL })).toMatchObject({ install: "equivocation", asks: [] });
+    await expect(store.install({ digest: twin.digest, grant: ["chat", "name"] })).rejects.toThrow(/^equivocation/);
+    expect((await store.list())[0]).toMatchObject({ digest: v1.digest, pending: { sequence: 2, added: ["name"] }, equivocation: { sequence: 2 } });
+    // The waiting update itself, by its own link, is still an update.
+    expect(await store.preview({ url: PINNED_URL })).toMatchObject({ install: "update", asks: ["name"] });
+  });
+
   it("an app uninstalled while an update that adds a permission downloads leaves no files behind", async () => {
     const { store, v1 } = await installed();
     const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
@@ -320,6 +337,35 @@ describe("updates", () => {
       expect(await bundleIds()).toEqual([]);
       net.fetch.mockImplementation(answer);
     }
+  });
+
+  it("an update the person accepts while a check reads the publisher's revocations stays accepted", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // The Apps page opens (a check starts) and the person presses Update while it reads ghostly-revoke.json.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reading!: () => void;
+    const started = new Promise<void>((resolve) => { reading = resolve; });
+    const answer = net.fetch.getMockImplementation()!;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/ghostly-revoke.json")) { reading(); await held; }
+      return answer(input, init);
+    });
+    const check = store.checkUpdates();
+    await started;
+    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    release();
+    await check;
+    const after = (await store.list())[0]!;
+    expect(after, "the check does not put back the version it read").toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat", "name"], run: { status: "ok" } });
+    expect(after.pending).toBeUndefined();
+    expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+    net.fetch.mockImplementation(answer);
   });
 
   it("with no app installed the check asks nothing", async () => {

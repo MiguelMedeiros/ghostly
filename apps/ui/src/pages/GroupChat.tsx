@@ -766,7 +766,7 @@ export function GroupChat() {
           {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
             className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
           <button onClick={() => { void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {}); nav.home(); }} data-testid="group-joining-cancel"
-            className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
+            className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
       <div ref={jump.listRef} data-message-list aria-busy={reading || undefined} className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
