@@ -48,6 +48,8 @@ export interface IdentityLinkHost {
 
 const KEY = "identityProofs";
 const REVOCATIONS = "identityRevocations";
+/** When the contacts' proofs were last looked up for a revocation (ms), so a reload does not look them all up again. */
+const REVOCATIONS_CHECKED_AT = "identityRevocationsCheckedAt";
 /** Relays and the DHT forget a record within hours: republish revocations this often while the app runs. */
 const REPUBLISH_MS = 60 * 60_000;
 /** How often the contacts' proofs are looked up for a revocation (and once shortly after start). */
@@ -72,6 +74,7 @@ const now = () => Math.floor(Date.now() / 1000);
 export class IdentityProofs {
   private proofs: StoredIdentityProof[] = [];
   private revocations: Revocation[] = [];
+  private revocationsCheckedAt = 0;
   /** Unsealed proof-key seeds, by proof id, for this run only. */
   private seeds = new Map<string, Uint8Array>();
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -92,9 +95,10 @@ export class IdentityProofs {
   async load(): Promise<void> {
     const providers = loadIdentityProviders();
     const settings = await store(STORES.settings, "readonly");
-    [this.proofs, this.revocations] = await Promise.all([
+    [this.proofs, this.revocations, this.revocationsCheckedAt] = await Promise.all([
       wrap<StoredIdentityProof[] | undefined>(settings.get(KEY)).then(v => v ?? []),
       wrap<Revocation[] | undefined>(settings.get(REVOCATIONS)).then(v => v ?? []),
+      wrap<number | undefined>(settings.get(REVOCATIONS_CHECKED_AT)).then(v => typeof v === "number" ? v : 0),
     ]);
     await providers;
   }
@@ -105,7 +109,10 @@ export class IdentityProofs {
       this.timers.push(setTimeout(tick, first));
     };
     every(REPUBLISH_MS, 5_000, () => this.republish());
-    every(REVOCATION_CHECK_MS, 60_000, () => this.checkRevocations());
+    // 60 s after the start, unless the last lookup (from an earlier run) was less than 12 h ago: then when those are up.
+    // A clock set back since then waits 12 h at most.
+    const due = Math.min(REVOCATION_CHECK_MS, this.revocationsCheckedAt + REVOCATION_CHECK_MS - Date.now());
+    every(REVOCATION_CHECK_MS, Math.max(60_000, due), () => this.checkRevocations());
     this.unlisten ??= whenDataKeyDropped(() => this.forgetSeeds());
   }
   stop(): void {
@@ -257,6 +264,8 @@ export class IdentityProofs {
         if (this.revocable(r)) await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
       }
     }
+    this.revocationsCheckedAt = Date.now();
+    await transact([STORES.settings], stores => { stores[STORES.settings].put(this.revocationsCheckedAt, REVOCATIONS_CHECKED_AT); });
   }
   private revocable(r: ReceivedIdentity): boolean {
     return r.status !== "revoked" && Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) > now();

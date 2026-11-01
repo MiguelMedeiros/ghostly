@@ -55,7 +55,7 @@ function pair() {
 }
 
 async function clearStorage() {
-  await transact([STORES.settings], stores => { stores[STORES.settings].delete("identityProofs"); stores[STORES.settings].delete("identityRevocations"); });
+  await transact([STORES.settings], stores => { stores[STORES.settings].delete("identityProofs"); stores[STORES.settings].delete("identityRevocations"); stores[STORES.settings].delete("identityRevocationsCheckedAt"); });
 }
 const stored = async <T,>(key: string) => wrap<T | undefined>((await store(STORES.settings, "readonly")).get(key));
 
@@ -208,6 +208,40 @@ describe("removing a proof and its revocation", () => {
     vi.setSystemTime(Date.now() + 31 * 86_400_000);
     await engines.b.checkRevocations();
     expect(resolved).toHaveLength(2);
+  });
+
+  it("the 12 h between revocation lookups is kept across a restart: a reload minutes after one reads nothing until it is due", async () => {
+    const { state, resolved, make } = await shared();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    state.connected = false;
+    const run = async () => { const b = make("b"); await b.load(); b.start(); return b; };
+    resolved.length = 0;
+    // Never checked: 60 s after the start, as before.
+    const first = await run();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => expect(resolved).toHaveLength(1));
+    first.stop();
+
+    // Reloaded five minutes later: no lookup at 60 s, nor until 12 h after the last one.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const second = await run();
+    await vi.advanceTimersByTimeAsync(11 * 60 * 60_000);
+    expect(resolved).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(56 * 60_000);
+    await vi.waitFor(() => expect(resolved).toHaveLength(2));
+    second.stop();
+
+    // Offline at the due time looks up nothing and keeps it due: the next start checks 60 s in.
+    state.online = false;
+    await vi.advanceTimersByTimeAsync(13 * 60 * 60_000);
+    const offline = await run();
+    await vi.advanceTimersByTimeAsync(60_000);
+    offline.stop();
+    state.online = true;
+    const third = await run();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.waitFor(() => expect(resolved).toHaveLength(3));
+    third.stop();
   });
 
   it("a proof removed while the contact is live: the contact sees it withdrawn at once, then revoked, as a recheck says", async () => {
