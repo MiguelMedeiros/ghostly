@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { chat, connect, expect, expectConnected, link, say, test } from "../support/fixtures";
+import { chat, connect, expect, link, say, test } from "../support/fixtures";
 
 test("on a phone: tabs for chats, wallet, sharing and settings, and Profile through Settings", { tag: ["@feature:app.mobile-layout"] }, async ({ peer }) => {
   const { page } = await peer("alice", { mobile: true });
@@ -112,8 +112,8 @@ test("on a 320px phone a toast holding a long file name wraps, its × on the scr
       }, language);
       await alice.page.reload();
       await expect(alice.page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
-      await expect(chat(alice)).toBeVisible();
-      await expectConnected(alice.page);
+      // As the chat was before the reload, live: in the language now shown, so read through its status.
+      await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("data-state", "connected", { timeout: 90_000 });
     }
     // Not a movie at all, so it cannot be converted; a file of its own each time, in a folder of its own.
     mkdirSync(testInfo.outputPath(language));
