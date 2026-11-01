@@ -15,6 +15,8 @@ import { Settings } from "../../pages/Settings";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { createProfile, namespaceOf } from "../../lib/profiles";
+import { defaultDeviceName } from "../../lib/devices";
+import { loadLocale, translatorFor } from "../../locales";
 import { setPushPlatform, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -238,6 +240,22 @@ describe("Profile, Devices", () => {
   it("draws each device's kind from its name", () => {
     expect(["iPhone", "Phone", "Pixel 8", "iPad", "Tablet", "Chrome on Mac", "Firefox", "Mac app", "Desktop", "Linux"].map(deviceLook))
       .toEqual(["phone", "phone", "phone", "tablet", "tablet", "browser", "browser", "computer", "computer", "computer"]);
+  });
+
+  it("draws the kind of a name in any app language, and of the name each language suggests", async () => {
+    expect(["هاتف (2)", "جوال أحمد", "手机", "スマホ", "Celular", "Téléphone", "Teléfono de Ana", "Telefono", "Tablette", "平板", "タブレット", "Navegador", "متصفح"].map(deviceLook))
+      .toEqual(["phone", "phone", "phone", "phone", "phone", "phone", "phone", "phone", "tablet", "tablet", "tablet", "browser", "browser"]);
+    const agents = {
+      phone: { userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36 Chrome/131.0" },
+      tablet: { userAgent: "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 Chrome/131.0 Safari/537.36" },
+      browser: { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" },
+      computer: { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", desktop: true },
+    } as const;
+    for (const language of ["ar", "en", "es", "fr", "it", "ja", "pt", "zh"] as const) {
+      await loadLocale(language);
+      const t = translatorFor(language);
+      for (const [look, env] of Object.entries(agents)) expect([language, deviceLook(defaultDeviceName(env, t))]).toEqual([language, look]);
+    }
   });
 });
 

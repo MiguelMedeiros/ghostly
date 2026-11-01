@@ -18,6 +18,15 @@
     "tryAgain": "Try again",
     "waiting": "Waiting for your other device…"
   },
+  "defaultName": {
+    "app": "{{os}} app",
+    "browser": "Browser",
+    "desktop": "Desktop",
+    "on": "{{browser}} on {{os}}",
+    "phone": "Phone",
+    "short": "{{browser}}, {{os}}",
+    "tablet": "Tablet"
+  },
   "fail": {
     "cancelled": "Stopped. Nothing was added.",
     "chat": "This is a chat invite. Use Join in the chat list.",

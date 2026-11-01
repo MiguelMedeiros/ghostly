@@ -18,6 +18,15 @@
     "tryAgain": "Intentar de nuevo",
     "waiting": "Esperando a tu otro dispositivo…"
   },
+  "defaultName": {
+    "app": "App para {{os}}",
+    "browser": "Navegador",
+    "desktop": "Ordenador",
+    "on": "{{browser}} en {{os}}",
+    "phone": "Teléfono",
+    "short": "{{browser}}, {{os}}",
+    "tablet": "Tableta"
+  },
   "fail": {
     "cancelled": "Detenido. No se añadió nada.",
     "chat": "Es una invitación a un chat. Usa Unirse en la lista de chats.",
