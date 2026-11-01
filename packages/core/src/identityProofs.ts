@@ -288,6 +288,10 @@ function receivedWithRoom(received: ReceivedIdentity[], id: string, replaced: (r
   return out.length < IDENTITY_MAX_RECEIVED ? out : undefined;
 }
 
+const REVOKED = "Its owner revoked this proof";
+/** Revoked is final: a later lookup that fails or finds nothing (the relays forgot it) does not undo it. */
+const revokedHere = (received: ReceivedIdentity[], id: string) => received.some(r => r.id === id && r.status === "revoked");
+
 const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), 160) ?? "Invalid proof";
 
 /**
@@ -518,6 +522,7 @@ export class IdentityExchange {
       // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
       // The checked subject is not known yet: an identity kept under the binding's subject may be the one replaced.
       const mayReplace = (r: ReceivedIdentity) => r.binding.provider === binding.provider && (r.binding.subject === binding.subject || r.verified.subject === binding.subject);
+      if (revokedHere(this.options.storage.read().received, id)) throw new Error(REVOKED);
       if (!receivedWithRoom(this.options.storage.read().received, id, mayReplace, now)) throw new Error(TOO_MANY_RECEIVED);
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
@@ -526,7 +531,7 @@ export class IdentityExchange {
       if (Math.min(binding.expiresAt, result.expiresAt ?? Infinity) <= now) throw new Error("The proof has expired");
       // A presentation needs the proof key, so this only matters when its seed leaked: a lookup that
       // fails is not a refusal, a revocation found is.
-      if (await this.options.revoked?.(statement).catch(() => false)) throw new Error("Its owner revoked this proof");
+      if (await this.options.revoked?.(statement).catch(() => false)) throw new Error(REVOKED);
       verified = result;
     } catch (e) { error = peerError(e); reason = shortError(e); }
     // Consuming the nonce and recording the outcome are one transaction.
@@ -536,6 +541,8 @@ export class IdentityExchange {
       const challenges = l.challenges.filter(c => c.nonce !== nonce);
       // A newer proof of the same identity replaces the older one; the bound holds for presentations checked at once.
       const subject = verified?.subject;
+      // A re-check may have found it revoked while it was being checked.
+      if (verified && revokedHere(l.received, id)) { verified = undefined; error = reason = REVOKED; }
       const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
       if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
       const logged = this.log(l, { type: "result", side: "theirs", proof: id, requested: challenge.id, provider: binding.provider,
