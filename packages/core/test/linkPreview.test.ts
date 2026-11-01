@@ -31,6 +31,12 @@ describe("linksIn", () => {
     expect(linksIn("see (https://a.example/x), and https://b.example/y.")).toEqual(["https://a.example/x", "https://b.example/y"]);
     expect(linksIn("no links here")).toEqual([]);
   });
+
+  // The preview was fetched from /a%E3%80%82, a page the person never linked.
+  it("ends a link at a Chinese, Japanese or Arabic sentence's punctuation, as the bubble does", () => {
+    expect(linksIn("見て https://a.example/x。看 https://b.example/y，好")).toEqual(["https://a.example/x", "https://b.example/y"]);
+    expect(linksIn("هل رأيت https://a.example/x؟ «https://b.example/y»")).toEqual(["https://a.example/x", "https://b.example/y"]);
+  });
 });
 
 describe("sanitizePreviewImage", () => {
