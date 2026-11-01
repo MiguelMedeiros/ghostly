@@ -103,6 +103,38 @@ async function readUnasked(read: StdinRead, note: (text: string) => void, ask: U
 }
 
 /**
+ * `identity add`'s fields: each `--field name=value`, then with `--stdin` the `name=value` lines piped to it (a NIP-46
+ * signer's bunker:// link holds the signer's secret). `secret`: the names the signer's form marks `kind: "secret"`
+ * (`identitySecretFields`); one given as a `--field` still goes, with the warning. Neither error repeats a value.
+ */
+export async function identityFields(items: string[], stdin: boolean, secret: string[], read: StdinRead, tty = false): Promise<{ fields: Record<string, string>; warning?: string }> {
+  const fields: Record<string, string> = {};
+  for (const item of items) {
+    const eq = item.indexOf("=");
+    if (eq < 1) throw new CliError("usage", "--field takes name=value, and one has no name or no =");
+    fields[item.slice(0, eq)] = item.slice(eq + 1);
+  }
+  const onLine = secret.filter((name) => fields[name] !== undefined);
+  if (stdin) {
+    if (tty) throw new CliError("usage", "--stdin takes the fields as name=value lines piped to it (… | ghostly identity add <provider> --signer id --stdin), not a terminal");
+    for (const line of (await read()).split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const eq = line.indexOf("=");
+      if (eq < 1) throw new CliError("usage", "--stdin takes name=value lines, and one has no name or no =");
+      fields[line.slice(0, eq).trim()] = line.slice(eq + 1);
+    }
+  }
+  if (!onLine.length) return { fields };
+  return { fields, warning: `${onLine.map((name) => `--field ${name}`).join(", ")} on the command line shows in ps and the shell's history: give ${onLine.length > 1 ? "them" : "it"} on stdin instead (--stdin, name=value lines)` };
+}
+
+/** The fields a provider's signer marks `kind: "secret"`: the one `--signer` names, or any of its signers when none is. */
+export function identitySecretFields(provider: { signers: readonly { id: string; fields?: readonly { name: string; kind?: string }[] }[] } | undefined, signer?: string): string[] {
+  const signers = (provider?.signers ?? []).filter((s) => signer === undefined || s.id === signer);
+  return [...new Set(signers.flatMap((s) => (s.fields ?? []).filter((f) => f.kind === "secret").map((f) => f.name)))];
+}
+
+/**
  * `wallet create --value`: the names given on the command line that the chosen source's form marks `kind: "secret"`
  * (an NWC URI, a macaroon, a rune, an RPC password), as a warning. `list`: a `wallet.list` answer, where the forms are.
  */

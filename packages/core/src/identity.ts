@@ -68,9 +68,13 @@ export function sign(message: Uint8Array, seed: Uint8Array): Uint8Array {
   return ed25519.sign(message, seed);
 }
 
+/**
+ * Ed25519 verification as RFC 8032 writes it (`zip215: false`): canonical encodings only, and no key of small order,
+ * which no secret key goes with and which "verifies" a constant signature of any message.
+ */
 export function verify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean {
   try {
-    return ed25519.verify(signature, message, publicKey);
+    return ed25519.verify(signature, message, publicKey, { zip215: false });
   } catch {
     return false;
   }

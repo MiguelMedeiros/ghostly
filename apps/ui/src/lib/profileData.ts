@@ -1,7 +1,8 @@
 import { identityFromSeedB64 } from "@ghostly/core";
 import { databaseExists } from "@ghostly/browser/backup/database";
 import { runsEngine } from "@ghostly/browser/devices/state";
-import { deviceStateOf, forgetDevice } from "@ghostly/browser/devices/store";
+import { deviceStateOf, forgetDevice, readDeviceRecord } from "@ghostly/browser/devices/store";
+import { handoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
@@ -237,7 +238,8 @@ async function lockHeld(ns: string): Promise<boolean> {
 
 /**
  * Deletes a profile of this space for good: its local keys, its peer database and its wallets' own storage
- * (Ark, Bark and Breez databases, Fedimint client files), then its place on the list (WISP 04). Never the active one,
+ * (Ark, Bark and Breez databases, Fedimint client files), the forks a handoff left of it on this device, then its place
+ * on the list (WISP 04). Never the active one,
  * never the first, never one running in another tab, and never a wallet's storage another profile still uses.
  */
 export async function deleteProfile(id: string, password?: string): Promise<void> {
@@ -253,6 +255,8 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   const others = await Promise.all(listProfiles().filter((p) => p.id !== id).map((p) => walletStorage(databaseOf(p.id))));
   const usedElsewhere = new Set(others.flatMap((o) => [...o.databases, ...o.files]));
   const own = await walletStorage(dbName);
+  // The forks its device record lists (WISP 06 § Installing the staged state): read before the record goes.
+  const forks = (await readDeviceRecord(dbName).catch(() => null))?.forks ?? [];
   if (await databaseExists(dbName)) await drop(dbName);
   // The folders and files its apps were given (linked files: handles, never copies).
   if (await databaseExists(linkedFilesDatabase(dbName))) await drop(linkedFilesDatabase(dbName)).catch(() => {});
@@ -267,6 +271,14 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
+  // Each fork of it goes as "Discard this copy" takes it, with its linked files: no screen lists it once the record
+  // is gone. Never a database a profile on the list runs on.
+  const listed = new Set(listProfiles().map((p) => databaseOf(p.id)));
+  for (const fork of forks) {
+    if (listed.has(fork)) continue;
+    await handoffProfileHost()?.staging.drop(fork).catch(() => {});
+    if (await databaseExists(linkedFilesDatabase(fork))) await drop(linkedFilesDatabase(fork)).catch(() => {});
+  }
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
   await forgetDevice(dbName).catch(() => {});
   // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.

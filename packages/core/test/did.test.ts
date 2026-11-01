@@ -196,6 +196,34 @@ describe("DID documents", () => {
   });
 });
 
+describe("small-order Ed25519 keys", () => {
+  // No secret key goes with a point of small order. The neutral point is one: with it, R = the neutral point and S = 0
+  // (bytes 01 00…00) is an Ed25519 signature of any text under ZIP-215, so nothing it "signs" proves anything.
+  const neutral = Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 1 : 0));
+  const constant = Uint8Array.from({ length: 64 }, (_, i) => (i === 0 ? 1 : 0));
+  const multibase = `z${base58.encode(Uint8Array.from([0xed, 0x01, ...neutral]))}`;
+
+  it("is refused as a did:key or a did:jwk", () => {
+    expect(multibase).toBe("z6MkeXATEjyXENzBXBxgC5EHk2JE5aqd7qMGGtDpLUH1e2Sj");
+    expect(() => staticDidDocument(`did:key:${multibase}`)).toThrow(/small order/);
+    expect(() => staticDidDocument(`did:jwk:${json64({ kty: "OKP", crv: "Ed25519", x: b64u(neutral) })}`)).toThrow(/small order/);
+  });
+
+  it("is skipped in a document, and its constant signature checks nothing", () => {
+    const did = "did:web:example.com";
+    const view = parseDidDocument(did, {
+      id: did,
+      verificationMethod: [{ id: `${did}#k`, type: "Multikey", controller: did, publicKeyMultibase: multibase }],
+      authentication: [`${did}#k`, { id: `${did}#e`, type: "Ed25519VerificationKey2018", publicKeyBase58: base58.encode(neutral) }],
+    });
+    expect(view.keys).toEqual([]);
+    expect(view.skipped).toBe(2);
+    const header = json64({ alg: "EdDSA" });
+    expect(() => checkDidJws(`${header}..${b64u(constant)}`, messages, view)).toThrow(DidError);
+    expect(() => checkDidSignature(constant, messages, view)).toThrow(DidError);
+  });
+});
+
 describe("DID signatures", () => {
   it("verifies the RFC 8037 Ed25519 JWS (A.4)", () => {
     const x = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo";

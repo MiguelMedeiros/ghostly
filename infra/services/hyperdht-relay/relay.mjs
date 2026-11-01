@@ -25,6 +25,8 @@ export const DEFAULT_LIMITS = Object.freeze({
   listens: 16,
   /** Dials one client may start per minute. */
   connectsPerMinute: 60,
+  /** HyperDHT streams one client may hold open at once: its dials and the connections its servers get. */
+  streams: 64,
   /** How long a client may hold its WebSocket with no listen open and no dial started (a browser listens within seconds). */
   idleMs: 30_000,
   /** How often the relay pings each client; one that has not answered the last ping by the next is dropped. */
@@ -79,11 +81,12 @@ function clientDht(dht, limits, drop, gone, log) {
   watchIdle()
   // Every HyperDHT stream the relay holds for this client: its dials and the connections its servers get, taken or
   // not. dht-relay forgets some of them (a dial whose alias the client reuses, an incoming one the client never
-  // takes) and would leave them open after the client has gone, outside every limit; they all close with it.
+  // takes) and would leave them open after the client has gone, outside every limit; they all close with it. While
+  // it stays, it holds at most `streams` of them: a dial past that drops it, an incoming one past that is closed.
   const streams = new Set()
   let left = false
   const hold = stream => {
-    if (left) { stream.destroy(); return stream }
+    if (left || streams.size >= limits.streams) { stream.destroy(); return stream }
     streams.add(stream)
     stream.once('close', () => streams.delete(stream))
     return stream
@@ -113,6 +116,7 @@ function clientDht(dht, limits, drop, gone, log) {
         const now = Date.now()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
+        if (streams.size >= limits.streams) { drop('stream limit'); throw new Error('Stream limit reached') }
         watchIdle()
         return hold(target.connect(publicKey, { ...options, createHandshake: untracked(options?.createHandshake) }))
       }
