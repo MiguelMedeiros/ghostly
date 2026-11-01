@@ -3834,10 +3834,11 @@ export class GhostlyNode implements EngineImplementation {
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
       const message = await db.getMessage(linkId, id);
-      // Not here yet, under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused`
-      // after it, `spent_` and a token's digest): never forgotten ahead, or a contact could hide the line of a payment
-      // or request it sends next, which a removal never takes (`canRemove`; agents#1587). No text or file has such an id.
-      if (!message && PAYMENT_LINE_ID.test(edit.id)) return true;
+      // Under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused` after it,
+      // `spent_` and a token's digest): never forgotten, here or not yet, or a contact could hide the line of a payment
+      // or request it sends next, or the line that says I refused one, which carries no `paymentId` for `canRemove` to
+      // read. A removal never takes those (agents#1587). No text or file has such an id.
+      if (PAYMENT_LINE_ID.test(edit.id)) return true;
       if (!message || canRemove(message)) await this.forgetMessage(linkId, id, ref && (message ?? true));
       return true;
     }

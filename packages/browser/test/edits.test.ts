@@ -385,6 +385,21 @@ describe("the contact's edits", () => {
     expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
   });
 
+  it("a removal after a refusal line is here leaves it: the line has no paymentId, its id says what it is", async () => {
+    const t = await setup();
+    const ids = ["1790000000001_refused", `spent_${"ab".repeat(16)}`];
+    const store = (t.node as unknown as { storeMessage(m: object): Promise<unknown> }).storeMessage.bind(t.node);
+    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `Could not receive ${i + 1} sats: refused`, sender: "peer", timestamp: 1_790_000_000_001 + i, via: "datalink" });
+    expect(await t.contact.sendMessage("a text", Date.now(), WIRE("T"))).toBeNull();
+    await t.peerRow("a text");
+    for (const id of [...ids, WIRE("T")]) expect(await t.contact.sendEdit({ id, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts.map(([id]) => id)).toEqual([...ids, WIRE("T")]));
+    // The control: the text the same removal names goes.
+    await vi.waitFor(async () => expect((await t.messages()).map(m => m.text)).not.toContain("a text"));
+    expect((await t.messages()).filter(m => m.text.startsWith("Could not receive")).map(m => m.id)).toEqual(ids.map(id => `peer_${id}`));
+    expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
+  });
+
   it("a removal leaves no line of its message in the replies here that quote it: each keeps its quote's id", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage("quote me", Date.now(), WIRE("Q"))).toBeNull();
