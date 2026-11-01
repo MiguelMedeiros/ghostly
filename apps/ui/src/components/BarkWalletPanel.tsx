@@ -13,6 +13,7 @@ import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
 import { problemText } from "../lib/problemText";
+import { exactText } from "../lib/exactText";
 
 type Network = "bitcoin" | "signet" | "regtest";
 /** Second's public servers (Bitcoin, signet), or a local regtest one (e2e/support/bark-regtest). */
@@ -80,7 +81,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
    </div>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <SendScan onText={given} disabled={busy} scanOnOpen>
-    <input aria-label={t("wallet.panel.recipient", { wallet: "Bark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bark" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={e => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
+    <input aria-label={t("wallet.panel.recipient", { wallet: "Bark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bark" })} {...exactText} className={`${input} font-mono text-xs`} value={address} onChange={e => { const text = e.target.value.trim(); if (/^bitcoin:/i.test(text)) given(text); else { setNotUsable(null); setAddress(text); } }} />
     {notUsable === "refused" && <Notice tone="error" testId="wallet-send-refused">{t("payments.formats.unsupported")}</Notice>}
     {notUsable === "unknown" && <Notice tone="error" testId="wallet-send-unknown">{t("wallet.panel.notAddress", { wallet: "Bark" })}</Notice>}
     <Amount value={amount} onChange={setAmount} unit={unit} />
@@ -102,8 +103,8 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
    </Row>}
    {ready && <><Row label={t("wallet.bark.server")} hint={bark.provider}><Button disabled={!canReplace} onClick={() => { setCustom(!custom); setProvider(bark.provider ?? ""); setExplorer(NETWORKS[network].explorer); }}>{custom ? t("common.cancel") : t("wallet.panel.change")}</Button></Row>
    {custom && <Block>
-    <input aria-label={t("wallet.bark.serverInput")} className={`${input} font-mono text-xs`} value={provider} onChange={e => setProvider(e.target.value)} spellCheck={false} />
-    <input aria-label={t("wallet.bark.esplora")} className={`${input} font-mono text-xs`} value={explorer} onChange={e => setExplorer(e.target.value)} spellCheck={false} />
+    <input aria-label={t("wallet.bark.serverInput")} className={`${input} font-mono text-xs`} value={provider} onChange={e => setProvider(e.target.value)} {...exactText} />
+    <input aria-label={t("wallet.bark.esplora")} className={`${input} font-mono text-xs`} value={explorer} onChange={e => setExplorer(e.target.value)} {...exactText} />
     <Button variant="primary" disabled={busy} loading={running === "server"} onClick={() => void run(async () => { await use(network, { provider, explorer }); setCustom(false); }, "server")}>{t("wallet.bark.useServer")}</Button>
    </Block>}
    <Row label={t("wallet.panel.autoRenewal")} hint={t("wallet.bark.renewalHint")}><span className="text-sm text-text-secondary">{t("wallet.panel.on")}</span></Row>

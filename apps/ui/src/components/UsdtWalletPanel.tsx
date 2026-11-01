@@ -14,6 +14,7 @@ import {useI18n} from '../contexts/I18nContext';
 import { formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemText } from "../lib/problemText";
+import { exactText } from "../lib/exactText";
 
 type Network='ethereum'|'sepolia'|'evm-local';
 const RPC:Record<Network,string>={ethereum:'https://ethereum.publicnode.com',sepolia:'https://ethereum-sepolia-rpc.publicnode.com','evm-local':'http://127.0.0.1:47070'};
@@ -67,7 +68,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    {action==='receive'&&<div className="bg-surface rounded-xl p-4 animate-fade-in"><Address value={usdt.address} qr={usdt.address ? `ethereum:${usdt.address}@${usdt.chainId}` : undefined} testId="usdt-address" note={network==='evm-local'?t('wallet.usdt.receiveNoteLocal',{token:label}):t('wallet.usdt.receiveNote',{token:label,place:PLACE[network]})}/></div>}
    {action==='send'&&<div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <SendScan onText={given} disabled={busy} scanOnOpen>
-    <input aria-label={t('wallet.panel.recipient',{wallet:'USDT'})} placeholder={t('wallet.usdt.recipientPlaceholder')} spellCheck={false} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>{const text=e.target.value.trim();if(/^ethereum:/i.test(text)&&!typedByKey(e))given(text);else{setNotUsable(false);setRecipient(text);}}} onBlur={()=>{if(/^ethereum:/i.test(recipient))given(recipient,true);}}/>
+    <input aria-label={t('wallet.panel.recipient',{wallet:'USDT'})} placeholder={t('wallet.usdt.recipientPlaceholder')} {...exactText} className={`${input} font-mono text-xs`} value={recipient} onChange={e=>{const text=e.target.value.trim();if(/^ethereum:/i.test(text)&&!typedByKey(e))given(text);else{setNotUsable(false);setRecipient(text);}}} onBlur={()=>{if(/^ethereum:/i.test(recipient))given(recipient,true);}}/>
     {notUsable&&<Notice tone="error" testId="wallet-send-unknown">{t('wallet.panel.notAddress',{wallet:'USDT'})}</Notice>}
     <Amount value={amount} onChange={setAmount} unit={label} decimals={usdt.decimals}/>
     <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} aria-invalid={gasField.hint?true:undefined} value={gasField.text} onChange={e=>gasField.change(e.target.value)}/>ETH</span></label>
@@ -89,8 +90,8 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
     <Segmented label={t('wallet.usdt.networkLabel')} value={pending??network} disabled={busy||!canReplace} options={[{value:'sepolia',label:'Sepolia'},{value:'evm-local',label:t('wallet.usdt.localChain')}]} onChange={choose}/>
    </Row>}
    {pending&&<Block>
-    <input aria-label={t('wallet.usdt.rpcInput')} className={`${input} font-mono text-xs`} value={provider} onChange={e=>setProvider(e.target.value)} spellCheck={false}/>
-    <input aria-label={t('wallet.usdt.tokenContract')} placeholder={t('wallet.usdt.tokenContractPlaceholder')} className={`${input} font-mono text-xs`} value={token} onChange={e=>setToken(e.target.value.trim())} spellCheck={false}/>
+    <input aria-label={t('wallet.usdt.rpcInput')} className={`${input} font-mono text-xs`} value={provider} onChange={e=>setProvider(e.target.value)} {...exactText}/>
+    <input aria-label={t('wallet.usdt.tokenContract')} placeholder={t('wallet.usdt.tokenContractPlaceholder')} className={`${input} font-mono text-xs`} value={token} onChange={e=>setToken(e.target.value.trim())} {...exactText}/>
     <ButtonGroup><Button variant="primary" disabled={busy||!token} loading={running==='switch'} onClick={()=>void run(async()=>{await use(pending,{provider,token});setPending(null);},'switch')}>{t('wallet.usdt.switchNetwork')}</Button><Button onClick={()=>setPending(null)}>{t('common.cancel')}</Button></ButtonGroup>
    </Block>}
    {ready&&<><Row label={t('wallet.usdt.rpcProvider')} hint={<><Truncate className="font-mono">{usdt.provider??''}</Truncate>{t('wallet.usdt.seesAddress')}</>}/>

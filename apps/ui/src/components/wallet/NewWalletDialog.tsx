@@ -12,6 +12,7 @@ import { PROVIDER_FORMS } from "./providers/forms";
 import { rawError } from "../../lib/errorText";
 import "./new-wallet.css";
 import { problemText, type Problem } from "../../lib/problemText";
+import { exactText } from "../../lib/exactText";
 
 type Key = Parameters<Translate>[0];
 /** What each kind of wallet is, in a line, on each network. */
@@ -177,7 +178,7 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
             {chosenOffer.needs === "invite" && (
               <form className="space-y-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void create("fedimint", { invite }); }}>
                 <label className="block text-xs text-text-secondary">{t("wallet.new.invite")}
-                  <input data-testid="new-wallet-invite" className={`${input} mt-1 font-mono text-xs`} value={invite} placeholder="fed11…" spellCheck={false} autoFocus disabled={busy} onChange={(e) => setInvite(e.target.value)} />
+                  <input data-testid="new-wallet-invite" className={`${input} mt-1 font-mono text-xs`} value={invite} placeholder="fed11…" {...exactText} autoFocus disabled={busy} onChange={(e) => setInvite(e.target.value)} />
                 </label>
                 <p className="text-[11px] text-text-muted">{t("wallet.new.inviteHint")}</p>
                 <Button type="submit" variant="primary" className="w-full" disabled={busy || !invite.trim()} data-testid="new-wallet-create">{busy ? t("wallet.new.busy.joining") : t("wallet.new.joinAndCreate")}</Button>

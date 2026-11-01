@@ -63,6 +63,13 @@ describe("Send on the USDT card: scan, paste or picture", () => {
   };
   const field = () => screen.getByLabelText("USDT recipient address");
 
+  it("a phone's keyboard is told not to change a typed address", async () => {
+    await show();
+    expect(field()).toHaveAttribute("autocapitalize", "none");
+    expect(field()).toHaveAttribute("autocorrect", "off");
+    expect(field()).toHaveAttribute("spellcheck", "false");
+  });
+
   it("a picture of a transfer link fills the recipient and the amount in USDT, and nothing is reviewed until the person asks", async () => {
     qr.text = `ethereum:${SEPOLIA_TEST_USDT}@11155111/transfer?address=${TO}&uint256=1500000`;
     const { user, engine } = await show();
