@@ -93,6 +93,8 @@
     "invoiceExpired": "Esa factura ha caducado",
     "lastMint": "Es el último mint de tu billetera Cashu de {{network}}",
     "lastMintNext": "Elimina la billetera para quitarlo.",
+    "lightningRefused": "La mint rechazó este pago Lightning",
+    "lightningRefusedNext": "Ningún sat salió de tu billetera. Puedes intentarlo de nuevo sin riesgo.",
     "lnurlExactly": "{{domain}} pide exactamente {{amount}} sats",
     "lnurlRange": "{{domain}} acepta entre {{min}} y {{max}} sats",
     "lnurlUnreachable": "No se llega a {{host}}",
