@@ -307,6 +307,25 @@ describe("with the apps flag on", () => {
     expect(await within(await screen.findByTestId("app-install")).findByTestId("app-sent-by")).toHaveTextContent("Sent by Contact · peer");
   });
 
+  it("a long contact name is cut alone on the card, never the words around it, in English and in Japanese", async () => {
+    fakeEngine.on("appList", () => []);
+    // A nickname at its 20-letter limit: on a 320 px phone the one cut line lost "opened it here".
+    const long = "Maximiliano Albuquer";
+    for (const [language, words] of [["en", " opened it here"], ["ja", " がここで開きました"]] as const) {
+      const view = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName={long} linkId="link-1" />, { language });
+      const line = within(await screen.findByTestId("app-card")).getByText((_, el) => el?.tagName === "P" && el.textContent === `${long}${words}`);
+      expect(line).toHaveClass("flex", "min-w-0", "overflow-hidden", "whitespace-nowrap");
+      expect(line).not.toHaveClass("truncate");
+      const name = within(line).getByTestId("app-card-name");
+      expect(name).toHaveTextContent(long);
+      expect(name).toHaveClass("min-w-0", "truncate");
+      const rest = [...line.children].filter((node) => node !== name);
+      expect(rest.map((node) => node.textContent).join("")).toBe(words);
+      for (const node of rest) expect(node).toHaveClass("shrink-0");
+      view.unmount();
+    }
+  });
+
   it("says the app needs you both online while the contact is not live, and Open once installed", async () => {
     fakeEngine.on("appList", () => [installed()]);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
