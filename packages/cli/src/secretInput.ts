@@ -88,6 +88,27 @@ export async function completeWithPipedEvidence(call: (params: Record<string, un
   return call({ ...params, evidence });
 }
 
+/**
+ * `settings set <key> <json-value>`'s value: from stdin when it is `-`, or when none is given and stdin is not a
+ * terminal (a pipe nobody writes: the note, then the usage error, as for a join). A TURN password (`iceServers` with a
+ * `credential`) given on the command line still goes, with the ps/history warning: `settings get` hides it as a secret.
+ */
+export async function settingValue(key: string, value: string | undefined, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<{ value: string; warning?: string }> {
+  const usage = `ghostly settings set <key> <json-value>, or on stdin: … | ghostly settings set ${key} -`;
+  if (value !== undefined && value !== "-") return { value, ...(key === "iceServers" && hasCredential(value) && { warning: `A TURN password on the command line shows in ps and the shell's history: give it on stdin instead (… | ghostly settings set ${key} -)` }) };
+  if (value === undefined && tty) throw new CliError("usage", `Missing <json-value>: ${usage}`);
+  const text = (value === "-" ? await read() : await readUnasked(read, note, { what: "the value", missing: "Missing <json-value>", command: `settings set ${key}`, as: "an argument" })).replace(/\r?\n$/, "");
+  if (!text.trim()) throw new CliError("usage", `Missing <json-value>: ${usage}`);
+  return { value: text };
+}
+
+/** Whether an `iceServers` value as typed holds a TURN password: an entry with a `credential` that is not empty. */
+function hasCredential(value: string): boolean {
+  let servers: unknown;
+  try { servers = JSON.parse(value); } catch { return false; }
+  return Array.isArray(servers) && servers.some((server) => !!server && typeof server === "object" && typeof (server as { credential?: unknown }).credential === "string" && (server as { credential: string }).credential !== "");
+}
+
 /** What `readUnasked` says: `what` is waited for, `missing` is the usage error's title, `as` the other way to give it. */
 interface Unasked { what: string; missing: string; command: string; as: string }
 

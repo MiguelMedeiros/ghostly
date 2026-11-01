@@ -14,7 +14,7 @@ import { jsonOut } from "./jsonOut";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
@@ -351,7 +351,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -1018,9 +1018,12 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   pretty = g.pretty;
   if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
   if (sub === "set") {
-    const [key, value] = parsed.positionals;
-    if (!key || value === undefined) throw new CliError("usage", `Missing <${key ? "json-value" : "key"}>: ghostly settings set <key> <json-value>`);
+    const [key, given] = parsed.positionals;
+    if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value>");
     noMoreThan(2, parsed.positionals, "settings set <key> <json-value>");
+    // `-`, or no value on a pipe: the value from stdin, out of ps and the shell's history (a TURN password).
+    const { value, warning } = await settingValue(key, given, readStdin, process.stdin.isTTY === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
+    if (warning) process.stderr.write(`ghostly: ${warning}\n`);
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
