@@ -2,6 +2,7 @@ import { identityStatement, type IdentityBinding, type IdentityStatement } from 
 import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import type { IdentityProofProvider, IdentitySigner, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import type { IdentityProofView } from "@ghostly/browser/shared/types";
+import { IDENTITY_DRAFT_TTL_MS, IDENTITY_MAX_DRAFTS } from "@ghostly/browser/engine/identities";
 import { chatOf, node, num, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 
@@ -21,9 +22,12 @@ import { CliError } from "./errors";
  */
 
 interface Draft { draftId: string; provider: string; signer: string; binding: IdentityBinding; createdAt: number }
-/** Drafts per daemon: a proof made in two steps needs the same process for both. */
+/**
+ * Drafts per daemon: a proof made in two steps needs the same process for both. Kept as long as the engine keeps them,
+ * and the oldest dropped when a fifth begins as the engine drops it, so what `identity add` promises still completes.
+ */
 const drafts = new Map<string, Draft>();
-const DRAFT_TTL_MS = 60 * 60 * 1000;
+const NO_DRAFT = `No such draft here: it is kept by the daemon that made it, for ${IDENTITY_DRAFT_TTL_MS / 60_000} minutes and while fewer than ${IDENTITY_MAX_DRAFTS} newer ones wait`;
 
 function provider(id: string): IdentityProofProvider {
   const found = IDENTITY_PROVIDERS.find((p) => p.id === id);
@@ -63,7 +67,7 @@ export function proofJson(p: IdentityProofView) {
 }
 
 function pruneDrafts(now = Date.now()) {
-  for (const [id, draft] of drafts) if (now - draft.createdAt > DRAFT_TTL_MS) drafts.delete(id);
+  for (const [id, draft] of drafts) if (now - draft.createdAt > IDENTITY_DRAFT_TTL_MS) drafts.delete(id);
 }
 
 async function begin(ctx: ApiContext, p: IdentityProofProvider, subject: string, params: Params) {
@@ -134,14 +138,16 @@ export const IDENTITY_METHODS: Record<string, Method> = {
     }
     const { draftId, binding } = await begin(ctx, p, subject, params);
     const statement = identityStatement(binding);
+    while (drafts.size >= IDENTITY_MAX_DRAFTS) drafts.delete(drafts.keys().next().value!);
     drafts.set(draftId, { draftId, provider: p.id, signer: signer.id, binding, createdAt: Date.now() });
-    return { done: false, draft: draftId, provider: p.id, signer: signer.id, statement: statement.text, instructions: instructionsJson(signer.instructions(statement)), expiresInSeconds: DRAFT_TTL_MS / 1000 };
+    return { done: false, draft: draftId, provider: p.id, signer: signer.id, statement: statement.text, instructions: instructionsJson(signer.instructions(statement)), expiresInSeconds: IDENTITY_DRAFT_TTL_MS / 1000 };
   },
 
   /** Finishes a two-step proof: what the tool printed (external-tool), or nothing (publish: the engine looks it up). */
   async "identity.complete"(ctx, params) {
+    pruneDrafts();
     const draft = drafts.get(str(params, "draft", true));
-    if (!draft) throw new CliError("not_found", "No such draft here: it is kept by the daemon that made it, for an hour");
+    if (!draft) throw new CliError("not_found", NO_DRAFT);
     const p = provider(draft.provider);
     const signer = signerOf(p, draft.signer);
     const statement: IdentityStatement = identityStatement(draft.binding);
@@ -166,7 +172,7 @@ export const IDENTITY_METHODS: Record<string, Method> = {
   async "identity.cancel"(ctx, params) {
     const draftId = str(params, "draft", true);
     // As `identity.complete` says it: a draft that is not here was never made, is done, or is another daemon's.
-    if (!drafts.delete(draftId)) throw new CliError("not_found", "No such draft here: it is kept by the daemon that made it, for an hour");
+    if (!drafts.delete(draftId)) throw new CliError("not_found", NO_DRAFT);
     await node(ctx).cancelIdentityProof({ draftId });
     return { cancelled: draftId };
   },
