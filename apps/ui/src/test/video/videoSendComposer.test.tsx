@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -57,6 +57,53 @@ describe("a video chosen to send", () => {
     await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
     expect(onSendFile).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("Cancel while two videos convert stops the one it is shown with, not the one chosen last", async () => {
+    const runs = new Map<string, PrepareOptions>();
+    converter.convert = (file, options) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError")));
+      runs.set(file.name, options);
+    });
+    const { user } = composer();
+    await user.upload(screen.getByTestId("media-input"), mov());
+    await waitFor(() => expect(runs.has("IMG_0001.MOV")).toBe(true));
+    await user.upload(screen.getByTestId("media-input"), new File(["second video"], "IMG_0002.MOV", { type: "video/quicktime" }));
+    await waitFor(() => expect(runs.has("IMG_0002.MOV")).toBe(true));
+
+    act(() => runs.get("IMG_0001.MOV")!.onProgress?.(0.1));
+    expect(await screen.findByText("Converting IMG_0001.MOV to MP4… 10%")).toBeInTheDocument();
+    await user.click(screen.getByTestId("video-convert-cancel"));
+    expect(runs.get("IMG_0001.MOV")!.signal?.aborted).toBe(true);
+    expect(runs.get("IMG_0002.MOV")!.signal?.aborted).toBe(false);
+  });
+
+  it("Cancel stops the video it is shown with, also after a second video chosen meanwhile is done converting", async () => {
+    const runs = new Map<string, { options: PrepareOptions; finish: () => void }>();
+    converter.convert = (file, options) => new Promise((resolve, reject) => {
+      options.signal?.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError")));
+      runs.set(file.name, { options, finish: () => resolve({ file: new File(["mp4"], file.name.replace(/\.MOV$/, ".mp4"), { type: "video/mp4" }) }) });
+    });
+    const { user } = composer();
+    await user.upload(screen.getByTestId("media-input"), mov());
+    await waitFor(() => expect(runs.has("IMG_0001.MOV")).toBe(true));
+    await user.upload(screen.getByTestId("media-input"), new File(["second video"], "IMG_0002.MOV", { type: "video/quicktime" }));
+    await waitFor(() => expect(runs.has("IMG_0002.MOV")).toBe(true));
+    const [first, second] = [runs.get("IMG_0001.MOV")!, runs.get("IMG_0002.MOV")!];
+
+    // While both convert, the line names the first and its Cancel is there.
+    act(() => { second.options.onProgress?.(0.5); first.options.onProgress?.(0.1); });
+    expect(await screen.findByText("Converting IMG_0001.MOV to MP4… 10%")).toBeInTheDocument();
+    expect(screen.getByTestId("video-convert-cancel")).toBeInTheDocument();
+    second.finish();
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
+    expect(onSendFile.mock.calls[0]![0].name).toBe("IMG_0002.mp4");
+
+    act(() => first.options.onProgress?.(0.2));
+    await user.click(await screen.findByTestId("video-convert-cancel"));
+    expect(first.options.signal?.aborted).toBe(true);
+    await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
+    expect(onSendFile).toHaveBeenCalledTimes(1);
   });
 
   it("one this device cannot convert goes as it is, and the sender is told", async () => {
