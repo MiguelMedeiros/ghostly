@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
-import { GhostlyNode, type NodeEvents } from "../src/engine/node";
+import { FEEDBACK_KEPT, GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
 import { STORES, fileStore, transact } from "../src/shared/idb";
@@ -160,6 +160,24 @@ describe("reacting over the live link", () => {
     expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(1);
     expect(t.attention.find(e => e.type === "reaction")?.linkId).toBe(t.id);
     expect(t.attention.filter(e => e.type === "message")).toEqual([]);
+  });
+
+  it("a contact flipping its reaction is heard each time, and what this engine keeps to hear a fact once stays bounded", async () => {
+    const t = await setup();
+    await t.agreed();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "lunch?" });
+    const mine = (await t.messages()).find(m => m.id === sent.messageId)!;
+    for (let n = 1; n <= 6; n++) expect(t.contact.sendReaction({ id: mine.wireId!, e: n % 2 ? "👍" : "❤️", n })).toBeNull();
+    await vi.waitFor(() => expect(t.receipts).toContain(6));
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(6);
+    // Past the window, the next ones: each is a new fact, so what is kept to hear it once forgets the oldest.
+    const heard = t.node as unknown as { feedbackIds: Set<string>; feedback(type: AttentionEvent["type"], id: string, linkId?: string): void };
+    for (let n = 7; n <= 3 * FEEDBACK_KEPT; n++) heard.feedback("reaction", `${t.id}:${mine.id}:peer:${n}`, t.id);
+    expect(heard.feedbackIds.size).toBe(FEEDBACK_KEPT);
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(3 * FEEDBACK_KEPT);
+    // The newest are still heard once.
+    heard.feedback("reaction", `${t.id}:${mine.id}:peer:${3 * FEEDBACK_KEPT}`, t.id);
+    expect(t.attention.filter(e => e.type === "reaction")).toHaveLength(3 * FEEDBACK_KEPT);
   });
 
   it("a reaction taken back leaves the chat list's line: the one before it is shown again, or none", async () => {

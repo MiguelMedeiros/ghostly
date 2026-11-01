@@ -330,6 +330,11 @@ const RTT_SAVE_MS = 5 * 60_000;
 const REACTION_RESEND_MS = 30_000;
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
 const REACTION_NOTES_KEPT = 8;
+/**
+ * The newest facts the pages heard of (`feedback`), kept so the same one is not heard twice: past this many the oldest
+ * goes, or a contact's reactions (each one a new fact) would grow it for as long as the engine runs.
+ */
+export const FEEDBACK_KEPT = 4096;
 /** A second press of one message's buttons waits this long (WISP 406 · Message Buttons). */
 export const BUTTON_PRESS_MS = 1_000;
 
@@ -850,6 +855,7 @@ export class GhostlyNode implements EngineImplementation {
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;
     this.feedbackIds.add(key);
+    if (this.feedbackIds.size > FEEDBACK_KEPT) this.feedbackIds.delete(this.feedbackIds.values().next().value!);
     this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {}), ...(mention ? {mention:true} : {}), ...(cue ? {cue} : {})});
   }
   /** A fact that had no sound before the sound categories: its cue is its only sound (engine/cues.ts). */
