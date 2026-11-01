@@ -385,6 +385,60 @@ it("neither drops nor logs a client that listened and then left", async () => {
   await own.close();
 }, 60_000);
 
+it("refuses an upgrade by origin, address or a full relay to a client that has already reset, and keeps serving", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { WebSocket: NodeWebSocket } = await import("ws");
+  const { connect } = await import("node:net");
+  const allowed = "https://ghostly.test";
+  const own = await startRelay({ testnet: 2, origins: [allowed], proxies: 1, limits: { clients: 2, clientsPerAddress: 1 } });
+  const port = Number(new URL(own.url).port);
+  const uncaught: unknown[] = [];
+  const onUncaught = (error: unknown) => { uncaught.push(error); };
+  process.on("uncaughtException", onUncaught);
+  const held: InstanceType<typeof NodeWebSocket>[] = [];
+  const hold = async (address: string) => {
+    const socket = new NodeWebSocket(own.url, { origin: allowed, headers: { "x-forwarded-for": address } });
+    held.push(socket);
+    await new Promise((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
+  };
+  // A well-formed upgrade the relay refuses, reset by the client as soon as it is written.
+  const resetUpgrade = (headers: string) => new Promise<void>(resolve => {
+    const socket = connect(port, "127.0.0.1", () => {
+      socket.write(`GET / HTTP/1.1\r\nHost: relay\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${Buffer.alloc(16, 1).toString("base64")}\r\nSec-WebSocket-Version: 13\r\n${headers}\r\n`);
+      setTimeout(() => { socket.resetAndDestroy(); resolve(); }, 1);
+    });
+    socket.on("error", () => resolve());
+  });
+  const resets = async (headers: string) => {
+    for (let i = 0; i < 20; i++) {
+      await resetUpgrade(headers);
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  };
+  try {
+    await resets("Origin: https://elsewhere.test\r\nX-Forwarded-For: 10.0.0.9\r\n");
+    await hold("10.0.0.1");
+    await resets(`Origin: ${allowed}\r\nX-Forwarded-For: 10.0.0.1\r\n`);
+    await hold("10.0.0.2");
+    await resets(`Origin: ${allowed}\r\nX-Forwarded-For: 10.0.0.3\r\n`);
+    await vi.waitFor(() => expect(own.stats().refused).toBe(60));
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(uncaught).toEqual([]);
+    // The clients it holds are still there, and a slot that frees is taken again.
+    expect(own.stats()).toMatchObject({ clients: 2, dropped: 0 });
+    const closed = new Promise(resolve => held[0].once("close", resolve));
+    held[0].close();
+    await closed;
+    await vi.waitFor(() => expect(own.stats().clients).toBe(1));
+    await hold("10.0.0.3");
+    expect(own.stats().clients).toBe(2);
+  } finally {
+    process.off("uncaughtException", onUncaught);
+    for (const socket of held) socket.terminate();
+    await own.close();
+  }
+}, 60_000);
+
 it("closes every HyperDHT stream it holds for a client when the client leaves: dials under one alias, and incoming ones never taken", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { default: DHT } = await import("hyperdht");

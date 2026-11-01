@@ -311,8 +311,11 @@ export async function startRelay(options = {}) {
   server.on('upgrade', (request, socket, head) => {
     const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
     const origin = request.headers.origin
+    // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
+    // would make the write fail with an error nobody catches, and that ends the relay for every other client.
     const refuse = (status, why) => {
       stats.refused++; log('refused', why)
+      socket.on('error', () => {})
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
     if (origins.size && !origins.has(origin)) return refuse('403 Forbidden', 'origin')
