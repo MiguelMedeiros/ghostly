@@ -165,7 +165,7 @@ export interface EngineApi {
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
    * community only the admin pins.
    */
-  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null };
+  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean };
   /**
    * Mini-apps in a paired 1:1 chat (`apps/1`, WISP 1200 § In a chat), refused while the apps feature is off. `ref` is
    * the app reference `<publisher key in z-base32>/<name>`; the contact's frames (`app-frame` events) name the app by

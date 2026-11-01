@@ -266,6 +266,23 @@ describe("a private group's traffic goes to its current members only", () => {
   }, 30_000);
 });
 
+describe("a profile no longer in a private group", () => {
+  it("is refused a pin with the group's reason, as a reaction is, and nothing is pinned", async () => {
+    const { node, inner, groupId } = await adminOf([]);
+    const chat = `group:${groupId}`;
+    const said = await node.sendGroupMessage({ groupId, text: "before" });
+    const messageId = (said as { messageId: string }).messageId;
+    // As the group shows to a member the admin removed (`group-removed`): the reason, and no sending.
+    const view = inner.groups.view(groupId)!;
+    vi.spyOn(inner.groups, "view").mockImplementation(id => id === groupId ? { ...view, status: "removed", statusReason: "You were removed from this group", canSend: false } : undefined);
+    expect(await node.react({ linkId: chat, messageId, emoji: "👍" })).toEqual({ error: "You were removed from this group", refused: true });
+    expect(await node.pinMessage({ linkId: chat, messageId })).toEqual({ error: "You were removed from this group", refused: true });
+    expect(await node.pinMessage({ linkId: chat, remove: true })).toEqual({ error: "You were removed from this group", refused: true });
+    vi.restoreAllMocks();
+    expect(inner.groups.view(groupId)?.pin).toBeUndefined();
+  }, 30_000);
+});
+
 describe("a hub and an edge to someone out of the roster", () => {
   const [admin, hub, member, gone] = ["admin", "hub", "member", "gone"];
   // Epochs 0 to 2 have `gone`; the commit of epoch 3 takes it out; 4 is a change after.
