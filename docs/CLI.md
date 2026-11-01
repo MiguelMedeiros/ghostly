@@ -327,6 +327,9 @@ ghostly call auto on --from alice        # or: ghostly call answer alice, on eac
 ghostly listen --type call.              # call.connected carries {"audio":{"socket":…,"rate":48000,…}}
 ```
 
+`call auto on --from` names chats: removing one (`chat remove`) takes it off the list, and removing the last one turns
+auto-answer off rather than leaving an empty list, which would answer everyone.
+
 A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
 text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup.
 
