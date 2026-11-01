@@ -25,6 +25,15 @@ function notTheDaemon(socket: string): CliError {
   return new CliError("refused", `What answers on ${socket} did not prove it is this profile's daemon, so nothing was sent to it. A daemon of an older release cannot: \`ghostly daemon restart\` starts this one's`, { reason: "not-the-daemon" });
 }
 
+/**
+ * A call the daemon read and never answered, because it stopped (a restart, a crash): what was asked may be done, so
+ * it is no plain failure a bot tries again (a send went twice). A daemon that stops answers its waits first (`serve`);
+ * this is for the calls it could not.
+ */
+function stoppedUnanswered(method: string): CliError {
+  return new CliError("timeout", `The daemon stopped before it answered ${method}, which may be done: check (\`ghostly chat history\` for a message) before you try again`, { method, reason: "daemon-stopped" });
+}
+
 export function isNotTheDaemon(error: unknown): boolean {
   return error instanceof CliError && error.code === "refused" && error.details?.reason === "not-the-daemon";
 }
@@ -42,7 +51,10 @@ export function isNotTheDaemon(error: unknown): boolean {
  */
 export class DaemonClient {
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  /** `written`: the call is on the socket, so the daemon may have acted on it. */
+  private readonly pending = new Map<number, { method: string; written: boolean; resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  /** This client closed the connection: what was still unanswered is its own doing, not a daemon that stopped. */
+  private leaving = false;
   private eventListener: ((event: GhostlyEvent) => void) | null = null;
   private closedListener: (() => void) | null = null;
   /** While paused: the events of the chunk already read, given to the listener on resume. */
@@ -99,7 +111,7 @@ export class DaemonClient {
       clearTimeout(waitedTooLong);
       const why = this.refusal ?? new CliError("unavailable", "The daemon went away");
       if (!this.verified) this.settle.reject(why);
-      for (const waiting of this.pending.values()) waiting.reject(why);
+      for (const waiting of this.pending.values()) waiting.reject(waiting.written && !this.refusal && !this.leaving ? stoppedUnanswered(waiting.method) : why);
       this.pending.clear();
       this.closedListener?.();
     });
@@ -131,13 +143,18 @@ export class DaemonClient {
         timer.unref?.();
       }
       const settle = {
+        method, written: false,
         resolve: (value: unknown) => { if (timer) clearTimeout(timer); resolve(value); },
         reject: (error: Error) => { if (timer) clearTimeout(timer); reject(error); },
       };
       this.pending.set(id, settle);
       // Written once the daemon proved itself, in the order the calls were made; a refusal ends each instead.
       this.ready.then(
-        () => { if (this.pending.has(id) && !this.socket.destroyed) this.socket.write(JSON.stringify({ id, method, params }) + "\n"); },
+        () => {
+          if (!this.pending.has(id) || this.socket.destroyed) return;
+          this.socket.write(JSON.stringify({ id, method, params }) + "\n");
+          settle.written = true;
+        },
         (error: CliError) => { if (this.pending.delete(id)) settle.reject(error); },
       );
     });
@@ -173,11 +190,13 @@ export class DaemonClient {
   }
 
   close(): void {
+    this.leaving = true;
     this.socket.end();
   }
 
   /** Closes at once: what the daemon still sends is not read. */
   destroy(): void {
+    this.leaving = true;
     this.socket.destroy();
   }
 }
