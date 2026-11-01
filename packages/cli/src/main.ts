@@ -691,7 +691,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const stopFor = seconds(parsed, 20);
     // A daemon of an older release never greets: what does not prove itself is stopped as the process that holds the
     // profile (`stopDaemon`), as the stop asked. One of this release that greets late is busy: the stop's deadline waits.
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     const { pid, listen } = await stopDaemon(g, client, stopFor);
     if (listen) process.stderr.write(listenEnded(pid));
@@ -701,7 +701,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
@@ -727,6 +727,26 @@ async function daemonCommand(argv: string[]): Promise<void> {
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g, startFor); return; }
   print(await startDetached(g, startFor));
+}
+
+/**
+ * The profile's daemon that is starting (`startingDaemon`: it holds the profile, its socket does not listen yet), once
+ * its socket answers, waited for up to `seconds`; null when none is starting. One still starting then is the answer,
+ * `timeout` with its pid. `daemon stop` said no daemon ran, and the daemon came up a moment later; `daemon restart`
+ * failed busy and left the old code running.
+ */
+async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient | null> {
+  const until = Date.now() + seconds * 1000;
+  for (;;) {
+    // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
+    const pid = startingDaemon(g.paths);
+    const client = await connectDaemon(g.paths);
+    if (client) return client;
+    if (pid === null) return null;
+    const left = until - Date.now();
+    if (left <= 0) throw new CliError("timeout", `The daemon (process ${pid}) is still starting after ${seconds} s; ghostly daemon status shows when it is up`, { pid });
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
+  }
 }
 
 /** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
