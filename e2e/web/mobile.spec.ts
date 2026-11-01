@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { chat, connect, expect, link, say, test } from "../support/fixtures";
 
 test("on a phone: tabs for chats, wallet, sharing and settings, and Profile through Settings", { tag: ["@feature:app.mobile-layout"] }, async ({ peer }) => {
@@ -93,6 +94,43 @@ test("on a phone: the tab bar goes behind the keyboard while typing, and comes b
   await expect(tabs).toBeVisible();
   const bar = (await tabs.boundingBox())!;
   expect(bar.y + bar.height).toBe(phone.height);
+});
+
+test("on a 320px phone a toast holding a long file name wraps, its × on the screen, in English and Arabic", { tag: ["@feature:app.mobile-layout", "@feature:files.video.convert", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  // A .mov this device cannot convert goes as it is, and the toast names it: an 87-character name with no space ran
+  // the line to x=675 (x=-355 in Arabic), the × with it.
+  const [alice, bob] = await Promise.all([peer("alice", { mobile: true, viewport: { width: 320, height: 568 } }), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  const name = `${"holiday_clip_from_the_old_phone_".repeat(2)}at_the_beach_2026_a.mov`;
+  expect(name).toHaveLength(87);
+  for (const language of ["en", "ar"]) {
+    if (language !== "en") {
+      await alice.page.evaluate((language) => {
+        const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+        localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+      }, language);
+      await alice.page.reload();
+      await expect(alice.page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+      // As the chat was before the reload, live: in the language now shown, so read through its status.
+      await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("data-state", "connected", { timeout: 90_000 });
+    }
+    // Not a movie at all, so it cannot be converted; a file of its own each time, in a folder of its own.
+    mkdirSync(testInfo.outputPath(language));
+    const path = testInfo.outputPath(language, name);
+    writeFileSync(path, Buffer.from(`not a movie (${language})`));
+    await alice.page.getByTestId("file-input").setInputFiles(path);
+    const toast = alice.page.getByRole("alert").filter({ hasText: name });
+    await expect(toast).toBeVisible({ timeout: 30_000 });
+    const box = (await toast.boundingBox())!;
+    const close = (await toast.getByRole("button").boundingBox())!;
+    for (const [what, b] of [["toast", box], ["×", close]] as const) {
+      expect(b.x, `${language}: the ${what}'s start`).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.width, `${language}: the ${what}'s end`).toBeLessThanOrEqual(320);
+    }
+    await toast.getByRole("button").click();
+    await expect(toast).toHaveCount(0);
+  }
 });
 
 test("on a 320px phone every tab's name fits whole, in every language", { tag: ["@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
