@@ -268,6 +268,27 @@ describe("the device links of a profile on this device", () => {
     expect(computer.links.views()[0].transport).toBe("webrtc/1");
   });
 
+  // Repeated: which device dials depends on the keys, and the computer's link must offer WebRTC again where it dials.
+  it("go back to WebRTC when the link that went on without it started its Iroh but nothing connects over it", { timeout: 60_000, repeats: 5 }, async () => {
+    // The phone's Iroh starts, the computer's never does (a relay it cannot reach): no session opens over Iroh.
+    rtc.blocked = true;
+    const native = new NativeWorld();
+    native.hexIds = true;
+    const d = newDeviceSetSecret();
+    const phone = await makeDevice("Phone", { nativeTransports: { "iroh/1": async () => native.endpoint("iroh/1", "Phone") } });
+    const computer = await makeDevice("Computer", { nativeTransports: { "iroh/1": async () => { throw new Error("The Iroh relay did not answer"); } } });
+    await write(phone, "active", d, [phone, computer]);
+    await write(computer, "standby", d, [phone, computer]);
+    await settled(Promise.all([phone.links.start(), computer.links.start()]));
+    // The phone's link went on without WebRTC with its Iroh up; the computer's starts its own for it, and fails.
+    const rtcOff = (device: TestDevice) => [...(device.links as unknown as { running: Map<string, { rtcOff: boolean }> }).running.values()][0]?.rtcOff;
+    expect(await until(() => rtcOff(phone), 120_000)).toBe(true);
+    // WebRTC goes through now: the links take it again rather than wait on an Iroh session that never opens.
+    rtc.blocked = false;
+    expect(await until(() => liveBetween(phone, computer), 600_000)).toBe(true);
+    expect(computer.links.views()[0].transport).toBe("webrtc/1");
+  });
+
   it("offer HyperDHT where only it goes through, and start again a native transport that did not start", async () => {
     // The Linux Desktop has no WebRTC; the page's Iroh is on a relay the Desktop cannot reach (two Iroh worlds), so
     // HyperDHT is the only way through. The page's HyperDHT relay does not answer the first time.

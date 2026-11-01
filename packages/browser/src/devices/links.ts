@@ -216,10 +216,10 @@ interface Running {
   nativeMisses: number;
   /**
    * This link runs without WebRTC, which connected nothing between the two devices (`withoutRtc`). For this run only,
-   * unless none of its native transports starts (`withRtc`).
+   * unless none of its native transports starts or no session opens over them (`withRtc`).
    */
   rtcOff: boolean;
-  /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so. */
+  /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so (`withRtc` after `DEVICE_NATIVE_MS` where `native`). */
   rtcWait?: ReturnType<typeof setTimeout>;
   waiting: Map<string, { resolve(ms: number): void; reject(error: Error): void; sentAt: number; timer: ReturnType<typeof setTimeout> }>;
 }
@@ -239,6 +239,8 @@ export const NATIVE_RETRY_MS = 10_000;
 export const NATIVE_RETRY_MAX_MS = 120_000;
 /** The other device is there and no session opened over WebRTC in this long: the link goes on without it (`withoutRtc`). */
 export const DEVICE_RTC_MS = 20_000;
+/** The other device is there and no session opened over a link's native endpoints in this long: it starts again with WebRTC (`withRtc`). */
+export const DEVICE_NATIVE_MS = 60_000;
 /** The longest that wait grows to, for a link that went back to WebRTC again and again (`withRtc`). */
 export const DEVICE_RTC_MAX_MS = 5 * 60_000;
 
@@ -488,9 +490,15 @@ export class DeviceLinks implements DeviceLinkEngine {
         onAnswersRefused: () => this.withoutRtc(running),
         // The other device is there and no session opens by `DEVICE_RTC_MS`: the side that answers may hear nothing of
         // an attempt that failed (it waits out its 90 s).
+        // A link that runs its native endpoints, the same by `DEVICE_NATIVE_MS`: one device's endpoint may start where the
+        // other's never does, so no session opens over them while WebRTC might connect now (`withRtc`).
         onPresence: (presence) => {
-          if (!presence.online || running.rtcOff || running.rtcWait || running.link.isDataLinkOpen) return;
-          running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running); }, Math.min(DEVICE_RTC_MS * 2 ** (this.rtcBacks.get(running.id) ?? 0), DEVICE_RTC_MAX_MS));
+          if (!presence.online || running.rtcWait || running.link.isDataLinkOpen) return;
+          const backs = this.rtcBacks.get(running.id) ?? 0;
+          running.rtcWait = setTimeout(() => {
+            running.rtcWait = undefined;
+            if (!running.link.isDataLinkOpen) { if (running.native) this.withRtc(running); else this.withoutRtc(running); }
+          }, Math.min((running.native ? DEVICE_NATIVE_MS : DEVICE_RTC_MS) * 2 ** backs, DEVICE_RTC_MAX_MS));
         },
         // The other device has no WebRTC: this one starts its native endpoints for it.
         onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
@@ -521,6 +529,8 @@ export class DeviceLinks implements DeviceLinkEngine {
    * and a transport that does not start is tried again (`retryNative`), as a chat's listeners are.
    */
   private startNative(running: Running): void {
+    // A wait for WebRTC no longer holds: the next presence waits `DEVICE_NATIVE_MS` for these instead.
+    if (!running.native && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
     running.native = true;
     const factories = this.nativeFactories();
     for (const transport of this.missingNative(running)) {
@@ -847,9 +857,13 @@ export class DeviceLinks implements DeviceLinkEngine {
    * device reaches, and no HyperDHT relay. With nothing to go through it starts again with WebRTC, which may connect
    * now, or only after `DEVICE_RTC_MS` (a device that just reloaded dials at its own pace). The wait before it goes
    * without WebRTC again doubles each time (`rtcBacks`), so a native transport that comes back is still tried.
+   * The same where its native transports started and no session opened over them by `DEVICE_NATIVE_MS` while the other
+   * device is there (its own endpoint never started, or is on another Iroh relay), and on the other device's link
+   * that runs native for it: the new link forgets the transports the other device's packet said, which a device link
+   * keeps although the packet no longer says any (the other device went back to WebRTC), and offers WebRTC again.
    */
   private withRtc(running: Running): void {
-    if (this.stopped || !running.rtcOff || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
+    if (this.stopped || !this.createPeerConnection || !running.native || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
     this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
     const run = this.queue.catch(() => {}).then(async () => {
       if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
