@@ -62,6 +62,10 @@ Other settings:
   Without either, the headers are ignored. A client that reaches the port past the proxy could write them itself,
   so publish it only where the proxy is (`HYPERDHT_RELAY_BIND`, loopback by default).
 
+A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
+start with one line that names it; leave a setting out for its default. The start line says how clients are counted
+and each limit set away from its default.
+
 ## Running it
 
 ```bash

@@ -388,3 +388,48 @@ export async function startRelay(options = {}) {
     },
   }
 }
+
+/**
+ * One setting from the environment: absent gives `fallback`; present, it must read as `kind` says, or the start stops
+ * with one line naming it (an empty `PORT=` in an env file, `GHOSTLY_RELAY_PROXIES=one`), never a quiet default.
+ */
+function setting (env, name, fallback, kind) {
+  const raw = env[name]
+  if (raw === undefined) return fallback
+  const value = raw.trim()
+  const fail = expected => { throw new Error(`${name}=${JSON.stringify(raw)}: expected ${expected}`) }
+  if (kind === 'port') return /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? Number(value) : fail('a port from 1 to 65535')
+  if (kind === 'count') return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number of 0 or more')
+  if (kind === 'positive') return /^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number above 0')
+  if (kind === 'flag') return value === '1' ? true : value === '0' ? false : fail('1 or 0')
+  if (kind === 'text') return value || fail('a value (leave it out for the default)')
+  return value
+}
+
+const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
+
+/** `GHOSTLY_RELAY_<LIMIT>` for a limit's name in DEFAULT_LIMITS: `clientsPerAddress` is GHOSTLY_RELAY_CLIENTS_PER_ADDRESS. */
+export const limitVariable = name => `GHOSTLY_RELAY_${name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`
+
+/**
+ * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0), GHOSTLY_HYPERDHT_BOOTSTRAP,
+ * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind.
+ */
+export function readSettings (env) {
+  const limits = {}
+  for (const name of Object.keys(DEFAULT_LIMITS)) {
+    const value = setting(env, limitVariable(name), undefined, 'positive')
+    if (value !== undefined) limits[name] = value
+  }
+  return {
+    port: setting(env, 'PORT', 49443, 'port'),
+    host: setting(env, 'HOST', '0.0.0.0', 'text'),
+    bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
+    testnet: setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined,
+    origins: list(env.GHOSTLY_RELAY_ORIGINS),
+    proxies: setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count'),
+    cloudflare: setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag'),
+    limits,
+  }
+}

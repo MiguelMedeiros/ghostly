@@ -1,4 +1,4 @@
-import { DEFAULT_LIMITS, startRelay } from './relay.mjs'
+import { DEFAULT_LIMITS, limitVariable, readSettings, startRelay } from './relay.mjs'
 
 // Configuration, all optional:
 //   PORT (49443), HOST (0.0.0.0)
@@ -10,27 +10,20 @@ import { DEFAULT_LIMITS, startRelay } from './relay.mjs'
 //                               that many from the end. A client that reaches the port past them could write either
 //                               header itself: publish the port only where the proxy is.
 //   GHOSTLY_RELAY_<LIMIT>       any of the limits in relay.mjs, e.g. GHOSTLY_RELAY_CLIENTS=512
-const env = process.env
-const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
-const limits = {}
-for (const name of Object.keys(DEFAULT_LIMITS)) {
-  const value = env[`GHOSTLY_RELAY_${name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`]
-  if (value !== undefined && Number.isFinite(Number(value)) && Number(value) > 0) limits[name] = Number(value)
+let settings
+try { settings = readSettings(process.env) } catch (error) {
+  console.error(new Date().toISOString(), `Ghostly HyperDHT relay not started: ${error.message}`)
+  process.exit(1)
 }
-
 const relay = await startRelay({
-  port: Number(env.PORT ?? 49443),
-  host: env.HOST ?? '0.0.0.0',
-  bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
-  testnet: Number(env.GHOSTLY_HYPERDHT_TESTNET ?? 0) || undefined,
-  origins: list(env.GHOSTLY_RELAY_ORIGINS),
-  proxies: Math.max(0, Math.floor(Number(env.GHOSTLY_RELAY_PROXIES ?? 0)) || 0),
-  cloudflare: env.GHOSTLY_RELAY_CLOUDFLARE === '1',
-  limits,
+  ...settings,
   // Counts and reasons only: never a key, an address or a byte of anyone's traffic.
   log: (...words) => console.log(new Date().toISOString(), ...words),
 })
-console.log(new Date().toISOString(), `Ghostly HyperDHT relay on port ${relay.port}`, relay.bootstrap.length ? `(bootstrap ${relay.bootstrap.length} nodes)` : '(public HyperDHT)')
+// What it counts clients by, and each limit set away from its default: a setting meant to apply shows that it does.
+const counting = settings.cloudflare ? 'clients by CF-Connecting-IP' : settings.proxies ? `clients behind ${settings.proxies} ${settings.proxies === 1 ? 'proxy' : 'proxies'}` : 'clients by their own address'
+const changed = Object.entries(settings.limits).filter(([name, value]) => value !== DEFAULT_LIMITS[name]).map(([name, value]) => `${limitVariable(name)}=${value}`)
+console.log(new Date().toISOString(), `Ghostly HyperDHT relay on port ${relay.port}`, relay.bootstrap.length ? `(bootstrap ${relay.bootstrap.length} nodes)` : '(public HyperDHT)', [`on ${settings.host}`, counting, ...(changed.length ? [`limits ${changed.join(' ')}`] : [])].join(', '))
 
 // One client's request that fails where nothing catches it must not end the relay for every other client.
 process.on('unhandledRejection', error => console.log(new Date().toISOString(), 'unhandled', error?.code ?? error?.name ?? 'error'))
