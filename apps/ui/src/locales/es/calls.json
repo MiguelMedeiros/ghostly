@@ -12,6 +12,7 @@
   "decline": "Rechazar",
   "devices": {
     "back": "{{name}} ha vuelto",
+    "failed": "No se pudo usar {{name}}. La llamada sigue con el que tenía.",
     "lost": "{{name}} desconectado. Usando el predeterminado.",
     "menu": "Dispositivos",
     "switchBack": "Volver a usarlo"

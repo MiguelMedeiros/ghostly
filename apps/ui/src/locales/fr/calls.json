@@ -12,6 +12,7 @@
   "decline": "Refuser",
   "devices": {
     "back": "{{name}} est de retour",
+    "failed": "Impossible d'utiliser {{name}}. L'appel garde celui qu'il avait.",
     "lost": "{{name}} débranché. Appareil par défaut utilisé.",
     "menu": "Appareils",
     "switchBack": "Revenir"
