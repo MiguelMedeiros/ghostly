@@ -1092,8 +1092,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (p.ci === "success") {
       const r = await landAlone(p);
       if (r.ok) return null;
-      say(`::warning::Could not land #${p.number}: ${r.message}`);
-      return stay;
+      // A base or head that moved under the merge: the next run rebases it onto the new tip, or reads its new head.
+      if (r.status === 409 || /Base branch was modified/.test(r.message ?? "")) {
+        say(`::warning::Could not land #${p.number}: ${r.message}`);
+        return stay;
+      }
+      // Any other refusal (squash merges turned off, a rule the train does not read) comes back on every run, and the
+      // whole line waited behind it: as in `goAlone`, it goes the batch way, which lands by another merge.
+      say(`::warning::Could not merge #${p.number} alone: ${r.message}; it goes the batch way.`);
+      return (await board([p])) ?? false;
     }
     if (p.ci === "none" && now - Date.parse(mark.at) > CI_START_TIMEOUT) {
       say(`CI never started on #${p.number} at ${p.sha.slice(0, 12)}, so it is rebased again.`);
