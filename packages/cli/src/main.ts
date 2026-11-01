@@ -14,7 +14,7 @@ import { jsonOut } from "./jsonOut";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { completeWithPipedEvidence, secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
@@ -355,8 +355,9 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
-  ["identity add <provider> [subject] [--signer id] [--field name=value]... [--days n] [--timeout s]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
+  ["identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
     signer: o("string", "Which signer makes the proof (identity providers lists them)"), field: o("list", "A field of the provider's form, name=value"),
+    stdin: o("boolean", "Take the fields as name=value lines on stdin (a signer's link: out of ps and the shell's history)"),
     days: o("number", "How long the proof holds"), timeout: o("number", "Seconds to wait for an approval"),
   }],
   ["version", "This CLI's version (also ghostly --version)"],
@@ -1078,26 +1079,24 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
  */
 async function identityAddCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {
-    signer: { type: "string", description: "" }, field: { type: "list", description: "" }, days: { type: "number", description: "" }, timeout: { type: "number", description: "" },
+    signer: { type: "string", description: "" }, field: { type: "list", description: "" }, stdin: { type: "boolean", description: "" }, days: { type: "number", description: "" }, timeout: { type: "number", description: "" },
   });
   const g = globals(parsed);
   pretty = g.pretty;
   const [provider, ...subject] = parsed.positionals;
-  if (!provider) throw new CliError("usage", "Missing <provider>: ghostly identity add <provider> [subject] [--signer id] [--field name=value]... [--days n] [--timeout s]");
-  const fields: Record<string, string> = {};
-  for (const item of (parsed.options.field as string[] | undefined) ?? []) {
-    const eq = item.indexOf("=");
-    if (eq < 1) throw new CliError("usage", `--field takes name=value, not ${JSON.stringify(item)}`);
-    fields[item.slice(0, eq)] = item.slice(eq + 1);
-  }
+  if (!provider) throw new CliError("usage", "Missing <provider>: ghostly identity add <provider> [subject] [--signer id] [--field name=value]... [--stdin] [--days n] [--timeout s]");
   // Before the profile opens, as a usage error that names the flag: the API's own check answered once it had opened, in
   // its parameter's words ("days must be a number from 1 to 365"), and `--days 1.5` got past it to the engine's.
   inRange(parsed.options, "timeout", "a number of seconds", 5, 3600);
-  if (parsed.options.days !== undefined) {
-    // The most days are the provider's; an unknown provider is the API's to name.
-    const known = (await import("@ghostly/browser/proofs/registry")).IDENTITY_PROVIDERS.find((p) => p.id === provider);
-    if (known) inRange(parsed.options, "days", "a whole number", 1, known.validity.maxDays, true);
-  }
+  const items = (parsed.options.field as string[] | undefined) ?? [];
+  const known = parsed.options.days !== undefined || items.length
+    ? (await import("@ghostly/browser/proofs/registry")).IDENTITY_PROVIDERS.find((p) => p.id === provider)
+    : undefined;
+  // The most days are the provider's; an unknown provider is the API's to name.
+  if (known && parsed.options.days !== undefined) inRange(parsed.options, "days", "a whole number", 1, known.validity.maxDays, true);
+  // A signer's secret (a bunker:// link) on the command line shows in ps for as long as the approval is waited for.
+  const { fields, warning } = await identityFields(items, parsed.options.stdin === true, identitySecretFields(known, parsed.options.signer as string | undefined), readStdin, process.stdin.isTTY === true);
+  if (warning) process.stderr.write(`ghostly: ${warning}\n`);
   const params ={ provider, subject: subject.join(" ") || undefined, signer: parsed.options.signer, fields, days: parsed.options.days, timeout: parsed.options.timeout };
   const tell = (event: GhostlyEvent) => {
     if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
