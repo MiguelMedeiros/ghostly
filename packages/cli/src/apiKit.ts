@@ -20,6 +20,8 @@ export interface ApiContext {
   version: string;
   /** The daemon asks to stop (answered first). */
   stop?: () => void;
+  /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
+  listen?: true;
 }
 
 export type Params = Record<string, unknown>;
