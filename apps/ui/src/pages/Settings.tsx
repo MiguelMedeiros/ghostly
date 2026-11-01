@@ -35,7 +35,7 @@ import { Select } from "../components/ui/Select";
 import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
 import { FieldError } from "../components/ui/FieldError";
-import { focusToRetype } from "../lib/focus";
+import { focusLost, focusToRetype } from "../lib/focus";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
@@ -140,6 +140,17 @@ export function Settings() {
     // Once the entry knows what is under it (a deep link is given that first), it takes the new address in its place.
     if (isOldSection(params.section) && section && readNav(location.state)) void navigate(settingsPath(section), { replace: true, state: location.state });
   }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps -- once per entry
+  // A phone's menu and a section's screen take each other's place, and the focus on the line or the Back that went falls
+  // to the page: the section's screen gives it to its title, the menu to the line of the section just left. (The header's
+  // Back may be the same button on both screens, but the menu hides it: a focus there is lost too.)
+  const shownSection = useRef(section);
+  useLayoutEffect(() => {
+    const left = shownSection.current;
+    shownSection.current = section;
+    if (!isMobile || left === section || !(focusLost() || document.activeElement?.getAttribute("data-testid") === "page-back")) return;
+    const target = section ? `[data-testid="settings-${section}-page"] h1` : `[data-testid="settings-open-${left}"]`;
+    document.querySelector<HTMLElement>(target)?.focus();
+  }, [section, isMobile]);
   // A wide screen: the index shows the section in view, and an address naming one scrolls to it.
   const content = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState<SettingsSection>(section ?? SETTINGS_SECTIONS[0]);
