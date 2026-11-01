@@ -189,7 +189,8 @@ export function wakeOwnerOf(current: WakeSubscription | undefined, self: string 
 
 /**
  * Posts a push: the host's way (Desktop and the CLI post it themselves), or `fetch`, then the person's push relay when
- * a page may not post it (the push services answer without CORS). Answers the push service's HTTP status.
+ * a page may not post it (the push services answer without CORS). Answers the push service's HTTP status; throws when
+ * the relay does not answer with it.
  */
 export async function postPush(request: PushRequest, options: { pushSend?: (request: PushRequest) => Promise<number>; relay?: string }): Promise<number> {
   if (options.pushSend) return options.pushSend(request);
@@ -202,8 +203,11 @@ export async function postPush(request: PushRequest, options: { pushSend?: (requ
     const response = await fetch(options.relay, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(relayRequest(request)), signal: AbortSignal.timeout(15_000), ...quiet,
     });
-    const answer = await response.json().catch(() => null) as { status?: unknown } | null;
-    return typeof answer?.status === "number" ? answer.status : response.status;
+    // Only the push service's status, as the relay reports it, counts: any other answer (a wrong address, a proxy with no
+    // route, a captive portal, the relay's own refusal) is the relay failing, never "gone" or "sent".
+    const answer = response.ok ? await response.json().catch(() => null) as { status?: unknown } | null : null;
+    if (typeof answer?.status !== "number") throw new Error(`The push relay did not forward it (HTTP ${response.status})`, { cause: error });
+    return answer.status;
   }
 }
 
