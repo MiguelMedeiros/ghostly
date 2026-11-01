@@ -58,8 +58,9 @@ const REVOCATION_CHECK_MS = 12 * 60 * 60_000;
  * off, and the first that finds it stops the rest. The 12 h check covers it after that.
  */
 export const WITHDRAWN_REVOCATION_TRIES_MS = [20_000, 60_000, 180_000] as const;
-const DRAFT_TTL = 30 * 60_000;
-const MAX_DRAFTS = 4;
+/** A proof begun and not completed is dropped this long after, or when a fifth one begins (the CLI says the same). */
+export const IDENTITY_DRAFT_TTL_MS = 30 * 60_000;
+export const IDENTITY_MAX_DRAFTS = 4;
 const MAX_PROOFS = 32;
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -151,8 +152,8 @@ export class IdentityProofs {
     const days = validityDays ?? p.validity.defaultDays;
     if (!Number.isInteger(days) || days < 1 || days > p.validity.maxDays) throw new Error(`Choose between 1 and ${p.validity.maxDays} days`);
     const canonical = p.subject.normalize(subject);
-    for (const [id, d] of this.drafts) if (Date.now() - d.at > DRAFT_TTL) { d.seed.fill(0); this.drafts.delete(id); }
-    while (this.drafts.size >= MAX_DRAFTS) { const [id, d] = this.drafts.entries().next().value!; d.seed.fill(0); this.drafts.delete(id); }
+    for (const [id, d] of this.drafts) if (Date.now() - d.at > IDENTITY_DRAFT_TTL_MS) { d.seed.fill(0); this.drafts.delete(id); }
+    while (this.drafts.size >= IDENTITY_MAX_DRAFTS) { const [id, d] = this.drafts.entries().next().value!; d.seed.fill(0); this.drafts.delete(id); }
     const { binding, seed } = newIdentityBinding({ provider, subject: canonical, validitySeconds: days * 86_400 });
     const draftId = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
     this.drafts.set(draftId, { binding, seed, at: Date.now() });
