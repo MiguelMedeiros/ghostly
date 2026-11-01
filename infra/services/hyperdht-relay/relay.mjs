@@ -37,6 +37,8 @@ export const DEFAULT_LIMITS = Object.freeze({
   handshakeMs: 15_000,
   /** Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. */
   handshakes: 64,
+  /** Bytes the relay may hold for one client that the client has not read yet (a chat's files have at most 2 MiB out). */
+  queuedBytes: 8 * 1024 * 1024,
 })
 
 /**
@@ -384,6 +386,14 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
+    // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
+    // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
+    // relay hold everything its far peers send. Past `queuedBytes` waiting for it, it is dropped.
+    stream._write = (data, cb) => {
+      ws.send(data)
+      if (ws.bufferedAmount > limits.queuedBytes) drop('queue')
+      cb(null)
+    }
     void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => {
       guardProtocol(node._protocol, drop)
       bound(node, limits, gone)
