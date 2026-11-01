@@ -306,7 +306,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); setPending(null); }
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
