@@ -354,8 +354,10 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   unpinned), `ref` the id both sides know it by, and `by` `peer` or a member key.
 - `--type message.received` keeps one type; `--type message` (or `message.`, `message.*`) a family. A family deeper
   down ends in "." (`group.typing.`): `group.message` is that type alone.
-- `--from <chat|key>` and `--group <group>` (again for more): an allowlist. Only the chats (id, prefix, name, or the
-  contact's `peer` key, which also matches a chat made later) and groups named get through; any other chat's or
+- `--from <chat|key>` and `--group <group>` (again for more): an allowlist. Only the chats (id, a label given here,
+  or the contact's `peer` key, which also matches a chat made later) and groups (id, prefix or name) named get through;
+  a prefix of a chat's id or the name its contact gave itself is refused (another contact could call itself that:
+  name the chat first with `chat rename`); any other chat's or
   group's event stops before `--exec`, `--webhook` and stdout (the message stays in the chat; the cursor moves past
   it). The profile's own events (`daemon.started`, `events.gap`, `identity.approval`) pass. Names become ids once,
   at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
