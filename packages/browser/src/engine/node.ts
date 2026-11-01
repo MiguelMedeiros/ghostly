@@ -5303,12 +5303,13 @@ export class GhostlyNode implements EngineImplementation {
    * 1:1 chat keeps it until the contact confirms it on a live session; a group sends it to its members, where the rule
    * (`mayPin`) allows it.
    */
-  async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null }> {
+  async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null; refused?: boolean }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
     const host = this.pinsHost;
     if (linkId.startsWith("group:")) {
       const groupId = linkId.slice("group:".length), view = this.groups.view(groupId);
-      if (!view || view.status !== "active") return { error: "You are not in this group" };
+      // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
+      if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
       const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
       if ("error" in pin) return pin;
