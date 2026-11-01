@@ -15,6 +15,13 @@ describe("a counted string", () => {
     expect(ar("group.chat.memberCount", { count: 25 })).toBe("25 عضوًا");
   });
 
+  // agents#2255: a redeem at a mint that kept a fee says the unit in the form of what arrived.
+  it("a redeem that paid the mint a fee says the unit for what arrived, in English and in Arabic", () => {
+    const redeemed = (say: typeof en, count: number) => say("wallet.cashu.tokenRedeemedFeeTest", { count, amount: String(count), fee: "2" });
+    expect([1, 2].map((count) => redeemed(en, count))).toEqual(["Redeemed 1 test sat (the mint kept 2 as its fee).", "Redeemed 2 test sats (the mint kept 2 as its fee)."]);
+    expect([1, 2, 3, 11, 100].map((count) => redeemed(ar, count).split(" (")[0])).toEqual(["استُرد 1 sat تجريبي", "استُرد 2 sat تجريبيان", "استُرد 3 sats تجريبية", "استُرد 11 sat تجريبيًا", "استُرد 100 sat تجريبي"]);
+  });
+
   it("takes its count from {{count}}, or from its one number when it has no count", () => {
     expect(ar("errors.group.filesPacedNextMinutes", { minutes: 2 })).toBe("انتظر دقيقتين، ثم أرسله مرة أخرى.");
     expect(ar("errors.group.filesPacedNextMinutes", { minutes: 5 })).toBe("انتظر 5 دقائق، ثم أرسله مرة أخرى.");

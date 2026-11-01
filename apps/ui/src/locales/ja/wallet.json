@@ -232,6 +232,12 @@
     "testBalance_one": "{{amount}} テスト sat（価値なし）",
     "testMintInvoice": "支払いを待っています… テスト用ミントはすべてのインボイスを自動で支払い済みにするため、このインボイスは連絡先がチャットで支払ったときだけ数えられます。今すぐテスト sats が必要なら、上の「テストコインを入手」を使ってください。",
     "tokenHint": "ecash トークンを受け取りましたか？「送金」に貼り付けてください。",
+    "tokenRedeemedFee": "{{amount}} sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFeeTest": "{{amount}} テスト sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFeeTest_one": "{{amount}} テスト sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFeeTest_other": "{{amount}} テスト sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFee_one": "{{amount}} sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFee_other": "{{amount}} sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
     "tx": {
       "ecashIn": "ecash を受け取りました",
       "ecashOut": "ecash を送りました",

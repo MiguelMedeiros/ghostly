@@ -290,6 +290,7 @@
     "qrTooLong": "Too long for a QR code: copy it instead.",
     "redeem": "Redeem",
     "redeemed": "Redeemed ✓",
+    "redeemedFee": "Redeemed ✓ (the mint kept {{fee}} as its fee)",
     "redeeming": "Redeeming…"
   },
   "mode": {

@@ -232,6 +232,12 @@
     "testBalance_one": "{{amount}} 测试 sat（没有价值）",
     "testMintInvoice": "正在等待付款… 测试铸币厂会自动把每张发票标记为已付，所以这张发票只有在联系人于聊天中支付后才算数。现在就要测试 sats，请使用上方的“获取测试币”。",
     "tokenHint": "收到的是 ecash 代币？请粘贴到“发送”中。",
+    "tokenRedeemedFee": "已兑换 {{amount}} sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFeeTest": "已兑换 {{amount}} 测试 sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFeeTest_one": "已兑换 {{amount}} 测试 sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFeeTest_other": "已兑换 {{amount}} 测试 sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFee_one": "已兑换 {{amount}} sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFee_other": "已兑换 {{amount}} sats（mint 扣下 {{fee}} 作为手续费）。",
     "tx": {
       "ecashIn": "收到 ecash",
       "ecashOut": "发送了 ecash",
