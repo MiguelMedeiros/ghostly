@@ -2,6 +2,7 @@
   "alreadyIn": "すでにこのチャットに参加しています。",
   "cameraPreview": "QRカメラのプレビュー",
   "cameraUnavailable": "カメラを利用できません。招待を貼り付けるか画像を開いてください。",
+  "chatGone": "このチャットはこの端末から削除されました。",
   "clipboardUnavailable": "クリップボードを読み取れません。{{keys}} を押して下に招待を貼り付けてください。",
   "clipboardUnavailableTouch": "クリップボードを読み取れません。下の欄を長押しして「ペースト」をタップしてください。",
   "close": "閉じる",

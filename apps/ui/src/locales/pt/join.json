@@ -2,6 +2,7 @@
   "alreadyIn": "Você já está nesta conversa.",
   "cameraPreview": "Prévia da câmera QR",
   "cameraUnavailable": "Câmera indisponível. Cole um convite ou abra uma imagem.",
+  "chatGone": "Esta conversa não está mais neste dispositivo.",
   "clipboardUnavailable": "Não foi possível ler a área de transferência. Pressione {{keys}} para colar o convite abaixo.",
   "clipboardUnavailableTouch": "Não foi possível ler a área de transferência. Toque e segure o campo abaixo e escolha Colar.",
   "close": "Fechar",
