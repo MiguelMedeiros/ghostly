@@ -270,7 +270,7 @@ export function communityRoster(previous: Roster | null, c: Pick<CommunityCommit
 /**
  * One commit against its parent (null for a genesis) and the parent's roster: shape, id, link,
  * authority, roster arithmetic, roster hash and signature. The confirmation tag is checked once
- * the secret is known. `before`: the commits before it on its branch, newest first; given, a `leave` is held to the
+ * the secret is known (a derived kind's on arrival, by a member holding the parent's: `receiveCommit`). `before`: the commits before it on its branch, newest first; given, a `leave` is held to the
  * admission it ends (`leaveStands`). A member gives it for every commit it takes in after its own admission; the chain
  * of a welcome is not held to it (`verifyCommunityChain`).
  */
@@ -965,6 +965,13 @@ export class CommunitySession {
     if (!parsed || this.known.has(communityCommitHash(parsed))) return false;
     const result = verifyCommunityCommit(raw, parent, parentRoster, this.id, this.ancestry(p));
     if ("error" in result) return false;
+    // A derived epoch's tag, checked here when I hold its parent's secret, as a welcome's is: one that does not match
+    // opens an epoch nobody can derive, its signer included, and followed it would leave the whole group unable to send.
+    const previous = this.state.secrets[p];
+    if (previous && !FRESH.has(result.commit.k)) {
+      const untagged = communityUntaggedHash(result.commit);
+      if (!confirmationMatches(epochKeys(derivedSecret(fromBase64Url(previous), untagged), this.id, result.commit.e).confirm, untagged, result.commit.c)) return false;
+    }
     if (GROWS.has(result.commit.k) && !keepsRoom(result.commit.e, result.roster)) return false;
     const commit = result.commit, h = communityCommitHash(commit);
     // Two commits by the admin after the same commit: equivocation. By one my branch moved past (it handed the role
