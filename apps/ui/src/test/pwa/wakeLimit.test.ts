@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WAKE_NOTICE_GAP_MS, wakeNoticeDue } from "../../../../web/src/sw/policy";
 import { resetWakeLimitMemory, takeWakeSlot } from "../../../../web/src/sw/wakeLimit";
+import { unsubscribePush } from "../../../../web/src/pwa/push";
 
 // covers: push.wake.notify, push.wake.call
 
@@ -65,5 +66,19 @@ describe("the worker's record of what it showed", () => {
     expect(await takeWakeSlot("", "tok-mem", true, T0)).toBe(true);
     expect(await takeWakeSlot("", "tok-mem", true, T0 + 1_000)).toBe(false);
     expect(await takeWakeSlot("", "tok-mem", true, T0 + 30_000)).toBe(true);
+  });
+
+  it("forgets a profile's tokens when it stops being woken (push off, profile deleted), and keeps another profile's", async () => {
+    expect(await takeWakeSlot("gone", "tok-gone", true, T0)).toBe(true);
+    expect(await takeWakeSlot("kept", "tok-kept2", true, T0)).toBe(true);
+    await unsubscribePush("gone");
+    // A worker started afresh: only IndexedDB remembers.
+    resetWakeLimitMemory();
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { const r = indexedDB.open("ghostly-wake-limit", 1); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+    const keys = await new Promise<IDBValidKey[]>((resolve) => { const r = db.transaction("shown").objectStore("shown").getAllKeys(); r.onsuccess = () => resolve(r.result); });
+    db.close();
+    expect(keys.filter((key) => String(key).startsWith("gone|"))).toEqual([]);
+    expect(keys).toContain("kept|tok-kept2|call");
+    expect(await takeWakeSlot("kept", "tok-kept2", true, T0 + 5_000)).toBe(false);
   });
 });
