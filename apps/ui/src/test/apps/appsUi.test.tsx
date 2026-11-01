@@ -12,6 +12,7 @@ import { ChatServicesDialog } from "../../components/ChatServicesDialog";
 import { InstalledAppDialog, AppInstallDialog } from "../../components/apps/AppInstallDialog";
 import { Apps } from "../../pages/Apps";
 import { AddAppDialog } from "../../components/apps/AddAppDialog";
+import { AppChatPicker } from "../../components/apps/AppChatPicker";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
@@ -750,6 +751,10 @@ describe("with the apps flag on", () => {
     await details.user.click(screen.getByTestId("app-uninstall-open"));
     wraps(within(screen.getByTestId("app-uninstall")).getByRole("heading"));
     details.unmount();
+    // Open of a chat app: "Open <title> in a chat" ran off a 320 px phone with a 40-letter one-word title.
+    const picker = renderApp(<AppChatPicker app={app} onClose={() => {}} />);
+    wraps(within(screen.getByTestId("app-chat-picker")).getByRole("heading"));
+    picker.unmount();
 
     fakeEngine.on("appStorePreview", () => ({ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
       name: `${long}5`, description: `${long}6`, kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, apps: 1 }));
