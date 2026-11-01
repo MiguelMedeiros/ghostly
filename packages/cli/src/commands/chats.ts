@@ -1,7 +1,13 @@
 import { CliError } from "../errors";
+import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
 import { type Command, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
 
+/** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
+const confirmWait: Record<string, OptionSpec> = {
+  wait: { type: "string", choices: ["none", "confirmed"], description: "none or confirmed: until the contact confirmed it, in a 1:1 chat (default: none with a daemon, confirmed without)" },
+  timeout: groupWait.timeout,
+};
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
@@ -100,19 +106,19 @@ export const commands: Record<string, Command> = {
   "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "pin": {
-    method: "chat.pin", usage: "pin <chat|group> <message> | --remove", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
-    args: ["chat", "message...?"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" } },
+    method: "chat.pin", usage: "pin <chat|group> <message> | --remove [--wait none|confirmed] [--timeout s]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
+    args: ["chat", "message...?"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" }, ...confirmWait },
     params: ({ options }, a) => {
       // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read.
       if (a.message === undefined && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
       if (a.message?.includes(" ")) throw new CliError("usage", "Too many arguments: ghostly pin <chat|group> <message> | --remove");
-      return { chat: a.chat, message: a.message, remove: options.remove === true };
+      return { chat: a.chat, message: a.message, remove: options.remove === true, wait: options.wait, timeout: timeout(options) };
     },
   },
   "react": {
-    method: "chat.react", usage: "react <chat> <message> <emoji> [--remove]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
-    args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true }),
+    method: "chat.react", usage: "react <chat> <message> <emoji> [--remove] [--wait none|confirmed] [--timeout s]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
+    args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" }, ...confirmWait },
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "routine send": {
     method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",

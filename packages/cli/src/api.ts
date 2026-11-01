@@ -10,7 +10,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
+import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
@@ -365,21 +365,38 @@ const METHODS: Record<string, Method> = {
       live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
     };
   },
-  /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
+  /**
+   * WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back.
+   * `wait: confirmed` (a one-shot's default) stays until the contact confirmed it; `confirmed` says whether it has.
+   */
   async "chat.react"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group react", "<message> <emoji>");
-    return { chat: link.id, ...(await react(ctx, link.id, params)) };
+    const { wait, ms } = confirmWait(ctx, params);
+    // A new reaction of mine is numbered past every one still waiting: it is confirmed once none past those is left.
+    const before = Math.max(...node(ctx).chatUnconfirmed({ linkId: link.id }).reactions);
+    const result = await react(ctx, link.id, params);
+    const pending = (left: { reactions: number[] }) => left.reactions.some((n) => n > before);
+    if (wait === "confirmed") await waitForConfirmed(ctx, link.id, "reaction", pending, ms);
+    return { chat: link.id, ...result, confirmed: !pending(node(ctx).chatUnconfirmed({ linkId: link.id })) };
   },
   /**
    * WISP 400 § Pinned message: one per chat or group, a new pin replaces it; `remove` unpins. In a community only the
-   * admin pins. Answers the chat (or group) and the message now pinned (null once unpinned).
+   * admin pins. Answers the chat (or group) and the message now pinned (null once unpinned). In a 1:1 chat `wait:
+   * confirmed` (a one-shot's default) stays until the contact confirmed it, and `confirmed` says whether it has.
    */
   async "chat.pin"(ctx, params) {
     const target = chatOrGroup(ctx, str(params, "chat", true));
     const remove = bool(params, "remove"), messageId = remove ? str(params, "message") : str(params, "message", true);
+    if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat");
+    const { wait, ms } = confirmWait(ctx, params);
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
     if (result.error) throw new CliError(/not in this chat|Nothing is pinned/.test(result.error) ? "not_found" : /Only the admin/.test(result.error) ? "refused" : "bad_request", result.error);
-    return { [target.group ? "group" : "chat"]: target.id, messageId: remove ? null : messageId, removed: remove };
+    if (target.group) return { group: target.id, messageId: remove ? null : messageId, removed: remove };
+    // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
+    const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
+    const pending = (left: { pin: number | null }) => mine !== null && left.pin === mine;
+    if (wait === "confirmed") await waitForConfirmed(ctx, target.linkId, "pin", pending, ms);
+    return { chat: target.id, messageId: remove ? null : messageId, removed: remove, confirmed: !pending(node(ctx).chatUnconfirmed({ linkId: target.linkId })) };
   },
   /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
   async "saved.add"(ctx, params) {
@@ -781,6 +798,15 @@ async function guardEngineSend(ctx: ApiContext, method: string, args: Params): P
   }
   const secret = secretIn(texts);
   if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; call ${method} with --force if you mean to`, { kind: secret.kind });
+}
+
+/**
+ * How long `react` and `pin` in a 1:1 chat wait for the contact: a one-shot until it confirmed (as `edit`), since what
+ * is not said yet leaves with the process; a daemon goes on saying it, so it answers at once unless asked to wait.
+ */
+function confirmWait(ctx: ApiContext, params: Params): { wait: "none" | "confirmed"; ms: number } {
+  const wait = oneOf(params, "wait", ["none", "confirmed"] as const, ctx.mode === "one-shot" ? "confirmed" : "none");
+  return { wait, ms: num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000 };
 }
 
 /** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
