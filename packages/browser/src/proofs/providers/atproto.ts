@@ -33,6 +33,13 @@ function currentHost(): AtprotoHost | undefined {
 
 const hostOf = (url: string) => new URL(url).host;
 
+/** Why the card shows the DID and no handle. */
+const HANDLE_NOT_SHOWN = {
+  none: "The account's DID document names no handle",
+  elsewhere: "The account's handle does not point back to it, so it is not shown",
+  unchecked: "The account's handle could not be checked, so it is not shown",
+} as const;
+
 export interface AtprotoIdentityOptions {
   /** The platform's sign-in window. */
   host?: () => AtprotoHost | undefined;
@@ -147,14 +154,14 @@ export function createAtprotoIdentityProvider(options: AtprotoIdentityOptions = 
       catch (e) { throw new Error(e instanceof AtprotoProofError ? `The account's repository does not prove the record: ${e.message}` : "The account's repository could not be read"); }
       if (!proof.record) throw new Error("The record is no longer in the account's repository");
       checkAtprotoProofRecord(proof.record.value, statement);
-      const handle = await verifiedAtprotoHandle(doc, resolve);
+      const { handle, missing } = await verifiedAtprotoHandle(doc, resolve);
       return {
         subject: did,
         source: `Record signed with the account's key, from ${hostOf(doc.pds)}`,
         display: {
           ...(handle ? { name: `@${handle}` } : {}),
           url: `https://bsky.app/profile/${did}`,
-          source: handle ? "Handle checked both ways: it points to this account" : "The account's handle does not point back to it, so it is not shown",
+          source: missing ? HANDLE_NOT_SHOWN[missing] : "Handle checked both ways: it points to this account",
           fetchedAt: ctx.now,
         },
       };
