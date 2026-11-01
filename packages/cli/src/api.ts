@@ -1,9 +1,9 @@
 import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
-import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
-import { CliError } from "./errors";
+import { asCliError, CliError } from "./errors";
 import {
   bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
@@ -526,7 +526,7 @@ const METHODS: Record<string, Method> = {
     await releaseHold(ctx, link.id, "connect");
     inviteTaken(link);
     dhtOnly(findChat(state(ctx).links, link.id));
-    await node(ctx).connect({ linkId: link.id });
+    await connectWithin(ctx, link, num(params, "timeout", CONNECT_MAX_SECONDS, { min: 1, max: CONNECT_MAX_SECONDS }) * 1000);
     return chatJson(findChat(state(ctx).links, link.id));
   },
   /**
@@ -882,6 +882,29 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
   if (refused && !message)
     return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
   return new CliError(refused ? "refused" : "unavailable", error);
+}
+
+/** The chat link's own wait for a contact (`GhostLink.connect`): `chat connect --timeout` waits at most that long. */
+const CONNECT_MAX_SECONDS = 90;
+
+/**
+ * `chat connect`, waiting at most `ms` for the contact; the link's dial goes on behind a shorter wait. Timed out (here,
+ * or by the link's own 90 s), it says what happens next: before, it waited a fixed 90 s and ended "Timed out connecting
+ * to the peer", with no next step.
+ */
+async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promise<void> {
+  const dial = node(ctx).connect({ linkId: link.id });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<"late">((resolve) => { timer = setTimeout(() => resolve("late"), ms); });
+  try {
+    if ((await Promise.race([dial, late])) !== "late") return;
+  } catch (error) {
+    if (asCliError(error).code !== "timeout") throw error;
+  } finally { clearTimeout(timer); }
+  const shown = /^[\w.:-]+$/.test(link.label ?? "") ? link.label! : link.id;
+  throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact did not answer. ${ctx.mode === "one-shot"
+    ? "Try again later, or keep this profile online with `ghostly daemon --detach`: it reconnects by itself"
+    : `It reconnects by itself while this profile is online; ghostly chat wait ${shown} --until live waits for it`}`, { chat: link.id });
 }
 
 /**
