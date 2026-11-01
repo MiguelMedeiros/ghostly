@@ -15,14 +15,15 @@ interface Asked { status: TranslationStatus; from: string; to: string; back: boo
  * question or leaving Settings leaves it running. So what it is doing is the app's, not the question's.
  */
 interface Downloads {
-  running: boolean;
+  /** The questions whose Download is on now; another question's languages can download beside them. */
+  running: readonly Asked[];
   /** The pairs the last download brought; a new list each time one ends, also one that failed midway. */
   finished: readonly string[];
   /** It failed with its question gone: `useTranslateDownloadFailure` asks again. */
   failed: { asked: Asked; problem: Problem } | null;
 }
 
-let downloads: Downloads = { running: false, finished: [], failed: null };
+let downloads: Downloads = { running: [], finished: [], failed: null };
 const listeners = new Set<() => void>();
 const setDownloads = (change: Partial<Downloads>) => {
   downloads = { ...downloads, ...change };
@@ -35,7 +36,7 @@ const subscribe = (listener: () => void) => {
 const useDownloads = () => useSyncExternalStore(subscribe, () => downloads);
 
 /** Languages are downloading now, whoever asked: Settings says so. */
-export const useTranslateDownloading = () => useDownloads().running;
+export const useTranslateDownloading = () => useDownloads().running.length > 0;
 
 const samePairs = (a: Asked | null, pairs: readonly string[]) => !!a && a.pairs.every((pair) => pairs.includes(pair));
 
@@ -85,7 +86,7 @@ export function useTranslateDownload(downloaded?: () => void) {
 
   const download = async (question: Asked) => {
     setProblem(null);
-    setDownloads({ running: true, failed: null });
+    setDownloads({ running: [...downloads.running, question], failed: null });
     const brought: string[] = [];
     try {
       // One after the other; a pair already here answers at once, so Download again fetches only what is missing.
@@ -96,7 +97,7 @@ export function useTranslateDownload(downloaded?: () => void) {
       else setDownloads({ failed: { asked: question, problem: failure } });
     } finally {
       forgetTranslations();
-      setDownloads({ running: false, finished: brought });
+      setDownloads({ running: downloads.running.filter((on) => on !== question), finished: brought });
     }
   };
 
@@ -105,9 +106,11 @@ export function useTranslateDownload(downloaded?: () => void) {
     setAsking(failed.asked);
   }, []);
 
+  // Busy only while these languages are what downloads: a question for others, asked meanwhile, still downloads them.
+  const busy = !!asking && running.some((on) => samePairs(asking, on.pairs));
   const question = asking && (
     <TranslateDownloadDialog from={asking.from} to={asking.to} back={asking.back} bytes={asking.bytes}
-      engine={!asking.status.runtime} busy={running} problem={problem} onNotNow={() => setAsking(null)} onDownload={() => void download(asking)} />
+      engine={!asking.status.runtime} busy={busy} problem={problem} onNotNow={() => setAsking(null)} onDownload={() => void download(asking)} />
   );
   return { ask, question, askAgain };
 }
