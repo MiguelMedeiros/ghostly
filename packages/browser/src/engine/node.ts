@@ -6751,6 +6751,8 @@ export class GhostlyNode implements EngineImplementation {
     // Earlier device sets (a removal, a new secret): their tombstones put again now and every hour, and their frames
     // delivered over the old links, as a removal that a crash cut short resumes from the record alone.
     this.watchTombstones();
+    // A removal cut short after its write: the removed device's wake subscription and wallet marks are cleared now.
+    await this.finishRemovals().catch(() => {});
     // A device was given the secret and never finished its enrollment: the set moves to a new one by itself.
     await this.rotateIfDue().catch(() => {});
   }
@@ -6854,6 +6856,13 @@ export class GhostlyNode implements EngineImplementation {
   private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
     this.setMoveAllowed();
     if (this.settingMove) throw new Error("remove-busy: The device set is already changing.");
+    // Removed already, by a move cut short after its write (Remove pressed again): that removal is finished, not refused.
+    const record = remove === undefined ? null : await readDeviceRecord(databaseName()).catch(() => null);
+    if (record?.state === "active" && record.earlierSets.some((set) => set.removed === remove) && !record.deviceSet.some((slot) => slot?.key === remove)) {
+      await this.finishRemovals().catch(() => {});
+      this.watchTombstones();
+      return this.deviceSet();
+    }
     const work = (async () => {
       const ports = await this.setMovePorts();
       if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
@@ -6861,7 +6870,7 @@ export class GhostlyNode implements EngineImplementation {
     })();
     this.settingMove = work;
     try { await work; } finally { this.settingMove = null; }
-    if (remove !== undefined) await this.afterDeviceRemoved(remove).catch(() => {});
+    if (remove !== undefined) await this.finishRemovals().catch(() => {});
     // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
     if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
     this.watchTombstones();
@@ -6891,6 +6900,27 @@ export class GhostlyNode implements EngineImplementation {
       await this.loadWalletHomes();
       await this.refreshWallet().catch(() => {});
     }
+  }
+
+  /**
+   * What each removal left in the profile (`afterDeviceRemoved`), for every earlier set that still names the device it
+   * removed: after the move, and at start for one a reload, a crash or a stop cut short after its write. The name is
+   * dropped once its device's leftovers are cleared.
+   */
+  private async finishRemovals(): Promise<void> {
+    const profile = databaseName();
+    const record = await readDeviceRecord(profile);
+    if (record?.state !== "active") return;
+    const done = new Set<string>();
+    for (const set of record.earlierSets) {
+      if (set.removed === undefined || done.has(set.removed)) continue;
+      // One that fails keeps its name: it is tried again at the next start.
+      if (await this.afterDeviceRemoved(set.removed).then(() => true, () => false)) done.add(set.removed);
+    }
+    if (!done.size) return;
+    const now = await readDeviceRecord(profile);
+    if (now?.state !== "active") return;
+    await amendDevice(profile, { earlierSets: now.earlierSets.map(({ removed, ...set }) => (removed === undefined || done.has(removed) ? set : { ...set, removed })) });
   }
 
   /**
