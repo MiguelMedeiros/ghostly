@@ -21,6 +21,10 @@ function fake() {
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     deleteMessage: vi.fn(async () => {}),
     removeMessage: vi.fn(async () => ({ error: null as string | null })),
+    messageDetails: vi.fn(async ({ linkId, messageId }: { linkId: string; messageId: string }) => {
+      const message = rows.find((m) => m.linkId === linkId && m.id === messageId);
+      return message ? { message: { id: message.id }, ...(linkId.startsWith("group:") && { group: { id: linkId.slice(6) } }) } : null;
+    }),
     forwardMessages: vi.fn(async ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(() => ({ messageIds: ["me_fwd"], sent: messageIds, error: null })) })),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -49,6 +53,23 @@ describe("delete", () => {
     expect(node.deleteMessage).not.toHaveBeenCalled();
     const { COMMANDS } = await import("../src/commands");
     expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone]");
+  });
+});
+
+describe("message details", () => {
+  it("reads a group's message too, by its name, its id or group:<id>; it said No chat", async () => {
+    const { ctx, node } = fake();
+    expect(await callApi(ctx, "chat.details", { chat: "Alice", message: "peer_1" })).toEqual({ message: { id: "peer_1" } });
+    expect(node.messageDetails).toHaveBeenLastCalledWith({ linkId: "chat-one", messageId: "peer_1" });
+    for (const chat of ["Crew", "g1", "group:g1"]) {
+      expect(await callApi(ctx, "chat.details", { chat, message: "k:0:1" })).toEqual({ message: { id: "k:0:1" }, group: { id: "g1" } });
+      expect(node.messageDetails).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1" });
+    }
+    await expect(callApi(ctx, "chat.details", { chat: "Crew", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this group" });
+    await expect(callApi(ctx, "chat.details", { chat: "Alice", message: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No message nope in this chat" });
+    await expect(callApi(ctx, "chat.details", { chat: "Nobody", message: "x" })).rejects.toMatchObject({ code: "not_found" });
+    const { COMMANDS } = await import("../src/commands");
+    expect(COMMANDS["message details"]!.usage).toBe("message details <chat|group> <message>");
   });
 });
 
