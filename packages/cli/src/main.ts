@@ -18,6 +18,7 @@ import { completeWithPipedEvidence, identityFields, identitySecretFields, secret
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
+  startingDaemon,
   type ProfilePaths,
 } from "./profiles";
 
@@ -273,6 +274,8 @@ function throughDaemon(client: DaemonClient): Session {
 
 /** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
 const HOLDER_WAIT_MS = 5_000;
+/** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
+const STARTING_WAIT_MS = 30_000;
 
 /**
  * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
@@ -280,20 +283,23 @@ const HOLDER_WAIT_MS = 5_000;
  * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step. A daemon takes the profile before
  * its socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
  * goes through it, its client the answer. Only the lock was looked at again, and a command run while the daemon started
- * failed busy, told to start the daemon that was running. A `listen` with no daemon opens it the same way, as the
- * daemon (`mode`).
+ * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
+ * STARTING_WAIT_MS, and named as the holder. A `listen` with no daemon opens it the same way, as the daemon (`mode`).
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
-  const until = Date.now() + HOLDER_WAIT_MS;
+  const from = Date.now();
   for (;;) {
     try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== "busy") throw error;
+      // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
+      const starting = startingDaemon(g.paths);
       const client = await connectDaemon(g.paths);
       if (client) return client;
-      const left = until - Date.now();
+      const left = from + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS) - Date.now();
       if (left <= 0) {
+        if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${STARTING_WAIT_MS / 1000} s: ghostly daemon status shows when it is up`, { pid: starting });
         const pid = error.details?.pid;
         throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and was not free after ${HOLDER_WAIT_MS / 1000} s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
       }
@@ -676,7 +682,12 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const client = await connectDaemon(g.paths);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
-    if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
+    // A daemon still starting (its engine, before its socket listens) holds the profile already: it is no one-shot's.
+    if (!client) {
+      const starting = startingDaemon(g.paths);
+      print({ running: false, ...(starting === null ? {} : { starting: true, pid: starting }), profile: g.profile, socket: g.paths.socket });
+      return;
+    }
     try { print({ running: true, ...(await client.call("status", {}, { timeoutMs: seconds(parsed, 15) * 1000 }) as object), socket: g.paths.socket }); } finally { client.close(); }
     return;
   }
@@ -685,7 +696,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const stopFor = seconds(parsed, 20);
     // A daemon of an older release never greets: what does not prove itself is stopped as the process that holds the
     // profile (`stopDaemon`), as the stop asked. One of this release that greets late is busy: the stop's deadline waits.
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     const { pid, listen } = await stopDaemon(g, client, stopFor);
     if (listen) process.stderr.write(listenEnded(pid));
@@ -695,7 +706,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths) ?? await startedDaemon(g, stopFor);
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
@@ -721,6 +732,26 @@ async function daemonCommand(argv: string[]): Promise<void> {
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g, startFor); return; }
   print(await startDetached(g, startFor));
+}
+
+/**
+ * The profile's daemon that is starting (`startingDaemon`: it holds the profile, its socket does not listen yet), once
+ * its socket answers, waited for up to `seconds`; null when none is starting. One still starting then is the answer,
+ * `timeout` with its pid. `daemon stop` said no daemon ran, and the daemon came up a moment later; `daemon restart`
+ * failed busy and left the old code running.
+ */
+async function startedDaemon(g: Globals, seconds: number): Promise<DaemonClient | null> {
+  const until = Date.now() + seconds * 1000;
+  for (;;) {
+    // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
+    const pid = startingDaemon(g.paths);
+    const client = await connectDaemon(g.paths);
+    if (client) return client;
+    if (pid === null) return null;
+    const left = until - Date.now();
+    if (left <= 0) throw new CliError("timeout", `The daemon (process ${pid}) is still starting after ${seconds} s; ghostly daemon status shows when it is up`, { pid });
+    await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
+  }
 }
 
 /** `--timeout <s>`, or `fallback` without one: seconds above 0 (0 or less would not wait at all). */
