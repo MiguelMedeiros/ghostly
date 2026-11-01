@@ -142,15 +142,15 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
               wide as the name, the title stays beside the picture whichever way the name runs. */}
           {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full truncate text-base font-semibold">{live.name}</h2>
-            : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
+            : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
               <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} ref={namingField.ref} value={naming} readOnly={busy !== null}
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
-                className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60" />
+                className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{t("group.rename.save")}</button>
-              <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
+              <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="rounded text-xs text-text-muted hover:text-text-primary max-md:min-h-11 max-md:px-3">{t("group.rename.cancel")}</button>
             </form>}
           <p className="text-xs text-text-muted">{live.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: live.members.length })}{live.epoch !== undefined && <> · {t("group.members.epoch", { epoch: live.epoch })}</>}{live.status && live.status !== "active" && <> · {groupStatusText(live.status, t)}</>}</p>
           {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app.
