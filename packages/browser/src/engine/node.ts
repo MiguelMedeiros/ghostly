@@ -5383,18 +5383,36 @@ export class GhostlyNode implements EngineImplementation {
     const { live, app } = this.appChat(linkId, ref);
     if (!isAppVersion(version)) throw new Error("Not an app version");
     // A version removed or revoked since it started says nothing more to the contact (WISP 1200 § Takedowns).
+    // The calls run side by side: a close (or a later open) that came while this one read the store wins.
+    const turn = this.appTurn(linkId, app);
     await this.appChatRunnable(ref, digest);
+    if (this.appTurns.get(`${linkId} ${app}`) !== turn) return { app };
     const open = live.appsOpen ??= new Map();
     if (live.link) live.link.openApp(app, version);
     else open.set(app, version);
     return { app };
   }
 
+  /** The last open or close of each app in each chat, by chat and chat app id: an open still reading the store is not the last. */
+  private readonly appTurns = new Map<string, number>();
+  private nextAppTurn = 0;
+  private appTurn(linkId: string, app: string): number {
+    const turn = ++this.nextAppTurn;
+    this.appTurns.set(`${linkId} ${app}`, turn);
+    return turn;
+  }
+
+  /** Closes `app` in a chat, and any open of it still on its way. */
+  private appCloseIn(linkId: string, live: LiveLink, app: string): void {
+    this.appTurn(linkId, app);
+    if (live.link) live.link.closeApp(app);
+    else live.appsOpen?.delete(app);
+  }
+
   /** This side closed an app in a paired chat: `close` goes now when the session is live. */
   appClose({ linkId, ref }: { linkId: string; ref: string }): void {
     const { live, app } = this.appChat(linkId, ref);
-    if (live.link) live.link.closeApp(app);
-    else live.appsOpen?.delete(app);
+    this.appCloseIn(linkId, live, app);
   }
 
   /** One data frame of an app open on both sides, on the live session only; nothing is kept to send later. */
@@ -5482,12 +5500,9 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Every page went away: no app runs here any more, so each open one is closed (`close` goes where it can). */
   appsCloseAll(): void {
-    for (const live of this.links.values()) {
-      for (const app of [...live.appsOpen?.keys() ?? []]) {
-        if (live.link) live.link.closeApp(app);
-        else live.appsOpen?.delete(app);
-      }
-    }
+    for (const [linkId, live] of this.links) for (const app of [...live.appsOpen?.keys() ?? []]) this.appCloseIn(linkId, live, app);
+    // Opens still reading the store: no page is left to run them.
+    for (const key of this.appTurns.keys()) this.appTurns.set(key, ++this.nextAppTurn);
   }
 
   /** An app that went (uninstalled) is closed in every chat it was open in, as `appClose` does. */
@@ -5495,9 +5510,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const [linkId, live] of this.links) {
       if (!live.appsOpen?.size) continue;
       const { app } = this.appChat(linkId, ref);
-      if (!live.appsOpen.has(app)) continue;
-      if (live.link) live.link.closeApp(app);
-      else live.appsOpen.delete(app);
+      if (live.appsOpen.has(app)) this.appCloseIn(linkId, live, app);
     }
   }
 
