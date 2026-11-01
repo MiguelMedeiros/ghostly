@@ -488,10 +488,7 @@ export class DeviceLinks implements DeviceLinkEngine {
         onAnswersRefused: () => this.withoutRtc(running),
         // The other device is there and no session opens by `DEVICE_RTC_MS`: the side that answers may hear nothing of
         // an attempt that failed (it waits out its 90 s).
-        onPresence: (presence) => {
-          if (!presence.online || running.rtcOff || running.rtcWait || running.link.isDataLinkOpen) return;
-          running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running); }, Math.min(DEVICE_RTC_MS * 2 ** (this.rtcBacks.get(running.id) ?? 0), DEVICE_RTC_MAX_MS));
-        },
+        onPresence: (presence) => { if (presence.online) this.waitForRtc(running); },
         // The other device has no WebRTC: this one starts its native endpoints for it.
         onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
         // An endpoint went away (its relay closed the connection): it is started again in a while.
@@ -826,10 +823,13 @@ export class DeviceLinks implements DeviceLinkEngine {
    * its own for it as for a Linux Desktop, and the two meet over Iroh's relay. Only with no session open, and only
    * where this app has a native transport to go on with.
    */
-  private withoutRtc(running: Running): void {
+  private withoutRtc(running: Running, waited = false): void {
     // A link that runs its native endpoints already (the other device has no WebRTC) has nothing more to go on with.
     if (this.stopped || running.rtcOff || running.native || !this.createPeerConnection || running.link.isDataLinkOpen) return;
     if (!Object.values(this.nativeFactories()).some(Boolean)) return;
+    // Back from a round without WebRTC that started nothing (`withRtc`): a stalled attempt does not end this one at once,
+    // the wait does, which doubles each time. Else the two would take turns every few seconds.
+    if (!waited && this.rtcBacks.get(running.id)) { this.waitForRtc(running); return; }
     const run = this.queue.catch(() => {}).then(async () => {
       if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
       this.running.delete(running.id);
@@ -840,6 +840,12 @@ export class DeviceLinks implements DeviceLinkEngine {
       this.changed();
     });
     this.queue = run;
+  }
+
+  /** `withoutRtc` once `DEVICE_RTC_MS` passed with no session open, twice as long for each time it went back (`rtcBacks`). */
+  private waitForRtc(running: Running): void {
+    if (running.rtcOff || running.rtcWait || running.link.isDataLinkOpen) return;
+    running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running, true); }, Math.min(DEVICE_RTC_MS * 2 ** (this.rtcBacks.get(running.id) ?? 0), DEVICE_RTC_MAX_MS));
   }
 
   /**
