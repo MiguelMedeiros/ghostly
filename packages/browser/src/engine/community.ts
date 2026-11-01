@@ -367,6 +367,14 @@ export class Communities {
    */
   private sharing = { groups: 1, hubs: 1 };
   private now(): number { return this.time || Date.now(); }
+  /** `Date.now()` at the last tick. */
+  private tickedAt = 0;
+  /**
+   * When a message of mine is dated: the clock, moved on by the time passed since the last tick. Dated by the tick
+   * alone, an answer sent within a second of a member's message (a tick runs late too) was older than its place: it
+   * went above the message it answered in my own history, and above my own "You joined" (bug hunt, 2026-11-01).
+   */
+  private sendTime(): number { return this.time ? this.time + Math.max(0, Date.now() - this.tickedAt) : Date.now(); }
 
   /** Files and voice messages (WISP 503), the desk `Groups` keeps for every group. */
   files?: GroupFileDesk;
@@ -573,7 +581,7 @@ export class Communities {
     // its author has caught up (`CommunitySession.reseal`) goes to the members let in before it, judged by the commits'
     // times against the frame's. Dated by the wall clock, a frame read as written before admissions it came after
     // whenever the two differ (on headless engines, minutes): the members let in meanwhile never got it (2026-10-03).
-    const now = this.now();
+    const now = this.sendTime();
     const result = card || file ? await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded, card, file) : await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded);
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
   }
@@ -728,6 +736,7 @@ export class Communities {
   /** Everything timed: beacon, hub election, lobbies, knocks, leaves, edges. The engine calls it every second or so. */
   async tick(now = Date.now()): Promise<void> {
     this.time = now;
+    this.tickedAt = Date.now();
     this.lineOrder.tick(now);
     const active = [...this.live.values()].filter(l => l.session.status === "active");
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
