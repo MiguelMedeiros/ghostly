@@ -295,7 +295,14 @@ export const FILE_METHODS: Record<string, Method> = {
       const transfer = state(ctx).transfers[fileId];
       if (!transfer || transfer.state === "done") throw new CliError("refused", outgoing ? "Nothing to send again: it arrived whole" : "Nothing to ask for: the file is all here");
       if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
-    } else await refuseAllHere();
+    } else {
+      const outgoing = fileId.startsWith(`${linkId}-out-`);
+      if (outgoing && (action === "accept" || action === "decline")) throw new CliError("bad_request", "A file sent from here is not accepted or declined: file cancel stops it");
+      await refuseAllHere();
+      // One that ended (cancelled, declined, failed): the engine takes the action and does nothing, as for one all here.
+      const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
+      if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
+    }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
@@ -336,6 +343,8 @@ export const FILE_METHODS: Record<string, Method> = {
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
+    // One that ended will not come: its partial bytes were dropped, so "not all here yet" would have a script wait for good.
+    if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const named = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, await voiceTime(ctx, stored)) : stored.metadata.name));
     const force = bool(params, "force");
