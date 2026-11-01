@@ -1,3 +1,12 @@
 [workspace]
 members = ["apps/desktop", "native/transports"]
 resolver = "2"
+
+# Release builds (Desktop, and the Android app's native library): no symbol table, whole-program LTO, one codegen
+# unit. Measured on the 1.5.4 arm64 APK: libghostly_lib.so 54.3 MB -> 35.7 MB, APK 56.1 MB -> 37.5 MB, for a clean
+# build about 85 s longer (255 s -> 340 s on 8 jobs). Strip alone: 40.4 MB; thin LTO adds nothing over it.
+# Debug builds are unchanged. Panics still unwind.
+[profile.release]
+strip = "symbols"
+lto = "fat"
+codegen-units = 1
