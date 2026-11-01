@@ -448,7 +448,7 @@ export function commandHelp(words: readonly string[]): string {
   let rows = named(words);
   while (!rows.length && words.length > 1) rows = named(words = words.slice(0, -1));
   const asked = words.join(" ");
-  if (!rows.length) throw new CliError("usage", `Unknown command: ${asked} (ghostly help)`);
+  if (!rows.length) throw new CliError("usage", `Unknown command: ${asked || '""'} (ghostly help)`);
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
   // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
   // says, not the group's list with exit 0.
@@ -498,7 +498,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
   switch (sub) {
     case "create": {
       const [name] = parsed.positionals;
-      if (!name || parsed.positionals.length > 1) throw new CliError("usage", "ghostly profile create <name>");
+      if (!name) throw new CliError("usage", "Missing <name>: ghostly profile create <name> [--use] [--name <shown name>]");
+      noMoreThan(1, parsed.positionals, "profile create <name> [--use] [--name <shown name>]");
       // A command that fails changes nothing: the name is checked before the folder is made, and the profile is made
       // current only once it holds it. Before, the retry with a good name was refused "Profile <name> exists".
       const shownName = parsed.options.name === undefined ? undefined : checkShownName(parsed.options.name);
@@ -524,7 +525,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "use": {
       const [name] = parsed.positionals;
-      if (!name) throw new CliError("usage", "ghostly profile use <name>");
+      if (!name) throw new CliError("usage", "Missing <name>: ghostly profile use <name>");
       noMoreThan(1, parsed.positionals, "profile use <name>");
       selectProfile(g.home, name);
       print({ current: name });
@@ -539,14 +540,14 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       const params: Record<string, unknown> = {};
       if (parsed.options.name !== undefined) params.name = parsed.options.name;
       if (parsed.options["share-profile"] !== undefined) params.shareProfile = parsed.options["share-profile"];
-      if (!Object.keys(params).length) throw new CliError("usage", "ghostly profile set [--name <name>] [--share-profile | --no-share-profile]");
+      if (!Object.keys(params).length) throw new CliError("usage", "Nothing to change: ghostly profile set [--name <name>] [--share-profile | --no-share-profile]");
       print(await withSession(g, (s) => s.call("profile.set", params)));
       return;
     }
     case "backup": {
       noMoreThan(0, parsed.positionals, "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]");
       const out = parsed.options.out;
-      if (typeof out !== "string") throw new CliError("usage", "ghostly profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light] (or GHOSTLY_BACKUP_PASSPHRASE)");
+      if (typeof out !== "string") throw new CliError("usage", "Missing --out: ghostly profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]");
       // Encrypted unless --no-passphrase says otherwise, and never a guess: a passphrase and --no-passphrase together are refused.
       const unsealed = parsed.options.passphrase === false;
       if (parsed.options.passphrase === true) throw new CliError("usage", "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line");
@@ -562,7 +563,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     }
     case "restore": {
       const [given, name] = parsed.positionals;
-      if (!given || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      if (!given || !name) throw new CliError("usage", `Missing <${given ? "new profile" : "file"}>: ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]`);
       noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
       const file = here(given) as string;
@@ -971,7 +972,8 @@ async function engineCommand(argv: string[]): Promise<void> {
     return;
   }
   const [method, raw] = parsed.positionals;
-  if (!method || parsed.positionals.length > 2) throw new CliError("usage", "ghostly engine <method> [json-params | -]");
+  if (!method) throw new CliError("usage", "Missing <method>: ghostly engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]");
+  noMoreThan(2, parsed.positionals, "engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]");
   if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method} (ghostly engine --list)`);
   const showSecret = parsed.options["show-secret"] === true;
   if (SECRET_RESULTS.has(method) && !showSecret) throw new CliError("confirm", `${method} answers with secrets: add --show-secret to print them`);
@@ -998,7 +1000,8 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
   if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
   if (sub === "set") {
     const [key, value] = parsed.positionals;
-    if (!key || value === undefined || parsed.positionals.length > 2) throw new CliError("usage", "ghostly settings set <key> <json-value>");
+    if (!key || value === undefined) throw new CliError("usage", `Missing <${key ? "json-value" : "key"}>: ghostly settings set <key> <json-value>`);
+    noMoreThan(2, parsed.positionals, "settings set <key> <json-value>");
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
@@ -1017,7 +1020,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   const [target, ...rest] = parsed.positionals;
   // `edit` names the message before the text.
   const [message, ...words] = spec.message ? rest : [undefined, ...rest];
-  if (!target || (spec.message && !message)) throw new CliError("usage", `ghostly ${spec.usage}`);
+  if (!target || (spec.message && !message)) throw new CliError("usage", `Missing <${target ? "message" : spec.target}>: ghostly ${spec.usage}`);
   // Before stdin is read and the profile opens: the API's own check answered once a one-shot was online (exit 1).
   timeout(parsed.options);
   // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
@@ -1062,7 +1065,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
   const g = globals(parsed);
   pretty = g.pretty;
   const [provider, ...subject] = parsed.positionals;
-  if (!provider) throw new CliError("usage", "ghostly identity add <provider> [subject] [--signer id] [--field name=value]... [--days n] [--timeout s]");
+  if (!provider) throw new CliError("usage", "Missing <provider>: ghostly identity add <provider> [subject] [--signer id] [--field name=value]... [--days n] [--timeout s]");
   const fields: Record<string, string> = {};
   for (const item of (parsed.options.field as string[] | undefined) ?? []) {
     const eq = item.indexOf("=");
@@ -1254,7 +1257,7 @@ export function unknownCommand(first: string | undefined, second?: string, third
     const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
     return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
   }
-  return new CliError("usage", `Unknown command: ${asked.slice(0, 2).join(" ")} (ghostly help)`);
+  return new CliError("usage", `Unknown command: ${asked.slice(0, 2).join(" ") || '""'} (ghostly help)`);
 }
 
 /** Leaves once what was printed reached stdout (a pipe drains asynchronously). */
