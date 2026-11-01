@@ -1,5 +1,5 @@
 import { openAsBlob } from "node:fs";
-import { access, constants, open, rm, stat } from "node:fs/promises";
+import { access, constants, copyFile, link, open, rename, rm, stat, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
@@ -190,6 +190,18 @@ export function saveName(name: string): string {
   return fitName(clean.startsWith("-") ? `_${clean}` : clean);
 }
 
+/**
+ * Gives the whole file at `partial` the name `target`: over a file there when `force`, else never (EEXIST). Where the
+ * file system has no hard links (exFAT, some network shares), it is copied under the name, still never over a file.
+ */
+async function place(partial: string, target: string, force: boolean): Promise<void> {
+  if (force) return rename(partial, target);
+  try { await link(partial, target); } catch (error) {
+    if (!["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    await copyFile(partial, target, constants.COPYFILE_EXCL);
+  }
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -332,13 +344,25 @@ export const FILE_METHODS: Record<string, Method> = {
     // "<name> (2)", as a browser's Download does; a --path the user named is never renamed.
     const free = !force && !str(params, "path") && !!stored.metadata.voice;
     const ext = extname(named), stem = named.slice(0, named.length - ext.length);
-    let target = named, out;
-    for (let n = 2; !out; n += 1) try { out = await open(target, force ? "w" : "wx", 0o600); } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (free && code === "EEXIST" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
+    // What is at `target` that the save may not go over, as the error that says so; nothing when it may.
+    const taken = async (target: string, code?: string): Promise<CliError | undefined> => {
+      const there = await stat(target).catch(() => undefined);
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
-      if ((code === "EEXIST" || code === "EISDIR") && (await stat(target).catch(() => undefined))?.isDirectory()) throw new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
-      if (code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
+      if (there?.isDirectory()) return new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
+      if ((there && !force) || code === "EEXIST") return new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
+    };
+    let target = named;
+    for (let n = 2, refused = await taken(target); refused; n += 1, refused = await taken(target)) {
+      if (!free || refused.code !== "confirm" || n > 1000) throw refused;
+      target = `${stem} (${n})${ext}`;
+    }
+    // The bytes go beside it first and take its name only once whole: a save that fails (the bytes not on this device, a
+    // full disk) leaves no file, and with --force the one it was to replace as it was. Before, --force emptied that file
+    // as it opened it, and the failure removed it.
+    const partial = join(dirname(target), `.ghostly-save-${process.pid}-${toBase64Url(randomBytes(6))}.partial`);
+    let out: FileHandle | null;
+    try { out = await open(partial, "wx", 0o600); } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
       // The folder it goes in is what is missing (or a file): named alone, as `listen --cursor` names its own. Before,
       // Node's whole path ("No such file or folder: <folder>/<name>") read as if the received file were gone.
       if (code === "ENOENT" || code === "ENOTDIR") {
@@ -364,10 +388,18 @@ export const FILE_METHODS: Record<string, Method> = {
         await out.write(chunk);
         written = chunk.length;
       } else throw new CliError("not_found", "The file's bytes are not on this device");
-      complete = true;
-    } finally {
       await out.close();
-      if (!complete) await rm(target, { force: true });
+      out = null;
+      // --force over what is there. Else never over a file that appeared meanwhile: a voice message steps on to a free name.
+      for (let n = 2; !complete; n += 1) try { await place(partial, target, force); complete = true; } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const refused = code === "EEXIST" || code === "EISDIR" || code === "ENOTEMPTY" ? await taken(target, code) : undefined;
+        if (free && refused?.code === "confirm" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
+        throw refused ?? error;
+      }
+    } finally {
+      await out?.close();
+      await rm(partial, { force: true });
     }
     return { file: fileId, path: target, size: written, name: stored.metadata.name, mime: stored.metadata.mime };
   },
