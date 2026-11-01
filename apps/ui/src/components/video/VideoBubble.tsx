@@ -4,7 +4,7 @@ import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction, statusSize } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { claimPlayback, registerVoicePlayer, releasePlayback } from "../../lib/voicePlayback";
@@ -340,10 +340,10 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     data-testid="video-accept"
                     disabled={noRoom}
                     onClick={() => act("accept")}
-                    className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
+                    className="flex items-center gap-2 max-w-[calc(100%-8px)] px-3 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
                   >
                     <DownloadIcon size={18} />
-                    {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
+                    {t("chat.media.downloadSize", { size: statusSize(file.size) })}
                   </button>
                   {/* A group's video (WISP 503) is downloaded or not: nothing to decline. */}
                   {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
@@ -430,7 +430,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
 
 function DownloadIcon({ size }: { size: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />

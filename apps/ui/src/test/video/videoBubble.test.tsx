@@ -464,6 +464,15 @@ describe("a video not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
   });
 
+  it("Download keeps its size on one line, inside the frame", () => {
+    const file = video();
+    show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
+    const accept = screen.getByTestId("video-accept");
+    // A portrait video in Japanese broke between the number and its unit.
+    expect(accept.textContent).toContain("35.0 MB");
+    expect(accept.className).toContain("max-w-[calc(100%-8px)]");
+  });
+
   it("an offer larger than the room here cannot be accepted", () => {
     const file = video();
     show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 10 * MB });
@@ -580,5 +589,12 @@ describe("the video's box", () => {
     expect(videoBox(100, 1000)).toEqual({ width: 140, height: 330 });
     // Nothing known: 16:9.
     expect(videoBox(undefined, undefined)).toEqual({ width: 300, height: 169 });
+  });
+
+  it("a very wide one keeps room for what is shown over it, letterboxed", () => {
+    // Download, Decline and the gap between take 63 px; a phone's bubble shrinks the box to about 230 px of its 300.
+    expect(videoBox(1600, 200)).toEqual({ width: 300, height: 96 });
+    expect(videoBox(4000, 100)).toEqual({ width: 300, height: 96 });
+    expect(videoBox(1280, 540)).toEqual({ width: 300, height: 127 });
   });
 });
