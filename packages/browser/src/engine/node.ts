@@ -303,6 +303,8 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** How many deleted ids a link remembers: enough to outlast what a peer republishes. */
 const MAX_DELETED_IDS = 500;
+/** A link's `removedRefs` with `ref`, the newest `MAX_DELETED_IDS`. */
+const withRemovedRef = (refs: readonly string[] | undefined, ref: string) => [...(refs ?? []).filter(r => r !== ref), ref].slice(-MAX_DELETED_IDS);
 /**
  * A card that went on the DHT floor or into a hold goes again live (`restoreCards`) only for the newest this many
  * messages of a chat, sent within this long: an old chat's cards are not worth a burst of edits.
@@ -3790,8 +3792,16 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
     if (live.stored.deletedIds?.includes(id)) {
-      // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line.
-      if (edit.rm) this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
+      // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line, and
+      // a pin of it goes.
+      if (edit.rm) {
+        this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
+        if (!live.stored.removedRefs?.includes(edit.id)) {
+          live.stored = { ...live.stored, removedRefs: withRemovedRef(live.stored.removedRefs, edit.id) };
+          await this.writeDeletions(linkId, { removedRefs: live.stored.removedRefs });
+          this.emitState();
+        }
+      }
       return true;
     }
     // The contact deleted its message for everyone (WISP 400 § Delete for everyone): forgotten as a delete here is, a
@@ -3802,7 +3812,7 @@ export class GhostlyNode implements EngineImplementation {
       // after it, `spent_` and a token's digest): never forgotten ahead, or a contact could hide the line of a payment
       // or request it sends next, which a removal never takes (`canRemove`; agents#1587). No text or file has such an id.
       if (!message && PAYMENT_LINE_ID.test(edit.id)) return true;
-      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, true);
+      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, message ?? true);
       return true;
     }
     const message = await db.getMessage(linkId, id);
@@ -4225,12 +4235,12 @@ export class GhostlyNode implements EngineImplementation {
     const out = `${linkId}-out-`;
     const wireId = message.wireId ?? (message.file?.id.startsWith(out) ? message.file.id.slice(out.length) : undefined);
     // Never left this device: deleting it here is all there is.
-    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId, true); return { error: null }; }
+    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
     const written = this.writeDeletions(linkId, { removals: live.stored.removals });
     // Its id to `deletedIds` goes in the same write of the chat's row (forgetMessage adds it before its first await).
-    const forgot = this.forgetMessage(linkId, messageId, true);
+    const forgot = this.forgetMessage(linkId, messageId, message);
     await written;
     await forgot;
     const edits = this.editsFor(linkId);
@@ -4257,7 +4267,7 @@ export class GhostlyNode implements EngineImplementation {
    * values are `live.stored`'s at the time of the call, so the newest of each field wins. `relaxed` (no disk sync of its
    * own, `db.patchLink`) holds only while every change merged into the write is.
    */
-  private writeDeletions(linkId: string, patch: Pick<Partial<StoredLink>, "removals" | "deletedIds">, relaxed = false): Promise<void> {
+  private writeDeletions(linkId: string, patch: Pick<Partial<StoredLink>, "removals" | "deletedIds" | "removedRefs">, relaxed = false): Promise<void> {
     const waiting = this.deletionWrites.get(linkId);
     if (waiting) { Object.assign(waiting.patch, patch); waiting.relaxed &&= relaxed; return waiting.done; }
     const entry = { patch: { ...patch } as Partial<StoredLink>, relaxed, done: Promise.resolve() };
@@ -4274,16 +4284,19 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Forgets one message of a chat on this device, the bytes of its file and any transfer of it, and keeps its id so a
    * copy that comes again is not stored: a delete here, or the contact's own removal (WISP 400 § Delete for everyone),
-   * also of a message not here yet. `removed`: deleted for everyone, so the replies here that quote it lose its line too.
+   * also of a message not here yet. `removed`: deleted for everyone (its row, when the caller read it), so the replies
+   * here that quote it lose its line too, and a pin of it goes (`removedRefs`).
    */
-  private async forgetMessage(linkId: string, messageId: string, removed = false): Promise<void> {
+  private async forgetMessage(linkId: string, messageId: string, removed: StoredMessage | boolean = false): Promise<void> {
     const live = this.links.get(linkId);
     if (!live) return;
+    const ref = removed ? replyRef(removed === true ? { id: messageId, linkId } : removed) : undefined;
     live.stored = {
       ...live.stored,
       deletedIds: [...(live.stored.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS),
+      ...(ref && { removedRefs: withRemovedRef(live.stored.removedRefs, ref) }),
     };
-    void this.writeDeletions(linkId, { deletedIds: live.stored.deletedIds }).catch(() => {});
+    void this.writeDeletions(linkId, { deletedIds: live.stored.deletedIds, ...(ref && { removedRefs: live.stored.removedRefs }) }).catch(() => {});
     void this.hold.forget(linkId, messageId).catch(() => {});
 
     const message = await db.getMessage(linkId, messageId);
@@ -9027,7 +9040,9 @@ export class GhostlyNode implements EngineImplementation {
       ...(stored.profile && !stored.group && live.link?.peerTyping ? typingView(live.link.peerTypingActivity) : {}),
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
-      ...(stored.pin && { pin: pinView(stored.pin) }),
+      // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
+      // The pin is kept as it came, so the same pin said again is no newer.
+      ...(stored.pin && { pin: pinView(stored.pin.id && stored.removedRefs?.includes(stored.pin.id) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
       participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,
