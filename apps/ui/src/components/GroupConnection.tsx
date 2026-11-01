@@ -98,7 +98,7 @@ export function GroupConnection({ group }: { group: GroupView }) {
                   <span className="block truncate text-[11px]" data-testid="group-connection-member-status">{edgeLabel(m, now, t, agoIn(language))}</span>
                 </span>
                 {down && online && !noLinks && <button disabled={busy !== ""} onClick={() => void reconnect(m.edge!.linkId)} data-testid="group-connection-reconnect"
-                  className={`min-h-8 shrink-0 rounded-md px-2 text-accent hover:bg-surface-alt disabled:opacity-40 ${focus}`}>{busy === m.edge!.linkId ? t("group.connection.trying") : t("group.connection.reconnect")}</button>}
+                  className={`min-h-8 shrink-0 rounded-md px-2 text-accent max-md:min-h-11 hover:bg-surface-alt disabled:opacity-40 ${focus}`}>{busy === m.edge!.linkId ? t("group.connection.trying") : t("group.connection.reconnect")}</button>}
               </div>
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) stays out of the list. */}
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) only behind the ⓘ. */}

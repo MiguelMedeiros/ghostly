@@ -285,6 +285,14 @@ describe("Manage groups from this device", () => {
     expect(screen.getByTestId("group-manage-open")).toHaveFocus();
   });
 
+  it("Turn on, Confirm and Cancel are thumb-sized on a phone", async () => {
+    fakeEngine.update({ groups: [adminGroup({ adminOff: true })] });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    expect(await screen.findByTestId("group-manage-open")).toHaveClass("max-md:min-h-11", "max-md:px-3");
+    await user.click(screen.getByTestId("group-manage-open"));
+    for (const id of ["group-manage-confirm", "group-manage-cancel"]) expect(screen.getByTestId(id)).toHaveClass("max-md:min-h-11", "max-md:px-3");
+  });
+
   it("is not shown where admin work is on", async () => {
     fakeEngine.update({ groups: [adminGroup()] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
