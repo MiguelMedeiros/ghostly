@@ -85,7 +85,7 @@ function OwnKey({ view, publish, onPublish, onError }: { view: NostrOwnView; pub
             return view.profile.stale ? t("identities.nostr.profileStaleFrom", from) : t("identities.nostr.profileFrom", from);
           })()}</p>}
           {view.follows && <p className="text-xs text-text-muted" data-testid="nostr-own-follows">{(() => {
-            const count = view.follows.follows.length, at = view.follows.eventAt;
+            const count = view.follows.count, at = view.follows.eventAt;
             if (at) return count === 1 ? t("identities.nostr.youFollowOneAsOf", { time: ago(at) }) : t("identities.nostr.youFollowAsOf", { count, time: ago(at) });
             return count === 1 ? t("identities.nostr.youFollowOne") : t("identities.nostr.youFollow", { count });
           })()}</p>}

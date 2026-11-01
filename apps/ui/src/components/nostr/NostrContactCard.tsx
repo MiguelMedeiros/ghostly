@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { NostrContactView, NostrDraftRequest } from "@ghostly/browser/nostr/types";
+import type { NostrContactView, NostrDraftRequest, NostrNoteView } from "@ghostly/browser/nostr/types";
 import { useEngineState } from "../../lib/engineState";
 import { agoIn } from "../../lib/relativeTime";
 import { useI18n } from "../../contexts/I18nContext";
@@ -16,7 +16,8 @@ import { initial } from "../../lib/initial";
  * whom they follow (kind 3) with direction hints against the person's own list, and their recent notes
  * (kind 1), moderated by the person's own mute list. Every part shows where it came from and when. `compact` (on the
  * Nostr ID card's back) says what loading reveals in one short line. `turning`: that back is still swinging round,
- * and its buttons wait, as the rest of the back's do (ContactIdentitiesPanel.tsx).
+ * and its buttons wait, as the rest of the back's do (ContactIdentitiesPanel.tsx). The engine state carries only how
+ * many posts were loaded: the posts themselves are asked (`nostrContactNotes`) while this card is on screen.
  */
 export function NostrContactCard({ linkId, view, name, compact = false, turning = false }: { linkId: string; view: NostrContactView; name: string; compact?: boolean; turning?: boolean }) {
   const { t, language } = useI18n();
@@ -31,6 +32,7 @@ export function NostrContactCard({ linkId, view, name, compact = false, turning 
   const load = (what: "profile" | "follows" | "notes", more = false) => { setError(""); void engine.call("nostrLoadContact", { linkId, subject: view.subject, what, more }).catch(e => setError(problemLine(e, t))); };
   const loadOwn = (subject: string) => { setError(""); void engine.call("nostrLoadOwn", { subject }).catch(e => setError(problemLine(e, t))); };
   const p = view.profile, f = view.follows, n = view.notes;
+  const notes = useShownNotes(linkId, view, own.map(o => o.mute?.fetchedAt ?? 0).join(" "));
   const profile = p?.profile;
   const myKey = f?.hints?.myKey ?? own[0]?.subject;
   const relays = settings?.relays ?? [];
@@ -89,9 +91,11 @@ export function NostrContactCard({ linkId, view, name, compact = false, turning 
       {/* Content */}
       <div className="space-y-1.5">
         {n && <>
-          {n.authorMuted ? <Notice testId="nostr-notes-muted">{t("identities.nostr.muted")}</Notice> : n.notes.length === 0 ? <p data-testid="nostr-notes-none">{t("identities.nostr.notesNone")}</p> : (
+          {n.authorMuted ? <Notice testId="nostr-notes-muted">{t("identities.nostr.muted")}</Notice> : n.count === 0 ? <p data-testid="nostr-notes-none">{t("identities.nostr.notesNone")}</p>
+            : notes.error ? <Notice tone="error" testId="nostr-notes-error">{problemLine(notes.error, t)}</Notice>
+            : !notes.list ? <p data-testid="nostr-notes-loading">{t("identities.activity.loading")}</p> : (
             <ul className="space-y-2" data-testid="nostr-notes">
-              {n.notes.map(note => (
+              {notes.list.map(note => (
                 <li key={note.id} data-testid="nostr-note" className="rounded-lg border border-border p-2 space-y-0.5">
                   <p className="text-text-primary whitespace-pre-wrap break-words">{note.content}</p>
                   <p className="text-[11px]">{ago(note.createdAt)}{note.reply ? ` · ${t("identities.nostr.aReply")}` : ""}</p>
@@ -113,4 +117,25 @@ export function NostrContactCard({ linkId, view, name, compact = false, turning 
       {publish && <NostrPublishDialog request={publish} onClose={() => setPublish(null)} onDone={() => load("follows")} />}
     </div>
   );
+}
+
+/**
+ * The posts the card shows, asked once per load: again when the posts are loaded anew (their time or counts change) or
+ * the person's mute lists are (`mutes`), never at each engine state. The last list stays up while the next comes.
+ */
+function useShownNotes(linkId: string, view: NostrContactView, mutes: string): { list?: NostrNoteView[]; error?: unknown } {
+  const n = view.notes;
+  const who = `${linkId}\n${view.subject}`;
+  const ask = n && !n.authorMuted && n.count > 0 ? `${who}\n${n.fetchedAt}\n${n.count}\n${n.hidden}\n${mutes}` : "";
+  const [got, setGot] = useState<{ who: string; ask: string; list?: NostrNoteView[]; error?: unknown }>();
+  useEffect(() => {
+    if (!ask) return;
+    let live = true;
+    void engine.call("nostrContactNotes", { linkId, subject: view.subject })
+      .then(list => { if (live) setGot({ who, ask, list }); }, error => { if (live) setGot({ who, ask, error }); });
+    return () => { live = false; };
+  }, [ask, who, linkId, view.subject]);
+  if (!ask || got?.who !== who) return {};
+  if (got.ask !== ask) return got.list ? { list: got.list } : {};
+  return got.error !== undefined ? { error: got.error } : { list: got.list };
 }

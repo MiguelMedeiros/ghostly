@@ -93,7 +93,8 @@ describe("the Nostr social layer in the engine", () => {
     expect(view.follows!.hints).toBeUndefined();
     await engine.loadOwn({ subject: B });
     const own = engine.state().own[0];
-    expect(own).toMatchObject({ subject: B, follows: { follows: [A, C] }, mute: { words: 1, pubkeys: 1, hasPrivate: false }, profile: { found: false } });
+    expect(own).toMatchObject({ subject: B, follows: { count: 2 }, mute: { words: 1, pubkeys: 1, hasPrivate: false }, profile: { found: false } });
+    expect(engine.ownFollowList({ subject: B })).toEqual([A, C]);
     view = engine.linkView("chat")![0];
     expect(view.follows!.hints).toEqual({ followsYou: true, youFollow: true, mutual: 1, myKey: B, myFollowsAt: expect.any(Number) });
   });
@@ -102,24 +103,29 @@ describe("the Nostr social layer in the engine", () => {
     // Not loaded from storage: the previous test saved Bob's mute list there, and this one loads it on purpose below.
     const { engine } = bobsEngine(relay);
     await engine.loadContact({ linkId: "chat", subject: A, what: "notes" });
+    const shown = () => engine.contactNotes({ linkId: "chat", subject: A });
     let view = engine.linkView("chat")![0];
-    expect(view.notes!.notes.length).toBe(20);
-    expect(view.notes!.notes[0].content).toBe("note 24");
+    expect(view.notes!.count).toBe(20);
+    expect(shown().length).toBe(20);
+    expect(shown()[0].content).toBe("note 24");
     expect(view.notes!.more).toBe(true);
     expect(view.notes!.hidden).toBe(0);
     await engine.loadContact({ linkId: "chat", subject: A, what: "notes", more: true });
     view = engine.linkView("chat")![0];
-    expect(view.notes!.notes.length).toBe(25);
+    expect(view.notes!.count).toBe(25);
+    expect(shown().length).toBe(25);
     expect(view.notes!.more).toBe(false);
     expect(relay.requests.at(-1)).toMatchObject({ kinds: [1], authors: [A], limit: 20, until: now - 1000 + 5 - 1 });
     await engine.loadOwn({ subject: B });
     view = engine.linkView("chat")![0];
-    expect(view.notes!.notes.length).toBe(23);
+    expect(view.notes!.count).toBe(23);
+    expect(shown().length).toBe(23);
     expect(view.notes!.hidden).toBe(2);
-    expect(view.notes!.notes.some(n => n.content.includes("casino"))).toBe(false);
+    expect(shown().some(n => n.content.includes("casino"))).toBe(false);
     expect(view.notes!.authorMuted).toBe(false);
     await engine.forgetContact({ linkId: "chat", subject: A });
     expect(engine.linkView("chat")![0].notes).toBeUndefined();
+    expect(shown()).toEqual([]);
   });
 
   it("what a key that is no longer verified had loaded is dropped; auto-load fetches only when the setting says so", async () => {
@@ -174,7 +180,8 @@ describe("the Nostr social layer in the engine", () => {
     expect(draft.template).toMatchObject({ kind: 3, tags: [["p", A]] });
     expect(draft.summary).toMatch(/^Unfollow npub1/);
     await engine.publish({ draftId: draft.draftId, event: finalizeEvent(draft.template, bob) });
-    expect(engine.state().own[0].follows!.follows).toEqual([A]);
+    expect(engine.state().own[0].follows!.count).toBe(1);
+    expect(engine.ownFollowList({ subject: B })).toEqual([A]);
     const again = await engine.draft({ subject: B, action: "follow", target: C });
     expect(again.template.tags).toEqual([["p", A], ["p", C]]);
     relay.add({ kind: 0, tags: [], content: JSON.stringify({ name: "bob", lud16: "bob@wallet.example" }), created_at: now - 50 }, bob);
