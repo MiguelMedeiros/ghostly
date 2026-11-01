@@ -2860,6 +2860,8 @@ export class GhostLink {
 
   /** The last attempt to go live that did not (WISP 100, "Why a chat is not live"); none while live. */
   get liveAttempt(): LiveAttempt | undefined { return this.isDataLinkOpen ? undefined : this.lastAttempt; }
+  /** Automatic dials since the link was last live or its wait started over (`wake`), the one under way included. */
+  get dialAttempts(): number { return this.autoConnectFailures; }
   /**
    * Which side dials this chat to go live: the lower rendezvous key, or the joiner of a first pairing (WISP 100). The
    * other side answers, so what it can tell of a failed attempt is only what reached it.
