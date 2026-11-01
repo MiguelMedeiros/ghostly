@@ -1,4 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
@@ -267,6 +268,42 @@ describe("the emoji/GIF panel", () => {
     viewport(320, 568);
     window.dispatchEvent(new Event("resize"));
     await waitFor(() => expect(height()).toBe(`${Math.round(568 * 0.52)}px`));
+  });
+
+  it("renders again only when it moves: not for a scroll or a resize that leaves it in place, nor for its own grid's scroll", async () => {
+    viewport(390, 844);
+    // The visual viewport a phone has (happy-dom has none): the sheet stands on it.
+    const visual = Object.assign(new EventTarget(), { width: 390, height: 844, offsetLeft: 0, offsetTop: 0 });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: visual });
+    let commits = 0;
+    try {
+      const { user } = renderApp(<Profiler id="composer" onRender={() => { commits++; }}><LockScreenProvider>
+        <MessageInput onSend={onSend} onSendFile={onSendFile} identities={{ peerKey: "peer", contact: "Alice" }} /></LockScreenProvider></Profiler>);
+      const frame = () => act(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
+      const grid = () => screen.getByTestId("emoji-grid");
+      await user.click(smiley());
+      // The grid's first scrolls pick its category (all at the top here) and React checks once more that it stayed:
+      // the grid's own business, not the panel's place.
+      for (let i = 0; i < 2; i++) { fireEvent.scroll(grid()); await frame(); }
+      const before = commits;
+      for (let i = 0; i < 20; i++) {
+        fireEvent.scroll(grid());
+        fireEvent.scroll(window);
+        window.dispatchEvent(new Event("resize"));
+        visual.dispatchEvent(new Event("scroll"));
+        visual.dispatchEvent(new Event("resize"));
+      }
+      await frame();
+      await frame();
+      expect(commits).toBe(before);
+      // A shorter screen (a phone on its side) still changes it.
+      visual.height = 500;
+      visual.dispatchEvent(new Event("resize"));
+      await frame();
+      expect(screen.getByTestId("expression-panel").style.getPropertyValue("--expression-height")).toBe("290px");
+    } finally {
+      Reflect.deleteProperty(window, "visualViewport");
+    }
   });
 
   it("opens on emoji, with categories, a search field and the grid, and a switch at the bottom", async () => {
