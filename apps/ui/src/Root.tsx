@@ -251,7 +251,7 @@ function GroupLinkIntake() {
  * this device does not have. Everything else opened directly gets home put under it (`useAnchorHome`).
  */
 function isIntake(pathname: string): boolean {
-  if (pathname.startsWith("/join/") || /^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null) return true;
+  if (/^\/join\/./.test(pathname) || /^\/?ghostly1/i.test(pathname) || protocolLinkCode(pathname) !== null) return true;
   // The app icon's shortcuts: the sidebar acts on them and takes them out of the history.
   if (pathname === "/new" || pathname === "/scan") return true;
   const rest = pathname.match(/^\/chat\/(.+)$/)?.[1];
@@ -264,6 +264,15 @@ function HomeAnchor() {
   const { hash } = useLocation();
   useAnchorHome((pathname) => isIntake(pathname) || !!namedDeviceLink(pathname, hash));
   return null;
+}
+
+/**
+ * An address with no page. What the intakes above take out of the history at once draws nothing, as before, with no
+ * "No routes matched" warning; anything else goes home, not to an empty screen that a reload keeps.
+ */
+function NoPage() {
+  const { pathname, hash } = useLocation();
+  return isIntake(pathname) || namedDeviceLink(pathname, hash) ? null : <Navigate to="/" replace />;
 }
 
 /**
@@ -337,10 +346,7 @@ export function Root() {
                   <AttentionFeedback />
                   <NameStep />
                   <Routes>
-                    {/* What the intakes above take out of the history at once (a group's link, an invite code, a
-                        web+ghostly: link): nothing drawn for them, as before, and no "No routes matched" warning. */}
-                    <Route path="/join/*" element={null} />
-                    <Route path="/:intake" element={null} />
+                    <Route path="*" element={<NoPage />} />
                     <Route element={<App />}>
                       <Route path="/" element={<Home />} />
                       <Route path="/chat/*" element={<ChatRoute />} />

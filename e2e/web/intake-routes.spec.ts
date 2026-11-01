@@ -32,3 +32,18 @@ test("invite and group links open without a routing warning", { tag: ["@feature:
 
   expect(warnings).toEqual([]);
 });
+
+test("an address with no page goes home, on a phone too, and Back never finds the empty screen", { tag: ["@feature:invite.link"] }, async ({ peer }) => {
+  const bob = await peer("no-page", { mobile: true });
+  for (const address of ["/#/wallets", "/#/join", "/#/join/", "/#/wallet/x", "/#/settings/a/b"]) {
+    await bob.page.goto(address);
+    await expect(bob.page.getByTestId("sidebar"), address).toBeVisible();
+    await expect.poll(() => bob.page.evaluate(() => location.hash), address).toBe("#/");
+  }
+  await bob.page.goBack();
+  await expect(bob.page.getByTestId("sidebar")).toBeVisible();
+
+  // The pages stay as they were, a section of Settings too.
+  await bob.page.goto("/#/settings/advanced");
+  await expect.poll(() => bob.page.evaluate(() => location.hash)).toBe("#/settings/advanced");
+});
