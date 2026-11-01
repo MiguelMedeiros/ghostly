@@ -97,9 +97,9 @@
   "hubs": {
     "auto": "常在线时作为中继",
     "badge": "中继",
-    "badgeHint": "将群组消息转发给与其连接的成员。它能看到谁在何时发言，看不到说了什么。",
     "choice": "中继",
     "exclude": "从不作为中继",
+    "note": "中继将群组消息转发给与其连接的成员。它能看到谁在何时发言，看不到说了什么。",
     "pin": "始终作为中继"
   },
   "join": {
@@ -211,9 +211,8 @@
     "inviteAction": "邀请",
     "invited": "已邀请…",
     "makeAdmin": "转让管理员",
-    "missing": "缺少 {{count}} 条",
-    "missingHint": "本纪元中尚未收到的消息",
-    "missingOne": "缺少 {{count}} 条",
+    "missing": "此成员还有 {{count}} 条消息未送达",
+    "missingOne": "此成员还有 {{count}} 条消息未送达",
     "needsBothHint": "群组需要双方应用都已连接且为最新版本",
     "needsUpdate": "需要更新 Ghostly",
     "noContacts": "所有已配对的联系人都已在群里，或者你还没有联系人。",

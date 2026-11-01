@@ -97,9 +97,9 @@
   "hubs": {
     "auto": "Hub s'il reste allumé",
     "badge": "hub",
-    "badgeHint": "Transmet les messages du groupe aux membres qui lui sont connectés. Il voit qui parle et quand, pas ce qui est dit.",
     "choice": "Hub",
     "exclude": "Jamais hub",
+    "note": "Un hub transmet les messages du groupe aux membres qui lui sont connectés. Il voit qui parle et quand, pas ce qui est dit.",
     "pin": "Toujours hub"
   },
   "join": {
@@ -211,9 +211,8 @@
     "inviteAction": "Inviter",
     "invited": "Invité…",
     "makeAdmin": "Céder l'admin",
-    "missing": "{{count}} manquants",
-    "missingHint": "Messages de cette époque qui ne sont pas encore arrivés",
-    "missingOne": "{{count}} manquant",
+    "missing": "{{count}} messages de ce membre ne sont pas encore arrivés",
+    "missingOne": "{{count}} message de ce membre n'est pas encore arrivé",
     "needsBothHint": "Les groupes demandent que les deux apps soient connectées et à jour",
     "needsUpdate": "Nécessite un Ghostly à jour",
     "noContacts": "Tous vos contacts appairés sont déjà là, ou vous n'en avez pas encore.",

@@ -97,9 +97,9 @@
   "hubs": {
     "auto": "Hub si está siempre activo",
     "badge": "hub",
-    "badgeHint": "Reenvía los mensajes del grupo a los miembros conectados a él. Ve quién habla y cuándo, no lo que se dice.",
     "choice": "Hub",
     "exclude": "Nunca hub",
+    "note": "Un hub reenvía los mensajes del grupo a los miembros conectados a él. Ve quién habla y cuándo, no lo que se dice.",
     "pin": "Siempre hub"
   },
   "join": {
@@ -211,9 +211,8 @@
     "inviteAction": "Invitar",
     "invited": "Invitado…",
     "makeAdmin": "Ceder admin",
-    "missing": "{{count}} faltan",
-    "missingHint": "Mensajes de esta época que aún no llegaron",
-    "missingOne": "falta {{count}}",
+    "missing": "Faltan por llegar {{count}} mensajes de este miembro",
+    "missingOne": "Falta por llegar {{count}} mensaje de este miembro",
     "needsBothHint": "Los grupos necesitan ambas apps conectadas y actualizadas",
     "needsUpdate": "Necesita un Ghostly actualizado",
     "noContacts": "Todos tus contactos emparejados ya están dentro, o aún no tienes ninguno.",

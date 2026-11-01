@@ -97,9 +97,9 @@
   "hubs": {
     "auto": "Hub if always on",
     "badge": "hub",
-    "badgeHint": "Passes the group's messages on to the members it is connected to. It sees who talks when, not what is said.",
     "choice": "Hub",
     "exclude": "Never a hub",
+    "note": "A hub passes the group's messages on to the members it is connected to. It sees who talks when, not what is said.",
     "pin": "Always a hub"
   },
   "join": {
@@ -211,9 +211,8 @@
     "inviteAction": "Invite",
     "invited": "Invited…",
     "makeAdmin": "Hand over admin",
-    "missing": "{{count}} missing",
-    "missingHint": "Messages of this epoch that have not arrived yet",
-    "missingOne": "{{count}} missing",
+    "missing": "{{count}} of their messages have not arrived yet",
+    "missingOne": "{{count}} of their messages has not arrived yet",
     "needsBothHint": "Groups need both apps connected and updated",
     "needsUpdate": "Needs an updated Ghostly",
     "noContacts": "Every paired contact is already in, or you have none yet.",
