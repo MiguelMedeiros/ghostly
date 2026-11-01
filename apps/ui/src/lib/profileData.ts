@@ -6,7 +6,7 @@ import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, registryKey, settingsKeyFor, unregisterProfile } from "./profiles";
 import { retryUnsaved, unreadUnder } from "./storage";
-import { peekFresh, storeKey as peekStoreKey } from "./profilePeek";
+import { clearPeek, peekFresh, storeKey as peekStoreKey } from "./profilePeek";
 import { verifyPassword } from "./settings";
 import { pushPlatform } from "./wakePush";
 import { linkedFilesDatabase } from "./apps/webFiles";
@@ -269,5 +269,7 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   await pushPlatform()?.unsubscribe(id).catch(() => {});
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.
   await forgetDevice(dbName).catch(() => {});
+  // What another profile's peek saw of it (its contacts' keys, link and message ids), and its notice.
+  clearPeek(id);
   unregisterProfile(id);
 }

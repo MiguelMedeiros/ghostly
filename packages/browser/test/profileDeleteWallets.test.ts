@@ -94,6 +94,20 @@ it("deleting a profile takes its device record with it, and leaves another profi
   await closeDevicesDb();
 });
 
+it("deleting a profile forgets what another profile's peek saw of it, and keeps the others' (WISP 04)", async () => {
+  const { mergePeek, peekFresh, storeKey } = await import("../../../apps/ui/src/lib/profilePeek");
+  const gone = registerProfile("peekgone01", "Gone"), kept = registerProfile("peekkept01", "Kept");
+  const chats = [{ linkId: "link1", peer: "peerpubkeyz32", peerSequence: 4, text: "msg-1", held: 0 }];
+  mergePeek(gone.id, { chats });
+  mergePeek(kept.id, { chats });
+  expect(peekFresh(gone.id)).toBe(1);
+  await deleteProfile(gone.id);
+  expect(peekFresh(gone.id)).toBe(0);
+  expect(localStorage.getItem(storeKey())).not.toContain(gone.id);
+  expect(localStorage.getItem(storeKey())).toContain(kept.id);
+  expect(peekFresh(kept.id)).toBe(1);
+});
+
 it("deleting a profile deletes its Breez databases (both of the SDK's), and never another profile's of the same phrase", async () => {
   const mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   const gone = await makeProfile("breezgone1", { "sparkWallet-mode-testnet": { network: "regtest" } });
