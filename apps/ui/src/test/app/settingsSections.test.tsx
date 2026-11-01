@@ -98,6 +98,28 @@ describe("Settings on a phone", () => {
     expect(screen.getByTestId("settings-menu")).toBeInTheDocument();
   });
 
+  it("with the keys: a section opened takes the focus to its title, and Back gives it to the section's line", async () => {
+    windowIs(true);
+    const { user } = renderSettings("/settings");
+    screen.getByTestId("settings-open-network").focus();
+    await user.keyboard("{Enter}");
+    expect(where()).toBe("/settings/network");
+    expect(screen.getByRole("heading", { level: 1, name: "Network" })).toHaveFocus();
+
+    screen.getByTestId("page-back").focus();
+    await user.keyboard("{Enter}");
+    expect(where()).toBe("/settings");
+    expect(screen.getByTestId("settings-open-network")).toHaveFocus();
+
+    // A focus on a control that stays is left where it is.
+    screen.getByTestId("settings-open-about").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("heading", { level: 1, name: "About" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Browser back" }));
+    expect(where()).toBe("/settings");
+    expect(screen.getByRole("button", { name: "Browser back" })).toHaveFocus();
+  });
+
   it("keeps the key options a tap away", async () => {
     windowIs(true);
     const { user } = renderSettings();
