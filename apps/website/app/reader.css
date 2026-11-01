@@ -501,7 +501,8 @@
   text-align: left;
   vertical-align: top;
 }
-.reader-prose th {
+.reader-prose th,
+.reader-prose thead td {
   background: var(--surface);
   color: var(--text);
   font-weight: 650;
