@@ -842,6 +842,17 @@ function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "
   return notAGroup(ctx, params, () => chatOf(ctx, params), command, rest);
 }
 
+/**
+ * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
+ * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
+ * can be edited" (`refused`, exit 1), as if the message were someone else's.
+ */
+function editRefused(message: StoredMessage | undefined, ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
+  if (refused && !message)
+    return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
+  return new CliError(refused ? "refused" : "unavailable", error);
+}
+
 /** The chat link's own wait for a contact (`GhostLink.connect`): `chat connect --timeout` waits at most that long. */
 const CONNECT_MAX_SECONDS = 90;
 
@@ -863,17 +874,6 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
   throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact did not answer. ${ctx.mode === "one-shot"
     ? "Try again later, or keep this profile online with `ghostly daemon --detach`: it reconnects by itself"
     : `It reconnects by itself while this profile is online; ghostly chat wait ${shown} --until live waits for it`}`, { chat: link.id });
-}
-
-/**
- * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
- * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
- * can be edited" (`refused`, exit 1), as if the message were someone else's.
- */
-function editRefused(message: StoredMessage | undefined, ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
-  if (refused && !message)
-    return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
-  return new CliError(refused ? "refused" : "unavailable", error);
 }
 
 /**

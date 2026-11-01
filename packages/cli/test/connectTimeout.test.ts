@@ -22,8 +22,8 @@ describe("chat connect", () => {
   it("takes --timeout, 1 to 90 s (the link's own wait)", () => {
     const command = COMMANDS["chat connect"]!;
     expect(command.usage).toBe("chat connect <chat> [--timeout s]");
-    expect(command.params!(parseArgs(["chat", "connect", "bia", "--timeout", "5"], command.options), { chat: "bia" })).toEqual({ chat: "bia", timeout: 5 });
-    expect(() => command.params!(parseArgs(["chat", "connect", "bia", "--timeout", "91"], command.options), { chat: "bia" })).toThrow(/timeout/);
+    expect(command.params!(parseArgs(["chat", "connect", "bia", "--timeout", "5"], command.options!), { chat: "bia" })).toEqual({ chat: "bia", timeout: 5 });
+    expect(() => command.params!(parseArgs(["chat", "connect", "bia", "--timeout", "91"], command.options!), { chat: "bia" })).toThrow(/timeout/);
   });
 
   it("gives up after --timeout, and says the one-shot's next step", async () => {
