@@ -1,0 +1,1 @@
+Says how long a used ratchet state stays on the disk: the CLI folds a journal that holds one once its snapshot is an hour old, and the promise no longer reaches past what a store can give (a removed file's blocks, the browser's IndexedDB). No wire change.

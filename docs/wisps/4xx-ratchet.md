@@ -145,11 +145,17 @@ Ratchet state is state of one device. It MUST NOT be in a profile backup ([05](0
 
 Plainly: **what was sent over the DHT or held cannot be opened again from the seed**, by anyone, the owner included. What a restore brings back of a chat is the history the backup holds, already opened. Items held for this side before a restore and not picked up are lost unless the sender seals them again ([Held items](#held-items)). A floor text in flight is sent again by the outbox under its stable id, in the new session.
 
+## Old keys on the disk
+
+A store SHOULD NOT keep a used ratchet state on the disk for long. The CLI appends each saved state to its journal, and folds a journal that holds one once its snapshot is an hour old, at a write, a close or a start. So while a profile is in use, what a copy of its folder can open again is what was opened in about the last hour. A profile no longer in use keeps its last hour of states until it next starts.
+
+No app can promise more than its storage gives. A fold removes a file and does not scrub the blocks it was on, on an SSD or a journaling file system. The web app, Desktop and the extension keep the state in the browser's IndexedDB, whose log and compaction they do not control, so how long an old state lasts there is the browser's.
+
 ## Security
 
 What it gives:
 
-- **Forward secrecy per message** on both lanes, once the turn has passed both ways in a session: a floor envelope or held item, once opened and its key dropped, cannot be opened again with anything the device keeps, nor with a participation key stolen later.
+- **Forward secrecy per message** on both lanes, once the turn has passed both ways in a session: a floor envelope or held item, once opened and its key dropped from the state, cannot be opened again with the state or with a participation key stolen later. How soon a dropped key also leaves the disk is the store's ([Old keys on the disk](#old-keys-on-the-disk)).
 - **Recovery after a compromise:** someone who copied a device's ratchet state and stays passive reads what comes until the turn passes twice; each step mixes a new X25519 secret they do not have.
 
 What it does not give:

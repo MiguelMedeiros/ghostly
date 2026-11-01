@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1173,6 +1173,89 @@ describe("messages kept in rows.db", () => {
       request.onerror = () => reject(request.error);
     });
     expect(links).toEqual([{ id: "chat", seedB64: "seed" }]);
+  });
+
+  describe("a chat's old ratchet states (WISP 4xx) do not stay on the disk", () => {
+    const HOUR = 60 * 60_000;
+    const links = async (store: PersistentIndexedDb) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = store.factory.open("ghostly", 1);
+      request.onupgradeneeded = () => { request.result.createObjectStore("links", { keyPath: "id" }); };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const save = (d: IDBDatabase, key: string) => tx(d, ["links"], (s) => { s.links.put({ id: "chat", ratchetState: { v: 1, current: { rk: key } } }); });
+    const age = (dir: string, ms: number) => { const then = new Date(Date.now() - ms); utimesSync(join(dir, "snapshot.bin"), then, then); };
+    const onDisk = (dir: string, name: string) => (existsSync(join(dir, name)) ? readFileSync(join(dir, name)).toString("latin1") : "");
+    const start = async (dir: string) => {
+      const store = await openPersistentIndexedDb(dir);
+      opened.push(store);
+      const d = await links(store);
+      await store.flush();
+      return { store, d };
+    };
+
+    it("a new state folds the journal once the snapshot is an hour old, and the row reads as it was saved", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await save(d, "the old root key");
+      age(dir, HOUR);
+      await save(d, "the new root key");
+      await store.flush();
+      expect(onDisk(dir, "journal.bin")).not.toContain("the old root key");
+      expect(onDisk(dir, "snapshot.bin")).not.toContain("the old root key");
+      d.close();
+      await store.close();
+      const again = await start(dir);
+      expect(await read(again.d.transaction("links").objectStore("links").get("chat"))).toEqual({ id: "chat", ratchetState: { v: 1, current: { rk: "the new root key" } } });
+    });
+
+    it("a close folds a journal that holds one once the snapshot is an hour old", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await save(d, "the old root key");
+      await save(d, "the new root key");
+      age(dir, HOUR);
+      d.close();
+      await store.close();
+      expect(onDisk(dir, "journal.bin")).not.toContain("the old root key");
+      expect(onDisk(dir, "snapshot.bin")).not.toContain("the old root key");
+    });
+
+    it("a start folds what a killed process left, once the snapshot is an hour old", async () => {
+      const dir = folder();
+      const { d } = await start(dir);
+      await save(d, "the old root key");
+      await save(d, "the new root key");
+      const killed = folder();
+      cpSync(dir, killed, { recursive: true });
+      age(killed, HOUR);
+      const { store: again } = await start(killed);
+      expect(again.recovered).toBe(true);
+      expect(onDisk(killed, "journal.bin")).not.toContain("the old root key");
+      expect(onDisk(killed, "snapshot.bin")).not.toContain("the old root key");
+    });
+
+    it("a young snapshot is not written again: a command's close stays cheap", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await save(d, "the old root key");
+      await save(d, "the new root key");
+      age(dir, HOUR - 60_000);
+      d.close();
+      await store.close();
+      expect(onDisk(dir, "journal.bin")).toContain("the old root key");
+    });
+
+    it("an old snapshot is not written again for a journal with no ratchet in it", async () => {
+      const dir = folder();
+      const { store, d } = await start(dir);
+      await tx(d, ["links"], (s) => { s.links.put({ id: "chat", label: "no ratchet here" }); });
+      age(dir, HOUR);
+      await tx(d, ["links"], (s) => { s.links.put({ id: "chat", label: "still none" }); });
+      d.close();
+      await store.close();
+      expect(onDisk(dir, "journal.bin")).toContain("no ratchet here");
+    });
   });
 
   it("moves a profile of format 1 with a journal after it (killed): the journal's overwrites and deletes reach rows.db and its indexes", async () => {
