@@ -91,11 +91,15 @@ export function tabbables(root: HTMLElement): HTMLElement[] {
  * closes it, and focus goes back where it was on close, unless `restore` says no (what it made takes the focus instead).
  * Where it was is nothing to go back to (the page's body, or a row that is gone), `fallback` has it.
  * A layer of its own that holds the focus (a select's list, a menu drawn over the page) keeps its Tab.
+ * While `beside` says so, it is not over the page but a pane beside it (a chat's identities on a wide screen): Tab goes
+ * on to the page, Escape closes it only from inside, F6 goes between it and where the focus was on the page, and on
+ * close the focus goes back only from inside (never pulled from where the person went meanwhile).
  */
-export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void, restore: () => boolean = () => true, fallback?: RefObject<HTMLElement | null>) {
+export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void, restore: () => boolean = () => true, fallback?: RefObject<HTMLElement | null>, beside?: () => boolean) {
   const callback = useRef(onClose); callback.current = onClose;
   const restoring = useRef(restore); restoring.current = restore;
   const back = useRef(fallback); back.current = fallback;
+  const aside = useRef(beside); aside.current = beside;
   // Where the focus goes back to, read as the modal first renders: a field's autoFocus has moved the focus into the
   // modal by the time the effect runs, and that field is gone once the modal closes.
   const opener = useRef<Element | null | undefined>(undefined);
@@ -105,19 +109,34 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
     // that button is where it goes back to.
     const rendered = opener.current as HTMLElement | null;
     const before = rendered?.isConnected ? rendered : document.activeElement as HTMLElement | null;
-    if (ref.current && !ref.current.contains(document.activeElement)) ref.current.focus();
+    const panel = ref.current;
+    if (panel && !panel.contains(document.activeElement)) panel.focus();
     modals.push(ref);
+    // Beside the page, where F6 goes back to: the last place the focus was outside it.
+    let away: HTMLElement | null = before;
+    const focusIn = (e: FocusEvent) => { if (e.target instanceof HTMLElement && !panel?.contains(e.target)) away = e.target; };
     const key = (e: KeyboardEvent) => {
       // Over another one, the newest answers: Escape closes it alone, Tab stays in it.
       if (modals[modals.length - 1] !== ref) return;
+      if (aside.current?.()) {
+        const inside = !!panel?.contains(document.activeElement);
+        if (e.defaultPrevented) return;
+        if (e.key === "Escape" && inside) { e.preventDefault(); callback.current(); }
+        else if (e.key === "F6") { e.preventDefault(); if (!inside) panel?.focus(); else if (away?.isConnected) away.focus(); }
+        return;
+      }
       if (e.key === "Escape" && !e.defaultPrevented) { e.preventDefault(); callback.current(); return; }
       keepTabInside(e, ref.current);
     };
     document.addEventListener("keydown", key);
+    document.addEventListener("focusin", focusIn);
     return () => {
       document.removeEventListener("keydown", key);
+      document.removeEventListener("focusin", focusIn);
       const at = modals.lastIndexOf(ref);
       if (at >= 0) modals.splice(at, 1);
+      const active = document.activeElement;
+      if (aside.current?.() && active && active !== document.body && !panel?.contains(active)) return;
       if (!restoring.current()) return;
       if (before?.isConnected && before !== document.body) before.focus();
       else back.current?.current?.focus();
