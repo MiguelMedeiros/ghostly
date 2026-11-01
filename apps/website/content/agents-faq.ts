@@ -29,7 +29,7 @@ export const agentsFaq = {
     description:
       "Short answers about putting an AI agent on Ghostly: who can give it orders, what leaves the machine, the wallet, and how to audit it.",
   },
-  updated: "October 16, 2026",
+  updated: "November 1, 2026",
   lead: "Short answers for people, and for the AI agents that read this page for them. Each one is meant to be true of the code on GitHub today. If one is not, that is a bug, and I want to hear about it.",
   items: [
     {
@@ -70,7 +70,7 @@ export const agentsFaq = {
     {
       id: "maintainer",
       q: "Who maintains it, and why so many releases?",
-      a: "Miguel Medeiros maintains Ghostly; outside pull requests are closed, and bug reports and ideas go in as GitHub issues. Patch releases come out most days because fixes ship as soon as they are ready: each pull request into dev needs green CI and a review, then lands through a merge train, and a release ships only after the end-to-end suites pass. Security patches can also be released automatically once CI and a release gate pass.",
+      a: "Miguel Medeiros maintains Ghostly; outside pull requests are closed, and bug reports and ideas go in as GitHub issues. Patch releases come out most days because fixes ship as soon as they are ready: each pull request into dev needs green CI (a review is optional), then lands through a merge train, and a release ships only after the end-to-end suites pass. Security patches can also be released automatically once CI and a release gate pass.",
       links: [
         { label: "Releases", href: `${REPO_URL}/releases` },
         { label: "Contributing", href: `${REPO_URL}/blob/main/.github/CONTRIBUTING.md` },
