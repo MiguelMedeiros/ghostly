@@ -35,9 +35,11 @@ const PRESET_COUNTS = Object.fromEntries(PRESETS.map((p) => [p.id, BLOCKS.filter
 
 /**
  * The ARIA radio pattern on a radio group: the arrow keys, Home and End check another radio and take the focus with
- * it, and only the checked radio is a tab stop (`tabIndex` on each one).
+ * it, and only the checked radio is a tab stop (`tabIndex` on each one). With Alt, Ctrl or Meta held the keys stay the
+ * browser's (Alt+Left is Back, Ctrl+End scrolls the page), as on native radios.
  */
 function onRadioKey(e: KeyboardEvent<HTMLElement>, current: number, count: number, check: (i: number) => void) {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
   let next: number;
   if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (current + 1) % count;
   else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (current - 1 + count) % count;
