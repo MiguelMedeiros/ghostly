@@ -145,7 +145,8 @@ export function Sidebar() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showNewGroup, setShowNewGroup] = useState(false);
   const [showNewFolder, setShowNewFolder] = useState(false);
-  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  // "shortcut": opened by the installed app's `#/new`, its Chat row focused, so one press makes the chat.
+  const [newMenuOpen, setNewMenuOpen] = useState<boolean | "shortcut">(false);
   const newMenuRef = useRef<HTMLDivElement>(null), newMoreRef = useRef<HTMLButtonElement>(null);
   const closeNewMenu = () => setNewMenuOpen(false);
   const engineState = useSyncExternalStore(subscribeEngine, engineSnapshot);
@@ -238,7 +239,9 @@ export function Sidebar() {
     if (activeSessionId && pageShown) markSessionAsRead(activeSessionId);
   }, [activeSessionId, pageShown, sessions]);
 
-  // The installed app's shortcuts (manifest.json): `#/new` starts a chat, `#/scan` opens Join with the camera on.
+  // The installed app's shortcuts (manifest.json): `#/new` opens the New menu, `#/scan` opens Join with the camera on.
+  // Any site can send the browser to either address, so neither does anything without a press: a chat made at `#/new`
+  // itself was one more empty chat with a fresh invite on each load, a page sending the browser there again and again.
   // Each address is acted on once (StrictMode runs effects twice), and leaves the history at once (an intake, Root.tsx).
   const [scanOnOpen, setScanOnOpen] = useState(false);
   const shortcutDone = useRef<string | null>(null);
@@ -249,10 +252,10 @@ export function Sidebar() {
     if (!shortcut) { shortcutDone.current = null; return; }
     if (shortcutDone.current === shortcut) return;
     shortcutDone.current = shortcut;
-    // Replaced, so Back never lands on it again (and makes another chat).
+    // Replaced, so Back never lands on it again (and opens it again).
     navigate("/", { replace: true });
     if (shortcut === "/scan") { setScanOnOpen(true); setShowNewChat(true); return; }
-    void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {});
+    setNewMenuOpen("shortcut");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [location.pathname]);
 
@@ -323,6 +326,22 @@ export function Sidebar() {
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
 
   const newChat = () => void createPairedChat().then(id => nav.conversation(chatPath(id)), () => {});
+  // The list's New menu; on the rail only the `#/new` shortcut opens it, from the rail's New.
+  const newMenu = (rail = false) => (
+    <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={!!newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef} focusFirst={newMenuOpen === "shortcut"} {...(rail && { portal: true, align: "start" as const })}>
+      <MenuItem onClick={() => { closeNewMenu(); newChat(); }} hint={t("sidebar.newMenu.chatHint")}
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
+        {t("sidebar.newMenu.chat")}
+      </MenuItem>
+      <MenuItem testId="new-group" onClick={() => { closeNewMenu(); setShowNewGroup(true); }} hint={t("sidebar.newMenu.groupHint")}
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>}>
+        {t("sidebar.newMenu.group")}
+      </MenuItem>
+      <MenuItem testId="new-folder" onClick={() => { closeNewMenu(); setShowNewFolder(true); }} hint={t("sidebar.newMenu.folderHint")} icon={<FolderIcon />}>
+        {t("sidebar.newMenu.folder")}
+      </MenuItem>
+    </Menu>
+  );
   const openTasks = () => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"));
   const openSaved = () => (location.pathname === "/saved" ? nav.home() : nav.place("/saved"));
   const openGroup = (id: string) => { nav.conversation(groupPath(id)); setConfirmDeleteId(null); };
@@ -413,7 +432,10 @@ export function Sidebar() {
             New chat (a group or a folder stay in the list's New menu), Join, and Saved and Tasks while they have something.
             New keeps the list's test id: the dialogs that lose their opener give the focus to it (NameStep, DeleteChatDialog). */}
         <div data-testid="chat-rail-actions" className="flex shrink-0 flex-col border-b border-border py-1">
-          <RailAction testId="sidebar-new-chat" label={t("sidebar.startChat")} title={t("sidebar.newChat")} accent onClick={newChat}><ActionIcon d={NEW_CHAT_PATH} size={18} /></RailAction>
+          <div ref={newMenuRef}>
+            <RailAction testId="sidebar-new-chat" label={t("sidebar.startChat")} title={t("sidebar.newChat")} accent onClick={newChat}><ActionIcon d={NEW_CHAT_PATH} size={18} /></RailAction>
+            {newMenu(true)}
+          </div>
           <RailAction testId="rail-join" label={t("join.submit")} title={t("sidebar.joinChat")} onClick={() => setShowNewChat(true)}><ActionIcon d={JOIN_PATH} size={18} /></RailAction>
           <SidebarTasks rail active={location.pathname === "/tasks"} onOpen={openTasks} />
           <SidebarSaved rail active={location.pathname === "/saved"} onOpen={openSaved} />
@@ -430,23 +452,11 @@ export function Sidebar() {
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
             <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
-            <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
+            <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
             </button>
-            <Menu id="sidebar-new-menu" testId="sidebar-new-menu" open={newMenuOpen} onClose={closeNewMenu} anchorRef={newMenuRef}>
-              <MenuItem onClick={() => { closeNewMenu(); newChat(); }} hint={t("sidebar.newMenu.chatHint")}
-                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5 M18 14v8 M14 18h8"/></svg>}>
-                {t("sidebar.newMenu.chat")}
-              </MenuItem>
-              <MenuItem testId="new-group" onClick={() => { closeNewMenu(); setShowNewGroup(true); }} hint={t("sidebar.newMenu.groupHint")}
-                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M16 11h6" /></svg>}>
-                {t("sidebar.newMenu.group")}
-              </MenuItem>
-              <MenuItem testId="new-folder" onClick={() => { closeNewMenu(); setShowNewFolder(true); }} hint={t("sidebar.newMenu.folderHint")} icon={<FolderIcon />}>
-                {t("sidebar.newMenu.folder")}
-              </MenuItem>
-            </Menu>
+            {newMenu()}
           </div>
           <button onClick={() => setShowNewChat(true)} aria-label={t("join.submit")} title={t("sidebar.joinChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-lg p-2 text-sm font-medium text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"><ActionIcon d={JOIN_PATH} /><span className="sidebar-action-label">{t("sidebar.join")}</span></button>
         </div>
