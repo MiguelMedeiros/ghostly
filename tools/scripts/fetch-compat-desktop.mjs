@@ -25,6 +25,8 @@
  *
  * Linux x64 only (the release's amd64 package). E2E_COMPAT_CACHE moves the cache. Prints the binary.
  * Ends with status 3 and the reason when no tool on this machine unpacks the package: the spec skips on it.
+ * A request to GitHub is tried 3 times on a network error or a 5xx; after that, and on any other failure, it ends with
+ * status 1 and one line saying why (the URL and the error's code).
  */
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -53,21 +55,52 @@ export async function newestPublished(tags, sums, log = () => {}) {
   return null;
 }
 
-const releaseFile = (tag, name) => fetch(`https://github.com/MiguelMedeiros/ghostly/releases/download/${tag}/${name}`);
-
-async function download(tag, name) {
-  const response = await releaseFile(tag, name);
-  if (!response.ok) throw new Error(`GET ${response.url}: ${response.status}`);
-  return Buffer.from(await response.arrayBuffer());
+/** A request that failed: its URL and why (an HTTP status, or the network error's code). */
+export class RequestFailed extends Error {
+  constructor(url, reason) {
+    super(`GET ${url}: ${reason}`);
+    this.reason = reason;
+  }
 }
+
+/** Why a fetch threw: undici puts the network error (UND_ERR_CONNECT_TIMEOUT, ECONNRESET…) in its cause. */
+const networkReason = (error) => error?.cause?.code ?? error?.code ?? error?.cause?.message ?? error?.message ?? String(error);
+
+/**
+ * GETs a URL and reads its body with `read(response)`, trying again after a network error or a 5xx: a connect timeout
+ * to github.com now and then must not fail the e2e. A 404 is an answer, not a blip: `read` gets it. Throws
+ * RequestFailed after the last attempt.
+ */
+export async function get(url, read, { attempts = 3, backoff = 2000, sleep = (ms) => new Promise((done) => setTimeout(done, ms)), log = () => {} } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    let reason;
+    try {
+      const response = await fetch(url);
+      if (response.status < 500) {
+        if (response.ok || response.status === 404) return await read(response);
+        throw new RequestFailed(url, response.status);
+      }
+      reason = response.status;
+    } catch (error) {
+      if (error instanceof RequestFailed) throw error;
+      reason = networkReason(error);
+    }
+    if (attempt >= attempts) throw new RequestFailed(url, `${reason} (${attempts} attempts)`);
+    log(`GET ${url}: ${reason}, trying again`);
+    await sleep(backoff * attempt);
+  }
+}
+
+const releaseFile = (tag, name, read) =>
+  get(`https://github.com/MiguelMedeiros/ghostly/releases/download/${tag}/${name}`, read, { log: (line) => console.error(line) });
+
+const download = (tag, name) => releaseFile(tag, name, async (response) => {
+  if (!response.ok) throw new RequestFailed(response.url, response.status);
+  return Buffer.from(await response.arrayBuffer());
+});
 
 /** A release's SHA256SUMS.txt, or null where the release is not published. */
-async function publishedSums(tag) {
-  const response = await releaseFile(tag, "SHA256SUMS.txt");
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`GET ${response.url}: ${response.status}`);
-  return response.text();
-}
+const publishedSums = (tag) => releaseFile(tag, "SHA256SUMS.txt", (response) => (response.status === 404 ? null : response.text()));
 
 /** The release's package, as its SHA256SUMS.txt says it is. */
 async function checked(tag, sums) {
@@ -128,4 +161,12 @@ async function main(args) {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    await main(process.argv.slice(2));
+  } catch (error) {
+    // One line the spec's log shows, not a stack: which URL, and why.
+    console.error(`fetch-compat-desktop.mjs: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}
