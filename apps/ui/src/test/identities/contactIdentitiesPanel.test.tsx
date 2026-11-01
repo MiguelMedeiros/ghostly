@@ -86,13 +86,39 @@ describe("ContactIdentitiesPanel", () => {
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
       const card = await turnOver(user, 0);
       expect(card).toHaveAttribute("data-status", "failed");
-      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent("Check failed: could not be confirmed (DNS lookup failed)");
+      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: DNS lookup failed$/);
       expect(card).toHaveTextContent("DNS TXT record for example.org");
       expect(within(card).getByTestId("chat-identity-checked")).toHaveTextContent(/^On this device /);
       expect(card).toHaveTextContent("Valid until");
       await user.click(within(card).getByTestId("chat-identity-cards"));
       await vi.waitFor(() => expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument());
       expect(theirs()).toHaveLength(1);
+    });
+
+    it("says why a long domain's check failed in the app's language, whole and in its own direction", async () => {
+      // A domain may be 253 characters; the reason names its record and still reads as the one the app knows how to say.
+      const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.example`;
+      const reason = `No Ghostly TXT record at _ghostly.${domain} (DNS changes can take a few minutes)`;
+      const source = `DNS TXT record at _ghostly.${domain}, via Quad9`;
+      const { user } = open(withReceived([receivedView({ id: "r1", provider: "domain", subject: domain, status: "unconfirmed", error: reason, verified: { subject: domain, source } })]));
+      const card = await turnOver(user, 0);
+      const status = within(card).getByTestId("chat-identity-received-status");
+      expect(status).toHaveTextContent("Check failed: No Ghostly TXT record in the domain's DNS. DNS changes can take a few minutes.");
+      expect(status.textContent!.match(/could not be confirmed/g) ?? []).toHaveLength(0);
+      expect(status.querySelector("bdi")).toHaveTextContent("No Ghostly TXT record in the domain's DNS");
+      expect(card).toHaveTextContent(source);
+    });
+
+    it("says a long domain's failed check in Portuguese, not in English after a generic title", async () => {
+      const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.example`;
+      const reason = `No Ghostly TXT record at _ghostly.${domain} (DNS changes can take a few minutes)`;
+      const onClose = vi.fn();
+      const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={onClose} />, { language: "pt" });
+      document.documentElement.dataset.reduceMotion = "true";
+      act(() => engine.update(withReceived([receivedView({ id: "r1", provider: "domain", subject: domain, status: "unconfirmed", error: reason, verified: { subject: domain, source: "DNS" } })])));
+      const status = within(await turnOver(user, 0)).getByTestId("chat-identity-received-status");
+      expect(status).toHaveTextContent(/Nenhum registro TXT do Ghostly no DNS do domínio/);
+      expect(status).not.toHaveTextContent(/No Ghostly|Algo deu errado/);
     });
 
     it("says who vouches for an attested identity and that a key proof is the holder's own", async () => {

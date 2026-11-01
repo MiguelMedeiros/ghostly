@@ -119,7 +119,7 @@
     "theirProfile": "ملفه العام",
     "title": "الهويات مع {{name}}",
     "unconfirmed": "{{status}}: تعذّر تأكيدها",
-    "unconfirmedWhy": "{{status}}: تعذّر تأكيدها ({{error}})",
+    "unconfirmedWhy": "{{status}}: {{error}}",
     "validity": "الصلاحية"
   },
   "did": {

@@ -174,10 +174,17 @@ const clean = (value: unknown, max: number): string | undefined => {
   return text ? text.slice(0, max) : undefined;
 };
 
+/**
+ * Room for a line that names a domain (up to 253 characters) once or twice: a How line or a reason cut inside the name
+ * names a record that does not exist, and the app no longer knows the reason to say it in the person's language.
+ */
+const SOURCE_MAX = 640;
+const ERROR_MAX = 512;
+
 /** Bounds a provider's result so a buggy provider cannot store or show arbitrary data. */
 export function boundVerifiedIdentity(v: VerifiedIdentity): VerifiedIdentity {
   if (!v || typeof v.subject !== "string" || !IDENTITY_SUBJECT.test(v.subject)) throw new Error("Provider returned an invalid subject");
-  const source = clean(v.source, 120);
+  const source = clean(v.source, SOURCE_MAX);
   if (!source) throw new Error("Provider did not say how it verified");
   const out: VerifiedIdentity = { subject: v.subject, source };
   const attester = clean(v.attester, 253);
@@ -292,7 +299,7 @@ const REVOKED = "Its owner revoked this proof";
 /** Revoked is final: a later lookup that fails or finds nothing (the relays forgot it) does not undo it. */
 const revokedHere = (received: ReceivedIdentity[], id: string) => received.some(r => r.id === id && r.status === "revoked");
 
-const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), 160) ?? "Invalid proof";
+const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), ERROR_MAX) ?? "Invalid proof";
 
 /**
  * A check this side could not finish because of what its own network did: a host it refused to contact, a server
@@ -436,7 +443,7 @@ export class IdentityExchange {
         case "idp-result": {
           const s = id ? this.shared(id) : undefined;
           if (!s || s.status !== "pending") return;
-          const error = frame.ok === true ? undefined : clean(frame.error, 160) ?? "Your contact could not verify it";
+          const error = frame.ok === true ? undefined : clean(frame.error, ERROR_MAX) ?? "Your contact could not verify it";
           await this.setShared({ ...s, status: frame.ok === true ? "accepted" : "rejected", at: this.now(), error },
             { type: "result", side: "mine", proof: s.id, ok: frame.ok === true, error });
           return;
