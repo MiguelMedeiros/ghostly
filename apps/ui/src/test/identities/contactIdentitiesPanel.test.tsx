@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { linkView } from "../fakeEngine";
@@ -257,6 +257,53 @@ describe("ContactIdentitiesPanel", () => {
       expect(facts.textContent).not.toContain("{{");
       expect(isolated(within(card).getByTestId("chat-identity-received-name-source"))).toEqual(["keys.openpgp.org (WKD)"]);
     });
+  });
+
+  /** The panel with the chat's message field before it, as Chat.tsx lays them out. */
+  function besideChat(docked: boolean) {
+    // contact-panel.css hides the backdrop where the panel docks beside the chat (the tests load no stylesheets).
+    const style = document.createElement("style");
+    style.textContent = docked ? ".contact-panel-backdrop{display:none}" : "";
+    document.head.append(style);
+    onTestFinished(() => style.remove());
+    const onClose = vi.fn();
+    const result = renderApp(<div className="chat-pane">
+      <textarea data-testid="composer" aria-label="Message" />
+      <ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={onClose} />
+    </div>);
+    document.documentElement.dataset.reduceMotion = "true";
+    act(() => result.engine.update(withReceived([receivedView({ id: "r1" })])));
+    return { onClose, ...result };
+  }
+
+  it("docked beside the chat, is a region of the page: Tab goes on to the chat, F6 between them, Escape closes it from inside only", async () => {
+    const { user, onClose } = besideChat(true);
+    const panel = screen.getByRole("complementary", { name: "Identities with Alice" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(panel).not.toHaveAttribute("aria-modal");
+    expect(panel).toHaveFocus();
+    const composer = screen.getByTestId("composer");
+    for (let i = 0; i < 14 && document.activeElement !== composer; i++) await user.tab();
+    expect(composer).toHaveFocus();
+    // Escape in the message field is the field's: the panel stays.
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{F6}");
+    expect(panel).toHaveFocus();
+    await user.keyboard("{F6}");
+    expect(composer).toHaveFocus();
+    await user.keyboard("{F6}");
+    await user.tab();
+    expect(screen.getByTestId("chat-identities-close")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("over the chat (its backdrop shown), is a modal dialog: Tab stays in it", async () => {
+    const { user } = besideChat(false);
+    const panel = screen.getByRole("dialog", { name: "Identities with Alice" });
+    expect(panel).toHaveAttribute("aria-modal", "true");
+    for (let i = 0; i < 14; i++) { await user.tab(); expect(panel).toContainElement(document.activeElement as HTMLElement); }
   });
 });
 
