@@ -142,6 +142,31 @@ describe("Settings and the models on this computer", () => {
     await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
   });
 
+  it("the switch turned on with another language's pairs downloaded still asks for what the app's language is missing", async () => {
+    // A Spanish chat set to On came first: es-en and en-pt are here, pt-en is not.
+    desktop.downloaded = new Set(["es-en", "en-pt"]);
+    settings("pt", false);
+    const { user } = renderSettings();
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+    await user.click(screen.getByTestId("settings-translate"));
+    const question = await screen.findByTestId("translate-download");
+    expect(within(question).getByTestId("translate-download-pair")).toHaveTextContent("Português para inglês e de volta, 37 MB");
+    await user.click(within(question).getByTestId("translate-download-yes"));
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(3));
+    expect(asked("translation_download")).toEqual([{ pair: "pt-en" }, { pair: "en-pt" }]);
+  });
+
+  it("the switch turned on with the app's language both ways here asks nothing", async () => {
+    desktop.downloaded = new Set(["pt-en", "en-pt"]);
+    settings("pt", false);
+    const { user } = renderSettings();
+    await waitFor(() => expect(screen.getAllByTestId("settings-translate-pair")).toHaveLength(2));
+    await user.click(screen.getByTestId("settings-translate"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(screen.queryByTestId("translate-download")).not.toBeInTheDocument();
+    expect(loadSettings().translateMessages).toBe(true);
+  });
+
   it("a download that fails says so in the question, with Rust's words behind the ⓘ, and Download again finishes it", async () => {
     settings("pt", false);
     desktop.failNext = "The download did not finish";
