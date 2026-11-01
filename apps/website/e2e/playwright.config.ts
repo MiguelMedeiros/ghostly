@@ -16,7 +16,9 @@ export default defineConfig({
   fullyParallel: true,
   reporter: [["list"]],
   forbidOnly: !!process.env.CI,
-  use: { baseURL: url ?? `http://localhost:${port}` },
+  // A failure leaves its page as it was (error-context.md beside it), which CI keeps: one seen once is still readable.
+  // Not a trace: recording one for every test made the scene specs about a fifth slower.
+  use: { baseURL: url ?? `http://localhost:${port}`, screenshot: "only-on-failure" },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } }, testIgnore: /phone/ },
     { name: "phone", use: { ...devices["Pixel 7"] }, testMatch: /phone.*\.spec\.ts$/ },
