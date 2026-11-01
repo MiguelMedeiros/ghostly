@@ -16,9 +16,11 @@ import { identitiesView, now, receivedView } from "./views";
  */
 const npub = "npub1example";
 const relays = ["wss://relay.test"];
-const note = (id: string, content: string): NostrNoteView => ({ id, createdAt: now() - 60, content, reply: false });
+// One load time for the file: a state built a second later carries the same posts, not posts loaded anew.
+const fetchedAt = now() - 30;
+const note = (id: string, content: string): NostrNoteView => ({ id, createdAt: fetchedAt - 30, content, reply: false });
 const notesView = (patch: Partial<NonNullable<NostrContactView["notes"]>> = {}): NostrContactView => ({
-  subject: npub, npub, notes: { fetchedAt: now() - 30, relays, count: 2, more: false, hidden: 0, authorMuted: false, ...patch },
+  subject: npub, npub, notes: { fetchedAt, relays, count: 2, more: false, hidden: 0, authorMuted: false, ...patch },
 });
 const chat = (nostr: NostrContactView) => ({ links: [linkView({
   pairing: { status: "ready" } as LinkView["pairing"],
@@ -44,13 +46,13 @@ describe("a contact's Nostr posts", () => {
     await act(async () => answer([note("n1", "hello"), note("n2", "again")]));
     expect(screen.getAllByTestId("nostr-note").map(li => li.firstChild!.textContent)).toEqual(["hello", "again"]);
 
-    // Another engine state, same posts: nothing asked.
-    act(() => engine.update(chat(notesView())));
+    // Another engine state, same posts: nothing asked (the ask goes out a microtask after the render, so it is waited).
+    await act(async () => engine.update(chat(notesView())));
     expect(engine.callsTo("nostrContactNotes")).toHaveLength(1);
 
     // Loaded again (older ones added): asked again, the list shown meanwhile.
     fakeEngine.on("nostrContactNotes", () => [note("n1", "hello"), note("n2", "again"), note("n3", "older")]);
-    await act(async () => engine.update(chat(notesView({ count: 3, fetchedAt: now() }))));
+    await act(async () => engine.update(chat(notesView({ count: 3, fetchedAt: fetchedAt + 30 }))));
     expect(engine.callsTo("nostrContactNotes")).toHaveLength(2);
     expect(screen.getAllByTestId("nostr-note")).toHaveLength(3);
   });
