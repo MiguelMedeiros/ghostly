@@ -1335,8 +1335,8 @@ export class Apps {
       // listing URL that moved on (a repository's HEAD), waits until the store lists it.
       const pinned = app.store;
       // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept;
-      // `holds`: what a source's peek showed it holds.
-      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
+      // `holds`: what a source's peek showed it holds; `sequence`: the number its listing or its peek names.
+      const candidates = new Map<string, { sequence: number; digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
       const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
       for (const s of stores) {
         if (pinned !== undefined && s.key !== pinned) continue;
@@ -1346,7 +1346,7 @@ export class Apps {
         for (const url of listingUrls(listing.urls)) {
           const missed = `${s.key} ${app.ref} ${url}`;
           if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
-          candidates.set(url, { ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
+          candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
         }
       }
       if (pinned === undefined) {
@@ -1354,7 +1354,7 @@ export class Apps {
           if (candidates.has(url)) continue;
           try {
             const peek = await this.peekAt(url);
-            if (peek && newer(peek)) candidates.set(url, { holds: peek });
+            if (peek && newer(peek)) candidates.set(url, { sequence: peek.sequence, holds: peek });
           } catch { /* this source does not answer now */ }
         }
       }
@@ -1362,7 +1362,9 @@ export class Apps {
       const revokeRead = new Set<string>();
       const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
       app = withRevocations(app, before ?? []);
-      for (const [url, want] of candidates) {
+      // The newest first, whichever store or source names it (then in the order found): the next is tried only when it
+      // cannot be taken.
+      for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
         // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
         // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
         // index lists the same.
