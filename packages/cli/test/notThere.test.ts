@@ -61,7 +61,7 @@ describe("an identity proof or a draft that is not there", () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "identity.remove", { id: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No identity proof "nope" (ghostly identity list)' });
     await expect(callApi(ctx, "identity.withdraw", { chat: "Alice", id: "nope" })).rejects.toMatchObject({ code: "not_found", message: 'No identity proof "nope" shared in this chat (ghostly identity contact chat-one)' });
-    await expect(callApi(ctx, "identity.cancel", { draft: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No such draft here: it is kept by the daemon that made it, for an hour" });
+    await expect(callApi(ctx, "identity.cancel", { draft: "nope" })).rejects.toMatchObject({ code: "not_found", message: "No such draft here: it is kept by the daemon that made it, for 30 minutes and while fewer than 4 newer ones wait" });
     expect(node.removeIdentityProof).not.toHaveBeenCalled();
     expect(node.withdrawIdentityProof).not.toHaveBeenCalled();
     expect(node.cancelIdentityProof).not.toHaveBeenCalled();

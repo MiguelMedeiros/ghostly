@@ -135,4 +135,35 @@ describe("identity signers on Node", () => {
     await expect(callApi(ctx, "identity.complete", { draft: domain.draft })).resolves.toMatchObject({ done: true });
     expect(node.completeIdentityProof).toHaveBeenCalledWith({ draftId: domain.draft, evidence: { method: "dns" } });
   });
+
+  /**
+   * The engine keeps a draft 30 minutes and four at once. `identity add` promised an hour (`expiresInSeconds: 3600`) and
+   * kept every draft, so a draft the engine had dropped went on to it and failed as "This proof was started too long ago".
+   */
+  it("keeps a draft as long as the engine does, and says so", async () => {
+    const { ctx, node } = fake();
+    let n = 0;
+    node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => ({
+      draftId: `keep${++n}`, binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) },
+    }));
+    node.completeIdentityProof.mockResolvedValue({ id: "p1", provider: "domain", subject: "example.com", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] });
+    const gone = { code: "not_found", message: "No such draft here: it is kept by the daemon that made it, for 30 minutes and while fewer than 4 newer ones wait" };
+    const add = () => callApi(ctx, "identity.add", { provider: "domain", subject: "example.com", signer: "dns" }) as Promise<{ draft: string; expiresInSeconds: number }>;
+
+    const added = [];
+    for (let i = 0; i < 5; i++) added.push(await add());
+    expect(added[0].expiresInSeconds).toBe(30 * 60);
+    await expect(callApi(ctx, "identity.complete", { draft: added[0].draft })).rejects.toMatchObject(gone);
+    await expect(callApi(ctx, "identity.complete", { draft: added[1].draft })).resolves.toMatchObject({ done: true });
+    expect(node.completeIdentityProof).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const old = await add();
+      vi.setSystemTime(Date.now() + 31 * 60_000);
+      await expect(callApi(ctx, "identity.complete", { draft: old.draft })).rejects.toMatchObject(gone);
+      await expect(callApi(ctx, "identity.cancel", { draft: old.draft })).rejects.toMatchObject(gone);
+    } finally { vi.useRealTimers(); }
+    expect(node.completeIdentityProof).toHaveBeenCalledTimes(1);
+  });
 });
