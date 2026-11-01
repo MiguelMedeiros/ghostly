@@ -101,6 +101,20 @@ export function becomeThePeer(lockName: string, onWaiting: () => void): Promise<
   });
 }
 
+/**
+ * Resolves once another page asks for the lock this page holds (`becomeThePeer`), or after `timeoutMs`. A page that
+ * must not run what it loaded (another tab took a new version) waits here before it reloads, so the page that asks
+ * gets the lock first instead of racing this one's reload for it. Also resolves where the browser cannot tell.
+ */
+export async function untilAskedFor(lockName: string, { timeoutMs = 10_000, everyMs = 100 } = {}): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await Promise.resolve().then(() => navigator.locks.query()).catch(() => null);
+    if (!state || state.pending?.some((request) => request.name === lockName)) return;
+    await new Promise((resolve) => setTimeout(resolve, everyMs));
+  }
+}
+
 /** The single-peer lock cannot be had in this browser (see `becomeThePeer`). */
 export class PeerLockUnavailable extends Error {
   constructor(cause: unknown) {
