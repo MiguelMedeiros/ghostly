@@ -162,6 +162,17 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     await expect(view).toHaveCount(0);
     await expect(person.page).toHaveURL(chat);
     await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+
+    // Open, and the contact quits Ghostly: the view says so in the app's words, in place of the app's last page (it
+    // stayed up, and a click in it waited 75 s for the services worker's English "The app did not answer in time.").
+    await open.click();
+    await expect(demo.locator("#title")).toHaveText("Hello from the demo", { timeout: 60_000 });
+    await bot.stop();
+    const offline = person.page.getByTestId("service-view-offline");
+    await expect(offline).toBeVisible({ timeout: 120_000 });
+    await expect(offline).toContainText("Your contact is offline, so Demo cannot open now.");
+    await expect(person.page.getByTestId("service-view-frame")).toBeHidden();
+    await expect(person.page.getByTestId("service-view-retry")).toBeVisible();
   } catch (error) {
     await bot.attachLogs(info);
     throw error;

@@ -74,7 +74,8 @@ export type ServiceReply =
   | { type: "head"; status: number; headers: [string, string][] }
   | { type: "chunk"; bytes: Uint8Array }
   | { type: "end" }
-  | { type: "error"; status: number; text: string };
+  /** `lang` and `dir`: the profile's, for the page that says it in place of the app's. */
+  | { type: "error"; status: number; text: string; lang?: string; dir?: "ltr" | "rtl" };
 
 /** The worker tells the app it no longer wants the rest (the page stopped reading). */
 export interface ServiceCancel { type: "cancel" }

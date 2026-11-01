@@ -15,7 +15,7 @@ import { renderApp } from "../render";
  * makes way for a call that rings or starts, and does not open over one. Desktop opens it in a window of its own.
  */
 const host = parseServicesHost("https://*.svc.ghostly.example")!;
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Offline", retry: "Try again", hostError: () => null };
 const open = () => openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: "o".repeat(52), service: "demo", title: "demo",
   send: async () => { throw new Error("not asked"); }, words });
 

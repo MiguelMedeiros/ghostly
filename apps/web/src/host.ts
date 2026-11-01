@@ -5,7 +5,7 @@ import { RELEASES_URL } from "../../ui/src/lib/settings";
 import { builtInAppOption } from "../../ui/src/lib/apps/builtIns";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
-import { DHT_POLL_INTERVALS, RelayTransport } from "@ghostly/core";
+import { DHT_POLL_INTERVALS, GhostlyHttpError, RelayTransport } from "@ghostly/core";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -137,10 +137,18 @@ export const webHost = createInPageHost({
     const title = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId)?.name ?? serviceId;
     // Loaded when first used: nothing of it is in the app's start.
     const { openServiceView } = await import("./svc/opener");
+    // The contact is offline once their app no longer says what it shares (the chat's strip drops the app then): a
+    // request is answered as unreachable at once, rather than waiting on a connection that is not coming.
+    const offline = () => { const link = engine.linkByPeer(peerPubKeyZ32); return !link || link.peerServices === null; };
     await openServiceView({
       host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title,
-      send: (request) => node.request(peerPubKeyZ32, serviceId, request),
-      words: { unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }), hostError: (headers) => hostErrorText(headers, title, t) },
+      send: (request) => offline() ? Promise.reject(new GhostlyHttpError("offline", "Your contact is offline")) : node.request(peerPubKeyZ32, serviceId, request),
+      presence: { offline, watch: (changed) => engine.subscribe(changed) },
+      words: {
+        unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
+        tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
+        hostError: (headers) => hostErrorText(headers, title, t),
+      },
     });
   },
 });

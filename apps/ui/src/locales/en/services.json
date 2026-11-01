@@ -34,6 +34,8 @@
     "elsewhere": "{{app}} tried to send you somewhere else, outside what your contact shares.",
     "failed": "The request failed.",
     "notAnswering": "{{app}} is not answering on your contact's machine. Ask them to check that it is running.",
+    "offline": "Your contact is offline, so {{app}} cannot open now. It opens again here when they are back.",
+    "retry": "Try again",
     "tooSlow": "{{app}} did not answer in time on your contact's machine. Try again in a moment.",
     "unreachable": "This service is not reachable. Services exist while their ghost is online.",
     "unshared": "{{app}} is no longer shared with you."
