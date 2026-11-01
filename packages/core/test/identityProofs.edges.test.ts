@@ -335,6 +335,39 @@ describe("verifying a presentation", () => {
     expect(result(w)).toMatchObject({ id, ok: true });
   });
 
+  it("refuses a proof this side found revoked, even when the revocation lookup now finds nothing", async () => {
+    const w = world();
+    const id = w.addProof();
+    await w.peers.bob.receive(await present(w, id));
+    w.state.revoked.add(id);
+    expect((await w.peers.bob.recheck(id)).status).toBe("revoked");
+    // The record is gone from the relays (or the lookup fails): the contact presents the same proof again.
+    w.state.revoked.delete(id);
+    await w.peers.bob.receive(await present(w, id));
+    expect(result(w)).toEqual({ t: "idp-result", id, ok: false, error: "Its owner revoked this proof" });
+    w.state.revokedFails = true;
+    await w.peers.bob.receive(await present(w, id));
+    expect(result(w)).toMatchObject({ id, ok: false });
+    expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "revoked"]]);
+    expect(w.ledgers.bob.challenges).toEqual([]);
+  });
+
+  it("refuses a proof found revoked while its presentation was being checked", async () => {
+    const w = world();
+    const id = w.addProof();
+    await w.peers.bob.receive(await present(w, id));
+    const frame = await present(w, id);
+    w.verify.mockImplementationOnce(async s => {
+      w.state.revoked.add(s.id);
+      await w.peers.bob.recheck(s.id, { revocationOnly: true });
+      w.state.revoked.delete(s.id);
+      return { subject: SUBJECT, source: "Test" };
+    });
+    await w.peers.bob.receive(frame);
+    expect(result(w)).toEqual({ t: "idp-result", id, ok: false, error: "Its owner revoked this proof" });
+    expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "revoked"]]);
+  });
+
   it("refuses evidence the provider rejects, and a presentation signed for another nonce", async () => {
     const w = world();
     const id = w.addProof({ evidence: { for: "someone else" } });
