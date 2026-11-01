@@ -260,6 +260,17 @@ export function MessageInput({
     if (input && (!active || active === document.body || active === input)) input.focus({ preventScroll: true });
   }, [disabled]);
 
+  // A conversion's Cancel goes with it, also in a chat opened again meanwhile, and its focus would drop to the page. The
+  // ref's cleanup runs while the button is still there. On a touch screen the field would bring up the keyboard: the +.
+  const cancelHadFocus = useRef(false);
+  const cancelRef = useCallback((button: HTMLButtonElement) => () => { cancelHadFocus.current = document.activeElement === button; }, []);
+  useLayoutEffect(() => {
+    if (!cancelHadFocus.current) return;
+    cancelHadFocus.current = false;
+    const active = document.activeElement;
+    if (!locked && (!active || active === document.body)) (touchOnly() ? plusRef : textareaRef).current?.focus({ preventScroll: true });
+  });
+
   // Answering a message: the words go in the field at once, as in WhatsApp.
   const replyKey = reply?.key;
   useEffect(() => {
@@ -942,8 +953,8 @@ export function MessageInput({
         </span>
       )}
       {shownConverting && (
-        <button type="button" data-testid="video-convert-cancel" onClick={() => cancelConverting(filesId, shown)}
-          className="shrink-0 cursor-pointer border-none bg-transparent p-0 text-[13px] font-medium text-accent hover:underline">
+        <button ref={cancelRef} type="button" data-testid="video-convert-cancel" onClick={() => cancelConverting(filesId, shown)}
+          className="min-h-6 max-md:min-h-11 shrink-0 cursor-pointer border-none bg-transparent px-1 py-0 text-[13px] font-medium text-accent hover:underline">
           {t("common.cancel")}
         </button>
       )}

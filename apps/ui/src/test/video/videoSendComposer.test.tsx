@@ -1,5 +1,5 @@
 import { act, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import type { PrepareOptions, PreparedVideo } from "../../lib/videoSend";
@@ -133,6 +133,121 @@ describe("a video chosen to send", () => {
     expect(first.options.signal?.aborted).toBe(true);
     await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
     expect(onSendFile).toHaveBeenCalledTimes(1);
+  });
+
+  describe("its Cancel", () => {
+    const touchScreen = (touch: boolean) => {
+      const matchMedia = window.matchMedia.bind(window);
+      vi.spyOn(window, "matchMedia").mockImplementation((query: string) => query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+        ? ({ ...matchMedia(query), matches: query === "(any-pointer: coarse)" ? touch : !touch } as MediaQueryList) : matchMedia(query));
+    };
+    const stoppable: typeof converter.convert = (_file, { signal }) => new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError")));
+    });
+
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it("is a target of at least 24 px, 44 on a phone", async () => {
+      converter.convert = stoppable;
+      const { user } = composer();
+      await user.upload(screen.getByTestId("media-input"), mov());
+      const cancel = await screen.findByTestId("video-convert-cancel");
+
+      expect(cancel).toHaveClass("min-h-6", "max-md:min-h-11", "px-1");
+      await user.click(cancel);
+      await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
+    });
+
+    it("focused when the first of two videos is done: the focus goes to the message field while that one is sent", async () => {
+      const runs = new Map<string, () => void>();
+      converter.convert = (file, { signal }) => new Promise((resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("stopped", "AbortError")));
+        runs.set(file.name, () => resolve({ file: new File(["mp4"], file.name.replace(/\.MOV$/, ".mp4"), { type: "video/mp4" }) }));
+      });
+      const { user } = composer();
+      await user.upload(screen.getByTestId("media-input"), mov());
+      await waitFor(() => expect(runs.has("IMG_0001.MOV")).toBe(true));
+      await user.upload(screen.getByTestId("media-input"), new File(["second video"], "IMG_0002.MOV", { type: "video/quicktime" }));
+      await waitFor(() => expect(runs.has("IMG_0002.MOV")).toBe(true));
+      screen.getByTestId("video-convert-cancel").focus();
+      runs.get("IMG_0001.MOV")!();
+
+      await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByTestId("file-preparing")).toHaveTextContent("IMG_0002.MOV"));
+      expect(screen.getByRole("textbox")).toHaveFocus();
+      runs.get("IMG_0002.MOV")!();
+      await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
+    });
+
+    it("focused when its conversion, chosen before the chat was left, ends: the focus goes to the message field", async () => {
+      let finish!: () => void;
+      converter.convert = () => new Promise((resolve) => {
+        finish = () => resolve({ file: new File(["mp4"], "IMG_0001.mp4", { type: "video/mp4" }) });
+      });
+      const inChat = () => <LockScreenProvider><MessageInput draftId="video-focus" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>;
+      const first = renderApp(inChat());
+      await first.user.upload(screen.getByTestId("media-input"), mov());
+      await screen.findByTestId("video-convert-cancel");
+      first.unmount();
+
+      renderApp(inChat());
+      screen.getByTestId("video-convert-cancel").focus();
+      finish();
+
+      await waitFor(() => expect(screen.queryByTestId("video-convert-cancel")).toBeNull());
+      expect(screen.getByRole("textbox")).toHaveFocus();
+    });
+
+    it("pressed: goes to the message field", async () => {
+      converter.convert = stoppable;
+      const { user } = composer();
+      await user.upload(screen.getByTestId("media-input"), mov());
+      await user.click(await screen.findByTestId("video-convert-cancel"));
+
+      await waitFor(() => expect(screen.queryByTestId("video-convert-cancel")).toBeNull());
+      expect(screen.getByRole("textbox")).toHaveFocus();
+    });
+
+    it("on a touch screen: goes to the +, so the keyboard stays down", async () => {
+      touchScreen(true);
+      converter.convert = stoppable;
+      const { user } = composer();
+      await user.upload(screen.getByTestId("media-input"), mov());
+      await user.click(await screen.findByTestId("video-convert-cancel"));
+
+      await waitFor(() => expect(screen.queryByTestId("video-convert-cancel")).toBeNull());
+      expect(screen.getByTestId("composer-more")).toHaveFocus();
+    });
+
+    it("the conversion ends by itself: goes to the message field", async () => {
+      let finish!: () => void;
+      converter.convert = () => new Promise((resolve) => {
+        finish = () => resolve({ file: new File(["mp4"], "IMG_0001.mp4", { type: "video/mp4" }) });
+      });
+      const { user } = composer();
+      await user.upload(screen.getByTestId("media-input"), mov());
+      (await screen.findByTestId("video-convert-cancel")).focus();
+      finish();
+
+      await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.queryByTestId("video-convert-cancel")).toBeNull());
+      expect(screen.getByRole("textbox")).toHaveFocus();
+    });
+
+    it("the focus is elsewhere: it stays there", async () => {
+      let finish!: () => void;
+      converter.convert = () => new Promise((resolve) => {
+        finish = () => resolve({ file: new File(["mp4"], "IMG_0001.mp4", { type: "video/mp4" }) });
+      });
+      const { user } = composer();
+      await user.upload(screen.getByTestId("media-input"), mov());
+      await screen.findByTestId("video-convert-cancel");
+      screen.getByTestId("composer-more").focus();
+      finish();
+
+      await waitFor(() => expect(screen.queryByTestId("video-convert-cancel")).toBeNull());
+      expect(screen.getByTestId("composer-more")).toHaveFocus();
+    });
   });
 
   it("one this device cannot convert goes as it is, and the sender is told", async () => {
