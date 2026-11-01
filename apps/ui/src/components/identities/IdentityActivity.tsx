@@ -78,7 +78,7 @@ export function IdentityActivity({ provider, subject, profile, links }: { provid
       </ol>}
       {posts?.hidden ? <p className="identity-activity-note" data-testid="contact-activity-hidden">{t("identities.activity.hidden", { count: posts.hidden })}</p> : null}
       {posts?.more && <button type="button" className="identity-activity-button" data-testid="contact-activity-more" aria-disabled={loading === "more" || undefined} onClick={more}>{loading === "more" ? t("identities.activity.loading") : t("identities.activity.more")}</button>}
-      {error && posts && <p className="identity-activity-note" role="alert" data-testid="contact-activity-error">{error}</p>}
+      {error && posts && <p className="identity-activity-note" role="alert" data-testid="contact-activity-error">{t("identities.activity.error", { error })}</p>}
 
       {hosts.length > 0 && <p className="identity-activity-source" data-testid="contact-activity-source">{t("identities.activity.source", { hosts: hostList(hosts, t) })}</p>}
     </section>

@@ -526,6 +526,8 @@
   },
   "relays": {
     "atLeastOne": "Informe pelo menos um endereço de relay",
+    "noneAnswered": "Os relays não responderam",
+    "noneAnsweredNext": "Verifique sua conexão e tente de novo.",
     "notAddress": "Não é um endereço de relay: {{address}}",
     "useHttps": "Use https:// no endereço do relay: {{address}}"
   },

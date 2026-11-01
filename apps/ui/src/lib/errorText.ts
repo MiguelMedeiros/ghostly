@@ -581,6 +581,8 @@ const RULES: readonly Rule[] = [
   // the address typed stays in the line, which has no ⓘ.
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>\S+)$/, key: "errors.relays.notAddress" },
+  // A read that no Nostr relay answered: offline, or the relays blocked (engine/nostrSocial.ts, profiles/activity.ts, readers.ts).
+  exact("No relay answered", "errors.relays.noneAnswered", "errors.relays.noneAnsweredNext"),
   exact("Choose a picture", "errors.picture.choose"),
   exact("That picture is too large (max 20 MB)", "errors.picture.tooLarge"),
   exact("This picture cannot be read here. Try a JPEG or PNG.", "errors.picture.unreadableTryJpeg"),
