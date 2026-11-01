@@ -252,8 +252,18 @@ describe("GroupMembersDialog", () => {
     expect(contacts[2]).toHaveTextContent("Needs an updated Ghostly");
     expect(contacts[3]).toHaveTextContent("Not connected");
     expect(screen.getAllByTestId("group-invite")).toHaveLength(1);
+    // Why, in words on the page: a tooltip never shows on a phone, where the row read "Not connected" and nothing more.
+    expect(screen.getByTestId("group-invite-why")).toHaveTextContent("Groups need both apps connected and updated");
     await user.click(within(contacts[0]).getByTestId("group-invite"));
     expect(engine.callsTo("inviteToGroup")).toEqual([{ groupId: "group-1", linkId: "link-carol" }]);
+  });
+
+  it("says nothing of why when every contact can be invited", () => {
+    members_(groupView({ status: "active", isAdmin: true, members, invited: ["link-pending"] }), [
+      paired({ id: "link-carol", label: "Carol" }),
+      paired({ id: "link-pending", peerNick: "Dan", groups: false, dataLink: "idle" }),
+    ]);
+    expect(screen.queryByTestId("group-invite-why")).not.toBeInTheDocument();
   });
 
   it("gives the group's, each member's and each contact's name its own direction, so in Arabic a Latin name is cut at its end", () => {
