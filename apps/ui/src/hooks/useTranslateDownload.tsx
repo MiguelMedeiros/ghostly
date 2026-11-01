@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { TranslateDownloadDialog } from "../components/TranslateDownloadDialog";
 import { useI18n } from "../contexts/I18nContext";
 import { downloadBytes, downloadTranslation, translationStatus, type TranslationStatus } from "../desktop/translate";
@@ -7,6 +7,37 @@ import type { Problem } from "../lib/problemText";
 import type { Language } from "../lib/settings";
 import { forgetTranslations } from "../lib/translateReceived";
 import { firstPairs, readingPairs } from "../lib/translateSettings";
+
+interface Asked { status: TranslationStatus; from: string; to: string; back: boolean; pairs: string[]; bytes: number }
+
+/**
+ * A download goes on in Desktop whatever the app shows (it has no cancel), for minutes with the engine: closing the
+ * question or leaving Settings leaves it running. So what it is doing is the app's, not the question's.
+ */
+interface Downloads {
+  running: boolean;
+  /** The pairs the last download brought; a new list each time one ends, also one that failed midway. */
+  finished: readonly string[];
+  /** It failed with its question gone: `useTranslateDownloadFailure` asks again. */
+  failed: { asked: Asked; problem: Problem } | null;
+}
+
+let downloads: Downloads = { running: false, finished: [], failed: null };
+const listeners = new Set<() => void>();
+const setDownloads = (change: Partial<Downloads>) => {
+  downloads = { ...downloads, ...change };
+  listeners.forEach((listener) => listener());
+};
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+};
+const useDownloads = () => useSyncExternalStore(subscribe, () => downloads);
+
+/** Languages are downloading now, whoever asked: Settings says so. */
+export const useTranslateDownloading = () => useDownloads().running;
+
+const samePairs = (a: Asked | null, pairs: readonly string[]) => !!a && a.pairs.every((pair) => pairs.includes(pair));
 
 /**
  * Turning translation on (the Settings switch, or On for one chat) asks for the models it needs when they are not on
@@ -18,9 +49,23 @@ import { firstPairs, readingPairs } from "../lib/translateSettings";
  */
 export function useTranslateDownload(downloaded?: () => void) {
   const { t } = useI18n();
-  const [asking, setAsking] = useState<{ status: TranslationStatus; from: string; to: string; back: boolean; pairs: string[]; bytes: number } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState<Asked | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
+  const { running, finished } = useDownloads();
+
+  const onScreen = useRef<Asked | null>(null);
+  useEffect(() => {
+    onScreen.current = asking;
+    return () => { onScreen.current = null; };
+  }, [asking]);
+
+  const seen = useRef(finished);
+  useEffect(() => {
+    if (seen.current === finished) return;
+    seen.current = finished;
+    setAsking((was) => samePairs(was, finished) ? null : was);
+    downloaded?.();
+  }, [finished, downloaded]);
 
   const ask = useCallback(async (language: Language, chatLanguage?: string | null) => {
     const first = chatLanguage ? null : firstPairs(language);
@@ -38,25 +83,43 @@ export function useTranslateDownload(downloaded?: () => void) {
     setAsking({ status, ...wanted, bytes });
   }, []);
 
-  const download = async (question: NonNullable<typeof asking>) => {
-    setBusy(true);
+  const download = async (question: Asked) => {
     setProblem(null);
+    setDownloads({ running: true, failed: null });
+    const brought: string[] = [];
     try {
       // One after the other; a pair already here answers at once, so Download again fetches only what is missing.
-      for (const pair of question.pairs) await downloadTranslation(pair);
-      setAsking(null);
+      for (const pair of question.pairs) { await downloadTranslation(pair); brought.push(pair); }
     } catch (cause) {
-      setProblem({ tone: "error", title: t("translate.download.failed"), next: t("translate.download.failedNext"), detail: rawError(cause) });
+      const failure: Problem = { tone: "error", title: t("translate.download.failed"), next: t("translate.download.failedNext"), detail: rawError(cause) };
+      if (onScreen.current === question) setProblem(failure);
+      else setDownloads({ failed: { asked: question, problem: failure } });
     } finally {
-      setBusy(false);
       forgetTranslations();
-      downloaded?.();
+      setDownloads({ running: false, finished: brought });
     }
   };
 
+  const askAgain = useCallback((failed: NonNullable<Downloads["failed"]>) => {
+    setProblem(failed.problem);
+    setAsking(failed.asked);
+  }, []);
+
   const question = asking && (
     <TranslateDownloadDialog from={asking.from} to={asking.to} back={asking.back} bytes={asking.bytes}
-      engine={!asking.status.runtime} busy={busy} problem={problem} onNotNow={() => setAsking(null)} onDownload={() => void download(asking)} />
+      engine={!asking.status.runtime} busy={running} problem={problem} onNotNow={() => setAsking(null)} onDownload={() => void download(asking)} />
   );
-  return { ask, question };
+  return { ask, question, askAgain };
+}
+
+/** The question again for a download that failed with its own gone, for `TranslateDownloadFailure` to render. */
+export function useTranslateDownloadFailure() {
+  const { question, askAgain } = useTranslateDownload();
+  const { failed } = useDownloads();
+  useEffect(() => {
+    if (!failed) return;
+    setDownloads({ failed: null });
+    askAgain(failed);
+  }, [failed, askAgain]);
+  return question;
 }

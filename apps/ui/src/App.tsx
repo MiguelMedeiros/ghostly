@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { ListNotices } from "./components/ListNotices";
 import { MobileTabBar } from "./components/MobileTabBar";
 import { InstallSteps } from "./components/InstallApp";
+import { TranslateDownloadFailure } from "./components/TranslateDownloadFailure";
 import { Chat } from "./pages/Chat";
 import { chatRouteSession } from "./lib/url";
 import { offerSession } from "./lib/lockedRing";
@@ -237,6 +238,7 @@ export function App() {
           )}
         </main>
         <InstallSteps />
+        <TranslateDownloadFailure />
       </div>
     );
   }
@@ -263,6 +265,7 @@ export function App() {
       {tabs && <NowPlayingBar key="playing" className="shrink-0 border-t" />}
       {tabs && <MobileTabBar />}
       <InstallSteps />
+      <TranslateDownloadFailure />
     </div>
   );
 }

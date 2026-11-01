@@ -224,6 +224,7 @@
   "title": "Ajustes",
   "translate": {
     "downloaded": "Idiomas baixados",
+    "downloading": "Baixando…",
     "hint": "O padrão para as conversas que não escolheram",
     "info": "Mensagens recebidas em outro idioma são traduzidas neste aparelho por um modelo de idioma baixado uma vez. Nenhum texto sai do aparelho, e seus contatos nunca ficam sabendo.",
     "name": "Traduzir mensagens",
