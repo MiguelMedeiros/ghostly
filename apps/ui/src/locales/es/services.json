@@ -29,12 +29,14 @@
     "stopped": "Detenido"
   },
   "window": {
+    "busy": "{{app}} está cargando demasiadas páginas a la vez en la máquina de tu contacto. Vuelve a intentarlo en un momento.",
     "callOn": "Hay una llamada en curso. Termínala para abrir {{app}}.",
     "elsewhere": "{{app}} intentó llevarte a otro sitio, fuera de lo que comparte tu contacto.",
     "failed": "La solicitud falló.",
     "notAnswering": "{{app}} no responde en el equipo de tu contacto. Pídele que compruebe que está en marcha.",
     "tooSlow": "{{app}} no respondió a tiempo en el equipo de tu contacto. Vuelve a intentarlo en un momento.",
-    "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea."
+    "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea.",
+    "unshared": "{{app}} ya no se comparte contigo."
   },
   "yourApps": "Tus apps"
 }

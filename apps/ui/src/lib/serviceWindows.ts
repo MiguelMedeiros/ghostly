@@ -45,6 +45,9 @@ const HOST_ERRORS: Record<string, TranslationKey> = {
   unreachable: "services.window.notAnswering",
   timeout: "services.window.tooSlow",
   "redirect-blocked": "services.window.elsewhere",
+  // The contact took it back: not a broken app, and nothing to ask them to fix.
+  "unknown-service": "services.window.unshared",
+  busy: "services.window.busy",
 };
 
 /**
