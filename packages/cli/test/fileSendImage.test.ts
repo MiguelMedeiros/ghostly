@@ -2,12 +2,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { imageSize } from "@ghostly/core";
 import { registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import type { EngineState, LinkView, MessageFile } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
+import { avatar, cameraJpeg, secretsIn } from "../../core/test/support/photos";
 // covers: headless.files, files.image.meta
 
 /** `file send` of a picture: its size, read from its first bytes, goes with it to the engine and back in the answer. */
@@ -48,6 +50,20 @@ describe("file send of a picture", () => {
     expect(sent[sent.length - 1]!.image).toEqual({ width: 640, height: 1280 });
     // Kept with the file, so a resend or a forward sends it again.
     expect((await fileStore.get(answer.file.id))?.metadata?.image).toEqual({ width: 640, height: 1280 });
+  });
+
+  it("sends a photo without its location and device details, its pixels and orientation kept", async () => {
+    // covers: files.image.no-metadata
+    const clean = avatar("avatar.jpg");
+    const path = join(dir, "IMG_0042.JPG");
+    writeFileSync(path, cameraJpeg(clean, 6));
+    const answer = await callApi(ctx, "file.send", { chat: "Alice", path }) as { file: { id: string; size: number; image?: unknown } };
+    const bytes = Buffer.from(await (await new NodeFileBytes(join(dir, "files")).blob(answer.file.id, "image/jpeg"))!.arrayBuffer());
+    expect(secretsIn(bytes)).toEqual([]);
+    expect(bytes.indexOf(Buffer.from(clean.subarray(2)))).toBe(bytes.length - clean.length + 2);
+    expect(answer.file.size).toBe(bytes.length);
+    expect(sent[sent.length - 1]!.size).toBe(bytes.length);
+    expect(answer.file.image).toEqual({ width: imageSize(clean)!.height, height: imageSize(clean)!.width });
   });
 
   it("sends none for a picture whose first bytes do not say, or for anything else", async () => {

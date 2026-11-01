@@ -13,6 +13,7 @@ import {
   toBase64Url,
   randomBytes,
   viewerTag,
+  withoutImageMetadata,
 } from "@ghostly/core";
 import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/lib/platform";
 import type { WalletNetwork } from "@ghostly/core";
@@ -90,6 +91,15 @@ async function copying<T>(copy: Promise<T>): Promise<T> {
   try { return await copy; } catch (error) {
     throw new Error(noRoom(error) ? "Not enough space on this device to send it" : `Could not read the file: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
+}
+
+/**
+ * A file about to be sent, a photo without what it says about where and on what it was taken (GPS, the device, its
+ * owner: core imageStrip.ts), its name and type kept. Its pixels are never touched; anything else goes as it is.
+ */
+async function withoutMetadata(source: File): Promise<File> {
+  const sent = await withoutImageMetadata(source, sanitizeMime(source.type));
+  return sent === source ? source : new File([sent], source.name, { type: source.type, lastModified: source.lastModified });
 }
 
 /**
@@ -367,6 +377,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (link.profile && !link.capabilities?.files && link.dataLink === "open") throw new Error("Connect to an updated peer to send files");
     const tooLarge = servicesPlatform!.fileTooLarge!(peerPubKeyZ32, source.size);
     if (tooLarge) throw new Error(tooLarge);
+    if (!options?.voice && !options?.video) source = await withoutMetadata(source);
 
     const wireId = toBase64Url(randomBytes(12));
     // A reply (WISP 400 § Replies) goes with the file as it goes with a text: the engine keeps it and sends it along.
@@ -443,6 +454,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     // checks again.
     const check = await engine.call("groupFileCheck", { groupId });
     if (check.error) throw new Error(check.error);
+    if (!options?.voice && !options?.video) source = await withoutMetadata(source);
     const mime = sanitizeMime(source.type);
     const image = options?.voice || options?.video ? undefined : await readImageMeta(source, mime);
     const file = {
