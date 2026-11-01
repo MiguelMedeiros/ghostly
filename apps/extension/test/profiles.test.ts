@@ -86,11 +86,15 @@ describe("clearing the profile's data", () => {
     await settle();
     const restart = world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" });
     await settle();
+    // Not ready until its stop is held below: on a slow host the restart would stop it first.
+    let ready!: () => void;
+    engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
     loadFirst();
     while (!engineControl().servers.length) await settle(1);
     // The stopped peer takes a moment to say goodbye.
     let stopped!: () => void;
     engineControl().servers[0].node.shutdown = () => new Promise<void>((resolve) => (stopped = () => { log().push("stop ghostly"); resolve(); }));
+    ready();
     expect(await first).toEqual({ ok: true });
 
     let answered = false;
