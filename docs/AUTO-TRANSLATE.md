@@ -63,7 +63,7 @@ token, which the addon alone did not). We keep QVAC's addon, its models and its 
 | Desktop (Linux, macOS, Windows) | A Bare sidecar: `bare` + the nmtcpp prebuild for the platform + a short script speaking JSON over stdio. It is built like today's `native-runtime/` (Node + the HyperDHT sidecar, from `native/transports/hyperdht` by `tools/scripts/prepare-native-runtime.mjs`, this platform's prebuilds only): a sibling `native/translation` package, copied into the bundle's resources. The addon is a Bare addon, not a Node-API one, so the existing Node runtime cannot load it; Rust spawns `bare` on the first translation and stops it after 5 idle minutes. | **Yes** |
 | CLI (`packages/cli`, Node) | The same `native/translation` script, started with the `bare` binary from `bare-runtime`. Received messages in `ghostly listen`, `events` and `chat history` get an optional `translation` field (the CLI prints JSON). | Yes, after Desktop |
 | Android (Tauri mobile, `apps/desktop/gen/android`) | The android-arm64 prebuild is a Bare addon, so it needs Bare embedded in the app (`react-native-bare-kit` is for React Native, not Tauri), or the Bergamot C++ library built for Android and called from the existing Kotlin plugin (`GhostlyHostPlugin.kt`) through JNI. Both are real work, and RAM is the limit (see Cost). | No: later, after a phone spike |
-| Web app / PWA, extension | QVAC does not run here. Firefox's own `bergamot-translator` WebAssembly build (5 MB, MPL-2.0, served by Mozilla's Remote Settings; the npm `@browsermt/bergamot-translator` 0.4.9 is from 2022) reads the same model files in a Worker. The CSPs already allow `wasm-unsafe-eval` (`apps/web/nginx-headers.conf`, the extension's manifest). Models would live in the Origin Private File System. Not measured. | No: a second spike |
+| Web app / PWA, extension | QVAC does not run here. Firefox's own `bergamot-translator` WebAssembly build (4.96 MB, MPL-2.0) reads the same model files in a Worker, single thread, models in the Origin Private File System. The CSPs already allow `wasm-unsafe-eval` (`apps/web/nginx-headers.conf`, the extension's manifest). Measured in desktop browsers: see [Spike: web app and extension](#spike-web-app-and-extension). | No: later, on desktop browsers first; phones after a phone measurement |
 
 So the first version is Desktop only, behind the flag. Every other client shows nothing new.
 
@@ -84,7 +84,8 @@ Each language pair is one model of 35-55 MB (see the table below), downloaded on
   offers to remove the pairs no chat set to **On** still uses.
 - **From where (your call):** the bytes are the same everywhere; what differs is who sees the download.
   1. Mozilla's Firefox CDN over HTTPS (`firefox-settings-attachments.cdn.mozilla.net`, what Firefox itself fetches and
-     what the addon's own fetcher uses). Mozilla's CDN sees an IP asking for "pt->en".
+     what the addon's own fetcher uses). Mozilla's CDN sees an IP asking for "pt->en". Desktop only: browsers cannot
+     use it (no CORS, and a 406 for any Chrome user agent; see [the web spike](#spike-web-app-and-extension)).
   2. The QVAC registry over Hyperswarm (what `@qvac/sdk` does). Any peer seeding the registry sees the IP and the
      blocks asked for; it also starts a DHT node in the app.
   3. A Ghostly mirror (our own CDN or release assets): we see it, nobody else.
@@ -319,6 +320,146 @@ Other findings:
   (`QVAC_WORKER_PATH`, what `qvac bundle sdk` generates) is needed even on the SDK path.
 - Loading a cached model never touches the registry; the files only need to be on disk with their checksums.
 
+## Spike: web app and extension
+
+Can the web app (and the PWA) and the extension translate received messages without QVAC? Yes, in desktop browsers,
+with Firefox's WebAssembly build of Bergamot in a Worker. Nothing of it is in the repo, and `VITE_TRANSLATE` still
+refuses the web and extension builds.
+
+How it was measured: headless Chromium 156, Firefox 157 and WebKit 27.2 (WPE, the engine of Safari) on this host
+(x86-64, 16 cores), from a local server sending the web app's CSP and `Cross-Origin-Opener-Policy`, and Chromium again
+with an unpacked MV3 extension using the extension's CSP. A Worker loads the engine, reads pt->en and en->pt from OPFS,
+builds both models and translates 30 short chat messages per direction (the pt->en and en->pt rows of the Desktop
+spike are among them). Memory: the WebAssembly heap's size, and the browser's resident memory (all its processes)
+before and at the peak. The host was busy at times (load 15-20 on 16 cores); the numbers below are from a quiet run
+(load 3), and busy runs were up to 3x slower. Harness and logs are kept outside the repo.
+
+**No phone was measured.** This host has no phone, and Chromium's CPU throttling does not reach a dedicated Worker
+(throttled runs were as fast as unthrottled ones), so there is no emulated phone number either. Measuring on a real
+Android phone and an iPhone is a follow-up.
+
+### Which build
+
+| | Firefox's build (Remote Settings `translations-wasm` 3.0) | npm `@browsermt/bergamot-translator` 0.4.9 |
+|---|---|---|
+| Released | 2025-06 (Firefox 141), `bergamot-translator` v0.6.0 | 2022-10, built from v0.4.5 |
+| Size | 4.96 MB wasm + 100 KB JS glue, MPL-2.0 | 5.17 MB wasm + 80 KB glue + 31 KB wrapper, MPL-2.0 |
+| Threads | none (single thread) | none |
+| Reads the current models (Remote Settings `translations-models-v2`) | yes | yes |
+| Per message, median (Chromium / Firefox / WebKit) | 20 / 14 / 30 ms | 26 / 14 / 29 ms |
+| WebAssembly heap, two models loaded | **338 MB** | **1,056 MB** |
+
+**Firefox's build.** Same speed or better, a third of the memory, and the one Mozilla maintains. Its glue is a single
+`loadBergamot(Module)` function; outside Firefox it uses the gemm built into the wasm (Firefox itself has a faster
+native one, `WebAssembly.mozIntGemm`, that web pages do not get). Its API differs a little from 0.4.9
+(`TranslationModel(from, to, config, model, lex, vocabs, null)`). The wasm and its glue would be pinned files we serve
+ourselves (their SHA-256 is in the Remote Settings record), not fetched from Mozilla.
+
+### Numbers (Firefox's build)
+
+pt->en / en->pt, models already in OPFS unless said otherwise:
+
+| | Chromium 156 | Firefox 157 | WebKit 27.2 |
+|---|---|---|---|
+| Engine start (wasm compile + init) | 9 ms | 26 ms | 16 ms |
+| Time to first translation (engine, read pt->en from OPFS, build the model, 1 message) | 314 ms | 315 ms | 328 ms |
+| The same, first time ever (models stored to OPFS first, from a local server) | 510 ms | 1,064 ms | 1,445 ms |
+| Model read from OPFS + built | 16 + 62 ms | 38 + 52 ms | 22 + 61 ms |
+| First message after the model is built | 206 / 136 ms | 182 / 105 ms | 180 / 129 ms |
+| Per message, median | 20 / 19 ms | 14 / 13 ms | 30 / 29 ms |
+| 30 messages, one by one | 649 / 606 ms | 457 / 410 ms | 968 / 917 ms |
+| 30 messages, one batch | 1,336 / 837 ms | 652 / 381 ms | 2,221 / 1,385 ms |
+| 983-character message | 327 ms | 158 ms | 507 ms |
+| pt -> en -> pt pivot, 10 messages | 972 ms | 443 ms | 1,500 ms |
+| WebAssembly heap: engine / one model in use / two | 40 / 196 / 338 MB | the same | the same |
+| Browser memory at the peak, two models (above the page alone) | +395 MB | +373 MB | +508 MB |
+
+- **Per message it is as fast as Desktop's native addon** (20-24 ms there) in Chromium and Firefox, and 1.5x slower in
+  WebKit. Batching does not help in WebAssembly: 30 messages in one call were slower than one by one in every browser
+  (the native addon was twice as fast batched). So the web translates one message per call.
+- **Memory is the cost.** A model takes 48 MB of heap once built and 196 MB after its first message (the int8 weights
+  are prepared then). The heap never shrinks: unloading a model leaves it allocated. Ending the Worker gives it all
+  back (Chromium: 920 MB at the peak, 526 MB a second after `terminate()`, 524 MB before). So: one Worker, at most two
+  models, and the Worker ends after 5 idle minutes.
+- **The extension** (Chromium, MV3, with the extension's CSP) gave the same numbers as the web page: 308 ms to the
+  first translation, 20 / 18 ms per message, the same heap.
+
+### Threads and cross-origin isolation
+
+Neither build has threads, so cross-origin isolation buys nothing today: Chromium with `Cross-Origin-Opener-Policy:
+same-origin` and `Cross-Origin-Embedder-Policy: require-corp` (or `credentialless`) is `crossOriginIsolated`, and
+translates at the same speed (21 / 21 ms per message). Threads would need our own Emscripten build of Bergamot with
+pthreads, and at 14-30 ms per chat message there is little to win.
+
+The web app is not cross-origin isolated (`same-origin-allow-popups` is not enough, and there is no COEP;
+`SharedArrayBuffer` is undefined). Turning it on would break:
+
+- **Sign-in popups.** Isolation needs `same-origin`, which cuts the app from the windows it opens: the identity
+  sign-in popup (`packages/browser/src/proofs/oidc/popup.ts` closes it and reads its answer) and Pubky Passport.
+- **Pictures from other sites.** `require-corp` blocks every cross-origin image without a
+  `Cross-Origin-Resource-Policy` header: OpenStreetMap tiles send none (Giphy does). `credentialless` would let them
+  through, but Safari does not support it.
+- **The mini-app runners** (`app-frame.html`, `app-frame-net.html`) and the services bridge would each need the header
+  too, inside a sandbox whose policy is a WISP (1200).
+
+The extension could turn it on with two manifest keys (`cross_origin_opener_policy`, `cross_origin_embedder_policy`;
+measured: `crossOriginIsolated` becomes true), but for the same zero gain. **Proposal: no isolation, single thread.**
+
+### Models in OPFS
+
+- **Size per pair:** Mozilla serves each file zstd-compressed. pt->en is 24.2 MB to download and 36.2 MB stored
+  (`model` 31.6 MB, `lex` 4.6 MB, `vocab` 0.8 MB); en->pt 24.8 MB / 36.3 MB. The other locales' pairs, download size
+  X->en / en->X: ar 24.7 / 23.8, es 25.1 / 24.1, fr 25.0 / 24.6, it 25.1 / 25.6, ja 36.0 / 34.9, zh-Hans 36.2 / 36.1
+  MB. These are the same models as Desktop's (pt->en: the same three files and sizes, 37.0 MB decompressed); a
+  Simplified Chinese model exists (`zh-Hans`), which answers the open script question in [Languages](#languages).
+- **No browser can unpack zstd** (`DecompressionStream("zstd")` throws in all three; gzip works everywhere). gzip -9 of
+  the same files is 5% bigger (pt->en 25.5 MB). So a mirror serves gzip, and the Worker unpacks it while writing.
+- **Not from Mozilla's CDN.** `firefox-settings-attachments.cdn.mozilla.net` sends no `Access-Control-Allow-Origin`,
+  so a web page cannot read its files, and it answers **406 to any user agent containing "Chrome"** (Chrome, Edge,
+  Android Chrome; Firefox, Safari and curl get 200). An extension with a host permission for it still got the 406. The
+  web app and the extension need a Ghostly mirror (option 3 of [Model download](#model-download)): same origin for the
+  web app (its CSP already allows `connect-src 'self'`), and `Access-Control-Allow-Origin: *` on it for the extension
+  (no new permission). Checksums pinned in the app as on Desktop.
+- **Asked first, stored once:** the same question as Desktop. The Worker writes with `createSyncAccessHandle` (in
+  every engine, Safari included); storing a 37 MB pair took 130-170 ms in Chromium, 0.6-1.6 s in Firefox and WebKit. In
+  Firefox, the first write of a new origin took 3 s once and 42-57 s twice while this host was busy: the progress has
+  to cover the store, not only the download. Reading a pair back: 14-47 ms. Two pairs used 73.4 MB of the origin's
+  quota.
+- **Evicted storage:** OPFS is best-effort. `navigator.storage.persist()` returned false in Chromium and WebKit, and
+  Firefox asks the person with a prompt; nothing can be counted on. Firefox also warned that 127.0.0.1 "has been
+  classified as a bounce tracker" whose state is purged without a visit. An evicted pair is a `NotFoundError` when the
+  Worker opens it, so the app checks the pair (names and sizes) before loading, and goes back to **Translate (24 MB)**
+  in the bubble, asking again. Never a silent download.
+- **No OPFS at all:** Playwright's WebKit refused `navigator.storage.getDirectory()` in an ephemeral profile
+  (`UnknownError`; it worked in a persistent one). Safari's private windows likely behave the same (not checked). Where
+  OPFS is missing, translation is not offered.
+
+### The service worker
+
+Nothing needs to be precached:
+
+- the wasm is already left out (`precacheList` drops every `.wasm`); fetched once on the first translation, the
+  worker's `asset` route then keeps it, as it does the wallets' wasm;
+- the engine's Worker and its glue (100 KB) must be left out by name, as the detector's worker is today
+  (`/assets/translateDetector.worker-`), or the build would precache them for everyone;
+- the models are never in the worker's cache: they come from the mirror into OPFS.
+
+### Recommendation
+
+**Build it, for the web app and the extension in desktop browsers, after Desktop**, reusing Desktop's slices (the
+detector, the Settings switch, the bubble, per chat) with a second runtime behind the same `translate_texts` shape:
+
+- Firefox's `bergamot-translator` wasm 3.0 and its glue, pinned and served from our own `/assets/`;
+- one dedicated Worker, single thread, no cross-origin isolation; one message per call; at most two models; the Worker
+  ends after 5 idle minutes;
+- models from a Ghostly mirror, gzip, pinned SHA-256, asked first, stored in OPFS, asked again when evicted; not
+  offered where there is no OPFS;
+- nothing added to the precache.
+
+**Not on phones yet** (the PWA on Android and iOS): 196-338 MB of WebAssembly heap in a tab, not measured on a phone,
+where a tab has less memory to spend. A measurement on a real Android phone and an iPhone decides; until then phones
+show nothing new. The model license check (separate) applies here too, and so does the mirror's cost.
+
 ## Open questions for review
 
 1. Desktop only first (Bare sidecar, addon direct), CLI next, Android and browsers after their own spikes: OK?
@@ -339,6 +480,8 @@ Other findings:
 9. A group's language: most of the others' last 20 messages at 60% or more (proposal), or always ask on the first
    Translate in a group?
 10. The originals of my sent translations: device only and not in backups (proposal), or in backups too?
+11. Web app and extension: build them after Desktop, in desktop browsers only, with Firefox's wasm and a Ghostly model
+    mirror (proposal, see [Spike: web app and extension](#spike-web-app-and-extension))? The mirror is new hosting.
 
 ## Slices
 
