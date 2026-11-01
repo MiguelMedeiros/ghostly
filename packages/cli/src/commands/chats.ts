@@ -102,10 +102,18 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": {
-    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone]",
+    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed] [--timeout s]]",
     summary: "Forget a message on this device (the contact keeps theirs); --everyone deletes one of yours, in a chat or a group, from every member's device",
-    args: ["chat", "message"], options: { everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" } },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, everyone: options.everyone === true }),
+    args: ["chat", "message"],
+    options: {
+      everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" },
+      wait: { type: "string", choices: ["none", "confirmed"], description: "With --everyone in a chat: none or confirmed, until the contact has it (default: none with a daemon, confirmed without)" },
+      timeout: wait.timeout,
+    },
+    params: ({ options }, a) => {
+      for (const flag of ["wait", "timeout"]) if (options[flag] !== undefined && options.everyone !== true) throw new CliError("usage", `--${flag} goes with --everyone`);
+      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options) };
+    },
   },
   "message details": { method: "chat.details", usage: "message details <chat|group> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },

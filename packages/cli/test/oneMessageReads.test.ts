@@ -21,6 +21,7 @@ function fake() {
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     deleteMessage: vi.fn(async () => {}),
     removeMessage: vi.fn(async () => ({ error: null as string | null })),
+    removalPending: vi.fn(() => true),
     messageDetails: vi.fn(async ({ linkId, messageId }: { linkId: string; messageId: string }) => {
       const message = rows.find((m) => m.linkId === linkId && m.id === messageId);
       return message ? { message: { id: message.id }, ...(linkId.startsWith("group:") && { group: { id: linkId.slice(6) } }) } : null;
@@ -52,7 +53,7 @@ describe("delete", () => {
     await expect(callApi(ctx, "chat.delete", { chat: "Nobody", message: "mine:0:2" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
     expect(node.deleteMessage).not.toHaveBeenCalled();
     const { COMMANDS } = await import("../src/commands");
-    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone]");
+    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone [--wait none|confirmed] [--timeout s]]");
   });
 });
 
@@ -81,10 +82,14 @@ describe("delete --everyone", () => {
     const command = COMMANDS["message delete"]!;
     const parsed = parseArgs(["Alice", "me_1", "--everyone"], command.options ?? {});
     expect(command.params!(parsed, positionals(command, parsed.positionals))).toEqual({ chat: "Alice", message: "me_1", everyone: true });
-    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toEqual({ chat: "chat-one", messageId: "me_1", deleted: "me_1", everyone: true, confirmed: false });
     expect(node.removeMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_1" });
     expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toEqual({ group: "g1", messageId: "mine:0:2", deleted: "mine:0:2", everyone: true });
     expect(node.removeMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "mine:0:2" });
+    // A group has no receipts to wait for: refused before anything is deleted.
+    node.removeMessage.mockClear();
+    await expect(callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true, wait: "confirmed" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.removeMessage).not.toHaveBeenCalled();
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
     // What the engine refuses (a payment, say) is said as such.
     node.removeMessage.mockResolvedValueOnce({ error: "A payment, a request or a notice cannot be deleted for everyone", refused: true } as never);

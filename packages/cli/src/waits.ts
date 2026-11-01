@@ -30,6 +30,15 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
   }
 }
 
+/** Waits until the contact confirmed my removal of a message, which is already gone here. */
+export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  while (node(ctx).removalPending({ linkId: chat, messageId })) {
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx)}`, { messageId });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 /**
  * Waits until an edge took my group message, or its edit number `edit` (WISP 902: a group has no receipts, so this is
  * as far as the author sees): a member's edge in a private group, an edge to one of my hubs in a community.

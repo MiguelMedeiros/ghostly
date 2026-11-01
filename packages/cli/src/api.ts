@@ -10,7 +10,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
-import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
+import { waitForConfirmed, waitForEdit, waitForGroupFrame, waitForMessage, waitForRemoval } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
@@ -474,6 +474,10 @@ const METHODS: Record<string, Method> = {
     // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
     if (bool(params, "everyone")) {
       const target = chatOrGroup(ctx, str(params, "chat", true));
+      // A one-shot leaves once its command is done, and the removal with it: by default it stays until the contact has it.
+      const wait = oneOf(params, "wait", ["none", "confirmed"] as const, !target.group && ctx.mode === "one-shot" ? "confirmed" : "none");
+      if (target.group && wait !== "none") throw new CliError("bad_request", "A group has no receipts: --wait confirmed is for a chat");
+      const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
       const ref = str(params, "message", true);
       const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
       if (!message) throw new CliError("not_found", `No message ${ref} of yours in this ${target.group ? "group" : "chat"}: only your own messages are deleted for everyone`);
@@ -481,7 +485,9 @@ const METHODS: Record<string, Method> = {
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       // `messageId`, as every command that makes or changes a message names it; `deleted` kept for callers that read
       // it (agents#1582).
-      return { [target.group ? "group" : "chat"]: target.id, messageId: message.id, deleted: message.id, everyone: true };
+      if (target.group) return { group: target.id, messageId: message.id, deleted: message.id, everyone: true };
+      if (wait === "confirmed") await waitForRemoval(ctx, target.linkId, message.id, ms);
+      return { chat: target.id, messageId: message.id, deleted: message.id, everyone: true, confirmed: !node(ctx).removalPending({ linkId: target.linkId, messageId: message.id }) };
     }
     // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
     // flag says so, with the command that takes it, not "No chat".
