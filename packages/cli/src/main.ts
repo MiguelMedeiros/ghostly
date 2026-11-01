@@ -336,7 +336,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile set [--name <name>] [--share-profile | --no-share-profile]", "Change the name contacts see", { name: o("string", "The name contacts see"), "share-profile": o("boolean", "Share the name and picture with contacts (--no-share-profile: do not)") }],
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
-  ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
+  ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds it waits for a command that holds the profile, and --detach for it to start (default 60)") }],
   ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
@@ -622,11 +622,29 @@ function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
   return value;
 }
 
-async function runDaemon(g: Globals): Promise<void> {
+/** Set on `startDetached`'s child: its parent waits for the profile and starts it again, so the child does not wait too. */
+const DETACHED_CHILD = "GHOSTLY_DAEMON_DETACHED";
+
+/**
+ * The daemon in this process. A one-shot command that holds the profile for a moment (a bot's `send` in the gap of a
+ * service manager's restart) is waited for until `seconds`, as `daemon --detach` waits for it: the first look used to be
+ * the answer, and the profile was left with no daemon. A daemon that comes up meanwhile is the answer instead.
+ */
+async function runDaemon(g: Globals, seconds: number): Promise<void> {
   requireProfile(g);
-  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  const detached = process.env[DETACHED_CHILD] === "1";
+  delete process.env[DETACHED_CHILD]; // not handed to the hooks it runs
   const { keepServing, openHost, serve } = await engineHost();
-  const host = await openHost(g.paths, "daemon", VERSION);
+  const until = Date.now() + seconds * 1000;
+  let host: Host;
+  for (;;) {
+    if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+    try { host = await openHost(g.paths, "daemon", VERSION); break; }
+    catch (error) {
+      if (detached || !(error instanceof CliError) || error.code !== "busy" || Date.now() >= until) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(100, until - Date.now()))));
+    }
+  }
   let served: Awaited<ReturnType<typeof serve>>;
   try { served = await serve(host); } catch (error) { await host.close(); throw error; }
   keepServing();
@@ -686,7 +704,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   }
   if (sub) throw unknownCommand("daemon", sub);
   const startFor = seconds(parsed, 60);
-  if (!parsed.options.detach) { await runDaemon(g); return; }
+  if (!parsed.options.detach) { await runDaemon(g, startFor); return; }
   print(await startDetached(g, startFor));
 }
 
@@ -782,7 +800,7 @@ async function startDetached(g: Globals, seconds: number) {
 /** `startDetached`'s child, or null when another process took the profile ahead of it and there is time to try again. */
 async function spawnDaemon(g: Globals, until: number) {
   const log = openSync(g.paths.log, "a", 0o600), logFrom = fstatSync(log).size;
-  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
+  const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log], env: { ...process.env, [DETACHED_CHILD]: "1" } });
   closeSync(log); // the child has its own
   child.unref();
   const spawned = { error: null as Error | null };

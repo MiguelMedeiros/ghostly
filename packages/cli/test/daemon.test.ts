@@ -147,6 +147,32 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     }
   });
 
+  it("a foreground daemon waits for a one-shot that holds the profile for a moment, as a service manager starts it", async () => {
+    const moment = home("foreground-one-shot");
+    ok(await ghostly(["--home", moment, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    // A one-shot command (a bot's `send` in the gap of a service restart) that opened the profile and ends 1.5 s later.
+    const oneShot = spawn(process.execPath, ["-e", "setTimeout(() => {}, 1500)"], { stdio: "ignore" });
+    writeFileSync(profilePaths(moment, "default").lock, String(oneShot.pid));
+    const daemon = new Running(["--home", moment, "daemon"], env);
+    try {
+      expect(await daemon.waitFor((line) => "daemon" in line)).toMatchObject({ daemon: "ready", profile: "default" });
+      expect(ok(await ghostly(["--home", moment, "daemon", "status"], { env }))).toMatchObject({ running: true });
+    } finally {
+      oneShot.kill("SIGKILL");
+      await daemon.stop();
+    }
+  });
+
+  it("a foreground daemon on a profile still held at its --timeout says busy and names the holder", async () => {
+    const held = home("foreground-held");
+    createProfile(held, "default");
+    // This test's own process stands in for a one-shot command that never lets go.
+    writeFileSync(profilePaths(held, "default").lock, String(process.pid));
+    const started = await ghostly(["--home", held, "daemon", "--timeout", "1"], { env });
+    expect(error(started, "busy", 1).message).toContain(`in use by process ${process.pid}`);
+    expect(started.json.error).toMatchObject({ details: { pid: process.pid } });
+  });
+
   it("daemon restart whose start loses the profile after the stop says the daemon was stopped and how to start it", async () => {
     const lost = home("restart-lost");
     ok(await ghostly(["--home", lost, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
