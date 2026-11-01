@@ -214,7 +214,10 @@ interface Running {
   nativeRetry?: ReturnType<typeof setTimeout>;
   /** Starts that left a transport missing since the last one that left none: the wait before the next doubles. */
   nativeMisses: number;
-  /** This link runs without WebRTC, which connected nothing between the two devices (`withoutRtc`). For this run only. */
+  /**
+   * This link runs without WebRTC, which connected nothing between the two devices (`withoutRtc`). For this run only,
+   * unless none of its native transports starts (`withRtc`).
+   */
   rtcOff: boolean;
   /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so. */
   rtcWait?: ReturnType<typeof setTimeout>;
@@ -236,6 +239,8 @@ export const NATIVE_RETRY_MS = 10_000;
 export const NATIVE_RETRY_MAX_MS = 120_000;
 /** The other device is there and no session opened over WebRTC in this long: the link goes on without it (`withoutRtc`). */
 export const DEVICE_RTC_MS = 20_000;
+/** The longest that wait grows to, for a link that went back to WebRTC again and again (`withRtc`). */
+export const DEVICE_RTC_MAX_MS = 5 * 60_000;
 
 /** How often a standby reads the turn while its screen shows (WISP 06 § When a device checks), and the jitter on it. */
 export const STANDBY_TURN_EVERY_MS = 10 * 60_000;
@@ -256,6 +261,8 @@ const defaultPeerConnection = (): (() => RTCPeerConnection) | undefined =>
 
 export class DeviceLinks implements DeviceLinkEngine {
   private readonly running = new Map<string, Running>();
+  /** By link: the times it went back to WebRTC (`withRtc`) since a session last opened. Each doubles the wait before it goes without again. */
+  private readonly rtcBacks = new Map<string, number>();
   private readonly createPeerConnection?: () => RTCPeerConnection;
   private key: DeviceSigningKey | null = null;
   private keeper: Promise<TurnKeeper | null> | null = null;
@@ -465,6 +472,7 @@ export class DeviceLinks implements DeviceLinkEngine {
           this.changed();
         },
         onDataLinkState: (state) => {
+          if (state === "open") this.rtcBacks.delete(running.id);
           if (state === "open" && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
           if (state !== "open") {
             running.agreed = false; this.failPings(running, "The device link closed");
@@ -482,7 +490,7 @@ export class DeviceLinks implements DeviceLinkEngine {
         // an attempt that failed (it waits out its 90 s).
         onPresence: (presence) => {
           if (!presence.online || running.rtcOff || running.rtcWait || running.link.isDataLinkOpen) return;
-          running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running); }, DEVICE_RTC_MS);
+          running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running); }, Math.min(DEVICE_RTC_MS * 2 ** (this.rtcBacks.get(running.id) ?? 0), DEVICE_RTC_MAX_MS));
         },
         // The other device has no WebRTC: this one starts its native endpoints for it.
         onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
@@ -525,6 +533,8 @@ export class DeviceLinks implements DeviceLinkEngine {
       }, () => {
         // Not available now; the others, and WebRTC, still are. Tried again in a while.
         running.starting.delete(transport);
+        // A link that went on without WebRTC and has nothing else up: back to WebRTC rather than wait on these.
+        if (running.rtcOff && !running.starting.size && !running.link.availableTransports.length) { this.withRtc(running); return; }
         this.retryNative(running);
       });
     }
@@ -811,7 +821,7 @@ export class DeviceLinks implements DeviceLinkEngine {
   /**
    * WebRTC on both devices that connects nothing (two browsers whose host candidates the other does not resolve, a
    * router that does not hairpin, no TURN): neither packet says it has no WebRTC, so neither device starts a native
-   * endpoint, and the link never went live. It starts again as on an app with no WebRTC, for this run, as a group's edge
+   * endpoint, and the link never went live. It starts again as on an app with no WebRTC, for this run (`withRtc` aside), as a group's edge
    * does (node.ts `edgeWithoutRtc`): its native endpoints run and its packet lists no `webrtc/1`, the other device starts
    * its own for it as for a Linux Desktop, and the two meet over Iroh's relay. Only with no session open, and only
    * where this app has a native transport to go on with.
@@ -827,6 +837,26 @@ export class DeviceLinks implements DeviceLinkEngine {
       await this.close(running, false);
       if (this.stopped) return;
       this.open({ id: running.id, d: fromBase64Url(running.d), key: running.key, name: running.name, slot: running.slot, earlier: running.earlier }, true);
+      this.changed();
+    });
+    this.queue = run;
+  }
+
+  /**
+   * The link that went on without WebRTC (`withoutRtc`) started none of its native transports: an Iroh relay neither
+   * device reaches, and no HyperDHT relay. With nothing to go through it starts again with WebRTC, which may connect
+   * now, or only after `DEVICE_RTC_MS` (a device that just reloaded dials at its own pace). The wait before it goes
+   * without WebRTC again doubles each time (`rtcBacks`), so a native transport that comes back is still tried.
+   */
+  private withRtc(running: Running): void {
+    if (this.stopped || !running.rtcOff || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
+    this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
+    const run = this.queue.catch(() => {}).then(async () => {
+      if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
+      this.running.delete(running.id);
+      await this.close(running, false);
+      if (this.stopped) return;
+      this.open({ id: running.id, d: fromBase64Url(running.d), key: running.key, name: running.name, slot: running.slot, earlier: running.earlier });
       this.changed();
     });
     this.queue = run;
