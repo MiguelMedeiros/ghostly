@@ -148,6 +148,26 @@ describe("editing my message", () => {
     expect((await t.row(theirs.id)).replyTo).toEqual({ id: wireId, snippet: "", from: "me", messageId: sent.messageId });
   });
 
+  // agents#2130: the sweep runs when the removal is made, so a reply that came after kept the deleted line for good.
+  it("a contact's reply that comes after I deleted its original for everyone keeps no line of it, live or on the DHT floor", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "the original words" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    const wireId = (await t.row(sent.messageId!)).wireId!;
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: sent.messageId! })).toEqual({ error: null });
+    await vi.waitFor(() => expect(t.contactEdits.filter(e => e.rm)).toHaveLength(1));
+    // Live: the contact's app still had the line, and sends it.
+    expect(await t.contact.sendMessage("their late answer", Date.now(), WIRE("A"), undefined, { i: wireId, s: "the original words", f: "recipient" })).toBeNull();
+    const live = await t.peerRow("their late answer");
+    expect(live.replyTo).toEqual({ id: wireId, snippet: "", from: "me", messageId: sent.messageId });
+    // On the DHT floor only the id travels.
+    const store = (t.node as unknown as { storeMessage(m: StoredMessage): Promise<unknown> }).storeMessage.bind(t.node);
+    await store({ linkId: t.id, id: `peer_${WIRE("B")}`, wireId: WIRE("B"), text: "short", sender: "peer", timestamp: Date.now(), via: "pkarr", replyTo: { id: wireId, snippet: "" } });
+    expect((await t.row(`peer_${WIRE("B")}`)).replyTo).toEqual({ id: wireId, snippet: "", from: "me", messageId: sent.messageId });
+    // What the next start reads.
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === t.id)?.removedRefs).toContain(wireId));
+  });
+
   it("deleting for everyone refuses the contact's messages and payments; one that never left is only deleted here", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage("theirs", Date.now(), WIRE("H"))).toBeNull();
@@ -405,6 +425,20 @@ describe("the contact's edits", () => {
     expect(await t.contact.sendEdit({ id: WIRE("Q"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
     await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("Q"), 1]]));
     expect((await t.row(mine.messageId!)).replyTo).toEqual({ id: WIRE("Q"), snippet: "", from: "peer", messageId: original.id });
+  });
+
+  it("a reply that comes after the contact's removal of its original keeps no line of it; one after a delete here keeps the wire's", async () => {
+    const t = await setup();
+    for (const c of "QD") expect(await t.contact.sendMessage(`quote ${c}`, Date.now(), WIRE(c))).toBeNull();
+    const removed = await t.peerRow("quote Q"), deleted = await t.peerRow("quote D");
+    expect(await t.contact.sendEdit({ id: WIRE("Q"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("Q"), 1]]));
+    t.node.deleteMessage({ linkId: t.id, messageId: deleted.id });
+    await vi.waitFor(async () => expect((await t.messages()).map(m => m.id)).not.toContain(deleted.id));
+    expect(await t.contact.sendMessage("late to Q", Date.now(), WIRE("R"), undefined, { i: WIRE("Q"), s: "quote Q", f: "sender" })).toBeNull();
+    expect(await t.contact.sendMessage("late to D", Date.now(), WIRE("S"), undefined, { i: WIRE("D"), s: "quote D", f: "sender" })).toBeNull();
+    expect((await t.peerRow("late to Q")).replyTo).toEqual({ id: WIRE("Q"), snippet: "", from: "peer", messageId: removed.id });
+    expect((await t.peerRow("late to D")).replyTo).toEqual({ id: WIRE("D"), snippet: "quote D", from: "peer" });
   });
 
   it("a removal never takes one of my messages", async () => {
@@ -890,6 +924,23 @@ describe("deleting many of my group messages for everyone", () => {
     // The second within the sweep's time goes when it is up (`QuoteSweeps`).
     await vi.waitFor(async () => expect((await db.getMessages(chat)).map(m => m.replyTo)).toEqual([quote(myOriginal, me, ""), quote(bobsOriginal, bob, "")]), { timeout: 15_000, interval: 200 });
   }, 30_000);
+
+  it("a member's reply that comes after its original was deleted for everyone keeps no line of it", async () => {
+    const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `late-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const [removed, kept] = [`${me}:1:1`, `${me}:1:2`];
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { groups: { isRemoved(groupId: string, id: string): boolean }; storeMessage(m: StoredMessage): Promise<unknown> };
+    vi.spyOn(inner.groups, "isRemoved").mockImplementation((group, id) => group === g && id === removed);
+    const late = (n: number, id: string): StoredMessage => ({ linkId: chat, id: `${bob}:1:${n}`, text: `answer ${n}`, sender: "peer", member: bob, timestamp: n, via: "datalink", replyTo: { id, snippet: "the original words", from: "me", member: me } });
+    await inner.storeMessage(late(1, removed));
+    await inner.storeMessage(late(2, kept));
+    expect((await db.getMessages(chat)).map(m => m.replyTo)).toEqual([
+      { id: removed, snippet: "", from: "me", member: me, messageId: removed },
+      // Never here and not removed: what the wire said, unchecked.
+      { id: kept, snippet: "the original words", from: "me", member: me },
+    ]);
+  });
 
   it("a member's removals of ids never here, or said again, read the group for their quotes once a while, not once each", async () => {
     const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `sweeps-${crypto.randomUUID()}`, chat = `group:${g}`;
