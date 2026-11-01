@@ -92,6 +92,15 @@ export const COMMUNITY_LIMITS = {
   syncAnswers: 16,
   syncWindowMs: 60_000,
   /**
+   * Messages of one member taken per `messageWindowMs`, and the bytes of their sealed bodies, past what one catch-up
+   * answer holds (a whole store, and the lasting frames): anyone with the link is a member, and each message taken is a
+   * row in every member's app and a frame each hub passes on. The rest are not taken now and come again in a catch-up
+   * (`MessagePace`).
+   */
+  messagesPerAuthor: 30,
+  messageBytesPerAuthor: 128 * 1024,
+  messageWindowMs: 10_000,
+  /**
    * Frames of one catch-up answer in a slice (`CommunitySessionHooks.handled`), two slices at most not handled yet by
    * the member's app: a member back after the store filled was handed 258 at once, and an app holds 64 waiting at most
    * before 2026-10-07 (more ends the session). As a private group's (`GROUP_LIMITS.catchUpSlice`).
@@ -481,6 +490,42 @@ const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v =
 const messageSigned = (f: Omit<CommunityMessageFrame, "sig" | "t" | "v">) => utf8Encode(JSON.stringify(["ghostly-group/2 msg", f.g, f.e, f.h, f.s, f.n, f.ts, f.nn, f.c]));
 export const communityMessageId = (sender: string, epoch: number, h: string, seq: number) => `${sender}:${epoch}:${h}:${seq}`;
 const seenKey = (e: number, h: string) => `${e}:${h}`;
+
+/**
+ * One member's messages taken: a whole catch-up answer at once (`MESSAGE_BURST`), then
+ * `COMMUNITY_LIMITS.messagesPerAuthor` and `messageBytesPerAuthor` per `messageWindowMs`. One not taken is not marked
+ * seen, so a catch-up hands it again; until it is taken, those after it under the same commit (`seenKey`) are not taken
+ * either: a later one taken would say I have everything up to it (`syncFrame`'s `have`) and the one before would never
+ * be handed again. A place that moves no more for `COMMUNITY_LIMITS.pendingMs` (no catch-up holds it any longer) is let go.
+ */
+const MESSAGE_BURST = { frames: COMMUNITY_LIMITS.store + COMMUNITY_LIMITS.lasting, bytes: COMMUNITY_LIMITS.storeBytes + COMMUNITY_LIMITS.lasting * COMMUNITY_LIMITS.textBytes * 2 };
+class MessagePace {
+  private frames: number = MESSAGE_BURST.frames;
+  private bytes: number = MESSAGE_BURST.bytes;
+  private at: number | undefined;
+  private held = new Map<string, { low: number; top: number; at: number }>();
+
+  take(key: string, n: number, bytes: number, now: number): boolean {
+    let held = this.held.get(key);
+    if (held && now - held.at >= COMMUNITY_LIMITS.pendingMs) { this.held.delete(key); held = undefined; }
+    if (held && n > held.low) { held.top = Math.max(held.top, n); return false; }
+    const elapsed = Math.max(0, now - (this.at ?? now)) / COMMUNITY_LIMITS.messageWindowMs;
+    this.at = now;
+    this.frames = Math.min(MESSAGE_BURST.frames, this.frames + elapsed * COMMUNITY_LIMITS.messagesPerAuthor);
+    this.bytes = Math.min(MESSAGE_BURST.bytes, this.bytes + elapsed * COMMUNITY_LIMITS.messageBytesPerAuthor);
+    if (this.frames < 1 || this.bytes < bytes) {
+      if (held) held.low = n;
+      else this.held.set(key, { low: n, top: n, at: now });
+      return false;
+    }
+    this.frames -= 1; this.bytes -= bytes;
+    if (held && n === held.low) {
+      if (held.top > n) { held.low = n + 1; held.at = now; }
+      else this.held.delete(key);
+    }
+    return true;
+  }
+}
 /** One of a member's frames, among its own. */
 const frameKey = (f: { e: number; h: string; n: number }) => `${f.e}:${f.h}:${f.n}`;
 /** A frame among everyone's: each member counts its own `n`, so `frameKey` alone tells only one member's frames apart. */
@@ -558,6 +603,8 @@ export class CommunitySession {
   private asked = new Map<string, number>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /** Messages taken per author, a few a second (`MessagePace`). In memory only. */
+  private messagePace = new Map<string, MessagePace>();
   /** The entry seed sealed to each member, for the seed it seals (`entryFrame`): every sync answer carries it. In memory only. */
   private sealedEntries = new Map<string, { seedB64: string; frame: CommunityEntryFrame }>();
   /** Catch-up answers still going out, a slice at a time (`receiveSync`). */
@@ -1785,6 +1832,10 @@ export class CommunitySession {
     const roster = this.rosterOf(found.hash)!;
     // Not from a member of that epoch: nothing to read, nothing to relay.
     if (!rosterHas(roster, raw.s)) return false;
+    // At its author's pace, once it is known to be theirs: past it, neither kept nor passed on (it comes again in a catch-up).
+    let pace = this.messagePace.get(raw.s);
+    if (!pace) this.messagePace.set(raw.s, pace = new MessagePace());
+    if (!pace.take(seenKey(raw.e, raw.h), raw.n, raw.c.length, this.hooks.clock?.() ?? Date.now())) return false;
     // From before I was let in: nothing for me to read, but its author may have reached nobody else yet (it wrote
     // before it heard of me, with no edge up, and I am its hub). Kept and passed on like any frame, never opened, so
     // the members it was written for get it; the store hands it to those only.
