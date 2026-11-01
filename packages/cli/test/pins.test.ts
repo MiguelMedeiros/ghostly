@@ -16,7 +16,7 @@ const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Crew", cr
   members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }], ...fields }) as unknown as GroupView;
 
 /** `out.pin`: the number of my pin the contact has not confirmed; a 1:1 pin made takes the next one. */
-function fake(result: { error: string | null } = { error: null }, mode: "daemon" | "one-shot" = "daemon") {
+function fake(result: { error: string | null; refused?: boolean } = { error: null }, mode: "daemon" | "one-shot" = "daemon") {
   const out = { pin: null as number | null, n: 0 };
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
@@ -63,6 +63,8 @@ describe("pin", () => {
     expect(node.pinMessage).toHaveBeenLastCalledWith({ linkId: "chat-one", messageId: "peer_x", remove: true });
     await expect(callApi(ctx, "chat.pin", { chat: "Alice" })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(fake({ error: "Only the admin pins in a community" }).ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).rejects.toMatchObject({ code: "refused" });
+    // Not a member any more (removed, say): refused with the group's reason, as group send and group react are.
+    await expect(callApi(fake({ error: "You were removed from this group", refused: true }).ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
     await expect(callApi(fake({ error: "That message is not in this chat, or cannot be pinned" }).ctx, "chat.pin", { chat: "Alice", message: "x" })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(fake({ error: "Nothing is pinned in this chat" }).ctx, "chat.pin", { chat: "Alice", remove: true })).rejects.toMatchObject({ code: "not_found" });
   });
