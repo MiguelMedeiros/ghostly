@@ -91,6 +91,20 @@ test("on the rail the list's notices still show, over the open page, and go back
   await expect(page.getByTestId("offline-banner")).toHaveCount(0);
 });
 
+test("Alt+Shift+L in a dialog opened from the rail leaves the rail, and Escape gives the focus back to its button", { tag: ["@feature:chats.list.rail"] }, async ({ peer }) => {
+  const { page } = await peer("ana", { viewport: { width: 1100, height: 800 } });
+  await page.getByTestId("chat-list-toggle").click();
+  const join = page.getByTestId("rail-join");
+  await join.click();
+  const dialog = page.getByRole("dialog", { name: "Join a chat or group" });
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press("Alt+Shift+L");
+  await expect(page.getByTestId("chat-rail")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  await expect(join).toBeFocused();
+});
+
 test("a phone's list has no rail",{ tag: ["@feature:chats.list.rail"] }, async ({ peer }) => {
   const { page } = await peer("phone", { viewport: { width: 390, height: 800 } });
   await expect(page.getByTestId("sidebar")).toBeVisible();

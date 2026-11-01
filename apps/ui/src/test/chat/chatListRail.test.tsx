@@ -137,6 +137,34 @@ describe("the rail", () => {
     field.remove();
   });
 
+  it("stays as it is with Alt+Shift+L while a dialog is open, so the dialog gives the focus back to its opener", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ chatListCollapsed: true }));
+    saveSession(chat("a", { nick: "Ana" }));
+    const { user } = list();
+    const join = within(screen.getByTestId("chat-rail-actions")).getByRole("button", { name: "Join chat" });
+    await user.click(join);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.keyDown(dialog, { code: "KeyL", key: "L", altKey: true, shiftKey: true });
+    expect(screen.getByTestId("chat-rail")).toBeInTheDocument();
+    expect(stored()).toBe(true);
+    await user.click(within(dialog).getByRole("button", { name: "Close join" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(join).toHaveFocus();
+  });
+
+  it("stays as it is with Alt+Shift+L behind the lock screen", () => {
+    saveSession(chat("a", { nick: "Ana" }));
+    list();
+    // The lock screen: a modal panel over the whole app (LockScreen.tsx).
+    const lock = document.body.appendChild(Object.assign(document.createElement("div"), { role: "dialog" }));
+    lock.setAttribute("aria-modal", "true");
+    try {
+      fireEvent.keyDown(window, { code: "KeyL", key: "L", altKey: true, shiftKey: true });
+      expect(screen.queryByTestId("chat-rail")).not.toBeInTheDocument();
+      expect(stored()).not.toBe(true);
+    } finally { lock.remove(); }
+  });
+
   it("says its buttons in the app's language", async () => {
     saveSession(chat("a", { nick: "Ana", messages: [message({})] }));
     const { user } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>, { language: "pt" });
