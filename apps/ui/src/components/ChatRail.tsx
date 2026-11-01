@@ -131,8 +131,9 @@ const SameRailGroup = memo(function SameRailGroup({ group, active, readAt, onOpe
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const label = invitation ? t("sidebar.rail.invitation", { name, status: invitationStatus(group, t) })
     : mention ? t("sidebar.rail.mention", { name }) : unread ? t("sidebar.rail.unread", { name }) : name;
-  const mark = invitation ? <span aria-hidden="true" data-testid="chat-rail-invitation" data-muted={!invitationWaitsForMe(invitation) || undefined}
-      className={`h-5 w-5 inline-flex items-center justify-center rounded-full ${badge(!invitationWaitsForMe(invitation))}`}><EnvelopeIcon /></span>
+  const waiting = invitation && !invitationWaitsForMe(invitation);
+  const mark = invitation ? <span aria-hidden="true" data-testid="chat-rail-invitation" data-muted={waiting || undefined}
+      className={`h-5 w-5 inline-flex items-center justify-center rounded-full ${badge(!!waiting)}`}><EnvelopeIcon /></span>
     : mention ? <span aria-hidden="true" data-testid="chat-rail-mention" data-muted={mentionQuiet || undefined}
       className={`h-5 w-5 inline-flex items-center justify-center rounded-full text-[12px] font-bold leading-none ${badge(mentionQuiet)}`}>@</span>
     : unread && <span aria-hidden="true" data-testid="chat-rail-unread" data-muted={muted || undefined} className={`h-3 w-3 rounded-full ${badge(muted)}`} />;
