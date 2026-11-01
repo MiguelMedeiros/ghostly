@@ -153,7 +153,7 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
     className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
       <GroupAvatar picture={group.picture} size={64} testId="group-share-avatar" className="mx-auto mb-3 bg-accent/15" />
-      <h2 id={`${id}-title`} className="text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
+      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
       <p className="mt-1 text-sm text-text-muted">{created ? t("group.share.createdHint") : t("group.share.hint")}</p>
     </div>
     <GroupLinkPanel group={group} large />
