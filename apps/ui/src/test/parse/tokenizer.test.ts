@@ -120,6 +120,13 @@ describe("links", () => {
     ["https://x.example/a||", "https://x.example/a"],
   ])("linkEnd(%s)", (url, end) => expect(linkEnd(url)).toBe(end));
 
+  // A phone's keyboard capitalizes a message's first letter: "Https://…" stayed text, while "[x](Https://…)" linked.
+  it("links an address whatever the case of its scheme, as typed", () => {
+    expect(inline("Https://x.example/a")).toBe("[link:Https://x.example/a]");
+    expect(inline("see HTTPS://X.EXAMPLE/A and Http://x.example.")).toBe("see [link:HTTPS://X.EXAMPLE/A] and [link:Http://x.example].");
+    expect(inline("Https://")).toBe("Https://");
+  });
+
   it("never links anything but http(s)", () => {
     expect(inline("javascript:alert(1) data:text/html,x ftp://x.example")).toBe("javascript:alert(1) data:text/html,x ftp://x.example");
     expect(inline("https://")).toBe("https://");

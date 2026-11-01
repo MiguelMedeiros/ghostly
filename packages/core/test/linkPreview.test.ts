@@ -31,6 +31,10 @@ describe("linksIn", () => {
     expect(linksIn("see (https://a.example/x), and https://b.example/y.")).toEqual(["https://a.example/x", "https://b.example/y"]);
     expect(linksIn("no links here")).toEqual([]);
   });
+
+  it("finds a link whose scheme a phone's keyboard capitalized, as the bubble does", () => {
+    expect(linksIn("Https://a.example/x and HTTP://b.example/y")).toEqual(["Https://a.example/x", "HTTP://b.example/y"]);
+  });
 });
 
 describe("sanitizePreviewImage", () => {
