@@ -30,6 +30,8 @@ vi.mock("@cashu/cashu-ts", async (importOriginal) => {
       getMintInfo = () => ({ isSupported: () => ({ supported: mintApi.restores(), params: [] }) });
       sendOffline = (...args: unknown[]) => mintApi.sendOffline(...args);
       getFeesForProofs = () => real.Amount.zero();
+      getFeesToInclude = () => real.Amount.zero();
+      selectProofsToSend = (proofs: { amount: number }[]) => ({ keep: [], send: proofs.map((p) => ({ ...p, amount: real.Amount.from(p.amount) })) });
       prepareSwapToSend = (...args: unknown[]) => mintApi.prepareSend(...args);
       prepareSwapToReceive = (...args: unknown[]) => mintApi.prepareReceive(...args);
       completeSwap = (preview: unknown) => mintApi.completeSwap(preview);
