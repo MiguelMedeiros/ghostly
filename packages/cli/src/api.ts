@@ -690,7 +690,8 @@ const METHODS: Record<string, Method> = {
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
     const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
     if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
-    if (typing && group.status !== "active") throw new CliError("bad_request", "You are not in this group");
+    // Removed or gone, as `group send` says it: `refused`, with the group's reason.
+    if (typing && group.status !== "active") throw new CliError("refused", group.statusReason ?? "You are not in this group");
     const target = { groupId: group.id };
     endTyping(ctx, target, false);
     sayTyping(ctx, target, typing, word);
