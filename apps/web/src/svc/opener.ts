@@ -4,7 +4,7 @@
  * from this page, where the peer runs. Closing it ends the app, its requests and its cookies.
  */
 import { GhostlyHttpError, viewerResponseHeaders, type ClientRequest, type ClientResponse } from "@ghostly/core";
-import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
+import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, HEAD_TIMEOUT_MS, MAX_RESPONSE_BYTES, SERVICE_FRAME_ALLOW, SERVICE_VIEW_CLOSE, SERVICE_VIEW_ID, closeServiceView, readRequest, serviceOrigin, type ServiceReply, type ServicesHost } from "./protocol";
 import { callWindowOn } from "../../../ui/src/lib/serviceWindows";
 
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
@@ -223,9 +223,10 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   frame.dataset.testid = "service-view-frame";
   frame.title = options.title;
   // Its own origin keeps it from the app's storage. The sandbox keeps it and every frame in it from navigating the
-  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view.
-  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-modals allow-downloads");
-  frame.setAttribute("allow", "fullscreen; clipboard-write");
+  // app's tab away, and from opening a window: one would be a tab of its own on its origin, outliving the view. No
+  // `allow-modals`: the browser's own alert or prompt over the view would be a Ghostly-looking dialog the app draws.
+  frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-downloads");
+  frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.style.cssText = "flex:1;width:100%;border:0;background:#fff";
   // While the contact is offline: said here, in the app's look and the person's language and direction (the view is
