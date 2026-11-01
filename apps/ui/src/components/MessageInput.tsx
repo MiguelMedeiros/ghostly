@@ -912,7 +912,7 @@ export function MessageInput({
         <line x1="12" y1="8" x2="12" y2="12" />
         <line x1="12" y1="16" x2="12.01" y2="16" />
       </svg>
-      <span className="text-[13px] text-text-primary leading-snug flex-1">
+      <span className="text-[13px] text-text-primary leading-snug flex-1 min-w-0 [overflow-wrap:anywhere]">
         {toast}
       </span>
       <button
