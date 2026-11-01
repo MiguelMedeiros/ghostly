@@ -148,6 +148,41 @@ const total = (proofs: { amount: number }[]) => proofs.reduce((sum, p) => sum + 
 
 const sats = (proofs: Proof[]) => total(proofs.map((p) => ({ amount: p.amount.toNumber() })));
 
+/**
+ * Whether `split` can take `amount` out of `proofs`, as it does: coins that add up exactly with the fee their receiver
+ * pays to redeem them, or a swap whose inputs also pay the mint's fee for taking them in. Asks nothing of the mint.
+ */
+function fitsAt(wallet: Wallet, proofs: StoredProof[], amount: number): boolean {
+  try {
+    const { send } = wallet.sendOffline(amount, asProofLike(proofs), { includeFees: true, exactMatch: true });
+    if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber()) return true;
+  } catch {
+    // no exact coins: a swap makes them
+  }
+  try {
+    const outputs = amount + wallet.getFeesToInclude(amount).toNumber();
+    const { send } = wallet.selectProofsToSend(asProofLike(proofs), outputs, true);
+    return send.length > 0 && sats(send) >= outputs + wallet.getFeesForProofs(send).toNumber();
+  } catch {
+    return false;
+  }
+}
+
+/** The most `fitsAt` takes out of `proofs` with `extra` on top (a Lightning fee reserve): 0 when nothing fits. */
+function roomAt(wallet: Wallet, proofs: StoredProof[], extra = 0): number {
+  // Every coin as it is, less what the mint charges to take them all in: nothing sends more.
+  const most = total(proofs) - wallet.getFeesForProofs(asProofLike(proofs)).toNumber() - extra;
+  if (most <= 0 || fitsAt(wallet, proofs, most + extra)) return Math.max(0, most);
+  let low = 0;
+  let high = most - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fitsAt(wallet, proofs, middle + extra)) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
+
 const MINT_QUOTE_MISMATCH = "The mint quoted another amount than this invoice's. Nothing was paid.";
 /** A melt quote that is not for this invoice (`invoice` lower case, as `decodeBolt11` gives it) and its amount. */
 const quoteMismatch = (quote: MeltQuoteBolt11Response, invoice: string, amount: number) =>
@@ -628,8 +663,17 @@ export class CashuWallet {
     const mine = preferred ? this.getKnownMints() : this.getMints(network);
     const candidates = (preferred ? preferred.map((m) => m.replace(/\/+$/, "")).filter((m) => mine.includes(m)) : mine)
       .filter((m) => !network || mintNetwork(m) === network);
+    /** The most a mint that holds the amount could send with its fees on top. */
+    let room = 0;
     for (const mint of candidates) {
       if ((await this.balanceAt(mint)) < amount) continue;
+      // At a mint that charges for each coin it takes in, the amount held may not cover its fees: the next mint may.
+      const wallet = await this.wallet(mint);
+      const proofs = await this.proofsAt(mint);
+      if (!fitsAt(wallet, proofs, amount)) {
+        room = Math.max(room, roomAt(wallet, proofs));
+        continue;
+      }
       return this.locked(mint, async () => {
         const { inputs, keep, send, swap } = await this.split(mint, amount, await this.proofsAt(mint));
         const token = (await loadCashu()).getEncodedToken({ mint, proofs: send, unit: UNIT });
@@ -647,6 +691,7 @@ export class CashuWallet {
         return { token, mint };
       });
     }
+    if (room > 0) throw engineError("notEnoughForFee", { amount: room });
     throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
   }
 
@@ -1315,9 +1360,10 @@ export class CashuWallet {
         const feeReserve = quote.fee_reserve.toNumber();
         // The amount shown is the invoice's, or the one chosen: a quote for another invoice or amount is never paid.
         if (quoteMismatch(quote, decoded.invoice, expected)) throw new Error(MINT_QUOTE_MISMATCH);
-        const balance = await this.balanceAt(mint);
-        if (balance < amount + feeReserve) {
-          room = Math.max(room, balance - feeReserve);
+        // The coins the melt spends are paid for too, at a mint that charges for each coin it takes in.
+        const proofs = await this.proofsAt(mint);
+        if (!fitsAt(wallet, proofs, amount + feeReserve)) {
+          room = Math.max(room, roomAt(wallet, proofs, feeReserve));
           lastError = room > 0 ? engineError("notEnoughForFee", { amount: room }) : engineError("notEnoughSats");
           continue;
         }
