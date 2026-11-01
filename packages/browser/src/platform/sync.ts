@@ -27,6 +27,7 @@ import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
 import { replyRef } from "../shared/replies";
+import { paymentRefusal } from "../shared/refusals";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -80,12 +81,15 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
   const isJoin = JOIN_PATTERN.test(message.text);
+  // A payment of the contact's this app refused: the app's own line, not the contact's (stored as theirs for the CLI).
+  const notice = paymentRefusal(message);
   return {
     id: message.id,
     delivery: message.delivery,
     deliveryError: message.deliveryError,
     text: message.text,
-    sender: isJoin ? "system" : message.sender,
+    sender: isJoin || notice ? "system" : message.sender,
+    ...(notice && { notice }),
     timestamp: message.timestamp,
     ...(message.sentAt !== undefined && { sentAt: message.sentAt }),
     nick: message.nick,
