@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS, isViewerTag, viewerTag } from "@ghostly/core";
+import { LIMITS, imageSize, isViewerTag, viewerTag } from "@ghostly/core";
+import { avatar, cameraJpeg, secretsIn } from "../../core/test/support/photos";
 import { setBrowserHost, type BrowserHost } from "../src/host";
 import { registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
@@ -232,6 +233,28 @@ describe("sending files", () => {
     await services.deleteMessage("peer-1", "me_1");
     await fileStore.delete(file.id);
     expect(await services.getFile(file.id)).toBeNull();
+  });
+
+  it("a photo goes to a chat and to a group without its location and device details, its pixels and orientation kept", async () => {
+    // covers: files.image.no-metadata
+    withLinks(chat({ id: "photo-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const clean = avatar("avatar.jpg");
+    const photo = () => new File([cameraJpeg(clean, 6)],"IMG_0042.JPG", { type: "image/jpeg" });
+    const { file } = await services.sendFile("peer-1", photo());
+    const { file: groupFile } = await services.sendGroupFile!("g1", photo());
+    for (const sent of [file, groupFile]) {
+      const stored = await fileStore.get(sent.id);
+      const bytes = new Uint8Array(await stored!.blob!.arrayBuffer());
+      expect(secretsIn(bytes)).toEqual([]);
+      // The picture's own bytes, after a minimal EXIF that turns it as the original did.
+      expect(Buffer.from(bytes).indexOf(Buffer.from(clean.subarray(2)))).toBe(bytes.length - clean.length + 2);
+      expect(sent.size).toBe(bytes.length);
+      expect(stored?.metadata?.size).toBe(bytes.length);
+      expect(sent.image).toEqual({ width: imageSize(clean)!.height, height: imageSize(clean)!.width });
+      expect(sent.name).toBe("IMG_0042.JPG");
+      expect(sent.mime).toBe("image/jpeg");
+    }
   });
 
   it("a file whose copy into this device fails says it in the app's words, the system's reason kept, to a chat and to a group", async () => {

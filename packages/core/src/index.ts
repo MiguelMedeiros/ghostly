@@ -34,6 +34,7 @@ export * from "./chatFiles";
 export * from "./voice";
 export * from "./video";
 export * from "./image";
+export * from "./imageStrip";
 export * from "./linkPreview";
 export * from "./messageTime";
 export * from "./payments";
