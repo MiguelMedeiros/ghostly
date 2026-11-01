@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "收起聊天列表",
     "expand": "展开聊天列表",
+    "invitation": "{{name}}，{{status}}",
+    "mention": "{{name}}，有人提及了你",
     "title": "{{action}}（{{keys}}）",
     "unread": "{{name}}，未读消息",
     "unreadCount": "{{name}}，{{count}} 条未读消息",

@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "Collapse chat list",
     "expand": "Expand chat list",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, you were mentioned",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, unread messages",
     "unreadCount": "{{name}}, {{count}} unread messages",

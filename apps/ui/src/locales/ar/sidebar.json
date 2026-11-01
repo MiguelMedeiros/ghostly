@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "طي قائمة المحادثات",
     "expand": "توسيع قائمة المحادثات",
+    "invitation": "{{name}}، {{status}}",
+    "mention": "{{name}}، تمت الإشارة إليك",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}، رسائل غير مقروءة",
     "unreadCount": "{{name}}، {{count}} من الرسائل غير المقروءة",
