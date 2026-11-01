@@ -258,6 +258,12 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("inviteToGroup")).toEqual([{ groupId: "group-1", linkId: "link-carol" }]);
   });
 
+  // It was 24 px tall on a phone, under the members' 44 px Hand over admin and Remove.
+  it("Invite is a thumb's height on a phone, as a member's Remove is", () => {
+    members_(groupView({ status: "active", isAdmin: true, members }), [paired({ id: "link-carol", label: "Carol" })]);
+    expect(screen.getByTestId("group-invite")).toHaveClass("max-md:min-h-11", "max-md:px-3");
+  });
+
   it("says nothing of why when every contact can be invited", () => {
     members_(groupView({ status: "active", isAdmin: true, members, invited: ["link-pending"] }), [
       paired({ id: "link-carol", label: "Carol" }),
