@@ -42,26 +42,28 @@ export function prepareUpdate(): void {
   void container()?.getRegistration().then((registration) => registration?.update()).catch(() => {});
 }
 
+/**
+ * The new worker once it is installed. Called after `update()` settled: a new script is `installing` by then, so
+ * with neither a waiting nor an installing worker the active one is already the newest (another tab's Reload put it
+ * in control of this page too) and there is nothing to wait for.
+ */
 function installed(registration: ServiceWorkerRegistration, timeoutMs: number): Promise<ServiceWorker | null> {
   if (registration.waiting) return Promise.resolve(registration.waiting);
+  const worker = registration.installing;
+  if (!worker) return Promise.resolve(null);
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(registration.waiting), timeoutMs);
-    const follow = (worker: ServiceWorker | null) => {
-      if (!worker) return;
-      worker.addEventListener("statechange", () => {
-        if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
-        if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
-      });
-    };
-    if (registration.installing) follow(registration.installing);
-    else registration.addEventListener("updatefound", () => follow(registration.installing), { once: true });
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
+      if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
+    });
   });
 }
 
 /**
  * Reload into the new version: the waiting worker (fetched now if it is not yet) takes over, then the page
  * reloads on it. The worker never does this on its own, so a deploy never swaps the app under a chat. With no
- * worker, or none newer after a while, it is a plain reload.
+ * worker, none newer, or one that does not finish installing in time, it is a plain reload.
  */
 export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.location.reload() } = {}): Promise<void> {
   const workers = container();

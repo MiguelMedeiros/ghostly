@@ -83,11 +83,25 @@ describe("Reload on a new version", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it("no newer worker in time: a plain reload, nothing told to skip waiting", async () => {
+  it("a worker that does not finish installing in time: a plain reload, nothing told to skip waiting", async () => {
+    const next = new FakeWorker("installing");
+    registration.update.mockImplementation(async () => { registration.installing = next; });
     const reload = vi.fn();
     await applyUpdate({ timeoutMs: 20, reload });
     expect(reload).toHaveBeenCalledTimes(1);
+    expect(next.posted).toEqual([]);
     expect(registration.active!.posted).toEqual([]);
+  });
+
+  it("the newest worker already controls the page (another tab took the update): it reloads at once", async () => {
+    // The other tab's Reload activated it and it claimed this page too: nothing is waiting, nothing installs.
+    const newest = new FakeWorker("activated");
+    registration.active = newest;
+    container.controller = newest;
+    const reload = vi.fn();
+    void applyUpdate({ reload });
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1), { timeout: 500 });
+    expect(newest.posted).toEqual([]);
   });
 
   it("no worker at all (a browser without them): a plain reload", async () => {
