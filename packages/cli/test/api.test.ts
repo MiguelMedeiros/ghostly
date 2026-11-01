@@ -425,6 +425,18 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: -1 })).rejects.toMatchObject({ code: "bad_request" });
   });
 
+  it("history after a message or a time reads that page, never the whole history (a bot reading what came since)", async () => {
+    // Read whole and cut, each such call cost a daemon 94 ms at 7,000 messages, against 6 ms for the newest page.
+    const { ctx, node } = fake([msg("c", 3), msg("a", 1), msg("b", 2), msg("d", 4), msg("e", 5)]);
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: "b", limit: 2 })).toMatchObject({ messages: [{ id: "c" }, { id: "d" }], more: true });
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: "d" })).toMatchObject({ messages: [{ id: "e" }], more: false });
+    expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: 2, before: "e" })).toMatchObject({ messages: [{ id: "c" }, { id: "d" }], more: false });
+    expect(await callApi(ctx, "group.history", { group: "g1", after: 0, limit: 1 })).toMatchObject({ more: true });
+    expect(node.getMessages).not.toHaveBeenCalled();
+    expect(node.messagePage).toHaveBeenCalledWith({ linkId: "chat-one", limit: 2, before: undefined, after: "b" });
+    expect(node.messagePage).toHaveBeenCalledWith({ linkId: "group:g1", limit: 1, before: undefined, after: 0 });
+  });
+
   it("a window between two messages it holds that has nothing in it is an empty page, not a message not found", async () => {
     const { ctx } = fake([msg("a", 1), msg("b", 2), msg("c", 3)]);
     const page = (after: unknown, before: unknown) => callApi(ctx, "chat.history", { chat: "chat-one", after, before });

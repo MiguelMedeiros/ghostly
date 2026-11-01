@@ -2730,20 +2730,29 @@ export class GhostlyNode implements EngineImplementation {
     return message && withoutFrame(message);
   }
 
-  async messagePage(asked: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+  /**
+   * A page of a chat's or a group's history: the newest `limit` (before `before`), or with `after` the oldest `limit`
+   * after it (and before `before`). Each bound is a time or a message's place; only the page's rows are read.
+   */
+  async messagePage(asked: { linkId: string; limit?: number; before?: string | number; after?: string | number }): Promise<MessagePage> {
     const page = await this.storedPage(asked);
     return { ...page, messages: page.messages.map(withoutFrame) };
   }
-  private async storedPage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+  private async storedPage({ linkId, limit = 50, before, after }: { linkId: string; limit?: number; before?: string | number; after?: string | number }): Promise<MessagePage> {
     if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
-    if (before === undefined) return db.getMessagePage(linkId, { limit });
-    if (typeof before === "number") {
-      if (Number.isNaN(before)) throw new Error("before: a time or a message id");
-      return db.getMessagePage(linkId, { limit, before: { timestamp: before } });
+    const end = before === undefined ? undefined : await this.pagePlace(linkId, before, "before");
+    if (after === undefined) return db.getMessagePage(linkId, { limit, before: end });
+    return db.getMessagePageAfter(linkId, { limit, before: end, after: await this.pagePlace(linkId, after, "after") });
+  }
+  /** A page's bound: a time, or the place of a message of the chat. */
+  private async pagePlace(linkId: string, bound: string | number, side: "before" | "after"): Promise<{ timestamp: number; id?: string }> {
+    if (typeof bound === "number") {
+      if (Number.isNaN(bound)) throw new Error(`${side}: a time or a message id`);
+      return { timestamp: bound };
     }
-    const from = await db.getMessage(linkId, before);
-    if (!from) throw new Error(`No message ${before}`);
-    return db.getMessagePage(linkId, { limit, before: from });
+    const from = await db.getMessage(linkId, bound);
+    if (!from) throw new Error(`No message ${bound}`);
+    return from;
   }
 
   /** Saves a message on this device, or unsaves it (`engine/saved.ts`): nothing is sent. */
