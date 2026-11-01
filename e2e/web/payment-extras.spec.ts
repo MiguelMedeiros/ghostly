@@ -149,8 +149,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   const review = await prepareSend(alice, 21);
   await review.getByRole("button", { name: "Approve payment" }).click();
 
-  // Bob's side says why, once, and has no payment.
-  await expect(chat(bob).getByText(/Could not receive 21 sats: Ecash from 127\.0\.0\.1 is not accepted/)).toBeVisible();
+  // Bob's side says why, once, as the app's own line (test sats: the mint is on this machine), and has no payment.
+  await expect(chat(bob).getByTestId("refused-line").getByText(/Could not receive 21 test sats: Ecash from 127\.0\.0\.1 is not accepted/)).toBeVisible();
   await expect(chat(bob).getByTestId("payment-bubble")).toHaveCount(0);
   // Alice's payment comes back to her: taken back, with the reason, and the review closed as failed.
   const sent = bubble(alice, "You sent");

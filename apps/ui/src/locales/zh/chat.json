@@ -326,6 +326,14 @@
     "notice": "有人回应了你的消息",
     "react": "回应"
   },
+  "refused": {
+    "fedimint": "无法接收 Fedimint ecash：{{reason}}",
+    "payment": "无法接收一笔付款：{{reason}}",
+    "sats": "无法接收 {{amount}} sats：{{reason}}",
+    "satsFedimint": "无法通过 Fedimint 接收 {{amount}} sats：{{reason}}",
+    "testSats": "无法接收 {{amount}} 测试 sats：{{reason}}",
+    "testSatsFedimint": "无法通过 Fedimint 接收 {{amount}} 测试 sats：{{reason}}"
+  },
   "reply": {
     "cancel": "取消回复",
     "deleted": "原消息已删除",
