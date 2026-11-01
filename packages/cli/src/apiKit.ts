@@ -225,7 +225,21 @@ export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId:
   return "group" in found ? { id: found.group.id, linkId: `group:${found.group.id}`, group: true } : { id: found.link.id, linkId: found.link.id, group: false };
 }
 
-export const groupOf = (ctx: ApiContext, params: Params) => findGroup(state(ctx).groups, str(params, "group", true));
+/**
+ * The group a group command names. A chat's id, key or name says it is a chat, with `twin`, the chat command that takes
+ * it (`group send` on a chat, where `send` is meant; `<chat>` stands for the ref), else where the groups are listed.
+ * It read "No group" before. A name nothing has stays that error.
+ */
+export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupView {
+  const ref = str(params, "group", true);
+  try { return findGroup(state(ctx).groups, ref); } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    let chat: LinkView;
+    try { chat = findChat(state(ctx).links, ref); } catch { throw error; }
+    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
+  }
+}
 
 /**
  * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no such
