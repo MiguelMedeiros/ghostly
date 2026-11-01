@@ -33,15 +33,25 @@ export async function pubkyRecords(key: string, fetch: IdentityFetch, signal?: A
   const newest = answers.filter(a => !!a).sort((a, b) => (b.seq > a.seq ? 1 : b.seq < a.seq ? -1 : 0))[0];
   // No relay answered at all (offline, a time-out): say that, not that the key has no records.
   if (!newest && failed.length === relays.length && failed[0] instanceof Error) throw failed[0];
-  if (!newest) throw new Error("This Pubky key has no records on the Pkarr relays");
+  if (!newest) throw new NoPkarrRecords("This Pubky key has no records on the Pkarr relays");
   return newest.dnsPacket;
 }
+
+class NoPkarrRecords extends Error {}
 
 /** Where `key`'s homeserver answers browsers: its `_pubky` record, then the homeserver's own HTTPS record. */
 export async function pubkyHomeserver(key: string, fetch: IdentityFetch, signal?: AbortSignal, relays?: readonly string[]): Promise<{ homeserver: string; endpoint: HomeserverEndpoint }> {
   const homeserver = pubkyHomeserverOf(await pubkyRecords(key, fetch, signal, relays), key);
   if (!homeserver) throw new Error("This Pubky key names no homeserver");
-  const endpoint = homeserverWebEndpoint(await pubkyRecords(homeserver, fetch, signal, relays), homeserver);
+  let records: Uint8Array;
+  try { records = await pubkyRecords(homeserver, fetch, signal, relays); }
+  catch (e) {
+    // The homeserver's own key, not the person's: say whose records are missing.
+    // eslint-disable-next-line preserve-caught-error -- The same failure, named for the right key (ES2020 has no Error.cause).
+    if (e instanceof NoPkarrRecords) throw new Error("The homeserver of this Pubky key has no records on the Pkarr relays");
+    throw e;
+  }
+  const endpoint = homeserverWebEndpoint(records, homeserver);
   if (!endpoint) throw new Error("The homeserver of this Pubky key publishes no address a browser can reach");
   return { homeserver, endpoint };
 }
