@@ -2,6 +2,7 @@
   "alreadyIn": "Sei già in questa chat.",
   "cameraPreview": "Anteprima fotocamera QR",
   "cameraUnavailable": "Fotocamera non disponibile. Incolla un invito o apri un’immagine.",
+  "chatGone": "Questa chat non è più su questo dispositivo.",
   "clipboardUnavailable": "Impossibile leggere gli appunti. Premi {{keys}} per incollare l’invito qui sotto.",
   "clipboardUnavailableTouch": "Impossibile leggere gli appunti. Tieni premuto il campo qui sotto, poi tocca Incolla.",
   "close": "Chiudi",
