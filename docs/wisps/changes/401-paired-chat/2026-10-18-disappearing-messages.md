@@ -1,0 +1,1 @@
+A design for disappearing messages on the live session, planned for 1.5 and not built: the `timer/1` capability, `paired-timer` and its confirmation `paired-timered` with the pin's rules for the number, and `ttl` in seconds on `paired-message`, on a file's announcement and in a held item's meta, the reader applying the shorter of `ttl` and its own setting.
