@@ -278,6 +278,15 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     return !!button && !!barRef.current?.contains(button) && button !== pressedRef.current;
   };
 
+  /**
+   * Safari, WKWebView, Firefox on macOS and iOS give a clicked button no focus, so no blur would ever clear the
+   * press: Tab back to it later and Enter sent instead of pressing it. A press counts only while the button holds
+   * the focus that press gave it.
+   */
+  const keepPressOnlyWithFocus = () => {
+    if (pressedRef.current && document.activeElement !== pressedRef.current) pressedRef.current = null;
+  };
+
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps.
   useEffect(() => {
     if (mode === "idle") return;
@@ -428,6 +437,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       {recording && (
         <div ref={barRef} className="voice-bar" data-testid="voice-bar" data-mode={mode} data-phase={phase} data-confirming={confirming || undefined} role="group" aria-label={t("chat.voice.message")}
           onPointerDownCapture={(event) => { pressedRef.current = event.target instanceof Element ? event.target.closest("button") : null; }}
+          onPointerUpCapture={keepPressOnlyWithFocus}
+          onClickCapture={keepPressOnlyWithFocus}
           onBlur={(event) => { if (event.target === pressedRef.current) pressedRef.current = null; }}>
           {confirming ? (
             <div className="voice-confirm" role="alertdialog" aria-label={t("chat.voice.discardAsk")} data-testid="voice-confirm">
