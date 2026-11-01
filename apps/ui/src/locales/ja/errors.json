@@ -93,6 +93,8 @@
     "invoiceExpired": "この請求書は期限切れです",
     "lastMint": "これは {{network}} の Cashu ウォレットの最後のミントです",
     "lastMintNext": "削除するにはウォレットを削除してください。",
+    "lightningRefused": "mint がこの Lightning 支払いを拒否しました",
+    "lightningRefusedNext": "ウォレットから sats は出ていません。安心してもう一度試せます。",
     "lnurlExactly": "{{domain}} はちょうど {{amount}} sats を求めています",
     "lnurlRange": "{{domain}} は {{min}}〜{{max}} sats を受け付けます",
     "lnurlUnreachable": "{{host}} に接続できません",

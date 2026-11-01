@@ -93,6 +93,8 @@
     "invoiceExpired": "انتهت صلاحية هذه الفاتورة",
     "lastMint": "هذه آخر دار سك في محفظة Cashu على {{network}}",
     "lastMintNext": "أزل المحفظة لإزالتها.",
+    "lightningRefused": "رفضت الـ mint هذه الدفعة عبر Lightning",
+    "lightningRefusedNext": "لم تخرج أي sats من محفظتك. يمكنك المحاولة مرة أخرى بأمان.",
     "lnurlExactly": "يطلب {{domain}} مبلغ {{amount}} sats بالضبط",
     "lnurlRange": "يقبل {{domain}} ما بين {{min}} و{{max}} sats",
     "lnurlUnreachable": "تعذر الوصول إلى {{host}}",
