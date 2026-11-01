@@ -143,6 +143,12 @@ function parseWeb(id: string): WebDid {
   return { id: [`${host}${port ? `%3A${port}` : ""}`, ...path].join(":"), host, port, path };
 }
 
+/**
+ * A did:web (or one of its URLs) with the port's `%3a` written `%3A`, as `parseDid` writes it: percent-encoding is
+ * case-insensitive (RFC 3986), so a document may write either. The fragment is left as it is.
+ */
+const webPortForm = (value: string) => value.startsWith("did:web:") ? value.replace(/^[^#]*/, part => part.replace(/%3a/g, "%3A")) : value;
+
 const web = (did: string): WebDid => {
   const parsed = parseDid(did);
   if (parsed.method !== "web") throw new DidError("Not a did:web");
@@ -173,7 +179,7 @@ export function didWebFileNames(text: string, did: string, statement: string): b
   if (typeof text !== "string" || utf8Encode(text).length > DID_FILE_MAX_BYTES) return false;
   let body: unknown;
   try { body = JSON.parse(text); } catch { return false; }
-  return isObject(body) && body.ghostly === 1 && body.did === did && body.statement === statement;
+  return isObject(body) && body.ghostly === 1 && typeof body.did === "string" && webPortForm(body.did) === did && body.statement === statement;
 }
 
 /** The service entry a did.json can carry instead of the file. */
@@ -265,7 +271,7 @@ export function staticDidDocument(did: string): DidDocumentView {
 /** An id as absolute `<did>#<fragment>`, from `#frag` or the absolute form; undefined for another DID's. */
 function methodId(did: string, id: unknown): string | undefined {
   if (typeof id !== "string" || id.length > DID_MAX_LENGTH + 128) return undefined;
-  const absolute = id.startsWith("#") ? `${did}${id}` : id;
+  const absolute = id.startsWith("#") ? `${did}${id}` : webPortForm(id);
   return absolute.startsWith(`${did}#`) && absolute.length > did.length + 1 && /^[\x21-\x7e]+$/.test(absolute) ? absolute : undefined;
 }
 
@@ -303,7 +309,7 @@ const list = (value: unknown, name: string): unknown[] => {
  */
 export function parseDidDocument(did: string, raw: unknown): DidDocumentView {
   if (!isObject(raw)) throw new DidError("The DID document is not a JSON object");
-  if (raw.id !== did) throw new DidError(typeof raw.id === "string" ? `The DID document is for another DID (${raw.id.slice(0, 80)})` : "The DID document has no id");
+  if (typeof raw.id !== "string" || webPortForm(raw.id) !== did) throw new DidError(typeof raw.id === "string" ? `The DID document is for another DID (${raw.id.slice(0, 80)})` : "The DID document has no id");
   const keys = new Map<string, DidKey>();
   const unusable = new Set<string>();
   let skipped = 0;

@@ -175,6 +175,20 @@ describe("DID documents", () => {
     expect(view.services).toEqual([{ id: `${did}#ghostly-cccccccccccc`, key: "y".repeat(52), proof: "c".repeat(64) }]);
   });
 
+  it("reads a did:web port written %3a or %3A as the same DID", () => {
+    const ported = normalizeDid("did:web:example.com%3a8443:u");
+    for (const written of ["did:web:example.com%3a8443:u", "did:web:example.com%3A8443:u"]) {
+      const view = parseDidDocument(ported, {
+        id: written,
+        verificationMethod: [{ id: `${written}#key-1`, type: "JsonWebKey2020", publicKeyJwk: { kty: "OKP", crv: "Ed25519", x: b64u(ed) } }],
+        authentication: [`${written}#key-1`],
+      });
+      expect(view.keys.map(k => [k.id, k.relationships.join("+")]), written).toEqual([[`${ported}#key-1`, "authentication"]]);
+    }
+    expect(didWebFileNames(JSON.stringify({ ghostly: 1, did: "did:web:example.com%3a8443:u", statement: STATEMENT }), ported, STATEMENT)).toBe(true);
+    expect(() => parseDidDocument(ported, { id: "did:web:example.com%3a8444:u" })).toThrow(/another DID/);
+  });
+
   it("refuses a document for another DID, or not an object", () => {
     expect(() => parseDidDocument(did, { ...doc, id: "did:web:evil.example" })).toThrow(/another DID/);
     expect(() => parseDidDocument(did, [])).toThrow(/not a JSON object/);
