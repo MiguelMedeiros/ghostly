@@ -23,3 +23,7 @@ Put it behind HTTPS (a tunnel or a reverse proxy) and enter its address in Setti
 client's address from `X-Forwarded-For` rather than the proxy's; without it the header is ignored. With proxies set,
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
+
+A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`) stops the start with one
+line that names it; leave a setting out for its default. The start line says how many proxies it counts and where it
+listens.

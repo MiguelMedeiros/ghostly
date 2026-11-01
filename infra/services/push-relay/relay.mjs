@@ -138,3 +138,36 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     close: () => new Promise(done => { clearInterval(pruning); server.close(() => done()) }),
   })))
 }
+
+/**
+ * One setting from the environment: absent gives `fallback`; present, it must read as `kind` says, or the start stops
+ * with one line naming it (an empty `PORT=` in an env file, `GHOSTLY_RELAY_PROXIES=one`), never a quiet default.
+ */
+function setting (env, name, fallback, kind) {
+  const raw = env[name]
+  if (raw === undefined) return fallback
+  const value = raw.trim()
+  const fail = expected => { throw new Error(`${name}=${JSON.stringify(raw)}: expected ${expected}`) }
+  if (kind === 'port') return /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? Number(value) : fail('a port from 1 to 65535')
+  if (kind === 'count') return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number of 0 or more')
+  if (kind === 'positive') return /^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number above 0')
+  if (kind === 'flag') return value === '1' ? true : value === '0' ? false : fail('1 or 0')
+  if (kind === 'text') return value || fail('a value (leave it out for the default)')
+  return value
+}
+
+const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
+
+/**
+ * The relay's settings from its environment (server.mjs): PORT (49480), HOST (0.0.0.0; 127.0.0.1 behind proxies),
+ * GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_PROXIES (0). Throws on one present but not of its kind.
+ */
+export function readSettings (env) {
+  const proxies = setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count')
+  return {
+    port: setting(env, 'PORT', 49480, 'port'),
+    host: setting(env, 'HOST', proxies ? '127.0.0.1' : '0.0.0.0', 'text'),
+    origins: list(env.GHOSTLY_RELAY_ORIGINS),
+    proxies,
+  }
+}
