@@ -7,6 +7,8 @@ export interface OptionSpec {
   optionalValue?: boolean;
   /** A boolean the command takes only as `--no-<name>`: help shows it so. */
   negatedOnly?: boolean;
+  /** A boolean whose usage shows `[--<name> | --no-<name>]`: both ways on one line are a usage error, not the last. */
+  eitherWay?: boolean;
   /**
    * The words a string option takes: any other (or "") is a usage error that names the flag and lists them, before the
    * profile opens. Before, the API answered it ("network must be one of mainnet, testnet", bad_request, exit 1).
@@ -45,6 +47,10 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
   };
   const positionals: string[] = [];
   const options: Parsed["options"] = {};
+  const setBoolean = (name: string, value: boolean) => {
+    if (all[name].eitherWay && options[name] !== undefined && options[name] !== value) throw new CliError("usage", `--${name} or --no-${name}, not both`);
+    options[name] = value;
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--") { positionals.push(...argv.slice(i + 1)); break; }
@@ -60,12 +66,12 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         if (!long) throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
         name = long;
       }
-      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean" && inline === undefined) { options[name.slice(3)] = false; continue; }
+      if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean" && inline === undefined) { setBoolean(name.slice(3), false); continue; }
       const option = all[name];
       if (!option) throw new CliError("usage", `Unknown option --${name}`);
       if (option.type === "boolean") {
         if (inline !== undefined && !["true", "false"].includes(inline)) throw new CliError("usage", `--${name} takes no value`);
-        options[name] = inline === undefined ? true : inline === "true";
+        setBoolean(name, inline === undefined || inline === "true");
         continue;
       }
       let value = inline;
