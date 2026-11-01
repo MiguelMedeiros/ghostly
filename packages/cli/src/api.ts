@@ -933,10 +933,6 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
     : `It reconnects by itself while this profile is online; ghostly chat wait ${shown} --until live waits for it`}`, { chat: link.id });
 }
 
-/**
- * A page of a chat's or a group's history. Without `after` only that page is read from the store (the newest, or those
- * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
- */
 async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
   const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
@@ -946,17 +942,20 @@ async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
 }
 
+/**
+ * A page of a chat's or a group's history: only that page is read from the store (the newest, those before `before`,
+ * or the oldest after `after`), so a long chat's is as quick as a short one's.
+ */
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
-  if (params.after !== undefined && params.after !== null) {
-    const whole = await node(ctx).getMessages(chat), { messages, more } = history(whole, params);
-    const originals = await originalsNow(ctx, chat, messages, whole);
-    return { messages: messages.map((m) => quoteChecked(json(m), m, originals)), more };
-  }
   const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
-  const before = params.before ?? undefined;
-  if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
-  const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
-    throw error instanceof Error && error.message === `No message ${before}` ? new CliError("not_found", error.message) : error;
+  const bound = (side: "before" | "after"): string | number | undefined => {
+    const value = params[side] ?? undefined;
+    if (value !== undefined && typeof value !== "number" && typeof value !== "string") throw new CliError("bad_request", `${side} must be a timestamp or a message id`);
+    return value;
+  };
+  const before = bound("before"), after = bound("after");
+  const page = await node(ctx).messagePage({ linkId: chat, limit, before, ...(after !== undefined && { after }) }).catch((error: unknown) => {
+    throw error instanceof Error && [before, after].some((id) => error.message === `No message ${id}`) ? new CliError("not_found", error.message) : error;
   });
   const originals = await originalsNow(ctx, chat, page.messages);
   return { messages: page.messages.map((m) => quoteChecked(json(m), m, originals)), more: page.more };
@@ -998,28 +997,6 @@ function quoteChecked(json: MessageJson, message: StoredMessage, originals: Orig
   if (!original) return { ...json, replyTo: { ...json.replyTo, snippet: "", found: false, deleted: true } };
   if (!original.edit || json.replyTo.button || original.card || original.file) return json;
   return { ...json, replyTo: { ...json.replyTo, snippet: replySnippet(original.text) } };
-}
-
-function history(messages: StoredMessage[], params: Params): { messages: StoredMessage[]; more: boolean } {
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
-  const before = params.before;
-  const after = params.after;
-  const sorted = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
-  // Each id is found in the whole history, not in what the other side already cut away: a window with nothing in it
-  // (`--after b --before b`, or crossed) is an empty page, not "No message b".
-  const bound = (value: unknown, side: "before" | "after"): ((m: StoredMessage, at: number) => boolean) | undefined => {
-    if (value === undefined || value === null) return;
-    if (typeof value === "number") return (m) => (side === "before" ? m.timestamp < value : m.timestamp > value);
-    if (typeof value !== "string") throw new CliError("bad_request", `${side} must be a timestamp or a message id`);
-    const index = sorted.findIndex((m) => m.id === value);
-    if (index === -1) throw new CliError("not_found", `No message ${value}`);
-    return (_, at) => (side === "before" ? at < index : at > index);
-  };
-  const bounds = [bound(before, "before"), bound(after, "after")].filter((b) => b !== undefined);
-  const list = sorted.filter((m, at) => bounds.every((within) => within(m, at)));
-  const more = after !== undefined && after !== null ? list.length > limit : list.length > limit;
-  const page = after !== undefined && after !== null ? list.slice(0, limit) : list.slice(-limit);
-  return { messages: page, more };
 }
 
 export { findChat, findGroup } from "./apiKit";
