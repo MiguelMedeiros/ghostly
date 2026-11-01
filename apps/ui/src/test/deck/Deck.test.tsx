@@ -51,6 +51,11 @@ describe("the deck primitive", () => {
     expect(card("a")).not.toHaveAttribute("aria-controls");
   });
 
+  it("gives its Previous and Next arrows a finger's 44 px on a phone (deck.css keeps them 30 px elsewhere)", () => {
+    show();
+    for (const id of ["plain-deck-prev", "plain-deck-next"]) expect(screen.getByTestId(id), id).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
+  });
+
   it("gives each face its place: the chosen one active, the ones after it marked as after", () => {
     show({ initial: "b" });
     expect(["a", "b", "c", "d"].map(id => card(id).querySelector("[data-deck=face]")!.getAttribute("data-face-active"))).toEqual(["false", "true", "false", "false"]);
