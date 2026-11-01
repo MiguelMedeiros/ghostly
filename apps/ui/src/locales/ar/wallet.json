@@ -194,6 +194,9 @@
       "feesPaid": "الرسوم المدفوعة: {{amount}} {{unit}}",
       "movements": "{{count}} حركات",
       "movementsOne": "حركة واحدة",
+      "movements_many": "{{count}} حركة",
+      "movements_other": "{{count}} حركة",
+      "movements_two": "حركتان",
       "noFee": "بلا رسوم",
       "none": "لا شيء بعد",
       "note": {
@@ -229,6 +232,7 @@
     "setAsideInfo": "محجوزة لدفعة لم تؤكدها دار السك بعد. تخرج مع الدفعة أو تعود إلى رصيدك عندما تجيب دار السك.",
     "settings": "الإعدادات",
     "testBalance": "{{amount}} sats تجريبية (بلا قيمة)",
+    "testBalance_one": "{{amount}} sat تجريبي (بلا قيمة)",
     "testMintInvoice": "بانتظار الدفع… دور السك التجريبية تعلّم كل فاتورة مدفوعة من تلقاء نفسها، لذا لا تُحتسب هذه الفاتورة إلا حين تدفعها جهة اتصال في محادثة. للحصول على sats تجريبية الآن، استخدم «احصل على عملات تجريبية» أعلاه.",
     "tokenHint": "وصلك رمز ecash بدلًا من ذلك؟ الصقه في «إرسال».",
     "tx": {
@@ -250,6 +254,7 @@
     "alreadyRedeemed": "استردّها شخص ما بالفعل.",
     "amountFee": "{{amount}} (رسوم {{fee}})",
     "asNotes": "{{amount}} sats على شكل أوراق",
+    "asNotes_one": "{{amount}} sat على شكل ورقة",
     "asking": "جارٍ سؤال حرّاسه…",
     "backup": "نسخة احتياطية للمحفظة",
     "backupHint": "العبارة والاتحادات، والنسخة الاحتياطية للملف الشخصي تحوي كل شيء",
@@ -587,7 +592,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "sats تجريبية"
+    "mainnet_one": "sat",
+    "testnet": "sats تجريبية",
+    "testnet_one": "sat تجريبي"
   },
   "send": {
     "balance": "الرصيد: {{amount}} {{unit}}",
@@ -639,6 +646,7 @@
     "experimental": "تجريبي",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "انضم أولًا إلى اتحاد لديه بوابة Lightning من بطاقة Fedimint.",
       "label": "الاتحاد",
       "unknownNetwork": "شبكة غير معروفة",

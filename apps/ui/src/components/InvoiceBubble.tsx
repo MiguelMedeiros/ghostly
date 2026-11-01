@@ -4,7 +4,7 @@ import { MoneyQr } from "./MoneyQr";
 import { parseEngineError, type Bolt11Invoice, type LightningDestination, type PaymentMethodName } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { holdsLess, lightningNetworkFor } from "./walletCardData";
-import { NetworkTag, satsIn } from "./NetworkTag";
+import { NetworkTag, satsIn, unitFor } from "./NetworkTag";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
@@ -104,7 +104,7 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
             {/* Only the number isolated: in a right-to-left page a Latin unit beside it was one run with it, glued to it,
                 and one isolate around both read "تجريبية sats 250,000". The unit stays in the line's direction. */}
             <bdi className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</bdi>
-            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
+            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? (amount === 1 ? "sat" : "sats") : unitFor(t, unit, amount)}</span>
           </>
         )}
       </p>

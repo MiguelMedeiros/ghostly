@@ -107,7 +107,7 @@ function Amount({ sats, network }: { sats?: number; network: WalletNetwork }) {
   return (
     <>
       <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(sats, t.language)}</span>
-      <span className="text-text-primary/65 text-xs ms-1">{satsIn(t, network)}</span>
+      <span className="text-text-primary/65 text-xs ms-1">{satsIn(t, network, sats)}</span>
     </>
   );
 }

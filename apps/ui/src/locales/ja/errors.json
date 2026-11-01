@@ -75,6 +75,7 @@
     "ecashAlreadySpent": "この ecash はすでに別の場所で使われています",
     "ecashBeingReceived": "この ecash はすでに受け取り中です",
     "ecashFeeTakesAll": "この ecash の {{amount}} sats はすべて受け取り手数料として mint に取られます。何も受け取っていないので、送った人はまだ取り戻せます",
+    "ecashFeeTakesAll_one": "この ecash の {{amount}} sat は受け取り手数料として mint に取られます。何も受け取っていないので、送った人はまだ取り戻せます",
     "ecashOtherUnit": "この ecash は {{unit}} 建てです。ここで受け取れるのは sat の ecash だけです",
     "fedimintAlreadyJoined": "このフェデレーションにはすでに参加しています",
     "fedimintConnecting": "フェデレーションの接続を待ってください",

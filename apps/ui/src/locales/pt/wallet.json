@@ -229,6 +229,7 @@
     "setAsideInfo": "Reservados para um pagamento que o mint ainda não confirmou. Saem com o pagamento ou voltam ao seu saldo assim que o mint responder.",
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de teste (sem valor)",
+    "testBalance_one": "{{amount}} sat de teste (sem valor)",
     "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então esta só conta quando um contato a pagar em um chat. Para ter sats de teste agora, use Obter moedas de teste acima.",
     "tokenHint": "Recebeu um token ecash? Cole-o em Enviar.",
     "tx": {
@@ -250,6 +251,7 @@
     "alreadyRedeemed": "Alguém já resgatou.",
     "amountFee": "{{amount}} (taxa {{fee}})",
     "asNotes": "{{amount}} sats em notas",
+    "asNotes_one": "{{amount}} sat em nota",
     "asking": "Consultando os guardiões…",
     "backup": "Backup da carteira",
     "backupHint": "A frase e as federações; o backup do perfil tem tudo",
@@ -587,7 +589,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "sats de teste"
+    "mainnet_one": "sat",
+    "testnet": "sats de teste",
+    "testnet_one": "sat de teste"
   },
   "send": {
     "balance": "Saldo: {{amount}} {{unit}}",
@@ -639,6 +643,7 @@
     "experimental": "Experimental",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "Entre primeiro em uma federação com gateway Lightning no cartão Fedimint.",
       "label": "Federação",
       "unknownNetwork": "rede desconhecida",
