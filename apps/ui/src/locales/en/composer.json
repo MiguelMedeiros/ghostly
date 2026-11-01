@@ -96,6 +96,6 @@
     "stale": "The message changed",
     "working": "Translating…"
   },
-  "videoConverting": "Converting {{name}} to MP4… {{percent}}",
+  "videoConverting": "Converting {{name}} to MP4…",
   "videoSentAsIs": "Sent {{name}} as it is: this device can't convert it. Some phones and computers may only be able to download it."
 }

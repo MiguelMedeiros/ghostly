@@ -96,6 +96,6 @@
     "stale": "消息已更改",
     "working": "正在翻译…"
   },
-  "videoConverting": "正在将 {{name}} 转换为 MP4… {{percent}}",
+  "videoConverting": "正在将 {{name}} 转换为 MP4…",
   "videoSentAsIs": "已按原样发送 {{name}}：此设备无法转换它。部分手机和电脑可能只能下载它。"
 }
