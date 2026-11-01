@@ -37,7 +37,7 @@ describe("GroupMembersDialog", () => {
     expect(within(row(ALICE)).getByRole("img", { name: "reachable" })).toBeInTheDocument();
     expect(row(BOB)).toHaveTextContent(/^Member bobyyy/);
     expect(within(row(BOB)).getByRole("img", { name: "not reachable" })).toBeInTheDocument();
-    expect(within(row(BOB)).getByText("3 missing")).toBeInTheDocument();
+    expect(within(row(BOB)).getByText("3 of their messages have not arrived yet")).toBeInTheDocument();
     expect(screen.getByTestId("group-read-note")).toHaveTextContent("Everyone in the group can read everything sent while they are a member.");
   });
 

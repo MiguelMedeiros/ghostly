@@ -145,18 +145,20 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
-              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} ref={namingField.ref} value={naming} readOnly={busy !== null}
+              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} aria-describedby={`${id}-rename-hint`} ref={namingField.ref} value={naming} readOnly={busy !== null}
                 onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60 max-md:min-h-11" />
               <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
                 className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.rename.save")}</button>
               <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="rounded text-xs text-text-muted hover:text-text-primary max-md:min-h-11 max-md:px-3">{t("group.rename.cancel")}</button>
             </form>}
+          {/* Who sees the new name, in words while the field is open: it was a tooltip on Rename, which a phone never shows. */}
+          {naming !== null && <p id={`${id}-rename-hint`} data-testid="group-rename-hint" className="mt-1 text-xs text-text-muted">{t("group.rename.hint")}</p>}
           <p className="text-xs text-text-muted">{live.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: live.members.length })}{live.epoch !== undefined && <> · {t("group.members.epoch", { epoch: live.epoch })}</>}{live.status && live.status !== "active" && <> · {groupStatusText(live.status, t)}</>}</p>
           {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app.
               A line of small text on a desktop, they are a thumb's height on a phone, as the rest of the dialog is. */}
           {live.isAdmin && live.status === "active" && <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-            {naming === null && <button ref={renameButton} type="button" data-testid="group-rename" aria-disabled={busy !== null || undefined} title={t("group.rename.hint")} onClick={() => { if (busy === null) setNaming(live.name); }}
+            {naming === null && <button ref={renameButton} type="button" data-testid="group-rename" aria-disabled={busy !== null || undefined} onClick={() => { if (busy === null) setNaming(live.name); }}
               className="text-xs font-medium text-accent hover:underline aria-disabled:opacity-40 max-md:min-h-11">{t("group.rename.action")}</button>}
             <label data-testid="group-picture-pick" className={`inline-flex cursor-pointer items-center rounded text-xs font-medium text-accent hover:underline has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent max-md:min-h-11 ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
               {live.picture ? t("group.members.changePicture") : t("group.members.addPicture")}
@@ -178,6 +180,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
         peerKey={m.me ? undefined : contactKey(m.key)} status={m.me ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
         tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
     </ul>
+    {/* What being a hub means, once under the list: it was a tooltip on each badge, which a phone never shows. */}
+    {live.members.some(m => m.hub) && <p data-testid="group-hubs-why" className="mt-1 text-xs text-text-muted">{t("group.hubs.note")}</p>}
     {live.isAdmin && live.status === "active" && live.profile !== "community" && <div className="mt-4">
       <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.members.invite")}</h3>
       {/* Unanswered invitations hold a seat (until they are answered, a week at most), so a full group says how many of its 32 are only invited. */}
@@ -257,10 +261,11 @@ const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, m
       <span className="flex min-w-0 items-center gap-1.5 text-sm"><span dir="auto" data-testid="group-member-name" className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
         {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
       {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
+      {/* A whole phrase under the status: "2 missing" beside a name read as two members missing, its meaning only in a tooltip. */}
+      {m.missing > 0 && <span className="block text-[11px] text-warn-ink" data-testid="group-member-missing">{t(m.missing === 1 ? "group.members.missingOne" : "group.members.missing", { count: m.missing })}</span>}
     </span>
     {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
-    {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
-    {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-warn-ink">{t(m.missing === 1 ? "group.members.missingOne" : "group.members.missing", { count: m.missing })}</span>}
+    {m.hub && <span data-testid="group-member-hub" className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
     {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1 max-md:gap-2">
       {tools === "hubs" && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy}
         value={m.hubRole ?? "auto"} options={HUB_ROLES.map(value => ({ value, label: hubLabels[value] }))} onChange={role => onHub(m.key, role)} />}
