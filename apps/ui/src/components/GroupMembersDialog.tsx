@@ -168,7 +168,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           </div>}
         </div>
       </div>
-      <button onClick={onClose} aria-label={t("common.close")} className="rounded-full p-1.5 text-text-muted hover:bg-surface-hover hover:text-text-primary">
+      <button onClick={onClose} aria-label={t("common.close")} className="grid shrink-0 place-items-center rounded-full p-1.5 text-text-muted max-md:h-11 max-md:w-11 hover:bg-surface-hover hover:text-text-primary">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
       </button>
     </div>
@@ -259,13 +259,13 @@ const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, m
     {m.role === "admin" && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent">{t("group.members.admin")}</span>}
     {m.hub && <span data-testid="group-member-hub" title={t("group.hubs.badgeHint")} className="rounded-full bg-surface-alt px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t("group.hubs.badge")}</span>}
     {m.missing > 0 && <span title={t("group.members.missingHint")} className="text-[10px] text-warn-ink">{t(m.missing === 1 ? "group.members.missingOne" : "group.members.missing", { count: m.missing })}</span>}
-    {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1">
+    {tools && <span data-testid="group-member-actions" className="ms-auto flex shrink-0 items-center gap-1 max-md:gap-2">
       {tools === "hubs" && <Select size="sm" fit aria-label={t("group.hubs.choice")} data-testid="group-member-hub-role" disabled={busy}
         value={m.hubRole ?? "auto"} options={HUB_ROLES.map(value => ({ value, label: hubLabels[value] }))} onChange={role => onHub(m.key, role)} />}
       <button disabled={busy} onClick={() => onPromote(m)} data-testid="group-make-admin"
-        className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
+        className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.makeAdmin")}</button>
       <button disabled={busy} onClick={() => onRemove(m)} data-testid="group-remove-member"
-        className="rounded px-2 py-1 text-xs text-danger-ink hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
+        className="rounded px-2 py-1 text-xs text-danger-ink hover:bg-danger/10 disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.members.remove")}</button>
     </span>}
   </li>;
 }, sameRow);
