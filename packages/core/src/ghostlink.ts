@@ -3683,17 +3683,25 @@ export class GhostLink {
   /**
    * The session ended or a new one took its place (a transport switch, a resume, a re-dial): what the contact had open
    * is held for `APP_RESUME_GRACE_MS` (WISP 1200 § In a chat). The next session's `open` takes each back, and the app
-   * hears only that open, not a close first; one not said again by then is closed with `offline`.
+   * hears only that open, not a close first; one not said again by then is closed with `offline`. Each suspension
+   * gives what it held its own grace: a later one's apps do not close at an earlier one's time.
    */
   private appsSuspended(): void {
     // Serve ids and requests last one session, even where the apps are held across it.
     this.appRanges.reset();
-    this.apps.sessionSuspended();
-    if (!this.apps.holding || this.appsGrace) return;
+    this.apps.sessionSuspended(this.options.appResumeGraceMs ?? APP_RESUME_GRACE_MS);
+    this.armAppsGrace();
+  }
+  /** A timer for the next held app's grace, as long as any is held. */
+  private armAppsGrace(): void {
+    if (this.appsGrace) { clearTimeout(this.appsGrace); this.appsGrace = null; }
+    const until = this.apps.heldUntil;
+    if (until === undefined) return;
     this.appsGrace = setTimeout(() => {
       this.appsGrace = null;
       for (const event of this.apps.heldExpired()) this.options.events?.onAppFrame?.(event);
-    }, this.options.appResumeGraceMs ?? APP_RESUME_GRACE_MS);
+      this.armAppsGrace();
+    }, Math.max(0, until - Date.now()));
   }
   /** Whether files/3 was agreed on the session open now; kept to say when that changes. */
   private filesOpen = false;
