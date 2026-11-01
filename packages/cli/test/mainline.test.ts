@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
+import { createSocket, type Socket } from "node:dgram";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Mainline, RelaysAndDht } from "../src/runtime/mainline";
@@ -490,5 +491,46 @@ describe("the bootstrap nodes (GHOSTLY_DHT_BOOTSTRAP, GHOSTLY_HYPERDHT_BOOTSTRAP
     expect(mainlineNetwork({ GHOSTLY_DHT_BOOTSTRAP: "127.0.0.1:1,localhost:49502" })).toEqual({ off: false, bootstrap: ["127.0.0.1:1", "localhost:49502"], host: "127.0.0.1" });
     expect(hyperdhtNetwork("node1.hyperdht.org:49737")).toEqual({ bootstrap: ["node1.hyperdht.org:49737"] });
     expect(hyperdhtNetwork("")).toEqual({});
+  });
+});
+
+// A command that reads only the profile, or a profile set offline, asks the DHT nothing: before, every command started a
+// node at once, which bootstrapped from the public routers (find_node to router.bittorrent.com and the like) and sent
+// them this machine's address; `settings set online false` did not stop it. A UDP socket on loopback stands in for the
+// routers and counts what comes.
+describe("the Mainline DHT node starts when it is asked something", { timeout: 60_000 }, () => {
+  let router: Socket;
+  let received = 0;
+  beforeAll(async () => {
+    router = createSocket("udp4");
+    router.on("message", () => { received += 1; });
+    await new Promise<void>((resolve) => router.bind(0, "127.0.0.1", resolve));
+  });
+  afterAll(() => router?.close());
+  const bootstrap = () => `127.0.0.1:${router.address().port}`;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+  it("a node nothing is asked of sends nothing; its first get bootstraps", async () => {
+    received = 0;
+    const node = new Mainline({ bootstrap: [bootstrap()], host: "127.0.0.1", timeoutMs: 1_000 });
+    await settle();
+    expect(node.running).toBe(false);
+    expect(received).toBe(0);
+    await node.get(createIdentity().pubKeyZ32).catch(() => null);
+    expect(node.running).toBe(true);
+    expect(received).toBeGreaterThan(0);
+    await node.destroy();
+    await expect(node.get(createIdentity().pubKeyZ32)).rejects.toThrow("closed");
+  });
+
+  it("chat list, settings get and status, and a profile set offline, send the DHT's routers nothing", async () => {
+    received = 0;
+    const dir = home("dht-quiet");
+    const env = { GHOSTLY_DHT: "1", GHOSTLY_DHT_BOOTSTRAP: bootstrap() };
+    for (const command of [["chat", "list"], ["settings", "get"], ["status"], ["settings", "set", "online", "false"], ["chat", "list"]]) {
+      ok(await ghostly(["--home", dir, ...command], { env }));
+    }
+    await settle();
+    expect(received).toBe(0);
   });
 });
