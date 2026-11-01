@@ -1943,6 +1943,24 @@ describe("one pull request alone", () => {
     expect((await repo.run()).merged).toEqual([11]);
   });
 
+  it("sends a rebased pull request the batch way when GitHub refuses its squash merge for good, so the line moves on", async () => {
+    // Kept in flight, it was picked first on every run while dev stood still, and nobody behind it boarded.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle();
+    repo.gh.squash = async () => ({ ok: false, status: 405, message: "HTTP 405 Squash merges are not allowed on this repository." });
+    repo.add(12);
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/Could not merge #11 alone: HTTP 405 Squash merges are not allowed on this repository\.; it goes the batch way/);
+    expect(r.inFlight).not.toBe(11);
+    expect(repo.members()).toEqual([11]);
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11"]); // the batch lands by the rebase merge
+    expect((await repo.run()).inFlight).toBe(12); // next, alone: rebased onto the tip #11 landed on
+  });
+
   it("goes the batch way for a head the train must never push to", async () => {
     expect(canGoAlone({ fork: false, branch: "fix-1" })).toBe(true);
     for (const branch of ["dev", "main", "epic/x", "batch/dev-1"]) expect(canGoAlone({ fork: false, branch })).toBe(false);
