@@ -45,8 +45,11 @@
     "offlineHint": "Questo dispositivo è offline: nessun membro è raggiungibile finché non torna online.",
     "onlyYou": "Per ora solo tu",
     "reachable": "{{reachable}} su {{total}} raggiungibili",
-    "reconnect": "Riconnetti",
+    "reachableReconnecting": "{{reachable}} su {{total}} raggiungibili · {{state}}",
     "reconnectFailed": "Impossibile riconnettersi",
+    "reconnecting": "Riconnessione…",
+    "reconnectingTo": "Riconnessione a {{count}} membri…",
+    "retryNow": "Riprova ora",
     "trying": "Tentativo…"
   },
   "create": {
@@ -193,6 +196,8 @@
     "noConnection": "Ancora nessuna connessione",
     "noSlot": "In attesa di una connessione libera su questo dispositivo",
     "notSeen": "non ancora visto",
+    "reconnecting": "Riconnessione…",
+    "reconnectingAttempt": "Riconnessione… · tentativo {{attempt}}",
     "unnamed": "Membro {{key}}",
     "unreachable": "Non raggiungibile · {{seen}}",
     "viaHub": "Tramite un hub",

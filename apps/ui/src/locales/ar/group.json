@@ -49,8 +49,11 @@
     "offlineHint": "هذا الجهاز غير متصل: لا يمكن الوصول إلى أي عضو حتى يعود للاتصال.",
     "onlyYou": "أنت فقط حتى الآن",
     "reachable": "{{reachable}} من {{total}} متاحون",
-    "reconnect": "إعادة الاتصال",
+    "reachableReconnecting": "{{reachable}} من {{total}} متاحون · {{state}}",
     "reconnectFailed": "تعذّرت إعادة الاتصال",
+    "reconnecting": "جارٍ إعادة الاتصال…",
+    "reconnectingTo": "جارٍ إعادة الاتصال بـ {{count}} أعضاء…",
+    "retryNow": "أعد المحاولة الآن",
     "trying": "جارٍ المحاولة…"
   },
   "create": {
@@ -200,6 +203,8 @@
     "noConnection": "لا اتصال بعد",
     "noSlot": "بانتظار اتصال متاح على هذا الجهاز",
     "notSeen": "لم يظهر بعد",
+    "reconnecting": "جارٍ إعادة الاتصال…",
+    "reconnectingAttempt": "جارٍ إعادة الاتصال… · المحاولة {{attempt}}",
     "unnamed": "العضو {{key}}",
     "unreachable": "غير متاح · {{seen}}",
     "viaHub": "عبر محور",

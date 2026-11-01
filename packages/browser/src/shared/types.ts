@@ -298,6 +298,15 @@ export interface GroupEdgeView {
    * again); `other`, anything else (a refused key, no common transport...).
    */
   cause?: GroupEdgeCause;
+  /**
+   * Down after it was live (in this run, or when the app last ran), for nothing the app can't get past: the app dials it
+   * again by itself, at WISP 100's background pace, while the member is seen.
+   */
+  reconnecting?: true;
+  /** When this side dials again by itself, in ms: set while it is the side that dials and its wait between attempts runs. */
+  retryAt?: number;
+  /** Automatic dials since the edge was last live or its wait started over, the one under way included. */
+  attempt?: number;
 }
 
 export type GroupEdgeCause = "relays" | "session" | "other";

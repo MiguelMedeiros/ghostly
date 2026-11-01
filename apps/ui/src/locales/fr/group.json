@@ -45,8 +45,11 @@
     "offlineHint": "Cet appareil est hors ligne : aucun membre n'est joignable tant qu'il n'est pas de retour en ligne.",
     "onlyYou": "Vous seul pour l'instant",
     "reachable": "{{reachable}} sur {{total}} joignables",
-    "reconnect": "Reconnecter",
+    "reachableReconnecting": "{{reachable}} sur {{total}} joignables · {{state}}",
     "reconnectFailed": "Reconnexion impossible",
+    "reconnecting": "Reconnexion…",
+    "reconnectingTo": "Reconnexion à {{count}} membres…",
+    "retryNow": "Réessayer",
     "trying": "Tentative…"
   },
   "create": {
@@ -193,6 +196,8 @@
     "noConnection": "Pas encore de connexion",
     "noSlot": "En attente d'une connexion libre sur cet appareil",
     "notSeen": "pas encore vu",
+    "reconnecting": "Reconnexion…",
+    "reconnectingAttempt": "Reconnexion… · tentative {{attempt}}",
     "unnamed": "Membre {{key}}",
     "unreachable": "Injoignable · {{seen}}",
     "viaHub": "Via un hub",

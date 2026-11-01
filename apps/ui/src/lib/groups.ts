@@ -74,6 +74,9 @@ export function edgeLabel(member: GroupMemberView, now = Date.now(), t: Translat
   if (member.viaHub) return t("group.member.viaHub");
   if (!edge) return t("group.member.noConnection");
   if (edge.noSlot) return t("group.member.noSlot");
+  // Live before and dropped: the app dials it again by itself (WISP 100 § Background retry), past its first attempt counted.
+  const attempt = edge.attempt ?? 0;
+  if (edgeReconnects(edge)) return attempt > 1 ? t("group.member.reconnectingAttempt", { attempt }) : t("group.member.reconnecting");
   if (edge.state === "connecting") return t("group.member.connecting");
   const seen = edge.lastSeenAt ? t("group.member.lastSeen", { time: since(edge.lastSeenAt / 1000, now / 1000) }) : t("group.member.notSeen");
   return edge.state === "error" && !edgeWaits(edge) ? t("group.member.issue", { seen }) : t("group.member.unreachable", { seen });
@@ -105,9 +108,14 @@ export function edgeWaits(edge: GroupEdgeView | undefined): boolean {
   return edge.cause === "session" || (edge.cause === "relays" && relayCause(edge.error ?? "")?.kind === "wait");
 }
 
+/** An edge that was live, dropped, and that the app is dialling again by itself (`GroupEdgeView.reconnecting`). */
+export function edgeReconnects(edge: GroupEdgeView | undefined): boolean {
+  return !!edge?.reconnecting && edge.state !== "open" && !edge.noSlot && (edge.state !== "error" || edgeWaits(edge));
+}
+
 /** The dot beside a member: reachable, on its way, failed, or away. */
 export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.state === "open" || member.viaHub ? "bg-accent"
-  : edgeWaits(member.edge) ? "bg-text-muted motion-safe:animate-pulse"
+  : edgeWaits(member.edge) || edgeReconnects(member.edge) ? "bg-text-muted motion-safe:animate-pulse"
   : member.edge?.state === "error" ? "bg-danger" : member.edge?.state === "connecting" ? "bg-text-muted motion-safe:animate-pulse" : "bg-text-muted/50";
 
 /**
