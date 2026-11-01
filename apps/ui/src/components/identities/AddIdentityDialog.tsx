@@ -17,6 +17,7 @@ import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
 import { focusLost } from "../../lib/focus";
 import { problemText, type Problem } from "../../lib/problemText";
+import { exactText } from "../../lib/exactText";
 
 const VALIDITY = [7, 30, 90, 180, 365];
 
@@ -193,8 +194,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             {signer?.kind === "external-tool" && pending.instructions?.paste && (
               <label className="block text-xs text-text-muted">{pending.instructions.paste.label}
                 {pending.instructions.paste.multiline
-                  ? <textarea data-testid="add-identity-paste" className={`${input} mt-1 h-32 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} spellCheck={false} />
-                  : <input data-testid="add-identity-paste" className={`${input} mt-1 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} spellCheck={false} autoComplete="off" />}
+                  ? <textarea data-testid="add-identity-paste" className={`${input} mt-1 h-32 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} {...exactText} />
+                  : <input data-testid="add-identity-paste" className={`${input} mt-1 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} {...exactText} autoComplete="off" />}
               </label>
             )}
             <div className="flex flex-wrap justify-end gap-2">
@@ -224,7 +225,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             {!previewFirst && signerChoice}
             {signer?.kind === "in-app" && signer.fields?.map(f => (
               <label key={f.name} className="block text-xs text-text-muted">{f.label}
-                <input data-testid={`add-identity-field-${f.name}`} className={`${input} mt-1`} type={f.kind === "secret" ? "password" : "text"} autoComplete="off" spellCheck={false}
+                <input data-testid={`add-identity-field-${f.name}`} className={`${input} mt-1`} type={f.kind === "secret" ? "password" : "text"} autoComplete="off" {...exactText}
                   value={values[f.name] ?? ""} placeholder={f.placeholder} disabled={busy} onChange={e => setValues({ ...values, [f.name]: e.target.value })} />
                 {f.help && <span className="block mt-1">{f.help}</span>}
               </label>
@@ -242,7 +243,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               </div>
             ) : (
               <label className="block text-xs text-text-muted">{provider.subject.label}
-                <input data-testid="add-identity-subject" className={`${input} mt-1 font-mono`} value={subject} placeholder={provider.subject.placeholder} disabled={busy} spellCheck={false} autoComplete="off" onChange={e => setSubject(e.target.value)} />
+                <input data-testid="add-identity-subject" className={`${input} mt-1 font-mono`} value={subject} placeholder={provider.subject.placeholder} disabled={busy} {...exactText} autoComplete="off" onChange={e => setSubject(e.target.value)} />
                 {provider.subject.help && <span className="block mt-1">{provider.subject.help}</span>}
               </label>
             ))}
