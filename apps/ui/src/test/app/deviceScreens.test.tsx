@@ -226,6 +226,26 @@ describe("Profile, Devices", () => {
     expect(screen.queryByTestId("device-move")).toBeNull();
   });
 
+  it("a move under way: no row offers Remove, which the engine refuses as busy, until the move is cancelled", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = { role: "giver", device: "iPhone", key: PHONE, step: "connecting", bytes: 0, total: 0 };
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffCancel", () => { handoff = null; });
+    const running = await screen.findByTestId("handoff-running");
+    const [, phone, tablet] = screen.getAllByTestId("device-row");
+    // Check connection stays on the connected device; the one not connected has nothing left in its menu.
+    await user.click(within(phone).getByTestId("device-menu"));
+    expect(screen.getByTestId("device-check")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-remove-open")).toBeNull();
+    await user.keyboard("{Escape}");
+    expect(within(tablet).queryByTestId("device-menu")).toBeNull();
+    await user.click(within(running).getByTestId("handoff-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    await user.click(within(tablet).getByTestId("device-menu"));
+    expect(screen.getByTestId("device-remove-open")).toBeInTheDocument();
+  });
+
   it("on a standby the section shows no move: its screen does", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
