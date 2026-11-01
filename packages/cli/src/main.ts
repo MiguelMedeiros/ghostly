@@ -344,7 +344,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
     type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
-    from: o("list", "Only this chat's events (id, prefix, name or the contact's key; again for more)"),
+    from: o("list", "Only this chat's events (id, a label given here or the contact's key; again for more)"),
     group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),
     exec: o("string", "Run this command per event, the event as JSON on stdin"),
     webhook: o("string", "POST each event to this URL"), print: o("boolean", "Print events too when --exec or --webhook handles them"),
