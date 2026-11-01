@@ -168,7 +168,7 @@ so you do not repeat these, but you must not contradict them:
   (a PGP key's expiry). `display` only for name/picture the evidence itself carries (OIDC `name` claim),
   with its `source`; avatars must already be sanitized `data:image/png|jpeg` URLs.
 - Use `ctx.now` (seconds) for time and `ctx.signal` for cancellation.
-- Results are bounded again by `boundVerifiedIdentity` in core (lengths, control characters, https URLs).
+- Results are bounded again by `boundVerifiedIdentity` in core (lengths, control, format and line-separator characters, https URLs).
 
 The same `verify` runs twice: on the person's device before saving, and on each contact's device when it
 is shared. The contact's app never trusts the sender's check.
