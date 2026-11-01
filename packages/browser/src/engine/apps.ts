@@ -388,6 +388,16 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
 }
 
+/**
+ * What installing `version` over `installed` does, for the install screen and for Install alike: the update rule, and an
+ * equivocation for another bundle at the number of the update waiting (two different versions of that number exist).
+ */
+function installDecision(installed: InstalledApp | undefined, version: AppVersion): ReturnType<typeof appUpdateDecision> | "new" {
+  if (!installed) return "new";
+  if (installed.pending && installed.pending.sequence === version.sequence && installed.pending.digest !== version.digest) return "equivocation";
+  return appUpdateDecision(installed, version);
+}
+
 /** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`, counter rows included. */
 const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []]);
 /** The app's own rows of one scope: its counter row left out. */
@@ -1143,7 +1153,8 @@ export class Apps {
     const { manifest, digest } = bundle;
     const version = versionOf(manifest, digest);
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
-    const decision = installed ? appUpdateDecision(installed, version) : "new";
+    // What Install will answer: a clash with the update waiting is one too.
+    const decision = installDecision(installed, version);
     const install = decision === "other-app" ? "new" : decision;
     const asks = install === "new" ? [...manifest.permissions] : install === "update" ? manifest.permissions.filter((p) => !installed!.permissions.includes(p)) : [];
     const listedBy = this.listedBy(version.ref, stores);
@@ -1173,8 +1184,7 @@ export class Apps {
     const run = this.runStatus(version, this.storeViews(stores), installed?.revocations);
     if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
     if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
-    const pendingClash = installed?.pending && installed.pending.sequence === version.sequence && installed.pending.digest !== digest;
-    const decision = installed ? (pendingClash ? "equivocation" : appUpdateDecision(installed, version)) : "new";
+    const decision = installDecision(installed, version);
     if (decision === "rollback") fail("rollback", "A newer version of this app is installed");
     if (decision === "equivocation") {
       await this.putApp({ ...installed!, equivocation: { sequence: version.sequence, digest, at: this.now() } });
