@@ -631,6 +631,9 @@ export class ChatFiles {
       else if (entry.record.state === "queued") this.startIncoming(entry);
       // The sender offers again on its own; one that does not (an older app, one stuck) is asked.
       else if (entry.record.state === "active") this.armNudge(entry);
+      // Paused there: a sender that cancelled it meanwhile no longer offers it, and asked, ends it (`pf-abort`). One
+      // that still has it paused answers with its paused offer, and nothing moves.
+      else if (entry.record.state === "paused" && entry.record.pausedBy === "peer") this.send({ t: "pf-accept", id: entry.record.id, offset: entry.in!.written });
     }
   }
 
