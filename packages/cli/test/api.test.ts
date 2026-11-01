@@ -45,6 +45,7 @@ function fake(messages: StoredMessage[] = []) {
   const ctx = {
     runtime: { server: { node }, paths: { name: "default" } },
     hub: { onEvent: (l: (e: GhostlyEvent) => void) => { listeners.add(l); return () => listeners.delete(l); }, onState: () => () => {}, lastSeq: 0, replay: () => [] },
+    calls: { forgetChat: vi.fn() },
     mode: "daemon", version: "test",
   } as unknown as ApiContext;
   return { ctx, node, emit: (e: GhostlyEvent) => { for (const l of listeners) l(e); } };
@@ -475,6 +476,15 @@ describe("chats", () => {
   it("remove needs a yes", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "chat.remove", { chat: "chat-one" })).rejects.toMatchObject({ code: "confirm" });
+    expect(ctx.calls.forgetChat).not.toHaveBeenCalled();
+  });
+
+  // Auto-answer from the chats named kept the removed one: it read as on and could answer nobody.
+  it("remove takes the chat out of auto-answer's chats", async () => {
+    const { ctx, node } = fake();
+    Object.assign(node, { removeLink: vi.fn(async () => undefined) });
+    expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
+    expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
   });
 });
 
@@ -769,8 +779,10 @@ describe("the engine passthrough", () => {
       await expect(callApi(ctx, "engine.call", { method, params: {} }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
       expect(call, method).not.toHaveBeenCalled();
     }
+    expect(ctx.calls.forgetChat).not.toHaveBeenCalled();
     await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true });
     expect(calls.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+    expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
   });
 
   it("clearProfileData says what it removed, and a daemon stops instead of serving the engine it shut down", async () => {
