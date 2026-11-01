@@ -345,7 +345,7 @@ function writeWhole(path: string, bytes: Uint8Array): void {
 
 /**
  * `app publish <dir> --key <file> [--out <file>] [--sequence n]`:`<dir>/ghostly-app.json` (the manifest without `publisher`,
- * `sequence` and `files`) and every other file in `<dir>` become one signed bundle, by default `<dir>/app.ghostlyapp`.
+ * `sequence` and `files`) and every other file in `<dir>` (but its bundles and revocations) become one signed bundle, by default `<dir>/app.ghostlyapp`.
  * The sequence is `--sequence` (higher than the bundle already at `--out`'s), else one more than that bundle's (or
  * the source's `sequence`, if higher, else 1). The
  * key file is made when it is missing and no earlier bundle is there to update.
@@ -388,7 +388,9 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
     throw refused(`--sequence ${sequenceArg} is not higher than the ${previous.sequence} of ${out}: every client refuses a lower one, and the same one with other content is equivocation`, { reason: sequenceArg < previous.sequence ? "rollback" : "equivocation" }, { previous: previous.sequence });
   }
   const sequence = sequenceArg ?? Math.max(previous ? previous.sequence + 1 : 1, (draft.sequence as number | undefined) ?? 1);
-  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_REVOKE_FILE)]));
+  // The bundle at the folder's default name is this command's own output too: published into another --out, the
+  // version an earlier publish left there went into the new bundle as one of its files.
+  const { files, skipped } = collectFiles(dir, new Set([sourcePath, out, join(dir, APP_BUNDLE_FILE), join(dir, APP_REVOKE_FILE)]));
   const contents = files.map((f) => ({ path: f.path, bytes: new Uint8Array(readFileSync(f.full)) }));
   // A bundle is public: a private key found in the folder (an old key, a store key, any PEM) stops the publish.
   const keyFile = contents.find((f) => PRIVATE_KEY.test(Buffer.from(f.bytes).toString("latin1")));
