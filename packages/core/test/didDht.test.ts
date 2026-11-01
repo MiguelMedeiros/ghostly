@@ -165,6 +165,8 @@ describe("strict parsing", () => {
     ["k0 of another type", [root("v=0;vm=k0"), { name: "_k0._did.", value: k0.replace("t=0", "t=3") }]],
     ["an unknown key type", [root("v=0;vm=k0,k1"), { name: "_k0._did.", value: k0 }, { name: "_k1._did.", value: "t=9;k=AAAA" }]],
     ["padded base64", [root("v=0;vm=k0"), { name: "_k0._did.", value: `${k0}=` }]],
+    // 4n+1 characters: the alphabet is right, but no byte string has that length.
+    ["a key of an impossible base64url length", [root("v=0;vm=k0,k1"), { name: "_k0._did.", value: k0 }, { name: "_k1._did.", value: "t=0;k=AAAAA" }]],
     ["a property twice", [root("v=0;v=0;vm=k0"), { name: "_k0._did.", value: k0 }]],
     ["a property without a value separator", [root("v=0;vm=k0;auth"), { name: "_k0._did.", value: k0 }]],
     ["two root records", [root("v=0;vm=k0"), root("v=0;vm=k0"), { name: "_k0._did.", value: k0 }]],
@@ -228,6 +230,17 @@ describe("resolveDidDht", () => {
       .resolves.toMatchObject({ relay: "https://b.test" });
     await expect(resolveDidDht(did, { ...relays({ "https://a.test": forged }), relays: ["https://a.test"] }))
       .rejects.toThrow("The did:dht record is not signed by the DID's key");
+  });
+
+  it("moves past a relay serving a signed packet with a key that does not decode", async () => {
+    const records = [{ name: "_k1._did.", value: "t=0;k=AAAAA", ttl: DID_DHT_TTL }, ...didDhtRecords(document).map((r) =>
+      "value" in r && r.name.startsWith("_did.") ? { ...r, value: r.value.replace("vm=k0", "vm=k0,k1") } : r)];
+    const broken = signDidDhtPacket(identity, encodeTxtPacket(records, { authoritative: true }), seq + 1);
+    const { fetch, asked } = relays({ "https://a.test": broken, "https://b.test": payload });
+    await expect(resolveDidDht(did, { fetch, relays: ["https://a.test", "https://b.test"] })).resolves.toMatchObject({ relay: "https://b.test" });
+    expect(asked).toHaveLength(2);
+    await expect(resolveDidDht(did, { ...relays({ "https://a.test": broken }), relays: ["https://a.test"] }))
+      .rejects.toMatchObject({ code: "malformed", message: "The did:dht document is malformed: the key k1 is not unpadded base64url" });
   });
 
   it("tells not found from unreachable", async () => {
