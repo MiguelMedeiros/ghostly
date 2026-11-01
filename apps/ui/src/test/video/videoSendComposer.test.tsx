@@ -34,7 +34,8 @@ describe("a video chosen to send", () => {
     const { user } = composer();
     await user.upload(screen.getByTestId("media-input"), mov());
 
-    expect(await screen.findByText("Converting IMG_0001.MOV to MP4… 42%")).toBeInTheDocument();
+    expect(await screen.findByRole("status")).toHaveTextContent("Converting IMG_0001.MOV to MP4…");
+    expect(screen.getByRole("progressbar", { name: "Converting IMG_0001.MOV to MP4…" })).toHaveTextContent("42%");
     expect(screen.getByTestId("video-convert-cancel")).toHaveTextContent("Cancel");
     expect(onSendFile).not.toHaveBeenCalled();
     finish();
@@ -43,6 +44,33 @@ describe("a video chosen to send", () => {
     expect([sent.name, sent.type]).toEqual(["IMG_0001.mp4", "video/mp4"]);
     await waitFor(() => expect(screen.queryByTestId("file-preparing")).toBeNull());
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("a sample at a time, the line takes the latest at most every quarter second and says no percent aloud", async () => {
+    let finish!: () => void;
+    let report!: (progress: number) => void;
+    converter.convert = (_file, { onProgress }) => new Promise((resolve) => {
+      report = (progress) => onProgress?.(progress);
+      finish = () => resolve({ file: new File(["mp4"], "IMG_0001.mp4", { type: "video/mp4" }) });
+    });
+    const { user } = composer();
+    await user.upload(screen.getByTestId("media-input"), mov());
+    await waitFor(() => expect(report).toBeDefined());
+
+    const status = screen.getByTestId("file-preparing");
+    const texts: string[] = [];
+    const watcher = new MutationObserver(() => texts.push(status.textContent ?? ""));
+    watcher.observe(status, { subtree: true, childList: true, characterData: true });
+    const progress = () => screen.getByTestId("video-convert-progress");
+    act(() => { for (let sample = 1; sample <= 99; sample++) report(sample / 100); });
+    expect(progress()).toHaveTextContent("1%");
+    await waitFor(() => expect(progress()).toHaveTextContent("99%"));
+    expect(progress()).toHaveAttribute("aria-valuenow", "99");
+    watcher.disconnect();
+    expect(texts.every((text) => text === "Converting IMG_0001.MOV to MP4…")).toBe(true);
+    expect(status).toHaveTextContent("Converting IMG_0001.MOV to MP4…");
+    finish();
+    await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
   });
 
   it("Cancel while it converts sends nothing", async () => {
@@ -72,7 +100,7 @@ describe("a video chosen to send", () => {
     await waitFor(() => expect(runs.has("IMG_0002.MOV")).toBe(true));
 
     act(() => runs.get("IMG_0001.MOV")!.onProgress?.(0.1));
-    expect(await screen.findByText("Converting IMG_0001.MOV to MP4… 10%")).toBeInTheDocument();
+    expect(await screen.findByRole("progressbar", { name: "Converting IMG_0001.MOV to MP4…" })).toHaveTextContent("10%");
     await user.click(screen.getByTestId("video-convert-cancel"));
     expect(runs.get("IMG_0001.MOV")!.signal?.aborted).toBe(true);
     expect(runs.get("IMG_0002.MOV")!.signal?.aborted).toBe(false);
@@ -93,7 +121,7 @@ describe("a video chosen to send", () => {
 
     // While both convert, the line names the first and its Cancel is there.
     act(() => { second.options.onProgress?.(0.5); first.options.onProgress?.(0.1); });
-    expect(await screen.findByText("Converting IMG_0001.MOV to MP4… 10%")).toBeInTheDocument();
+    expect(await screen.findByRole("progressbar", { name: "Converting IMG_0001.MOV to MP4…" })).toHaveTextContent("10%");
     expect(screen.getByTestId("video-convert-cancel")).toBeInTheDocument();
     second.finish();
     await waitFor(() => expect(onSendFile).toHaveBeenCalledTimes(1));
