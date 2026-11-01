@@ -216,6 +216,24 @@ describe("Profile, Devices", () => {
     await waitFor(() => expect(move).toHaveFocus());
   });
 
+  it("the move's dialog closed while it runs: the keyboard focus goes to the move's steps in the section, not to the page", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = null;
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffPush", () => (handoff = { role: "giver", device: "iPhone", key: PHONE, step: "copying", bytes: 1, total: 2 }));
+    const [, phone] = await screen.findAllByTestId("device-row");
+    within(phone).getByTestId("device-move").focus();
+    await user.keyboard("{Enter}");
+    const dialog = await screen.findByTestId("handoff-move-dialog");
+    await within(dialog).findByTestId("handoff-line", {}, { timeout: 3_000 });
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    // Move to, which had the focus before the dialog, goes once the section shows the move.
+    const running = await screen.findByTestId("handoff-running", {}, { timeout: 3_000 });
+    expect(screen.queryByTestId("device-move")).toBeNull();
+    await waitFor(() => expect(running).toHaveFocus());
+  });
+
   it("a move the other device started with Use here: the section shows it on the active device too", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set());
