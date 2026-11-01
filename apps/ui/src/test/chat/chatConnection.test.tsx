@@ -461,9 +461,35 @@ describe("ChatConnection: what the panel does", () => {
     expect(engine.callsTo("connect")).toEqual([{ linkId: "link-1" }]);
   });
 
+  // The contact's daemon was down when Reconnect was pressed, then came back and the chat went live by itself: the
+  // header stayed a red "Connection issue" with the old refusal until the menu was used again.
+  it("forgets a failed Reconnect once the chat is live again by itself", async () => {
+    const away = { dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" } as Partial<LinkView>;
+    const { user, engine } = banner(away);
+    engine.on("connect", () => { throw new Error("Could not connect to the peer"); });
+    await user.click(screen.getByRole("button", { name: "Reconnect" }));
+    expect(await screen.findByTestId("connection-failure")).toHaveTextContent("Could not connect to the peer");
+    expect(header()).toMatchObject({ kind: "failure", name: "Connection issue" });
+    act(() => engine.update({ links: [linkView({ availableTransports: all, ...away, dataLink: "open", peerOnline: true, pairing: ready({ peerKey: "peer" }) })] }));
+    expect(header()).toMatchObject({ kind: "connected", name: "Connected · WebRTC" });
+    expect(screen.queryByTestId("connection-failure")).not.toBeInTheDocument();
+  });
+
+  it("keeps a failed choice made while live: it is about that choice, not about getting live", async () => {
+    const { user, engine } = banner({ pairing: ready() });
+    engine.on("setChatTransport", () => { throw new Error("Transport unavailable"); });
+    await user.click(screen.getByRole("radio", { name: "Iroh" }));
+    expect(await screen.findByTestId("connection-failure")).toBeInTheDocument();
+    act(() => engine.update({ links: [linkView({ availableTransports: all, pairing: ready(), transportRttMs: 40 })] }));
+    expect(screen.getByTestId("connection-failure")).toBeInTheDocument();
+  });
+
   it.each<[string, Partial<LinkView>, StatePatch]>([
     ["connected", { pairing: ready() }, {}],
     ["DHT-only", { deliveryMode: "dht", dataLink: "idle" }, {}],
+    // The engine refuses a dial while the contact keeps the chat on DHT only, and the refusal read as a connection issue.
+    ["the contact keeps it on DHT only", { textDelivery: "dht", dataLink: "idle", peerParticipationKey: "saved", pairing: { status: "ready", peerKey: "peer" } as Pairing,
+      dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } }, {}],
     ["nobody joined yet", { dataLink: "idle", peerOnline: false }, {}],
     ["offline", { dataLink: "idle" }, { settings: { online: false } }],
   ])("offers no Reconnect when %s", (_, link, state) => {
