@@ -495,6 +495,13 @@ function isPush(value: unknown): value is DevicePush {
   return true;
 }
 
+/** One earlier device set as a record keeps it, and as a handoff's part `devices` carries it. */
+export function isEarlierSet(value: unknown): value is EarlierDeviceSet {
+  const set = value as Partial<EarlierDeviceSet> | null;
+  if (!set || typeof set !== "object" || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return false;
+  return set.pending.length <= MAX_DEVICES && (set.foreign === undefined || set.foreign === true) && optional(set.removed, bytes);
+}
+
 /** Why a stored record cannot be trusted. The gate then starts nothing (see `gate.ts`). */
 export class DeviceRecordError extends Error {
   constructor(what: string) {
@@ -583,10 +590,7 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
     if (!raise || typeof raise !== "object" || !bytes(raise.id) || (raise.why !== "takeover" && raise.why !== "restore") || !count(raise.takeovers, 2 ** 32 - 1) || !count(raise.at, Number.MAX_SAFE_INTEGER)) return bad("raise");
   }
   if (!Array.isArray(r.earlierSets) || r.earlierSets.length > MAX_EARLIER_SETS) return bad("the earlier device sets");
-  for (const set of r.earlierSets as Partial<EarlierDeviceSet>[]) {
-    if (!set || !bytes(set.d) || !bytes(set.tombstone) || !text(set.setUpdate) || !Array.isArray(set.pending) || !set.pending.every(bytes)) return bad("an earlier device set");
-    if (set.pending.length > MAX_DEVICES || (set.foreign !== undefined && set.foreign !== true) || !optional(set.removed, bytes)) return bad("an earlier device set");
-  }
+  if (!r.earlierSets.every(isEarlierSet)) return bad("an earlier device set");
   if (r.setNotice !== undefined) {
     const n = r.setNotice as Partial<SetNotice> | null;
     if (!n || typeof n !== "object" || !texts(n.names, MAX_DEVICES) || !count(n.at, Number.MAX_SAFE_INTEGER) || (n.seen !== undefined && n.seen !== true)) return bad("setNotice");
