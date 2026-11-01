@@ -7,7 +7,7 @@
 //   node e2e/support/nwc-regtest/regtest.mjs pay <alice|bob> <bolt11>            that LND node pays it directly
 // Pairing URIs come only from the module (`nwcUri`), never from the CLI: they carry a spending secret.
 import { endpoints } from "../../infra/env.mjs";
-import { ensureMiner, mine, miner, retry, run, wait } from "../../infra/chain.mjs";
+import { ensureMiner, mine, miner, restart, retry, run, wait } from "../../infra/chain.mjs";
 
 export { mine };
 export const NWC_REGTEST = {
@@ -109,11 +109,34 @@ async function ensureHub(who) {
   }
   const now = await info();
   if (!now.running && !now.startupState) tokens[who] = (await hub(who, "POST", "/api/start", { unlockPassword: HUB_PASSWORD })).token;
-  const running = await until(`${who}'s hub to run`, async () => {
-    const state = await info();
-    return state.running && state.relays?.every((r) => r.online) ? state : null;
-  }, { tries: 60 }).catch(async (e) => { throw new Error(`${e.message}: ${(await info()).startupError || "no startup error"}`); });
+  const running = await hubRunning(who, { info, restart: () => restart(`nwc-hub-${who}`) });
   return { network: running.network, backend: running.backendType, version: running.version, relays: running.relays.map((r) => r.url) };
+}
+
+/**
+ * Resolves with `who`'s hub info once it runs with every relay online. Alby Hub dials its relay once when it starts,
+ * and afterwards only for its app connections: a hub with none yet stays offline for good once the relay drops
+ * (strfry restarted after a crash). So a hub that runs with a relay offline for `stuck` tries in a row is restarted,
+ * once (AUTO_UNLOCK_PASSWORD starts it again), and a timeout says what it was still waiting for.
+ */
+export async function hubRunning(who, { info, restart, tries = 60, stuck = 25, every = 1000 }) {
+  let last, offline = 0, restarted = false;
+  for (let i = 0; i < tries; i++) {
+    const state = await info().catch(() => null);
+    if (state) {
+      last = state;
+      // The hub reports its relays every 10 s, and none in its first seconds.
+      if (state.running && state.relays?.length && state.relays.every((r) => r.online)) return state;
+      offline = state.running && state.relays?.length ? offline + 1 : 0;
+      // A full wait again after it, for the hub to boot and dial.
+      if (offline >= stuck && !restarted) { restarted = true; offline = 0; i = -1; await restart(); }
+    }
+    await wait(every);
+  }
+  const off = last?.relays?.filter((r) => !r.online).map((r) => r.url) ?? [];
+  const why = last?.startupError || (!last ? "it never answered" : !last.running ? `not running (${last.startupState || "no startup state"})`
+    : off.length ? `relay offline: ${off.join(", ")}${restarted ? ", even after a restart" : ""}` : "no relay reported");
+  throw new Error(`Timed out waiting for ${who}'s hub to run: ${why}`);
 }
 
 async function hubToken(who) {
