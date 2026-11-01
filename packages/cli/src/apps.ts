@@ -504,7 +504,8 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
  * out and is then the signing key's) becomes `ghostly-store.json`, canonical, and `ghostly-store.sig`, in `--out` or
  * beside the index. It is read back as a client reads it (`expires` at most 90 days ahead), and refused when the index
  * already there has a higher `sequence`, or the same one with other content, or is signed by another key (another
- * store is another `--out`). The key is made only when no signed index is there.
+ * store is another `--out`), or when a `ghostly-store.json` or `.sig` there does not read as a signed index. The key is
+ * made only when neither is there.
  */
 export async function signStore(indexArg: string, keyArg: string, outArg?: string, now = Math.floor(Date.now() / 1000)): Promise<Record<string, unknown>> {
   const indexPath = userPath(indexArg);
@@ -523,14 +524,22 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   // Each revocation's signature is checked once, though the held index, the new one and its read-back all carry it.
   const checked = new Set<string>();
   let held: AppStoreReading | null = null;
-  if (existsSync(indexOut) && existsSync(sigOut)) {
-    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now, undefined, checked);
+  // A pair there that does not read as a signed index (one of the two missing, or damaged) is not written over, as
+  // `app publish` does not write over a bundle it cannot read: its sequence and key are not known, so neither is a rollback.
+  let unread: CliError | null = null;
+  const heldIndex = existsSync(indexOut) ? new Uint8Array(readFileSync(indexOut)) : null;
+  if (heldIndex || existsSync(sigOut)) {
+    const read = !heldIndex ? { ok: false as const, reason: "missing-file", detail: `no ${STORE_INDEX_FILE}` }
+      : !existsSync(sigOut) ? { ok: false as const, reason: "bad-signature-statement", detail: `no ${STORE_SIG_FILE}` }
+      : readAppStore(heldIndex, new Uint8Array(readFileSync(sigOut)), now, undefined, checked);
     if (read.ok) held = read.store;
+    else unread = refused(`${heldIndex ? indexOut : sigOut} is there and is not a signed store index: move ${STORE_INDEX_FILE} and ${STORE_SIG_FILE} away, or name another --out`, read);
   }
 
   let key: LoadedKey;
   if (existsSync(keyPath)) key = readKey(keyPath, "store");
   else if (index.key !== undefined) throw new CliError("not_found", `No key file ${keyPath}: the index names the store key ${typeof index.key === "string" ? appFingerprint(index.key) : JSON.stringify(index.key)}`);
+  else if (unread) throw unread;
   else if (held) throw new CliError("not_found", `No key file ${keyPath}: ${indexOut} is signed by ${appFingerprint(held.index.key)}, and only that key signs its next index`);
   else key = makeKey(keyPath, "store");
   if (index.key !== undefined && index.key !== key.key) {
@@ -547,6 +556,8 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   const read = readAppStore(indexBytes, sigBytes, now, key.key, checked);
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
+  // Unless the index there is this one's bytes: a run stopped between the index's rename and the signature's, signed again.
+  if (unread && !(heldIndex && Buffer.from(heldIndex).equals(indexBytes))) throw unread;
 
   let previous: number | null = null;
   if (held) {
