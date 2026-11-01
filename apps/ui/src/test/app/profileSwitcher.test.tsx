@@ -154,6 +154,26 @@ describe("the account switcher on the account bar", () => {
     expect(before).toHaveFocus();
   });
 
+  it("stays shut on Alt+Shift+P behind a modal dialog or the lock screen, and opens again once it is gone", async () => {
+    createProfile("Work");
+    const { user } = renderBar();
+    // A `<dialog>` shown as a modal (Join), then the lock screen: a modal panel over the whole app (LockScreen.tsx).
+    const join = document.body.appendChild(document.createElement("dialog"));
+    join.setAttribute("open", "");
+    const lockPanel = Object.assign(document.createElement("div"), { role: "dialog" });
+    lockPanel.setAttribute("aria-modal", "true");
+    try {
+      await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
+      expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
+      join.remove();
+      document.body.appendChild(lockPanel);
+      await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
+      expect(screen.queryByTestId("profile-switcher")).not.toBeInTheDocument();
+    } finally { join.remove(); lockPanel.remove(); }
+    await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
+    expect(screen.getByTestId("profile-switcher")).toBeInTheDocument();
+  });
+
   it("opens on a click on Profile, closes on a click outside or a second click, and its first entry is the Profile page", async () => {
     const { user } = renderBar();
     await user.click(screen.getByTestId("account-profile"));
