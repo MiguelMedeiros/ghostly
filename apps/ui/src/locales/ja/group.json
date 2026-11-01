@@ -45,8 +45,11 @@
     "offlineHint": "この端末はオフラインです。オンラインに戻るまでどのメンバーにも接続できません。",
     "onlyYou": "今のところあなただけです",
     "reachable": "{{total}} 人中 {{reachable}} 人に到達可能",
-    "reconnect": "再接続",
+    "reachableReconnecting": "{{total}} 人中 {{reachable}} 人に到達可能 · {{state}}",
     "reconnectFailed": "再接続できませんでした",
+    "reconnecting": "再接続中…",
+    "reconnectingTo": "{{count}} 人のメンバーに再接続中…",
+    "retryNow": "今すぐ再試行",
     "trying": "試しています…"
   },
   "create": {
@@ -193,6 +196,8 @@
     "noConnection": "まだ接続がありません",
     "noSlot": "この端末の接続の空きを待っています",
     "notSeen": "まだ確認されていません",
+    "reconnecting": "再接続中…",
+    "reconnectingAttempt": "再接続中… · {{attempt}} 回目",
     "unnamed": "メンバー {{key}}",
     "unreachable": "到達できません · {{seen}}",
     "viaHub": "ハブ経由",

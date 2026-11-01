@@ -45,8 +45,11 @@
     "offlineHint": "此设备处于离线状态：恢复在线前无法连接任何成员。",
     "onlyYou": "目前只有你",
     "reachable": "{{total}} 人中 {{reachable}} 人可连接",
-    "reconnect": "重新连接",
+    "reachableReconnecting": "{{total}} 人中 {{reachable}} 人可连接 · {{state}}",
     "reconnectFailed": "无法重新连接",
+    "reconnecting": "正在重新连接…",
+    "reconnectingTo": "正在重新连接 {{count}} 位成员…",
+    "retryNow": "立即重试",
     "trying": "正在尝试…"
   },
   "create": {
@@ -193,6 +196,8 @@
     "noConnection": "尚未连接",
     "noSlot": "正在等待此设备上的空闲连接",
     "notSeen": "尚未上线",
+    "reconnecting": "正在重新连接…",
+    "reconnectingAttempt": "正在重新连接… · 第 {{attempt}} 次尝试",
     "unnamed": "成员 {{key}}",
     "unreachable": "无法连接 · {{seen}}",
     "viaHub": "通过中继节点",
