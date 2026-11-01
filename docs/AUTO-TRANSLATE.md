@@ -466,7 +466,7 @@ Question: can a small local LLM, as an optional mode on Desktop, beat Bergamot o
 messages, no context) by enough to be worth its cost? Bergamot stays the default either way. Nothing ships from this
 spike.
 
-Setup: the Linux x64 host above (i7-11700F, 16 threads, 62 GB, SSD, no GPU used), busy with other work during the runs
+Setup: the Linux x64 host of the first spike (i7-11700F, 16 threads, 62 GB, SSD, no GPU used), busy with other work during the runs
 (load average 11-17), so times are upper bounds. llama.cpp b12032 (`llama-server`, CPU build, greedy decoding, the
 message text tokenized as plain text), and QVAC's `@qvac/llm-llamacpp` 0.65.1 under `bare` 1.36.0 for the packaging
 check. Bergamot through the app's own `native/translation` runtime, with the pinned models. Every model as Q4_K_M
@@ -490,11 +490,11 @@ Checked before testing:
 
 ### Test set
 
-60 sentences: the doc's spike sentences above, plus Brazilian and Spanish chat slang and short messages ("tmj,
+50 single messages: the doc's spike sentences above, plus Brazilian and Spanish chat slang and short messages ("tmj,
 valeu!", "Ele pisou na bola feio", "Não tô nem aí", "brb", "I'm down, let's do it", "Ponte las pilas"...), in pt -> en,
 en -> pt, es -> pt and pt -> es. The LLMs translate es <-> pt directly; Bergamot pivots through English. Six short
 threads (4 messages each) were run with and without the last 3 messages (and their translations) as context, and 8
-messages that try prompt injection. 42 of the sentences are idioms, slang or short messages; each translation of those
+messages that try prompt injection. 42 of the 50 are idioms, slang or short messages; each translation of those
 was graded by hand, 0 (wrong), 1 (understandable but off) or 2 (right and natural), by one grader.
 
 ### Numbers
