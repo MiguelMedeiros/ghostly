@@ -54,4 +54,16 @@ describe("identity timeline", () => {
     expect(lastSharedWithMe(t)).toBe(IDENTITY_TIMELINE_MAX + 4);
     expect(lastSharedWithMe(undefined)).toBe(0);
   });
+
+  it("never gives a new entry the id of one still kept, once the bound cut a proof's first entry", () => {
+    let t = applyIdentityEvent([], { type: "shared", side: "mine", proof: P, provider: "nostr" }, 0);
+    t = applyIdentityEvent(t, { type: "result", side: "mine", proof: P, ok: true }, 1);
+    t = applyIdentityEvent(t, { type: "stopped", side: "mine", proof: P, provider: "nostr", reason: "withdrawn" }, 2);
+    t = applyIdentityEvent(t, { type: "shared", side: "mine", proof: P, provider: "nostr" }, 3);
+    for (let i = 0; i < IDENTITY_TIMELINE_MAX - 2; i++) t = applyIdentityEvent(t, { type: "shared", side: "theirs", proof: i.toString(16).padStart(64, "0"), provider: "nostr" }, 4 + i);
+    t = applyIdentityEvent(t, { type: "stopped", side: "mine", proof: P, provider: "nostr", reason: "withdrawn" }, 200);
+    expect(t).toHaveLength(IDENTITY_TIMELINE_MAX);
+    expect(new Set(t.map(e => e.id)).size).toBe(t.length);
+    expect(t.filter(e => e.proof === P).map(e => e.id)).toEqual([`mine:${P}:2`, `mine:${P}:3`]);
+  });
 });
