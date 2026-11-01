@@ -34,8 +34,9 @@ import {
  *    only a newcomer is sent it; `leave`, `remove` and `rotate` get a fresh secret sealed to everyone;
  *  - concurrent commits are a race with a deterministic winner, not a fork: the branch that keeps the
  *    admin's changes (remove, role, rotate, link) since the common parent, then the longest, then the
- *    lowest hash of the first commit after the common parent. The admin signing changes on two
- *    branches (after the same commit or not) is still a fork and halts the group;
+ *    lowest hash of the first commit after the common parent. The admin of the tip signing changes on
+ *    two branches (after the same commit or not) is still a fork and halts the group; a former admin
+ *    doing so on a branch from before its hand-over is refused, as a stale branch;
  *  - messages name the commit of their epoch, so messages under a commit that lost stay readable;
  *    every member keeps recent frames from everyone and re-sends them to whoever was away.
  *
@@ -966,10 +967,13 @@ export class CommunitySession {
     if ("error" in result) return false;
     if (GROWS.has(result.commit.k) && !keepsRoom(result.commit.e, result.roster)) return false;
     const commit = result.commit, h = communityCommitHash(commit);
-    // Two commits by the admin after the same commit: equivocation.
+    // Two commits by the admin after the same commit: equivocation. By one my branch moved past (it handed the role
+    // on, then maybe left or was removed), its other commit is a branch that drops that hand-over and never wins: it
+    // is refused, not kept or passed on, and the group goes on. Only the admin of my tip halts the group.
     const admin = rosterAdmin(parentRoster);
     if (commit.by === admin) {
       for (const [other, c] of this.known) if (other !== h && c.p === commit.p && c.by === admin) {
+        if (admin !== this.admin) return false;
         this.known.set(h, commit); this.rosters.set(h, result.roster);
         await this.fork(`The admin signed two different changes after epoch ${parent.e}`);
         return true;
@@ -979,8 +983,10 @@ export class CommunitySession {
     const branch = this.branch(h);
     if (branch && branch.path.length) {
       const { admin } = this.parting(branch, this.branch(this.topHash)!, this.adminCounts());
-      // The admin's change on a branch parting from one that holds another of theirs: two histories.
+      // The admin's change on a branch parting from one that holds another admin change: two histories. From a former
+      // admin (my branch holds its hand-over), refused as above; from the admin of my tip, the group halts.
       if (ADMIN_ONLY.has(commit.k) && admin[1]) {
+        if (commit.by !== this.admin) { this.known.delete(h); this.rosters.delete(h); return false; }
         await this.fork(`The admin signed changes on two branches after epoch ${this.state.chain[branch.fork].e}`);
         return true;
       }

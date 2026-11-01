@@ -897,7 +897,7 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     expect(bob.session.topHash).toBe(alice.session.topHash);
   });
 
-  it("an admin who handed the role on and signs another history halts the group", async () => {
+  it("an admin who handed the role on and signs another history from before is refused; the group goes on", async () => {
     const { net, alice, bob, carol, mallory } = await group();
     const before = alice.session.top, beforeRoster = alice.session.roster;
     await alice.session.transferAdmin(bob.session.myKey);
@@ -905,14 +905,39 @@ describe("community admin changes are final", { timeout: 60_000 }, () => {
     await bob.session.remove(mallory.session.myKey);
     await net.settle();
     expect(carol.session.admin).toBe(bob.session.myKey);
-    // Alice, admin before the hand-over, signs a rotation on another branch from there: two histories.
+    // Alice, admin before the hand-over, signs a rotation on another branch from there: a stale branch, not kept.
     const race = forge(carol, before, beforeRoster, { k: "add", s: createIdentity().pubKeyZ32 });
     const other = forge(alice, race.commit, race.roster, { k: "rotate" }).commit;
     expect(await carol.session.handle(bob.session.myKey, commitFrame(race.commit))).toBe(true);
     expect(carol.session.status).toBe("active");
-    await carol.session.handle(alice.session.myKey, commitFrame(other));
-    expect(carol.session.status).toBe("forked");
-    expect(carol.session.state.statusReason).toMatch(/admin signed changes on two branches/);
+    expect(await carol.session.handle(alice.session.myKey, commitFrame(other))).toBe(false);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.state.side.map(communityCommitHash)).not.toContain(communityCommitHash(other));
+    await say(net, carol, "still here");
+    expect(net.texts(bob)).toContain("still here");
+  });
+
+  it("a former admin, removed, cannot halt the group with a second commit after one it signed as admin", async () => {
+    const { net, alice, bob, carol } = await group();
+    const genesis = carol.session.state.chain[0], genesisRoster = communityRoster(null, genesis)!;
+    const beforeHandOver = alice.session.top, beforeRoster = alice.session.roster;
+    await alice.session.transferAdmin(bob.session.myKey);
+    await net.settle();
+    await bob.session.remove(alice.session.myKey);
+    await net.settle();
+    expect(carol.session.wasRemoved(alice.session.myKey)).toBe(true);
+    // After the commit before its hand-over, and after the genesis: each its second commit there, on an edge no commit names.
+    const stranger = createIdentity().pubKeyZ32;
+    for (const [parent, roster] of [[beforeHandOver, beforeRoster], [genesis, genesisRoster]] as const) {
+      const second = forge(alice, parent, roster, { k: "add", s: createIdentity().pubKeyZ32 }).commit;
+      expect(await carol.session.handle(stranger, commitFrame(second))).toBe(false);
+      expect(carol.session.status).toBe("active");
+    }
+    await say(net, bob, "after alice");
+    expect(net.texts(carol)).toContain("after alice");
+    await net.restart(carol);
+    expect(carol.session.status).toBe("active");
+    expect(carol.session.isMember).toBe(true);
   });
 
   it("a stored branch from before the fix that dropped an admin change is dropped in turn", async () => {
