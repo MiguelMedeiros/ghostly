@@ -126,6 +126,21 @@ describe("opening a service on a given port", () => {
     for (const same of [undefined, 0, port]) expect((await openOn(same)).url).toBe(url);
   });
 
+  it("two opens at once open one server, and close closes it: no link of either still reaches the contact", async () => {
+    const [first, second] = await Promise.all([openOn(), openOn()]);
+    expect(second.url).toBe(first.url);
+    await SERVICE_METHODS["service.close"](ctx, { chat: link.id, service: "app" });
+    await expect(fetch(first.url, { redirect: "manual" })).rejects.toThrow();
+    // One whose port could not be taken is not left in the way of the next open.
+    const taken = createNetServer();
+    await new Promise<void>((r) => taken.listen(0, "127.0.0.1", r));
+    const { port } = taken.address() as AddressInfo;
+    const results = await Promise.allSettled([openOn(port), openOn(port)]);
+    expect(results.map((r) => r.status)).toEqual(["rejected", "rejected"]);
+    await new Promise((r) => taken.close(r));
+    expect(portOf((await openOn()).url)).toBeGreaterThan(0);
+  });
+
   it("the API takes a whole number only, for a socket caller too", async () => {
     await expect(openOn(1.5)).rejects.toMatchObject({ code: "bad_request", message: "port must be a whole number from 0 to 65535" });
   });
