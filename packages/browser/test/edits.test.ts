@@ -1,13 +1,13 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, REMOVED_TEXT, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type GroupEdit, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
+import { DhtDelivery, EDIT_BUFFER_MS, nextPinNumber, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, REMOVED_TEXT, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type GroupEdit, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
 import type { GroupEditsHost } from "../src/engine/groupEdits";
 import type { Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
-import type { StoredMessage } from "../src/shared/types";
+import type { StoredLink, StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.edit.wire
 
@@ -22,7 +22,7 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
-async function setup(contactOptions: { editSupport?: boolean; confirm?: () => boolean } = {}) {
+async function setup(contactOptions: { editSupport?: boolean; pinSupport?: boolean; confirm?: () => boolean } = {}) {
   const net = new FakeNativeNet();
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
@@ -34,8 +34,9 @@ async function setup(contactOptions: { editSupport?: boolean; confirm?: () => bo
     peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const onAttention = vi.fn();
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention }, { transport, automaticWallets: false,
+  const makeNode = () => new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
+  let node = makeNode();
   let contactState: PairingState = { status: "connecting" };
   const contactGot: IncomingMessage[] = [];
   const contactEdits: WireEdit[] = [], contactReceipts: [string, number][] = [];
@@ -44,7 +45,7 @@ async function setup(contactOptions: { editSupport?: boolean; confirm?: () => bo
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
-    editSupport: contactOptions.editSupport ?? true, reactionsSupport: true,
+    editSupport: contactOptions.editSupport ?? true, reactionsSupport: true, pinSupport: contactOptions.pinSupport,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); },
       onMessageEdit: edit => { contactEdits.push(edit); return contactOptions.confirm?.() ?? true; }, onEditReceipt: (id, e) => { contactReceipts.push([id, e]); } },
   });
@@ -62,10 +63,13 @@ async function setup(contactOptions: { editSupport?: boolean; confirm?: () => bo
     const mineLink = () => (node as unknown as { links: Map<string, { link?: GhostLink }> }).links.get(id)?.link;
     await vi.waitFor(() => expect([mineLink()?.supportsEdits, contact.supportsEdits]).toEqual([true, true]));
   }
+  if (contactOptions.pinSupport) await vi.waitFor(() => expect(contact.supportsPins).toBe(true));
   const messages = () => db.getMessages(id);
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await messages()).find(m => m.text === text)).toBeDefined()); return (await messages()).find(m => m.text === text)!; };
   const row = async (messageId: string) => (await messages()).find(m => m.id === messageId)!;
-  return { node, contact, id, contactGot, contactEdits, contactReceipts, messages, peerRow, row, view, onAttention };
+  /** The app closes and opens again on this device's storage; the contact is not waited for. */
+  const restart = async () => { await node.shutdown(); node = makeNode(); await node.start(); };
+  return { get node() { return node; }, contact, id, contactGot, contactEdits, contactReceipts, messages, peerRow, row, view, onAttention, restart };
 }
 
 const WIRE = (c: string) => c.repeat(22);
@@ -410,6 +414,60 @@ describe("the contact's edits", () => {
     expect(await t.contact.sendEdit({ id: mine.wireId!, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
     await vi.waitFor(() => expect(t.contactReceipts).toEqual([[mine.wireId, 1]]));
     expect(await t.row(sent.messageId!)).toMatchObject({ text: "mine to keep" });
+  });
+
+  // agents#2129: the pin of a message deleted for everyone stayed, "Not on this device" on both sides, after a restart too.
+  it("a removal takes the pin of its message: shown as unpinned, after a restart too, and the same pin again is no newer", async () => {
+    const t = await setup({ pinSupport: true });
+    expect(await t.contact.sendMessage("pin me", Date.now(), WIRE("P"))).toBeNull();
+    const row = await t.peerRow("pin me");
+    const pin = { id: WIRE("P"), n: nextPinNumber() };
+    expect(t.contact.sendPin(pin)).toBeNull();
+    await vi.waitFor(() => expect(t.view().pin).toMatchObject({ id: WIRE("P"), by: "peer", messageId: row.id }));
+    expect(await t.contact.sendEdit({ id: WIRE("P"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("P"), 1]]));
+    expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+    expect(t.contact.sendPin(pin)).toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(t.view().pin?.id).toBe("");
+    await t.restart();
+    expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+  });
+
+  it("a pin that comes after its message was deleted for everyone shows as unpinned: the contact's removal or mine", async () => {
+    const t = await setup({ pinSupport: true });
+    // Theirs, removed before it came here: the pin crossed the removal.
+    expect(await t.contact.sendEdit({ id: WIRE("H"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("H"), 1]]));
+    const first = { id: WIRE("H"), n: nextPinNumber() };
+    expect(t.contact.sendPin(first)).toBeNull();
+    await vi.waitFor(() => expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) }));
+    // Mine, removed here while the contact pinned it.
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "mine, pinned" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    const wireId = (await t.row(sent.messageId!)).wireId!;
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: sent.messageId! })).toEqual({ error: null });
+    expect(t.contact.sendPin({ id: wireId, n: nextPinNumber(first.n) })).toBeNull();
+    const kept = () => (t.node as unknown as { links: Map<string, { stored: StoredLink }> }).links.get(t.id)!.stored.pin;
+    await vi.waitFor(() => expect(kept()).toMatchObject({ id: wireId, by: "peer" }));
+    expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+  });
+
+  it("the pin of a message deleted here first goes when its author deletes it for everyone; deleted here alone it stays", async () => {
+    const t = await setup({ pinSupport: true });
+    expect(await t.contact.sendMessage("pin me", Date.now(), WIRE("D"))).toBeNull();
+    const row = await t.peerRow("pin me");
+    expect(t.contact.sendPin({ id: WIRE("D"), n: nextPinNumber() })).toBeNull();
+    await vi.waitFor(() => expect(t.view().pin?.messageId).toBe(row.id));
+    t.node.deleteMessage({ linkId: t.id, messageId: row.id });
+    await vi.waitFor(async () => expect((await t.messages()).find(m => m.id === row.id)).toBeUndefined());
+    // Still on the contact's device: "Not on this device" says so.
+    expect(t.view().pin).toMatchObject({ id: WIRE("D"), by: "peer" });
+    expect(await t.contact.sendEdit({ id: WIRE("D"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("D"), 1]]));
+    expect(t.view().pin).toEqual({ id: "", by: "peer", at: expect.any(Number) });
+    await t.restart();
+    expect(t.view().pin?.id).toBe("");
   });
 
   it("an edit of a message deleted here is confirmed and brings nothing back", async () => {
