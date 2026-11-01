@@ -437,6 +437,31 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => w.b.disks.get("restart-a")!.discarded);
   });
 
+  it("the sender pauses, then cancels while the receiver is away: back, the receiver hears it ended and drops what it had", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("pcancel-1", 4 * 1024 * 1024));
+    send(w, file("pkeep-01", 4 * 1024 * 1024));
+    await until(() => (w.b.transferred.get("in:pcancel-1") ?? 0) > 100_000 && (w.b.transferred.get("in:pkeep-01") ?? 0) > 100_000);
+    w.a.files.pause("out", "pcancel-1");
+    w.a.files.pause("out", "pkeep-01");
+    await until(() => ["pcancel-1", "pkeep-01"].every((id) => w.b.records.get(`in:${id}`)?.pausedBy === "peer"));
+    w.drop();
+    w.restart("b");
+    w.a.files.cancel("out", "pcancel-1");
+    const dataBefore = w.a.sent.filter((f) => f.t === "pf-data" && f.id === "pkeep-01").length;
+    w.attach();
+    await until(() => state(w.b, "in", "pcancel-1") === "cancelled");
+    expect(w.b.records.get("in:pcancel-1")?.error).toBe("Cancelled by the sender");
+    await until(() => w.b.disks.get("pcancel-1")!.discarded);
+    // One the sender still has paused stays paused on both sides, and nothing moves.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.b.files.get("in", "pkeep-01")).toMatchObject({ state: "paused", pausedBy: "peer" });
+    expect(w.a.files.get("out", "pkeep-01")).toMatchObject({ state: "paused", pausedBy: "me" });
+    expect(w.a.sent.filter((f) => f.t === "pf-data" && f.id === "pkeep-01").length).toBe(dataBefore);
+    expect(w.b.disks.get("pkeep-01")!.discarded).toBe(false);
+  });
+
   it("the sender cancels: the receiver drops what it had; the receiver cancels: the sender stops", async () => {
     const w = wire();
     w.attach();
