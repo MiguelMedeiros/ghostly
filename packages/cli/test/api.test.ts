@@ -879,7 +879,7 @@ describe("a pending chat's invite code is a secret", () => {
 
   it("is hidden in every chat summary unless asked for, and only list and show take the asking", async () => {
     const made = pending();
-    const ctx = { ...made.ctx, runtime: { server: { node: made.node }, paths: { name: "default" } } } as unknown as ApiContext;
+    const ctx = { ...made.ctx, runtime: { server: { node: made.node }, paths: { name: "default" } }, calls: { list: () => [] } } as unknown as ApiContext;
     expect(chatJson(link("c", { inviteCode: CODE } as never), true).invite).toBe(CODE);
     expect(chatJson(link("c")).invite).toBeNull();
     // Array.map hands the index as the second argument: it must never read as "show".
