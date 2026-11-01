@@ -1,4 +1,4 @@
-import { fromBase64Url, toBase64Url, utf8Decode, utf8Encode } from '@ghostly/core';
+import { IDENTITY_CLOCK_SKEW, fromBase64Url, toBase64Url, utf8Decode, utf8Encode } from '@ghostly/core';
 import { audiences, issuerFor, type OidcAlg, type OidcProvider, type OidcProviderId } from './providers';
 import { sharedJwksCache, type Jwk, type JwksCache, type JwksFetch } from './jwks';
 
@@ -134,7 +134,8 @@ export async function verifyIdToken(token: string, options: VerifyOptions): Prom
   const iat = claims.iat, exp = claims.exp, nbf = claims.nbf;
   if (typeof iat !== 'number' || typeof exp !== 'number' || !Number.isFinite(iat) || !Number.isFinite(exp)) return refuse('Token has no validity window');
   if (exp <= iat || exp - iat > MAX_LIFETIME) refuse('Token validity window refused');
-  if (iat > now + CLOCK_TOLERANCE) refuse('Token is not valid yet');
+  // A proof's sign-in may be checked on a clock as slow as the proof engine accepts.
+  if (iat > now + (options.issuedWithin ? IDENTITY_CLOCK_SKEW : CLOCK_TOLERANCE)) refuse('Token is not valid yet');
   if (options.issuedWithin) {
     const [from, to] = options.issuedWithin;
     if (iat < from || iat > to) refuse('The sign-in does not belong to this proof: it happened at another time');
