@@ -490,7 +490,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     create: { use: { type: "boolean", description: "" }, name: { type: "string", description: "" } },
     backup: { out: { type: "string", description: "" }, "passphrase-file": { type: "string", description: "" }, passphrase: { type: "boolean", description: "" }, light: { type: "boolean", description: "" } },
     restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
-    set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "" } },
+    set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true } },
   };
   const parsed = parseArgs(argv, specs[sub ?? ""] ?? {});
   const g = globals(parsed);
