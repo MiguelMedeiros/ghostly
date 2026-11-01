@@ -388,7 +388,8 @@ export function decodeDidDhtPacket(did: string, dnsPacket: Uint8Array): DecodedD
     const alg = props.get("a") ?? KEY_TYPES[type].alg;
     if (!ALG.test(alg)) throw malformed(`the key ${alias} has an unusable algorithm`);
     const k = props.get("k") ?? "";
-    const bytes = /^[A-Za-z0-9_-]+$/.test(k) ? fromBase64Url(k) : new Uint8Array();
+    // 4n+1 characters encode no byte string: atob would throw a DOMException, not a DidDhtError.
+    const bytes = /^[A-Za-z0-9_-]+$/.test(k) && k.length % 4 !== 1 ? fromBase64Url(k) : new Uint8Array();
     if (bytes.length === 0 || toBase64Url(bytes) !== k) throw malformed(`the key ${alias} is not unpadded base64url`);
     const controller = props.get("c") ?? did;
     if (!DID.test(controller)) throw malformed(`the key ${alias} has a controller that is not a DID`);
