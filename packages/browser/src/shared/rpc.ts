@@ -165,7 +165,7 @@ export interface EngineApi {
    * `messageId` the message's id here or the id both sides know it by. One per chat: a new pin replaces the old. In a
    * community only the admin pins.
    */
-  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null };
+  pinMessage(params: { linkId: string; messageId?: string; remove?: boolean }): { error: string | null; refused?: boolean };
   /**
    * Mini-apps in a paired 1:1 chat (`apps/1`, WISP 1200 § In a chat), refused while the apps feature is off. `ref` is
    * the app reference `<publisher key in z-base32>/<name>`; the contact's frames (`app-frame` events) name the app by
@@ -387,12 +387,19 @@ export interface EngineApi {
   pressButton(params: { linkId: string; messageId: string; buttonId: string }): { error: string | null; refused?: boolean; paced?: true; messageId?: string };
   /** How many edges took my message `messageId` (or its edit number `edit`): members' edges in a private group, hubs' in a community. */
   groupTaken(params: { groupId: string; messageId: string; edit?: number }): number;
+  /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed yet. */
+  chatUnconfirmed(params: { linkId: string }): { reactions: number[]; pin: number | null };
   groupMessages(params: { groupId: string }): StoredMessage[];
   /**
    * A page of a chat's or a group's (`group:<id>`) history, oldest first: the latest `limit` (50 by default) messages,
    * or those before `before` (the id of a message in it, or a time). Reads that page only, however long the chat is.
    */
   messagePage(params: { linkId: string; limit?: number; before?: string | number }): MessagePage;
+  /**
+   * The 1:1 chats among `linkIds` with a message whose text holds `query`, folded as the pages fold (`shared/fold.ts`):
+   * the chat list's search over histories a page holds only the newest page of (the extension's), read in the engine.
+   */
+  chatsFound(params: { query: string; linkIds: string[] }): string[];
   /**
    * Every task and routine card of this profile, from all its chats and groups, oldest first (WISP 405 · Status Cards
    * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.

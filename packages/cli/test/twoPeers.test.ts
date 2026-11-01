@@ -672,7 +672,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(started.statement).toMatch(/^Ghostly identity proof v1: I control ssh:/);
     const signature = execFileSync("ssh-keygen", ["-Y", "sign", "-n", "ghostly", "-f", key], { input: started.statement as string }).toString();
     error(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: "not a signature" }), "bad_request", 1);
-    const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string, "--stdin"], { env, input: signature }));
+    // Nothing given: where to give it, not the API's "evidence is required"; piped without --stdin, read as a send's text.
+    expect(error(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: "" }), "usage", 2).message)
+      .toBe(`Missing what ssh-keygen printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${started.draft as string})`);
+    const done = ok(await ghostly(["--home", alice, "identity", "complete", started.draft as string], { env, input: signature }));
     const proof = done.proof as { id: string; provider: string };
     expect(proof.provider).toBe("ssh");
     expect((ok(await as(alice, "identity", "list")).proofs as { id: string }[]).map((p) => p.id)).toContain(proof.id);
@@ -938,5 +941,32 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(Date.now() - started).toBeLessThan(40_000);
     const history = ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { text: string }[];
     expect(history.map((m) => m.text)).toEqual(["from a one-shot"]);
+  });
+
+  it("react and pin as one-shots: each stays until the contact confirmed it, and the contact shows it as the command ends", async () => {
+    // Before, both answered in about a second and left with the reaction and the pin unsaid: Bob saw them only with
+    // Alice's next one-shot send. Each is a fresh process, as the send above; the same 50 s for its first dial.
+    const mine = (ok(await as(alice, "chat", "history", "bob", "--limit", "1")).messages as { id: string }[])[0]!;
+    const theirs = (ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { id: string; text: string; reactions?: unknown }[])[0]!;
+    expect(theirs.text).toBe("from a one-shot");
+    expect(ok(await as(alice, "react", "bob", mine.id, "🎈", "--timeout", "50"))).toMatchObject({ messageId: mine.id, emoji: "🎈", confirmed: true });
+    const reacted = (ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { reactions?: unknown }[])[0]!;
+    expect(reacted.reactions).toMatchObject([{ by: "peer", emoji: "🎈" }]);
+    expect(ok(await as(alice, "pin", "bob", mine.id, "--timeout", "50"))).toMatchObject({ messageId: mine.id, confirmed: true });
+    expect(ok(await as(bob, "chat", "show", "alice")).pin).toMatchObject({ messageId: theirs.id, by: "peer" });
+  });
+
+  it("task send and task update as one-shots: each stays until it went out, and the contact has the card done as the update ends", async () => {
+    // Before, the update answered `confirmed: false` in about a second and left with its edit unsaid: Bob's card said
+    // running until a later one-shot stayed long enough. The send goes out first (`sent`: on the DHT floor its text
+    // alone, the card once the chat is live). Each is a fresh process; the same 50 s for its first dial as above.
+    expect(ok(await as(alice, "task", "send", "bob", "--id", "one-shot-task", "--title", "From a one-shot", "--timeout", "50"))).toMatchObject({ task: "one-shot-task", delivery: expect.stringMatching(/^(sent|delivered)$/) });
+    expect(ok(await as(alice, "task", "update", "bob", "one-shot-task", "--status", "done", "--timeout", "50"))).toMatchObject({ task: "one-shot-task", confirmed: true });
+    // Bob confirms the edit as he stores it: his history may say it a moment later. Alice's process is gone by now, so
+    // nothing else carries it meanwhile.
+    const card = async () => ((ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { from: string; card?: Record<string, unknown> }[])[0]!);
+    let mine = await card();
+    for (const until = Date.now() + 10_000; mine.card?.status !== "done" && Date.now() < until; mine = await card()) await new Promise((r) => setTimeout(r, 250));
+    expect(mine).toMatchObject({ from: "peer", card: { kind: "task", id: "one-shot-task", title: "From a one-shot", status: "done" } });
   });
 });

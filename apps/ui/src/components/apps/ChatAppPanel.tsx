@@ -7,24 +7,10 @@ import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type A
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
 import { AppGlyph } from "./AppIcon";
+import { NAME, aroundName } from "./aroundName";
 import "./chat-app-panel.css";
 
 const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
-
-/** A stand-in for the contact's name while the line is translated: the name goes back in as an element of its own. */
-const NAME = "\u0001";
-
-/**
- * "with Ana", "sharing a file with Ana": only the name is cut when the line is too long, never the words around it,
- * wherever the language puts them ("Ana とファイルを共有中" would lose "sharing" after a long name). Unless the words alone
- * fill the line (a 320 px phone in Portuguese): they stop 4ch short of its end, cut, so a few letters of the name show.
- */
-function aroundName(text: string, name: string) {
-  return text.split(NAME).flatMap((part, i) => [
-    i > 0 && <bdi key={`name-${i}`} data-testid="mini-app-with-name" className="min-w-0 truncate">{name}</bdi>,
-    part && <span key={i} className="shrink-0 max-w-[calc(100%-4ch)] overflow-hidden text-ellipsis whitespace-pre">{part}</span>,
-  ]);
-}
 
 /**
  * A mini-app in a 1:1 chat (WISP 1200 § Per client, web): beside the chat on a wide screen, over it on a phone, with
@@ -41,7 +27,7 @@ function aroundName(text: string, name: string) {
  * modal: Tab stays in it and the chat under it is inert. Escape, with the focus in the panel, goes Back on a phone and
  * for a full-screen app, back beside the chat from full width, and closes it beside the chat.
  */
-export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status }: {
+export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn }: {
   linkId: string;
   sessionId: string;
   contact: AppContact;
@@ -50,6 +36,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   photo?: string;
   myKey?: string;
   status?: string;
+  /** A call is on in the chat: its connection control offers no DHT only meanwhile. */
+  callOn?: boolean;
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -145,7 +133,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           {/* The chat's connection control, the same as in its header. */}
-          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" />
+          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} />
           {!withBack && (
             <button type="button" data-testid="mini-app-wide" aria-pressed={wide} onClick={() => updateChatApp(linkId, { wide: !wide })}
               aria-label={t(wide ? "apps.view.beside" : "apps.view.full")} title={t(wide ? "apps.view.beside" : "apps.view.full")}

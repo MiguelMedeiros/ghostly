@@ -114,6 +114,7 @@ import {
 } from "@ghostly/core";
 import type { AppRangeAsk, AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { SavedMessages } from "./saved";
+import { ChatTextSearch } from "./chatSearch";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
@@ -718,7 +719,7 @@ export const LIMITED_MODE_ERROR = "Ghostly could not check which device is activ
  */
 export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi>([
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
-  "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
+  "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage", "chatsFound",
   "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
   // Saved messages are marks on this device only, a settings record (`engine/saved.ts`): nothing is sent. Refused,
   // the Saved page stayed blank with no word and Save did nothing (agents#1694).
@@ -2183,7 +2184,7 @@ export class GhostlyNode implements EngineImplementation {
     const start = await check.catch((): StartCheck => ({ limited: true }));
     this.startChecking = false;
     if (this.shuttingDown) return;
-    if (start.gated) { await this.stopReplaced({ ...start.gated, reload: true }); return; }
+    if (start.gated) { await this.stopReplaced({ ...start.gated, reload: true, keepUnlocked: true }); return; }
     if (start.limited) { this.emitState(); this.readTurnWhileLimited(); return; }
     // What the limited start kept as it was stored: the files of groups this device no longer has go, as at a full start.
     await this.groups.files?.sweep((await db.getGroups()).map((group) => group.id)).catch(() => {});
@@ -2692,6 +2693,17 @@ export class GhostlyNode implements EngineImplementation {
   /** A chat's or a group's history, as a page gets it (`withoutFrame`). */
   async getMessages(linkId: string): Promise<StoredMessage[]> {
     return (await db.getMessages(linkId)).map(withoutFrame);
+  }
+
+  /**
+   * The 1:1 chats among `linkIds` with a message whose text holds `query`, whatever the case and the accents: the chat
+   * list's search, read here so a page that holds each chat's newest page only is not sent every whole history for it.
+   */
+  async chatsFound(params: { query: string; linkIds: string[] }): Promise<string[]> {
+    if (typeof params?.query !== "string") throw new Error("query: the text to search for");
+    if (!Array.isArray(params.linkIds)) throw new Error("linkIds: the ids of the chats to search");
+    const chats = params.linkIds.filter(linkId => { const link = this.links.get(linkId); return !!link && !link.stored.group; });
+    return this.chatSearch.found(chats, params.query);
   }
 
   /** The ids of the messages deleted in a chat (`deletedIds`, the newest `MAX_DELETED_IDS`): a whole history goes with them. */
@@ -4194,6 +4206,11 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
+  /** Whether my removal of this message of a 1:1 chat is still on its way to the contact (`removeMessage`). */
+  removalPending({ linkId, messageId }: { linkId: string; messageId: string }): boolean {
+    return !!this.links.get(linkId)?.stored.removals?.some(r => r.id === messageId);
+  }
+
   /** A chat's row write of its removals and deleted ids waiting to go, by chat (`writeDeletions`). */
   private readonly deletionWrites = new Map<string, { patch: Partial<StoredLink>; relaxed: boolean; done: Promise<void> }>();
   /** The last such write of each chat, which the next one follows. */
@@ -4730,13 +4747,26 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
+  /**
+   * DHT only, or back to a live link. Back, it answers once the link has left DHT only: the native listeners start
+   * behind it and join the chat as each comes up (`registerEndpoint`). It waited for them before, 10 to 25 s with
+   * Iroh's relay or the HyperDHT out of reach, so `chat disconnect --hold 0` blocked that long.
+   */
   async setDeliveryMode({ linkId, mode }: { linkId: string; mode: DeliveryMode }): Promise<void> {
+    await this.switchDeliveryMode(linkId, mode, false);
+  }
+
+  /** `setDeliveryMode`; `native`: back on a live link, wait for its native listeners too (a choice that names one). */
+  private async switchDeliveryMode(linkId: string, mode: DeliveryMode, native: boolean): Promise<void> {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || !live.link || (mode !== "stream" && mode !== "dht")) throw new Error("Delivery method unavailable.");
     await db.patchLink(linkId, { deliveryMode: mode });
     live.stored = { ...live.stored, deliveryMode: mode };
     await live.link.setDeliveryMode(mode);
-    if (mode === "stream") await this.ensureNativeEndpoints(linkId);
+    if (mode === "stream") {
+      const listening = this.ensureNativeEndpoints(linkId);
+      if (native) await listening;
+    }
     this.observeTransport(linkId);
     this.emitState();
   }
@@ -4785,7 +4815,7 @@ export class GhostlyNode implements EngineImplementation {
       const preferredTransport = transport === "auto" ? undefined : transport;
       live.stored = { ...live.stored, preferredTransport };
       await db.patchLink(linkId, { preferredTransport });
-      await this.setDeliveryMode({ linkId, mode: "stream" });
+      await this.switchDeliveryMode(linkId, "stream", true);
     }
     if (transport !== "auto") {
       // A choice on the wire too; out of DHT only, the log leaves the row to the one that says so (it names it).
@@ -5095,6 +5125,11 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** How many edges took my message (or its edit number `edit`) so far: what `group send --wait sent` waits for. */
   groupTaken({ groupId, messageId, edit }: { groupId: string; messageId: string; edit?: number }): number { return this.groups.taken(groupId, messageId, edit); }
+  /** The numbers of my reactions and of my pin in a 1:1 chat that the contact has not confirmed: what `react` and `pin` wait for. */
+  chatUnconfirmed({ linkId }: { linkId: string }): { reactions: number[]; pin: number | null } {
+    const stored = this.links.get(linkId)?.stored;
+    return { reactions: (stored?.reactionsOut ?? []).map((r) => r.n), pin: stored?.pinOut?.n ?? null };
+  }
 
   /**
    * Reacts to a message of a chat or a group (WISP 400 § Reactions): shown here at once; a 1:1 chat keeps it until the
@@ -5229,12 +5264,13 @@ export class GhostlyNode implements EngineImplementation {
    * 1:1 chat keeps it until the contact confirms it on a live session; a group sends it to its members, where the rule
    * (`mayPin`) allows it.
    */
-  async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null }> {
+  async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null; refused?: boolean }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
     const host = this.pinsHost;
     if (linkId.startsWith("group:")) {
       const groupId = linkId.slice("group:".length), view = this.groups.view(groupId);
-      if (!view || view.status !== "active") return { error: "You are not in this group" };
+      // Not a member (removed, say): refused with the reason the group shows, as a reaction is.
+      if (!view || view.status !== "active") return { error: view?.statusReason ?? "You are not in this group", refused: true };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
       const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
       if ("error" in pin) return pin;
@@ -6472,6 +6508,8 @@ export class GhostlyNode implements EngineImplementation {
   /** Groups whose admin work is off on this device since a forced takeover or a restore. */
   private groupAdminOff = new Set<string>();
   private readonly saved = new SavedMessages(() => this.emitState());
+  /** The chat list's search over the chats' histories (`chatsFound`): each chat read once, and again after it changes. */
+  private readonly chatSearch = new ChatTextSearch(linkId => db.getMessages(linkId));
 
   /**
    * Raises the counters a copy from older state must raise, once (`devices/raise.ts`): the raise a forced takeover wrote
@@ -8748,6 +8786,7 @@ export class GhostlyNode implements EngineImplementation {
    * the whole history. A host that takes whole histories only (no `onMessageChanges`) gets the whole history, as before.
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
+    this.chatSearch.changed(linkId);
     // The chat list's reaction line quotes its message: an edit of that message changes the quote too, and a delete (here
     // or for everyone) takes the line back to the reaction before it that still stands.
     const reacted = this.reactionNotes.get(linkId);

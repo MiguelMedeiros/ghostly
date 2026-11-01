@@ -214,7 +214,7 @@
     "removeNote": "Os contatos com quem você compartilhou são avisados de que não está mais compartilhada, e uma revogação é publicada para que vejam mesmo que você nunca se reconecte. Uma cópia que guardaram não pode ser apagada.",
     "renew": "Adicionar de novo",
     "renewHint": "Adicione de novo para renovar; depois remova esta.",
-    "shareHint": "Compartilhe pelas Identidades de uma conversa, um contato de cada vez.",
+    "shareHint": "Compartilhe pelo + de uma conversa, um contato de cada vez.",
     "takeDownFailed": "O que foi publicado não pôde ser retirado. Você pode remover a prova sem isso: os contatos ainda a veem revogada.",
     "title": "Suas"
   },

@@ -15,13 +15,16 @@ const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ3
 const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
   members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }], ...fields }) as unknown as GroupView;
 
-function fake(result: { error: string | null } = { error: null }) {
+/** `out.pin`: the number of my pin the contact has not confirmed; a 1:1 pin made takes the next one. */
+function fake(result: { error: string | null; refused?: boolean } = { error: null }, mode: "daemon" | "one-shot" = "daemon") {
+  const out = { pin: null as number | null, n: 0 };
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Alice" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
-    pinMessage: vi.fn(async () => result),
+    pinMessage: vi.fn(async ({ linkId }: { linkId: string }) => { if (!result.error && !linkId.startsWith("group:")) out.pin = ++out.n; return result; }),
+    chatUnconfirmed: vi.fn(() => ({ reactions: [], pin: out.pin })),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
-  return { ctx, node };
+  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+  return { ctx, node, out };
 }
 
 describe("pin", () => {
@@ -32,35 +35,62 @@ describe("pin", () => {
   };
 
   it("takes a chat or a group and a message, or --remove", () => {
-    expect(COMMANDS.pin.usage).toBe("pin <chat|group> <message> | --remove");
-    expect(line("alice", "peer_x")).toEqual({ chat: "alice", message: "peer_x", remove: false });
+    expect(COMMANDS.pin.usage).toBe("pin <chat|group> <message> | --remove [--wait none|confirmed] [--timeout s]");
+    expect(line("alice", "peer_x")).toEqual({ chat: "alice", message: "peer_x", remove: false, wait: undefined, timeout: undefined });
+    expect(line("alice", "peer_x", "--wait", "none", "--timeout", "5")).toEqual({ chat: "alice", message: "peer_x", remove: false, wait: "none", timeout: 5 });
     expect(() => line("alice")).toThrow(/Missing <message>: ghostly pin <chat\|group> <message> \| --remove/);
     expect(() => line()).toThrow(/Missing <chat\|group>/);
     expect(() => line("alice", "peer_x", "peer_y")).toThrow(/Too many arguments/);
     // A group's id may start with a dash: it is still the message.
-    expect(line("crew", "-k:0:1")).toEqual({ chat: "crew", message: "-k:0:1", remove: false });
+    expect(line("crew", "-k:0:1")).toMatchObject({ chat: "crew", message: "-k:0:1", remove: false });
   });
 
   it("unpins with --remove alone: no message is named, and one given is not asked for", () => {
-    expect(line("alice", "--remove")).toEqual({ chat: "alice", message: undefined, remove: true });
-    expect(line("--remove", "alice")).toEqual({ chat: "alice", message: undefined, remove: true });
+    expect(line("alice", "--remove")).toMatchObject({ chat: "alice", message: undefined, remove: true });
+    expect(line("--remove", "alice")).toMatchObject({ chat: "alice", message: undefined, remove: true });
     // A script that named the pinned message beside --remove goes on working.
-    expect(line("alice", "peer_x", "--remove")).toEqual({ chat: "alice", message: "peer_x", remove: true });
+    expect(line("alice", "peer_x", "--remove")).toMatchObject({ chat: "alice", message: "peer_x", remove: true });
     expect(() => line("alice", "peer_x", "peer_y", "--remove")).toThrow(/Too many arguments/);
   });
 
   it("goes to the engine for a chat or a group; --remove unpins; what the engine refuses is said", async () => {
     const { ctx, node } = fake();
-    expect(await callApi(ctx, "chat.pin", { chat: "Alice", message: "peer_x" })).toEqual({ chat: "chat-one", messageId: "peer_x", removed: false });
+    expect(await callApi(ctx, "chat.pin", { chat: "Alice", message: "peer_x" })).toEqual({ chat: "chat-one", messageId: "peer_x", removed: false, confirmed: false });
     expect(node.pinMessage).toHaveBeenLastCalledWith({ linkId: "chat-one", messageId: "peer_x", remove: false });
     expect(await callApi(ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).toEqual({ group: "g1", messageId: "k:0:1", removed: false });
     expect(node.pinMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "k:0:1", remove: false });
-    expect(await callApi(ctx, "chat.pin", { chat: "Alice", message: "peer_x", remove: true })).toEqual({ chat: "chat-one", messageId: null, removed: true });
+    expect(await callApi(ctx, "chat.pin", { chat: "Alice", message: "peer_x", remove: true })).toEqual({ chat: "chat-one", messageId: null, removed: true, confirmed: false });
     expect(node.pinMessage).toHaveBeenLastCalledWith({ linkId: "chat-one", messageId: "peer_x", remove: true });
     await expect(callApi(ctx, "chat.pin", { chat: "Alice" })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(fake({ error: "Only the admin pins in a community" }).ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).rejects.toMatchObject({ code: "refused" });
+    // Not a member any more (removed, say): refused with the group's reason, as group send and group react are.
+    await expect(callApi(fake({ error: "You were removed from this group", refused: true }).ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
     await expect(callApi(fake({ error: "That message is not in this chat, or cannot be pinned" }).ctx, "chat.pin", { chat: "Alice", message: "x" })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(fake({ error: "Nothing is pinned in this chat" }).ctx, "chat.pin", { chat: "Alice", remove: true })).rejects.toMatchObject({ code: "not_found" });
+  });
+});
+
+describe("pin in a 1:1 chat, without a daemon", () => {
+  it("stays until the contact confirmed it: the process leaving took it along unsaid", async () => {
+    const { ctx, out } = fake(undefined, "one-shot");
+    setTimeout(() => { out.pin = null; }, 300);
+    const started = Date.now();
+    expect(await callApi(ctx, "chat.pin", { chat: "Alice", message: "peer_x" })).toEqual({ chat: "chat-one", messageId: "peer_x", removed: false, confirmed: true });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+  });
+
+  it("times out saying it is kept and what carries it; --wait none answers at once", async () => {
+    await expect(callApi(fake(undefined, "one-shot").ctx, "chat.pin", { chat: "Alice", remove: true, timeout: 1 })).rejects.toMatchObject({
+      code: "timeout", message: "Timed out after 1 s: the contact has not confirmed the pin yet. It is kept here and goes with this profile's next command, or keep it online with `ghostly daemon --detach`",
+    });
+    expect(await callApi(fake(undefined, "one-shot").ctx, "chat.pin", { chat: "Alice", message: "peer_x", wait: "none" })).toMatchObject({ confirmed: false });
+  });
+
+  it("in a group answers at once (no receipts there); --wait confirmed on a group is refused before anything goes", async () => {
+    const { ctx, node } = fake(undefined, "one-shot");
+    expect(await callApi(ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).toEqual({ group: "g1", messageId: "k:0:1", removed: false });
+    await expect(callApi(ctx, "chat.pin", { chat: "Crew", message: "k:0:1", wait: "confirmed" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.pinMessage).toHaveBeenCalledOnce();
   });
 });
 

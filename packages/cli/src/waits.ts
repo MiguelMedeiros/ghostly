@@ -10,6 +10,14 @@ import type { GhostlyEvent } from "./events";
 
 const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 1, held: 2, sent: 2, delivered: 3 };
 
+/**
+ * What a timed-out wait says of what happens next: a daemon goes on, a one-shot's profile closes now. A one-shot's
+ * `edit` and `group edit` said "while this profile is online" too, as it was about to leave.
+ */
+const goesOn = (ctx: ApiContext) => ctx.mode === "one-shot"
+  ? "goes with this profile's next command, or keep it online with `ghostly daemon --detach`"
+  : "still goes by itself while this profile is online";
+
 /** Waits until the contact confirmed the latest edit of one of my messages (it is no longer pending). */
 export async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<StoredMessage> {
   const until = Date.now() + ms;
@@ -17,7 +25,16 @@ export async function waitForEdit(ctx: ApiContext, chat: string, messageId: stri
     const message = await node(ctx).getMessage(chat, messageId);
     if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
     if (!message.edit?.pending) return message;
-    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact has not confirmed the edit yet. It goes by itself once the chat is live and the contact's app shows edits, while this profile is online`, { messageId, edits: message.edit.seq });
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOn(ctx)}`, { messageId, edits: message.edit.seq });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/** Waits until the contact confirmed my removal of a message, which is already gone here. */
+export async function waitForRemoval(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  while (node(ctx).removalPending({ linkId: chat, messageId })) {
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the message is gone here and the contact has not confirmed yet. Its removal ${goesOn(ctx)}`, { messageId });
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -31,7 +48,7 @@ export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messag
   for (;;) {
     const taken = node(ctx).groupTaken({ groupId, messageId, ...(edit ? { edit } : {}) });
     if (taken > 0) return taken;
-    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: no member's edge took it yet. It stays in the group and goes when one opens, while this profile is online`, { messageId, ...(edit ? { edits: edit } : {}) });
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: no member's edge took it yet (it stays in the group and goes when one opens). It ${goesOn(ctx)}`, { messageId, ...(edit ? { edits: edit } : {}) });
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 }
@@ -44,10 +61,18 @@ export async function waitForGroupFrame(ctx: ApiContext, groupId: string, messag
  */
 export const ONE_SHOT_RECEIPT_MS = 2_000;
 
-/** What a timed-out wait says of what happens next: a daemon goes on, a one-shot's profile closes now. */
-const goesOn = (ctx: ApiContext) => ctx.mode === "one-shot"
-  ? "goes with this profile's next command, or keep it online with `ghostly daemon --detach`"
-  : "still goes by itself while this profile is online";
+/**
+ * Waits until the contact confirmed my reaction or pin in a 1:1 chat (WISP 401): until `pending` no longer finds it in
+ * what the contact has not confirmed (`chatUnconfirmed`). It goes on the live session, a reaction also on the DHT
+ * envelopes; one not confirmed in time is kept and said again.
+ */
+export async function waitForConfirmed(ctx: ApiContext, chat: string, what: "reaction" | "pin", pending: (left: { reactions: number[]; pin: number | null }) => boolean, ms: number): Promise<void> {
+  const until = Date.now() + ms;
+  while (pending(node(ctx).chatUnconfirmed({ linkId: chat }))) {
+    if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact has not confirmed the ${what} yet. It is kept here and ${goesOn(ctx)}`, { chat });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
 
 /**
  * Waits until a message of mine reached `target` (`sent`: on its way to the contact; `delivered`: acknowledged). A

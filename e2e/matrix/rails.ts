@@ -126,12 +126,11 @@ const LND: LightningNode = {
   lock: "lnd",
   connect: async (actor, who) => {
     const lnd = await import("../support/lnd-regtest/regtest.mjs");
-    const { url, macaroon, cert } = lnd.credentials(who);
+    const { url, macaroon } = lnd.credentials(who);
     const source = await lightningSource(actor, "lnd", async (area) => {
       const form = area.getByTestId("provider-form-lnd");
       await form.getByLabel("REST address").fill(url);
       await form.getByLabel("Macaroon (hex)").fill(macaroon);
-      await form.getByLabel("TLS certificate").fill(cert);
       await form.getByTestId("provider-save").click();
     }, macaroon);
     await expect(source.getByTestId("lightning-source-status")).toContainText(`ghostly-${who}`);

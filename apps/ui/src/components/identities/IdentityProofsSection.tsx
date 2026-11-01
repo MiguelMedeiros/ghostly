@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types";
 import type { ApprovalRequest } from "@ghostly/browser/proofs/contract";
@@ -18,11 +18,14 @@ import { PublicProfileDetails } from "./PublicProfileDetails";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { deckArrows } from "../deck/arrows";
 import { problemLine } from "../../lib/problemText";
+import { focusLost } from "../../lib/focus";
+import { fillNames } from "../../lib/fillNodes";
 
 type Entry =
   | { id: typeof GHOSTLY; ghostly: true; card: IdCardContent }
   | { id: string; ghostly?: false; proof: IdentityProofView; card: IdCardContent };
 const PANEL = { id: "identity-panel", tabId: (id: string) => `identity-tab-${id}` };
+const REMOVE = '[data-testid="identity-proof-remove"]';
 
 /**
  * Identities → Yours: a deck of ID cards (the wallet's deck, with ID cards for faces). The first card is the
@@ -52,6 +55,21 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   // A proof just added comes up, so the person sees what they made.
   useNewProof(state, setChosen);
 
+  // A button pressed here can go away with the focus on it (Keep, a share stopped, a proof removed), now or when the
+  // engine's state comes: the keys go where `to` says, once nothing runs, instead of falling to the page.
+  const section = useRef<HTMLElement>(null);
+  const handOff = useRef<{ from: HTMLElement; to: string[] } | null>(null);
+  useEffect(() => {
+    const pressed = handOff.current;
+    if (!pressed || pressed.from.isConnected || busy) return;
+    handOff.current = null;
+    if (!focusLost()) return;
+    for (const selector of pressed.to) {
+      const target = section.current?.querySelector<HTMLElement>(selector);
+      if (target) { target.focus({ preventScroll: true }); return; }
+    }
+  });
+
   if (!state) return null;
   const now = Math.floor(Date.now() / 1000);
   const providers = addableProviders().map(p => p.id);
@@ -70,8 +88,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   ];
   const entry = entries.find(e => e.id === chosen) ?? entries[0];
   const select = (id: string) => { removeAbort.current?.abort(); setChosen(id); setRemoving(null); setError(""); setRemoval({}); };
-  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };
-  /**
+  const act = (key: string, work: () => Promise<unknown>) => { setBusy(key); setError(""); void work().catch(e => setError(problemLine(e, t))).finally(() => setBusy("")); };  /**
    * Removes a proof: first what its provider published, when it can take that down (an AT Protocol record, after a
    * fresh approval on the person's server), then the proof itself, which withdraws it and publishes the revocation.
    * Called straight from the click: the provider may open a window. `withRecord` false skips the first step.
@@ -95,7 +112,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   const tone = (e: Entry) => idCardTone({ provider: e.card.provider, subject: e.card.bound, attested: e.card.attested });
 
   return (
-    <section className="space-y-3" data-testid="identities-mine">
+    <section ref={section} className="space-y-3" data-testid="identities-mine">
       <h2 className="text-sm font-semibold text-accent uppercase tracking-wide">{t("identities.mine.title")}</h2>
       <Deck<Entry> cards={entries} selected={entry.id} onSelect={select}
         kind="tabs" panel={PANEL} label={t("identities.mine.deckLabel")} name="identity-deck" arrows={deckArrows(t)} className="id-deck"
@@ -139,7 +156,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
             <Block>
               <code className="block break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="identity-panel-subject">{card.subject}</code>
               <p className="text-xs text-text-muted leading-5">
-                {p.verified.source}. {card.attested ? (p.verified.attester ? t("identities.mine.attested", { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
+                <bdi>{p.verified.source}</bdi>. {card.attested ? (p.verified.attester ? fillNames(t("identities.mine.attested"), { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
               </p>
               {card.refusedBy.length > 0 && <p className="text-xs text-danger" data-testid="identity-proof-refused">{t("identities.mine.refusedBy", { names: card.refusedBy.join(", ") })}</p>}
               {(card.status === "expired" || card.status === "expiring") && (
@@ -159,15 +176,18 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                   <div key={link.id} data-testid="identity-shared-chat" className="flex flex-wrap items-center gap-x-3 gap-y-2">
                     <p className="flex-[1_1_10rem] min-w-0 text-sm text-text-primary">{nameOf(link)} <span className="text-xs text-text-muted">· {sharedStatus(status, t)}</span></p>
                     {chat && <Button onClick={() => nav.conversation(chatPath(chat.id))}>{t("identities.openChat")}</Button>}
-                    {status !== "withdrawal-pending" && <Button data-testid="identity-shared-stop" disabled={!!busy} onClick={() => act(link.id, () => engine.call("withdrawIdentityProof", { linkId: link.id, id: p.id }))}>{t("identities.stopSharing")}</Button>}
+                    {status !== "withdrawal-pending" && <Button data-testid="identity-shared-stop" loading={busy === link.id} disabled={!!busy} onClick={e => {
+                      handOff.current = { from: e.currentTarget, to: ['[data-testid="identity-shared-stop"]', REMOVE] };
+                      act(link.id, () => engine.call("withdrawIdentityProof", { linkId: link.id, id: p.id }));
+                    }}>{t("identities.stopSharing")}</Button>}
                   </div>
                 ))}
             </Block>
             <Row label={t("identities.mine.remove")} hint={t("identities.mine.removeHint")}>
               {removing === p.id ? <>
-                <Button variant="danger" data-testid="identity-proof-remove-confirm" disabled={busyHere} onClick={() => remove(p)}>{revoking === p.id ? t("identities.card.revoking") : takingDown === p.id ? t("identities.waiting") : t("identities.mine.removeConfirm")}</Button>
-                {removal.failed === p.id && !busyHere && <Button data-testid="identity-proof-remove-anyway" onClick={() => remove(p, false)}>{t("identities.mine.removeAnyway")}</Button>}
-                <Button disabled={revoking === p.id} onClick={() => { removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
+                <Button variant="danger" data-testid="identity-proof-remove-confirm" loading={busyHere} onClick={e => { handOff.current = { from: e.currentTarget, to: ['[role="tab"][aria-selected="true"]'] }; remove(p); }}>{revoking === p.id ? t("identities.card.revoking") : takingDown === p.id ? t("identities.waiting") : t("identities.mine.removeConfirm")}</Button>
+                {removal.failed === p.id && !busyHere && <Button data-testid="identity-proof-remove-anyway" onClick={e => { handOff.current = { from: e.currentTarget, to: ['[data-testid="identity-proof-remove-confirm"]'] }; remove(p, false); }}>{t("identities.mine.removeAnyway")}</Button>}
+                <Button disabled={revoking === p.id} onClick={e => { handOff.current = { from: e.currentTarget, to: [REMOVE] }; removeAbort.current?.abort(); setRemoving(null); setRemoval({}); }}>{t("identities.mine.keep")}</Button>
               </> : <Button data-testid="identity-proof-remove" onClick={() => setRemoving(p.id)}>{t("identities.mine.remove")}</Button>}
             </Row>
             {removing === p.id && <Block testId="identity-proof-remove-notes"><Notice>{t("identities.mine.removeNote")}{providerOf(p.provider)?.unpublish ? ` ${providerOf(p.provider)!.unpublish!.description}` : ""}</Notice>

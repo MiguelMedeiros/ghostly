@@ -1,7 +1,7 @@
 "use client";
 
 import { IntentLink } from "@/components/site/IntentLink";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { BLOCKS, DIMS, PRESETS, type Block, type PresetId } from "@/lib/composition";
 import { LEVELS, type Level } from "@/lib/status";
 import { LevelBadge } from "@/components/site/Level";
@@ -34,6 +34,24 @@ const REF_NAMES: Record<string, string> = {
 const PRESET_COUNTS = Object.fromEntries(PRESETS.map((p) => [p.id, BLOCKS.filter(p.blocks).length])) as Record<PresetId, number>;
 
 /**
+ * The ARIA radio pattern on a radio group: the arrow keys, Home and End check another radio and take the focus with
+ * it, and only the checked radio is a tab stop (`tabIndex` on each one). With Alt, Ctrl or Meta held the keys stay the
+ * browser's (Alt+Left is Back, Ctrl+End scrolls the page), as on native radios.
+ */
+function onRadioKey(e: KeyboardEvent<HTMLElement>, current: number, count: number, check: (i: number) => void) {
+  if (e.altKey || e.ctrlKey || e.metaKey) return;
+  let next: number;
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (current + 1) % count;
+  else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (current - 1 + count) % count;
+  else if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = count - 1;
+  else return;
+  e.preventDefault();
+  check(next);
+  e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+}
+
+/**
  * The architecture as a flat grid: one row per area, one block per piece.
  * On /developers a composition lights the blocks it uses; on /roadmap the
  * stages light them in the order they arrive. Selecting a block opens its
@@ -53,6 +71,8 @@ export function BlockGrid({
   const [stage, setStage] = useState(mode === "stages" ? 0 : LEVELS.length - 1);
   const [playing, setPlaying] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // The block whose details are open: Close removes itself from the page, so the focus goes back here.
+  const opener = useRef<HTMLButtonElement>(null);
 
   const on = useMemo(() => {
     if (mode === "compose") return new Set(BLOCKS.filter(PRESETS.find((p) => p.id === preset)!.blocks).map((bl) => bl.id));
@@ -80,7 +100,15 @@ export function BlockGrid({
         <div className="bgrid-detail-head">
           <h4>{bl.name}</h4>
           <LevelBadge level={bl.level} small />
-          <button type="button" className="bgrid-close" onClick={() => setSelected(null)} aria-label={t.close}>
+          <button
+            type="button"
+            className="bgrid-close"
+            onClick={() => {
+              opener.current?.focus();
+              setSelected(null);
+            }}
+            aria-label={t.close}
+          >
             ×
           </button>
         </div>
@@ -115,9 +143,29 @@ export function BlockGrid({
     <div className="bgrid" data-mode={mode}>
       {mode === "compose" ? (
         <div className="bgrid-controls">
-          <div className="composer-presets" role="radiogroup" aria-label={t.presets}>
+          <div
+            className="composer-presets"
+            role="radiogroup"
+            aria-label={t.presets}
+            onKeyDown={(e) =>
+              onRadioKey(
+                e,
+                PRESETS.findIndex((p) => p.id === preset),
+                PRESETS.length,
+                (i) => setPreset(PRESETS[i].id),
+              )
+            }
+          >
             {PRESETS.map((p) => (
-              <button key={p.id} role="radio" aria-checked={p.id === preset} className="preset" onClick={() => setPreset(p.id)}>
+              <button
+                key={p.id}
+                type="button"
+                role="radio"
+                aria-checked={p.id === preset}
+                tabIndex={p.id === preset ? 0 : -1}
+                className="preset"
+                onClick={() => setPreset(p.id)}
+              >
                 {p.title}
                 <span className="bgrid-preset-n mono" aria-hidden="true">
                   {PRESET_COUNTS[p.id]}
@@ -134,12 +182,24 @@ export function BlockGrid({
         </div>
       ) : (
         <div className="bgrid-controls">
-          <div className="stage-rail" role="radiogroup" aria-label={t.stages!.title}>
+          <div
+            className="stage-rail"
+            role="radiogroup"
+            aria-label={t.stages!.title}
+            onKeyDown={(e) =>
+              onRadioKey(e, stage, LEVELS.length, (i) => {
+                setPlaying(false);
+                setStage(i);
+              })
+            }
+          >
             {LEVELS.map((l, i) => (
               <button
                 key={l}
+                type="button"
                 role="radio"
                 aria-checked={i === stage}
+                tabIndex={i === stage ? 0 : -1}
                 className="stage-node"
                 data-level={l}
                 data-passed={i <= stage}
@@ -192,7 +252,10 @@ export function BlockGrid({
                     data-on={on.has(bl.id)}
                     data-level={bl.level}
                     aria-expanded={selected === bl.id}
-                    onClick={() => setSelected(selected === bl.id ? null : bl.id)}
+                    onClick={(e) => {
+                      opener.current = e.currentTarget;
+                      setSelected(selected === bl.id ? null : bl.id);
+                    }}
                   >
                     <span className="bgrid-name">{bl.name}</span>
                     <span className="bgrid-level" data-level={bl.level}>

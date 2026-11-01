@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { secretsFromStdin, secretValuesWarning, textFromStdin } from "../src/secretInput";
+import { CliError } from "../src/errors";
+import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, textFromStdin } from "../src/secretInput";
 // covers: headless.cli
 
 const stdin = (text: string) => async () => text;
@@ -153,6 +154,69 @@ describe("secrets from stdin, out of ps", () => {
     expect(secretValuesWarning(list, "bitcoin", undefined, ["mnemonic", "scriptType"])).toMatch(/^--value mnemonic on/);
     expect(secretValuesWarning(list, "lightning", "nwc", [])).toBeUndefined();
     expect(secretValuesWarning(undefined, "lightning", "nwc", ["uri"])).toBeUndefined();
+  });
+
+  it("identity add --stdin takes a signer's fields as name=value lines, out of ps; a --field the signer marks secret is warned about", async () => {
+    const link = "bunker://abc?relay=wss://r.example&secret=s3cr=t";
+    const piped = await identityFields(["domain=example.com"], true, ["bunker"], stdin(`bunker=${link}\n\n`));
+    expect(piped).toEqual({ fields: { domain: "example.com", bunker: link } });
+    const onLine = await identityFields([`bunker=${link}`, "domain=example.com"], false, ["bunker"], never);
+    expect(onLine.fields).toEqual({ bunker: link, domain: "example.com" });
+    expect(onLine.warning).toMatch(/^--field bunker on the command line shows in ps.*--stdin/);
+    expect(onLine.warning).not.toContain(link);
+    expect((await identityFields(["domain=example.com"], false, ["bunker"], never)).warning).toBeUndefined();
+    // A terminal would wait on the keyboard without a word.
+    await expect(identityFields([], true, ["bunker"], never, true)).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(/\| ghostly identity add <provider> --signer id --stdin/) });
+  });
+
+  it("identity add's usage errors for a field with no = never repeat the value", async () => {
+    // `--field bunker://…` with the name left out, and `--field =bunker://…`.
+    for (const item of ["bunker://abc@s3cret", "=bunker://abc?secret=s3cret"]) {
+      const error = await identityFields([item], false, [], never).catch((e: CliError) => e);
+      expect(error).toMatchObject({ code: "usage" });
+      expect((error as CliError).message).not.toContain("s3cret");
+    }
+    const error = await identityFields([], true, [], stdin("bunker://abc@s3cret\n")).catch((e: CliError) => e);
+    expect(error).toMatchObject({ code: "usage" });
+    expect((error as CliError).message).not.toContain("s3cret");
+  });
+
+  it("the secret fields of identity add are its signers' kind: secret ones, as the providers mark them", async () => {
+    const { IDENTITY_PROVIDERS } = await import("@ghostly/browser/proofs/registry");
+    const nostr = IDENTITY_PROVIDERS.find((p) => p.id === "nostr"), domain = IDENTITY_PROVIDERS.find((p) => p.id === "domain");
+    expect(identitySecretFields(nostr, "nip46")).toEqual(["bunker"]);
+    expect(identitySecretFields(nostr)).toEqual(["bunker"]);
+    expect(identitySecretFields(nostr, "nip07")).toEqual([]);
+    expect(identitySecretFields(domain, "nip05-nip46")).toEqual(["bunker"]);
+    expect(identitySecretFields(undefined)).toEqual([]);
+  });
+
+  // `ssh-keygen … | ghostly identity complete <draft>` left the pipe unread and said "evidence is required".
+  it("identity complete reads a tool's output piped to it once the draft asks for one, and never for a published record", async () => {
+    const needs = new CliError("usage", "Missing what ssh-keygen printed", { needs: "evidence" });
+    const tool = vi.fn(async (p: Record<string, unknown>) => { if (p.evidence === undefined) throw needs; return { done: true, evidence: p.evidence }; });
+    expect(await completeWithPipedEvidence(tool, { draft: "d1" }, stdin("-----BEGIN SSH SIGNATURE-----\n"), () => {})).toEqual({ done: true, evidence: "-----BEGIN SSH SIGNATURE-----\n" });
+    expect(tool).toHaveBeenCalledTimes(2);
+    // A published record is done on the first ask: the pipe, maybe one nobody closes, is not read.
+    expect(await completeWithPipedEvidence(async () => ({ done: true }), { draft: "d2" }, never, () => {})).toEqual({ done: true });
+    // Another refusal is the draft's own, as it was.
+    await expect(completeWithPipedEvidence(async () => { throw new CliError("not_found", "No such draft here"); }, { draft: "d3" }, never, () => {})).rejects.toMatchObject({ code: "not_found" });
+    // Nothing piped: the engine's words, naming both flags, again.
+    await expect(completeWithPipedEvidence(tool.mockImplementation(async () => { throw needs; }), { draft: "d1" }, stdin(""), () => {})).rejects.toBe(needs);
+  });
+
+  it("identity complete on a pipe nobody writes says so on stderr, then gives up with the usage error naming --evidence-file", async () => {
+    vi.useFakeTimers();
+    try {
+      const notes: string[] = [];
+      const needs = async () => { throw new CliError("usage", "Missing what ssh-keygen printed", { needs: "evidence" }); };
+      const done = completeWithPipedEvidence(needs, { draft: "d1" }, () => new Promise<string>(() => {}), (note) => notes.push(note));
+      const failed = expect(done).rejects.toMatchObject({ code: "usage", message: "Missing what the tool printed: nothing came on stdin in 60 s; give it there (… | ghostly identity complete d1) or as --evidence-file f" });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(notes).toEqual(["Waiting for what the tool printed on stdin (… | ghostly identity complete d1): give it there or as --evidence-file f"]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await failed;
+    } finally { vi.useRealTimers(); }
   });
 
   it("other commands are left alone", async () => {

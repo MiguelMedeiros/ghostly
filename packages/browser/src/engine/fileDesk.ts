@@ -129,6 +129,8 @@ export class FileDesk {
       openTarget: (record) => this.openTarget(linkId, record),
       openSource: (record) => this.openSource(linkId, record),
       changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
+      // A change of state is written at once (`changed`): the chat's writes so far hold it.
+      kept: () => made.saving,
       room: async () => (await fileBytes()).room(),
       ...(this.deps.sendData && { sendData: (id: string, offset: number, data: Uint8Array) => this.deps.sendData!(linkId, id, offset, data) }),
       writable: () => this.deps.writable?.(linkId),

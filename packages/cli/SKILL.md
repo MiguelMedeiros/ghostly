@@ -111,7 +111,8 @@ ghostly invite create --label alice     # {"chat","invite":"ghostly1…","link":
 ghostly chat wait alice --until live    # returns once Alice opened the link in the app
 ```
 
-Give the link to the person through the channel your owner chose. To join someone else's invite instead:
+`"published":false` (with a `reason` and a `note`) means no relay took it yet: the invite is good and goes out by itself
+while the daemon runs, so don't make another. Give the link to the person through the channel your owner chose. To join someone else's invite instead:
 `printf '%s' '<ghostly1… or https://ghostly.tools/#ghostly1…>' | ghostly invite join --label bob` (on stdin, not in `ps`
 or the shell's history). `ghostly chat list` shows every
 chat; a `<chat>` is its id, a unique prefix of it, or its name.
@@ -255,6 +256,9 @@ ghostly task update owner relay-fix --status done --steps 4/4 --pr-url https://g
   every 2.5 s at most: with the daemon, a sooner update answers `"queued":true` and merges into the next one; without
   it, the command waits. Always end with `done`, `failed` or `cancelled`, or the card stays running. A card takes
   5,000 updates; after that, `task send` a new one.
+- **Without a daemon** a card in a chat stays until it went out: `send` until it is sent, `update` until the contact
+  confirmed it, up to `--timeout` (30 s). Past it the command exits 4 and the card goes with your next command;
+  `--wait none` answers at once. A group's card answers at once (`--wait sent` waits for an edge).
 
 Something that runs on a schedule (a nightly check, a weekly report) is a routine card. The app runs nothing: your own
 scheduler runs it, and the card shows the schedule, the last run and the next.

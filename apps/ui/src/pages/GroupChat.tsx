@@ -53,7 +53,7 @@ import { COMMUNITY_LIMITS, GROUP_FILE_LIMITS, GROUP_LIMITS, isPlayableVideoType,
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
 import { videoMetaOf } from "../lib/videoPoster";
-import { messageSnippet, quoteFor, replyIndex, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
+import { messageSnippet, quoteFor, replyIndexer, replyTarget, type NameOf, type QuoteView } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
@@ -66,6 +66,7 @@ import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
+import { working } from "../lib/focus";
 import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
 
@@ -318,7 +319,8 @@ export function GroupChat() {
   /** The message of mine the composer edits (WISP 902 § Edits). */
   const [editing, setEditing] = useState<StoredMessage | null>(null);
   useEffect(() => { setReplyingTo(null); setEditing(null); }, [groupId]);
-  const quoteIndex = useMemo(() => replyIndex(messages, true), [messages]);
+  const [readReplies] = useState(() => replyIndexer(true));
+  const quoteIndex = useMemo(() => readReplies(messages), [messages, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => replyRef(m, true)), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => replyRef(m, true)), [messages]);
@@ -642,7 +644,7 @@ export function GroupChat() {
               <p dir="auto" className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</p>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
-            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer">
+            : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer max-md:min-h-6">
               {/* Who is typing while it lasts, in place of the member count, as a 1:1 chat's header does. Only that is
                   said by a screen reader: the count, inside the live region, was read again each time they stopped. */}
               <span role="status" aria-live="polite">{typers.length > 0 && <GroupTypingText testId="group-typing" typers={typers} />}</span>
@@ -811,20 +813,36 @@ function ManageHere({ groupId }: { groupId: string }) {
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  // Turn on and Cancel each take the other's place: the focus they had goes across, not to the page.
+  const turnOn = useRef<HTMLButtonElement>(null), cancel = useRef<HTMLButtonElement>(null);
+  const pressed = useRef(false);
+  useEffect(() => {
+    if (!pressed.current) return;
+    pressed.current = false;
+    (asking ? cancel : turnOn).current?.focus({ preventScroll: true });
+  }, [asking]);
+  const ask = (on: boolean) => { pressed.current = true; setProblem(null); setAsking(on); };
+  const confirm = () => {
+    if (busy) return;
+    setBusy(true); setProblem(null);
+    void engine.call("setGroupManage", { groupId, on: true }).catch(e => setProblem(problemText(e, t))).finally(() => setBusy(false));
+  };
   return (
     <div role="status" data-testid="group-manage-off" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1">{t("devices.manage.off")}</span>
-        {!asking && <button type="button" data-testid="group-manage-open" onClick={() => setAsking(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
+        {!asking && <button ref={turnOn} type="button" data-testid="group-manage-open" onClick={() => ask(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
       </div>
       {asking && (
         <div className="flex flex-wrap items-center gap-2">
           <span data-testid="group-manage-warning" className="min-w-0 flex-1 text-danger-ink">{t("devices.manage.warning")}</span>
-          <button type="button" data-testid="group-manage-confirm" disabled={busy} onClick={() => { setBusy(true); void engine.call("setGroupManage", { groupId, on: true }).finally(() => setBusy(false)); }}
-            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer disabled:opacity-40">{t("devices.manage.confirm")}</button>
-          <button type="button" onClick={() => setAsking(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
+          <button type="button" data-testid="group-manage-confirm" {...working(busy)} onClick={confirm}
+            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40">{t("devices.manage.confirm")}</button>
+          <button ref={cancel} type="button" data-testid="group-manage-cancel" onClick={() => ask(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
         </div>
       )}
+      {problem && <Notice problem={problem} testId="group-manage-problem" className="text-xs" />}
     </div>
   );
 }

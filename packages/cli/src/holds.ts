@@ -75,15 +75,16 @@ export async function holdChat(ctx: ApiContext, link: LinkView, minutes: number)
 
 /**
  * Ends a hold: the chat leaves DHT only, unless someone chose otherwise meanwhile. Whether there was one. `reason`:
- * expired, connect (`chat connect`) or lifted (`--hold 0`).
+ * expired, connect (`chat connect`) or lifted (`--hold 0`, or `chat transport`: `chosen`, the chat's transport was
+ * just chosen, and stays as chosen).
  */
-export async function releaseHold(ctx: ApiContext, linkId: string, reason: "expired" | "connect" | "lifted"): Promise<boolean> {
+export async function releaseHold(ctx: ApiContext, linkId: string, reason: "expired" | "connect" | "lifted", chosen = false): Promise<boolean> {
   const holds = readHolds(ctx);
   if (!holds[linkId]) return false;
   clearTimeout(timersOf(ctx).get(linkId));
   timersOf(ctx).delete(linkId);
   const link = state(ctx).links.find((l) => l.id === linkId);
-  if (link?.deliveryMode === "dht") await node(ctx).setDeliveryMode({ linkId, mode: "stream" });
+  if (!chosen && link?.deliveryMode === "dht") await node(ctx).setDeliveryMode({ linkId, mode: "stream" });
   delete holds[linkId];
   writeHolds(ctx, holds);
   ctx.hub.emit("chat.released", `chat.released:${linkId}:${Date.now()}`, { chat: linkId, reason });

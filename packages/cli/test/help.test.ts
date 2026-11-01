@@ -33,9 +33,9 @@ describe("help", () => {
     for (const args of [["help", "daemon"], ["daemon", "--help"]]) {
       const { stdout } = await ghostly(args);
       expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly daemon \[--detach\] \[--timeout s\]\n/);
-      expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds --detach waits for it to start/);
+      expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds it waits for a command that holds the profile, and --detach for it to start/);
       expect(stdout, args.join(" ")).toContain("ghostly daemon: 3 more commands (ghostly help daemon <command> for one)");
-      expect(stdout.indexOf("--detach waits"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
+      expect(stdout.indexOf("--detach for it to start"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
     }
     // One command in a group is "1 command".
     expect((await ghostly(["help", "store"])).stdout).not.toContain("1 commands");

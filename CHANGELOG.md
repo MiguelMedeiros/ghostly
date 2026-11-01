@@ -4,6 +4,165 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.7.3
+
+### Security
+
+- Wallets: on Desktop, a bitcoind or LND node in plain http is reached directly, past any proxy set in the environment, so that proxy no longer receives the node's RPC password or macaroon. A node in https keeps the proxy.
+- Wallets: on the web app, the extension and the CLI, an LND source with a TLS certificate is refused before the node is contacted, saying that only Desktop can pin one. Before, the certificate was taken and never checked.
+- Devices: deleting a profile also deletes the copies a handoff kept of it on this device (keys, chat links, history and ecash). Before, they stayed in the browser or app storage with no screen left to discard them.
+- Identities: a DID proof (did:key, did:jwk, did:web, did:dht) no longer verifies with an Ed25519 key of small order, which no secret key goes with: such a key "signed" any statement with one constant signature, so a contact could show a verified DID nobody holds. Ed25519 signatures are now checked as RFC 8032 writes it.
+- CLI: `identity add --stdin` takes a signer's fields as `name=value` lines, so a remote signer's `bunker://` link no longer has to be on the command line. A secret given with `--field` still works, with a warning.
+- CLI: a deleted chat or message leaves the store's journal within an hour of use, instead of staying readable in it until the next fold.
+- Android: a photo taken with the composer's Camera no longer carries the camera app's location and device metadata.
+- Android: Share to Ghostly no longer reads the app's own private files when another app writes the address with a user number in front.
+- Android: sharing a file with a very long name to Ghostly no longer keeps the app busy for minutes.
+- HyperDHT relay (self-hosted): one client holds at most 64 HyperDHT streams at once (`GHOSTLY_RELAY_STREAMS`), so it can no longer run the relay out of memory by keeping them open.
+
+### Fixed
+
+**Everywhere**
+
+- The agents FAQ no longer says every pull request needs a review: it needs green CI, and a review is optional.
+- Opening the address of a chat deleted from this device says the chat is gone from this device, as a group's does, instead of "This is not a Ghostly invite."
+- An address with no page (`#/wallets`, `#/wallet/x`) opens the chat list, instead of an empty screen with no way out that a reload kept.
+- Sending a text just after another, before its receipt came, or while a text waits for an away contact no longer reads
+  the chat's whole history, so sending in a long chat no longer holds the app up.
+- Texts sent at the same moment in a chat, as a bot with several workers sends them, no longer each read the chat's
+  whole history, so a long chat no longer slows them down or makes them arrive late.
+- A message arriving in a long chat or group no longer reads the whole history again to find what replies quote, so the
+  chat stays a little lighter with each message.
+
+**Android**
+
+- The Android app no longer closes by itself, at times, right after sending or receiving a small file. A file through in a few milliseconds stopped the "Sending and receiving files" service before Android had it running, and Android then ended the whole app.
+
+**Apps**
+
+- On a narrow phone, an app card from a contact with a long name now cuts only the name and keeps "opened it here"
+  (or "shared it") whole, instead of cutting those words off the end of the line.
+- On a narrow phone, Open on an app with a long one-word title no longer pushes the "Open … in a chat" sheet sideways:
+  the title breaks onto the next line.
+- Pressing Uninstall on an installed app's screen now puts the keyboard focus on the question's Cancel, and Cancel gives it back to Uninstall, instead of leaving it nowhere on the page.
+- In Apps → Add, Check on a store's link hands the keyboard focus to the store's Cancel once the store shows, instead of dropping it to the page.
+
+**Chat**
+
+- On a short screen, such as a small window on its side or a window at 200% zoom, the composer's Camera stays inside the window: the picture gets smaller, so Close, the shutter, Retake and Send are no longer cut. The live picture now shows the whole frame the photo will have, rather than cropping it.
+- On a short screen, such as a phone on its side or a window at 200% zoom, Hold messages stays inside the window and scrolls, so its title and Save are no longer cut with no way to reach them.
+- With nothing new, the chat list no longer draws itself again every 3 seconds: it draws when a time, a read mark, a pin
+  or a mute it shows has changed.
+- On a phone on its side, the emoji sheet takes more of the screen, so emoji show under its categories, search and Emoji/GIF switch. Before, the list was left a few pixels high and no emoji could be seen.
+- A file or picture you receive no longer stays at "Not moving · 0%" for good if the app reloads or closes just as it
+  arrives, while your contact's side shows it as sent. Your app tells the sender a file arrived only once it has saved
+  it, so after a reload the file comes again.
+- Sending several texts in a row in a long chat no longer reads the chat's whole history once for each text still
+  sending, each time the chat changes, so sending stays lighter.
+- The Cancel of a video being converted is now at least 24 px high, 44 px on a phone, instead of an 18 px line of text. When it goes, its focus moves to the message field (the + on a touch screen) instead of dropping to the page.
+- Cancel on "Converting … to MP4" stops the video it names. With a second video chosen while the first was still
+  converting, Cancel stopped the second one, or did nothing once the second had been sent.
+- A video still being converted when you leave the chat now shows its progress and its Cancel again when you come back, and picking the same video again there no longer converts and sends it a second time. A "sent as it is" note that came while you were away is shown when you are back in that chat.
+
+**Extension**
+
+- While a search stays typed in the chat list, a chat found by an older message leaves the results once that message is edited or deleted, and a chat that loads after the search was typed is found by its older messages too.
+- Searching the chat list in the browser extension no longer copies every chat's whole history into the tab on the
+  first letter typed. Ghostly now searches the older messages where they are kept and only tells the tab which chats
+  match. Before, with many long chats, the first search in each tab could move tens of megabytes and make the tab slow.
+- In the browser extension, Clear all data in one tab now starts every other open Ghostly tab again on the empty profile. Before, another tab kept the cleared chat open, and a message sent there stayed pending and reached nobody. The same goes for a device added or taken over in one tab.
+- In the browser extension, the first message in a group no longer sends that group's whole history to every open tab. A tab gets the group's newest messages, and the rest when it opens the group.
+
+**CLI**
+
+- `app open`, `app send` and `app close` without a daemon now tell you to start one with `ghostly daemon --detach`. Before, they said `ghostly daemon start`, a command that does not exist.
+- `chat connect` takes `--timeout` (1 to 90 s; 90 by default, as before). When the contact does not answer, it now says what happens next: a one-shot tells you to try again later or keep the profile online with `ghostly daemon --detach`, a daemon that it reconnects by itself and that `ghostly chat wait <chat> --until live` waits for it. Before, it always waited 90 s and ended "Timed out connecting to the peer".
+- A group command given a chat (`group send bia x`, `group show bia`) now says it is a chat and gives the chat command, `ghostly send bia [text...]`, where it said `No group "bia"`. `send group:<id>`, the form `pin` and `saved` take, says it is a group too, and `message retry` on a group says that a group's message goes again by itself.
+- `chat connect` on a chat your contact keeps on DHT only is refused and says so (`details.reason: "peer-dht-only"`; your own DHT only is `dht-only`). Before, it failed as an engine error asking both sides to choose a live method, though yours already had.
+- A `ghostly daemon` started in the foreground, as a service manager (systemd, launchd) starts it, now waits for a command that holds the profile for a moment, such as a bot's `send` during the restart, up to its `--timeout` (60 s). Before, it stopped at once with `busy` and the profile had no daemon. `daemon --detach` and `daemon restart` already waited.
+- `group edit` now answers `sent: false` while no member's edge took the edit, as `group send` does (without a daemon, or with every member away). Before, it answered `sent: true` with `edges: 0` though nobody had the edit yet.
+- `pin` in a group you were removed from now fails with `refused` and the group's reason ("You were removed from this group"), as `group send` and `group react` do. Before, it failed as `bad_request` with "You are not in this group".
+- `chat disconnect --hold` while a call is on in that chat is now refused (`busy`, naming the call): hang it up first. Before, the hold cut the path the call's signals take while its sound went on, so a hang-up from either side never reached the other, whose call ended only 16 s later as `failed`.
+- A `chat transport` chosen while `chat disconnect --hold` keeps a chat on the DHT now ends the hold and stays as chosen. Before, `chat transport dht` was taken back when the hold's time was up, and a chat that had gone live again still showed `heldUntil` and later said it was released.
+- `chat disconnect <chat> --hold 0` now answers at once. It waited for the chat's Iroh and HyperDHT listeners to start again, 10 to 25 s when their relay or DHT was slow to reach; they now start behind it and join the chat as each comes up.
+- `identity add` with a signer you approve in another app (Pubky, a Nostr remote signer) ends with a timeout (exit 4) when nobody approves in time, naming the approval it waited for and `--timeout`, now in the usage line. Before, after 5 minutes it failed as an engine error, "The operation was aborted due to timeout".
+- `identity complete <draft>` reads the tool's output piped to it (`ssh-keygen … | ghostly identity complete <draft>`), as `send` and `invite join` do, and a proof that needs one, given none, is a usage error naming `--evidence-file` and stdin. Before, it ignored the pipe and said "evidence is required". A published record still needs nothing.
+- `identity add` now says a proof waiting for `identity complete` is kept 30 minutes, and while fewer than four newer ones wait, as the daemon keeps it. Before, it promised an hour, and a draft the daemon had already dropped failed at `identity complete` with "This proof was started too long ago".
+- `message details` now reads a group's message too, by the group's name, its id or `group:<id>`, as the app's message details do. Before, it answered `No chat "team"`.
+- `call start` and `call answer` run without a daemon now say a call needs one (`ghostly daemon --detach`). Before, a one-shot `call start` said "Calls need a live connection", which no one-shot could get in time.
+- `task send`, `routine send` and `usage send` in a chat without a daemon now stay until the card went out, and `task update`, `routine update` and a later `usage send` until the contact confirmed it, up to `--timeout` (30 s; past it, exit 4 and the card goes with your next command). Before, they answered in under a second and left with the card or its update unsent: the contact saw it only with a later command that stayed long enough, and `task send --help` said it waited. `--wait none` answers at once, and a group's card still answers at once by default.
+- `message delete <chat> <message> --everyone` without a daemon stays until the contact confirmed, as `edit` does, and answers `confirmed`. Before, it answered done and left, and the contact kept the message until a later command of this profile went live. `--wait none` and `--timeout` are new.
+- A one-shot `edit --wait confirmed` or `group edit --wait sent` that times out now says the edit goes with this profile's next command, or to keep it online with `ghostly daemon --detach`, as `send` does. Before, it said it would go "while this profile is online", as the one-shot was closing it.
+- A `react` or `pin` in a 1:1 chat without a daemon now stays until the contact confirmed it, up to `--timeout` (30 s). Before, it answered done in about a second and left with the reaction or the pin unsaid: the contact saw it only with your next command. `--wait none` answers at once, and the answer says `confirmed`.
+- `chat show` says when your contact keeps the chat on DHT only (`peerDeliveryMode: "dht"`), beside your own choice (`deliveryMode`). Before, such a chat looked like any chat not live, and a bot could only retry `chat connect`.
+- A reply in `chat history`, `group history` and `saved list` now quotes its original as it reads after an edit, as the apps show it. Before, `replyTo.snippet` kept the original's text from when the reply was made. A button press still quotes the question as it was answered, and a card's or a file's line is unchanged.
+- `profile set --share-profile --no-share-profile` is a usage error ("--share-profile or --no-share-profile, not both", exit 2) and changes nothing, as the CLI's other either-or flags are. Before, the last one won: sharing went off (or on) with exit 0.
+- `chat transport <chat> dht` while a call is on in that chat is now refused (`busy`, naming the call), as a hold is: hang it up first. Before, the switch cut the path the call's signals take while its sound went on, so a hang-up from either side never reached the other, whose call ended only 16 s later as `failed`.
+- A CLI usage error says what is wrong before the usage line: `ghostly profile create` says `Missing <name>`, and
+  `ghostly call auto maybe` says it takes on or off. Each error's usage line now matches `ghostly help`.
+- `usage send` with both a chat and `--all` is a usage error (exit 2) before the profile opens, as giving neither is. Before, it opened the profile and failed with exit 1.
+- `x401 credential add -` with nothing on stdin is a usage error (exit 2) naming stdin and a file, as `invite join -`, `group join -` and `wallet redeem -` answer theirs. Before, it was a bad request (exit 1).
+- `ghostly invite create` with no relay answering says why beside `"published":false`, and that the invite is good and
+  goes out by itself. A relay that is down is named as one that did not answer, not as "cooling down".
+
+**Groups**
+
+- A message in a community now writes about its own size to the device. The group's record no longer holds the last 256 messages kept for members who were away, which cost each member 128 KB a message received and 247 KB a message sent once it was full: each is kept with its own message, as in a private group. A community from before keeps handing on what its record held, which leaves it as newer messages come.
+- In a community, a message you send within a second of a member's message now shows below it in your history, and below your own "You joined", instead of above them.
+- When the app stops cleanly, a community keeps what it received in its last second, so it no longer asks for those messages again at the next start.
+- A group's New link and Turn on the link keep the keyboard focus while they run, and when they do not work, instead of leaving the focus on the page.
+- Manage groups from this device: when turning it on is refused, the band says why under the warning, instead of nothing, and Turn on, Cancel and Confirm keep the keyboard focus in the band instead of dropping it to the page.
+- On a phone, a group's Rename, Add picture and Remove picture are now a thumb's height (44 px) instead of a 16 px line of text, and the members line under the group's name in its header is 24 px high. A desktop looks as before.
+
+**Calls**
+
+- A chat's Connection menu no longer offers DHT only while a call is on in that chat: the option is off and says to hang up first, and it comes back when the call ends. Before, choosing it during a call (with the call window made small) cut the path the call's hang-up takes while its sound went on, so neither side could end the call, and the contact's ended only 16 s later as failed.
+- A call ringing on a phone on its side while you are on another call shows its End and answer and Decline buttons
+  with their words whole, instead of cutting them off at the bottom of the screen.
+
+**Devices**
+
+- A device link that went on without the direct connection, and then could not reach Iroh's relay either, now tries the
+  direct connection again instead of staying "Not connected" until the page reloads. A new device added on a network
+  that blocks Iroh's relay links to the active one again.
+- A forced takeover, or opening a device that was replaced, asks for the lock password once instead of twice.
+- In Arabic, a device's name keeps its own direction on the device screens, so punctuation at its edge stays where it is written ("Pixel-" no longer reads "-Pixel", in the standby screen, the device list and the takeover's name to type).
+- Take over and Use here keep the keyboard focus while they run, and a wrong password in Take over puts the cursor back in its field, instead of leaving the focus on the page.
+
+**Desktop**
+
+- A chat waiting to dial its contact again writes one line about that wait to the Desktop log, not the same line every
+  few seconds until the wait is over, so the log keeps the lines that say how a slow connection went.
+
+**Identities**
+
+- In Identities → Add, Continue and Verify and save keep the keyboard focus while the signer or the check works, and when it is refused; a refused bunker:// link hands the focus to its emptied field.
+- Two changes to your identities at the same moment both hold now. Before, two proofs finished together kept only one, and a proof removed while another was finishing came back, and its revocation was no longer republished for contacts who check.
+- On a proof in Identities, Keep, Stop sharing and Remove keep the keyboard focus in the panel, instead of dropping it to the page, and a refused removal or stop leaves it on the button pressed.
+- In Arabic, how a proof was checked, who attests it and where a contact's name came from keep their own direction, so their brackets and the period stay with the English words they belong to (in Identities and on a contact's card).
+- A proof you have not shared yet says to share it from the + in a chat, the only place that shares it, instead of from a chat's Identities, a panel that cannot share. In all 8 languages.
+
+**Wallets**
+
+- On a phone, New wallet's "← All kinds of wallet" is now 24 px high instead of a 16 px line of text. A desktop looks as before.
+
+**Files**
+
+- While a video converts to MP4 before it goes, its line updates a few times a second instead of at every frame, and a screen reader says "Converting… to MP4" once instead of reading out each percent; the percent is still on screen beside it.
+
+**Website**
+
+- On the website's "page not found" page, the main heading now reads "404: Page not found" to screen readers. Before, they heard the big number split into "4 0 4".
+- In the WISP reader, a diagram's original Mermaid source that is wider than its box can be scrolled from the keyboard, like the other code blocks.
+- On the map on the roadmap and developers pages, closing a block's details from the keyboard puts the focus back on that block, instead of losing it.
+- On the map on the roadmap and developers pages, the stage and composition pickers work as radio buttons from the keyboard: Tab stops once on the chosen one, and the arrow keys, Home and End pick another.
+- The page of an app that is not in the store shows "Page not found" in the browser's tab, instead of the home page's title.
+- In a WISP on the website, each link of the Contents list is at least 24 pixels high, so it is easier to tap on a phone.
+- On the home page, "Skip to content" and the next Tab land on "Open in your browser", not on the story rail's first chapter mark at the bottom of the screen; the rail's 9 marks now come after the story.
+
+### For developers
+
+- A store's check of a submitted `listing.json` refuses a key written twice (`not-json`, naming the key). Before, the last value was taken silently, so a reviewer reading the file could see one digest or URL while the index was built from another.
+
 ## 1.7.2
 
 ### Security

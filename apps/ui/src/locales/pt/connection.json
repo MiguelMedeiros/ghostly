@@ -123,6 +123,7 @@
     "chosenNotInUse": "Escolhido · fora de uso",
     "chosenWaiting": "Escolhido · aguardando",
     "contactLacks": "O app do seu contato não suporta {{transport}}",
+    "dhtCallOn": "Encerre a chamada para usar só DHT",
     "dhtContactChose": "Seu contato escolheu · sem conexão direta até vocês dois saírem",
     "dhtOff": "Textos curtos pela DHT, mesmo offline",
     "dhtOn": "Textos curtos pela DHT, sem conexão direta · escolha outro para sair",

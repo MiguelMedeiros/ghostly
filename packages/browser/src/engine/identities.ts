@@ -58,8 +58,9 @@ const REVOCATION_CHECK_MS = 12 * 60 * 60_000;
  * off, and the first that finds it stops the rest. The 12 h check covers it after that.
  */
 export const WITHDRAWN_REVOCATION_TRIES_MS = [20_000, 60_000, 180_000] as const;
-const DRAFT_TTL = 30 * 60_000;
-const MAX_DRAFTS = 4;
+/** A proof begun and not completed is dropped this long after, or when a fifth one begins (the CLI says the same). */
+export const IDENTITY_DRAFT_TTL_MS = 30 * 60_000;
+export const IDENTITY_MAX_DRAFTS = 4;
 const MAX_PROOFS = 32;
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -77,6 +78,7 @@ export class IdentityProofs {
   private unlisten: (() => void) | undefined;
   private drafts = new Map<string, { binding: IdentityBinding; seed: Uint8Array; at: number }>();
   private exchanges = new Map<string, IdentityExchange>();
+  private saving: Promise<void> = Promise.resolve();
   private errors = new Map<string, string>();
   /** Chats whose current connection already got the hello: "ready" is reported more than once per connection. */
   private greeted = new Set<string>();
@@ -117,11 +119,20 @@ export class IdentityProofs {
     for (const seed of this.seeds.values()) seed.fill(0);
     this.seeds.clear();
   }
-  private async save(proofs: StoredIdentityProof[], revocations = this.revocations): Promise<void> {
-    await transact([STORES.settings], stores => { stores[STORES.settings].put(proofs, KEY); stores[STORES.settings].put(revocations, REVOCATIONS); });
-    this.proofs = proofs;
-    this.revocations = revocations;
-    this.host.emit();
+  /**
+   * Every change of the proofs and revocations, one after the other, each made on what the one before stored: two at
+   * once (two proofs completed, a proof removed while another completes) both from the same list lost one of them.
+   */
+  private save(change: (proofs: StoredIdentityProof[], revocations: Revocation[]) => [StoredIdentityProof[], Revocation[]]): Promise<void> {
+    const run = this.saving.then(async () => {
+      const [proofs, revocations] = change(this.proofs, this.revocations);
+      await transact([STORES.settings], stores => { stores[STORES.settings].put(proofs, KEY); stores[STORES.settings].put(revocations, REVOCATIONS); });
+      this.proofs = proofs;
+      this.revocations = revocations;
+      this.host.emit();
+    });
+    this.saving = run.catch(() => {});
+    return run;
   }
   private async seedOf(id: string, sealed: SealedProofKey): Promise<Uint8Array> {
     let seed = this.seeds.get(id);
@@ -151,8 +162,8 @@ export class IdentityProofs {
     const days = validityDays ?? p.validity.defaultDays;
     if (!Number.isInteger(days) || days < 1 || days > p.validity.maxDays) throw new Error(`Choose between 1 and ${p.validity.maxDays} days`);
     const canonical = p.subject.normalize(subject);
-    for (const [id, d] of this.drafts) if (Date.now() - d.at > DRAFT_TTL) { d.seed.fill(0); this.drafts.delete(id); }
-    while (this.drafts.size >= MAX_DRAFTS) { const [id, d] = this.drafts.entries().next().value!; d.seed.fill(0); this.drafts.delete(id); }
+    for (const [id, d] of this.drafts) if (Date.now() - d.at > IDENTITY_DRAFT_TTL_MS) { d.seed.fill(0); this.drafts.delete(id); }
+    while (this.drafts.size >= IDENTITY_MAX_DRAFTS) { const [id, d] = this.drafts.entries().next().value!; d.seed.fill(0); this.drafts.delete(id); }
     const { binding, seed } = newIdentityBinding({ provider, subject: canonical, validitySeconds: days * 86_400 });
     const draftId = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
     this.drafts.set(draftId, { binding, seed, at: Date.now() });
@@ -169,7 +180,10 @@ export class IdentityProofs {
     this.drafts.delete(draftId);
     const stored: StoredIdentityProof = { binding: draft.binding, evidence, seed: await sealSecret(toBase64Url(draft.seed), proofKeyAt(statement.id)), verified, createdAt: Date.now() };
     this.seeds.set(statement.id, draft.seed);
-    await this.save([...this.proofs, stored]);
+    await this.save((proofs, revocations) => {
+      if (proofs.length >= MAX_PROOFS) throw new Error("Remove an identity first");
+      return [[...proofs, stored], revocations];
+    });
     return this.viewOf(stored);
   }
 
@@ -192,7 +206,10 @@ export class IdentityProofs {
     }
     const revocation: Revocation = { id, key: proof.binding.key, seed: proof.seed, revokedAt: now(), expiresAt: Math.min(proof.binding.expiresAt, proof.verified.expiresAt ?? Infinity) };
     const wasShared = this.host.linkIds().some(l => this.host.ledger(l)?.shared.some(s => s.id === id));
-    await this.save(this.proofs.filter(p => p !== proof), wasShared && revocation.expiresAt > now() ? [...this.revocations, revocation] : this.revocations);
+    const revoke = wasShared && revocation.expiresAt > now();
+    await this.save((proofs, revocations) => proofs.some(p => identityStatement(p.binding).id === id)
+      ? [proofs.filter(p => identityStatement(p.binding).id !== id), revoke ? [...revocations, revocation] : revocations]
+      : [proofs, revocations]);
     if (wasShared) void this.publishRevocation(revocation).catch(() => {});
     else { this.seeds.get(id)?.fill(0); this.seeds.delete(id); }
   }
@@ -224,7 +241,7 @@ export class IdentityProofs {
     const live = this.revocations.filter(r => r.expiresAt > now());
     if (live.length !== this.revocations.length) {
       for (const r of this.revocations) if (!live.includes(r)) { this.seeds.get(r.id)?.fill(0); this.seeds.delete(r.id); }
-      await this.save(this.proofs, live);
+      await this.save((proofs, revocations) => [proofs, revocations.filter(r => r.expiresAt > now())]);
     }
     for (const r of live) await this.publishRevocation(r).catch(() => {});
   }

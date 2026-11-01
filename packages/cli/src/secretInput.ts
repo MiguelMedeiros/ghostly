@@ -75,6 +75,19 @@ export async function textFromStdin(read: StdinRead, command: string, asked: boo
   return text.replace(/\n$/, "");
 }
 
+/**
+ * `identity complete <draft>` with neither --evidence-file nor --stdin, stdin not a terminal: asked with nothing first,
+ * since a published record takes none; a draft that answers it takes a tool's output (`details.needs`) is asked again
+ * with what was piped, read as a send reads its text.
+ */
+export async function completeWithPipedEvidence(call: (params: Record<string, unknown>) => Promise<unknown>, params: Record<string, unknown>, read: StdinRead, note: (text: string) => void): Promise<unknown> {
+  try { return await call(params); } catch (error) {
+    if (!(error instanceof CliError) || error.details?.needs !== "evidence") throw error;
+  }
+  const evidence = await readUnasked(read, note, { what: "what the tool printed", missing: "Missing what the tool printed", command: `identity complete ${String(params.draft)}`, as: "--evidence-file f" });
+  return call({ ...params, evidence });
+}
+
 /** What `readUnasked` says: `what` is waited for, `missing` is the usage error's title, `as` the other way to give it. */
 interface Unasked { what: string; missing: string; command: string; as: string }
 
@@ -87,6 +100,38 @@ async function readUnasked(read: StdinRead, note: (text: string) => void, ask: U
   });
   try { return await Promise.race([read(stop), nothingCame]); }
   finally { stop(); }
+}
+
+/**
+ * `identity add`'s fields: each `--field name=value`, then with `--stdin` the `name=value` lines piped to it (a NIP-46
+ * signer's bunker:// link holds the signer's secret). `secret`: the names the signer's form marks `kind: "secret"`
+ * (`identitySecretFields`); one given as a `--field` still goes, with the warning. Neither error repeats a value.
+ */
+export async function identityFields(items: string[], stdin: boolean, secret: string[], read: StdinRead, tty = false): Promise<{ fields: Record<string, string>; warning?: string }> {
+  const fields: Record<string, string> = {};
+  for (const item of items) {
+    const eq = item.indexOf("=");
+    if (eq < 1) throw new CliError("usage", "--field takes name=value, and one has no name or no =");
+    fields[item.slice(0, eq)] = item.slice(eq + 1);
+  }
+  const onLine = secret.filter((name) => fields[name] !== undefined);
+  if (stdin) {
+    if (tty) throw new CliError("usage", "--stdin takes the fields as name=value lines piped to it (… | ghostly identity add <provider> --signer id --stdin), not a terminal");
+    for (const line of (await read()).split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const eq = line.indexOf("=");
+      if (eq < 1) throw new CliError("usage", "--stdin takes name=value lines, and one has no name or no =");
+      fields[line.slice(0, eq).trim()] = line.slice(eq + 1);
+    }
+  }
+  if (!onLine.length) return { fields };
+  return { fields, warning: `${onLine.map((name) => `--field ${name}`).join(", ")} on the command line shows in ps and the shell's history: give ${onLine.length > 1 ? "them" : "it"} on stdin instead (--stdin, name=value lines)` };
+}
+
+/** The fields a provider's signer marks `kind: "secret"`: the one `--signer` names, or any of its signers when none is. */
+export function identitySecretFields(provider: { signers: readonly { id: string; fields?: readonly { name: string; kind?: string }[] }[] } | undefined, signer?: string): string[] {
+  const signers = (provider?.signers ?? []).filter((s) => signer === undefined || s.id === signer);
+  return [...new Set(signers.flatMap((s) => (s.fields ?? []).filter((f) => f.kind === "secret").map((f) => f.name)))];
 }
 
 /**

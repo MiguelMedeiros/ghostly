@@ -123,6 +123,7 @@
     "chosenNotInUse": "已选择 · 未使用",
     "chosenWaiting": "已选择 · 等待中",
     "contactLacks": "你联系人的应用不支持 {{transport}}",
+    "dhtCallOn": "挂断通话后才能使用仅 DHT",
     "dhtContactChose": "你的联系人选择了它 · 双方退出前无直连",
     "dhtOff": "短文字经 DHT 发送，离线也可以",
     "dhtOn": "短文字经 DHT 发送，无直连 · 选择其他方式即可退出",

@@ -8,7 +8,7 @@ import { InfoButton } from "../layout/Section";
  * gutters and at most 24rem, scrolling inside when it is taller than the window. Escape closes it and gives the focus
  * back to what opened it.
  */
-export function DeviceDialog({ title, onClose, testId, children }: { title: string; onClose(): void; testId: string; children: ReactNode }) {
+export function DeviceDialog({ title, onClose, testId, children }: { title: ReactNode; onClose(): void; testId: string; children: ReactNode }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -36,7 +36,7 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: stri
   );
 }
 
-export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed";
+export const primaryButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-on-accent hover:bg-accent-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40 disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
 export const quietButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-border px-3 py-2.5 text-sm font-semibold text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-40";
 /** An action that cannot be undone from here (Remove): the danger color, never the accent. */
 export const dangerButton = "inline-flex min-h-11 w-full items-center justify-center rounded-lg bg-danger-fill px-3 py-2.5 text-sm font-semibold text-white hover:bg-danger-fill/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar-bg disabled:opacity-40 disabled:cursor-not-allowed";

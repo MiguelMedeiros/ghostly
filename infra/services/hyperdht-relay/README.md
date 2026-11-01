@@ -43,11 +43,13 @@ are in WISP 103, "Browser profile".
 | bytes a client sends per second, burst | 512 KiB/s, 4 MiB | `GHOSTLY_RELAY_BYTES_PER_SECOND`, `GHOSTLY_RELAY_BURST_BYTES` |
 | keys one client listens on | 16 | `GHOSTLY_RELAY_LISTENS` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
+| HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
 
-Past a limit the client is dropped, or its socket is paused (the byte rate). Topic lookups and announcements
+Past a limit the client is dropped, or its socket is paused (the byte rate), or an incoming stream past
+`streams` is closed. Topic lookups and announcements
 are refused: Ghostly never makes them, and they would make the relay an open crawler.
 
 Other settings:

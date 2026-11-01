@@ -129,18 +129,26 @@ pub fn endpoint(url: &str, wallet: &str, method: &str) -> Result<reqwest::Url, R
     Ok(url)
 }
 
-fn client() -> Result<&'static reqwest::Client, RpcError> {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    if let Some(client) = CLIENT.get() {
+/// One client for https nodes and one for plain http. A proxy set in the environment would read a plain http
+/// request whole, password included, so those go straight to the node; over https a proxy only relays the
+/// encrypted connection, which a node reached through Tor or a company proxy may need.
+fn client(url: &reqwest::Url) -> Result<&'static reqwest::Client, RpcError> {
+    static SECURE: OnceLock<reqwest::Client> = OnceLock::new();
+    static PLAIN: OnceLock<reqwest::Client> = OnceLock::new();
+    let plain = url.scheme() != "https";
+    let cell = if plain { &PLAIN } else { &SECURE };
+    if let Some(client) = cell.get() {
         return Ok(client);
     }
-    let client = reqwest::Client::builder()
+    let builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(TIMEOUT)
+        .timeout(TIMEOUT);
+    let builder = if plain { builder.no_proxy() } else { builder };
+    let client = builder
         .build()
         .map_err(|e| RpcError::new("refused", format!("HTTP client: {}", e)))?;
-    Ok(CLIENT.get_or_init(|| client))
+    Ok(cell.get_or_init(|| client))
 }
 
 /// What the node's answer means: the `result`, or why there is none.
@@ -219,7 +227,7 @@ pub async fn call(
         STANDARD.encode(format!("{}:{}", user, password))
     );
 
-    let mut response = client()?
+    let mut response = client(&target)?
         .post(target)
         .header(reqwest::header::AUTHORIZATION, auth)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
@@ -511,6 +519,27 @@ mod proxy_tests {
             params,
         )
         .await
+    }
+
+    /// A proxy set in the environment never sees a call in plain http, where it would read the password: by name
+    /// or by address, the call goes straight to the node.
+    #[test]
+    fn a_plain_http_node_is_never_reached_through_a_proxy() {
+        let used = crate::test_support::proxied_run(
+            "bitcoind_rpc::proxy_tests::plain_http_calls_skip_the_proxy",
+        );
+        assert_eq!(used, 0);
+    }
+
+    #[tokio::test]
+    #[ignore = "run by a_plain_http_node_is_never_reached_through_a_proxy, with a proxy set"]
+    async fn plain_http_calls_skip_the_proxy() {
+        for host in ["localhost", "127.0.0.1"] {
+            let (url, seen) = node(ok(r#"{"result":1,"error":null,"id":"ghostly"}"#));
+            let url = url.replace("127.0.0.1", host);
+            assert_eq!(rpc(url, "getbalances", vec![]).await.unwrap(), json!(1));
+            assert_eq!(seen.lock().unwrap().len(), 1, "{host}");
+        }
     }
 
     #[tokio::test]

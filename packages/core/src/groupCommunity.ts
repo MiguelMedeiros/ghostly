@@ -393,7 +393,8 @@ export interface CommunityState {
   metaPast?: GroupMeta[];
 }
 
-export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta }
+/** `frame`: the frame the message came in, as it is kept to hand on to a member who missed it. An app may keep it with the message it stores. */
+export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; frame?: CommunityMessageFrame }
 /**
  * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
  * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
@@ -410,7 +411,10 @@ export interface CommunitySessionHooks {
   direct(to: string, frame: CommunityFrame): boolean | void;
   /** To one member, wherever they are: over their edge if I have it, else to the hubs with `to`. */
   addressed(to: string, frame: CommunitySecretFrame | CommunityEntryFrame): void;
-  message(message: CommunityIncomingMessage): Promise<void> | void;
+  /** `true`: the app stored the message's `frame` with it, durably, so the saved state need not carry that frame. */
+  message(message: CommunityIncomingMessage): Promise<boolean | void> | boolean | void;
+  /** A frame the app holds with its message (`id`) is no longer kept to hand on: newer ones took its place, or I am out. */
+  forgetFrame?(id: string): void;
   /**
    * Whether an application frame (mine or a member's) says the group's state rather than news, and of which kind: the
    * newest frame of each kind is kept past the store and handed with every catch-up to a member who lacks it, however
@@ -478,6 +482,8 @@ export const communityMessageId = (sender: string, epoch: number, h: string, seq
 const seenKey = (e: number, h: string) => `${e}:${h}`;
 /** One of a member's frames, among its own. */
 const frameKey = (f: { e: number; h: string; n: number }) => `${f.e}:${f.h}:${f.n}`;
+/** A frame among everyone's: each member counts its own `n`, so `frameKey` alone tells only one member's frames apart. */
+const storeKey = (f: { s: string; e: number; h: string; n: number }) => `${f.s}:${frameKey(f)}`;
 /** Frames of mine remembered as not heard by anyone yet. */
 const UNHEARD_KEPT = 64;
 /**
@@ -563,10 +569,16 @@ export class CommunitySession {
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   /** One metadata frame naming a commit or a secret I do not have yet: tried again when the chain or my secrets move. */
   private pendingMeta: { from: string; frame: unknown } | undefined;
+  /** The store's frames the app holds with their messages (`storeKey` → message id): in memory here, not in what is saved. */
+  private readonly onRows = new Map<string, string>();
 
-  constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks) {
+  /** `rows`: the frames the app holds with the messages it stored (`CommunityIncomingMessage.frame`). They join the store. */
+  constructor(state: CommunityState, private readonly hooks: CommunitySessionHooks, rows: readonly { id: string; frame: CommunityMessageFrame }[] = []) {
     this.state = state;
     this.identity = identityFromSeedB64(state.seedB64);
+    // Out of the group, its store is empty (`out`): a row that kept its frame through a stop gives it up.
+    if (state.status === "left" || state.status === "removed") for (const row of rows) hooks.forgetFrame?.(row.id);
+    else this.takeRows(rows);
     this.answers = new CatchUpAnswers({
       send: (to, frame) => hooks.direct(to, frame),
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
@@ -1124,7 +1136,12 @@ export class CommunitySession {
   }
   private persist(): Promise<void> {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = undefined; }
-    return this.hooks.save(structuredClone(this.state));
+    return this.hooks.save(this.toSave());
+  }
+  /** The state as it is saved: a copy, without the frames the app holds with their messages (`onRows`). */
+  private toSave(): CommunityState {
+    const { store, ...rest } = this.state;
+    return structuredClone({ ...rest, store: store.filter(f => !this.onRows.has(storeKey(f))) });
   }
   /**
    * A save within a second, for what may happen many times a second (every message received, in a
@@ -1132,7 +1149,7 @@ export class CommunitySession {
    */
   private persistSoon(): void {
     if (this.saveTimer) return;
-    this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.hooks.save(structuredClone(this.state)); }, 1000);
+    this.saveTimer = setTimeout(() => { this.saveTimer = undefined; void this.hooks.save(this.toSave()); }, 1000);
   }
   /** Writes what is waiting to be saved now (before a restart, in tests). */
   async flush(): Promise<void> { if (this.saveTimer) await this.persist(); }
@@ -1312,6 +1329,8 @@ export class CommunitySession {
     this.state.statusReason = reason;
     this.state.secrets = {};
     this.state.store = [];
+    for (const id of this.onRows.values()) this.hooks.forgetFrame?.(id);
+    this.onRows.clear();
     delete this.state.lasting;
     this.state.entry = { key: this.state.entry.key, seedB64: "" };
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear(); this.pendingSecrets.clear();
@@ -1340,7 +1359,8 @@ export class CommunitySession {
       if (utf8Encode(trimmed).length + mentionsBytes(named) + replyBytes + fileBytes + (hops ? 16 : 0) + (card ? statusCardBytes(card) + 8 : 0) > COMMUNITY_LIMITS.textBytes) return { error: "Message exceeds 16 KiB" };
       const sent = await this.sendPayload(() => ({ text: trimmed, ...(named.length ? { m: named } : {}), ...(answers ? { r: answers } : {}), ...(hops ? { fw: hops } : {}), ...(card ? { sc: card } : {}), ...(described ? { fl: described } : {}) }), nick, now);
       if ("error" in sent) return sent;
-      await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}) });
+      const onRow = await this.hooks.message({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, seq: sent.frame.n, timestamp: now, text: trimmed, ...(named.length ? { mentions: named } : {}), ...(answers ? { reply: answers } : {}), ...(hops ? { forwarded: hops } : {}), ...(card ? { card } : {}), ...(described ? { file: described } : {}), frame: sent.frame });
+      if (onRow === true) this.onRows.set(storeKey(sent.frame), sent.id);
       await this.say(sent.frame);
       return { id: sent.id };
     });
@@ -1472,6 +1492,8 @@ export class CommunitySession {
     const author = id.slice(0, id.indexOf(":"));
     const kept = this.state.store.filter(f => f.s !== author || this.storedId(f) !== id);
     if (kept.length === this.state.store.length) return;
+    const left = new Set(kept.map(storeKey));
+    for (const f of this.state.store) if (!left.has(storeKey(f))) this.onRows.delete(storeKey(f));
     this.state.store = kept;
     this.persistSoon();
   }
@@ -1487,9 +1509,32 @@ export class CommunitySession {
   }
 
   private keep(frame: CommunityMessageFrame): void {
+    // Taken again after a save that was lost (`persistSoon`): its row, and so the store, has it already.
+    if (this.onRows.has(storeKey(frame))) return;
     this.state.store.push(frame);
+    this.trimStore();
+  }
+  private trimStore(): void {
     let bytes = this.state.store.reduce((sum, f) => sum + f.c.length, 0);
-    while (this.state.store.length > COMMUNITY_LIMITS.store || bytes > COMMUNITY_LIMITS.storeBytes) bytes -= this.state.store.shift()!.c.length;
+    while (this.state.store.length > COMMUNITY_LIMITS.store || bytes > COMMUNITY_LIMITS.storeBytes) {
+      const oldest = this.state.store.shift()!;
+      bytes -= oldest.c.length;
+      const row = this.onRows.get(storeKey(oldest));
+      if (row === undefined) continue;
+      this.onRows.delete(storeKey(oldest));
+      this.hooks.forgetFrame?.(row);
+    }
+  }
+  /** The frames the app's rows hold, into the store: oldest first by when they were written, with what the record kept from before. */
+  private takeRows(rows: readonly { id: string; frame: CommunityMessageFrame }[]): void {
+    if (!rows.length) return;
+    const inRecord = new Set(this.state.store.map(storeKey));
+    for (const { id, frame } of rows) {
+      this.onRows.set(storeKey(frame), id);
+      if (!inRecord.has(storeKey(frame))) this.state.store.push(frame);
+    }
+    this.state.store.sort((a, b) => a.ts - b.ts);
+    this.trimStore();
   }
 
   /**
@@ -1743,6 +1788,7 @@ export class CommunitySession {
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
+    let onRow: boolean | void = false;
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
       // A reply that does not hold is left out, never the text.
@@ -1752,7 +1798,7 @@ export class CommunitySession {
       const card = parsed.sc === undefined ? undefined : readStatusCard(parsed.sc);
       // A file that does not hold is left out too (WISP 503): the text, its caption or fallback line, shows.
       const file = parsed.fl === undefined ? undefined : readGroupFileMeta(parsed.fl) ?? undefined;
-      await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}) });
+      onRow = await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), frame: raw });
     }
     else if (isObject(parsed.x)) {
       const app = { id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x };
@@ -1775,6 +1821,7 @@ export class CommunitySession {
     // place naming none would be a new entry in `seen` per frame, never pruned before the window passes it.
     if (original && firstAt) this.markSeen({ ...raw, ...original });
     this.keep(raw);
+    if (onRow === true) this.onRows.set(storeKey(raw), id);
     // The message itself is stored already; what changed here (seen, store) is saved in a batch.
     this.persistSoon();
     return true;

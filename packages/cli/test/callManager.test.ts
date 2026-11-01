@@ -266,6 +266,18 @@ describe("the audio socket", () => {
   });
 });
 
+describe("a one-shot's call", () => {
+  it("names the daemon it needs, before the chat's own not-live reason", async () => {
+    const link = { id: "chat-ab", label: "bia", profile: "paired-chat/1", callsUnavailable: "Calls need a live connection" } as unknown as LinkView;
+    const engine: CallEngine = { getState: () => ({ links: [link] }) as unknown as EngineState, setCallSignal: () => {} };
+    const calls = new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: false });
+    const daemon = { code: "unavailable", message: "Calls need the daemon (a call outlives this command): start it with `ghostly daemon --detach`" };
+    await expect(calls.start("bia", {})).rejects.toMatchObject(daemon);
+    // A daemon still says why the chat cannot call.
+    await expect(new CallManager({ engine, emit: () => {}, profileDir: tmp(), answers: true }).start("bia", {})).rejects.toMatchObject({ code: "unavailable", message: "Calls need a live connection" });
+  });
+});
+
 describe("two call managers", { timeout: 60_000 }, () => {
   it("call, auto-answer, a tone each way through the programs, flush, hang up", async () => {
     const { a, b } = pairOfManagers();

@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -97,7 +97,13 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
   it("says a credential file or stdin that holds nothing is empty", async () => {
     const empty = file("empty.txt", "");
     expect(error(await run("x401", "credential", "add", empty), "bad_request", 1).message).toBe(`${empty} is empty: it holds the SD-JWT VC the issuer sent`);
-    expect(error(await ghostly(["--home", dir, "x401", "credential", "add", "-"], { env, input: "" }), "bad_request", 1).message).toBe("Nothing on stdin: give the SD-JWT VC the issuer sent");
+  });
+
+  // Nothing on stdin is a usage error, worded as `invite join -`, `group join -` and `wallet redeem -` say theirs.
+  it("answers - with nothing on stdin as a usage error, before any profile is made", async () => {
+    const fresh = home("x401-credentials-empty-stdin");
+    expect(error(await ghostly(["--home", fresh, "x401", "credential", "add", "-"], { env, input: "" }), "usage", 2).message).toBe("Missing <file|->: give the SD-JWT VC on stdin (… | ghostly x401 credential add -) or as a file");
+    expect(readdirSync(fresh)).toEqual([]);
   });
 
   it("answers the words of a group with its commands", async () => {

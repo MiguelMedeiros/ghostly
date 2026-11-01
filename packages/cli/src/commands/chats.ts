@@ -1,7 +1,27 @@
 import { CliError } from "../errors";
+import type { OptionSpec } from "../args";
 import { TRANSPORT_NAMES } from "../words";
-import { type Command, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
+import { type Command, CONNECT_SECONDS, force, groupWait, cursor, HOLD_MINUTES, inRange, LONG_WAIT_SECONDS, needs, pageLimit, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, timeout, translate, typingFor, typingKind, usageFields, usageOptions, wait } from "./shared";
 
+/** `react` and `pin` in a 1:1 chat: until the contact confirmed it, by default without a daemon (the process leaves). */
+const confirmWait: Record<string, OptionSpec> = {
+  wait: { type: "string", choices: ["none", "confirmed"], description: "none or confirmed: until the contact confirmed it, in a 1:1 chat (default: none with a daemon, confirmed without)" },
+  timeout: groupWait.timeout,
+};
+/** The card commands: in a chat a one-shot stays until the card went out, as `send` (a group has no receipts). */
+const ONE_SHOT_DEFAULT = (word: string) => `(default: none with a daemon; without one, ${word} in a chat and none in a group)`;
+const cardWait: Record<string, OptionSpec> = {
+  wait: { type: "string", choices: ["none", "sent", "delivered"], description: `none, sent or delivered; in a group none or sent: until an edge took it ${ONE_SHOT_DEFAULT("sent")}` },
+  timeout: groupWait.timeout,
+};
+const cardUpdateWait: Record<string, OptionSpec> = {
+  wait: { type: "string", choices: ["none", "confirmed", "sent"], description: `none, confirmed (a chat's contact took it) or sent (a group's edge took it) ${ONE_SHOT_DEFAULT("confirmed")}` },
+  timeout: groupWait.timeout,
+};
+const usageWait: Record<string, OptionSpec> = {
+  wait: { type: "string", choices: ["none", "sent"], description: `none or sent: until the contact has it in a chat, an edge took it in a group ${ONE_SHOT_DEFAULT("sent")}` },
+  timeout: groupWait.timeout,
+};
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
 /** Invites, chats and messages: one entry per command, in alphabetical order (test/commands.test.ts checks). */
@@ -33,7 +53,11 @@ export const commands: Record<string, Command> = {
       return { chat: a.chat, message: a.message, chosen: options.chosen, close: options.close === true, text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
   },
-  "chat connect": { method: "chat.connect", usage: "chat connect <chat>", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"], params: (_, { chat }) => ({ chat }) },
+  "chat connect": {
+    method: "chat.connect", usage: "chat connect <chat> [--timeout s]", summary: "Reconnect a chat now (ends a --hold)", args: ["chat"],
+    options: { timeout: { type: "number", description: `Seconds to wait for the contact (default and at most ${CONNECT_SECONDS})` } },
+    params: ({ options }, { chat }) => ({ chat, timeout: timeout(options, CONNECT_SECONDS) }),
+  },
   "chat disconnect": {
     method: "chat.disconnect", usage: "chat disconnect <chat> [--hold <minutes>]", summary: "Close a chat's live session (the contact may redial; --hold keeps it on the DHT that long, 0 ends it)", args: ["chat"],
     options: { hold: { type: "number", description: "Stay off the direct link this many minutes (up to 10080): DHT only, taken back after" } },
@@ -92,40 +116,48 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": {
-    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone]",
+    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone [--wait none|confirmed] [--timeout s]]",
     summary: "Forget a message on this device (the contact keeps theirs); --everyone deletes one of yours, in a chat or a group, from every member's device",
-    args: ["chat", "message"], options: { everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" } },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, everyone: options.everyone === true }),
+    args: ["chat", "message"],
+    options: {
+      everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" },
+      wait: { type: "string", choices: ["none", "confirmed"], description: "With --everyone in a chat: none or confirmed, until the contact has it (default: none with a daemon, confirmed without)" },
+      timeout: wait.timeout,
+    },
+    params: ({ options }, a) => {
+      for (const flag of ["wait", "timeout"]) if (options[flag] !== undefined && options.everyone !== true) throw new CliError("usage", `--${flag} goes with --everyone`);
+      return { chat: a.chat, message: a.message, everyone: options.everyone === true, wait: options.wait, timeout: timeout(options) };
+    },
   },
-  "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
+  "message details": { method: "chat.details", usage: "message details <chat|group> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "pin": {
-    method: "chat.pin", usage: "pin <chat|group> <message> | --remove", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
-    args: ["chat", "message...?"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" } },
+    method: "chat.pin", usage: "pin <chat|group> <message> | --remove [--wait none|confirmed] [--timeout s]", summary: "Pin a message at the top of a chat or group (one per chat: it replaces the pinned one); --remove unpins",
+    args: ["chat", "message...?"], options: { remove: { type: "boolean", description: "Unpin the chat's pinned message (it names no message)" }, ...confirmWait },
     params: ({ options }, a) => {
       // --remove names no message: the chat has one pin. One given beside it is taken as before, and not read.
       if (a.message === undefined && options.remove !== true) throw new CliError("usage", "Missing <message>: ghostly pin <chat|group> <message> | --remove");
       if (a.message?.includes(" ")) throw new CliError("usage", "Too many arguments: ghostly pin <chat|group> <message> | --remove");
-      return { chat: a.chat, message: a.message, remove: options.remove === true };
+      return { chat: a.chat, message: a.message, remove: options.remove === true, wait: options.wait, timeout: timeout(options) };
     },
   },
   "react": {
-    method: "chat.react", usage: "react <chat> <message> <emoji> [--remove]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
-    args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
-    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true }),
+    method: "chat.react", usage: "react <chat> <message> <emoji> [--remove] [--wait none|confirmed] [--timeout s]", summary: "React to a message with one emoji (it replaces yours); --remove takes yours back",
+    args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" }, ...confirmWait },
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true, wait: options.wait, timeout: timeout(options) }),
   },
   "routine send": {
     method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",
     summary: "Send a routine card (something a bot runs on a schedule: its last run and the next) to a chat or group",
     args: ["chat"],
-    options: { id: { type: "string", description: "The routine's id, kept across updates (default: made up)" }, ...routineOptions, ...groupWait, wait: wait.wait },
+    options: { id: { type: "string", description: "The routine's id, kept across updates (default: made up)" }, ...routineOptions, ...cardWait },
     params: ({ options }, { chat }) => ({ chat, card: needs(routineFields(options), [["name", "name"], ["schedule", "schedule"]], "routine send <chat|group> --name <name> --schedule \"every day 01:00\""), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "routine update": {
     method: "routine.update", usage: "routine update <chat|group> <routine> [--run ok|failed|skipped[:summary]] [--next <time>] [--state active|paused] [--name <name>] [--schedule ...] [--cron ...] [--link url]... [--text <text>] [--json json|-|file] [--force] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Update a routine card you sent: record a run, the next one, a pause (at most one update per 2.5 s; sooner ones merge)",
     args: ["chat", "routine"],
-    options: { ...routineOptions, wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
+    options: { ...routineOptions, ...cardUpdateWait },
     params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "saved add": { method: "saved.add", usage: "saved add <chat|group> <message>", summary: "Save a message on this device, to find it again in `saved list` (nothing is sent)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
@@ -135,14 +167,14 @@ export const commands: Record<string, Command> = {
     method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]... [--parent task] [--link url]... [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",
     summary: "Send a task card (a bot's work: status, progress, its PR) to a chat or group; prints its id and message",
     args: ["chat"],
-    options: { id: { type: "string", description: "The task's id, kept across updates (default: made up)" }, ...taskOptions, ...groupWait, wait: wait.wait },
+    options: { id: { type: "string", description: "The task's id, kept across updates (default: made up)" }, ...taskOptions, ...cardWait },
     params: ({ options }, { chat }) => ({ chat, card: prLinked(needs(taskFields(options), [["title", "title"]], "task send <chat|group> --title <title>"), options, "task send <chat|group> --title <title> --pr-url <url>"), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "task update": {
     method: "task.update", usage: "task update <chat|group> <task> [--title <title>] [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url] [--pr-number n] [--additions n] [--deletions n] [--files n] [--pr-state s] [--pr-checks c] [--branch b] [--tag label]... [--parent task] [--link url]... [--text <text>] [--json json|-|file] [--force] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Update a task card you sent: the fields given, merged over it (at most one update per 2.5 s; sooner ones merge)",
     args: ["chat", "task"],
-    options: { ...taskOptions, wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
+    options: { ...taskOptions, ...cardUpdateWait },
     params: ({ options }, a) => ({ chat: a.chat, task: a.task, card: taskFields(options), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) }),
   },
   "typing": {
@@ -160,9 +192,10 @@ export const commands: Record<string, Command> = {
     method: "usage.send", usage: "usage send [<chat|group>] [--all] --left <percent> [--window \"5 h\"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]... [--used n --limit n] [--id id] [--text <text>] [--json json|-|file] [--force] [--wait none|sent] [--timeout s]",
     summary: "Say how much of your quota is left (a bot's usage card, one per chat, updated in place); --all for every 1:1 chat",
     args: ["chat?"],
-    options: { ...usageOptions, ...groupWait },
+    options: { ...usageOptions, ...usageWait },
     params: ({ options }, { chat }) => {
       if (!chat && options.all !== true) throw new CliError("usage", "Name a chat or group, or give --all: ghostly usage send <chat|--all> --left <percent>");
+      if (chat && options.all === true) throw new CliError("usage", "Name a chat or group or give --all, not both: ghostly usage send <chat|--all> --left <percent>");
       return { chat, all: options.all === true, card: quota(usageFields(options), "usage send <chat|--all> --left <percent>"), text: options.text, force: options.force === true, wait: options.wait, timeout: timeout(options) };
     },
   },

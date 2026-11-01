@@ -2,18 +2,20 @@ import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
+import { useChatsFound } from "../hooks/useChatsFound";
 import { ChatRow, GroupRow } from "./ChatRow";
 import { ChatFolderHeader, OtherChatsHeader } from "./ChatFolderHeader";
 import { OTHER_CHATS_ID, createFolder, folderChatsId, inOrder, movePinnedBeside, setChatFolder, setFolderFolded, setOthersFolded, setSectionOrder, useChatFolders } from "../lib/chatFolders";
 import { FolderNameDialog } from "./chat/ChatFolderDialogs";
 import { FolderIcon } from "./chat/ChatFolderMenu";
-import { groupChat } from "../lib/chatMute";
+import { groupChat, mentionsNotify, mutedUntil } from "../lib/chatMute";
+import type { GroupView } from "@ghostly/browser/shared/types";
 import { formatListTime } from "../lib/chatList";
 import { foldText } from "../lib/chatSearch";
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
-import { groupPath, groupRouteId, invitationRow } from "../lib/groups";
+import { groupPath, groupReadAt, groupRouteId, invitationRow } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useLabelsFit } from "../hooks/useLabelsFit";
 import { Menu, MenuItem } from "./Menu";
@@ -34,6 +36,7 @@ import {
   isSessionPinned,
   setSessionPinned,
   deleteSession,
+  getLastReadCount,
   getUnreadCount,
   markSessionAsRead,
   ensureSession,
@@ -90,6 +93,16 @@ function groupsFound<G extends { name: string }>(groups: G[], search: string): G
 
 /** The pinned chats among `sessions`, as the list shows them. (Outside the component, as `groupsFound`.) */
 const pinnedRows = (sessions: ChatSession[]): string[] => sessions.filter(s => isSessionPinned(s.id)).map(s => s.id);
+
+/**
+ * What the list shows beyond the chats and groups themselves, which only its look every few seconds brings: what each
+ * row's time says (the app's language does not matter: only whether it changed), and what is stored apart from the chat,
+ * where another page of the app writes with no word to this one (read marks, pins, a mute, which also ends by itself).
+ */
+const listExtras = (sessions: ChatSession[], groups: GroupView[]): string => [
+  ...sessions.map(s => [formatListTime(s.lastSyncAt ?? s.createdAt), getLastReadCount(s.id), isSessionPinned(s.id), !!getInviteCode(s.id), mutedUntil(s.id)].join()),
+  ...groups.map(g => [formatListTime(g.lastMessageAt), groupReadAt(g.id), mutedUntil(groupChat(g.id)), mentionsNotify(groupChat(g.id))].join()),
+].join("\n");
 
 export function Sidebar() {
   const nav = useAppNavigation();
@@ -164,9 +177,16 @@ export function Sidebar() {
 
   const { syncingSessions } = useBackgroundPoller(activeSessionId);
 
-  const refreshSessions = useCallback(() => {
+  const lastRead = useRef<{ sessions: ChatSession[]; extras: string } | undefined>(undefined);
+  const refreshSessions = useCallback((onlyIfChanged = false) => {
     // Read through the page's one cache: a long chat whose stored text changed is parsed once for every reader (`listShownSessions`).
     const updated = listShownSessions();
+    const extras = listExtras(updated, engine.state?.groups ?? []);
+    const last = lastRead.current;
+    lastRead.current = { sessions: updated, extras };
+    // The look every few seconds draws only what it brings: the same chats are the same objects (`listShownSessions`).
+    // Anyone else who calls this asks for a draw: a pin changes no chat, and `session-updated` is all it says.
+    if (onlyIfChanged && last?.extras === extras && last.sessions.length === updated.length && updated.every((s, i) => s === last.sessions[i])) return;
 
     setSessions(updated);
     // A chat deleted elsewhere takes its pending "Delete?" with it.
@@ -175,8 +195,8 @@ export function Sidebar() {
 
   useEffect(() => {
     refreshSessions();
-    const interval = setInterval(refreshSessions, 3000);
-    
+    const interval = setInterval(() => refreshSessions(true), 3000);
+
     const handleSessionUpdate = () => refreshSessions();
     window.addEventListener("session-updated", handleSessionUpdate);
     
@@ -219,21 +239,16 @@ export function Sidebar() {
   // The identity a contact is shown as (identities/contactFace.ts): its name in the row, and found by search.
   const faceOf = useContactFaces();
   const query = foldText(search);
-  // A search reads every chat's messages: their whole histories, where the engine sent this page only their newest page
-  // (the extension's pages), are asked for while it lasts.
-  const searching = !!search;
-  useEffect(() => {
-    if (!searching) return;
-    const releases = (engine.state?.links ?? []).map((link) => engine.keepWhole(link.id));
-    return () => releases.forEach((release) => release());
-  }, [searching]);
+  // A search reads every chat's messages: the ones this page holds here, and the engine the older ones of a chat it sent
+  // this page only the newest page of (the extension's pages).
+  const foundInEngine = useChatsFound(query);
   const filtered = sessions.filter((s) => {
     if (!search) return true;
     if (found(s.label, query)) return true;
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return messagesFound(s.messages, query);
+    return messagesFound(s.messages, query) || foundInEngine.has(s.id);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.

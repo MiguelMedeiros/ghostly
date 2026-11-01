@@ -199,5 +199,22 @@ describe("ContactIdentitiesPanel", () => {
       open({ links: [paired({ identities: identitiesView({ error: "Alice sent a proof this app could not read" }) })] });
       expect(screen.getByTestId("chat-identities-link-error")).toHaveTextContent("Alice sent a proof this app could not read");
     });
+
+    it("in Arabic, keeps how it was checked, who attests it and where its name came from each in its own direction", async () => {
+      // English in an Arabic card, isolated: the bracket and the period stay with the words they belong to.
+      const onClose = vi.fn();
+      const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={onClose} />, { language: "ar" });
+      document.documentElement.dataset.reduceMotion = "true";
+      act(() => engine.update(withReceived([receivedView({ provider: "oidc", subject: "https://accounts.google.com",
+        display: { name: "Alice Liddell", source: "keys.openpgp.org (WKD)", fetchedAt: now() },
+        verified: { subject: "https://accounts.google.com#42", source: "Nostr signature (NIP-01, BIP-340)", attester: "accounts.google.com (OIDC)" } })])));
+      const card = await turnOver(user, 0);
+      const isolated = (el: Element) => [...el.querySelectorAll("bdi")].map(bdi => bdi.textContent);
+      const facts = card.querySelector("dl")!;
+      expect(isolated(facts)).toEqual(["accounts.google.com (OIDC)", "accounts.google.com (OIDC)", "Nostr signature (NIP-01, BIP-340)"]);
+      expect(facts.textContent).not.toContain("{{");
+      expect(isolated(within(card).getByTestId("chat-identity-received-name-source"))).toEqual(["keys.openpgp.org (WKD)"]);
+    });
   });
 });
+

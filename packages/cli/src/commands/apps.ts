@@ -70,7 +70,7 @@ export const commands: Record<string, Command> = {
       bundle: { type: "string", description: "The bundle naming the app (default <dir>/app.ghostlyapp)" },
       force: { type: "boolean", description: "Allow --up-to past the bundle's own sequence (versions published from elsewhere)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).revokeApp(a.dir!, keyFile(options.key, "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>]"), {
+    run: async ({ options }, a) => (await import("../apps")).revokeApp(a.dir!, keyFile(options.key, "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>] [--force]"), {
       digests: options.digest as string[] | undefined, upTo: options["up-to"] as number | undefined,
       reason: options.reason as string | undefined, bundle: here(options.bundle), force: options.force === true,
     }),

@@ -601,3 +601,33 @@ describe("Settings, when contacts hold another device's push address", () => {
     expect(screen.getByTestId("settings-wake")).toHaveAttribute("aria-checked", "false");
   });
 });
+
+describe("a device's name in a right-to-left language", () => {
+  // A Latin name in an Arabic sentence, isolated: the punctuation at its edge stays on its side ("Pixel-", not "-Pixel").
+  const names = (element: HTMLElement) => [...element.querySelectorAll("bdi")].map((bdi) => bdi.textContent);
+
+  it("keeps its own direction in the standby screen's title and in the new device list", () => {
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Pixel-of-a-very-", notice: ["MacBook (Pro)", "2nd phone"] }} />, { language: "ar" });
+    expect(screen.getByTestId("device-standby-title")).toHaveTextContent("نشط على Pixel-of-a-very-");
+    expect(names(screen.getByTestId("device-standby-title"))).toEqual(["Pixel-of-a-very-"]);
+    expect(names(screen.getByTestId("device-set-notice-title"))).toEqual(["MacBook (Pro)", "2nd phone"]);
+    expect(screen.getByTestId("device-set-notice-title").textContent).not.toContain("{{");
+  });
+
+  it("keeps its own direction on its row and on Move to", async () => {
+    const { engine } = renderApp(<DevicesSection />, { language: "ar" });
+    engine.on("deviceSet", () => set({ devices: [set().devices[0]!, { key: PHONE, name: "Pixel-of-a-very-", slot: 1, self: false, active: false, status: "live" }] }));
+    engine.on("deviceHandoffView", () => null);
+    const rows = await screen.findAllByTestId("device-row");
+    expect(names(rows[0]!)).toEqual(["MacBook"]);
+    expect(names(rows[1]!)).toEqual(["Pixel-of-a-very-", "Pixel-of-a-very-"]);
+  });
+
+  it("keeps its own direction in the takeover's title, hint and the name to type", () => {
+    renderApp(<TakeoverDialog device="Pixel-of-a-very-" password onClose={() => {}} />, { language: "ar" });
+    const dialog = screen.getByTestId("takeover-dialog");
+    expect(names(dialog)).toEqual(["Pixel-of-a-very-", "Pixel-of-a-very-", "Pixel-of-a-very-"]);
+    expect(dialog.querySelector("h2")).toHaveTextContent("تتولى الأمر بدون Pixel-of-a-very-؟");
+    expect(screen.getByLabelText("اكتب Pixel-of-a-very- للتأكيد")).toBe(screen.getByTestId("takeover-name"));
+  });
+});

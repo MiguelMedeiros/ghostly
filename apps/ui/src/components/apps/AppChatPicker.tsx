@@ -36,7 +36,7 @@ export function AppChatPicker({ app, options, onClose }: { app: InstalledAppView
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="app-chat-picker-title" data-testid="app-chat-picker"
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[85dvh] overflow-y-auto pb-safe">
         <div>
-          <h2 id="app-chat-picker-title" className="text-lg font-medium text-text-primary">{t("apps.pick.title", { title: app.title })}</h2>
+          <h2 id="app-chat-picker-title" className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.pick.title", { title: app.title })}</h2>
           <p className="text-xs text-text-secondary mt-1">{t("apps.pick.hint")}</p>
         </div>
         {targets.length === 0

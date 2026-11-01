@@ -481,3 +481,110 @@ describe("a new text with nothing before it still to go", () => {
     await c.box.stop();
   });
 });
+
+/**
+ * Seen 2026-10-31 on the web app at 20,000 messages: texts sent a moment apart, each before the last one's receipt came,
+ * read the chat's whole history once each on the page's thread, and found only what the outbox knew of already.
+ */
+describe("a new text while others of mine are on their way", () => {
+  function long(n: number, { send = async () => null, resender, get = true }: { send?: (m: StoredMessage) => Promise<string | null>; resender?: Resender; get?: boolean } = {}) {
+    const rows = Array.from({ length: n }, (_, i) => row(i + 1, "delivered")), sent: string[] = [];
+    const counts = { reads: 0, gets: 0 };
+    const box = new Outbox({
+      read: async () => { counts.reads++; return rows.map(m => ({ ...m })); },
+      ...(get && { get: async (id: string) => { counts.gets++; const found = rows.find(m => m.id === id); return found && { ...found }; } }),
+      update: async (id, delivery, error, extra) => { const found = rows.find(m => m.id === id); if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error }); },
+    }, async m => { sent.push(m.text); return send(m); }, 60_000, undefined, { resender });
+    const add = (m: StoredMessage) => { rows.push(m); return m.id; };
+    return { box, rows, sent, counts, add };
+  }
+
+  it("goes without the chat's history being read while the last one awaits its receipt", async () => {
+    const c = long(1_000);
+    for (const n of [1001, 1002, 1003, 1004, 1005]) await c.box.transmit(c.add(row(n, "sending")));
+    expect(c.sent).toEqual(["m1001", "m1002", "m1003", "m1004", "m1005"]);
+    // The first send's look, and none after it.
+    expect(c.counts.reads).toBe(1);
+    await c.box.stop();
+  });
+
+  it("goes after one that is queued, sent again first, without the chat's history being read", async () => {
+    let fail = true;
+    const c = long(1_000, { send: async () => { if (!fail) return null; fail = false; return "no link"; } });
+    await c.box.transmit(c.add(row(1001, "sending")));
+    const reads = c.counts.reads;
+    expect(c.rows[1000].delivery).toBe("queued");
+    await c.box.transmit(c.add(row(1002, "sending")));
+    expect(c.sent).toEqual(["m1001", "m1001", "m1002"]);
+    expect(c.counts.reads).toBe(reads);
+    await c.box.stop();
+  });
+
+  it("goes after one sent on the DHT that the live link can take now, sent again on it first", async () => {
+    let via: StoredMessage["via"] = "pkarr";
+    const c = long(1_000, { resender: { ready: () => true, via: () => via } });
+    await c.box.transmit(c.add(row(1001, "sending")));
+    const reads = c.counts.reads;
+    via = "datalink";
+    await c.box.transmit(c.add(row(1002, "sending")));
+    expect(c.sent).toEqual(["m1001", "m1001", "m1002"]);
+    expect(c.counts.reads).toBe(reads);
+    await c.box.stop();
+  });
+
+  /**
+   * Seen 2026-10-31 on a CLI daemon at 5,000 messages, its bot sending from four workers at once: 30 of 100 texts read
+   * the chat's whole history, each send cost 24 ms of CPU against 6 ms one after the other, and texts arrived seconds late.
+   */
+  it("goes without the chat's history being read while other texts are asked for at the same time", async () => {
+    const c = long(1_000);
+    await c.box.transmit(c.add(row(1001, "sending")));
+    const reads = c.counts.reads;
+    // Each row's write still on its way when the next send is asked for, as several callers at once do.
+    let stored!: () => void;
+    const storing = new Promise<void>(resolve => { stored = resolve; });
+    const sends = [1002, 1003, 1004, 1005].map(n => c.box.transmit(c.add(row(n, "sending")), { storing }));
+    stored();
+    await Promise.all(sends);
+    expect(c.sent).toEqual(["m1001", "m1002", "m1003", "m1004", "m1005"]);
+    expect(c.counts.reads).toBe(reads);
+    await c.box.stop();
+  });
+
+  it("sends one asked for at the same time and stored first after the older one it finds on its way", async () => {
+    const c = long(1_000);
+    await c.box.transmit(c.add(row(1001, "sending")));
+    const reads = c.counts.reads;
+    let older!: () => void;
+    const olderStored = new Promise<void>(resolve => { older = resolve; });
+    const first = c.box.transmit(c.add(row(1002, "sending")), { storing: olderStored });
+    // The newer one's write is done first: its turn comes before the older one's, which still has to go before it.
+    await c.box.transmit(c.add(row(1003, "sending")), { storing: Promise.resolve() });
+    older();
+    await first;
+    expect(c.sent).toEqual(["m1001", "m1002", "m1003"]);
+    expect(c.counts.reads).toBe(reads);
+    await c.box.stop();
+  });
+
+  it("reads the chat's history where many are on their way, not each of them", async () => {
+    const c = long(10);
+    for (let n = 11; n <= 40; n++) await c.box.transmit(c.add(row(n, "sending")));
+    const { reads, gets } = c.counts;
+    await c.box.transmit(c.add(row(41, "sending")));
+    expect(c.counts.reads).toBe(reads + 1);
+    expect(c.counts.gets - gets).toBeLessThanOrEqual(1);
+    expect(c.sent[c.sent.length - 1]).toBe("m41");
+    await c.box.stop();
+  });
+
+  it("reads the chat's history where the store cannot read one message", async () => {
+    const c = long(10, { get: false });
+    await c.box.transmit(c.add(row(11, "sending")));
+    const reads = c.counts.reads;
+    await c.box.transmit(c.add(row(12, "sending")));
+    expect(c.counts.reads).toBe(reads + 1);
+    expect(c.sent).toEqual(["m11", "m12"]);
+    await c.box.stop();
+  });
+});

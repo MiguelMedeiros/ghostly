@@ -253,6 +253,22 @@ describe("the emoji/GIF panel", () => {
     }
   });
 
+  it("on a phone on its side takes more than half the screen, so the grid keeps room for emoji rows", async () => {
+    const height = () => screen.getByTestId("expression-panel").style.getPropertyValue("--expression-height");
+    viewport(568, 320);
+    const { user } = composer();
+    await user.click(smiley());
+    // Half (166 px) would leave the grid 8 px under the categories, the search and the switch.
+    expect(height()).toBe(`${Math.round(320 * 0.82)}px`);
+    viewport(667, 375);
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(height()).toBe("290px"));
+    // A phone held upright keeps its half.
+    viewport(320, 568);
+    window.dispatchEvent(new Event("resize"));
+    await waitFor(() => expect(height()).toBe(`${Math.round(568 * 0.52)}px`));
+  });
+
   it("opens on emoji, with categories, a search field and the grid, and a switch at the bottom", async () => {
     const { user } = composer();
     await user.click(smiley());

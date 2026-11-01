@@ -209,13 +209,37 @@ export function inviteTaken(link: LinkView): void {
   if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 
+/**
+ * A chat on DHT only opens no live session: the engine refused `chat connect` as `engine`, "Both peers must choose a
+ * live method first", which read as if this side had to change something. Refused instead, naming whose choice it is
+ * (`details.reason`): the contact's (`peer-dht-only`, nothing to do here but wait), or this side's (`dht-only`).
+ */
+export function dhtOnly(link: LinkView): void {
+  if (link.deliveryMode === "dht") throw new CliError("refused", "This chat is on DHT only on this side: choose a live method first (chat transport auto)", { reason: "dht-only" });
+  if (link.dhtDelivery?.peerMode === "dht") throw new CliError("refused", "Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT", { reason: "peer-dht-only" });
+}
+
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
 export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
   const found = findChatOrGroup(state(ctx).links, state(ctx).groups, ref);
   return "group" in found ? { id: found.group.id, linkId: `group:${found.group.id}`, group: true } : { id: found.link.id, linkId: found.link.id, group: false };
 }
 
-export const groupOf = (ctx: ApiContext, params: Params) => findGroup(state(ctx).groups, str(params, "group", true));
+/**
+ * The group a group command names. A chat's id, key or name says it is a chat, with `twin`, the chat command that takes
+ * it (`group send` on a chat, where `send` is meant; `<chat>` stands for the ref), else where the groups are listed.
+ * It read "No group" before. A name nothing has stays that error.
+ */
+export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupView {
+  const ref = str(params, "group", true);
+  try { return findGroup(state(ctx).groups, ref); } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    let chat: LinkView;
+    try { chat = findChat(state(ctx).links, ref); } catch { throw error; }
+    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
+  }
+}
 
 /**
  * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no such

@@ -16,12 +16,11 @@ test.describe.configure({ mode: "serial", timeout: 480_000 });
 
 /** Adds a Lightning card through the LND node's form; the card comes up selected. */
 async function addLnd(p: Peer, lnd: typeof import("../support/lnd-regtest/regtest.mjs")) {
-  const { url, macaroon, cert } = lnd.credentials("alice");
+  const { url, macaroon } = lnd.credentials("alice");
   await createWallet(p, "lightning", "testnet", { provider: "lnd", timeout: 30_000, fill: async (area) => {
     const form = area.getByTestId("provider-form-lnd");
     await form.getByLabel("REST address").fill(url);
     await form.getByLabel("Macaroon (hex)").fill(macaroon);
-    await form.getByLabel("TLS certificate").fill(cert);
     await form.getByTestId("provider-save").click();
   } });
   expect(await p.page.content()).not.toContain(macaroon);

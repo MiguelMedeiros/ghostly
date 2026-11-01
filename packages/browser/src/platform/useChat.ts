@@ -21,6 +21,23 @@ import { notifySessionsChanged, startSessionSync } from "./sync";
 const NO_MESSAGES: ChatMessage[] = [];
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const getState = () => engine.state;
+const NONE_LANDED: ReadonlySet<ChatMessage> = new Set();
+
+/**
+ * Of the texts still sending, the ones the engine's history holds: a text of mine at the same timestamp. One pass over the
+ * history for all of them, from the newest, where they land: in a long chat sent to with no pause, a pass per text still
+ * sending, in two places per list, was the sender's largest read of the history.
+ */
+function landedRows(pending: ChatMessage[], history: ChatMessage[]): ReadonlySet<ChatMessage> {
+  if (!pending.length) return NONE_LANDED;
+  const sentAt = new Set(pending.map((row) => row.timestamp));
+  const found = new Set<number>();
+  for (let i = history.length - 1; i >= 0 && found.size < sentAt.size; i--) {
+    const m = history[i]!;
+    if (sentAt.has(m.timestamp) && m.id.startsWith("me_")) found.add(m.timestamp);
+  }
+  return found.size ? new Set(pending.filter((row) => found.has(row.timestamp))) : NONE_LANDED;
+}
 
 /**
  * Stands in for Desktop's `useChat`. Same contract towards the Chat page, but
@@ -73,13 +90,13 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [sessionId]);
 
   useEffect(() => setPending([]), [sessionId]);
-  const landed = useCallback((row: ChatMessage) => sessionMessages.some((m) => m.id.startsWith("me_") && m.timestamp === row.timestamp), [sessionMessages]);
+  const landed = useMemo(() => landedRows(pending, sessionMessages), [pending, sessionMessages]);
   // One the engine's history brought back is its row from now on.
   useEffect(() => {
-    if (pending.some(landed)) setPending((rows) => rows.filter((row) => !landed(row)));
-  }, [pending, landed]);
+    if (landed.size) setPending((rows) => rows.filter((row) => !landed.has(row)));
+  }, [landed]);
   const messages = useMemo(() => {
-    const waiting = pending.filter((row) => !landed(row));
+    const waiting = landed.size ? pending.filter((row) => !landed.has(row)) : pending;
     return waiting.length ? [...sessionMessages, ...waiting].sort((a, b) => a.timestamp - b.timestamp) : sessionMessages;
   }, [sessionMessages, pending, landed]);
 

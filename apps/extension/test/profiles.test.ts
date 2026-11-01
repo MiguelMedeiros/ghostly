@@ -202,6 +202,34 @@ describe("pages follow a switch made in another tab", () => {
   });
 });
 
+describe("pages follow a peer started again in another tab", () => {
+  const stored = (key: string, newValue: string | null) => world.page.dispatchEvent(Object.assign(new Event("storage"), { key, newValue }));
+
+  it("the page that starts the peer again leaves the mark once the new peer runs", async () => {
+    useProfile(world, WORK);
+    await ensure();
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    expect(world.storage.has("ghostly_engine_restarted")).toBe(false);
+    await extensionHost.restartEngine!();
+    expect(log()).toEqual([`start ghostly_${WORK}`, `stop ghostly_${WORK}`, `start ghostly_${WORK}`]);
+    expect(world.storage.has("ghostly_engine_restarted")).toBe(true);
+  });
+
+  it("another page starts again on the mark, and only on it", async () => {
+    const { followEngineRestart } = await world.load("page", () => import("../src/profile.ts"));
+    const onRestart = vi.fn();
+    const stop = followEngineRestart(onRestart);
+    stored("ghostly_app_settings", "{}");
+    stored("ghostly_engine_restarted", null);
+    expect(onRestart).not.toHaveBeenCalled();
+    stored("ghostly_engine_restarted", "1");
+    expect(onRestart).toHaveBeenCalledTimes(1);
+    stop();
+    stored("ghostly_engine_restarted", "2");
+    expect(onRestart).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("a page of the profile before a switch", () => {
   it("does not reach the peer of the profile after it, and starts again instead", async () => {
     const reload = vi.fn();

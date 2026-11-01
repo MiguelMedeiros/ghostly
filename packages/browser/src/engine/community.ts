@@ -354,6 +354,8 @@ export class Communities {
   }
   /** Resolves once what was received so far has been handed on (tests). */
   async idle(): Promise<void> { await Promise.all([...this.deliveries.values()]); }
+  /** Writes what the sessions still have to save (each saves within a second what it receives): the app is stopping. */
+  async flush(): Promise<void> { await Promise.allSettled([...this.live.values()].map(live => live.session.flush())); }
 
   /** The clock: the last tick's time (the engine ticks every second), so every decision reads one clock. */
   private time = 0;
@@ -365,6 +367,14 @@ export class Communities {
    */
   private sharing = { groups: 1, hubs: 1 };
   private now(): number { return this.time || Date.now(); }
+  /** `Date.now()` at the last tick. */
+  private tickedAt = 0;
+  /**
+   * When a message of mine is dated: the clock, moved on by the time passed since the last tick. Dated by the tick
+   * alone, an answer sent within a second of a member's message (a tick runs late too) was older than its place: it
+   * went above the message it answered in my own history, and above my own "You joined" (bug hunt, 2026-11-01).
+   */
+  private sendTime(): number { return this.time ? this.time + Math.max(0, Date.now() - this.tickedAt) : Date.now(); }
 
   /** Files and voice messages (WISP 503), the desk `Groups` keeps for every group. */
   files?: GroupFileDesk;
@@ -384,9 +394,10 @@ export class Communities {
   async load(groups: StoredGroup[]): Promise<void> {
     for (const group of groups) {
       this.stored.set(group.id, group);
-      if (group.community) this.attach(group.community);
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
       const history = await this.store.getMessages(MESSAGE_LINK(group.id));
+      // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`) too, not from its record alone.
+      if (group.community) this.attach(group.community, history.flatMap(m => m.frame ? [{ id: m.id, frame: m.frame as CommunityMessageFrame }] : []));
       loadMarks(this.marks, group, history);
       this.host.loaded?.(group.id, history);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
@@ -570,7 +581,7 @@ export class Communities {
     // its author has caught up (`CommunitySession.reseal`) goes to the members let in before it, judged by the commits'
     // times against the frame's. Dated by the wall clock, a frame read as written before admissions it came after
     // whenever the two differ (on headless engines, minutes): the members let in meanwhile never got it (2026-10-03).
-    const now = this.now();
+    const now = this.sendTime();
     const result = card || file ? await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded, card, file) : await live.session.sendText(text, this.host.myNick?.(), now, mentions, reply, forwarded);
     return "error" in result ? { error: result.error } : { error: null, messageId: result.id };
   }
@@ -725,6 +736,7 @@ export class Communities {
   /** Everything timed: beacon, hub election, lobbies, knocks, leaves, edges. The engine calls it every second or so. */
   async tick(now = Date.now()): Promise<void> {
     this.time = now;
+    this.tickedAt = Date.now();
     this.lineOrder.tick(now);
     const active = [...this.live.values()].filter(l => l.session.status === "active");
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
@@ -1875,7 +1887,8 @@ export class Communities {
 
   // -- internals -------------------------------------------------------------------------------
 
-  private attach(state: CommunityState): void {
+  /** `rows`: what the group's rows hold to hand on (none yet for a group just made or joined). */
+  private attach(state: CommunityState, rows: { id: string; frame: CommunityMessageFrame }[] = []): void {
     const id = state.id;
     const session: CommunitySession = new CommunitySession(state, {
       save: async next => {
@@ -1907,14 +1920,18 @@ export class Communities {
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) });
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }), ...(m.frame && { frame: m.frame }) });
         placing(stored !== false);
         // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645).
-        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return;
+        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return false;
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         markCame(this.marks, id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
+        // On its row now. A copy I had already changes no row: the state keeps its frame.
+        return stored !== false;
       },
+      // A row of its own, small (`forgetFrame` on the host).
+      forgetFrame: rowId => { void this.host.forgetFrame?.(MESSAGE_LINK(id), rowId).catch(() => {}); },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
       // Who holds which files (WISP 503) is the file desk's; anything else the engine's.
       app: m => this.deliver(id, () => m.frame.t === GROUP_HAVE_FRAME ? this.files?.communityApp(id, m.sender, m.frame) : this.host.communityApp?.(id, m.sender, m.frame)),
@@ -1946,7 +1963,7 @@ export class Communities {
           return edge && this.host.linkHandled ? this.host.linkHandled(edge) : Promise.resolve(false);
         },
       }),
-    });
+    }, rows);
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], hubClocks: new HubClocks(() => session.myKey, HUB_CLOCK_READ_GAP_MS), head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
       lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),

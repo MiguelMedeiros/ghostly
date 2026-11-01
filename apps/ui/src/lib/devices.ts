@@ -169,7 +169,8 @@ const lockHashOf = (id: string): string | null => {
 
 /**
  * Starts the app again into the gate: where the engine outlives the page (the extension), it starts again too.
- * `keepUnlocked`: the lock this tab passed carries across this one reload (a device just added, `handOverUnlock`).
+ * `keepUnlocked`: the lock this tab passed carries across this one reload (a device just added, one that took over or
+ * read at start that it was replaced, `handOverUnlock`). Never from a page whose lock is closed (`useLockPassedNow`).
  */
 export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): Promise<void> {
   try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }
@@ -204,6 +205,14 @@ export function listNames(names: readonly string[], language: string): string {
   const ListFormat = (Intl as unknown as { ListFormat?: new (locale: string, options: object) => { format(list: readonly string[]): string } }).ListFormat;
   try { if (ListFormat) return new ListFormat(language, { style: "long", type: "conjunction" }).format(names); } catch { /* below */ }
   return names.join(", ");
+}
+
+/**
+ * The list of names for a sentence, each to be put back in its own direction: `[list, named]`, the list with a stand-in
+ * per name and the names by stand-in, for `fillNames(t(key, { devices: list }), named)` (lib/fillNodes.tsx).
+ */
+export function listNamesFor(names: readonly string[], language: string): [string, Record<string, string>] {
+  return [listNames(names.map((_, i) => `{{name${i}}}`), language), Object.fromEntries(names.map((name, i) => [`name${i}`, name]))];
 }
 
 const JOIN_REQUEST = "ghostly_join_device";

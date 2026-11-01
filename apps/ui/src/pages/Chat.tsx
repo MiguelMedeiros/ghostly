@@ -44,7 +44,7 @@ import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
-import { messageSnippet, quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
+import { messageSnippet, quoteFor, replyIndexer, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
 import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
@@ -503,7 +503,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
   // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
-  const quoteIndex = useMemo(() => replyIndex(messages, false, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId]);
+  const [readReplies] = useState(() => replyIndexer());
+  const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
@@ -904,7 +905,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
-            phone={phoneHeader} />
+            phone={phoneHeader} callOn={callState !== "idle"} />
           <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
           <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
@@ -1283,7 +1284,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         never moves. */}
     {appHere && params && (
       <ChatAppPanel linkId={appHere} sessionId={sessionId} contact={{ name: shownName, named: !isAnonymous }}
-        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} />
+        peerKey={params.peerPubKeyB64} photo={face?.photo} myKey={techInfo?.myPubKey} status={statusLabel} callOn={callState !== "idle"} />
     )}
     {showIdentities && params && (
       <ContactIdentitiesPanel key={identityCard ? `${identityCard.side}:${identityCard.id}` : "panel"} peerKey={params.peerPubKeyB64} name={shownName}

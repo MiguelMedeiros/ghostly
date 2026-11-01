@@ -5,6 +5,7 @@ import { IDENTITY_PROVIDERS } from "@ghostly/browser/proofs/registry";
 import { IdentityProofsSection } from "../../components/identities/IdentityProofsSection";
 import { date } from "../../lib/identities";
 import { linkView } from "../fakeEngine";
+import { LANGUAGES, lookup } from "../i18n/locales";
 import { renderApp as render } from "../render";
 import { DAY, identitiesView, now, proofView, sharedView } from "./views";
 
@@ -149,6 +150,14 @@ describe("IdentityProofsSection", () => {
     expect(engine.callsTo("withdrawIdentityProof")).toEqual([{ linkId: "link-1", id: "a" }]);
   });
 
+  it("a proof not shared yet points at the + in a chat, the only place that shares it, in every language", () => {
+    const { engine } = renderApp(<IdentityProofsSection />);
+    act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
+    expect(screen.getByTestId("identity-panel-sharing")).toHaveTextContent("Share it from the + in a chat, one contact at a time.");
+    // A chat's Identities panel cannot share: it sends a person to the + too.
+    for (const language of LANGUAGES) expect(lookup(language, "identities.mine.shareHint"), language).toContain("+");
+  });
+
   it("asks before removing the chosen card, says what removing does, and asks the engine", async () => {
     const { user, engine } = renderApp(<IdentityProofsSection />);
     let finish!: () => void;
@@ -161,7 +170,7 @@ describe("IdentityProofsSection", () => {
     expect(engine.callsTo("removeIdentityProof")).toEqual([{ id: "b" }]);
     // While the revocation is published, the card says so.
     expect(cards()[1]).toHaveTextContent("Revoking…");
-    expect(screen.getByTestId("identity-proof-remove-confirm")).toBeDisabled();
+    expect(screen.getByTestId("identity-proof-remove-confirm")).toHaveAttribute("aria-busy", "true");
     await act(async () => { finish(); });
     act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
     expect(cards()).toHaveLength(1);
@@ -188,6 +197,82 @@ describe("IdentityProofsSection", () => {
     expect(screen.getByTestId("identity-proof-remove")).toBeInTheDocument();
     expect(screen.queryByText(/a revocation is published/)).not.toBeInTheDocument();
     expect(engine.callsTo("removeIdentityProof")).toEqual([]);
+  });
+
+  describe("the keyboard focus stays in the panel", () => {
+    const sharedTwice = () => ({
+      identityProofs: [proofView({ id: "a", sharedWith: 2 })],
+      links: [linkView({ id: "link-1", identities: identitiesView({ shared: [sharedView({ id: "a", status: "accepted" })] }) }), linkView({ id: "link-2", identities: identitiesView({ shared: [sharedView({ id: "a", status: "accepted" })] }) })],
+    });
+
+    it("gives Keep's focus back to Remove", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      act(() => engine.update({ identityProofs: [proofView()] }));
+      await user.click(screen.getByTestId("identity-proof-remove"));
+      await user.click(screen.getByRole("button", { name: "Keep" }));
+      expect(screen.getByTestId("identity-proof-remove")).toHaveFocus();
+    });
+
+    it("keeps it on Stop sharing while it runs and when it is refused, and moves it on once the share has gone", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      let refuse!: (e: Error) => void, finish!: () => void;
+      engine.on("withdrawIdentityProof", () => new Promise<void>((resolve, reject) => { finish = resolve; refuse = reject; }));
+      act(() => engine.update(sharedTwice()));
+      const stop = () => screen.getAllByTestId("identity-shared-stop");
+
+      const first = stop()[0];
+      await user.click(first);
+      expect(first).not.toBeDisabled();
+      expect(first).toHaveAttribute("aria-busy", "true");
+      expect(first).toHaveFocus();
+      await act(async () => { refuse(new Error("offline")); });
+      expect(first).toHaveFocus();
+
+      // The next chat's Stop sharing, once this one's row has gone and nothing runs.
+      await user.click(first);
+      act(() => engine.update({ links: sharedTwice().links.slice(1) }));
+      await act(async () => { finish(); });
+      expect(stop()).toHaveLength(1);
+      expect(stop()[0]).toHaveFocus();
+
+      // The last one: the panel's next control.
+      await user.click(stop()[0]);
+      await act(async () => { finish(); });
+      act(() => engine.update({ links: [] }));
+      expect(screen.getByTestId("identity-proof-remove")).toHaveFocus();
+    });
+
+    it("moves on from a Stop sharing that goes while the row stays (its withdrawal waits for the contact)", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      engine.on("withdrawIdentityProof", () => undefined);
+      const pending = linkView({ id: "link-1", identities: identitiesView({ shared: [sharedView({ id: "a", status: "withdrawal-pending" })] }) });
+      act(() => engine.update({ identityProofs: [proofView({ id: "a", sharedWith: 1 })], links: [sharedTwice().links[0]] }));
+      await user.click(screen.getByTestId("identity-shared-stop"));
+      act(() => engine.update({ links: [pending] }));
+      expect(screen.getByTestId("identity-shared-chat")).toBeInTheDocument();
+      expect(screen.getByTestId("identity-proof-remove")).toHaveFocus();
+    });
+
+    it("keeps it on the confirmation while it revokes and when it is refused, and gives it to the card that comes up", async () => {
+      const { user, engine } = renderApp(<IdentityProofsSection />);
+      let refuse!: (e: Error) => void, finish!: () => void;
+      engine.on("removeIdentityProof", () => new Promise<void>((resolve, reject) => { finish = resolve; refuse = reject; }));
+      act(() => engine.update({ identityProofs: [proofView({ id: "a" }), proofView({ id: "b", subject: "example.net" })] }));
+      await user.click(cards()[1]);
+      await user.click(screen.getByTestId("identity-proof-remove"));
+      const confirm = screen.getByTestId("identity-proof-remove-confirm");
+      await user.click(confirm);
+      expect(confirm).not.toBeDisabled();
+      expect(confirm).toHaveFocus();
+      await act(async () => { refuse(new Error("offline")); });
+      expect(confirm).toHaveFocus();
+      expect(panel()).toHaveTextContent("offline");
+
+      await user.click(confirm);
+      await act(async () => { finish(); });
+      act(() => engine.update({ identityProofs: [proofView({ id: "a" })] }));
+      expect(ghostly()).toHaveFocus();
+    });
   });
 
   describe("a proof whose provider published something (an AT Protocol record)", () => {
@@ -284,5 +369,16 @@ describe("IdentityProofsSection", () => {
       await user.click(screen.getByTestId("identity-ghostly-edit"));
       expect(screen.getByTestId("where")).toHaveTextContent("/profile");
     });
+  });
+
+  it("in Arabic, keeps how a proof was checked and who attests it each in its own direction", () => {
+    // English in an Arabic paragraph, isolated: the bracket and the period stay with the words they belong to.
+    const { engine } = renderApp(<IdentityProofsSection />, { language: "ar" });
+    act(() => engine.update({ identityProofs: [proofView({ id: "a", provider: "oidc", subject: "https://accounts.google.com",
+      verified: { subject: "https://accounts.google.com#1234", source: "Nostr signature (NIP-01, BIP-340)", attester: "accounts.google.com (OIDC)" } })] }));
+    const line = within(panel()).getByText((_, el) => el?.tagName === "P" && !!el.textContent?.startsWith("Nostr signature"));
+    expect([...line.querySelectorAll("bdi")].map(bdi => bdi.textContent)).toEqual(["Nostr signature (NIP-01, BIP-340)", "accounts.google.com (OIDC)", "accounts.google.com (OIDC)"]);
+    expect(line.textContent).toMatch(/^Nostr signature \(NIP-01, BIP-340\)\. يقول accounts\.google\.com \(OIDC\) إن/);
+    expect(line.textContent).not.toContain("{{");
   });
 });

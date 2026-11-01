@@ -6,7 +6,7 @@ import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/b
 import { STATUS_CARD_LIMITS, checkStatusCard, type StatusCard } from "@ghostly/core";
 import { callApi, type ApiContext } from "../src/api";
 import { parseArgs } from "../src/args";
-import { EventHub } from "../src/events";
+import { EventHub, type GhostlyEvent } from "../src/events";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 import { COMMANDS, idSlot, positionals } from "../src/commands";
 import { chatOnly } from "../src/main";
@@ -18,15 +18,21 @@ const link = (id: string, fields: Partial<LinkView> = {}) => ({ id, peerPubKeyZ3
 const group = (fields: Partial<GroupView> = {}) => ({ id: "g1", name: "Sala de Máquinas", createdAt: 1, profile: "mesh", isAdmin: false, canSend: true, lastMessageAt: 0, invited: [], memberLinks: {},
   members: [{ key: "mekey", role: "member", me: true, online: true, missing: 0 }], ...fields }) as unknown as GroupView;
 
-function fake(mode: "daemon" | "one-shot" = "daemon") {
+/**
+ * `out.delivery`: what a new message's delivery is (default `sent`); `out.pending`: an edit waits for the contact's
+ * confirmation. `emit` tells the commands' waits a message changed, as the engine's events do.
+ */
+function fake(mode: "daemon" | "one-shot" = "daemon", out: { delivery?: StoredMessage["delivery"]; pending?: boolean } = {}) {
   const rows = new Map<string, StoredMessage[]>();
   const of = (linkId: string) => rows.get(linkId) ?? rows.set(linkId, []).get(linkId)!;
   let n = 0;
   const store = (linkId: string, text: string, card?: StatusCard) => {
     const id = `me_${++n}`;
-    of(linkId).push({ linkId, id, wireId: `w${n}`, text, sender: "me", timestamp: Date.now(), via: "datalink", delivery: "sent", ...(card && { card }) });
+    of(linkId).push({ linkId, id, wireId: `w${n}`, text, sender: "me", timestamp: Date.now(), via: "datalink", delivery: out.delivery ?? "sent", ...(card && { card }) });
     return id;
   };
+  const listeners = new Set<(event: GhostlyEvent) => void>();
+  const emit = (event: GhostlyEvent) => { for (const listener of listeners) listener(event); };
   const card = (raw: unknown) => { const checked = checkStatusCard(raw); if ("error" in checked) throw new Error(checked.error); return checked.card; };
   const node = {
     getState: () => ({ links: [link("chat-one", { label: "Coordinator" })], groups: [group()], settings: {}, transport: {} }) as unknown as EngineState,
@@ -38,13 +44,14 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     editMessage: vi.fn(async ({ linkId, messageId, card: raw }: { linkId: string; messageId: string; text: string; card?: unknown }) => {
       const row = of(linkId).find((m) => m.id === messageId)!;
       row.card = card(raw);
-      row.edit = { seq: (row.edit?.seq ?? 0) + 1, at: Date.now(), history: [] };
+      row.edit = { seq: (row.edit?.seq ?? 0) + 1, at: Date.now(), history: [], ...(out.pending && { pending: true }) };
       return { error: null, messageId };
     }),
     groupTaken: vi.fn(() => 1),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
-  return { ctx, node, rows: of, store };
+  const onEvent = (listener: (event: GhostlyEvent) => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
+  return { ctx, node, rows: of, store, emit };
 }
 
 /** A command line as main.ts reads it: its options and positionals, then the method's parameters. */
@@ -198,6 +205,77 @@ describe("task send", () => {
   });
 });
 
+describe("the card commands in a chat, without a daemon", () => {
+  /** The message goes out (and the contact has it) 300 ms after the command, as a one-shot's first dial carries it. */
+  const goesOut = (f: ReturnType<typeof fake>, id: string, delivery: StoredMessage["delivery"] = "delivered") => setTimeout(() => {
+    f.rows("chat-one").find((m) => m.id === id)!.delivery = delivery;
+    f.emit({ seq: 1, id: "e1", type: "message.delivery", at: Date.now(), chat: "chat-one", messageId: id });
+  }, 300);
+  const goesOff = "goes with this profile's next command, or keep it online with `ghostly daemon --detach`";
+
+  it("task send and routine send stay until the card went out: the process leaving took it along unsent", async () => {
+    // Before, both answered at once with `delivery: waiting`, and the contact had the card only with a later one-shot.
+    for (const [method, card] of [["task.send", { id: "t1", title: "Fix" }], ["routine.send", { id: "r1", name: "Nightly", schedule: "every day 01:00" }]] as const) {
+      const f = fake("one-shot", { delivery: "waiting" });
+      goesOut(f, "me_1");
+      const started = Date.now();
+      expect(await callApi(f.ctx, method, { chat: "Coordinator", card })).toMatchObject({ chat: "chat-one", messageId: "me_1", delivery: "delivered" });
+      expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    }
+  });
+
+  it("time out with the shared words (exit 4); --wait none answers at once; a daemon and a group answer at once", async () => {
+    await expect(callApi(fake("one-shot", { delivery: "waiting" }).ctx, "task.send", { chat: "Coordinator", card: { title: "Fix" }, timeout: 1 })).rejects.toMatchObject({
+      code: "timeout", message: `Timed out after 1 s: the message is waiting and ${goesOff}`,
+    });
+    expect(await callApi(fake("one-shot", { delivery: "waiting" }).ctx, "task.send", { chat: "Coordinator", card: { title: "Fix" }, wait: "none" })).toMatchObject({ delivery: "waiting" });
+    expect(await callApi(fake("daemon", { delivery: "waiting" }).ctx, "task.send", { chat: "Coordinator", card: { title: "Fix" } })).toMatchObject({ delivery: "waiting" });
+    // A group has no receipts: a group's card keeps answering at once (`--wait sent` waits for an edge).
+    const group = fake("one-shot");
+    group.node.groupTaken.mockReturnValue(0);
+    expect(await callApi(group.ctx, "task.send", { chat: "g1", card: { title: "Fix" } })).toMatchObject({ group: "g1", messageId: "me_1" });
+  });
+
+  it("task update and routine update stay until the contact confirmed the edit; --wait none does not", async () => {
+    vi.useFakeTimers();
+    const f = fake("one-shot", { pending: true });
+    await callApi(f.ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" }, wait: "none" });
+    const update = callApi(f.ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" } });
+    let answered = false;
+    void update.then(() => { answered = true; }, () => { answered = true; });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS + 1_000);
+    // Before, it answered as soon as the edit was made, with `confirmed: false`, and the process left with it.
+    expect(answered).toBe(false);
+    delete f.rows("chat-one")[0]!.edit!.pending;
+    await vi.advanceTimersByTimeAsync(300);
+    expect(await update).toMatchObject({ task: "t1", edits: 1, confirmed: true });
+    const none = callApi(f.ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 100 }, wait: "none" });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
+    expect(await none).toMatchObject({ edits: 2, confirmed: false });
+    await callApi(f.ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" }, wait: "none" });
+    const routine = callApi(f.ctx, "routine.update", { chat: "Coordinator", routine: "r1", card: {}, run: { result: "ok" }, timeout: 1 });
+    const said = expect(routine).rejects.toMatchObject({ code: "timeout", message: `Timed out after 1 s: the contact has not confirmed the edit yet (it needs a live chat and a contact's app that shows edits). It ${goesOff}` });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS + 1_500);
+    await said;
+  });
+
+  it("usage send stays until its report went out: the first one sent, a later one confirmed", async () => {
+    const f = fake("one-shot", { delivery: "waiting", pending: true });
+    goesOut(f, "me_1");
+    expect(await callApi(f.ctx, "usage.send", { chat: "Coordinator", card: { left: 62 } })).toMatchObject({ messageId: "me_1", delivery: "delivered", updated: false });
+    setTimeout(() => { delete f.rows("chat-one")[0]!.edit!.pending; }, CARD_UPDATE_GAP_MS + 300);
+    expect(await callApi(f.ctx, "usage.send", { chat: "Coordinator", card: { left: 40 } })).toMatchObject({ messageId: "me_1", edits: 1, confirmed: true, updated: true });
+    expect(await callApi(fake("one-shot", { delivery: "waiting" }).ctx, "usage.send", { chat: "Coordinator", card: { left: 62 }, wait: "none" })).toMatchObject({ delivery: "waiting" });
+  }, 15_000);
+
+  it("say so in their help: the default is none with a daemon, and waits without one in a chat", () => {
+    // Before, task send and routine send said "sent without" a daemon and sent nothing; usage send said none.
+    for (const name of ["task send", "routine send"]) expect(COMMANDS[name]!.options!.wait!.description).toBe("none, sent or delivered; in a group none or sent: until an edge took it (default: none with a daemon; without one, sent in a chat and none in a group)");
+    for (const name of ["task update", "routine update"]) expect(COMMANDS[name]!.options!.wait!.description).toBe("none, confirmed (a chat's contact took it) or sent (a group's edge took it) (default: none with a daemon; without one, confirmed in a chat and none in a group)");
+    expect(COMMANDS["usage send"]!.options!.wait!.description).toBe("none or sent: until the contact has it in a chat, an edge took it in a group (default: none with a daemon; without one, sent in a chat and none in a group)");
+  });
+});
+
 describe("the secret guard on cards", () => {
   const seed = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
   const nsec = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
@@ -217,9 +295,9 @@ describe("the secret guard on cards", () => {
   it("refuses an update that brings one, and not one for the text the card already had", async () => {
     vi.useFakeTimers();
     const { ctx, node } = fake("one-shot");
-    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true });
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Deploy", step: seed }, force: true, wait: "none" });
     await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: `seed: ${seed}` } })).rejects.toMatchObject({ code: "confirm", message: /update it with --force/ });
-    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" }, wait: "none" });
     await expect(callApi(ctx, "routine.update", { chat: "Coordinator", routine: "r1", card: {}, run: { result: "failed", summary: nsec } })).rejects.toMatchObject({ code: "confirm" });
     expect(node.editMessage).not.toHaveBeenCalled();
     const update = callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { status: "done" } });
@@ -331,7 +409,7 @@ describe("task update", () => {
   it("in a one-shot, waits the gap out itself and sends", async () => {
     const { ctx, node } = fake("one-shot");
     vi.useFakeTimers();
-    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" }, wait: "none" });
     const update = callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 30 } });
     await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS);
     expect(await update).toMatchObject({ queued: false, edits: 1 });

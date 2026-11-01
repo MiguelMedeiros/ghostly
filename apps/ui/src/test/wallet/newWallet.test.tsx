@@ -250,6 +250,8 @@ describe("New, in the header", () => {
     const key = screen.getByTestId("new-wallet-api-key");
     expect(key).toHaveAttribute("type", "password");
     expect(screen.getByTestId("new-wallet-create")).toBeDisabled();
+    // The step back is 24 px high on a phone, not a 16 px line of text.
+    expect(screen.getByTestId("new-wallet-back").className.split(/\s+/)).toContain("max-md:min-h-6");
     // Going back forgets what was typed.
     await user.type(key, "typed-then-left");
     await user.click(screen.getByTestId("new-wallet-back"));

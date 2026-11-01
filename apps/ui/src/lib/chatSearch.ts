@@ -1,3 +1,4 @@
+import { foldText } from "@ghostly/browser/shared/fold";
 import { englishT, type Translate } from "../locales/translate";
 import type { ChatFile, ChatMessage } from "./types";
 
@@ -14,10 +15,8 @@ export interface Searchable {
   folded: string;
 }
 
-/** Lower case, accents off: "Ação" reads "acao". */
-export function foldText(text: string): string {
-  return text.normalize("NFD").toLowerCase().replace(/\p{M}/gu, "");
-}
+/** Lower case, accents off: "Ação" reads "acao". The engine's chat search folds the same way (`chatsFound`). */
+export { foldText };
 
 /** A file's kind in words, the same the app shows for it: a voice message, a video, a picture; none for other files. */
 export function fileKindWords(file: ChatFile, t: Translate): string | undefined {

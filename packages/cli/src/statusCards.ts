@@ -208,7 +208,10 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   }, params, now));
   await parentThere(ctx, target, card);
   const text = str(params, "text") ?? "";
-  const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "sent", "delivered"] as const, "none");
+  // A one-shot leaves once its command is done, and the card with it: in a chat it stays until it went out, as `send`.
+  const wait = target.group
+    ? oneOf(params, "wait", ["none", "sent"] as const, "none")
+    : oneOf(params, "wait", ["none", "sent", "delivered"] as const, ctx.mode === "one-shot" ? "sent" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   if (target.group) {
     const result = await node(ctx).sendGroupMessage({ groupId: target.id, text, card });
@@ -252,7 +255,10 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
   const card = checked(merged);
   if (isObject(patch) && patch.parent !== undefined) await parentThere(ctx, target, card);
   const text = str(params, "text") ?? "";
-  const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
+  // In a chat a one-shot stays until the contact confirmed the update, as `edit`: the process leaving took it along.
+  const wait = target.group
+    ? oneOf(params, "wait", ["none", "sent"] as const, "none")
+    : oneOf(params, "wait", ["none", "confirmed"] as const, ctx.mode === "one-shot" ? "confirmed" : "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const last = Math.max(pace.last, message.edit?.at ?? message.timestamp);
   const due = last + CARD_UPDATE_GAP_MS - Date.now();
@@ -315,7 +321,8 @@ async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, 
   const report = { updatedAt: Date.now(), ...fields, kind: "usage", id };
   checked(report);
   const sent = await cardMessage(ctx, target, "usage", id).catch(() => undefined);
-  const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+  // A one-shot's report in a chat stays until it went out (a new card) or the contact confirmed it (an update).
+  const wait = oneOf(params, "wait", ["none", "sent"] as const, !target.group && ctx.mode === "one-shot" ? "sent" : "none");
   if (!sent || (sent.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits) {
     const answer = await sendCard(ctx, { ...params, chat: ref, card: report, wait }, "usage");
     return { ...answer, updated: false };

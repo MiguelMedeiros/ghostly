@@ -12,6 +12,7 @@ import { ChatServicesDialog } from "../../components/ChatServicesDialog";
 import { InstalledAppDialog, AppInstallDialog } from "../../components/apps/AppInstallDialog";
 import { Apps } from "../../pages/Apps";
 import { AddAppDialog } from "../../components/apps/AddAppDialog";
+import { AppChatPicker } from "../../components/apps/AppChatPicker";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
@@ -305,6 +306,25 @@ describe("with the apps flag on", () => {
     expect(card).not.toHaveTextContent("Anonymous");
     await user.click(within(card).getByTestId("app-card-install"));
     expect(await within(await screen.findByTestId("app-install")).findByTestId("app-sent-by")).toHaveTextContent("Sent by Contact · peer");
+  });
+
+  it("a long contact name is cut alone on the card, never the words around it, in English and in Japanese", async () => {
+    fakeEngine.on("appList", () => []);
+    // A nickname at its 20-letter limit: on a 320 px phone the one cut line lost "opened it here".
+    const long = "Maximiliano Albuquer";
+    for (const [language, words] of [["en", " opened it here"], ["ja", " がここで開きました"]] as const) {
+      const view = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName={long} linkId="link-1" />, { language });
+      const line = within(await screen.findByTestId("app-card")).getByText((_, el) => el?.tagName === "P" && el.textContent === `${long}${words}`);
+      expect(line).toHaveClass("flex", "min-w-0", "overflow-hidden", "whitespace-nowrap");
+      expect(line).not.toHaveClass("truncate");
+      const name = within(line).getByTestId("app-card-name");
+      expect(name).toHaveTextContent(long);
+      expect(name).toHaveClass("min-w-0", "truncate");
+      const rest = [...line.children].filter((node) => node !== name);
+      expect(rest.map((node) => node.textContent).join("")).toBe(words);
+      for (const node of rest) expect(node).toHaveClass("shrink-0");
+      view.unmount();
+    }
   });
 
   it("says the app needs you both online while the contact is not live, and Open once installed", async () => {
@@ -750,6 +770,10 @@ describe("with the apps flag on", () => {
     await details.user.click(screen.getByTestId("app-uninstall-open"));
     wraps(within(screen.getByTestId("app-uninstall")).getByRole("heading"));
     details.unmount();
+    // Open of a chat app: "Open <title> in a chat" ran off a 320 px phone with a 40-letter one-word title.
+    const picker = renderApp(<AppChatPicker app={app} onClose={() => {}} />);
+    wraps(within(screen.getByTestId("app-chat-picker")).getByRole("heading"));
+    picker.unmount();
 
     fakeEngine.on("appStorePreview", () => ({ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
       name: `${long}5`, description: `${long}6`, kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, apps: 1 }));

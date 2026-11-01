@@ -1,7 +1,8 @@
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   closeInstallSteps, dismissInstallHint, installHintShown, installState, installVisits, isAppleMobile, isMacSafari, promptInstall,
-  resetInstallPrompt, startInstall, installStepsOpen, watchInstallPrompt,
+  resetInstallPrompt, startInstall, installStepsOpen, useInstallHint, watchInstallPrompt,
 } from "../../lib/installPrompt";
 
 // covers: app.pwa.install, app.pwa.install-entry
@@ -170,6 +171,17 @@ describe("the hint above the chat list", () => {
     offer("accepted");
     expect(installState()).toBe("none");
     expect(installHintShown(installState(), true)).toBe(false);
+  });
+
+  it("Not now in another tab of the app puts it away in this one, with nothing else drawing the list", () => {
+    watchInstallPrompt();
+    offer("accepted");
+    const { result } = renderHook(() => useInstallHint(true));
+    expect(result.current).toBe(true);
+    // What the other tab's dismissInstallHint() does here: its write, and the storage event this tab gets for it.
+    localStorage.setItem("ghostly-install-hint", "dismissed");
+    act(() => { window.dispatchEvent(new StorageEvent("storage", { key: "ghostly-install-hint", newValue: "dismissed" })); });
+    expect(result.current).toBe(false);
   });
 
   it("works where storage refuses (a private window): shown once there are chats, Not now still puts it away", () => {

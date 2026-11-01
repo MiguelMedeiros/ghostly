@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, FileTransferView, LinkView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
 import type { GhostlyEvent } from "../src/events";
+import type { CliError } from "../src/errors";
 import { resumeHolds } from "../src/holds";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
 // covers: headless.files, headless.typing, headless.chat, headless.api
@@ -37,13 +38,16 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     fileAction: vi.fn(async () => undefined),
     disconnect: vi.fn(),
     connect: vi.fn(async () => undefined),
-    setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { if (transport === "dht") setLink(linkId, { deliveryMode: "dht", textDelivery: "dht" }); }),
+    setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
+  /** The calls on, as `call.list` shows them. */
+  const calls: { call: string; chat: string; state: string }[] = [];
   const ctx = {
     runtime: { server: { node }, paths: { name: "default", dir } },
+    calls: { list: () => calls },
     hub: {
       onEvent: (l: (e: GhostlyEvent) => void) => { events.add(l); return () => events.delete(l); },
       onState: (l: (s: EngineState) => void) => { states.add(l); return () => states.delete(l); },
@@ -56,7 +60,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
   const event = (e: Partial<GhostlyEvent>) => { for (const l of events) l({ seq: 0, id: "x", at: 1, type: "x", ...e }); };
   /** A chat's link changes, and the engine says its state changed. */
   const linkChanged = (linkId: string, fields: Partial<LinkView>) => { setLink(linkId, fields); for (const l of states) l(s); };
-  return { ctx, node, s, dir, emitted, transfer, event, setLink, linkChanged };
+  return { ctx, node, s, dir, emitted, calls, transfer, event, setLink, linkChanged };
 }
 
 describe("file wait", () => {
@@ -219,13 +223,91 @@ describe("chat disconnect --hold", () => {
     const { ctx, node, setLink, emitted } = fake();
     setLink("chat-two", { deliveryMode: "dht" });
     await expect(callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 })).rejects.toMatchObject({ code: "refused" });
-    await callApi(ctx, "chat.connect", { chat: "Bob" });
+    await expect(callApi(ctx, "chat.connect", { chat: "Bob" })).rejects.toMatchObject({ code: "refused", details: { reason: "dht-only" } });
     expect(node.setDeliveryMode).not.toHaveBeenCalled();
     await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
     await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 0 });
     expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "stream" });
     expect(emitted.at(-1)).toMatchObject({ type: "chat.released", chat: "chat-one", reason: "lifted" });
     await expect(callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 10_081 })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  // Held mid-call, the call talked on over its own connection while its signals had no way across: one side's hang-up
+  // never reached the other, whose call ended only when its media stalled out 16 s later, as failed.
+  it("is refused while a call is on in the chat, which stays live; another chat is held", async () => {
+    const { ctx, node, calls, dir, emitted } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const refused = await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toMatch(/^A call is on in this chat: hang it up first \(ghostly call hangup chat-one\)/);
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    expect(existsSync(join(dir, "holds.json"))).toBe(false);
+    expect(emitted).toEqual([]);
+    // Without --hold the chat reconnects at once, and a signal the session could not carry goes on the next one.
+    await callApi(ctx, "chat.disconnect", { chat: "Alice" });
+    expect(node.disconnect).toHaveBeenCalledWith({ linkId: "chat-one" });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 1 });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+  });
+
+  // `chat transport dht` is the switch a hold makes, with the same lost hang-up: refused the same way mid-call.
+  it("chat transport dht is refused while a call is on in the chat; another transport or chat is not", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const refused = await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toMatch(/^A call is on in this chat: hang it up first \(ghostly call hangup chat-one\)/);
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "iroh/1" });
+    await callApi(ctx, "chat.transport", { chat: "Bob", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+  });
+
+  // The engine refused it as `engine`, "Both peers must choose a live method first", though this side had: a bot retried.
+  it("chat connect on a chat the contact keeps on DHT only is refused, naming the contact's choice", async () => {
+    const { ctx, node, setLink } = fake();
+    setLink("chat-two", { deliveryMode: "stream", dhtDelivery: { mode: "stream", peerMode: "dht", authenticated: true, maxTextBytes: 256 } });
+    const refused = await callApi(ctx, "chat.connect", { chat: "Bob" }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "refused", details: { reason: "peer-dht-only" } });
+    expect(refused?.message).toMatch(/^Your contact keeps this chat on DHT only/);
+    expect(node.connect).not.toHaveBeenCalled();
+    // A hold of this side's ends first; the contact's choice still keeps the chat off its live link.
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 });
+    await expect(callApi(ctx, "chat.connect", { chat: "Bob" })).rejects.toMatchObject({ details: { reason: "peer-dht-only" } });
+    expect(await callApi(ctx, "chat.get", { chat: "Bob" })).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
+    setLink("chat-two", { dhtDelivery: { mode: "stream", peerMode: "stream", authenticated: true, maxTextBytes: 256 } });
+    await callApi(ctx, "chat.connect", { chat: "Bob" });
+    expect(node.connect).toHaveBeenCalledWith({ linkId: "chat-two" });
+  });
+
+  // A `chat transport dht` chosen during a hold was taken back when the hold's time was up, and one that left DHT
+  // only kept `heldUntil` in `chat show` while the chat was live, then said it was released when nothing was held.
+  it("ends when the chat's transport is chosen meanwhile, and leaves that choice as it is", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, dir, emitted } = fake();
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 5 });
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ heldUntil: null, deliveryMode: "dht" });
+    expect(emitted.at(-1)).toMatchObject({ type: "chat.released", chat: "chat-one", reason: "lifted" });
+    expect(JSON.parse(readFileSync(join(dir, "holds.json"), "utf8"))).toEqual({});
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(node.setDeliveryMode).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "chat.get", { chat: "Alice" })).toMatchObject({ deliveryMode: "dht" });
+
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 5 });
+    await callApi(ctx, "chat.transport", { chat: "Bob", transport: "auto" });
+    expect(await callApi(ctx, "chat.get", { chat: "Bob" })).toMatchObject({ heldUntil: null, deliveryMode: "stream" });
+    const released = emitted.length;
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(emitted.length, "no second release when the time is up").toBe(released);
+    expect(node.setDeliveryMode).not.toHaveBeenCalled();
   });
 
   it("ends by itself when the time is up, also after a restart", async () => {

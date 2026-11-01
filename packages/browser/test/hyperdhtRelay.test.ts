@@ -410,6 +410,64 @@ it("closes every HyperDHT stream it holds for a client when the client leaves: d
   await own.close();
 }, 90_000);
 
+it("holds at most `streams` HyperDHT streams for a client while it stays: a dial past that drops it, an incoming one past that is closed", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  type Stream = { destroyed: boolean; once(event: string, f: () => void): void; on(event: string, f: (...args: unknown[]) => void): void; destroy(): void };
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 2, limits: { streams: 3 }, log: (what: string, why: string) => { reasons.push(`${what} ${why}`); } });
+  const native = new DHT({ bootstrap: own.bootstrap.map((node: string) => { const [host, port] = node.split(":"); return { host, port: Number(port) }; }), host: "127.0.0.1", firewalled: false });
+  const streams: Stream[] = [];
+  const keep = (stream: Stream) => { stream.on("error", () => {}); streams.push(stream); return stream; };
+  const open = (list: Stream[]) => list.filter(stream => !stream.destroyed).length;
+  const client = async () => {
+    const socket = new WebSocket(own.url);
+    await new Promise(resolve => socket.addEventListener("open", resolve));
+    const closed = new Promise(resolve => socket.addEventListener("close", resolve));
+    return { socket, closed, node: new RelayedDHT(new WebSocketStream(true, socket)) as unknown as {
+      _protocol: Record<string, { send(m: unknown): void }>;
+      createServer(options: object, onconnection: (stream: Stream) => void): { listen(keyPair: unknown): Promise<void> };
+    } };
+  };
+
+  // A listener whose servers get more connections than it may hold: the extra ones close, it stays.
+  const listener = await client();
+  const taken: Stream[] = [];
+  const listenKeys = DHT.keyPair();
+  await listener.node.createServer({}, stream => taken.push(keep(stream))).listen(listenKeys);
+  const incoming = [0, 1, 2, 3, 4].map(() => keep(native.connect(listenKeys.publicKey) as Stream));
+  await vi.waitFor(() => expect(incoming.filter(stream => stream.destroyed).length).toBe(2), { timeout: 30_000 });
+  expect(open(incoming)).toBe(3);
+  expect(own.stats().dropped).toBe(0);
+
+  // A dialler that keeps every stream: the dial past its budget drops it, and what it held closes with it.
+  const server = native.createServer();
+  const accepted: Stream[] = [];
+  server.on("connection", (stream: Stream) => accepted.push(keep(stream)));
+  const serverKeys = DHT.keyPair();
+  await server.listen(serverKeys);
+  const dialer = await client();
+  const keyPair = DHT.keyPair();
+  const dial = (alias: number) => dialer.node._protocol.connect.send({ custodial: true, alias, publicKey: keyPair.publicKey, secretKey: keyPair.secretKey, remotePublicKey: serverKeys.publicKey });
+  for (let alias = 1; alias <= 3; alias++) dial(alias);
+  await vi.waitFor(() => expect(open(accepted)).toBe(3), { timeout: 20_000 });
+  expect(own.stats().dropped).toBe(0);
+  dial(4);
+  await dialer.closed;
+  expect(reasons).toContain("dropped stream limit");
+  expect(own.stats().dropped).toBe(1);
+  await vi.waitFor(() => expect(open(accepted)).toBe(0), { timeout: 15_000 });
+  // The listener was never dropped and still holds its three.
+  expect(open(incoming)).toBe(3);
+
+  for (const stream of streams) stream.destroy();
+  listener.socket.close();
+  await native.destroy();
+  await own.close();
+}, 90_000);
+
 it("holds a client's handshakes only while they wait on it, and its signatures only until they come", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");

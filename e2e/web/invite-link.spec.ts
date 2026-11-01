@@ -119,7 +119,9 @@ test("a link that is not an invite says so, and a mistyped one says it has a typ
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   const { code } = await newInvite(alice);
   for (const [fragment, message] of [
-    ["/chat/not-an-invite", "This is not a Ghostly invite."],
+    ["/chat/not/an-invite", "This is not a Ghostly invite."],
+    // One word reads as the address of a chat, and none is here.
+    ["/chat/not-an-invite", "This chat is gone from this device."],
     [typo(code), "This code has a typo. Check it, or ask for the code again."],
   ]) {
     await bob.page.goto("about:blank");

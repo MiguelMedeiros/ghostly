@@ -98,4 +98,72 @@ describe("identity signers on Node", () => {
     expect(JSON.stringify(hub.replay(0))).not.toContain("s3cret");
     expect(hub.replay(0).map((e) => e.type)).toEqual(["daemon.started"]);
   });
+
+  // Nobody approved a Pubky sign-in: it ended as `engine`, "The operation was aborted due to timeout", after 300 s,
+  // naming neither the approval it waited for nor --timeout. A local double, not the public relay.
+  it("an approval that does not come in time is a timeout naming it and --timeout", async () => {
+    const { ctx, node } = fake();
+    const signer = IDENTITY_PROVIDERS.find((p) => p.id === "pubky")!.signers.find((s) => s.kind === "in-app") as InAppSigner<unknown>;
+    const run = vi.spyOn(signer, "run").mockImplementation((sctx) => new Promise((_, reject) => {
+      sctx.signal!.addEventListener("abort", () => reject(sctx.signal!.reason));
+    }));
+    try {
+      await expect(callApi(ctx, "identity.add", { provider: "pubky", timeout: 5 })).rejects.toMatchObject({
+        code: "timeout", message: "Timed out after 5 s waiting for Pubky Ring or Pubky Passport to approve the Pubky proof: --timeout <seconds> waits longer",
+      });
+    } finally { run.mockRestore(); }
+    expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  }, 15_000);
+
+  // `identity complete <draft>` with nothing said "evidence is required", the API's word, naming neither way to give it.
+  it("asks for a tool's missing output by where the CLI takes it, and a published record for none", async () => {
+    const { ctx, node } = fake();
+    let n = 0;
+    node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => ({
+      draftId: `d${++n}`, binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) },
+    }));
+    node.completeIdentityProof.mockResolvedValue({ id: "p1", provider: "domain", subject: "example.com", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] });
+    const ssh = await callApi(ctx, "identity.add", { provider: "ssh", subject: `SHA256:${"A".repeat(43)}`, signer: "ssh-keygen" }) as { draft: string };
+    for (const evidence of [undefined, "", " \n"]) {
+      await expect(callApi(ctx, "identity.complete", { draft: ssh.draft, evidence })).rejects.toMatchObject({
+        code: "usage", details: { needs: "evidence" },
+        message: `Missing what ssh-keygen printed: give it from a file (--evidence-file f) or on stdin (… | ghostly identity complete ${ssh.draft})`,
+      });
+    }
+    expect(node.completeIdentityProof).not.toHaveBeenCalled();
+    const domain = await callApi(ctx, "identity.add", { provider: "domain", subject: "example.com", signer: "dns" }) as { draft: string };
+    await expect(callApi(ctx, "identity.complete", { draft: domain.draft })).resolves.toMatchObject({ done: true });
+    expect(node.completeIdentityProof).toHaveBeenCalledWith({ draftId: domain.draft, evidence: { method: "dns" } });
+  });
+
+  /**
+   * The engine keeps a draft 30 minutes and four at once. `identity add` promised an hour (`expiresInSeconds: 3600`) and
+   * kept every draft, so a draft the engine had dropped went on to it and failed as "This proof was started too long ago".
+   */
+  it("keeps a draft as long as the engine does, and says so", async () => {
+    const { ctx, node } = fake();
+    let n = 0;
+    node.beginIdentityProof.mockImplementation(async ({ provider, subject }: { provider: string; subject: string }) => ({
+      draftId: `keep${++n}`, binding: { v: 1, provider, subject, key: "y".repeat(52), issuedAt: 1_800_000_000, expiresAt: 1_800_086_400, nonce: "A".repeat(22) },
+    }));
+    node.completeIdentityProof.mockResolvedValue({ id: "p1", provider: "domain", subject: "example.com", verified: true, issuedAt: 1, expiresAt: 2, sharedWith: [] });
+    const gone = { code: "not_found", message: "No such draft here: it is kept by the daemon that made it, for 30 minutes and while fewer than 4 newer ones wait" };
+    const add = () => callApi(ctx, "identity.add", { provider: "domain", subject: "example.com", signer: "dns" }) as Promise<{ draft: string; expiresInSeconds: number }>;
+
+    const added = [];
+    for (let i = 0; i < 5; i++) added.push(await add());
+    expect(added[0].expiresInSeconds).toBe(30 * 60);
+    await expect(callApi(ctx, "identity.complete", { draft: added[0].draft })).rejects.toMatchObject(gone);
+    await expect(callApi(ctx, "identity.complete", { draft: added[1].draft })).resolves.toMatchObject({ done: true });
+    expect(node.completeIdentityProof).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const old = await add();
+      vi.setSystemTime(Date.now() + 31 * 60_000);
+      await expect(callApi(ctx, "identity.complete", { draft: old.draft })).rejects.toMatchObject(gone);
+      await expect(callApi(ctx, "identity.cancel", { draft: old.draft })).rejects.toMatchObject(gone);
+    } finally { vi.useRealTimers(); }
+    expect(node.completeIdentityProof).toHaveBeenCalledTimes(1);
+  });
 });
