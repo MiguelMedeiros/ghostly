@@ -280,13 +280,14 @@ const HOLDER_WAIT_MS = 5_000;
  * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step. A daemon takes the profile before
  * its socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
  * goes through it, its client the answer. Only the lock was looked at again, and a command run while the daemon started
- * failed busy, told to start the daemon that was running.
+ * failed busy, told to start the daemon that was running. A `listen` with no daemon opens it the same way, as the
+ * daemon (`mode`).
  */
-async function openOneShot(g: Globals, options: RuntimeOptions = {}): Promise<Host | DaemonClient> {
+async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
   const until = Date.now() + HOLDER_WAIT_MS;
   for (;;) {
-    try { return await openHost(g.paths, "one-shot", VERSION, options); }
+    try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== "busy") throw error;
       const client = await connectDaemon(g.paths);
@@ -940,9 +941,13 @@ async function listenCommand(argv: string[]): Promise<void> {
     });
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths);
-  if (client) await warnVersion(client);
-  if (client) {
+  // With no daemon, this process becomes it (the socket too, so hooks can answer with `ghostly send`). A profile held
+  // is waited for as a one-shot waits (`openOneShot`): a daemon starting answers on its socket in a moment, and is
+  // followed. A listen started a second too early used to die busy, while one started after followed it for good.
+  const opened = await connectDaemon(g.paths) ?? await openOneShot(g, {}, "daemon");
+  if (opened instanceof DaemonClient) {
+    const client = opened;
+    await warnVersion(client);
     // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
     const handle = await start((m, p) => client.call(m, p), async (chat) => {
       const c = await connectDaemon(g.paths, 1000);
@@ -960,9 +965,8 @@ async function listenCommand(argv: string[]): Promise<void> {
     process.on("SIGTERM", stop);
     return;
   }
-  // No daemon: this process becomes it (the socket too, so hooks can answer with `ghostly send`).
-  const [{ keepServing, openHost, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
-  const host: Host = await openHost(g.paths, "daemon", VERSION);
+  const [{ keepServing, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
+  const host = opened;
   const call = (m: string, p: Record<string, unknown>) => callApi(host.ctx, m, p);
   const handle = await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
