@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
+import { STORES, openDb, wrap } from "../src/shared/idb";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
   listing, revocation, signer, storeFiles,
@@ -200,6 +201,39 @@ describe("updates", () => {
     expect(accepted).toMatchObject({ sequence: 2, digest: v2.digest, permissions: ["chat", "name"] });
     expect(accepted.pending).toBeUndefined();
     expect(await bundleIds()).toEqual([`app-${v2.digest}`]);
+  });
+
+  it("a version installed while an update waits: the update adds, and Update grants, only what is new to that version", async () => {
+    const { store, v1 } = await installed({ permissions: ["internet"] });
+    const v3 = await bundle({ sequence: 3, permissions: ["internet", "chat"] });
+    net.put(PINNED_URL, v3.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v3, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    expect((await store.list())[0]).toMatchObject({ pending: { sequence: 3, added: ["chat"] } });
+    // A card of version 2, asking nothing, installed from its link: the install screen grants nothing.
+    const v2 = await bundle({ sequence: 2, permissions: [] });
+    net.put(BUNDLE_URL, v2.bytes);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v2.digest, grant: [] });
+    expect((await store.list())[0]).toMatchObject({ sequence: 2, permissions: [], pending: { sequence: 3, added: ["internet", "chat"] } });
+    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 3, permissions: ["internet", "chat"] });
+  });
+
+  it("Update refuses a waiting update whose added permissions are not the ones shown, and shows the new ones", async () => {
+    const { store, v1 } = await installed({ permissions: [] });
+    const v2 = await bundle({ sequence: 2, permissions: ["internet", "chat"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // A record kept by an older version, whose list was worked out against another version installed before.
+    const [row] = await appRows() as { pending: { added: string[] } }[];
+    row!.pending.added = ["chat"];
+    await wrap((await openDb()).transaction(STORES.apps, "readwrite").objectStore(STORES.apps).put(row));
+    await expect(store.acceptUpdate({ ref: v1.ref })).rejects.toThrow(/^permissions-changed/);
+    expect((await store.list())[0]).toMatchObject({ sequence: 1, permissions: [], pending: { sequence: 2, added: ["internet", "chat"] } });
+    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, permissions: ["internet", "chat"] });
   });
 
   it("the install screen says equivocation for a bundle that clashes with the update waiting, as Install answers", async () => {
