@@ -334,6 +334,14 @@
     "notice": "تفاعل أحدهم مع رسالتك",
     "react": "تفاعل"
   },
+  "refused": {
+    "fedimint": "تعذّر استلام الـ ecash من Fedimint: {{reason}}",
+    "payment": "تعذّر استلام دفعة: {{reason}}",
+    "sats": "تعذّر استلام {{amount}} ساتس: {{reason}}",
+    "satsFedimint": "تعذّر استلام {{amount}} ساتس عبر Fedimint: {{reason}}",
+    "testSats": "تعذّر استلام {{amount}} ساتس تجريبية: {{reason}}",
+    "testSatsFedimint": "تعذّر استلام {{amount}} ساتس تجريبية عبر Fedimint: {{reason}}"
+  },
   "reply": {
     "cancel": "إلغاء الرد",
     "deleted": "تم حذف الرسالة الأصلية",
