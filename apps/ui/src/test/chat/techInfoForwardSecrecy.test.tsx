@@ -53,3 +53,14 @@ describe("a chat's Tech Info says whether forward secrecy is on", () => {
     expect(screen.queryByTestId("tech-forward-secrecy")).not.toBeInTheDocument();
   });
 });
+
+describe("a chat's Tech Info on a phone", () => {
+  it("has its values that copy a thumb's height, at least 24 px", async () => {
+    // The session id's row was 230 x 16 px on a phone on its side.
+    await techInfo("on");
+    // The session id and both keys (the connection panel's keys have the same title).
+    const copies = screen.getAllByTitle("Click to copy");
+    expect(copies.length).toBeGreaterThan(0);
+    for (const copy of copies) expect(copy.className.split(/\s+/)).toContain("max-md:min-h-6");
+  });
+});
