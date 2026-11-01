@@ -29,12 +29,14 @@
     "stopped": "Parado"
   },
   "window": {
+    "busy": "{{app}} está carregando páginas demais ao mesmo tempo na máquina do seu contato. Tente de novo daqui a pouco.",
     "callOn": "Há uma chamada em andamento. Encerre-a para abrir {{app}}.",
     "elsewhere": "{{app}} tentou levar você para outro lugar, fora do que seu contato compartilha.",
     "failed": "O pedido falhou.",
     "notAnswering": "{{app}} não está respondendo na máquina do seu contato. Peça ao seu contato que confira se está rodando.",
     "tooSlow": "{{app}} não respondeu a tempo na máquina do seu contato. Tente de novo daqui a pouco.",
-    "unreachable": "Este serviço não está acessível. Os serviços existem enquanto o fantasma deles está online."
+    "unreachable": "Este serviço não está acessível. Os serviços existem enquanto o fantasma deles está online.",
+    "unshared": "{{app}} não está mais compartilhado com você."
   },
   "yourApps": "Seus apps"
 }
