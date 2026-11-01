@@ -283,6 +283,10 @@ describe("chats", () => {
     await expect(callApi(ctx, "group.typing", { group: "Mesh", status: "see https://x.example" })).rejects.toMatchObject({ code: "bad_request" });
     await expect(callApi(ctx, "group.typing", { group: "Mesh", stop: true, for: 5 })).rejects.toMatchObject({ code: "bad_request" });
     expect(node.setGroupTyping).toHaveBeenCalledTimes(2);
+    // Removed from it: refused with the group's reason, as `group send` says it (it was `bad_request`).
+    node.getState = () => ({ ...state, groups: [{ ...mesh, status: "removed", statusReason: "You were removed from this group" } as GroupView] });
+    await expect(callApi(ctx, "group.typing", { group: "Mesh" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
+    expect(node.setGroupTyping).toHaveBeenCalledTimes(2);
   });
 
   it("typing says a kind and a bot's status, checked before anything is said", async () => {
