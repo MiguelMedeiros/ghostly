@@ -253,6 +253,31 @@ describe("hands-free (locked) recording", () => {
     expect(onSendFile).toHaveBeenCalledOnce();
   });
 
+  it("leaves Enter to Resume reached with Tab after a click that gave it no focus (Safari, WKWebView, iOS)", async () => {
+    // Where a click does not focus a button, no blur ever cleared "pressed by a pointer", and Enter sent.
+    await locked();
+    await wait(2_000);
+    const pause = screen.getByTestId("voice-pause");
+    fireEvent.pointerDown(pause, mouse);
+    fireEvent.pointerUp(pause, mouse);
+    fireEvent.click(pause);
+    expect(screen.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+    // Shift+Tab to Resume, then Enter: the browser presses the focused button.
+    pause.focus();
+    expect(fireEvent.keyDown(pause, { key: "Enter" })).toBe(true);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+
+    // The bin, after a click that gave it no focus either, does not send.
+    const bin = screen.getByTestId("voice-delete");
+    fireEvent.pointerDown(bin, mouse);
+    fireEvent.pointerUp(bin, mouse);
+    bin.focus();
+    expect(fireEvent.keyDown(bin, { key: "Enter" })).toBe(true);
+    await wait(0);
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
   it("deletes with Esc or the bin, and gives the microphone back", async () => {
     await locked();
     await wait(1_000);
