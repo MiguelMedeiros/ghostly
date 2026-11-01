@@ -43,8 +43,11 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
+  /** The calls on, as `call.list` shows them. */
+  const calls: { call: string; chat: string; state: string }[] = [];
   const ctx = {
     runtime: { server: { node }, paths: { name: "default", dir } },
+    calls: { list: () => calls },
     hub: {
       onEvent: (l: (e: GhostlyEvent) => void) => { events.add(l); return () => events.delete(l); },
       onState: (l: (s: EngineState) => void) => { states.add(l); return () => states.delete(l); },
@@ -57,7 +60,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
   const event = (e: Partial<GhostlyEvent>) => { for (const l of events) l({ seq: 0, id: "x", at: 1, type: "x", ...e }); };
   /** A chat's link changes, and the engine says its state changed. */
   const linkChanged = (linkId: string, fields: Partial<LinkView>) => { setLink(linkId, fields); for (const l of states) l(s); };
-  return { ctx, node, s, dir, emitted, transfer, event, setLink, linkChanged };
+  return { ctx, node, s, dir, emitted, calls, transfer, event, setLink, linkChanged };
 }
 
 describe("file wait", () => {
@@ -227,6 +230,27 @@ describe("chat disconnect --hold", () => {
     expect(node.setDeliveryMode).toHaveBeenCalledWith({ linkId: "chat-one", mode: "stream" });
     expect(emitted.at(-1)).toMatchObject({ type: "chat.released", chat: "chat-one", reason: "lifted" });
     await expect(callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 10_081 })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  // Held mid-call, the call talked on over its own connection while its signals had no way across: one side's hang-up
+  // never reached the other, whose call ended only when its media stalled out 16 s later, as failed.
+  it("is refused while a call is on in the chat, which stays live; another chat is held", async () => {
+    const { ctx, node, calls, dir, emitted } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    const refused = await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toMatch(/^A call is on in this chat: hang it up first \(ghostly call hangup chat-one\)/);
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    expect(existsSync(join(dir, "holds.json"))).toBe(false);
+    expect(emitted).toEqual([]);
+    // Without --hold the chat reconnects at once, and a signal the session could not carry goes on the next one.
+    await callApi(ctx, "chat.disconnect", { chat: "Alice" });
+    expect(node.disconnect).toHaveBeenCalledWith({ linkId: "chat-one" });
+    await callApi(ctx, "chat.disconnect", { chat: "Bob", hold: 1 });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-two", transport: "dht" });
+    calls.length = 0;
+    await callApi(ctx, "chat.disconnect", { chat: "Alice", hold: 1 });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
   });
 
   // The engine refused it as `engine`, "Both peers must choose a live method first", though this side had: a bot retried.
