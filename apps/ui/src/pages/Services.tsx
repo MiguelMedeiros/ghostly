@@ -83,13 +83,25 @@ export function Services() {
           ? <Block><Notice>{t("services.fromContactsEmpty")}</Notice></Block>
           : fromContacts.map((contact) => (
             <Row key={contact.key} label={contact.name} hint={<span className="font-mono">{contact.short}</span>}>
-              {contact.apps.map((app) => (
-                <Button key={app.id} variant="primary" data-testid="contact-service-open" onClick={() => {
-                  setOpenError("");
-                  if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
-                  platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
-                }}>{t("services.open", { app: app.name ?? app.id })}</Button>
-              ))}
+              {contact.apps.map((app) => {
+                const appName = app.name ?? app.id;
+                // The verb around the name ("Open {{app}}", "{{app}} を開く") stays whole; the name alone is cut.
+                const [before, after = ""] = t("services.open", { app: "\u0000" }).split("\u0000");
+                return (
+                  // At most the row's width, the name cut with an ellipsis in its own direction: a 46-character name went
+                  // 51 px past a 375 px phone's edge, its start cut off in Arabic. The whole label is in the title.
+                  <Button key={app.id} variant="primary" data-testid="contact-service-open" title={t("services.open", { app: appName })}
+                    className="flex items-center max-w-full min-w-0" onClick={() => {
+                      setOpenError("");
+                      if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
+                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
+                    }}>
+                    {before && <span className="whitespace-pre">{before}</span>}
+                    <span data-testid="contact-service-name" className="truncate" dir="auto">{appName}</span>
+                    {after && <span className="whitespace-pre">{after}</span>}
+                  </Button>
+                );
+              })}
             </Row>
           ))}
         {openError && <Block><Notice tone="error">{openError}</Notice></Block>}
