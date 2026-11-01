@@ -19,7 +19,7 @@ import { handOut, openTreeFile, rollback, SqlTree, type TreeFile } from "./sqlTr
  * - at start the snapshot is loaded and the journal replayed. A short journal that is whole stays as it is, and so
  *   does the snapshot; a long one, or one whose last entry was cut short, is folded into a fresh snapshot first;
  * - a close leaves a short journal too, with a mark at its end that says the store was closed: the rows are on disk
- *   already, and writing the whole snapshot again for them cost a second or more of every command on a large profile;
+ *   already, and writing the whole snapshot again for them would add megabytes of disk writes to every command;
  * - a chat's ratchet keys are forgotten as they are used (WISP 4xx), and an append-only journal would keep each one: a
  *   journal that holds a ratchet state is folded once the snapshot is an hour old, at a write, a close or a start;
  * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
@@ -113,7 +113,8 @@ const KEEP_BYTES = 1024 * 1024;
 const RATCHET = "ratchetState";
 /**
  * How long a used ratchet state may stay on the disk while the store is in use, so a profile folder copied later opens
- * nothing older. Not at every close: writing the whole snapshot again costs a large profile a second or more.
+ * nothing older. The time a fold blocks does not set this (tens of milliseconds at 100,000 messages, which are not in
+ * the snapshot); its disk writes do: 4 MB on that profile, so about 100 MB a day at this hour and 600 MB at 10 minutes.
  */
 const RATCHET_FOLD_MS = 60 * 60_000;
 /**
