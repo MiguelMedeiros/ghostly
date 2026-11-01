@@ -43,7 +43,7 @@ test("an address with no page goes home, on a phone too, and Back never finds th
   await bob.page.goBack();
   await expect(bob.page.getByTestId("sidebar")).toBeVisible();
 
-  // The pages stay as they were, a section of Settings too.
-  await bob.page.goto("/#/settings/advanced");
-  await expect.poll(() => bob.page.evaluate(() => location.hash)).toBe("#/settings/advanced");
+  // The pages stay as they were, a section of Settings too (a real one: an old name such as `advanced` leads to its new place).
+  await bob.page.goto("/#/settings/appearance");
+  await expect.poll(() => bob.page.evaluate(() => location.hash)).toBe("#/settings/appearance");
 });
