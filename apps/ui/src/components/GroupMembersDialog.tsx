@@ -191,12 +191,14 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           return <li key={link.id} tabIndex={-1} data-testid="group-invite-contact" data-link={link.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <span dir="auto" className="min-w-0 truncate text-sm">{contactName(link)}</span>
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
-              : !link.groups ? <span className="text-xs text-text-muted" title={t("group.members.needsBothHint")}>{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
+              : !link.groups ? <span className="text-xs text-text-muted">{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
                 className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
       </ul>
+      {/* Why a contact has no Invite, in words: it was a tooltip, which a phone never shows. */}
+      {contacts.some(link => !link.groups && !invited.has(link.id)) && <p data-testid="group-invite-why" className="mt-1 text-xs text-text-muted">{t("group.members.needsBothHint")}</p>}
     </div>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
     {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
