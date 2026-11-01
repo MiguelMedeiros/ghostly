@@ -540,6 +540,10 @@ const METHODS: Record<string, Method> = {
       return chatJson(findChat(state(ctx).links, link.id));
     }
     const minutes = num(params, "hold", 0, { min: 0, max: HOLD_MAX_MINUTES });
+    // A call's signals cross the live link: held off it, the call talked on over its own connection, and a hang-up
+    // from either side never reached the other (that call ended only when its media stalled out, 16 s later).
+    const call = minutes > 0 ? ctx.calls.list().find((c) => c.chat === link.id) : undefined;
+    if (call) throw new CliError("busy", `A call is on in this chat: hang it up first (ghostly call hangup ${link.id}), then hold the chat`, { call: call.call });
     if (minutes === 0) await releaseHold(ctx, link.id, "lifted");
     else await holdChat(ctx, link, minutes);
     return { ...chatJson(findChat(state(ctx).links, link.id)), heldUntil: holdOf(ctx, link.id) };
