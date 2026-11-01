@@ -876,6 +876,31 @@ describe("the ecash of a paid invoice", () => {
 });
 
 describe("removing a wallet", () => {
+  it("waits for a Lightning payment that is splitting its ecash, and is refused once that payment is in flight at the mint", async () => {
+    // forget read the payments in flight before it waited for the split's lock: the payment went on to the mint, and
+    // the removal then deleted its reserved ecash; when the mint said it failed, the 48 sats were booked as a fee.
+    const INVOICE = fakeInvoice(38, new Uint8Array(32).fill(7));
+    const pending = { quote: "q1", request: INVOICE, amount: Amount.from(38), fee_reserve: Amount.from(2), state: "UNPAID" };
+    mintApi.createMeltQuoteBolt11.mockResolvedValue(pending);
+    mintApi.checkMeltQuoteBolt11.mockResolvedValue(pending);
+    mintApi.prepareMelt.mockImplementation(async (method: string, quote: unknown, inputs: unknown[]) => ({ method, inputs, outputData: [], keysetId: KEYSET, quote }));
+    let release!: (answer: unknown) => void;
+    mintApi.completeSwap.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    // At the mint the payment is pending: its route is being tried.
+    mintApi.completeMelt.mockImplementation(async () => { mintApi.checkMeltQuoteBolt11.mockResolvedValue({ ...pending, state: "PENDING" }); return { quote: { state: "PENDING" }, change: [] }; });
+    const { wallet } = setup();
+    const { quote, mint } = await wallet.quoteInvoice(INVOICE);
+    const paying = wallet.payQuote(quote, mint);
+    await vi.waitFor(() => expect(mintApi.completeSwap).toHaveBeenCalledOnce());
+    // Remove the wallet while the split is at the mint: no payment is written down yet.
+    const removal = wallet.forget([MINT]).then(() => "removed", (e: Error) => e.message);
+    release(sendAnswer());
+    await expect(paying).resolves.toBe(false);
+    await expect(removal).resolves.toMatch(/^A Lightning payment from this wallet is still in flight/);
+    expect(await all<PendingMelt>(STORES.melts), "the payment is still written down").toMatchObject([{ quote: "q1", secrets: ["s1", "s2"] }]);
+    expect((await proofs()).map((p) => `${p.secret}${p.reserved ? " reserved" : ""}`).sort(), "and its ecash with it").toEqual(["b", "k", "s1 reserved", "s2 reserved"]);
+  });
+
   it("asks its mints once more about a swap still written down, and waits for it instead of cutting it off", async () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockRejectedValue(lost());
