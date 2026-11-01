@@ -184,7 +184,9 @@
     "shareTitleUnnamed": "Entra in un gruppo su Ghostly",
     "shared": "Condiviso",
     "showQr": "Mostra QR",
-    "title": "Link del gruppo"
+    "title": "Link del gruppo",
+    "tooMany": "Troppi link di gruppo aperti",
+    "tooManyNext": "Elimina un gruppo che aspetta ancora di entrare o incolla il link in Unisciti."
   },
   "makeAdmin": {
     "body": "Non sarai più l'admin. Solo {{name}} potrà rinominare il gruppo, cambiarne foto e link, invitare o rimuovere membri, e restituirti il ruolo.",
