@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyUpdate, askForShare, buildGone, forwardShare, listenForShares, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
+import { applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, listenForShares, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
 import { carryIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
 
 // covers: app.pwa.update, app.pwa.share-target
@@ -95,6 +95,66 @@ describe("Reload on a new version", () => {
     const reload = vi.fn();
     await applyUpdate({ reload });
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("another tab took a new version", () => {
+  /** The new worker activates and takes every open page of the app (`clients.claim()` in sw.ts). */
+  const takenBy = (worker: FakeWorker) => {
+    container.controller = worker;
+    container.dispatchEvent(new Event("controllerchange"));
+  };
+
+  it("a tab running the app reloads into it as soon as the new worker takes it", async () => {
+    const reload = vi.fn();
+    const mayStart = followNewVersion({ reload });
+    await mayStart(async () => {});
+    expect(reload).not.toHaveBeenCalled();
+    takenBy(new FakeWorker("activated"));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("a tab waiting for the lock does not start the old build: it reloads once the lock is its own and the tab that pressed Reload asked for it again", async () => {
+    const reload = vi.fn();
+    const mayStart = followNewVersion({ reload });
+    takenBy(new FakeWorker("activated"));
+    // Waiting on "already open in another tab": nothing runs, so nothing reloads yet; its place for the lock stays.
+    expect(reload).not.toHaveBeenCalled();
+    let askedAgain = () => {};
+    const handOver = vi.fn(() => new Promise<void>((resolve) => { askedAgain = resolve; }));
+    let started = false;
+    void mayStart(handOver).then(() => { started = true; });
+    await vi.waitFor(() => expect(handOver).toHaveBeenCalledTimes(1));
+    expect(reload).not.toHaveBeenCalled();
+    askedAgain();
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+    expect(started).toBe(false);
+  });
+
+  it("the first worker of all, taking a page that had none, replaces nothing", async () => {
+    container.controller = null;
+    const reload = vi.fn();
+    const mayStart = followNewVersion({ reload });
+    takenBy(registration.active!);
+    const handOver = vi.fn(async () => {});
+    await mayStart(handOver);
+    expect(handOver).not.toHaveBeenCalled();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("the tab that pressed Reload reloads once, by its own update", async () => {
+    const reload = vi.fn();
+    void followNewVersion({ reload })(async () => {});
+    const next = new FakeWorker("installed");
+    registration.waiting = next;
+    const applied = vi.fn();
+    const applying = applyUpdate({ reload: applied });
+    await vi.waitFor(() => expect(next.posted).toEqual([{ type: "skip-waiting" }]));
+    takenBy(next);
+    await applying;
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(reload).not.toHaveBeenCalled();
   });
 });
 
