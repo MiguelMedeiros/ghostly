@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "Replier la liste des discussions",
     "expand": "Déplier la liste des discussions",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, vous avez été mentionné",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, messages non lus",
     "unreadCount": "{{name}}, {{count}} messages non lus",

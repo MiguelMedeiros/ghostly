@@ -2,7 +2,7 @@ import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalSto
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
-import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
+import { answerable, InvitationButtons, InvitationRefusal, LinkTryAgain, TakenBackDelete, invitationStatus, useInvitationAnswer } from "./GroupInvitation";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
@@ -420,8 +420,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
   const { busy, refused, answer } = useInvitationAnswer(group);
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
-  const status = invitation ? (invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
-      : invitationLine(invitation, t))
+  const status = invitation ? invitationStatus(group, t)
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;

@@ -57,6 +57,8 @@
   "rail": {
     "collapse": "Contraer la lista de chats",
     "expand": "Expandir la lista de chats",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, te mencionaron",
     "title": "{{action}} ({{keys}})",
     "unread": "{{name}}, mensajes sin leer",
     "unreadCount": "{{name}}, {{count}} mensajes sin leer",
