@@ -116,6 +116,18 @@ describe("app publish", () => {
     expect(readAppBundle(new Uint8Array(readFileSync(join(dir, "app.ghostlyapp"))))).toMatchObject({ ok: true, bundle: { manifest: { sequence: 2 } } });
   }, 60_000);
 
+  it("a bundle published into another --out never holds the one an earlier publish left in the folder", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    const out = join(tmp(), "chess.ghostlyapp");
+    const made = ok(await ghostly(["app", "publish", dir, "--key", key, "--out", out])) as { files: string[] };
+    expect(made.files).toEqual([...files.keys()].sort());
+    const read = readAppBundle(new Uint8Array(readFileSync(out)));
+    expect(read.ok && [...read.bundle.files.keys()]).not.toContain("app.ghostlyapp");
+  }, 60_000);
+
   it("makes an owner-only key on first use and never prints it", async () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);

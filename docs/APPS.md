@@ -69,7 +69,7 @@ the whole app, plain JavaScript typed against [`@ghostlytools/sdk/app`](SDK.md),
 there to a store. `--name` and `--title` set the app's name and title; by default they come from the folder's name. It
 writes nothing over a file that is there unless `--force`.
 
-`app publish` takes every file of the folder but dot files, the README included. Once the app has sources and a build,
+`app publish` takes every file of the folder but dot files, `ghostly-revoke.json` and the bundle it writes (`app.ghostlyapp`, or `--out`), the README included. Once the app has sources and a build,
 publish a folder that holds only the built `index.html` and `ghostly-app.json`, as
 [ghostly-chess](https://github.com/MiguelMedeiros/ghostly-chess) does with its `scripts/stage.mjs`.
 
