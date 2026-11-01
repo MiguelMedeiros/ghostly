@@ -7001,8 +7001,9 @@ export class GhostlyNode implements EngineImplementation {
       // The record now lists the new device: the network settings go into it, and the links start.
       afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
       // An enrollment that ended after its grant went out and before the new device said it stored it: that device
-      // may hold the secret, so the set moves to a new one (once this enrollment is over).
-      onChange: (view) => { if (view.step === "failed") setTimeout(() => void this.rotateIfDue().catch(() => {}), 0); },
+      // may hold the secret, so the set moves to a new one (once this enrollment is over). Any end tries it: one that
+      // a second Add cancelled was refused while that one ran, and is due once it is over, done included.
+      onChange: (view) => { if (view.step === "failed" || view.step === "done") setTimeout(() => void this.rotateIfDue().catch(() => {}), 0); },
     });
     this.enrollment = inviter;
     try { return await inviter.start(); } catch (error) {
