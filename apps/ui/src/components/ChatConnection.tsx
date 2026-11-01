@@ -340,7 +340,7 @@ function KeyRow({ label, value, testId }: { label: string; value: string; testId
       <dt>{label}</dt>
       <dd className="min-w-0">
         <button type="button" data-testid={testId} onClick={copy} title={t("chat.message.copyHint")} aria-label={t("connection.panel.copyKey", { label, value })}
-          className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
+          className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent max-md:min-h-6 ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
           {copied ? t("common.copied") : value}
         </button>
       </dd>
