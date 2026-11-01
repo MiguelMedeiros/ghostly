@@ -955,4 +955,18 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(ok(await as(alice, "pin", "bob", mine.id, "--timeout", "50"))).toMatchObject({ messageId: mine.id, confirmed: true });
     expect(ok(await as(bob, "chat", "show", "alice")).pin).toMatchObject({ messageId: theirs.id, by: "peer" });
   });
+
+  it("task send and task update as one-shots: each stays until it went out, and the contact has the card done as the update ends", async () => {
+    // Before, the update answered `confirmed: false` in about a second and left with its edit unsaid: Bob's card said
+    // running until a later one-shot stayed long enough. The send goes out first (`sent`: on the DHT floor its text
+    // alone, the card once the chat is live). Each is a fresh process; the same 50 s for its first dial as above.
+    expect(ok(await as(alice, "task", "send", "bob", "--id", "one-shot-task", "--title", "From a one-shot", "--timeout", "50"))).toMatchObject({ task: "one-shot-task", delivery: expect.stringMatching(/^(sent|delivered)$/) });
+    expect(ok(await as(alice, "task", "update", "bob", "one-shot-task", "--status", "done", "--timeout", "50"))).toMatchObject({ task: "one-shot-task", confirmed: true });
+    // Bob confirms the edit as he stores it: his history may say it a moment later. Alice's process is gone by now, so
+    // nothing else carries it meanwhile.
+    const card = async () => ((ok(await as(bob, "chat", "history", "alice", "--limit", "1")).messages as { from: string; card?: Record<string, unknown> }[])[0]!);
+    let mine = await card();
+    for (const until = Date.now() + 10_000; mine.card?.status !== "done" && Date.now() < until; mine = await card()) await new Promise((r) => setTimeout(r, 250));
+    expect(mine).toMatchObject({ from: "peer", card: { kind: "task", id: "one-shot-task", title: "From a one-shot", status: "done" } });
+  });
 });
