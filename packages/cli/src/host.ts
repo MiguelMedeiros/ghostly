@@ -1,5 +1,5 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { chmodSync, existsSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
@@ -12,7 +12,7 @@ import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { resumeHolds } from "./holds";
 import { ownFolder, privateFolder } from "./privateFolder";
-import { acquireLock, type ProfilePaths } from "./profiles";
+import { acquireLock, startingPath, type ProfilePaths } from "./profiles";
 import { startRuntime, type RuntimeOptions } from "./runtime/engine";
 import { flushCardUpdates } from "./statusCards";
 
@@ -45,7 +45,11 @@ export interface Host {
  * `deferGroups`: the groups' sessions would spend the relays' budget its message needs.
  */
 export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], version: string, options: RuntimeOptions = {}): Promise<Host> {
-  const release = acquireLock(paths);
+  const locked = acquireLock(paths);
+  // A daemon says it is starting until its socket listens (`serve`): a command that finds the profile held tells it
+  // from a one-shot command (`startingDaemon`). Without it, `daemon status` said no daemon ran and `daemon stop` missed it.
+  const unmark = mode === "daemon" ? markStarting(paths) : () => {};
+  const release = () => { unmark(); locked(); };
   let runtime;
   try {
     runtime = await startRuntime(paths, mode === "daemon" ? { ...options, logJoins: true } : options);
@@ -139,6 +143,7 @@ export async function serve(host: Host): Promise<Served> {
     try { server.listen(path, () => { server.off("error", reject); resolve(); }); } finally { umask?.(); }
   });
   if (process.platform !== "win32") chmodSync(path, 0o600);
+  unmarkStarting(ctx.runtime.paths);
   let closing: Promise<void> | null = null;
   return {
     server,
@@ -150,6 +155,16 @@ export async function serve(host: Host): Promise<Served> {
       setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 500).unref();
     })),
   };
+}
+
+/** Writes the daemon's start mark (`startingDaemon`); the function it returns removes it. A mark it cannot write is none. */
+function markStarting(paths: ProfilePaths): () => void {
+  try { writeFileSync(startingPath(paths.dir), String(process.pid), { mode: 0o600 }); } catch { /* read as a one-shot's hold */ }
+  return () => unmarkStarting(paths);
+}
+
+function unmarkStarting(paths: ProfilePaths): void {
+  try { rmSync(startingPath(paths.dir), { force: true }); } catch { /* gone already */ }
 }
 
 let guarded = false;
