@@ -180,6 +180,31 @@ describe("updates", () => {
     expect(await store.preview({ url: PINNED_URL })).toMatchObject({ install: "update", asks: ["name"] });
   });
 
+  it("an app uninstalled while its waiting update is being accepted stays uninstalled", async () => {
+    const { store, v1 } = await installed();
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
+    net.put(PINNED_URL, v2.bytes);
+    await net.putStore(await storeFiles({ apps: [listing(v2, [PINNED_URL])] }));
+    await store.addStore({ url: STORE_URL });
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // Update pressed; Uninstall (another tab, or the same dialog while Update is busy) lands while it reads the files.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reading!: () => void;
+    const started = new Promise<void>((resolve) => { reading = resolve; });
+    const engine = store as unknown as { readBundleBytes: (...args: unknown[]) => Promise<unknown> };
+    const read = engine.readBundleBytes.bind(store);
+    const spy = vi.spyOn(engine, "readBundleBytes").mockImplementation(async (...args: unknown[]) => { const bytes = await read(...args); reading(); await held; return bytes; });
+    const accept = store.acceptUpdate({ ref: v1.ref });
+    await started;
+    await store.uninstall({ ref: v1.ref });
+    release();
+    await expect(accept).rejects.toThrow(/^not-installed/);
+    spy.mockRestore();
+    expect(await store.list(), "not back on the new version, with its data gone").toEqual([]);
+    expect(await bundleIds()).toEqual([]);
+  });
+
   it("an app uninstalled while an update that adds a permission downloads leaves no files behind", async () => {
     const { store, v1 } = await installed();
     const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"] });
