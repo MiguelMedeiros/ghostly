@@ -36,7 +36,7 @@ function fakeRepo() {
   const kinds = new Map<string, { event: string; head_branch: string }>();
   /** The run a list of jobs comes from, where it is not what `kinds` (or a push to dev) says. */
   const meta = new Map<object[], { event: string; head_branch: string; created_at?: string }>();
-  const files = new Map<number, string[]>();
+  const files = new Map<number, string[] | null>();
   /** The draft gate's jobs per commit (the fast tier), and CI's runs still going on each head, which the train may cancel. */
   const drafts = new Map<string, object[]>();
   const going = new Map<string, number[]>();
@@ -97,7 +97,7 @@ function fakeRepo() {
         if (await counts(jobs, run)) return jobs;
       return [];
     },
-    pullFiles: async (n: number) => (readState(pulls.get(n)?.body) ? readState(pulls.get(n)!.body).prs.flatMap((m: { number: number }) => files.get(m.number) ?? [`packages/core/src/fix${m.number}.ts`]) : (files.get(n) ?? [`packages/core/src/fix${n}.ts`])),
+    pullFiles: async (n: number) => (readState(pulls.get(n)?.body) ? readState(pulls.get(n)!.body).prs.flatMap((m: { number: number }) => files.get(m.number) ?? [`packages/core/src/fix${m.number}.ts`]) : files.has(n) ? files.get(n)! : [`packages/core/src/fix${n}.ts`]),
     draftJobs: async (sha: string) => drafts.get(sha) ?? [],
     cancelCi: async (sha: string) => {
       if (cancelAccess.denied) return { cancelled: [], denied: cancelAccess.denied };
@@ -739,6 +739,30 @@ describe("a run of the train", () => {
     expect(r.dropped).toEqual([13, 12]);
     expect(r.log.filter((line: string) => line.startsWith("DROP #13"))).toHaveLength(1);
     expect(repo.comments.get(13)).toHaveLength(1);
+  });
+
+  it("takes out a pull request whose files GitHub does not list when the batch's push is refused for a workflow", async () => {
+    // GitHub lists no files for a pull request of 3000 or more: every run threw on the list it could not read, and the
+    // line waited behind it. One that lists a workflow leaves first; the unlisted one only when the push is still refused.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    repo.add(13);
+    repo.add(14);
+    repo.files.set(12, null);
+    repo.files.set(14, [".github/workflows/ci.yml"]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      const aboard = sha.split(":")[1]?.split(",") ?? [];
+      if (aboard.includes("12") || aboard.includes("14")) throw new Error(`! [remote rejected] (refusing to allow a GitHub App to create or update workflow \`.github/workflows/big.yml\` without \`workflows\` permission)`);
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 13]);
+    expect(r.dropped).toEqual([14, 12]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/big\.yml\)/);
+    expect(repo.comments.get(14)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
 
   it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
@@ -1659,6 +1683,11 @@ describe("one pull request alone", () => {
     repo.files.set(22, ["README.md"]);
     expect((await repo.run()).dropped).toEqual([22]);
     expect(repo.comments.get(22)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    // GitHub lists no files for a pull request of 3000 or more: the same, where every run threw on the list.
+    repo.add(23, { behind: true });
+    repo.files.set(23, null);
+    expect((await repo.run()).dropped).toEqual([23]);
+    expect(repo.comments.get(23)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
 
   it("gives a red pull request one more run on a fresh rebase, then queue:failed", async () => {
