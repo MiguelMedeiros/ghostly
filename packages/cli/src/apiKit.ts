@@ -4,6 +4,7 @@ import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/b
 import { CliError } from "./errors";
 import type { CallManager } from "./calls/manager";
 import type { EventHub } from "./events";
+import type { GroupAutoJoin } from "./groupAuto";
 import type { Runtime } from "./runtime/engine";
 
 /**
@@ -15,6 +16,8 @@ export interface ApiContext {
   hub: EventHub;
   /** Voice calls (WISP 1100 § Calls). */
   calls: CallManager;
+  /** Group invitations accepted by themselves (`group auto`). */
+  groupAuto: GroupAutoJoin;
   /** How the host runs: a daemon stays; a one-shot leaves when its command is done. */
   mode: "daemon" | "one-shot";
   version: string;

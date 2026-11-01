@@ -10,6 +10,7 @@ import { CallManager } from "./calls/manager";
 import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
+import { GroupAutoJoin } from "./groupAuto";
 import { resumeHolds } from "./holds";
 import { ownFolder, privateFolder } from "./privateFolder";
 import { acquireLock, type ProfilePaths } from "./profiles";
@@ -55,6 +56,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   }
   const hub = new EventHub(paths.events);
   let calls!: CallManager;
+  let groupAuto!: GroupAutoJoin;
   try {
     await hub.open();
     const node = runtime.server.node;
@@ -79,13 +81,18 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
     reportAppFrames(hub, node, paths.dir);
+    // Group invitations over the chats `group auto on --from` names: only a daemon accepts them, those that came while it was down too.
+    groupAuto = new GroupAutoJoin({ engine: node, profileDir: paths.dir, joins: mode === "daemon" });
+    const joiner = groupAuto;
+    hub.onState((s) => joiner.check(s));
     runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
+    joiner.check(node.getState());
   } catch (error) {
     await runtime.close().catch(() => {});
     release();
     throw error;
   }
-  const ctx: ApiContext = { runtime, hub, mode, version, calls };
+  const ctx: ApiContext = { runtime, hub, mode, version, calls, groupAuto };
   resumeHolds(ctx);
   let closing: Promise<void> | null = null;
   return {

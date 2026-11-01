@@ -527,6 +527,7 @@ const METHODS: Record<string, Method> = {
     noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
+    ctx.groupAuto.forgetChat(link.id);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
@@ -613,7 +614,12 @@ const METHODS: Record<string, Method> = {
   },
   async "group.list"(ctx, params) {
     const showSecret = bool(params, "showSecret");
-    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt) };
+    return { groups: state(ctx).groups.map((g) => groupJson(g, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt), autoJoin: ctx.groupAuto.get() };
+  },
+  /** Invitations over the chats named accepted by the daemon itself (`group auto on --from`); no argument: the setting. */
+  async "group.auto"(ctx, params) {
+    if (params.on === undefined) return { autoJoin: ctx.groupAuto.get() };
+    return { autoJoin: ctx.groupAuto.set({ on: bool(params, "on"), from: list(params, "from") }) };
   },
   async "group.get"(ctx, params) {
     return groupJson(groupOf(ctx, params, "chat show <chat>"), bool(params, "showSecret"));
@@ -775,8 +781,11 @@ const METHODS: Record<string, Method> = {
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     try {
       const result = (await target.call(node(ctx), args)) ?? null;
-      // The chat is gone, as with `chat remove`: auto-answer no longer names it.
-      if (method === "removeLink") ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+      // The chat is gone, as with `chat remove`: auto-answer and auto-join no longer name it.
+      if (method === "removeLink") {
+        ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+        ctx.groupAuto.forgetChat(str(args ?? {}, "linkId", true));
+      }
       return result;
     } catch (error) {
       // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is

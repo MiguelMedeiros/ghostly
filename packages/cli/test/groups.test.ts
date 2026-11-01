@@ -40,7 +40,7 @@ function fake(messages: StoredMessage[] = []) {
     rotateGroup: vi.fn(async () => undefined),
     renameGroup: vi.fn(async () => undefined),
   };
-  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+  const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, groupAuto: { get: () => ({ on: false, from: [] }) }, mode: "daemon", version: "test" } as unknown as ApiContext;
   return { ctx, node };
 }
 
