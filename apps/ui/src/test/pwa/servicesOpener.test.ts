@@ -1,8 +1,8 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
 import { closeServiceWindows, hostErrorText, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { translatorFor } from "../../locales";
-import { SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
@@ -71,7 +71,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", hostError: () => null };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", tooSlow: "Too slow", offline: "Your contact is offline", retry: "Try again", hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -118,6 +118,28 @@ describe("one request from the app, over the contact's link", () => {
     }
   });
 
+  it("answers in the profile's words before the services worker would give up with its own English", async () => {
+    vi.useFakeTimers();
+    try {
+      const { port, replies, closed } = recorder();
+      let aborted = false;
+      const done = serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, (request) => new Promise<ClientResponse>((_, reject) => {
+        request.signal?.addEventListener("abort", () => { aborted = true; reject(new GhostlyHttpError("aborted", "x")); });
+      }), new CookieJar(), words);
+      await vi.advanceTimersByTimeAsync(ANSWER_BY_MS - 1);
+      expect(replies).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      await done;
+      expect(ANSWER_BY_MS).toBeLessThan(HEAD_TIMEOUT_MS);
+      // One answer only: the request's own end (aborted) adds nothing after it.
+      expect(replies).toEqual([{ type: "error", status: 504, text: "Too slow" }]);
+      expect(aborted).toBe(true);
+      expect(closed()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stops the contact's answer when the page stops reading", async () => {
     const { port, cancel } = recorder();
     let signal: AbortSignal | undefined;
@@ -145,6 +167,40 @@ describe("a contact's app shown over the app", () => {
   });
   afterEach(() => { setServiceWindowsCloser(null); closeServiceView(); });
   const open = (service: string) => openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service, title: service, send: async () => answer(200, [], []), words });
+
+  it("says so in the person's words while the contact is offline, in place of their last page, and loads the app anew once they are back", async () => {
+    let offline = false;
+    const listeners = new Set<() => void>();
+    const presence = { offline: () => offline, watch: (changed: () => void) => { listeners.add(changed); return () => listeners.delete(changed); } };
+    const change = (to: boolean) => { offline = to; for (const l of listeners) l(); };
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words, presence });
+    const view = document.getElementById(SERVICE_VIEW_ID)!;
+    const notice = view.querySelector<HTMLElement>("[data-testid=service-view-offline]")!;
+    const frame = view.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    expect(notice.hidden).toBe(true);
+    const first = frame.src;
+    change(true);
+    expect(notice.hidden).toBe(false);
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(notice.textContent).toBe("Your contact is offlineTry again");
+    expect(frame.style.display).toBe("none");
+    // Try again while still offline: the notice stays.
+    view.querySelector<HTMLButtonElement>("[data-testid=service-view-retry]")!.click();
+    expect(notice.hidden).toBe(false);
+    frame.src = "about:blank";
+    change(false);
+    expect(notice.hidden).toBe(true);
+    expect(frame.style.display).toBe("");
+    expect(frame.src, "the app is loaded anew").toBe(first);
+    // Closed, it hears nothing more.
+    view.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
+    expect(listeners.size).toBe(0);
+  });
+
+  it("opens on the notice when the contact is already offline", async () => {
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send: async () => answer(200, [], []), words, presence: { offline: () => true, watch: () => () => {} } });
+    expect(document.querySelector<HTMLElement>("[data-testid=service-view-offline]")!.hidden).toBe(false);
+  });
 
   it("is one at a time: opening another closes the one before", async () => {
     await open("one");
