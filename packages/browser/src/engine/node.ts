@@ -4230,6 +4230,11 @@ export class GhostlyNode implements EngineImplementation {
     return { error: null };
   }
 
+  /** Whether my removal of this message of a 1:1 chat is still on its way to the contact (`removeMessage`). */
+  removalPending({ linkId, messageId }: { linkId: string; messageId: string }): boolean {
+    return !!this.links.get(linkId)?.stored.removals?.some(r => r.id === messageId);
+  }
+
   /** A chat's row write of its removals and deleted ids waiting to go, by chat (`writeDeletions`). */
   private readonly deletionWrites = new Map<string, { patch: Partial<StoredLink>; relaxed: boolean; done: Promise<void> }>();
   /** The last such write of each chat, which the next one follows. */
