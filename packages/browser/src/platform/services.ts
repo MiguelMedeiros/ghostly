@@ -193,7 +193,8 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     setPrimaryMint: (url) => engine.call("walletSetPrimaryMint", { url }),
     removeMint: (url, acceptLoss) => engine.call("walletRemoveMint", { url, ...(acceptLoss ? { acceptLoss } : {}) }),
     receiveLightning: (amount, via) => engine.call("walletReceiveLightning", { amount, via, ...ln }),
-    quoteInvoice: (invoice, via) => engine.call("walletQuoteInvoice", { invoice, via, ...ln }),
+    watchInvoice: (invoice) => engine.call("walletWatchInvoice", { invoice, ...on }),
+    quoteInvoice: (invoice, via, amount) => engine.call("walletQuoteInvoice", { invoice, via, amount, ...ln }),
     lightningSetSource: (providerId, values) => engine.call("lightningSetSource", { providerId, values, ...ln }),
     lightningClearSource: () => engine.call("lightningClearSource", ln),
     lightningRetrySource: () => engine.call("lightningRetrySource", ln),
@@ -215,7 +216,7 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
       if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
       await engine.call("checkPayment", { linkId: link.id, paymentId });
     },
-    receiveToken: async (token) => (await engine.call("walletReceiveToken", { token })).amount,
+    receiveToken: async (token) => { const { amount, fee } = await engine.call("walletReceiveToken", { token }); return { amount, fee: fee ?? 0 }; },
     inspectCashu: async (text) => (await engine.call("walletInspectCashu", { text })).inspection,
     exportTokens: () => engine.call("walletExport", on),
     backupReminder: (event) => engine.call("walletBackupReminder", event),
@@ -546,6 +547,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (!state) return null;
     return {
       protocol: state.transport.protocol,
+      kind: state.transport.direct ? "direct" as const : "relays" as const,
       relays: state.settings.relays,
       defaultRelays: DEFAULT_RELAYS,
       turn: state.settings.iceServers[0] ?? null,

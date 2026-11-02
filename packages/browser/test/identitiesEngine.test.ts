@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, emptyIdentityLedger, identityFromSeed, identityStatement, type IdentityDisplay, type IdentityLedger } from "@ghostly/core";
-import { STORES, store, transact, wrap } from "../src/shared/idb";
+import { STORES, clearProfileStores, store, transact, wrap } from "../src/shared/idb";
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
@@ -29,7 +29,9 @@ type Me = "a" | "b";
 function pair() {
   const keys = { a: createIdentity().pubKeyZ32, b: createIdentity().pubKeyZ32 };
   const ledgers: Record<Me, IdentityLedger> = { a: emptyIdentityLedger(), b: emptyIdentityLedger() };
-  const state = { connected: true, online: true, theirs: {} as Partial<Record<Me, string>>, providers: { a: [fakeKey], b: [fakeKey] } as Record<Me, IdentityProofProvider[]> };
+  const state = { connected: true, online: true, theirs: {} as Partial<Record<Me, string>>, providers: { a: [fakeKey], b: [fakeKey] } as Record<Me, IdentityProofProvider[]>,
+    /** Chats deleted on that side: gone from its list, with their ledger. */
+    deleted: {} as Partial<Record<Me, boolean>> };
   const pkarr = new Map<string, { label: string; value: string }[]>();
   const resolved: string[] = [];
   const engines = {} as Record<Me, IdentityProofs>;
@@ -37,14 +39,14 @@ function pair() {
     const them: Me = me === "a" ? "b" : "a";
     return {
       // Only "chat" is a paired chat.
-      ledger: linkId => linkId === "chat" ? ledgers[me] : undefined,
+      ledger: linkId => linkId === "chat" && !state.deleted[me] ? ledgers[me] : undefined,
       updateLedger: async (_id, change) => (ledgers[me] = change(structuredClone(ledgers[me]))),
       channel: linkId => linkId === "chat" && state.connected ? {
         scope: () => ({ subject: keys[me], audience: keys[them], context: "c".repeat(64), session: "s".repeat(64) }),
         send: frame => queueMicrotask(() => void engines[them].frame("chat", structuredClone(frame) as Record<string, unknown>)),
       } : undefined,
       keys: () => ({ mine: keys[me], theirs: state.theirs[me] ?? keys[them] }),
-      linkIds: () => ["chat", "plain"], online: () => state.online, emit: vi.fn(),
+      linkIds: () => state.deleted[me] ? ["plain"] : ["chat", "plain"], online: () => state.online, emit: vi.fn(),
       publish: async (seed, records) => { pkarr.set(identityFromSeed(seed).pubKeyZ32, records); },
       resolve: async key => { resolved.push(key); return pkarr.get(key) ?? null; },
     };
@@ -145,6 +147,29 @@ describe("removing a proof and its revocation", () => {
     expect(records.some((r) => r.value.includes(kept.id))).toBe(false);
   });
 
+  /** The chat went with its ledger, so no chat listed the proof as shared: nothing was revoked and the contact kept it verified. */
+  it("a proof shared in a chat deleted since is still revoked when removed, after a restart too, and at Clear all data", async () => {
+    const { engines, state, pkarr, make, id, binding } = await shared();
+    state.deleted.a = true;
+    engines.a.forget("chat");
+    // A new run: what the proof went through is only in storage.
+    const again = make("a");
+    await again.load();
+    await again.remove({ id });
+    await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id })]);
+    await engines.b.checkRevocations();
+    expect(engines.b.linkView("chat", true)!.received[0].status).toBe("revoked");
+
+    const other = await prove(again);
+    state.deleted.a = false;
+    await again.share({ linkId: "chat", id: other.id });
+    state.deleted.a = true;
+    pkarr.clear();
+    await again.revokeAll();
+    expect([...pkarr.keys()].sort()).toEqual([binding.key, other.binding.key].sort());
+  });
+
   it("a proof never shared is removed without publishing anything; an unknown id changes nothing", async () => {
     const { engines, pkarr } = pair();
     await clearStorage(); await engines.a.load();
@@ -242,6 +267,22 @@ describe("removing a proof and its revocation", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.waitFor(() => expect(resolved).toHaveLength(3));
     third.stop();
+  });
+
+  it("a revocation lookup still on its way when the profile's data is cleared does not note its time in the cleared profile", async () => {
+    const { engines, pkarr, resolved } = await shared();
+    let release: (() => void) | undefined;
+    const get = pkarr.get.bind(pkarr);
+    // The relays answer the lookup only once the clear is over.
+    (pkarr as unknown as { get: (key: string) => unknown }).get = (key: string) => new Promise(resolve => { release = () => resolve(get(key)); });
+    resolved.length = 0;
+    const check = engines.b.checkRevocations();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await engines.b.revokeAll();
+    await clearProfileStores();
+    release!();
+    await check;
+    expect(await stored("identityRevocationsCheckedAt"), "the cleared profile has no lookup time").toBeUndefined();
   });
 
   it("a proof removed while the contact is live: the contact sees it withdrawn at once, then revoked, as a recheck says", async () => {

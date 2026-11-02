@@ -143,7 +143,8 @@
   },
   "store": {
     "count": "{{count}} apps",
-    "countOne": "1 app",
+    "count_one": "{{count}} app",
+    "count_other": "{{count}} apps",
     "curated": "Curada",
     "empty": "Esta loja não lista apps.",
     "filter": "Buscar nesta loja",
@@ -166,6 +167,7 @@
     "resume": "Voltar para {{title}}",
     "resumeSharing": "compartilhando um arquivo",
     "sharingWith": "compartilhando um arquivo com {{name}}",
+    "stoppedFailed": "{{title}} parou de funcionar e foi fechado. Se continuar acontecendo, avise o autor.",
     "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
     "stoppedRevoked": "{{title}} foi parado: o autor revogou esta versão",
     "with": "{{title}} com {{name}}",

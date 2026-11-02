@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, positionText, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -17,11 +17,11 @@ const greenForDocs = [
   ...["Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Website browser checks (${{ matrix.shard }}/4)", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
   ...["Changed paths", "Frontend lint and types", "Frontend tests (app)", "Frontend builds", "Tauri Backend (apps/desktop)", "Website"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 20 + i })),
 ];
-/** A push to dev whose tree a green run already tested (ci-changes.mjs's testedAs): only lint, types and Tauri Backend ran. */
+/** A push to dev whose tree a green run already tested (ci-changes.mjs's testedAs): only Tauri Backend ran. */
 const greenTested = [
   ...green,
-  ...["Frontend tests (app)", "Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Frontend builds", "Website", "Website browser checks (${{ matrix.shard }}/4)", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
-  ...["Changed paths", "Frontend lint and types", "Tauri Backend (apps/desktop)"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 30 + i })),
+  ...["Frontend lint and types", "Frontend tests (app)", "Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Frontend builds", "Website", "Website browser checks (${{ matrix.shard }}/4)", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
+  ...["Changed paths", "Tauri Backend (apps/desktop)"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 30 + i })),
 ];
 
 /** A fake repository: pull requests, labels, label events, comments, CI per commit, and the base's tip. */
@@ -608,6 +608,36 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([1, 3]);
   });
 
+  it("tells a red one what its fix costs: a re-run keeps its place, a pushed fix takes it out of the line", async () => {
+    const repo = fakeRepo();
+    repo.add(1, { ci: red });
+    await repo.run();
+    const said = repo.comments.get(1)![0].body;
+    expect(said).toMatch(/1st\*\*\. Waiting: CI Success is red on its last commit\. A re-run of a failed job keeps its place; after a pushed fix it leaves the line and joins it again at the back once it is reviewed and queued\.$/);
+    expect(said).not.toMatch(/It keeps its place/);
+    // It follows the advice: the push drops it, as the comment said.
+    repo.pulls.get(1)!.sha = "h1b";
+    expect((await repo.run()).dropped).toEqual([1]);
+  });
+
+  it("says no fix that needs a push or a new pull request keeps the place", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "pending", draft: false, fork: false, sha: "h1", ...extra });
+    const cases = [
+      pr({ shared: [{ number: 2, base: "epic/x" }] }),
+      pr({ retargeted: true }),
+      pr({ unread: "events" }),
+      pr({ crowded: true }),
+    ];
+    for (const p of cases) {
+      const said = positionText("dev", p, 2, null);
+      expect(said).toMatch(/joins (it|the line) again at the back once it is reviewed and queued\)?\.$/);
+      expect(said).not.toMatch(/It keeps its place/);
+    }
+    // A wait whose way out needs no push still keeps its place.
+    expect(positionText("dev", pr({ draft: true }), 2, null)).toMatch(/Waiting: it is a draft\. It keeps its place\.$/);
+    expect(positionText("dev", pr({ misplanned: true }), 2, null)).toMatch(/close and reopen it for a new run \(re-running that run plans it the same way again\)\. It keeps its place\.$/);
+  });
+
   it("rebuilds a batch on the new tip when the base moved under it", async () => {
     const repo = fakeRepo();
     repo.add(11);
@@ -733,6 +763,33 @@ describe("a run of the train", () => {
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/big\.yml\)/);
     expect(repo.comments.get(14)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+  });
+
+  it("tells pull requests whose files GitHub does not list that it cannot tell which one changes the refused workflow", async () => {
+    // Two aboard with no file list and the push refused: both leave, but only one (or neither alone) changes the
+    // workflow. Each was told it changes it and lands by hand, which is false for at least one of them.
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n);
+    repo.files.set(12, null);
+    repo.files.set(13, null);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if ((sha.split(":")[1]?.split(",") ?? []).includes("13")) throw new Error("! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/big.yml` without `workflows` permission)");
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11]);
+    expect(r.dropped).toEqual([12, 13]);
+    for (const [n, other] of [[12, 13], [13, 12]]) {
+      const body = repo.comments.get(n)!.at(-1)!.body;
+      expect(repo.pulls.get(n)!.labels).toEqual([LABEL.failed]);
+      expect(body).not.toMatch(/this pull request changes a workflow/);
+      expect(body).not.toMatch(/lands by hand/);
+      expect(body).toMatch(/GitHub lists no files for this pull request/);
+      expect(body).toContain("`.github/workflows/big.yml`");
+      expect(body).toContain(`#${other}`);
+      expect(body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
+    }
   });
 
   it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
@@ -2172,7 +2229,7 @@ describe("a green CI run planned for other files", () => {
     const yml = readFileSync(resolve(import.meta.dirname, "../../../.github/workflows/ci.yml"), "utf8");
     // Each job's name and condition: `  <id>:`, then `    name: ...` and, within its first lines, `    if: needs.changes.outputs.<gate> == 'true'`.
     const gated = [...yml.matchAll(/^ {2}[\w-]+:\n {4}name: (.+)\n(?: {4}.+\n){0,3}? {4}if: needs\.changes\.outputs\.(\w+) == 'true'$/gm)].map((m) => ({ name: m[1], gate: m[2] }));
-    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "packages", "packages", "rust", "website", "website_e2e"]);
+    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "lint", "packages", "packages", "rust", "website", "website_e2e"]);
     // The draft tier's job is skipped in every full run: it is no path gate.
     for (const { name, gate } of gated) expect([name, gateOf(name)]).toEqual([name, gate === "affected" ? undefined : gate]);
     expect(Object.keys(PLANNED_JOBS).filter((start) => !gated.some((j) => j.name.startsWith(start)))).toEqual([]);
@@ -2187,8 +2244,9 @@ describe("a green CI run planned for other files", () => {
   });
 
   it("plans as ci.yml does for a ready pull request", async () => {
-    expect(await ciPlan(["docs/NOTES.md"])).toMatchObject({ packages: false, app: false, website: false, full: true, rust: true });
+    expect(await ciPlan(["docs/NOTES.md"])).toMatchObject({ packages: false, app: false, website: false, full: true, rust: false });
     expect(await ciPlan(["packages/core/src/x.ts", "docs/NOTES.md"])).toMatchObject({ packages: true, app: true });
+    expect(await ciPlan(["apps/desktop/src/lib.rs"])).toMatchObject({ rust: true });
     expect(await ciPlan(null)).toMatchObject({ packages: true, app: true, website: true, website_e2e: true });
   });
 
@@ -2211,6 +2269,17 @@ describe("a green CI run planned for other files", () => {
     expect(r.merged).toEqual([]);
     expect(repo.landed).toEqual([]);
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: the green CI run on its last commit skipped jobs that its changes need/);
+  });
+
+  it("asks for a new run, not a re-run: a re-run plans from the same merge commit and skips the same jobs", async () => {
+    // A run planned by the ci-changes.mjs of its merge commit, older than the base's (a file added to a gate since),
+    // skipped what the base's plan now turns on. GitHub re-runs a run at its own sha, so the same jobs skip again.
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    await repo.run();
+    const said = repo.comments.get(21)![0].body;
+    expect(said).toMatch(/close and reopen it for a new run \(re-running that run plans it the same way again\)\. It keeps its place\.$/);
+    expect(said).not.toMatch(/run CI on it again/);
   });
 
   it("passes over it for the pull request's own green run before it", async () => {

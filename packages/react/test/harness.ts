@@ -20,10 +20,11 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
   const removeCallEventMessage = vi.fn();
   const onError = vi.fn();
 
+  let props: { signal: string | null; handled?: number } = { signal: null, handled: 0 };
   const hook = renderHook(
-    ({ signal }: { signal: string | null }) =>
-      useWebRTC({ incomingCallSignal: signal, publishCallSignal, setFastPoll, addCallEventMessage, removeCallEventMessage, onError, media, devices, ...network }),
-    { initialProps: { signal: null as string | null } },
+    ({ signal, handled }: { signal: string | null; handled?: number }) =>
+      useWebRTC({ incomingCallSignal: signal, callHandledElsewhere: handled, publishCallSignal, setFastPoll, addCallEventMessage, removeCallEventMessage, onError, media, devices, ...network }),
+    { initialProps: props },
   );
 
   return {
@@ -36,7 +37,13 @@ export function renderCall(media?: CallMedia, devices?: () => { audio?: Constrai
     removeCallEventMessage,
     onError,
     receive(signal: string) {
-      hook.rerender({ signal });
+      props = { ...props, signal };
+      hook.rerender(props);
+    },
+    /** Another page on the same engine answered or declined the call ringing in this chat. */
+    handledElsewhere() {
+      props = { ...props, handled: (props.handled ?? 0) + 1 };
+      hook.rerender(props);
     },
     /** The last value `setFastPoll` was given. */
     fastPoll: () => setFastPoll.mock.lastCall?.[0] as boolean | undefined,

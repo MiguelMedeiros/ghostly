@@ -66,7 +66,7 @@ export function AppBrand({ onHome }: AppBrandProps) {
             </g>
           </g>
         </svg>
-        <span className="sidebar-wordmark whitespace-nowrap text-accent font-bold text-[17px] leading-6 tracking-tight">
+        <span className="sidebar-wordmark whitespace-nowrap text-accent font-bold text-[1.0625rem] leading-6 tracking-tight">
           {/* One span per letter, so they can come in one after another; inline, so the word keeps its kerning. */}
           {[...WORD].map((letter, i) => <span key={i} className="app-brand-letter">{letter}</span>)}
         </span>

@@ -1,4 +1,5 @@
 import type {
+  GetInfoResponse,
   MeltPreview,
   MeltProofsResponse,
   MeltQuoteBolt11Response,
@@ -13,7 +14,8 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, mintRefused } from "./paymentAdapters/cashu";
-import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
+import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
+import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
   MintInfoView,
@@ -42,7 +44,15 @@ import type {
  * asked for again (NUT-09) at any time.
  */
 const UNIT = "sat";
-const QUOTE_POLL_MS = 4_000;
+/**
+ * cdk-mintd 0.17 writes NUT-05's `amountless` beside the method, not under its `options` as 0.18 does, and cashu-ts reads
+ * `options` only: such a mint would be taken for one that refuses an invoice with no amount, and never sent the amount.
+ */
+const saysAmountlessBeside = (method: object): boolean => (method as { amountless?: unknown }).amountless === true;
+function amountlessUnderOptions(info: GetInfoResponse): GetInfoResponse {
+  const moved = info.nuts[5].methods.map((method) => (saysAmountlessBeside(method) ? { ...method, options: { ...method.options, amountless: true } } : method));
+  return { ...info, nuts: { ...info.nuts, 5: { ...info.nuts[5], methods: moved } } };
+}
 /** A Lightning payment can stay in flight for minutes or hours; the mint is asked again this often. */
 const MELT_POLL_MS = 30_000;
 const MAX_AMOUNT = 1_000_000;
@@ -59,6 +69,8 @@ const SWAP_SLOW_POLL_MS = 600_000;
 const SWAP_WATCH_MS = 3_600_000;
 /** How many proofs of tokens refused as spent are remembered. */
 const SPENT_KEPT = 1_000;
+/** The most coins `sendCoins` makes for one token. */
+const MAX_SEND_COINS = 64;
 /** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
 /**
  * `attemptEndedAt`: when the approval's swap failed with no answer. `abandoned`: the mint proved the swap never
@@ -125,7 +137,7 @@ export function normalizeMintUrl(input: string): string {
   }
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw engineError("mintNotHttps");
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  return mintUrlSpelling(url.href);
 }
 
 export function assertAmount(amount: number): void {
@@ -139,6 +151,85 @@ const asProofLike = (proofs: StoredProof[]) => proofs as unknown as ProofLike[];
 const total = (proofs: { amount: number }[]) => proofs.reduce((sum, p) => sum + p.amount, 0);
 
 const sats = (proofs: Proof[]) => total(proofs.map((p) => ({ amount: p.amount.toNumber() })));
+
+/**
+ * Whether `split` can take `amount` out of `proofs`, as it does: coins that add up exactly with the fee their receiver
+ * pays to redeem them, or a swap whose inputs also pay the mint's fee for taking them in. Asks nothing of the mint.
+ */
+/** Whether exact coins go as one token a payment frame carries: a wallet of many small coins can add up in hundreds. */
+const inOneFrame = (encode: typeof import("@cashu/cashu-ts").getEncodedToken, mint: string) => (send: Proof[]) =>
+  encode({ mint, proofs: send, unit: UNIT }).length <= LIMITS.maxPaymentEndpointChars;
+
+/**
+ * The coins a swap makes to send `amount` with the fee their receiver pays to redeem them: the fewest sats whose coins,
+ * less that fee, are exactly `amount`. cashu-ts' includeFees adds coins for the fee that can be worth more than it, and
+ * the contact is credited more than was sent. Undefined at a mint that charges nothing for coins, or when no such
+ * coins are found up to what cashu-ts would make: its own choice is used then.
+ */
+function sendCoins(wallet: Wallet, amount: number): number[] | undefined {
+  const included = wallet.getFeesToInclude(amount).toNumber();
+  if (included === 0) return undefined;
+  const keyset = wallet.getKeyset();
+  const fee = (coins: number) => wallet.getFeesForKeyset(coins, keyset.id).toNumber();
+  const sizes = Object.keys(keyset.keys).map(Number).filter((size) => size > 0).sort((a, b) => b - a);
+  const coinsOf = (value: number, among = sizes) => {
+    const coins: number[] = [];
+    for (const size of among) while (value >= size) { coins.push(size); value -= size; }
+    return value === 0 ? coins : undefined;
+  };
+  for (let value = amount; value <= amount + included; value++) {
+    let coins = coinsOf(value);
+    // Fewer coins than the sats over `amount` pay for: the largest coin split in smaller ones until they do, if ever.
+    while (coins && coins.length <= MAX_SEND_COINS && fee(coins.length) < value - amount) {
+      const [largest, ...rest] = coins;
+      const parts = coinsOf(largest, sizes.filter((size) => size < largest));
+      coins = parts && [...parts, ...rest].sort((a, b) => b - a);
+    }
+    if (coins && coins.length <= MAX_SEND_COINS && fee(coins.length) === value - amount) return coins;
+  }
+  return undefined;
+}
+
+function fitsAt(wallet: Wallet, proofs: StoredProof[], amount: number): boolean {
+  return outlayAt(wallet, proofs, amount) !== undefined;
+}
+
+/**
+ * The sats `split` takes out of the wallet for `amount`, the mint's fees for the coins it takes in included, as `fitsAt`
+ * works it out: undefined when it cannot. `inOneFrame`: whether exact coins fit in one token, as `split` asks of them.
+ */
+function outlayAt(wallet: Wallet, proofs: StoredProof[], amount: number, inOneFrame = (_send: Proof[]) => true): number | undefined {
+  try {
+    const { send } = wallet.sendOffline(amount, asProofLike(proofs), { includeFees: true, exactMatch: true });
+    if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber() && inOneFrame(send)) return sats(send);
+  } catch {
+    // no exact coins: a swap makes them
+  }
+  try {
+    const coins = sendCoins(wallet, amount);
+    const outputs = coins ? coins.reduce((sum, coin) => sum + coin, 0) : amount + wallet.getFeesToInclude(amount).toNumber();
+    const { send } = wallet.selectProofsToSend(asProofLike(proofs), outputs, true);
+    const taken = outputs + wallet.getFeesForProofs(send).toNumber();
+    return send.length > 0 && sats(send) >= taken ? taken : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The most `fitsAt` takes out of `proofs` with `extra` on top (a Lightning fee reserve): 0 when nothing fits. */
+function roomAt(wallet: Wallet, proofs: StoredProof[], extra = 0): number {
+  // Every coin as it is, less what the mint charges to take them all in: nothing sends more.
+  const most = total(proofs) - wallet.getFeesForProofs(asProofLike(proofs)).toNumber() - extra;
+  if (most <= 0 || fitsAt(wallet, proofs, most + extra)) return Math.max(0, most);
+  let low = 0;
+  let high = most - 1;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (fitsAt(wallet, proofs, middle + extra)) low = middle;
+    else high = middle - 1;
+  }
+  return low;
+}
 
 const MINT_QUOTE_MISMATCH = "The mint quoted another amount than this invoice's. Nothing was paid.";
 /** A melt quote that is not for this invoice (`invoice` lower case, as `decodeBolt11` gives it) and its amount. */
@@ -176,6 +267,10 @@ const backInWallet = (lost: number) => lost > 0
   ? `The sats are back in your wallet, less ${lost} sat${lost === 1 ? "" : "s"} the mint kept as its fee.`
   : "The sats are back in your wallet.";
 
+/** A mint's own words for a refusal, as one short line: the reason at the end of `lightningRefused`. */
+const mintReason = (error: unknown) =>
+  (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").trim().slice(0, 160) || "no reason given";
+
 /** Every proof and swap stored, as `CashuWallet.readStored` read them. */
 export interface StoredCashu { proofs: StoredProof[]; swaps: PendingSwap[] }
 
@@ -192,6 +287,11 @@ export interface WalletEvents {
    * the wallet with its records; otherwise the mint never made it, and what it held is free again.
    */
   onSwapSettled?(swap: PendingSwap, done: boolean): void | Promise<void>;
+  /**
+   * Whether the chat request an invoice of ours belongs to (`StoredQuote.paymentId`) was closed: withdrawn, closed, or
+   * paid some other way. Its invoice is then asked about only once more, after it expired (`nextInvoiceAsk`).
+   */
+  requestClosed?(paymentId: string): boolean;
 }
 
 /**
@@ -212,6 +312,12 @@ export class CashuWallet {
   private readonly infos = new Map<string, MintInfoView>();
   private readonly locks = new Map<string, Promise<unknown>>();
   private quoteTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When `quoteTimer` fires: a round that would fire later leaves it as it is. */
+  private quoteTimerAt = 0;
+  /** Per open quote: when its mint was last asked about it, in this run (`nextInvoiceAsk`). */
+  private readonly quoteAsked = new Map<string, number>();
+  /** Per quote the screen shows: until when (`watch`). */
+  private readonly quoteWatched = new Map<string, number>();
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
   private restoredTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimer: ReturnType<typeof setTimeout> | null = null;
@@ -225,7 +331,8 @@ export class CashuWallet {
    * so the same token sent again, under any id or encoding, is refused without asking the mint again.
    */
   private readonly spentTokens = new Set<string>();
-  /** Per melt quote shown to the person: the invoice, its amount and the fee reserve the mint quoted. Only these are paid. */
+  /** Per melt quote shown to the person: the invoice, its amount and the most it was said to cost in fees
+   * (the mint's reserve and the coins' own fees). Only these are paid, for no more. */
   private readonly shownQuotes = new Map<string, { request: string; amount: number; feeReserve: number }>();
 
   /**
@@ -414,8 +521,23 @@ export class CashuWallet {
       ...(paysItsOwnInvoices(mint) ? { held: true } : {}),
     };
     await committed((await store(STORES.quotes, "readwrite")).put(quote));
+    // Nobody paid it yet: it is first asked about after the fast pace's gap.
+    this.quoteAsked.set(quote.quote, Date.now());
     void this.pollQuotes();
     return quote;
+  }
+
+  /**
+   * The screen shows this invoice of ours (Receive): it is asked about at the fast pace for `INVOICE_PACE.watchMs`, and
+   * now if it was not just asked. The screen says it again while it shows it. Returns whether it is one of ours here.
+   */
+  async watch(invoice: string): Promise<boolean> {
+    const wanted = invoice.trim().toLowerCase();
+    const quote = (await this.quotes()).find((q) => q.invoice.toLowerCase() === wanted);
+    if (!quote) return false;
+    this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
+    await this.pollQuotes();
+    return true;
   }
 
   /**
@@ -428,7 +550,9 @@ export class CashuWallet {
     const quote = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).find((q) => q.invoice.toLowerCase() === wanted);
     if (!quote) return false;
     if (quote.held) await committed((await store(STORES.quotes, "readwrite")).put({ ...quote, held: undefined } satisfies StoredQuote));
-    await this.pollQuotes();
+    // The payment may take a moment to settle at the mint: the invoice is asked about at the fast pace meanwhile.
+    this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
+    await this.pollQuotes(true);
     return true;
   }
 
@@ -477,7 +601,7 @@ export class CashuWallet {
    * these mints (one network's wallet, before it is removed), claiming what is paid; the regular round is left alone.
    */
   async checkQuotes(mints?: readonly string[]): Promise<void> {
-    if (!mints) return this.pollQuotes();
+    if (!mints) return this.pollQuotes(true);
     const at = new Set(mints);
     await this.settleQuotes((await this.quotes()).filter((q) => at.has(q.mint)));
   }
@@ -490,28 +614,62 @@ export class CashuWallet {
   /**
    * Invoices are paid by someone else, somewhere else; all we can do is ask the mint. A quote is the only
    * claim on the sats paid to it, so it is dropped only once the mint says it is unpaid and it has expired.
+   * Each quote is asked about at its own pace (`nextInvoiceAsk`): often while it is new or on screen, then less.
+   * `now`: every open quote is asked about, whatever its pace (someone says it was paid). The store is read once.
    */
-  private async pollQuotes(): Promise<void> {
+  private async pollQuotes(now = false): Promise<void> {
     if (this.quoteTimer) clearTimeout(this.quoteTimer);
     this.quoteTimer = null;
     if (this.stopped) return;
-    const quotes = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
+    const quotes = await this.quotes();
+    const gone = new Set<string>();
 
     // A held quote is not asked about: its mint's "paid" means nothing. It only goes once it has expired.
-    for (const held of quotes.filter((q) => q.held && q.expiresAt && q.expiresAt + 60_000 < Date.now())) {
+    for (const held of quotes.filter((q) => q.held && q.expiresAt && q.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now())) {
       await committed((await store(STORES.quotes, "readwrite")).delete(held.quote));
+      gone.add(held.quote);
     }
-    await this.settleQuotes(quotes);
+    // What this run knows of quotes that are no longer stored goes with them.
+    const stored = new Set(quotes.map((q) => q.quote));
+    for (const pace of [this.quoteAsked, this.quoteWatched]) for (const id of pace.keys()) if (!stored.has(id)) pace.delete(id);
 
-    const remaining = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
-    if (!this.stopped && remaining.some((q) => !q.issuedUnclaimed && !q.held)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
+    const open = quotes.filter((q) => !q.issuedUnclaimed && !q.held);
+    const at = Date.now();
+    for (const settled of await this.settleQuotes(open.filter((q) => now || this.nextAsk(q, at) <= at + INVOICE_PACE.dueSlackMs))) gone.add(settled);
+
+    const next = open.filter((q) => !gone.has(q.quote)).map((q) => this.nextAsk(q, Date.now()));
+    if (next.length) this.scheduleQuotes(Math.min(...next));
   }
 
-  private async settleQuotes(quotes: readonly StoredQuote[]): Promise<void> {
+  /** When the mint is next asked about this quote. */
+  private nextAsk(quote: StoredQuote, now: number): number {
+    return nextInvoiceAsk({
+      createdAt: quote.createdAt,
+      expiresAt: quote.expiresAt,
+      watchedUntil: this.quoteWatched.get(quote.quote),
+      closed: !!quote.paymentId && !!this.events.requestClosed?.(quote.paymentId),
+      paid: !!quote.paid,
+    }, this.quoteAsked.get(quote.quote), now);
+  }
+
+  /** The next round at `at`, unless one is due sooner. */
+  private scheduleQuotes(at: number): void {
+    if (this.stopped) return;
+    if (this.quoteTimer && this.quoteTimerAt <= at) return;
+    if (this.quoteTimer) clearTimeout(this.quoteTimer);
+    this.quoteTimerAt = at;
+    this.quoteTimer = setTimeout(() => { this.quoteTimer = null; void this.pollQuotes(); }, Math.max(0, at - Date.now()));
+  }
+
+  /** Asks the mints about these quotes. Returns the ones minted. */
+  private async settleQuotes(quotes: readonly StoredQuote[]): Promise<string[]> {
+    const minted: string[] = [];
     for (const { quote, mint } of quotes.filter((q) => !q.issuedUnclaimed && !q.held)) {
+      this.quoteAsked.set(quote, Date.now());
       try {
         const paid = await this.locked(mint, () => this.settleQuote(quote));
         if (paid) {
+          minted.push(quote);
           // Test coins are no invoice anyone else knows of.
           if (!paid.testCoins) this.events.onQuotePaid(paid);
           this.events.onChange();
@@ -520,6 +678,7 @@ export class CashuWallet {
         // mint unreachable: try again on the next round
       }
     }
+    return minted;
   }
 
   /** Runs under the mint's lock, so two rounds never mint one quote twice. Returns the quote once its ecash is in. */
@@ -618,12 +777,27 @@ export class CashuWallet {
     // A send without mints comes from this network's mints. A request names its mints, but a contact may name a
     // real mint on a Testnet request: only mints of the network asked for are ever spent from.
     const mine = preferred ? this.getKnownMints() : this.getMints(network);
-    const candidates = (preferred ? preferred.map((m) => m.replace(/\/+$/, "")).filter((m) => mine.includes(m)) : mine)
+    const candidates = (preferred ? preferred.map(mintUrlSpelling).filter((m) => mine.includes(m)) : mine)
       .filter((m) => !network || mintNetwork(m) === network);
+    /** The most a mint that holds the amount could send with its fees on top. */
+    let room = 0;
+    /** The coins held at `mint` when they send the amount. */
+    const fitting = async (mint: string): Promise<StoredProof[] | undefined> => {
+      const proofs = await this.proofsAt(mint);
+      if (total(proofs) < amount) return undefined;
+      // At a mint that charges for each coin it takes in, the amount held may not cover its fees: the next mint may.
+      const wallet = await this.wallet(mint);
+      if (fitsAt(wallet, proofs, amount)) return proofs;
+      room = Math.max(room, roomAt(wallet, proofs));
+      return undefined;
+    };
     for (const mint of candidates) {
-      if ((await this.balanceAt(mint)) < amount) continue;
-      return this.locked(mint, async () => {
-        const { inputs, keep, send, swap } = await this.split(mint, amount, await this.proofsAt(mint));
+      if (!(await fitting(mint))) continue;
+      const sent = await this.locked(mint, async () => {
+        // Asked again in the mint's turn: another payment may have taken these coins since.
+        const proofs = await fitting(mint);
+        if (!proofs) return undefined;
+        const { inputs, keep, send, swap } = await this.split(mint, amount, proofs);
         const token = (await loadCashu()).getEncodedToken({ mint, proofs: send, unit: UNIT });
         // Everything that left the balance beyond the amount: the swap's fee and the redeem fee prepaid for the receiver.
         const spent = total(inputs) - sats(keep);
@@ -638,7 +812,9 @@ export class CashuWallet {
         this.events.onChange();
         return { token, mint };
       });
+      if (sent) return sent;
     }
+    if (room > 0) throw engineError("notEnoughForFee", { amount: room });
     throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
   }
 
@@ -855,7 +1031,7 @@ export class CashuWallet {
     try {
       if (/^cashu[AB]/i.test(value)) {
         const metadata = getTokenMetadata(value);
-        const mint = metadata.mint.replace(/\/+$/, "");
+        const mint = mintUrlSpelling(metadata.mint);
         return {
           kind: "token",
           amount: Number(metadata.amount),
@@ -872,7 +1048,7 @@ export class CashuWallet {
           kind: "request",
           amount: request.amount === undefined ? null : Number(request.amount),
           unit: request.unit ?? UNIT,
-          mints: request.mints ?? [],
+          mints: (request.mints ?? []).map(mintUrlSpelling),
           description: request.description || undefined,
         };
       }
@@ -899,7 +1075,8 @@ export class CashuWallet {
     try {
       const metadata = getTokenMetadata(token);
       unit = metadata.unit;
-      mint = metadata.mint.replace(/\/+$/, "");
+      // In this wallet's spelling of its mints. The library redeems the token at the same mint in any spelling.
+      mint = mintUrlSpelling(metadata.mint);
       faceValue = Number(metadata.amount);
     } catch {
       throw new Error("That is not a valid ecash token");
@@ -928,6 +1105,9 @@ export class CashuWallet {
         // The same coins in another token (another memo): one coin is one redeem, never another swap counted again.
         const redeeming = new Set(written.flatMap((s) => (swapOf(s).inputs ?? []).map((p) => p.secret)));
         if (preview.inputs.some((p) => redeeming.has(p.secret))) throw engineError("ecashBeingReceived");
+        // A mint whose fee to take the token in is all of it would spend the coin and give nothing back: refused before the
+        // mint is asked, so the token stays unspent and its sender can still take it back.
+        if (preview.amount.toNumber() <= 0) throw engineError("ecashFeeTakesAll", { amount: String(faceValue) });
         // The outputs are for what is left after the mint's fee, so the records are known before the mint is asked.
         swap = { id: swapId(), mint, kind: "receive", swap: serializeSwapPreview(preview), createdAt: Date.now(), token, ...records(preview.amount.toNumber()) };
         await committed((await store(STORES.swaps, "readwrite")).put(swap));
@@ -958,12 +1138,14 @@ export class CashuWallet {
     const among =(chosen: { secret: string }[]) => { const secrets = new Set(chosen.map((p) => p.secret)); return proofs.filter((p) => secrets.has(p.secret)); };
     try {
       const { send } = wallet.sendOffline(amount, asProofLike(proofs), { includeFees: true, exactMatch: true });
-      if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber()
-        && getEncodedToken({ mint, proofs: send, unit: UNIT }).length <= LIMITS.maxPaymentEndpointChars) return { inputs: among(send), keep: [], send };
+      if (send.length > 0 && sats(send) === amount + wallet.getFeesForProofs(send).toNumber() && inOneFrame(getEncodedToken, mint)(send)) return { inputs: among(send), keep: [], send };
     } catch {
       // no exact coins: the mint makes them
     }
-    const preview = await wallet.prepareSwapToSend(amount, asProofLike(proofs), { includeFees: true });
+    const coins = sendCoins(wallet, amount);
+    const preview = coins
+      ? await wallet.prepareSwapToSend(coins.reduce((sum, coin) => sum + coin, 0), asProofLike(proofs), {}, { send: { type: "random", denominations: coins } })
+      : await wallet.prepareSwapToSend(amount, asProofLike(proofs), { includeFees: true });
     const swap: PendingSwap = { id: swapId(), mint, kind: "send", swap: serializeSwapPreview(preview), createdAt: Date.now() };
     const inputs = among(preview.inputs);
     // Written down before the mint sees the proofs: from here on they may be spent, and only these outputs replace them.
@@ -1272,36 +1454,50 @@ export class CashuWallet {
 
   // -- Lightning out -----------------------------------------------------------
 
-  /** What paying this invoice would cost, from the first mint that can afford it. */
-  async quoteInvoice(invoice: string, network?: WalletNetwork): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
+  /**
+   * What paying this invoice would cost, from the first mint that can afford it. `chosen`: the sats the person typed for
+   * an invoice with no amount, the only way one is paid (WISP 203); only a mint that says it takes one is asked.
+   */
+  async quoteInvoice(invoice: string, network?: WalletNetwork, chosen?: number): Promise<{ quote: string; mint: string; amount: number; feeReserve: number }> {
     let lastError: unknown = new Error("Add a mint in Settings first");
     let mints = this.getMints(network);
     /** The most any mint asked could pay with its fee on top: a Max comes down to it. */
     let room = 0;
     const decoded = decodeBolt11(invoice);
     if (!decoded) throw new Error("That is not an invoice this wallet can pay");
-    if (decoded.amountSat === null) throw new Error("Invoices without an amount are not supported");
+    if (decoded.amountSat === null && chosen === undefined) throw new Error("Invoices without an amount are not supported");
+    // An invoice that names its amount is paid for that amount, whatever is asked.
+    if (decoded.amountSat !== null && chosen !== undefined) throw new Error(MINT_QUOTE_MISMATCH);
+    if (chosen !== undefined) assertAmount(chosen);
+    const expected = decoded.amountSat ?? chosen!;
     // A Bitcoin invoice may be real money: test sats pay one only through a mint whose Lightning is known to be fake.
     if (decoded.network === "bitcoin" && mints.some((mint) => mintNetwork(mint) === "testnet")) {
       mints = mints.filter((mint) => mintNetwork(mint) === "mainnet" || fakesLightning(mint));
       if (!mints.length) throw new Error(BITCOIN_INVOICE_ON_TESTNET);
     }
+    if (chosen !== undefined && mints.length) lastError = engineError("mintsNoAnyAmount");
     for (const mint of mints) {
       try {
         const wallet = await this.wallet(mint);
-        const quote = await wallet.createMeltQuoteBolt11(invoice.trim());
+        // cashu-ts leaves the amount out of the request for a mint that does not say it takes one: never asked here.
+        if (chosen !== undefined && !wallet.getMintInfo().supportsAmountless("bolt11", UNIT)) continue;
+        const quote = chosen === undefined ? await wallet.createMeltQuoteBolt11(invoice.trim()) : await wallet.createMeltQuoteBolt11(invoice.trim(), chosen * 1000);
         const amount = quote.amount.toNumber();
         const feeReserve = quote.fee_reserve.toNumber();
-        // The amount shown is the invoice's: a quote for another invoice or amount is never paid.
-        if (quoteMismatch(quote, decoded.invoice, decoded.amountSat)) throw new Error(MINT_QUOTE_MISMATCH);
-        const balance = await this.balanceAt(mint);
-        if (balance < amount + feeReserve) {
-          room = Math.max(room, balance - feeReserve);
+        // The amount shown is the invoice's, or the one chosen: a quote for another invoice or amount is never paid.
+        if (quoteMismatch(quote, decoded.invoice, expected)) throw new Error(MINT_QUOTE_MISMATCH);
+        // The coins the melt spends are paid for too, at a mint that charges for each coin it takes in.
+        const proofs = await this.proofsAt(mint);
+        const outlay = outlayAt(wallet, proofs, amount + feeReserve, inOneFrame((await loadCashu()).getEncodedToken, mint));
+        if (outlay === undefined) {
+          room = Math.max(room, roomAt(wallet, proofs, feeReserve));
           lastError = room > 0 ? engineError("notEnoughForFee", { amount: room }) : engineError("notEnoughSats");
           continue;
         }
-        this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve });
-        return { quote: quote.quote, mint, amount, feeReserve };
+        // The most it can cost: the reserve, and what the split before the melt and the melt itself pay for their coins.
+        const fee = outlay - amount;
+        this.shownQuotes.set(quote.quote, { request: decoded.invoice, amount, feeReserve: fee });
+        return { quote: quote.quote, mint, amount, feeReserve: fee };
       } catch (error) {
         lastError = error;
       }
@@ -1328,17 +1524,25 @@ export class CashuWallet {
 
   private async melt(quoteId: string, mint: string, note?: string, paymentId?: string): Promise<MeltOutcome> {
     const wallet = await this.wallet(mint);
-    const { MeltChangeError, OutputData } = await loadCashu();
+    const { MeltChangeError, OutputData, getEncodedToken } = await loadCashu();
     const quote = await wallet.checkMeltQuoteBolt11(quoteId);
     const inFlight = await wrap<PendingMelt[]>((await store(STORES.melts, "readonly")).getAll());
     if (inFlight.some((m) => m.quote === quote.quote || m.request === quote.request)) throw new Error("This invoice is already being paid");
-    // Read again from the mint: it must still be the invoice and amount shown, for no more fee than shown.
+    // Read again from the mint: it must still be the invoice and amount shown, for no more fee than shown, the coins'
+    // own fees included, out of the coins held now.
     const shown = this.shownQuotes.get(quoteId);
-    if (!shown || quote.quote !== quoteId || quoteMismatch(quote, shown.request, shown.amount) || quote.fee_reserve.toNumber() > shown.feeReserve) {
+    const needed = quote.amount.toNumber() + quote.fee_reserve.toNumber();
+    const proofs = await this.proofsAt(mint);
+    const outlay = outlayAt(wallet, proofs, needed, inOneFrame(getEncodedToken, mint));
+    if (!shown || quote.quote !== quoteId || quoteMismatch(quote, shown.request, shown.amount) || (outlay ?? needed) > shown.amount + shown.feeReserve) {
       throw new Error(MINT_QUOTE_MISMATCH);
     }
-    const needed = quote.amount.toNumber() + quote.fee_reserve.toNumber();
-    const { inputs, keep, send, swap } = await this.split(mint, needed, await this.proofsAt(mint));
+    // Coins another payment took since the quote was shown: said as the quote would have said it.
+    if (outlay === undefined) {
+      const room = roomAt(wallet, proofs, quote.fee_reserve.toNumber());
+      throw room > 0 ? engineError("notEnoughForFee", { amount: room }) : engineError("notEnoughSats");
+    }
+    const { inputs, keep, send, swap } = await this.split(mint, needed, proofs);
     let preview: MeltPreview<MeltQuoteBolt11Response>;
     try {
       preview = await wallet.prepareMelt("bolt11", quote, send);
@@ -1381,12 +1585,14 @@ export class CashuWallet {
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
       const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
-        // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
         const lost = this.takeFailedFee(melt.quote);
         // Its ecash was spent somewhere else: said in plain words, whatever the mint's own were.
         if (this.spentAway.delete(melt.quote)) throw Object.assign(engineError("ecashAlreadySpent"), { cause: error });
+        // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
         if (lost > 0) throw Object.assign(new Error(`${error instanceof Error ? error.message : String(error)} ${backInWallet(lost)}`), { cause: error });
-        throw error;
+        // Refused, the quote unpaid and every proof back unspent: nothing left the wallet. Said in the app's words, the
+        // mint's own kept as the reason (and in the text, where "already paid" is read: InvoiceBubble.tsx).
+        throw Object.assign(engineError("lightningRefused", { reason: mintReason(error) }), { cause: error });
       }
       return outcome;
     }
@@ -1577,6 +1783,8 @@ export class CashuWallet {
       wallet = (async () => {
         const instance = new (await loadCashu()).Wallet(mint, { unit: UNIT });
         await within(MINT_TIMEOUT_MS, instance.loadMint(), mint);
+        const info = instance.getMintInfo();
+        if (info.isSupported(5).params.some(saysAmountlessBeside)) instance.loadMintFromCache(amountlessUnderOptions(info.cache), instance.keyChain.cache);
         return instance;
       })();
       this.wallets.set(mint, wallet);

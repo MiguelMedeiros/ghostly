@@ -20,7 +20,11 @@ import { renderApp } from "../render";
 const merges = vi.hoisted(() => ({ count: 0 }));
 vi.mock("../../lib/transportEvents", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../lib/transportEvents")>();
-  return { ...real, mergeTimeline: (...args: Parameters<typeof real.mergeTimeline>) => { merges.count++; return real.mergeTimeline(...args); } };
+  // The page puts its timeline together with a merger of its own.
+  return { ...real, timelineMerger: <M extends { timestamp: number }>() => {
+    const merge = real.timelineMerger<M>();
+    return (...args: Parameters<typeof merge>) => { merges.count++; return merge(...args); };
+  } };
 });
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
 

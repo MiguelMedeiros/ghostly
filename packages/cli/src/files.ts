@@ -1,12 +1,13 @@
+import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
-import { access, constants, copyFile, link, open, rename, rm, stat, type FileHandle } from "node:fs/promises";
+import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
+import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
@@ -66,6 +67,31 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
 
 /** A file's size as a person reads it: "40 MB", "26.2 MB". */
 const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
+
+/**
+ * Where an unfinished transfer stands, in words, for a person reading a timeout: the stage's id ("asking", "waiting")
+ * stays in `details.stage` for a bot. A group's file says why it waits (`note`), as the app does.
+ */
+function stageWords(transfer: FileTransferView): string {
+  switch (transfer.stage) {
+    case "preparing": return "getting it ready to send";
+    case "waiting": return transfer.note ?? "waiting for a connection to the contact";
+    case "asking": return transfer.direction === "in" ? "waiting for you to take it (file accept)" : "waiting for the contact to take it";
+    case "queued": return "waiting its turn";
+    case "paused": return transfer.pausedBy === "peer" ? "paused by the contact" : "paused here (file resume)";
+    case "verifying": return "every byte here, checking it";
+    default: return String(transfer.stage);
+  }
+}
+
+/**
+ * A transfer that waits for a person's decision (`asking`), with whose: `me` (`file accept` takes it here) or `contact`
+ * (theirs). A received file's `transferring` alone read as if it were moving.
+ */
+function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact" }) | undefined {
+  if (transfer?.state !== "transferring" || transfer.stage !== "asking") return transfer;
+  return { ...transfer, waitingFor: transfer.direction === "in" ? "me" : "contact" };
+}
 
 /** The chat or the group a file command names (`findChatOrGroup`). */
 const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
@@ -205,6 +231,23 @@ async function place(partial: string, target: string, force: boolean): Promise<v
   }
 }
 
+/**
+ * Marks a saved copy of a contact's file as downloaded, as a browser and Ghostly Desktop (`file_store.rs`
+ * `mark_downloaded`) do, so the system checks it when it is opened: Gatekeeper's "downloaded from the internet" on
+ * macOS, SmartScreen and Office's Protected View on Windows. Node has no extended attributes, so macOS's own `xattr`
+ * writes `com.apple.quarantine`; on Windows it is the file's `Zone.Identifier` stream. Best effort: a file system that
+ * cannot hold the mark still gets the file.
+ */
+async function markDownloaded(path: string): Promise<void> {
+  if (process.platform === "darwin") {
+    // Flags 0x0001 (downloaded) and 0x0080, as browsers write them; then time and agent.
+    const value = `0081;${Math.floor(Date.now() / 1000).toString(16).padStart(8, "0")};Ghostly;`;
+    await new Promise<void>((done) => execFile("/usr/bin/xattr", ["-w", "com.apple.quarantine", value, path], { timeout: 10_000 }, () => done()));
+  } else if (process.platform === "win32") {
+    await writeFile(`${path}:Zone.Identifier`, "[ZoneTransfer]\r\nZoneId=3\r\n").catch(() => {});
+  }
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -266,10 +309,10 @@ export const FILE_METHODS: Record<string, Method> = {
     }));
     if ("group" in target) {
       const kept = await keptOf(`group:${target.group.id}`);
-      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => views[id] ?? kept.get(id)) };
+      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => withWaitingFor(views[id] ?? kept.get(id))) };
     }
     const kept = await keptOf(target.link.id);
-    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id] ?? kept.get(id)) };
+    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => withWaitingFor(views[id] ?? kept.get(id))) };
   },
 
   /**
@@ -305,6 +348,11 @@ export const FILE_METHODS: Record<string, Method> = {
       // One that ended (cancelled, declined, failed): the engine takes the action and does nothing, as for one all here.
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
       if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
+      // Sent whole (the engine's `sentWhole`): the engine takes no cancel and it ends done, so it is refused, not echoed.
+      if (outgoing && action === "cancel" && transfer?.state === "transferring" && (transfer.stage === "verifying"
+        || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"))) {
+        throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
+      }
     }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
@@ -328,7 +376,7 @@ export const FILE_METHODS: Record<string, Method> = {
       return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
     }, ms, `file ${fileId} to arrive`).catch((error: unknown) => {
       const now = state(ctx).transfers[fileId];
-      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${now.stage}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
+      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
       throw error;
     });
     if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
@@ -416,6 +464,8 @@ export const FILE_METHODS: Record<string, Method> = {
         if (free && refused?.code === "confirm" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
         throw refused ?? error;
       }
+      // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. One sent from here needs none.
+      if (stored.direction !== "out") await markDownloaded(target);
     } finally {
       await out?.close();
       await rm(partial, { force: true });

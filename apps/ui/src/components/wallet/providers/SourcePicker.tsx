@@ -8,6 +8,7 @@ import { PROVIDER_FORMS, type ProviderFormProps } from "./forms";
 import { changeableFields, sourceStatus } from "./sourceStatus";
 import { useI18n } from "../../../contexts/I18nContext";
 import { focusLost } from "../../../lib/focus";
+import { exactText } from "../../../lib/exactText";
 
 
 /** A field's suggested values that fit the other fields (`when`), as buttons that fill it in. */
@@ -39,7 +40,7 @@ function ServerForm({ kind, fields, config, busy, saving, onSubmit, onCancel }: 
           <label className="block space-y-1">
             <span className="text-xs text-text-secondary">{field.label}{field.optional && <span className="text-text-muted"> {t("wallet.source.optional")}</span>}</span>
             {/* Opened from the card's own button, further up: focusing it brings the form into view. */}
-            <input aria-label={field.label} autoFocus={i === 0} className={`${input} font-mono text-xs`} type={field.kind === "url" ? "url" : "text"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+            <input aria-label={field.label} autoFocus={i === 0} className={`${input} font-mono text-xs`} type={field.kind === "url" ? "url" : "text"} {...exactText} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
           </label>
           <Suggestions field={field} values={{ ...config, ...values }} onPick={(value) => set(field.name, value)} />
           {field.help && <span className="block text-[11px] text-text-muted">{field.help}</span>}
@@ -73,7 +74,7 @@ export function ProviderConfigForm({ descriptor, mode, busy, saving = false, onS
               <textarea aria-label={field.label} className={`${input} font-mono text-xs resize-none`} rows={3} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
             ) : (
               <input aria-label={field.label} className={`${input} ${field.kind === "text" ? "" : "font-mono text-xs"}`} type={field.kind === "secret" ? "password" : field.kind === "url" ? "url" : "text"}
-                autoComplete={field.kind === "secret" ? "new-password" : "off"} spellCheck={false} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
+                autoComplete={field.kind === "secret" ? "new-password" : "off"} {...exactText} placeholder={field.placeholder} value={values[field.name]} onChange={(e) => set(field.name, e.target.value)} />
             )}
           </label>
           {field.kind !== "secret" && <Suggestions field={field} values={values} onPick={(value) => set(field.name, value)} />}

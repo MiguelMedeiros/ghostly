@@ -57,6 +57,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
   const [isSending, setIsSending] = useState(false);
   const [isBurned, setIsBurned] = useState(false);
   const [incomingCallSignal, setIncomingCallSignal] = useState<string | null>(null);
+  /** Counts the calls another page answered or declined while they rang in this chat (`useWebRTC`'s `callHandledElsewhere`). */
+  const [callHandledElsewhere, setCallHandledElsewhere] = useState(0);
 
   const profile = params?.profile;
   const deliveryMode = params?.deliveryMode;
@@ -142,7 +144,10 @@ export const useChat: typeof Desktop.useChat = (params) => {
       engine.takeCallOffer(linkId);
       setIncomingCallSignal(signal);
     });
-    return off;
+    const handled = engine.onCallHandled((id) => {
+      if (id === linkId) setCallHandledElsewhere((count) => count + 1);
+    });
+    return () => { off(); handled(); };
   }, [linkId]);
 
   /**
@@ -367,6 +372,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
     peerAck: link?.peerAck ?? 0,
     forceRefresh,
     incomingCallSignal,
+    callHandledElsewhere,
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,

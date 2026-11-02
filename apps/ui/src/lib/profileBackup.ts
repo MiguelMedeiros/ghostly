@@ -270,6 +270,14 @@ export async function writeProfileBackup(sink: BackupSink, { passphrase, id, loc
   // The pieces of large files are not read here: every file's bytes are read through file storage, a step at a time.
   const peer = await snapshotDatabase(space, ["fileChunks"]);
   const storeOf = (name: string) => peer?.stores.find((store) => store.name === name);
+  // A chat's ratchet (WISP 4xx) is this device's alone: never in a backup, never moved by a handoff. A restored chat, or
+  // the device that takes the profile, starts a new session with its contact on its first item.
+  const linksStore = storeOf("links");
+  if (linksStore) linksStore.values = linksStore.values.map((value) => {
+    if (!value || typeof value !== "object" || !("ratchetState" in value)) return value;
+    const { ratchetState: _ratchet, ...link } = value as Record<string, unknown>;
+    return link;
+  });
   const settingsStore = storeOf("settings");
   // The engine's settings without what a backup leaves out (`backupSettings`). A handoff keeps them whole: the new active
   // device goes on holding items for contacts, a desktop with no push subscription of its own goes on giving contacts the

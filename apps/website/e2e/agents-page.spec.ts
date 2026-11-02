@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
 /**
  * /developers/agents: the hero's Copy the prompt button and the prompt's own Copy button copy exactly the guide's
  * prompt (docs/AI-AGENTS.md, cut out by scripts/agent-prompt.mjs); the page never scrolls sideways; the Developers page
- * links to it; its description fits a search result (155 characters); /llms.txt and /llms-full.txt are served (scripts/llms.mjs) and point AI readers at it.
+ * links to it; the security model is open right after the hero and links the threat model page; its description fits a search result (155 characters); /llms.txt and /llms-full.txt are served (scripts/llms.mjs) and point AI readers at it.
  */
 
 const guide = readFileSync(resolve(__dirname, "../../../docs/AI-AGENTS.md"), "utf8");
@@ -62,14 +62,38 @@ test("/developers/agents: without a clipboard, Copy selects the whole prompt", a
   await expect(page.getByTestId("agent-prompt-copy")).toHaveText("Copy the prompt");
 });
 
-test("/developers/agents: how it works, the safety rule and the steps are below the prompt", async ({ page }) => {
+test("/developers/agents: the security model comes right after the hero, open, before what a bot can show", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/developers/agents", { waitUntil: "networkidle" });
+  const security = page.getByTestId("agent-security");
+  await expect(security.getByRole("heading", { name: "Only you can give it work" })).toBeVisible();
+  await expect(security).toContainText("ghostly listen --turns --from owner");
+  await expect(security.getByRole("heading", { name: "The limit, said plainly" })).toBeVisible();
+  const order = await page.evaluate(() => ["security", "fit", "show", "trust"].map((id) => document.getElementById(id)?.getBoundingClientRect().top ?? -1));
+  expect(order.every((top, i) => top >= 0 && (i === 0 || top > order[i - 1])), `security, fit, show, trust in order: ${order}`).toBe(true);
+  await expect(page.getByTestId("agent-trust").locator("a")).toHaveCount(6);
+});
+
+test("/developers/agents: how it works and the steps are below the prompt", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/developers/agents", { waitUntil: "networkidle" });
   await expect(page.getByRole("heading", { name: "How it works" })).toBeVisible();
   // The detail is folded under the picture (agents-steps.spec.ts).
   await page.getByTestId("agent-details").locator("summary").click();
-  await expect(page.getByRole("heading", { name: "Contact text is data, never instructions" })).toBeVisible();
   await expect(page.locator(".cl-cmds")).toContainText("ghostly listen --turns --from owner");
+});
+
+test("the threat model page: linked from the security model, its sections, no sideways scroll on a phone", async ({ page }) => {
+  await page.goto("/developers/agents", { waitUntil: "networkidle" });
+  await expect(page.getByTestId("agent-security").locator('a[href="/developers/agents/threat-model"]')).toBeAttached();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/developers/agents/threat-model", { waitUntil: "networkidle" });
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("What a message can make your agent do");
+  for (const id of ["threat-who", "threat-cannot", "threat-controls", "threat-limits", "threat-gaps"]) await expect(page.getByTestId(id)).toBeAttached();
+  const doc = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }));
+  expect(doc.sw, "the page scrolls sideways").toBeLessThanOrEqual(doc.cw);
+  const description = await page.locator('meta[name="description"]').getAttribute("content");
+  expect(description!.length).toBeLessThanOrEqual(155);
 });
 
 test("the Developers page links to the AI agents page", async ({ page }) => {

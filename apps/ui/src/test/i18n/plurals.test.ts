@@ -15,6 +15,24 @@ describe("a counted string", () => {
     expect(ar("group.chat.memberCount", { count: 25 })).toBe("25 عضوًا");
   });
 
+  // agents#2255: a redeem at a mint that kept a fee says the unit in the form of what arrived.
+  it("a redeem that paid the mint a fee says the unit for what arrived, in English and in Arabic", () => {
+    const redeemed = (say: typeof en, count: number) => say("wallet.cashu.tokenRedeemedFeeTest", { count, amount: String(count), fee: "2" });
+    expect([1, 2].map((count) => redeemed(en, count))).toEqual(["Redeemed 1 test sat (the mint kept 2 as its fee).", "Redeemed 2 test sats (the mint kept 2 as its fee)."]);
+    expect([1, 2, 3, 11, 100].map((count) => redeemed(ar, count).split(" (")[0])).toEqual(["استُرد 1 sat تجريبي", "استُرد 2 sat تجريبيان", "استُرد 3 sats تجريبية", "استُرد 11 sat تجريبيًا", "استُرد 100 sat تجريبي"]);
+  });
+
+  // A store's app count (Apps' store rows, Add's store question) read "0 تطبيقات", "2 تطبيقات", "61 تطبيقات".
+  it("a store's app count takes its form for every count, in Arabic and in every language", () => {
+    const apps = (count: number) => ar("apps.store.count", { count });
+    expect([0, 1, 2, 3, 10, 61, 100].map(apps)).toEqual(["لا تطبيقات", "تطبيق واحد", "تطبيقان", "3 تطبيقات", "10 تطبيقات", "61 تطبيقًا", "100 تطبيق"]);
+    expect([1, 2].map((count) => en("apps.store.count", { count }))).toEqual(["1 app", "2 apps"]);
+    expect([0, 1, 2].map((count) => translateWith(LOCALES.fr, "fr")("apps.store.count", { count }))).toEqual(["0 app", "1 app", "2 apps"]);
+    for (const [language, dict] of Object.entries(LOCALES)) {
+      expect(translateWith(dict, language as "en")("apps.store.count", { count: 1 }), language).not.toMatch(/apps\b|تطبيقات/);
+    }
+  });
+
   it("takes its count from {{count}}, or from its one number when it has no count", () => {
     expect(ar("errors.group.filesPacedNextMinutes", { minutes: 2 })).toBe("انتظر دقيقتين، ثم أرسله مرة أخرى.");
     expect(ar("errors.group.filesPacedNextMinutes", { minutes: 5 })).toBe("انتظر 5 دقائق، ثم أرسله مرة أخرى.");

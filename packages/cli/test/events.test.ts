@@ -134,6 +134,24 @@ describe("the event stream", () => {
     expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
   });
 
+  it("a contact's proof back at a status it had before is a new fact, with its own id and the reason", async () => {
+    const { h, events } = await hub("identity-status.jsonl");
+    h.baseline(state([link("c1")]), new Map());
+    const proof = (status: string, error?: string) => link("c1", { identities: { support: true, shared: [], received: [{ id: "p1", provider: "domain", subject: "example.com", status, verified: {}, verifiedAt: 1, checkedAt: 1, expiresAt: 0, recheckDue: false, ...(error ? { error } : {}) }] } } as never);
+    for (const [status, error] of [["verified"], ["unconfirmed", "No TXT record at _ghostly.example.com"], ["verified"], ["unconfirmed", "The resolver did not answer"], ["unconfirmed", "The resolver did not answer"]]) {
+      h.sink.post({ kind: "state", state: state([proof(status!, error)]) });
+    }
+    const changes = events.map((e) => ({ type: e.type, ...(e.identity as { status: string; error: string | null }) })).map(({ type, status, error }) => ({ type, status, error }));
+    expect(changes).toEqual([
+      { type: "identity.received", status: "verified", error: null },
+      { type: "identity.status", status: "unconfirmed", error: "No TXT record at _ghostly.example.com" },
+      { type: "identity.status", status: "verified", error: null },
+      { type: "identity.status", status: "unconfirmed", error: "The resolver did not answer" },
+    ]);
+    // A listener that dedupes by id (README) keeps every change.
+    expect(new Set(events.map((e) => e.id)).size).toBe(events.length);
+  });
+
   it("says when a member of a group starts and stops typing, with what it does, once per change", async () => {
     const { h, events } = await hub("group-typing.jsonl");
     const group = (typing?: unknown[]) => ({ id: "g1", status: "active", members: [{ key: "ana" }, { key: "bo" }], ...(typing ? { typing } : {}) });

@@ -29,10 +29,12 @@ function digestOf(size: number): string {
 
 // Node has no storage estimate: this device says it has 40 GiB left for files (`left`, for a test that fills it).
 let left = 40 * 1024 ** 3;
+/** The contact's check of a received file's digest waits for this, as one over a large file takes a while. */
+let checking: Promise<void> | undefined;
 Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: async () => ({ quota: 50 * 1024 ** 3, usage: 50 * 1024 ** 3 - left }) }, configurable: true });
 
 const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => { left = 40 * 1024 ** 3; for (const step of cleanup.splice(0).reverse()) await step(); });
+afterEach(async () => { left = 40 * 1024 ** 3; checking = undefined; for (const step of cleanup.splice(0).reverse()) await step(); });
 
 /** `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3. */
 async function setup({ files2 = false, largeFiles = true } = {}) {
@@ -66,7 +68,7 @@ async function setup({ files2 = false, largeFiles = true } = {}) {
       const disk = received.get(record.id) ?? { hash: createHash("sha256"), length: 0 };
       received.set(record.id, disk);
       return { offset: disk.length, append: async (bytes) => { disk.hash.update(bytes); disk.length += bytes.length; }, flush: async () => {},
-        verify: async (digest) => disk.hash.copy().digest("base64url") === digest, discard: async () => { received.delete(record.id); } };
+        verify: async (digest) => { await checking; return disk.hash.copy().digest("base64url") === digest; }, discard: async () => { received.delete(record.id); } };
     },
     openSource: async (record) => {
       const { size, digest } = sources.get(record.id)!;
@@ -322,6 +324,20 @@ it("sends a file to a contact with files/3, and cancels one on both sides", asyn
   await vi.waitFor(() => expect(t.node().getState().transfers[cancelled.id]).toMatchObject({ stage: "asking" }));
   t.node().fileAction({ linkId: t.id, fileId: cancelled.id, action: "cancel" });
   await vi.waitFor(() => expect(t.records.get("in:send-0002")).toMatchObject({ state: "cancelled", error: "Cancelled by the sender" }));
+}, 60_000);
+
+it("a sent file whose every byte arrived is too late to cancel: it ends done on both sides, kept there", async () => {
+  const t = await setup();
+  let release!: () => void;
+  checking = new Promise<void>((resolve) => { release = resolve; });
+  const sent = await put(t, "late-00001", 3 * 1024 * 1024 + 5);
+  await vi.waitFor(() => expect(t.records.get("in:late-00001")?.state).toBe("verifying"), { timeout: 30_000 });
+  expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "transferring", stage: "verifying", direction: "out" });
+  t.node().fileAction({ linkId: t.id, fileId: sent.id, action: "cancel" });
+  release();
+  await vi.waitFor(() => expect(t.node().getState().transfers[sent.id]).toMatchObject({ state: "done", direction: "out" }), { timeout: 20_000 });
+  expect(t.records.get("in:late-00001")?.state).toBe("done");
+  expect(t.received.get("late-00001")?.length).toBe(3 * 1024 * 1024 + 5);
 }, 60_000);
 
 const notFound = () => Object.assign(new Error("The object can not be found here."), { name: "NotFoundError" });

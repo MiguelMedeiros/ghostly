@@ -1,7 +1,7 @@
 // The README's hero (docs/assets/readme/hero*.webp): Boo's chat with Casper on a computer and on a phone, in the
 // app's default Dark. Shots are named x-readme-*, so run.mjs leaves them in the scratch folder; readme-hero.mjs turns
 // them into the README's images. Nothing leaves this machine: Pkarr from the in-process relay, STUN from a local
-// server, Iroh off, every other host refused.
+// server, every other host refused (Iroh too: the plain build this runs on ignores the suite's ghostly-test-iroh).
 import { test, expect, type Browser } from "@playwright/test";
 import { LocalRelay } from "../../../../e2e/support/relay";
 // Not a React hook, despite the name: renamed so the website's lint does not read it as one.
@@ -21,7 +21,6 @@ async function offline(browser: Browser, relay: LocalRelay, baseURL: string, who
   await context.routeWebSocket((url) => !local(url), (ws) => { void ws.close({ code: 1008, reason: "Offline capture" }); });
   await relay.attach(context);
   await localStun(context);
-  await context.addInitScript(() => { try { localStorage.setItem("ghostly-test-iroh", "off"); } catch { /* opaque origin */ } });
   const page = context.pages()[0] ?? await context.newPage();
   page.on("pageerror", (e) => console.log(`  [${who.name}] ${e.message}`));
   await page.goto("/");

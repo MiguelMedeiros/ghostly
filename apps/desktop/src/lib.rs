@@ -330,7 +330,7 @@ pub fn run() {
         })
         .on_page_load(on_page_load);
     // What a contact's app kept, cleared in a hidden window of its origin when the page forgets it.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let builder = builder.manage(forget_origins::ForgetState::default());
 
     // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
@@ -425,7 +425,7 @@ pub fn run() {
         .expect("error while running tauri application");
     // Before any window (they are made when the app runs): the files a contact's app forgotten last time left behind,
     // which WebKit no longer holds open now.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     forget_origins::clean_at_launch(app.handle());
     app.run(on_run_event);
 }

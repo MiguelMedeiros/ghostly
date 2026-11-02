@@ -48,6 +48,19 @@ describe("the Redeemed mark of an ecash token", () => {
     expect(await screen.findByTestId("token-redeemed")).toBeInTheDocument();
   });
 
+  // agents#2255: the card showed the token's face value and "Redeemed ✓" while the mint had kept part of it as its fee.
+  it("says what the mint kept as its fee when it kept one, and only Redeemed when it kept none", async () => {
+    fakeEngine.setState({ links: [linkView()] });
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 3, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    const view = renderApp(<><MessageBubble message={message("m1", `cashuBa${"f".repeat(60)}`)} peerPubKey="peer" /><MessageBubble message={message("m2", `cashuBa${"n".repeat(60)}`)} peerPubKey="peer" /></>);
+    view.engine.on("walletReceiveToken", ({ token }: { token: string }) => (token.endsWith("f") ? { amount: 1, fee: 2 } : { amount: 3, fee: 0 }));
+    const [feeCard, freeCard] = await screen.findAllByTestId("cashu-token-bubble");
+    await view.user.click(within(feeCard!).getByTestId("token-redeem"));
+    await waitFor(() => expect(within(feeCard!).getByTestId("token-redeemed")).toHaveTextContent("Redeemed ✓ (the mint kept 2 as its fee)"));
+    await view.user.click(within(freeCard!).getByTestId("token-redeem"));
+    await waitFor(() => expect(within(freeCard!).getByTestId("token-redeemed")).toHaveTextContent(/^Redeemed ✓$/));
+  });
+
   // agents#1588: the same token in two messages: the second card offered Redeem still, and pressed said "Already spent"
   // for a token this device had just redeemed.
   it("turns every card of the same token Redeemed when one of them is redeemed here, not Already spent", async () => {

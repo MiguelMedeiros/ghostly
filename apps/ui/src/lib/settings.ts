@@ -45,6 +45,11 @@ export interface AppSettings {
   reduceMotion: boolean;
   chatListDensity: ChatListDensity;
   /**
+   * Where the layout has a side list (a wide window): the list folded to a rail of the chats' pictures, for more room
+   * for the open chat. Kept on this device only; a phone's list is unchanged.
+   */
+  chatListCollapsed: boolean;
+  /**
    * Whether this client may ask, now and then, whether a newer version was
    * published. The question is a request that says this device runs Ghostly,
    * so it is the user's to allow; off, updates are only looked for on demand.
@@ -92,6 +97,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   defaultNickname: "",
   reduceMotion: false,
   chatListDensity: "compact",
+  chatListCollapsed: false,
   checkForUpdates: true,
   linkPreviews: true,
   translateMessages: false,
@@ -146,6 +152,7 @@ export function loadSettings(): AppSettings {
       // Cleaned as it is saved now: a name kept before, of spaces or zero-width characters only, is no name.
       defaultNickname: typeof parsed.defaultNickname === "string" ? cleanOwnName(parsed.defaultNickname) : DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
+      chatListCollapsed: parsed.chatListCollapsed === true,
       linkPreviews: parsed.linkPreviews !== false,
       translateMessages: parsed.translateMessages === true,
     };

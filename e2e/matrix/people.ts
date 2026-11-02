@@ -163,7 +163,7 @@ export interface DesktopPerson extends Person {
 
 /**
  * A Desktop app of its own (`home`, `profile`), pointed at the test's relay and HyperDHT bootstrap by `env`.
- * `binary` opens another build than the current one: an older release's (e2e/desktop/compat-v115.spec.ts).
+ * `binary` opens another build than the current one: an older release's (e2e/desktop/compat.spec.ts).
  * `open` starts it some other way: on a Mac, through the test driver (support/desktopMac.ts).
  */
 export async function desktopPerson(name: string, options: {

@@ -108,6 +108,7 @@
     "backupFirst": "先にバックアップをダウンロード",
     "backupPassphrase": "バックアップのパスフレーズ",
     "cashuSats": "Cashu に {{amount}} sats",
+    "cashuSats_one": "Cashu に {{amount}} sat",
     "confirmLabel": "確認のためプロフィール名を入力",
     "confirmPlaceholder": "{{name}} と入力",
     "deleting": "削除中…",
@@ -144,5 +145,6 @@
   "restoredTag": "復元",
   "restoredTagHint": "バックアップから復元しました",
   "sats": "{{amount}} sats",
+  "sats_one": "{{amount}} sat",
   "switch": "切り替え"
 }

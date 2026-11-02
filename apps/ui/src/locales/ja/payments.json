@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "支払いを承認",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin オンチェーン",
@@ -289,6 +290,7 @@
     "qrTooLong": "QR コードには長すぎます。コピーしてください。",
     "redeem": "受け取る",
     "redeemed": "受け取り済み ✓",
+    "redeemedFee": "受け取り済み ✓（mint が手数料として {{fee}} を差し引きました）",
     "redeeming": "受け取り中…"
   },
   "mode": {

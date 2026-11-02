@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { chat, connect, expect, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
+import { chat, connect, deployedBuild, expect, link, openProfilePage, say, test, type Peer } from "../support/fixtures";
 
 /**
  * Reactions (WISP 400 § Reactions). In a 1:1 chat Alice reacts to Bob's message from the React button, changes it from
@@ -172,6 +172,7 @@ test("a message taller than the chat: the bar and the + panel open at the React 
 });
 
 test("an app from before reactions gets nothing, and its contact's chip stays on their side", { tag: ["@feature:chat.reactions.wire"] }, async ({ peer }) => {
+  test.skip(deployedBuild, "a deployed build is a release build: it ignores ghostly-test-reactions");
   test.setTimeout(4 * 60_000);
   const [alice, bob] = await Promise.all([peer("react-new"), peer("react-old")]);
   // Bob's page stands in for an older app: it never says react/1.

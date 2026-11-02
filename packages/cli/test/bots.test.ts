@@ -86,7 +86,7 @@ describe("file wait", () => {
   it("times out with how far it got; an unknown file is not found", async () => {
     const { ctx, transfer } = fake();
     transfer("chat-one-in-c", { state: "transferring", transferred: 40, size: 100, direction: "in", stage: "paused" });
-    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-c", timeout: 1 })).rejects.toMatchObject({ code: "timeout", details: { transferred: 40, size: 100, stage: "paused" } });
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-c", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: "Timed out after 1 s waiting for file chat-one-in-c to arrive (40 of 100 bytes, paused here (file resume))", details: { transferred: 40, size: 100, stage: "paused" } });
     await expect(callApi(ctx, "file.wait", { file: "chat-one-in-nothing" })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "file.wait", { file: "nochat-in-x" })).rejects.toMatchObject({ code: "not_found" });
   }, 10_000);
@@ -123,8 +123,34 @@ describe("file wait", () => {
     await expect(waiting).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("(26.2 MB) waits for you to take it: ghostly file accept chat-one-in-f") });
     // A file sent from here that waits for the contact's person goes on waiting: only they can take it.
     transfer("chat-one-out-g", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
-    await expect(callApi(ctx, "file.wait", { file: "chat-one-out-g", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-out-g", timeout: 1 })).rejects.toMatchObject({ code: "timeout", message: expect.stringContaining("(0 of 40000000 bytes, waiting for the contact to take it)"), details: { stage: "asking" } });
   }, 10_000);
+
+  it("times out naming where the transfer stands in words, the stage's id in details", async () => {
+    const { ctx, transfer } = fake();
+    const words = async (t: Partial<FileTransferView>) => {
+      transfer("chat-one-in-h", { state: "transferring", transferred: 0, size: 9, direction: "in", ...t });
+      return ((await callApi(ctx, "file.wait", { file: "chat-one-in-h", timeout: 1 }).catch((e: CliError) => e)) as CliError).message.replace(/^.*bytes, /, "");
+    };
+    expect(await words({ stage: "waiting" })).toBe("waiting for a connection to the contact)");
+    expect(await words({ stage: "paused", pausedBy: "peer" })).toBe("paused by the contact)");
+    expect(await words({ stage: "queued" })).toBe("waiting its turn)");
+    expect(await words({ stage: "verifying", transferred: 9 })).toBe("every byte here, checking it)");
+  }, 10_000);
+});
+
+describe("file list", () => {
+  it("says whose decision a file waits for: mine for one received, the contact's for one sent", async () => {
+    const { ctx, node, transfer } = fake();
+    const message = (id: string, file: string) => ({ id, sender: id.startsWith("me_") ? "me" : "peer", timestamp: 1, file: { id: file, name: "big.bin", size: 40_000_000, mime: "application/octet-stream" } });
+    node.getMessages.mockResolvedValueOnce([message("peer_1", "chat-one-in-i"), message("me_2", "chat-one-out-j"), message("peer_3", "chat-one-in-k")] as never);
+    transfer("chat-one-in-i", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
+    transfer("chat-one-out-j", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
+    transfer("chat-one-in-k", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "queued" });
+    const { files } = await callApi(ctx, "file.list", { chat: "Alice" }) as { files: { transfer: Record<string, unknown> }[] };
+    expect(files.map((f) => f.transfer.waitingFor)).toEqual(["me", "contact", undefined]);
+    expect(files[0].transfer).toMatchObject({ state: "transferring", stage: "asking", direction: "in" });
+  });
 });
 
 describe("typing --for", () => {

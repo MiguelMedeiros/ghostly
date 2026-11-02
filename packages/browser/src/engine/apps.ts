@@ -369,9 +369,11 @@ async function noteBundles(change: (noted: Set<string>) => void): Promise<void> 
   const settings = tx.objectStore(STORES.settings);
   const read = settings.get(APP_BUNDLES_KEY);
   read.onsuccess = () => {
-    const noted = new Set(bundleDigests(read.result));
+    const before = bundleDigests(read.result);
+    const noted = new Set(before);
     change(noted);
-    settings.put([...noted], APP_BUNDLES_KEY);
+    // Nothing changed: no write, so a profile that never held a bundle gets no record (and "Clear all data" keeps none).
+    if (noted.size !== before.length || before.some((d) => !noted.has(d))) settings.put([...noted], APP_BUNDLES_KEY);
   };
   await done(tx);
 }
@@ -894,6 +896,8 @@ export class Apps {
       for (const kind of kinds) await this.removeBundle(kind, digest);
       gone.add(digest);
     }
+    // Stopped meanwhile ("Clear all data" stops the peer before it empties the store): what was read is gone, write nothing.
+    if (this.stopped) return;
     await noteBundles((noted) => {
       for (const digest of named) noted.add(digest);
       for (const digest of gone) noted.delete(digest);
@@ -1476,7 +1480,7 @@ export class Apps {
       app = withRevocations(app, before ?? []);
       // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
       if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
-        await this.removeBundle(app.pending.bytes, app.pending.digest);
+        dropped.push(app.pending);
         const { pending: _p, ...rest } = app;
         app = rest;
       }

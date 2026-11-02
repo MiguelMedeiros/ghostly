@@ -16,6 +16,7 @@ import android.net.LinkProperties
 import android.net.Network
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.webkit.WebView
@@ -571,13 +572,13 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       return
     }
     thread(name = "ghostly-save") {
-      try {
-        val out = activity.contentResolver.openOutputStream(target, "wt") ?: throw IllegalStateException("No output")
-        out.use { to -> File(args.path).inputStream().use { it.copyTo(to) } }
-        invoke.resolve(JSObject().put("saved", true))
-      } catch (e: Exception) {
-        invoke.reject("The file could not be saved there")
-      }
+      val resolver = activity.contentResolver
+      val saved = SaveCopy.copy(
+        File(args.path),
+        { resolver.openOutputStream(target, "wt") },
+        { DocumentsContract.deleteDocument(resolver, target) },
+      )
+      if (saved) invoke.resolve(JSObject().put("saved", true)) else invoke.reject("The file could not be saved there")
     }
   }
 

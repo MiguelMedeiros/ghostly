@@ -1,0 +1,1 @@
+The wire binding says that each transport agrees fresh keys per connection, so a recorded session is forward secret already, and points at the draft [4xx · Forward Secrecy](../../4xx-ratchet.md) for the paths that store what they carry. No wire change here.

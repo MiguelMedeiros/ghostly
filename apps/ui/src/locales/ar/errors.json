@@ -30,6 +30,8 @@
     "lightningFailed": "لم تكتمل دفعة Lightning.",
     "mintHttps": "يجب أن تستخدم دور السكّ https",
     "mintNotAccepted": "لا يُقبل ecash من {{host}}",
+    "mintsNoAnyAmount": "لا يمكن لأي دار سكّ لديك دفع فاتورة بلا مبلغ",
+    "mintsNoAnyAmountNext": "اطلب فاتورة بالمبلغ.",
     "noAnswer": "لم يُجب {{host}}",
     "noInvoice": "لم تتمكن أي دار سك من إنشاء فاتورة",
     "noMint": "لا توجد دار سكّ مهيّأة",
@@ -72,6 +74,8 @@
     "couldNotVerify": "تعذّر التحقق من هذه الدفعة حتى الآن. لم تُرسَل دفعة ثانية.",
     "ecashAlreadySpent": "هذا الـ ecash أُنفق من قبل في مكان آخر",
     "ecashBeingReceived": "هذا الـ ecash قيد الاستلام بالفعل",
+    "ecashFeeTakesAll": "تحتفظ الـ mint بكل الـ {{amount}} sats من هذا الـ ecash رسمًا لاستلامه: لم يُسترد شيء، ولا يزال بإمكان مُرسله استعادته",
+    "ecashFeeTakesAll_one": "تحتفظ الـ mint بالـ {{amount}} sat من هذا الـ ecash رسمًا لاستلامه: لم يُسترد شيء، ولا يزال بإمكان مُرسله استعادته",
     "ecashOtherUnit": "هذا الـ ecash بوحدة {{unit}}: لا يمكن هنا استرداد إلا ecash بوحدة sat",
     "fedimintAlreadyJoined": "لقد انضممت إلى هذا الاتحاد من قبل",
     "fedimintConnecting": "انتظر حتى يتصل الاتحاد",
@@ -90,6 +94,8 @@
     "invoiceExpired": "انتهت صلاحية هذه الفاتورة",
     "lastMint": "هذه آخر دار سك في محفظة Cashu على {{network}}",
     "lastMintNext": "أزل المحفظة لإزالتها.",
+    "lightningRefused": "رفضت الـ mint هذه الدفعة عبر Lightning",
+    "lightningRefusedNext": "لم تخرج أي sats من محفظتك. يمكنك المحاولة مرة أخرى بأمان.",
     "lnurlExactly": "يطلب {{domain}} مبلغ {{amount}} sats بالضبط",
     "lnurlRange": "يقبل {{domain}} ما بين {{min}} و{{max}} sats",
     "lnurlUnreachable": "تعذر الوصول إلى {{host}}",
@@ -313,6 +319,8 @@
     "requestGone": "لم يعد طلب الدفع موجودًا",
     "retryNext": "أعد المحاولة للاحتفاظ به مجددًا.",
     "retryingNext": "يعيد Ghostly المحاولة تلقائيًا.",
+    "sealedBefore": "تركت جهة اتصالك عناصر للجهاز الذي كنت تستخدمه من قبل",
+    "sealedBeforeNext": "تصلك عندما يختمها تطبيق جهة اتصالك من جديد لهذا الجهاز.",
     "storeFailed": "تعذّر حفظ العنصر في مساحة التخزين الخاصة بك",
     "storeFailedNext": "تحقق من مساحة S3 في الملف الشخصي ← النسخ الاحتياطية، ثم أعد المحاولة.",
     "tooLarge": "لا يتجاوز العنصر المحفوظ لجهة اتصال غائبة {{mb}} ميغابايت"
@@ -556,10 +564,14 @@
   },
   "relays": {
     "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل",
+    "enterAddress": "أدخل عنوان مرحّل ({{example}}…)",
+    "irohAtMost": "استخدم أربعة مرحّلات Iroh على الأكثر",
+    "noLogin": "أزِل اسم المستخدم وكلمة المرور من العنوان",
     "noneAnswered": "لم تستجب المرحّلات",
     "noneAnsweredNext": "تحقّق من اتصالك، ثم أعد المحاولة.",
     "notAddress": "ليس عنوان مرحّل: {{address}}",
-    "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}"
+    "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}",
+    "useWss": "استخدم wss:// في عنوان المرحّل"
   },
   "startAgain": "ابدأ من جديد",
   "transport": {
@@ -608,6 +620,11 @@
     "switchRetryNext": "حاول مرة أخرى، أو اختر وسيلة نقل أخرى.",
     "switchSlow": "لم يتصل {{transport}} في الوقت المحدد",
     "switchTimedOut": "استغرق التبديل وقتًا طويلًا"
+  },
+  "turn": {
+    "enterAddress": "أدخل عنوان خادم TURN",
+    "needsLogin": "يحتاج خادم TURN إلى اسم المستخدم وبيانات الاعتماد",
+    "notAddress": "ليس عنوان TURN أو STUN (مثل turn:host:port): {{address}}"
   },
   "verify": {
     "closed": "أُغلق الاتصال",

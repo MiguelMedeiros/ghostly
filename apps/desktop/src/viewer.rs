@@ -298,7 +298,7 @@ pub async fn handle<R: tauri::Runtime>(
     request: Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
     // A hidden window clearing an origin (`forget_origins`): served the app's cleaning page, never the contact's.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(response) = crate::forget_origins::serve(&app, &label, &request) {
         return response;
     }

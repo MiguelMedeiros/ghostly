@@ -493,6 +493,12 @@ describe("a video not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
   });
 
+  it("one sent from here that arrived whole, the contact checking it, has no Cancel: too late", () => {
+    const file = video({ id: "chat1-out-late" });
+    show(file, { state: "transferring", stage: "verifying", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("video-cancel")).toBeNull();
+  });
+
   it("once in, it plays", () => {
     const file = video();
     const view = show(file, { state: "transferring", direction: "in", transferred: 14 * MB, size: file.size });

@@ -54,6 +54,16 @@
   "pinned": "مثبّتة",
   "quiet": "الهدوء يعم هنا...",
   "quietHint": "حان وقت إخافة أحدهم! 👻",
+  "rail": {
+    "collapse": "طي قائمة المحادثات",
+    "expand": "توسيع قائمة المحادثات",
+    "invitation": "{{name}}، {{status}}",
+    "mention": "{{name}}، تمت الإشارة إليك",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}، رسائل غير مقروءة",
+    "unreadCount": "{{name}}، {{count}} من الرسائل غير المقروءة",
+    "unreadOne": "{{name}}، رسالة واحدة غير مقروءة"
+  },
   "searchPlaceholder": "بحث في المحادثات...",
   "settings": "الإعدادات",
   "sharedIdentity": "شارك هوية",

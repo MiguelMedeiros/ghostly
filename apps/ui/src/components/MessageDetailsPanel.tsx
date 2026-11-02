@@ -122,7 +122,7 @@ function Row({ row, copyHint, copied }: { row: DetailRow; copyHint: string; copi
       {row.copy !== undefined
         ? <button type="button" data-testid="message-details-copy" title={copyHint} aria-label={`${copyHint}: ${row.label}`}
             onClick={() => { void navigator.clipboard?.writeText(row.copy!).then(() => { setDone(true); setTimeout(() => setDone(false), 1500); }).catch(() => {}); }}
-            className="bg-transparent border-none p-0 text-start text-inherit cursor-pointer hover:text-accent transition-colors">{value}</button>
+            className="bg-transparent border-none p-0 text-start text-inherit cursor-pointer hover:text-accent transition-colors max-md:min-h-6">{value}</button>
         : value}
     </dd>
   </>;

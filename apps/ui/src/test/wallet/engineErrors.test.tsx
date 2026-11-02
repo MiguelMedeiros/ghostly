@@ -6,7 +6,7 @@ import { CashuWallet } from "../../components/wallet/CashuWallet";
 import { networkState } from "../../components/walletCardData";
 import { servicesPlatform, type WalletNetwork, type WalletState } from "../../lib/platform";
 import { fakeEngine, linkView, paymentView, walletView } from "../fakeEngine";
-import { lightningSource, mint, REAL_MINT, TEST_MINT } from "../payments/fixtures";
+import { lightningSource, liveMainnetInvoice, mint, REAL_MINT, TEST_MINT } from "../payments/fixtures";
 import { renderApp } from "../render";
 
 // covers: wallet.cashu.mint.add, wallet.lightning.sources
@@ -48,6 +48,31 @@ describe("an engine error, in the app's language", () => {
     fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(REAL_MINT, 0)] }, payments: { "pay-1": paymentView({ kind: "payment", direction: "out", state: "failed", error: engineText("noSharedMint") }) } });
     renderApp(<PaymentBubble paymentId="pay-1" peerPubKey="peer" fallbackText="[a payment]" />, { language: "pt" });
     expect(screen.getByTestId("payment-state")).toHaveTextContent("Você não tem nenhum mint em comum com este contato");
+  });
+
+  // A mint that refuses a melt at once ("Lightning payment failed: no route"): its English stood alone (agents#2253).
+  const refused = engineText("lightningRefused", { reason: "Lightning payment failed: no route" });
+
+  it("a Lightning payment the mint refused, on the wallet page: no sats left, in Portuguese; the mint's words behind the ⓘ", async () => {
+    const state = walletView({ mode: "testnet", mints: [mint(TEST_MINT, 9_500)], balance: 9_500 }) as WalletState;
+    const { user, engine } = renderApp(<CashuWallet wallet={wallet} state={state} rail="cashu" onOpenCashu={() => {}} />, { language: "pt" });
+    engine.on("walletQuoteInvoice", () => ({ quote: "melt-1", mint: TEST_MINT, amount: 300, feeReserve: 2 })).on("walletPayQuote", () => { throw new Error(refused); });
+    await user.click(screen.getByTestId("wallet-send"));
+    await user.type(screen.getByTestId("wallet-pay-input"), liveMainnetInvoice(300));
+    await user.click(screen.getByRole("button", { name: /^Pagar 300 sats de teste$/ }));
+    await user.click(await screen.findByTestId("wallet-pay-confirm"));
+    const notice = await screen.findByTestId("wallet-error");
+    expect(notice).toHaveTextContent("A mint recusou este pagamento Lightning" + "Nenhum sat saiu da sua carteira. Pode tentar de novo com segurança.");
+    expect(notice).not.toHaveTextContent("no route");
+    await user.click(screen.getByTestId("wallet-error-info"));
+    expect(screen.getByTestId("wallet-error-details")).toHaveTextContent("The mint said: Lightning payment failed: no route");
+  });
+
+  it("a Lightning payment the mint refused, on a chat request: no sats left, in Portuguese", () => {
+    fakeEngine.setState({ links: [linkView()], wallet: { mints: [mint(TEST_MINT, 9_500)] }, payments: { "req-1": paymentView({ kind: "request", direction: "in", state: "failed", error: refused }) } });
+    renderApp(<PaymentBubble paymentId="req-1" peerPubKey="peer" fallbackText="[a request]" />, { language: "pt" });
+    expect(screen.getByTestId("payment-state")).toHaveTextContent("A mint recusou este pagamento Lightning. Nenhum sat saiu da sua carteira.");
+    expect(screen.getByTestId("payment-state")).not.toHaveTextContent("no route");
   });
 
   it("in English, the text is the engine's own, word for word", async () => {

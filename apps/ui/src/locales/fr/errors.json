@@ -30,6 +30,8 @@
     "lightningFailed": "Le paiement Lightning n'a pas abouti.",
     "mintHttps": "Les mints doivent utiliser https",
     "mintNotAccepted": "L'ecash de {{host}} n'est pas accepté",
+    "mintsNoAnyAmount": "Aucun de vos mints ne peut payer une facture sans montant",
+    "mintsNoAnyAmountNext": "Demandez-en une avec le montant.",
     "noAnswer": "{{host}} n'a pas répondu",
     "noInvoice": "Aucun mint n'a pu créer de facture",
     "noMint": "Aucun mint configuré",
@@ -72,6 +74,8 @@
     "couldNotVerify": "Impossible de vérifier ce paiement pour l’instant. Aucun second paiement n’a été envoyé.",
     "ecashAlreadySpent": "Cet ecash a déjà été dépensé ailleurs",
     "ecashBeingReceived": "Cet ecash est déjà en cours de réception",
+    "ecashFeeTakesAll": "La mint garde les {{amount}} sats de cet ecash comme frais pour l’encaisser : rien n’a été encaissé, et son expéditeur peut encore le reprendre",
+    "ecashFeeTakesAll_one": "La mint garde le {{amount}} sat de cet ecash comme frais pour l’encaisser : rien n’a été encaissé, et son expéditeur peut encore le reprendre",
     "ecashOtherUnit": "Cet ecash est en {{unit}} : seul l’ecash en sat peut être encaissé ici",
     "fedimintAlreadyJoined": "Vous avez déjà rejoint cette fédération",
     "fedimintConnecting": "Attendez que la fédération se connecte",
@@ -90,6 +94,8 @@
     "invoiceExpired": "Cette facture a expiré",
     "lastMint": "C'est le dernier mint de votre portefeuille Cashu {{network}}",
     "lastMintNext": "Supprimez le portefeuille pour le retirer.",
+    "lightningRefused": "La mint a refusé ce paiement Lightning",
+    "lightningRefusedNext": "Aucun sat n’a quitté votre portefeuille. Vous pouvez réessayer sans risque.",
     "lnurlExactly": "{{domain}} demande exactement {{amount}} sats",
     "lnurlRange": "{{domain}} accepte entre {{min}} et {{max}} sats",
     "lnurlUnreachable": "{{host}} injoignable",
@@ -281,7 +287,7 @@
     "pictureNext": "Essayez une autre image.",
     "privateNotCommunity": "Ce lien mène à l'un de vos groupes privés",
     "privateNotCommunityNext": "Ouvrez-le depuis la liste des discussions.",
-    "removed": "Vous avez été retiré de ce groupe",
+    "removed": "Vous ne faites plus partie de ce groupe",
     "shareLinkInstead": "Partagez le lien du groupe avec cette personne : quiconque l'ouvre rejoint le groupe",
     "tooLong": "Le message dépasse 16 Kio"
   },
@@ -309,6 +315,8 @@
     "requestGone": "La demande de paiement n'existe plus",
     "retryNext": "Réessayez pour le garder à nouveau.",
     "retryingNext": "Ghostly réessaie tout seul.",
+    "sealedBefore": "Votre contact a laissé des éléments pour l'appareil que vous utilisiez avant",
+    "sealedBeforeNext": "Ils vous parviennent dès que l'app de votre contact les scelle à nouveau pour celui-ci.",
     "storeFailed": "Impossible d'enregistrer l'élément dans votre stockage",
     "storeFailedNext": "Vérifiez votre stockage S3 dans Profil → Sauvegardes, puis réessayez.",
     "tooLarge": "Un élément gardé pour un contact absent fait au plus {{mb}} Mo"
@@ -552,10 +560,14 @@
   },
   "relays": {
     "atLeastOne": "Saisissez au moins une adresse de relais",
+    "enterAddress": "Saisissez une adresse de relais ({{example}}…)",
+    "irohAtMost": "Utilisez au plus quatre relais Iroh",
+    "noLogin": "Retirez l'identifiant et le mot de passe de l'adresse",
     "noneAnswered": "Les relais n'ont pas répondu",
     "noneAnsweredNext": "Vérifiez votre connexion, puis réessayez.",
     "notAddress": "Ce n'est pas une adresse de relais : {{address}}",
-    "useHttps": "Utilisez une adresse de relais https:// : {{address}}"
+    "useHttps": "Utilisez une adresse de relais https:// : {{address}}",
+    "useWss": "Utilisez une adresse de relais wss://"
   },
   "startAgain": "Recommencer",
   "transport": {
@@ -604,6 +616,11 @@
     "switchRetryNext": "Réessayez, ou choisissez un autre transport.",
     "switchSlow": "{{transport}} ne s'est pas connecté à temps",
     "switchTimedOut": "Le changement a pris trop de temps"
+  },
+  "turn": {
+    "enterAddress": "Saisissez l'adresse du serveur TURN",
+    "needsLogin": "Un serveur TURN a besoin de son identifiant et de son mot de passe",
+    "notAddress": "« {{address}} » n'est pas une adresse TURN ou STUN (turn:host:port)"
   },
   "verify": {
     "closed": "La connexion s'est fermée",

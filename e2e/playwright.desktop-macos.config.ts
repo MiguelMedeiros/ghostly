@@ -21,6 +21,10 @@ export default defineConfig({
   // No retries: this job is on probation (dev pushes and nightly), and a flake has to show as one.
   retries: 0,
   timeout: 10 * 60_000,
+  // In CI the whole run has a limit too, about 5 times what a green one takes (under 3 minutes): a test's own timeout
+  // runs in its worker, so a worker that hangs never reaches it. Past this Playwright stops the worker and still writes
+  // the report. Not here on a Mac: the measurements that run only when asked take over an hour.
+  globalTimeout: process.env.CI ? 15 * 60_000 * Number(process.env.REPEAT || 1) : 0,
   expect: { timeout: 30_000 },
   reporter: process.env.CI
     ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report-desktop-macos" }], ["github"]]

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { spawnSync } from "node:child_process";
+import { basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attachDesktopLogs, desktopHome } from "../support/desktop";
 import { LocalRelay } from "../support/relay";
@@ -7,11 +8,13 @@ import { desktopNetwork } from "../matrix/desktop";
 import { desktopPerson, type DesktopPerson } from "../matrix/people";
 
 /**
- * The current Desktop and a real v1.1.5 Desktop, the last release: what a contact who has not updated their Desktop yet
- * still does with it. The web compatibility suite (e2e/compat/) covers old web builds; this is the other side, the
+ * The current Desktop and a real older Desktop: what a contact who has not updated their Desktop yet still does with
+ * it. v1.1.5, and the newest release with a published package, read from the tags: the common case, a contact who
+ * updates a day later. The web compatibility suite (e2e/compat/) covers old web builds; this is the other side, the
  * Rust host and its native transports, which a web build never runs.
  *
- * The 1.1.5 app is the release's own Linux package (tools/scripts/fetch-compat-desktop.mjs), what people installed.
+ * The old app is the release's own Linux package (tools/scripts/fetch-compat-desktop.mjs), what people installed.
+ * E2E_COMPAT_LATEST names the newest release instead of asking the remote, as in the web suite.
  * A chat pairs from either side's invite, texts go both ways over the DHT, then both go live on Iroh or HyperDHT
  * (WebKitGTK has no WebRTC, so no other transport is possible) and texts go both ways live, each shown once.
  *
@@ -19,15 +22,20 @@ import { desktopPerson, type DesktopPerson } from "../matrix/people";
  * this process, as in native-upgrade.spec.ts.
  */
 
-/** The v1.1.5 binary: fetched once, then from the cache. Skips the test where no tool unpacks the release's package. */
-const oldBinary = () => {
-  const fetched = spawnSync(process.execPath, ["tools/scripts/fetch-compat-desktop.mjs", "--tag", "v1.1.5"], {
+/**
+ * A release's binary and its version: fetched once, then from the cache. `newest` is the newest release whose package
+ * is published, a draft's tag passed over. Skips the test where no tool unpacks the release's package.
+ */
+const oldBinary = (tag: string) => {
+  const fetched = spawnSync(process.execPath, ["tools/scripts/fetch-compat-desktop.mjs", "--tag", tag], {
     cwd: fileURLToPath(new URL("../..", import.meta.url)), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
   });
   process.stderr.write(fetched.stderr ?? "");
-  test.skip(fetched.status === 3, `The v1.1.5 package cannot be unpacked here: ${(fetched.stderr ?? "").trim().split("\n").at(-1)}`);
+  test.skip(fetched.status === 3, `The ${tag} package cannot be unpacked here: ${(fetched.stderr ?? "").trim().split("\n").at(-1)}`);
   if (fetched.error || fetched.status !== 0) throw fetched.error ?? new Error(`fetch-compat-desktop.mjs ended with status ${fetched.status}`);
-  return fetched.stdout.trim();
+  const binary = fetched.stdout.trim();
+  // <cache>/desktop-<tag>/usr/bin/ghostly
+  return { binary, version: basename(resolve(binary, "../../..")).replace(/^desktop-v/, "") };
 };
 
 /** How many times the open conversation shows this exact text: once, or it was lost or doubled. */
@@ -44,12 +52,17 @@ const shownOnce = (p: DesktopPerson, text: string, timeout: number) =>
 
 test.skip(process.platform !== "linux" || process.arch !== "x64", "The release's Desktop package is Linux x64 only");
 
-for (const host of ["current", "1.1.5"] as const) {
-  test(`a chat from the ${host} Desktop's invite goes both ways between the current Desktop and v1.1.5, over the DHT and then live`, {
-    tag: ["@feature:chat.compat.v115.desktop", "@feature:chat.native-upgrade"],
+const RELEASES = [
+  { name: "v1.1.5", release: "v1.1.5", tag: ["@feature:chat.compat.v115.desktop"] },
+  { name: "the newest release", release: process.env.E2E_COMPAT_LATEST || "newest", tag: ["@feature:chat.compat.latest.desktop"] },
+];
+
+for (const { name, release, tag } of RELEASES) for (const host of ["current", "old"] as const) {
+  test(`a chat from the ${host} Desktop's invite goes both ways between the current Desktop and ${name}, over the DHT and then live`, {
+    tag: [...tag, "@feature:chat.native-upgrade"],
   }, async () => {
     test.setTimeout(10 * 60_000);
-    const binary = oldBinary();
+    const { binary, version: old } = oldBinary(release);
     const relay = new LocalRelay();
     const network = await desktopNetwork(relay);
     const cleanup: (() => Promise<void> | void)[] = [() => relay.close(), () => network.close()];
@@ -61,9 +74,9 @@ for (const host of ["current", "1.1.5"] as const) {
         return person;
       };
       const [nina, olga] = await Promise.all([open("nina", false), open("olga", true)]);
-      // The old app is the one we think it is.
-      expect(await version(olga)).toBe("1.1.5");
-      expect(await version(nina)).not.toBe("1.1.5");
+      // The old app is the one we think it is. Not the current one by its number: dev keeps the last release's version
+      // until the next bump, so the current Desktop can say the newest release's.
+      expect(await version(olga)).toBe(old);
 
       const [inviter, joiner] = host === "current" ? [nina, olga] : [olga, nina];
       await inviter.press("New chat");

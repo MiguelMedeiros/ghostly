@@ -30,6 +30,8 @@
     "lightningFailed": "The Lightning payment did not go through.",
     "mintHttps": "Mints must use https",
     "mintNotAccepted": "Ecash from {{host}} is not accepted",
+    "mintsNoAnyAmount": "None of your mints can pay an invoice with no amount",
+    "mintsNoAnyAmountNext": "Ask for one with the amount.",
     "noAnswer": "{{host}} did not answer",
     "noInvoice": "No mint could make an invoice",
     "noMint": "No mint configured",
@@ -72,6 +74,8 @@
     "couldNotVerify": "Could not verify this payment yet. No second payment was sent.",
     "ecashAlreadySpent": "This ecash was already spent somewhere else",
     "ecashBeingReceived": "This ecash is already being received",
+    "ecashFeeTakesAll": "The mint keeps all {{amount}} sats of this ecash as its fee to take it in: nothing was redeemed, and its sender can still take it back",
+    "ecashFeeTakesAll_one": "The mint keeps this ecash's {{amount}} sat as its fee to take it in: nothing was redeemed, and its sender can still take it back",
     "ecashOtherUnit": "This ecash is in {{unit}}: only sat ecash can be redeemed here",
     "fedimintAlreadyJoined": "You already joined this federation",
     "fedimintConnecting": "Wait for the federation to connect",
@@ -90,6 +94,8 @@
     "invoiceExpired": "That invoice has expired",
     "lastMint": "This is your {{network}} Cashu wallet's last mint",
     "lastMintNext": "Remove the wallet to remove it.",
+    "lightningRefused": "The mint refused this Lightning payment",
+    "lightningRefusedNext": "No sats left your wallet. It's safe to try again.",
     "lnurlExactly": "{{domain}} asks for exactly {{amount}} sats",
     "lnurlRange": "{{domain}} takes between {{min}} and {{max}} sats",
     "lnurlUnreachable": "Can't reach {{host}}",
@@ -309,6 +315,8 @@
     "requestGone": "The payment request is gone",
     "retryNext": "Retry to hold it again.",
     "retryingNext": "Ghostly tries again by itself.",
+    "sealedBefore": "Your contact left items for the device you used before",
+    "sealedBeforeNext": "They arrive once your contact's app seals them again for this one.",
     "storeFailed": "Couldn't store the item in your storage",
     "storeFailedNext": "Check your S3 storage in Profile → Backups, then retry.",
     "tooLarge": "An item held for an away contact is at most {{mb}} MB"
@@ -552,10 +560,14 @@
   },
   "relays": {
     "atLeastOne": "Enter at least one relay address",
+    "enterAddress": "Enter a relay address ({{example}}…)",
+    "irohAtMost": "Use at most four Iroh relays",
+    "noLogin": "Leave the user and password out of the address",
     "noneAnswered": "The relays did not answer",
     "noneAnsweredNext": "Check your connection, then try again.",
     "notAddress": "Not a relay address: {{address}}",
-    "useHttps": "Use an https:// relay address: {{address}}"
+    "useHttps": "Use an https:// relay address: {{address}}",
+    "useWss": "Use a wss:// relay address"
   },
   "startAgain": "Start again",
   "transport": {
@@ -604,6 +616,11 @@
     "switchRetryNext": "Try again, or choose another transport.",
     "switchSlow": "{{transport}} did not connect in time",
     "switchTimedOut": "The change took too long"
+  },
+  "turn": {
+    "enterAddress": "Enter the TURN server address",
+    "needsLogin": "A TURN server needs its username and credential",
+    "notAddress": "“{{address}}” is not a TURN or STUN address (turn:host:port)"
   },
   "verify": {
     "closed": "The connection closed",

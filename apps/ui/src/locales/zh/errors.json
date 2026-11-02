@@ -30,6 +30,8 @@
     "lightningFailed": "Lightning 付款没有成功。",
     "mintHttps": "铸币厂必须使用 https",
     "mintNotAccepted": "不接受来自 {{host}} 的 ecash",
+    "mintsNoAnyAmount": "你的铸币厂都无法支付没有金额的发票",
+    "mintsNoAnyAmountNext": "请索取带金额的发票。",
     "noAnswer": "{{host}} 没有响应",
     "noInvoice": "没有铸币厂能创建发票",
     "noMint": "尚未配置铸币厂",
@@ -72,6 +74,8 @@
     "couldNotVerify": "暂时无法核实此付款。没有发送第二笔付款。",
     "ecashAlreadySpent": "这笔 ecash 已在别处花掉",
     "ecashBeingReceived": "这笔 ecash 已在接收中",
+    "ecashFeeTakesAll": "mint 会把这笔 ecash 的全部 {{amount}} sats 作为接收手续费扣下：没有兑换任何东西，发送者仍可以收回它",
+    "ecashFeeTakesAll_one": "mint 会把这笔 ecash 的 {{amount}} sat 作为接收手续费扣下：没有兑换任何东西，发送者仍可以收回它",
     "ecashOtherUnit": "这笔 ecash 的单位是 {{unit}}：这里只能兑换 sat 的 ecash",
     "fedimintAlreadyJoined": "你已经加入了这个联盟",
     "fedimintConnecting": "请等待联盟连接",
@@ -90,6 +94,8 @@
     "invoiceExpired": "这张发票已过期",
     "lastMint": "这是你的 {{network}} Cashu 钱包的最后一个铸币厂",
     "lastMintNext": "要移除它，请删除钱包。",
+    "lightningRefused": "mint 拒绝了这笔 Lightning 付款",
+    "lightningRefusedNext": "没有任何 sats 离开你的钱包。可以放心重试。",
     "lnurlExactly": "{{domain}} 要求正好 {{amount}} sats",
     "lnurlRange": "{{domain}} 接受 {{min}} 到 {{max}} sats",
     "lnurlUnreachable": "无法连接 {{host}}",
@@ -309,6 +315,8 @@
     "requestGone": "付款请求已不存在",
     "retryNext": "重试即可再次暂存。",
     "retryingNext": "Ghostly 会自动重试。",
+    "sealedBefore": "联系人留给你的内容是给你之前所用设备的",
+    "sealedBeforeNext": "联系人的应用为这台设备重新封装后就会送达。",
     "storeFailed": "无法将项目存入你的存储",
     "storeFailedNext": "请在个人资料 → 备份中检查 S3 存储，然后重试。",
     "tooLarge": "为不在线的联系人暂存的项目最大 {{mb}} MB"
@@ -552,10 +560,14 @@
   },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",
+    "enterAddress": "请输入中继地址（{{example}}…）",
+    "irohAtMost": "最多使用四个 Iroh 中继",
+    "noLogin": "请从地址中去掉用户名和密码",
     "noneAnswered": "中继没有响应",
     "noneAnsweredNext": "请检查网络连接，然后重试。",
     "notAddress": "这不是中继地址：{{address}}",
-    "useHttps": "请使用 https:// 中继地址：{{address}}"
+    "useHttps": "请使用 https:// 中继地址：{{address}}",
+    "useWss": "请使用 wss:// 中继地址"
   },
   "startAgain": "重新开始",
   "transport": {
@@ -604,6 +616,11 @@
     "switchRetryNext": "请重试，或选择另一种传输方式。",
     "switchSlow": "{{transport}} 未能及时连接",
     "switchTimedOut": "切换耗时过长"
+  },
+  "turn": {
+    "enterAddress": "请输入 TURN 服务器地址",
+    "needsLogin": "TURN 服务器需要用户名和凭据",
+    "notAddress": "“{{address}}”不是 TURN 或 STUN 地址（turn:host:port）"
   },
   "verify": {
     "closed": "连接已关闭",

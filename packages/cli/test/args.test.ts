@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { liftGlobals, parseArgs } from "../src/args";
+import { liftGlobals, nearest, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
 import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
@@ -107,6 +107,17 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["bob", "--frobnicate"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --frobnicate"));
     // Two edits in a short word are another word: `--nope` is not `--home`.
     expect(() => parseArgs(["--nope"], {})).toThrow(new CliError("usage", "Unknown option --nope"));
+  });
+
+  // A word whose length is more than 2 away from a name's is more than 2 edits away from it: no distance is worked out.
+  // Before, a 100,000-character text that starts with a dash took over a second to be refused (a table per name).
+  it("refuses a long word that starts with a dash as fast as a short one", () => {
+    const send = TEXT_COMMANDS.send, long = `-${"a".repeat(100_000)}`;
+    const started = performance.now();
+    expect(() => parseArgs(["bob", long], send.options, idSlot(send), { command: "send", text: true })).toThrow(/^Unknown option -a+ for ghostly send/);
+    expect(nearest(long.slice(1), Object.keys(COMMANDS))).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(nearest(`wait${"x".repeat(2)}`, ["wait", "wai"])).toBe("wait");
   });
 
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
@@ -482,6 +493,8 @@ describe("errors", () => {
     for (const code of ["hostTimedOut", "networkTimedOut"] as const) expect(asCliError(engineError(code, host)).code, code).toBe("timeout");
     for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
     for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
+    // A mint that refused a Lightning payment at once: nothing left the wallet, its own words kept at the end (agents#2253).
+    expect(asCliError(engineError("lightningRefused", { reason: "Lightning payment failed: no route" })).toJSON()).toEqual({ code: "refused", message: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: Lightning payment failed: no route" });
     expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
     // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
     expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
