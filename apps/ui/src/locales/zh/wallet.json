@@ -229,8 +229,15 @@
     "setAsideInfo": "为铸币厂尚未确认的付款预留。铸币厂答复后，它会随付款转出或回到你的余额。",
     "settings": "设置",
     "testBalance": "{{amount}} 测试 sats（没有价值）",
+    "testBalance_one": "{{amount}} 测试 sat（没有价值）",
     "testMintInvoice": "正在等待付款… 测试铸币厂会自动把每张发票标记为已付，所以这张发票只有在联系人于聊天中支付后才算数。现在就要测试 sats，请使用上方的“获取测试币”。",
     "tokenHint": "收到的是 ecash 代币？请粘贴到“发送”中。",
+    "tokenRedeemedFee": "已兑换 {{amount}} sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFeeTest": "已兑换 {{amount}} 测试 sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFeeTest_one": "已兑换 {{amount}} 测试 sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFeeTest_other": "已兑换 {{amount}} 测试 sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFee_one": "已兑换 {{amount}} sats（mint 扣下 {{fee}} 作为手续费）。",
+    "tokenRedeemedFee_other": "已兑换 {{amount}} sats（mint 扣下 {{fee}} 作为手续费）。",
     "tx": {
       "ecashIn": "收到 ecash",
       "ecashOut": "发送了 ecash",
@@ -250,6 +257,7 @@
     "alreadyRedeemed": "已被别人兑换。",
     "amountFee": "{{amount}}（手续费 {{fee}}）",
     "asNotes": "{{amount}} sats 的票据",
+    "asNotes_one": "{{amount}} sat 的票据",
     "asking": "正在询问其守护者…",
     "backup": "钱包备份",
     "backupHint": "短语和联盟；个人资料备份包含全部内容",
@@ -587,7 +595,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "测试 sats"
+    "mainnet_one": "sat",
+    "testnet": "测试 sats",
+    "testnet_one": "测试 sat"
   },
   "send": {
     "balance": "余额：{{amount}} {{unit}}",
@@ -639,6 +649,7 @@
     "experimental": "实验性",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "请先在 Fedimint 卡上加入一个带 Lightning 网关的联盟。",
       "label": "联盟",
       "unknownNetwork": "未知网络",

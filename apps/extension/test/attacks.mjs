@@ -264,7 +264,7 @@ try {
     const fake = getEncodedToken({ mint: local, unit: "sat", proofs: [{ id: "009a1f293253e41e", amount: 64, secret: "forged", C: "02" + "11".repeat(32) }] });
     await forgePay(first, 64, fake);
     // The victim says a refusal in the chat: the frame arrived and was read.
-    const refusal = victim.page.locator(".chat-wallpaper").getByText(/^Could not receive 64 sats: /);
+    const refusal = victim.page.locator(".chat-wallpaper").getByText(/^Could not receive 64 (?:test )?sats: /);
     await refusal.waitFor({ timeout: 60_000 });
     console.log(`    victim: "${await refusal.innerText()}"`);
     trap.server.close();

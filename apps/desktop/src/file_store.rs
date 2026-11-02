@@ -291,16 +291,25 @@ fn write_whole(
     result.map_err(io_text)
 }
 
-/// `.<name>.<random>.part` beside `target`.
+/// `.<name>.<random>.part` beside `target`, its name cut to fit [`NAME_BYTES`]: a name the disk takes (up to 255
+/// bytes) would not, 23 bytes longer.
 #[cfg_attr(target_os = "android", allow(dead_code))]
 fn partial_path(target: &Path) -> Result<PathBuf, String> {
     let name = target
         .file_name()
-        .ok_or_else(|| "The chosen place has no file name".to_string())?;
-    let mut partial = std::ffi::OsString::from(".");
-    partial.push(name);
-    partial.push(format!(".{:016x}.part", rand::random::<u64>()));
-    Ok(target.with_file_name(partial))
+        .ok_or_else(|| "The chosen place has no file name".to_string())?
+        .to_string_lossy();
+    let suffix = format!(".{:016x}.part", rand::random::<u64>());
+    let room = NAME_BYTES - 1 - suffix.len();
+    let mut used = 0;
+    let name: String = name
+        .chars()
+        .take_while(|c| {
+            used += c.len_utf8();
+            used <= room
+        })
+        .collect();
+    Ok(target.with_file_name(format!(".{name}{suffix}")))
 }
 
 /// The system's "downloaded from the internet" mark on a saved copy: a contact sent it, so opening
@@ -386,8 +395,13 @@ fn invisible(c: char) -> bool {
 /// The longest name the save dialog is given, in characters (as packages/core `sanitizeFileName`).
 const MAX_NAME_CHARS: usize = 200;
 
+/// Bytes a file system takes in one name: 255 on ext4, btrfs, APFS (NTFS counts 255 UTF-16 units, within this too).
+/// 200 characters of Chinese are 600.
+const NAME_BYTES: usize = 255;
+
 /// A suggested name for the save dialog: what the chat shows, without anything that reads as a path.
-/// A longer one loses the end of its stem, not its extension (up to 15 characters after the last dot).
+/// A longer one (in characters, or in bytes) loses the end of its stem, not its extension (up to 15 characters after
+/// the last dot).
 fn suggested_name(name: &str) -> String {
     let clean: String = name
         .chars()
@@ -398,7 +412,7 @@ fn suggested_name(name: &str) -> String {
         return "file".into();
     }
     let chars: Vec<char> = clean.chars().collect();
-    if chars.len() <= MAX_NAME_CHARS {
+    if chars.len() <= MAX_NAME_CHARS && clean.len() <= NAME_BYTES {
         return clean.to_string();
     }
     let extension: Vec<char> = match chars.iter().rposition(|c| *c == '.') {
@@ -410,7 +424,16 @@ fn suggested_name(name: &str) -> String {
         }
         _ => Vec::new(),
     };
-    let stem: String = chars[..MAX_NAME_CHARS - extension.len()].iter().collect();
+    let room = NAME_BYTES - extension.iter().map(|c| c.len_utf8()).sum::<usize>();
+    let mut used = 0;
+    let stem: String = chars[..chars.len() - extension.len()]
+        .iter()
+        .take(MAX_NAME_CHARS - extension.len())
+        .take_while(|c| {
+            used += c.len_utf8();
+            used <= room
+        })
+        .collect();
     stem.trim_end().chars().chain(extension).collect()
 }
 
@@ -1021,6 +1044,45 @@ mod tests {
         assert!(failed.is_err());
         assert_eq!(fs::read(&target).unwrap(), b"the old report");
         assert_eq!(names(&dir), vec!["report.pdf"]);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    /// The issue: a name of 200 characters in Chinese or Japanese is 600 bytes, and a folder entry holds 255 (ext4,
+    /// btrfs, APFS): the save dialog was handed a name no disk takes, and a name of 233 to 255 bytes still failed,
+    /// as its hidden partial copy is 23 bytes longer. Either way Save a copy said "File name too long".
+    #[test]
+    fn a_long_name_in_any_script_is_saved_under_a_name_the_disk_takes() {
+        let suggested = suggested_name(&format!("{}.pdf", "文".repeat(200)));
+        assert!(suggested.len() <= 255, "{} bytes", suggested.len());
+        assert_eq!(suggested, format!("{}.pdf", "文".repeat(83)));
+        assert_eq!(
+            suggested_name(&"é".repeat(150)),
+            "é".repeat(127),
+            "no extension: the end goes"
+        );
+        // Short enough in bytes and characters: as it is.
+        assert_eq!(suggested_name(&"文".repeat(85)), "文".repeat(85));
+    }
+
+    #[test]
+    fn a_name_the_disk_takes_is_saved_though_its_partial_copy_would_be_longer() {
+        let (files, dir) = store();
+        files.append("p", "f", 0, b"report").unwrap();
+        let out = dir.join("out");
+        fs::create_dir_all(&out).unwrap();
+        // 83 characters of 3 bytes and ".pdf": 253 bytes, a name the disk takes.
+        let name = format!("{}.pdf", "文".repeat(83));
+        let target = out.join(&name);
+        files.copy_to("p", "f", &target).unwrap();
+        assert_eq!(fs::read(&target).unwrap(), b"report");
+        assert_eq!(names(&out), vec![name]);
+        let partial = partial_path(&target).unwrap();
+        let partial = partial.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(partial.len() <= 255, "{} bytes", partial.len());
+        assert!(
+            partial.starts_with(".文") && partial.ends_with(".part"),
+            "{partial}"
+        );
         fs::remove_dir_all(dir).ok();
     }
 
