@@ -247,6 +247,19 @@ export function Settings() {
   const appsOn = useAppsAvailable();
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
   const [chatCount, setChatCount] = useState(0);
+  // Clear and Delete all chats swap their button for a confirm and back: the focus goes to what took the pressed button's place, not to the page.
+  const dataButtons = { clear: useRef<HTMLButtonElement>(null), clearCancel: useRef<HTMLButtonElement>(null), deleteChats: useRef<HTMLButtonElement>(null) };
+  const focusDataButton = useRef<keyof typeof dataButtons | null>(null);
+  const confirmData = (which: "clear" | "deleteChats", open: boolean) => {
+    focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : null;
+    if (which === "clear") setConfirmClearData(open);
+    else setConfirmDeleteChats(open);
+  };
+  useLayoutEffect(() => {
+    const which = focusDataButton.current;
+    focusDataButton.current = null;
+    if (which) dataButtons[which].current?.focus();
+  }, [confirmClearData, confirmDeleteChats]); // eslint-disable-line react-hooks/exhaustive-deps -- the refs are read when it is drawn
   const [noticePermission, setNoticePermission] = useState<NoticePermission>("default");
   const [requestingNotice, setRequestingNotice] = useState(false);
   useEffect(() => {
@@ -719,13 +732,13 @@ export function Settings() {
         <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
           {confirmDeleteChats ? <>
             <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
-            <Button onClick={() => setConfirmDeleteChats(false)}>{t("common.cancel")}</Button>
+            <Button onClick={() => confirmData("deleteChats", false)}>{t("common.cancel")}</Button>
           </> : (
-            <Button variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => setConfirmDeleteChats(true)}>{t("common.delete")}</Button>
+            <Button ref={dataButtons.deleteChats} variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => confirmData("deleteChats", true)}>{t("common.delete")}</Button>
           )}
         </Row>
         <Row label={t("settings.clearAllData")} hint={t("settings.clearAllDataDescription")} info={t("settings.clearAllDataInfo")}>
-          {!confirmClearData && <Button variant="danger" data-testid="clear-all-data" onClick={() => setConfirmClearData(true)}>{t("settings.clear")}</Button>}
+          {!confirmClearData && <Button ref={dataButtons.clear} variant="danger" data-testid="clear-all-data" onClick={() => confirmData("clear", true)}>{t("settings.clear")}</Button>}
         </Row>
         {confirmClearData && (
           // What goes, in plain lines, and what stays; why and what the network keeps is behind the row's ⓘ.
@@ -738,7 +751,7 @@ export function Settings() {
               </ul>
               <p className="text-xs text-text-muted">{t("settings.clearAllDataKeeps")}</p>
               <ButtonGroup>
-                <Button onClick={() => setConfirmClearData(false)}>{t("common.cancel")}</Button>
+                <Button ref={dataButtons.clearCancel} onClick={() => confirmData("clear", false)}>{t("common.cancel")}</Button>
                 <Button variant="danger" data-testid="clear-all-data-confirm" onClick={() => void clearData()}>{t("settings.clearAllData")}</Button>
               </ButtonGroup>
             </div>
