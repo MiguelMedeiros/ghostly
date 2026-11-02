@@ -315,6 +315,8 @@
     "requestGone": "The payment request is gone",
     "retryNext": "Retry to hold it again.",
     "retryingNext": "Ghostly tries again by itself.",
+    "sealedBefore": "Your contact left items for the device you used before",
+    "sealedBeforeNext": "They arrive once your contact's app seals them again for this one.",
     "storeFailed": "Couldn't store the item in your storage",
     "storeFailedNext": "Check your S3 storage in Profile → Backups, then retry.",
     "tooLarge": "An item held for an away contact is at most {{mb}} MB"
