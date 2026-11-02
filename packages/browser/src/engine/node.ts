@@ -7696,6 +7696,7 @@ export class GhostlyNode implements EngineImplementation {
     live.carried?.stop();
     live.carried = entry || this.groups.isCommunityGroup(group) ? undefined : new CarriedTransport(this.groupTransport, live.myPubKeyZ32, stored.peerPubKeyZ32, {
       carry: payload => this.groups.carrySignal(group, peer, payload),
+      canCarry: () => this.groups.canCarrySignal(group, peer),
       open: () => !!live.link?.isDataLinkOpen,
       look: () => live.link?.look(),
       direct: payload => this.groups.directSignal(group, peer, linkId, payload),
