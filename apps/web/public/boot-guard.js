@@ -277,13 +277,14 @@
   }
 
   /**
-   * The language the app will start in, as apps/ui/src/lib/settings.ts picks it: the one the default profile saved,
-   * or for a new profile the first of the browser's languages the app speaks. English is in the entry. Another
-   * profile chosen here may read in another language: then this file was asked for in vain, and the app asks for its own.
+   * The language the app will start in, as apps/ui/src/lib/settings.ts picks it: the one the profile the page starts as
+   * saved (`settingsKey`, a handoff's space included), or for a new profile the first of the browser's languages the app
+   * speaks. English is in the entry. Another profile chosen on the way in may read in another language: then this file
+   * was asked for in vain, and the app asks for its own.
    */
   function appLanguage(files) {
     try {
-      var saved = JSON.parse(localStorage.getItem("ghostly_app_settings") || "null");
+      var saved = JSON.parse(localStorage.getItem(settingsKey()) || "null");
       if (saved && typeof saved.language === "string") return saved.language;
     } catch (e) { /* no storage: a new profile */ }
     var tags = [];
