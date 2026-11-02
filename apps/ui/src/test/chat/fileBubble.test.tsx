@@ -484,4 +484,24 @@ describe("a moving file's progress bar", () => {
     expect(bar.className).toMatch(/\borigin-left\b/);
     expect(bar.className).toMatch(/\brtl:origin-right\b/);
   });
+
+  // agents#2509: the bar was a bare div; a screen reader found no progress in the bubble but its status text.
+  it("is a progress bar to a screen reader, named by its file, with its value as the status says it", () => {
+    show({ state: "transferring", direction: "in", transferred: 0.62 * 4.2 * GB, size: 4.2 * GB, rate: 12 * 1024 ** 2 });
+    const bar = screen.getByRole("progressbar", { name: "movie.mkv" });
+    expect(bar).toHaveAttribute("aria-valuemin", "0");
+    expect(bar).toHaveAttribute("aria-valuemax", "100");
+    expect(bar).toHaveAttribute("aria-valuenow", "62");
+    expect(bar.getAttribute("aria-valuetext")?.replace(/\u00a0/g, " ")).toBe("62% of 4.2 GB");
+    // Not live: it is read when the person goes to it, never on each reading.
+    expect(bar).not.toHaveAttribute("aria-live");
+  });
+
+  it("says its value in the app's language", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { [file().id]: { state: "transferring", direction: "in", transferred: 0.5 * 4.2 * GB, size: 4.2 * GB, stage: "paused", pausedBy: "peer" } } });
+    renderApp(<FileBubble file={file()} peerName="Ana" />, { language: "pt" });
+    const bar = screen.getByRole("progressbar", { name: "movie.mkv" });
+    expect(bar).toHaveAttribute("aria-valuenow", "50");
+    expect(bar.getAttribute("aria-valuetext")?.replace(/\u00a0/g, " ")).toMatch(/^50% de 4[.,]2 GB$/);
+  });
 });

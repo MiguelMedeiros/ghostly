@@ -1,5 +1,14 @@
 {
   "announce": {
+    "fileAccepted": "{{name}} 已接受 {{file}}",
+    "fileArrived": "{{file}} 已收到，可以保存",
+    "fileCancelled": "{{name}} 已取消 {{file}}",
+    "fileDeclined": "{{name}} 已拒绝 {{file}}",
+    "fileDelivered": "{{name}} 已收到 {{file}}",
+    "fileFailed": "{{file}}：{{status}}",
+    "fileOffer": "{{name}} 想发送 {{file}}（{{size}}）· 等待你的答复",
+    "filePaused": "{{name}} 已暂停 {{file}}",
+    "fileResumed": "{{name}} 已继续 {{file}}",
     "message": "{{name}}：{{text}}",
     "messages": "{{count}} 条新消息",
     "messagesFrom": "来自 {{name}} 的 {{count}} 条新消息",
