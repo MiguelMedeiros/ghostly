@@ -165,6 +165,8 @@
     "restoring": "Caricamento… · {{size}}",
     "resume": "Riprendi",
     "roomDevice": "{{size}} liberi su questo dispositivo",
+    "senderOnly": "Non ancora presso le tue connessioni",
+    "senderOnlyHint": "In un gruppo così grande la tua app si collega tramite pochi membri, non a chi l'ha inviato. Arriva da solo quando uno di loro lo scarica, oppure chiedi a chi l'ha inviato di mandartelo in una chat.",
     "stalled": "Fermo · {{progress}}",
     "verifying": "Verifica del file… {{size}}",
     "verifyingThere": "Arrivato, {{name}} lo sta verificando… {{size}}",
