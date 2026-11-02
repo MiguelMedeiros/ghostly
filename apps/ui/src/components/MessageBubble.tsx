@@ -429,10 +429,13 @@ const emojiCount = (text: string) => {
   return parts.filter((part) => part.trim()).length;
 };
 
-/** Up to 6 emoji and nothing else show big. */
+/**
+ * Up to 6 emoji and nothing else show big. Besides the pictures: a keycap (a digit, # or * with U+20E3) and a tag
+ * sequence's tags (the flags of England, Scotland and Wales), which the emoji panel offers too.
+ */
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
-    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
+    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|[0-9#*]\uFE0F?\u20E3|[\u{E0020}-\u{E007F}]|\u200d|\uFE0F|\s)+$/u;
   return emojiPattern.test(text.trim()) && emojiCount(text) <= 6;
 }
 
