@@ -260,6 +260,46 @@
     if (poll === null) poll = setInterval(check, 500);
   }
 
+  /**
+   * The language the app will start in, as apps/ui/src/lib/settings.ts picks it: the one the default profile saved,
+   * or for a new profile the first of the browser's languages the app speaks. English is in the entry. Another
+   * profile chosen here may read in another language: then this file was asked for in vain, and the app asks for its own.
+   */
+  function appLanguage(files) {
+    try {
+      var saved = JSON.parse(localStorage.getItem("ghostly_app_settings") || "null");
+      if (saved && typeof saved.language === "string") return saved.language;
+    } catch (e) { /* no storage: a new profile */ }
+    var tags = [];
+    try { tags = navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language]; } catch (e) { /* English */ }
+    for (var i = 0; i < tags.length; i++) {
+      var base = String(tags[i] || "").toLowerCase().split("-")[0];
+      if (base === "en" || Object.prototype.hasOwnProperty.call(files, base)) return base;
+    }
+    return "en";
+  }
+
+  /**
+   * The app's language file, asked for now, beside the bundle's files: the app loads it (`loadLocale`) only once its
+   * whole entry has downloaded and run, a round trip later on a slow network, and draws nothing until then. The
+   * build names each language's file in the page (apps/web/localePreload.ts); the dev server names none.
+   */
+  function preloadLanguage() {
+    try {
+      var meta = document.querySelector('meta[name="ghostly-locales"]');
+      if (!meta || !document.head) return;
+      var files = JSON.parse(meta.getAttribute("content") || "{}");
+      var language = appLanguage(files);
+      if (!Object.prototype.hasOwnProperty.call(files, language)) return;
+      var link = document.createElement("link");
+      link.rel = "modulepreload";
+      link.crossOrigin = "";
+      link.href = files[language];
+      document.head.appendChild(link);
+    } catch (e) { /* the app loads it itself */ }
+  }
+
+  preloadLanguage();
   window.addEventListener("error", onError, true);
   window.addEventListener("unhandledrejection", onRejection);
   if (document.readyState === "complete") loaded();

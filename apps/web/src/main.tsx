@@ -52,7 +52,9 @@ gateSounds();
 // is pointed at its state again before anything opens storage. Its language is on <html> before the first paint (the
 // I18nProvider keeps it in step from then on).
 const profile = await openProfile(recoverHandoffPointer);
-// Its words too: only English is in the entry, every other language is loaded when a profile reads in it.
+// Its words too: only English is in the entry, every other language is loaded when a profile reads in it. The boot
+// guard (public/boot-guard.js) already asked for this one beside the entry's files (localePreload.ts), so on a first
+// visit this takes it from there rather than starting one more round trip now.
 await loadLocale(loadSettings().language);
 
 /** The profile's language, for what the entry draws before the app (and its providers) can. */
