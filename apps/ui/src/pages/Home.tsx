@@ -41,9 +41,9 @@ export function Home() {
             <circle cx="15" cy="9" r="1.5" fill="#111b21"/>
           </svg>
         </div>
-        <h2 className="text-text-primary text-2xl font-light">
+        <h1 className="text-text-primary text-2xl font-light">
           {t("app.name")}
-        </h2>
+        </h1>
         <p className="text-text-muted text-sm leading-tight">
           {t("home.description")}
         </p>
