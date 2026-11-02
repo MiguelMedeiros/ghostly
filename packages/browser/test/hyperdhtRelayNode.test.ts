@@ -175,3 +175,38 @@ it("listens again a while after the relay went away, each app at a time of its o
     await node.shutdown();
   }
 });
+
+it("starts the chat opened while the relay is out of reach before every other chat's waiting start", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  // Out of reach, a start takes its whole wait to fail (10 s), one after another per transport: the chat opened
+  // waited behind every other chat's start, 200 s with 20 chats, before its own even began or said why.
+  const starts: { seed: string; at: number }[] = [];
+  relayed.create.mockImplementation((seed: string) => {
+    starts.push({ seed, at: Date.now() });
+    return new Promise((_, reject) => setTimeout(() => reject(new Error("The HyperDHT relay did not answer")), 10_000));
+  });
+  const node = engine();
+  node["settings"] = { ...node["settings"], hyperdhtRelay: "wss://relay.example" };
+  const ids: string[] = [];
+  for (let i = 0; i < 20; i++) ids.push((await addChat(node, stubLink())).id);
+  for (const id of ids) void node["ensureNativeEndpoints"](id);
+  // A second at a time, the stored seeds written in between (fake-indexeddb answers on setImmediate).
+  const run = async (seconds: number) => {
+    for (let second = 0; second < seconds; second++) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (let k = 0; k < 4; k++) await new Promise(resolve => setImmediate(resolve));
+    }
+  };
+  await run(1);
+  const opened = ids[19], at = Date.now();
+  node["activeLinkId"] = opened;
+  void node["ensureNativeEndpoints"](opened, true);
+  await run(20);
+  const seed = () => node["links"].get(opened)!.stored.transportSeeds?.["hyperdht/1"];
+  const first = starts.find(start => start.seed === seed());
+  expect(first && first.at - at).toBeLessThanOrEqual(10_000);
+  expect(node.getState().links.find(l => l.id === opened)?.transportErrors?.["hyperdht/1"]).toMatch(/did not answer/);
+  // The others still take their turns after it (and after its own start asked before it was opened).
+  await run(20);
+  expect(starts.filter(start => start.at > first!.at && start.seed !== seed()).length).toBeGreaterThan(0);
+}, 60_000);
