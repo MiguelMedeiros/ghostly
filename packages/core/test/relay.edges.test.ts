@@ -107,7 +107,9 @@ describe("publishing", () => {
 
   it("says a relay that refused the connection did not answer, by its address, not that it cools down", async () => {
     const relay = new RelayTransport({ relays: ["https://a.test", "https://b.test"], fetch: (async () => { throw new TypeError("fetch failed"); }) as typeof fetch });
-    await expect(relay.publish(id, [])).rejects.toThrow("fetch failed");
+    const first = await relay.publish(id, []).then(() => "", (e: Error) => e.message);
+    // It said "TypeError: fetch failed", once per relay: Node's words, no relay named.
+    expect(first).toBe("Publish failed on every relay: Error: https://a.test did not answer; Error: https://b.test did not answer");
     const error = await relay.publish(id, []).then(() => "", (e: Error) => e.message);
     expect(error).toContain("https://a.test did not answer a moment ago");
     expect(error).toContain("https://b.test did not answer a moment ago");
