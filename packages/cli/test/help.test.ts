@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ghostly, home } from "./support/cli";
+import { error, ghostly, home, ok } from "./support/cli";
 // covers: headless.cli
 
 /** Help per command and per group, as a person or a bot asks for it: `help <words>` or `<words> --help`. */
@@ -143,6 +143,25 @@ describe("help", () => {
       expect(code, args.join(" ")).toBe(0);
       expect(json, args.join(" ")).toHaveProperty("version");
       expect(stdout.trim().split("\n")).toHaveLength(1);
+    }
+  });
+
+  it("an option's value that reads -h or --help is the value, not a help request", async () => {
+    // `profile set --name --help` printed profile set's help with exit 0 and changed nothing; `edit … --text "$NEW"` with
+    // a text of "-h" did the same: a bot read exit 0 as done.
+    const dir = home("help-as-value");
+    expect(ok(await ghostly(["--home", dir, "profile", "create", "bot", "--name", "-h"]))).toMatchObject({ created: "bot", profile: { name: "-h" } });
+    expect(ok(await ghostly(["--home", dir, "-p", "bot", "profile", "set", "--name", "--help"]))).toMatchObject({ profile: "bot", name: "--help" });
+    // The parser's own reading of the line: `--reply -h` names a message, so the chat is looked for.
+    for (const args of [["send", "bob", "hi", "--reply", "-h"], ["edit", "bob", "m1", "--text", "--help"]]) {
+      const result = await ghostly(["--home", dir, "-p", "bot", ...args]);
+      expect(error(result, "not_found", 3).message, args.join(" ")).toContain('No chat "bob"');
+    }
+    // A boolean before it, or a value given with `=`, leaves a later --help a help request.
+    for (const args of [["send", "bob", "--force", "--help"], ["send", "bob", "--wait=sent", "-h"], ["daemon", "--timeout", "5", "--help"]]) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(0);
+      expect(result.stdout, args.join(" ")).toMatch(/^Usage: ghostly /);
     }
   });
 
