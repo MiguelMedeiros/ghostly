@@ -47,7 +47,7 @@ describe("install", () => {
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
     const preview = await store.preview({ url: "https://github.com/ana/chess" });
-    expect(net.requests).toEqual([BUNDLE_URL]);
+    expect(net.requests).toEqual([BUNDLE_URL, new URL("ghostly-revoke.json", BUNDLE_URL).href]);
     expect(preview).toMatchObject({ digest: v1.digest, ref: v1.ref, install: "new", asks: ["chat"], run: { status: "ok" }, unknownPublisher: true, listedBy: [] });
     expect(await appRows()).toEqual([]);
     expect(await bundleIds()).toEqual([]);

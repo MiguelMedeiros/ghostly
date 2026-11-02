@@ -303,8 +303,11 @@ export interface AppsHost {
   checked?(results: AppCheckResult[]): void;
 }
 
-/** `store`: fetched from that store's listing, so installing it pins its updates to that store. */
-interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; at: number }
+/**
+ * `store`: fetched from that store's listing, so installing it pins its updates to that store. `revocations`: its
+ * publisher's, read beside it when it was fetched (Install refuses a version they stop, and the record starts with them).
+ */
+interface Staged { bundle: AppBundle; bytes: Uint8Array; from: string; store?: string; revocations: SignedAppRevocation[]; at: number }
 
 /**
  * A listing's URLs this client reads, in order, a jsDelivr copy first: one this client reads names a full commit, so it
@@ -1248,14 +1251,18 @@ export class Apps {
   }
 
   private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
-    for (const [digest, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(digest);
-    this.staged.delete(bundle.digest);
-    while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
-    this.staged.set(bundle.digest, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), at: this.now() });
-    if (!this.sweep) this.sweepStaged();
-
     const { manifest, digest } = bundle;
     const version = versionOf(manifest, digest);
+    // A fetched version is checked against its publisher's revocations before Install, as the update check does: beside
+    // the URL it came from and beside each source it names (beside a pinned commit, the file is that commit's). A version
+    // this build carries makes no request; the update check reads them.
+    const revocations = carried ? [] : (await this.readRevocations(version.ref, [from, ...(manifest.sources ?? [])])) ?? [];
+    for (const [d, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(d);
+    this.staged.delete(digest);
+    while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
+    this.staged.set(digest, { bundle, bytes, from, ...(fromStore !== undefined && { store: fromStore }), revocations, at: this.now() });
+    if (!this.sweep) this.sweepStaged();
+
     const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
     // What Install will answer: a clash with the update waiting is one too.
     const decision = installDecision(installed, version);
@@ -1266,7 +1273,7 @@ export class Apps {
       digest, ref: version.ref, publisher: manifest.publisher, fingerprint: appFingerprint(manifest.publisher), manifest, from,
       icon: bundle.files.get("icon.png")?.slice() ?? null,
       install, asks,
-      run: this.runStatus(version, this.storeViews(stores), installed?.revocations),
+      run: this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
       ...(carried && { carried: true as const }),
     };
@@ -1280,7 +1287,7 @@ export class Apps {
   async install({ digest, grant }: { digest: string; grant: string[] }): Promise<InstalledAppView> {
     const staged = this.staged.get(digest);
     if (!staged || this.now() - staged.at > STAGED.ms) { this.staged.delete(digest); fail("expired", "Fetch the app again"); }
-    const { bundle, bytes, from, store: fromStore } = staged;
+    const { bundle, bytes, from, store: fromStore, revocations } = staged;
     const { manifest } = bundle;
     if (!Array.isArray(grant) || !manifest.permissions.every((p) => grant.includes(p))) fail("permissions", "Every permission the app asks for must be granted");
     const version = versionOf(manifest, digest);
@@ -1291,7 +1298,7 @@ export class Apps {
       // (the check installed a newer version, an update accepted, another tab) is read and judged again.
       for (;;) {
         const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
-        const run = this.runStatus(version, this.storeViews(stores), installed?.revocations);
+        const run = this.runStatus(version, this.storeViews(stores), [...(installed?.revocations ?? []), ...revocations]);
         if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
         if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
         const decision = installDecision(installed, version);
@@ -1316,7 +1323,8 @@ export class Apps {
         }
         const kind = wrote = await this.writeBundle(digest, bytes);
         // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
-        const next = this.versionRecord(installed, bundle, kind, from, fromStore);
+        // It starts with the revocations read for the preview (of other versions: a later one may name one).
+        const next = withRevocations(this.versionRecord(installed, bundle, kind, from, fromStore), revocations);
         if (!(await this.putAppIfUnchanged(next, installed))) continue;
         // The person installed a built-in app they had removed (from a store, a link or a card): it is theirs again.
         if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
