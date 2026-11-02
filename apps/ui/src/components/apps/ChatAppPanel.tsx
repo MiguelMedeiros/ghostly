@@ -1,9 +1,8 @@
-import { useContext, useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
+import { useTabTrap } from "../../hooks/useDismiss";
 import { takedownText } from "../../lib/apps/open";
-import { ChatOnScreen } from "../../lib/chatOnScreen";
 import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
 import { ChatConnection } from "../ChatConnection";
@@ -27,10 +26,6 @@ const iconProps = { width: 18, height: 18, viewBox: "0 0 24 24", fill: "none", s
  * gives it back (to what opened it, "Back to Chess" after Back, else the message field). On a phone the panel is
  * modal: Tab stays in it and the chat under it is inert. Escape, with the focus in the panel, goes Back on a phone and
  * for a full-screen app, back beside the chat from full width, and closes it beside the chat.
- *
- * The browser's Back (Android's back gesture) with Back here on screen does what Back does: the app hides and the
- * person stays in the chat, as with a dialog or a sheet (lib/layerHistory.ts). Beside the chat it is part of the page,
- * and Back leaves the chat as usual.
  */
 export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey, status, callOn }: {
   linkId: string;
@@ -101,11 +96,6 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
 
   // A stopped app (a takedown) has nothing left to stop: Close takes its message away.
   const close = () => { if (app?.stopped) setChatApp(linkId, null); else app?.running.stop(); };
-  // Back to the chat: the app keeps running, "Back to Chess" brings it back; a stopped one has nothing to come back to.
-  const goBack = () => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }));
-  // Only while its chat is the one on screen: a chat kept loaded off screen (App's `loaded`) leaves Back to the page.
-  const onScreen = useContext(ChatOnScreen);
-  useBackCloses(goBack, shown && withBack && onScreen);
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "Escape" || e.defaultPrevented || !app) return;
     e.preventDefault();
@@ -121,7 +111,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {/* The header only while the app shows: the chat's own header is the only one otherwise. */}
       {shown && <div className="chat-app-head h-14 header-safe flex items-center gap-2 max-md:gap-1 px-3 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         {withBack && (
-          <button ref={back} type="button" data-testid="mini-app-back" onClick={goBack}
+          <button ref={back} type="button" data-testid="mini-app-back" onClick={() => (app?.stopped ? setChatApp(linkId, null) : updateChatApp(linkId, { shown: false }))}
             aria-label={t("apps.view.back")} title={t("apps.view.back")}
             className="w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
