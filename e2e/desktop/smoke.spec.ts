@@ -14,7 +14,7 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   await expect.poll(() => app.title()).toContain("Ghostly");
 
   // The UI rendered inside the real shell: the bundle, the asset protocol and the CSP all hold.
-  await expect.poll(() => app.text("h2")).toBe("Ghostly");
+  await expect.poll(() => app.text("h1")).toBe("Ghostly");
   await expect.poll(() => app.text('[title="New chat"]')).not.toBeNull();
 
   await app.click('[title="Settings"]');
