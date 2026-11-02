@@ -125,6 +125,14 @@ test("every link of llms.txt to the site lands on a page, a file or a WISP, and 
   for (const [url, path] of files) assert.ok(existsSync(resolve(root, path)), `${url}: no file ${path} in the repository`);
 });
 
+test("llms.txt says releases attach the Android APK, as the Release workflow does", () => {
+  const index = llmsIndex(entries, numbering);
+  assert.match(read(".github/workflows/release.yml"), /^ {2}ANDROID_FROM: "\d+\.\d+\.\d+"$/m, "the Release workflow attaches an APK from ANDROID_FROM on");
+  assert.doesNotMatch(index, /Android[^.]*\bno release\b/, "the native Android app is in the releases");
+  assert.ok(index.includes("ghostly-<version>-android-arm64.apk"), "the APK's file name, as docs/ANDROID.md gives it");
+  assert.match(index, /- \[Download\]\([^)]+\): [^\n]*Android/, "the Download line names Android");
+});
+
 test("both files start with # Ghostly, and every page links llms.txt in its head and footer", () => {
   for (const name of ["llms.txt", "llms-full.txt"]) assert.ok(read(`apps/website/public/${name}`).startsWith("# Ghostly\n"), name);
   assert.match(read("apps/website/app/layout.tsx"), /<link rel="alternate" type="text\/plain" href="\/llms\.txt"/);
