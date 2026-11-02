@@ -6,7 +6,7 @@
  * `/_ghostly-svc/bridge.js` (apps/web/svcBuild.ts).
  */
 import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, BRIDGE_READY, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost } from "./protocol";
-import { clearSite } from "./clearSite";
+import { clearSite, dropSharedCookies } from "./clearSite";
 
 declare const __SERVICES_HOST__: string;
 /** The app's own origin: the one page that may hand this bridge its port. */
@@ -40,11 +40,13 @@ function start(): void {
     const type = (event.data as { type?: unknown } | null)?.type;
     // The chat, its data or its profile went: what the contact's app kept here goes too.
     if (type === BRIDGE_CLEAR) {
-      void clearSite().then(() => window.parent.postMessage({ type: BRIDGE_CLEARED }, __SERVICES_APP_ORIGIN__));
+      void clearSite(host.suffix).then(() => window.parent.postMessage({ type: BRIDGE_CLEARED }, __SERVICES_APP_ORIGIN__));
       return;
     }
     if (type !== BRIDGE_PORT || !event.ports[0]) return;
     appPort = event.ports[0];
+    // One left by another contact's app (any chat, any profile) is not this one's to read.
+    dropSharedCookies(host.suffix);
     void workers.register(WORKER_SCRIPT, { scope: "/", updateViaCache: "none" })
       .then(() => workers.ready)
       .then(() => {

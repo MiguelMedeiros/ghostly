@@ -33,6 +33,6 @@ async function bridgeFrame(): Promise<HTMLIFrameElement> {
 describe("the bridge's frame of the contact's app", () => {
   it("cannot take the screen from the view's bar: no full screen", async () => {
     const frame = await bridgeFrame();
-    expect(frame.getAttribute("allow")!.split(";").map((feature) => feature.trim())).toEqual(["clipboard-write"]);
+    expect(frame.getAttribute("allow")).toBe("");
   });
 });

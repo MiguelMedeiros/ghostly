@@ -158,6 +158,10 @@
     "read": "Ler",
     "refresh": "Atualizar",
     "remove": "Remover",
+    "removeApps": "Ela lista apps que você instalou: {{titles}}. Eles não receberão mais atualizações nem remoções desta loja.",
+    "removeAppsOne": "Ela lista um app que você instalou: {{titles}}. Ele não receberá mais atualizações nem remoções desta loja.",
+    "removeNone": "Para adicioná-la de novo, você vai precisar do link dela.",
+    "removeTitle": "Remover {{name}}?",
     "showMore": "Mostrar mais ({{count}})",
     "stale": "Desatualizada desde {{date}}"
   },

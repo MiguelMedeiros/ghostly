@@ -44,7 +44,9 @@ export function edgeView(live: EdgeLive, now = Date.now(), noSlot = false): Grou
   return {
     linkId: live.stored.id, state,
     ...(open && live.pairing?.transport ? { transport: live.pairing.transport } : {}),
-    lastSeenAt: open ? now : heardAt,
+    // Open, it is heard all along: not "now", which made each engine state a change of every group with a member
+    // connected (the chat list drew those rows again each time). Nothing shows it while open; closed, it is the close.
+    lastSeenAt: heardAt,
     ...(error ? { error, cause } : {}),
     ...(reconnecting ? { reconnecting: true as const } : {}),
     ...(retryAt && retryAt > now ? { retryAt } : {}),

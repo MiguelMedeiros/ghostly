@@ -149,7 +149,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "open-payment-link") {
     // Only a payment link, and only the characters one is made of: nothing else leaves the extension this way.
-    const uri = typeof message.uri === "string" && /^(lightning|bitcoin):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
+    const uri = typeof message.uri === "string" && /^(lightning|bitcoin|monero):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
     if (!uri) { sendResponse({ ok: false, error: "Not a payment link" }); return false; }
     void chrome.tabs.create({ url: uri }).then(
       () => sendResponse({ ok: true }),

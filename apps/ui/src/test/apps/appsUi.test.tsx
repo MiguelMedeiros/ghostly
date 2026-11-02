@@ -721,8 +721,55 @@ describe("with the apps flag on", () => {
 
     screen.getByTestId("app-store-remove").focus();
     await user.click(screen.getByTestId("app-store-remove"));
+    await user.click(screen.getByTestId("app-store-remove-confirm"));
     await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
     await waitFor(() => expect(screen.getByTestId("apps-add")).toHaveFocus());
+  });
+
+  it("a store's Remove asks first, names the installed apps it lists, and Cancel gives the focus back to Remove", async () => {
+    let stores = [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Hunt", kind: "curated" as const, sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+      apps: [{ ref: REF, sequence: 7, digest: DIGEST, urls: [URL_], title: "Chess", tagline: "Play chess with a contact" },
+        { ref: `${KEY}/other`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] }];
+    fakeEngine.on("appList", () => [installed({ unknownPublisher: false, listedBy: [{ key: "s", name: "Hunt", kind: "curated" }] })])
+      .on("appStoreList", () => stores).on("appCheckUpdates", () => []).on("appStoreRemove", () => { stores = []; return undefined; });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const remove = await screen.findByTestId("app-store-remove");
+    remove.focus();
+    await user.keyboard("{Enter}");
+    // One press removes nothing: the question takes the place of the buttons, and Enter again does not remove.
+    const question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("Remove Hunt?");
+    expect(question).toHaveTextContent("Chess");
+    expect(question).not.toHaveTextContent("Snake");
+    expect(question).toHaveTextContent("updates or takedowns");
+    expect(fakeEngine.callsTo("appStoreRemove")).toEqual([]);
+    expect(within(question).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("app-store-remove-question")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-store-remove")).toHaveFocus();
+    expect(fakeEngine.callsTo("appStoreRemove")).toEqual([]);
+
+    // Escape is Cancel too; the second Remove is the one that removes.
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("app-store-remove")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByTestId("app-store-remove-confirm"));
+    expect(fakeEngine.callsTo("appStoreRemove")).toEqual([{ key: "s" }]);
+    await waitFor(() => expect(screen.queryByTestId("app-store")).not.toBeInTheDocument());
+  });
+
+  it("a store that lists none of the installed apps says only how to get it back", async () => {
+    fakeEngine.on("appList", () => []).on("appStoreList", () => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
+      preloaded: false, name: "Hunt", kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] }])
+      .on("appCheckUpdates", () => []);
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("app-store-remove"));
+    const question = screen.getByTestId("app-store-remove-question");
+    expect(question).toHaveTextContent("Remove Hunt?");
+    expect(question).not.toHaveTextContent("updates or takedowns");
+    expect(question).toHaveTextContent("its link");
   });
 
   it("the focus goes back to Add when Add closes, and to the new app's Open after Install from a pasted link", async () => {

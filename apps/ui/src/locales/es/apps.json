@@ -158,6 +158,10 @@
     "read": "Leer",
     "refresh": "Actualizar",
     "remove": "Quitar",
+    "removeApps": "Incluye apps que instalaste: {{titles}}. Ya no recibirán actualizaciones ni retiradas de esta tienda.",
+    "removeAppsOne": "Incluye una app que instalaste: {{titles}}. Ya no recibirá actualizaciones ni retiradas de esta tienda.",
+    "removeNone": "Para añadirla de nuevo, necesitarás su enlace.",
+    "removeTitle": "¿Quitar {{name}}?",
     "showMore": "Mostrar más ({{count}})",
     "stale": "Desactualizada desde el {{date}}"
   },

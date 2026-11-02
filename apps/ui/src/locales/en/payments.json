@@ -184,6 +184,9 @@
     "maxFee": "Most you accept in fees ({{unit}})",
     "maxFeeAria": "Maximum fee in {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly has no Monero wallet. Pay opens this link in the Monero wallet on this device, where you check and send it.",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "Opens your Monero wallet on this device",
     "networkNotStated": "Network not stated",
     "noWallet": {
       "mainnet": "You have no Mainnet {{wallet}} wallet to pay this real money.",

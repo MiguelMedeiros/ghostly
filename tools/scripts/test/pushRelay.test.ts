@@ -59,6 +59,14 @@ describe("the push relay (infra/services/push-relay)", () => {
     expect(rateKey("::1")).toBe("0:0:0:0::/64");
   });
 
+  it("counts an address a proxy wrote with its port, or in brackets, as the address alone", () => {
+    expect(rateKey("203.0.113.7:51234")).toBe("203.0.113.7");
+    expect(rateKey("203.0.113.7:51235")).toBe("203.0.113.7");
+    expect(rateKey("[2001:db8:1:2::1]:443")).toBe("2001:db8:1:2::/64");
+    expect(rateKey("[2001:db8:1:2::1]")).toBe("2001:db8:1:2::/64");
+    expect(rateKey("[::ffff:203.0.113.7]:51234")).toBe("203.0.113.7");
+  });
+
   let close: (() => Promise<void>) | undefined;
   afterEach(async () => { await close?.(); close = undefined; });
 
@@ -133,6 +141,18 @@ describe("the push relay (infra/services/push-relay)", () => {
     expect((await post("1.1.1.1")).status).toBe(400);
     expect((await post("2.2.2.2")).status).toBe(400);
     expect((await post("1.1.1.1")).status).toBe(429);
+    expect(relay.tracked()).toBe(2);
+  });
+
+  it("limits a client behind a proxy that writes its port, though each request comes from a new one", async () => {
+    const relay = await startRelay({ limits: { perMinute: 3 }, proxies: 1 });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    const post = (xff: string) => fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools", "X-Forwarded-For": xff }, body: request({ endpoint: "https://example.com/" }) });
+    const statuses = [];
+    for (let n = 1; n <= 4; n++) statuses.push((await post(`203.0.113.7:5000${n}`)).status);
+    expect(statuses).toEqual([400, 400, 400, 429]);
+    expect((await post("[2001:db8:1:2::1]:443")).status).toBe(400);
     expect(relay.tracked()).toBe(2);
   });
 
