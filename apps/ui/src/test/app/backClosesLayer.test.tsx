@@ -1,13 +1,14 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef, useState } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DeleteChatDialog } from "../../components/DeleteChatDialog";
 import { I18nProvider } from "../../contexts/I18nContext";
 import { SettingsProvider } from "../../contexts/SettingsContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { useBackCloses, useOutsideDismiss } from "../../hooks/useDismiss";
+import { reloadIntoGate } from "../../lib/devices";
 
 // covers: app.navigation.back
 
@@ -165,5 +166,36 @@ describe("Back with a layer open", () => {
     expect(screen.queryByTestId("menu")).toBeNull();
     await back();
     await waitFor(() => expect(where()).toBe("/"));
+  });
+
+  it("a page reloaded with a dialog open starts on its entry as the page's own: the app's next move runs at once", async () => {
+    // As a takeover reloads the page from its open dialog: the entry still carries the layer's mark, nothing is open.
+    history.replaceState({ ghostlyLayer: 1 }, "", "#/profile");
+    vi.resetModules();
+    const { afterLayers } = await import("../../lib/layerHistory");
+    const moved = vi.fn();
+    afterLayers(moved);
+    expect(moved).toHaveBeenCalledOnce();
+    expect(location.hash).toBe("#/profile");
+    expect(layerEntry()).toBe(false);
+  });
+
+  // Last: the page is on its way out after it, and the history stays as it is.
+  it("a reload into the gate as the dialog under it goes (a move's last step) goes back over its entry first, never after the reload", async () => {
+    const user = await inChat();
+    await user.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    const go = vi.spyOn(history, "go");
+    const reload = vi.spyOn(window.location, "reload").mockImplementation(() => {});
+    // The page under the dialog gives way to the standby screen, whose reload starts at once.
+    cleanup();
+    await reloadIntoGate();
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    await waitFor(() => expect(layerEntry()).toBe(false));
+    // A traversal after the reload started cancels it: the device stayed on "Moving to another device".
+    expect(go).toHaveBeenCalledOnce();
+    expect(go.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0]);
+    go.mockRestore();
+    reload.mockRestore();
   });
 });

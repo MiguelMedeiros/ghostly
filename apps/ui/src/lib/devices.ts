@@ -8,6 +8,7 @@ import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nCo
 import { englishT } from "../locales/translate";
 import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
 import { utf8Bytes } from "./fitText";
+import { reloadPage } from "./layerHistory";
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
@@ -180,7 +181,7 @@ const lockHashOf = (id: string): string | null => {
 export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): Promise<void> {
   try { await getBrowserHost().restartEngine?.(); } catch { /* the reload says what is wrong now */ }
   if (options.keepUnlocked) handOverUnlock(activeProfileId(), lockHashOf(activeProfileId()));
-  window.location.reload();
+  reloadPage();
 }
 
 /** What the engine's `takeover-<reason>:` errors say to the person. */
