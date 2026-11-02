@@ -288,7 +288,9 @@ export function waiting(pr) {
   if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit; after the push it leaves the line and joins it ${AT_BACK}`;
   if (pr.crowded) return `its branch has more pull requests than the train reads (${PAGES_READ * 100}), so one into another base may have run CI on the same commit; open a new pull request from a new branch, which joins the line ${AT_BACK}`;
   if (pr.retargeted) return `its green CI run on its last commit ran before its base was changed; close and reopen it for a run against this base, which keeps its place (after a pushed commit instead, it leaves the line and joins it ${AT_BACK})`;
-  if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base); run CI on it again";
+  // A re-run plans from the run's own merge commit again (GitHub keeps its sha), so it skips the same jobs: a run
+  // planned by an older ci-changes.mjs than the base's stays short. Closing and reopening makes a new merge commit.
+  if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base, or by an older copy of ci-changes.mjs); close and reopen it for a new run (re-running that run plans it the same way again)";
   return "CI Success has not passed on its last commit yet";
 }
 
