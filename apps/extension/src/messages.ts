@@ -10,6 +10,11 @@ export type RuntimeMessage =
   | { target: "background"; type: "close-services" }
   /** A `lightning:` or `bitcoin:` link, for a wallet on this device: the app page cannot open one itself. */
   | { target: "background"; type: "open-payment-link"; uri: string }
+  /**
+   * A notification was clicked: the app page that showed it opens its chat and answers `true`; no answer, and the
+   * worker shows the app itself (apps/ui/src/lib/notifications.ts).
+   */
+  | { target: "app"; type: "notification-open"; id: string }
   /** Answered with an `EngineStatus` once the peer is up. */
   | { target: "engine"; type: "ping" }
   /** The worker is about to close the peer's document, to start it again as another profile. */
