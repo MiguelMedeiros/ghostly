@@ -111,6 +111,8 @@ type SwapOutcome =
 
 /** When a swap with no answer can no longer reach the mint: a request's longest life, and a margin after its last try. */
 const swapOverdueAt = (swap: PendingSwap) => Math.max(swap.createdAt + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS, (swap.attemptEndedAt ?? Number.POSITIVE_INFINITY) + SWAP_SETTLED_MS);
+/** When a melt with no answer can no longer reach the mint: its one request is sent right after it is written down. */
+const meltOverdueAt = (melt: PendingMelt) => melt.createdAt + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
 
 const swapOf = (swap: PendingSwap) => swap.swap as SerializedSwapPreview;
 
@@ -1377,7 +1379,7 @@ export class CashuWallet {
       // A dropped connection or a gateway timeout says nothing: the payment may still be going through.
       if (!mintRefused(error) && !(error instanceof MeltChangeError)) return "pending";
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
-      const outcome = await this.settleMelt(melt).catch((): MeltOutcome => "pending");
+      const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
         // The mint's refusal ("Invoice already paid") stays what the person reads, with what it cost them.
         const lost = this.takeFailedFee(melt.quote);
@@ -1392,7 +1394,7 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    return this.settleMelt(melt).catch((): MeltOutcome => "pending");
+    return this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
   }
 
   /**
@@ -1436,9 +1438,10 @@ export class CashuWallet {
   /**
    * Asks the mint where a recorded melt stands and books the answer. Paid: the reserved proofs are gone and
    * the change is ours. Unpaid: what the mint says is unspent is spendable again. Pending: nothing moves.
-   * Throws when the mint cannot be asked, and the melt stays as it is.
+   * Throws when the mint cannot be asked, and the melt stays as it is. `answered`: the mint answered the melt request
+   * itself, so it has acted on it; without that, an unpaid quote may only mean the request has not landed yet.
    */
-  private async settleMelt(melt: PendingMelt): Promise<MeltOutcome> {
+  private async settleMelt(melt: PendingMelt, answered = false): Promise<MeltOutcome> {
     const wallet = await this.wallet(melt.mint);
     const { Amount, OutputData } = await loadCashu();
     const quote = await wallet.checkMeltQuoteBolt11(melt.quote);
@@ -1462,6 +1465,9 @@ export class CashuWallet {
       return "paid";
     }
     if (quote.state === "PENDING") return "pending";
+    // UNPAID with no answer to the request: it may still reach the mint and be paid with these very proofs. Held
+    // until no request of this melt can land any more.
+    if (!answered && Date.now() < meltOverdueAt(melt)) return "pending";
 
     // UNPAID: the payment failed, or never started. The mint says which proofs are still unspent.
     const inputs = await this.reservedProofs(melt);
