@@ -274,6 +274,8 @@ function throughDaemon(client: DaemonClient): Session {
 
 /** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
 const HOLDER_WAIT_MS = 5_000;
+/** How long it waits for the profile's daemon that is starting (`startingDaemon`): its engine takes seconds on a large profile. */
+const STARTING_WAIT_MS = 30_000;
 
 /**
  * Opens the profile in this process for a one-shot command. Another one that holds it (a script's `&`, a second
@@ -281,20 +283,23 @@ const HOLDER_WAIT_MS = 5_000;
  * exit code. One still holding it after HOLDER_WAIT_MS is answered with the next step. A daemon takes the profile before
  * its socket listens (its engine starts in between, seconds on a large profile): once one answers there, the command
  * goes through it, its client the answer. Only the lock was looked at again, and a command run while the daemon started
- * failed busy, told to start the daemon that was running. A `listen` with no daemon opens it the same way, as the
- * daemon (`mode`).
+ * failed busy, told to start the daemon that was running. A daemon that marked its start is waited for up to
+ * STARTING_WAIT_MS, and named as the holder. A `listen` with no daemon opens it the same way, as the daemon (`mode`).
  */
 async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host["ctx"]["mode"] = "one-shot"): Promise<Host | DaemonClient> {
   const { openHost } = await engineHost();
-  const until = Date.now() + HOLDER_WAIT_MS;
+  const from = Date.now();
   for (;;) {
     try { return await openHost(g.paths, mode, VERSION, options); }
     catch (error) {
       if (!(error instanceof CliError) || error.code !== "busy") throw error;
+      // Read before the socket is tried: a daemon whose socket listens in between is found by the try.
+      const starting = startingDaemon(g.paths);
       const client = await connectDaemon(g.paths);
       if (client) return client;
-      const left = until - Date.now();
+      const left = from + (starting === null ? HOLDER_WAIT_MS : STARTING_WAIT_MS) - Date.now();
       if (left <= 0) {
+        if (starting !== null) throw new CliError("busy", `Profile ${g.profile} is in use by its daemon (process ${starting}), which was still starting after ${STARTING_WAIT_MS / 1000} s: ghostly daemon status shows when it is up`, { pid: starting });
         const pid = error.details?.pid;
         throw new CliError("busy", `Profile ${g.profile} is in use by ${pid ? `process ${pid}, another ghostly command,` : "another ghostly command"} and was not free after ${HOLDER_WAIT_MS / 1000} s: run the commands one after another, or start \`ghostly daemon --detach\` so they can run at once`, error.details);
       }
