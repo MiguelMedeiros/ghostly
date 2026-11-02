@@ -16,7 +16,7 @@ import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Ess
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab } from "../../ui/src/components/OtherTab";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
-import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
+import { countInstallVisit, watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
@@ -88,6 +88,8 @@ await becomeThePeer(peerLock, () => {
 await mayStart(() => untilAskedFor(peerLock));
 
 isPeer = true;
+// This tab is the app: a visit, once per tab (its reloads are the same one), for the install hint.
+countInstallVisit();
 // The device state, before anything of the profile starts (WISP 06 § The gate): one small local read. A profile that
 // never enrolled a device is `single` and goes on exactly as before. On a device that is not the active one nothing
 // below touches the profile: no session sync, no share taken in, and the host starts device-link-only mode.
