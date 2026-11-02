@@ -67,6 +67,7 @@ describe("the push relay's log of refusals (infra/services/push-relay)", () => {
     refusals.flush();
     refusals.refuse("origin", '"https://b.example"');
     expect(lines).toEqual(['refused origin "https://a.example"', "refused origin 2 more", 'refused origin "https://b.example"']);
+    expect(refusals.total()).toBe(4);
   });
 
   it("logs what is still uncounted when it stops", async () => {

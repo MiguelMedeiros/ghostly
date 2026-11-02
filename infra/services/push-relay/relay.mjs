@@ -101,8 +101,12 @@ export function rateKey (address) {
 export function refusalLog (log) {
   // Kind → refusals since its last line. Present: a line for it went out in this minute.
   const pending = new Map()
+  let total = 0
   return {
+    /** Refusals since the start, of every kind. */
+    total: () => total,
     refuse: (why, detail) => {
+      total++
       if (pending.has(why)) pending.set(why, pending.get(why) + 1)
       else { pending.set(why, 0); log('refused', why, ...(detail === undefined ? [] : [detail])) }
     },
@@ -122,6 +126,7 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   let pruned = 0
   const prune = now => { pruned = now; for (const [ip, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(ip) }
   const refusals = refusalLog(log)
+  const stats = { forwarded: 0, failed: 0 }
   const pruning = setInterval(() => { prune(Date.now()); refusals.flush() }, 60_000)
   pruning.unref?.()
   // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
@@ -138,6 +143,12 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     const cors = origin === undefined ? {} : { 'Access-Control-Allow-Origin': allowed.size ? origin : '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
     const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
     const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
+    // An operator's check (curl, a monitor): up, with counts since the start, and nothing about any client.
+    if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      res.end(JSON.stringify({ ok: true, ...stats, refused: refusals.total(), tracked: recent.size }))
+      return
+    }
     // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return }
     if (req.method !== 'POST') return refuse('method', 405, { error: 'No' })
@@ -175,9 +186,11 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
       if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
+        stats.forwarded++
         log('forwarded', response.status)
         answer(200, { status: response.status })
       } catch (error) {
+        stats.failed++
         log('failed', failure(error))
         answer(502, { error: 'The push service did not answer' })
       }
