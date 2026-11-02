@@ -16,8 +16,10 @@
 //!   Until then the origin is on a list in the app's data folder; it leaves the list once its files are gone, and the
 //!   list goes once empty, since it too names contacts.
 //!
-//! Windows (WebView2) clears nothing yet: every origin is answered as not cleared, so the page keeps it on its list
-//! for when it does.
+//! On Windows, WebView2 names the origin `http://ghostly-svc.<service>.<peer>.<tag>`, and the webview's DevTools
+//! protocol clears one origin of every kind of storage at once (`Storage.clearDataForOrigin`), the files and folders
+//! named after it included. WebView2's own files shared by every origin (its Local Storage log, its quota database)
+//! keep traces of it until WebView2 compacts them.
 
 use serde::Deserialize;
 use tauri::{AppHandle, Runtime};
@@ -40,8 +42,8 @@ impl ServiceOrigin {
     }
 }
 
-/// Forgets what the apps on `origins` kept: their windows close, then each origin is cleared (Linux, macOS). Answers, for
-/// each, whether it was cleared; one that was not stays on the page's list, for its next clear.
+/// Forgets what the apps on `origins` kept: their windows close, then each origin is cleared (Linux, macOS, Windows).
+/// Answers, for each, whether it was cleared; one that was not stays on the page's list, for its next clear.
 #[tauri::command]
 pub async fn forget_service_origins<R: Runtime>(
     app: AppHandle<R>,
@@ -68,8 +70,16 @@ pub async fn forget_service_origins<R: Runtime>(
         }
         Ok(cleared)
     }
-    // Follow-up: Windows, through WebView2. Until then nothing is cleared, and the page keeps each origin for later.
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        let mut cleared = Vec::with_capacity(hosts.len());
+        for host in &hosts {
+            cleared.push(windows::clear(&app, host).await);
+        }
+        Ok(cleared)
+    }
+    // Android and iOS open no viewer window (`viewer` is Desktop's): nothing to clear.
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = app;
         Ok(vec![false; hosts.len()])
@@ -78,6 +88,57 @@ pub async fn forget_service_origins<R: Runtime>(
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use webkit::{clean_at_launch, serve, ForgetState};
+
+#[cfg(windows)]
+mod windows {
+    use std::time::Duration;
+
+    use tauri::{AppHandle, Manager, Runtime};
+    use tokio::sync::oneshot;
+    use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
+    use windows_core::HSTRING;
+
+    use crate::viewer::SCHEME;
+
+    /// How long WebView2 may take to clear one origin before the rest goes on without it.
+    const CLEAR_TIMEOUT: Duration = Duration::from_secs(10);
+
+    /// Clears every kind of storage `host`'s origin has, through the Ghostly window's webview: they share one
+    /// profile, so the call reaches the contact's app's storage with no window of its origin. True once WebView2
+    /// said it cleared.
+    pub async fn clear<R: Runtime>(app: &AppHandle<R>, host: &str) -> bool {
+        let Some(window) = app.get_webview_window("main") else {
+            return false;
+        };
+        let params = serde_json::json!({
+            "origin": format!("http://{SCHEME}.{host}"),
+            "storageTypes": "all",
+        })
+        .to_string();
+        let (sender, answered) = oneshot::channel();
+        let asked = window.with_webview(move |webview| unsafe {
+            let Ok(core) = webview.controller().CoreWebView2() else {
+                return;
+            };
+            // Dropped unanswered when the call fails: `answered` then says not cleared.
+            let handler =
+                CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |result, _| {
+                    let _ = sender.send(result.is_ok());
+                    Ok(())
+                }));
+            let _ = core.CallDevToolsProtocolMethod(
+                &HSTRING::from("Storage.clearDataForOrigin"),
+                &HSTRING::from(params),
+                &handler,
+            );
+        });
+        asked.is_ok()
+            && matches!(
+                tokio::time::timeout(CLEAR_TIMEOUT, answered).await,
+                Ok(Ok(true))
+            )
+    }
+}
 
 /// WebKitGTK's and WKWebView's own: the hidden window, the list, and the files each keeps per origin.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1000,33 +1061,93 @@ mod tests {
     }
 }
 
-/// The real windows on WebKitGTK: what a contact's app kept, read back after it was forgotten, and its files after the
-/// next launch's cleanup.
-#[cfg(all(test, target_os = "linux"))]
+/// The real windows on WebKitGTK and WebView2: what a contact's app kept, read back after it was forgotten, and the
+/// files left named after its origin (on Linux, until the next launch's cleanup).
+#[cfg(all(test, any(target_os = "linux", windows)))]
 mod display_tests {
-    use super::webkit::tests::{files, named_anywhere, PEER, TAG};
+    #[cfg(target_os = "linux")]
+    use super::webkit::tests::{files, named_anywhere};
     use super::*;
+    #[cfg(windows)]
+    use std::path::Path;
     use std::sync::mpsc;
     use std::time::Duration;
     use tauri::{Listener, Manager};
 
-    /// The contact's app: it keeps something in each kind of storage, or reads back what it kept.
+    /// The contact's app: it keeps something in each kind of storage, or reads back what it kept. Cache Storage only
+    /// on a secure origin (WebView2's `http://ghostly-svc.…` is not one); it says whether it had it.
     const WRITE: &str = r#"<!doctype html><script>
 localStorage.setItem('probe-k', '1');
 const r = indexedDB.open('probe-db', 1);
 r.onupgradeneeded = () => r.result.createObjectStore('s');
 r.onsuccess = () => {
   const tx = r.result.transaction('s', 'readwrite'); tx.objectStore('s').put('v', 'k');
-  tx.oncomplete = async () => { r.result.close(); await caches.open('probe-cache'); fetch('/written'); };
+  tx.oncomplete = async () => {
+    r.result.close();
+    if (self.caches) await caches.open('probe-cache');
+    fetch('/written?caches=' + Boolean(self.caches));
+  };
 };
 </script>"#;
     const READ: &str = r#"<!doctype html><script>
 (async () => {
   const dbs = (await indexedDB.databases()).map((d) => d.name).join(',');
-  const cs = (await caches.keys()).join(',');
+  const cs = self.caches ? (await caches.keys()).join(',') : '';
   fetch('/read?' + new URLSearchParams({ ls: String(localStorage.getItem('probe-k')), idb: dbs, caches: cs }));
 })();
 </script>"#;
+
+    const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const TAG: &str = "ybndrfg8ejkmcpqx";
+
+    /// Every file under `dir`, by its path from there.
+    #[cfg(windows)]
+    fn files(dir: &Path) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut folders = vec![dir.to_path_buf()];
+        while let Some(folder) = folders.pop() {
+            for path in std::fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+            {
+                if path.is_dir() {
+                    folders.push(path);
+                } else {
+                    found.push(
+                        path.strip_prefix(dir)
+                            .unwrap()
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                }
+            }
+        }
+        found.sort();
+        found
+    }
+
+    /// The files under `dir` whose path names `host`, and those whose bytes do (UTF-8 or UTF-16, as Chromium writes
+    /// either).
+    #[cfg(windows)]
+    fn named_anywhere(dir: &Path, host: &str) -> (Vec<String>, Vec<String>) {
+        let host = host.to_ascii_lowercase();
+        let wide: Vec<u8> = host.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let (mut by_name, mut by_bytes) = (Vec::new(), Vec::new());
+        for file in files(dir) {
+            if file.to_ascii_lowercase().contains(&host) {
+                by_name.push(file);
+            } else if std::fs::read(dir.join(&file)).is_ok_and(|bytes| {
+                [host.as_bytes(), &wide[..]]
+                    .iter()
+                    .any(|n| bytes.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n)))
+            }) {
+                by_bytes.push(file);
+            }
+        }
+        (by_name, by_bytes)
+    }
 
     /// Exits the app when dropped, a panic's unwinding included.
     struct Exit(tauri::AppHandle);
@@ -1037,27 +1158,35 @@ r.onsuccess = () => {
     }
 
     #[test]
-    #[ignore = "needs a display and a process of its own (GTK)"]
-    fn what_a_contacts_app_kept_is_gone_at_once_and_its_files_at_the_next_launch() {
+    #[ignore = "needs a display and a process of its own (GTK, WebView2)"]
+    fn what_a_contacts_app_kept_is_gone_and_no_file_names_it() {
         // covers: services.desktop-viewer
         let home =
             std::env::temp_dir().join(format!("ghostly-forget-display-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         std::fs::create_dir_all(&home).unwrap();
-        std::env::set_var("HOME", &home);
-        for (name, folder) in [
-            ("XDG_CONFIG_HOME", ".config"),
-            ("XDG_DATA_HOME", ".local/share"),
-            ("XDG_CACHE_HOME", ".cache"),
-        ] {
-            std::env::set_var(name, home.join(folder));
+        #[cfg(target_os = "linux")]
+        {
+            std::env::set_var("HOME", &home);
+            for (name, folder) in [
+                ("XDG_CONFIG_HOME", ".config"),
+                ("XDG_DATA_HOME", ".local/share"),
+                ("XDG_CACHE_HOME", ".cache"),
+            ] {
+                std::env::set_var(name, home.join(folder));
+            }
         }
+        // WebView2 keeps every webview's storage here instead of the app's own data folder.
+        #[cfg(windows)]
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &home);
         let host = format!("keeper.{PEER}.{TAG}");
 
-        let app = tauri::Builder::default()
+        let builder = tauri::Builder::default()
             .any_thread()
-            .manage(viewer::ViewerState::default())
-            .manage(ForgetState::default())
+            .manage(viewer::ViewerState::default());
+        #[cfg(target_os = "linux")]
+        let builder = builder.manage(ForgetState::default());
+        let app = builder
             .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
                 let app = ctx.app_handle().clone();
                 let label = ctx.webview_label().to_string();
@@ -1076,6 +1205,7 @@ r.onsuccess = () => {
         app.listen_any(viewer::REQUEST_EVENT, move |event| {
             let request: serde_json::Value = serde_json::from_str(event.payload()).unwrap();
             let path = request["path"].as_str().unwrap().to_string();
+            eprintln!("the app asked for {path}");
             let body = if path == "/" {
                 serving.lock().unwrap().to_string()
             } else {
@@ -1096,6 +1226,7 @@ r.onsuccess = () => {
             );
         });
 
+        // The Ghostly window (`main`, the WebView2 clears through) comes from the app's configuration, as in the app.
         let handle = app.handle().clone();
         let steps = std::thread::spawn(move || {
             // Whatever a step finds, the app exits, and the failure comes out of `join` below.
@@ -1119,7 +1250,7 @@ r.onsuccess = () => {
                 .unwrap()
             };
             open();
-            wait("/written");
+            eprintln!("{}", wait("/written"));
             let windows = |prefix: &str| {
                 handle
                     .webview_windows()
@@ -1141,6 +1272,7 @@ r.onsuccess = () => {
             assert_eq!(cleared, [true]);
             std::thread::sleep(Duration::from_millis(500));
             assert_eq!(windows("svc-"), 0, "the app's window closed");
+            #[cfg(target_os = "linux")]
             assert_eq!(windows("forget-"), 0, "the hidden window closed");
 
             // The app opened again finds nothing of what it kept.
@@ -1150,6 +1282,7 @@ r.onsuccess = () => {
             assert_eq!(read, "/read?ls=null&idb=&caches=");
             std::thread::sleep(Duration::from_millis(500));
         });
+        #[cfg(target_os = "linux")]
         let list = app
             .path()
             .app_data_dir()
@@ -1158,22 +1291,45 @@ r.onsuccess = () => {
         app.run_return(|_, _| {});
         steps.join().unwrap();
 
-        // The files still named after the origin, until the next launch: at least its folders' `origin` files.
-        let before = named_anywhere(&home, &host);
-        assert!(
-            before.iter().any(|f| f.ends_with("/origin")),
-            "{:?}",
-            files(&home)
-        );
-        assert!(list.exists(), "{:?}", files(&home));
+        // WebView2's processes let go of the folder once they are gone.
+        #[cfg(windows)]
+        {
+            std::thread::sleep(Duration::from_secs(3));
+            let (by_name, by_bytes) = named_anywhere(&home, &host);
+            eprintln!("files: {:#?}", files(&home));
+            eprintln!("named after the origin: {by_name:#?}");
+            eprintln!("holding its name: {by_bytes:#?}");
+            assert_eq!(
+                by_name,
+                Vec::<String>::new(),
+                "no file or folder is named after the origin"
+            );
+            // Not asserted: WebView2 keeps the profile's own records (its Local Storage log, its quota database)
+            // in files shared by every origin, until it compacts them.
+            let (_, kept) = named_anywhere(&home, "probe-");
+            eprintln!("holding what the app kept: {kept:#?}");
+            let _ = std::fs::remove_dir_all(&home);
+        }
 
-        super::webkit::clean_list(&list);
-        assert_eq!(
-            named_anywhere(&home, &host),
-            Vec::<String>::new(),
-            "before: {before:?}"
-        );
-        assert!(!list.exists());
-        let _ = std::fs::remove_dir_all(&home);
+        // The files still named after the origin, until the next launch: at least its folders' `origin` files.
+        #[cfg(target_os = "linux")]
+        {
+            let before = named_anywhere(&home, &host);
+            assert!(
+                before.iter().any(|f| f.ends_with("/origin")),
+                "{:?}",
+                files(&home)
+            );
+            assert!(list.exists(), "{:?}", files(&home));
+
+            super::webkit::clean_list(&list);
+            assert_eq!(
+                named_anywhere(&home, &host),
+                Vec::<String>::new(),
+                "before: {before:?}"
+            );
+            assert!(!list.exists());
+            let _ = std::fs::remove_dir_all(&home);
+        }
     }
 }
