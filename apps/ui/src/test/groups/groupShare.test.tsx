@@ -146,6 +146,17 @@ describe("GroupShareDialog", () => {
     expect([screen.getByPlaceholderText("Message…"), screen.getByTestId("group-share")]).toContain(document.activeElement);
   });
 
+  it("hands out the public web app's address from the desktop app and Android, served over http from an address no other device opens", () => {
+    // Windows and Android serve the app from http://tauri.localhost: an http page, but not one a link may name.
+    Object.assign(window, { __TAURI_INTERNALS__: {} });
+    try {
+      renderApp(<GroupShareDialog group={admin({ entryLink: LINK })} onClose={() => {}} />);
+      expect(screen.getByRole("textbox", { name: "Group link" })).toHaveValue(`https://app.ghostly.tools/#/join/${LINK}`);
+    } finally {
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    }
+  });
+
   it("closes on Escape", () => {
     const onClose = vi.fn();
     renderApp(<GroupShareDialog group={admin({ entryLink: LINK })} onClose={onClose} />);
