@@ -630,6 +630,8 @@ export function useChat(params: ChatParams | null) {
     peerAck,
     forceRefresh,
     incomingCallSignal,
+    // One page per peer here: no other page answers its calls.
+    callHandledElsewhere: 0,
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,

@@ -24,6 +24,11 @@ export type Picture = "camera" | "screen";
 
 interface UseWebRTCParams {
   incomingCallSignal: string | null;
+  /**
+   * Goes up each time another page on this engine (an extension tab) answers or declines the call ringing in this chat:
+   * the ring stops here, with no line and no signal of its own, which that page wrote and sent.
+   */
+  callHandledElsewhere?: number;
   publishCallSignal: (signal: string | null) => void;
   setFastPoll: (fast: boolean) => void;
   /**
@@ -257,6 +262,7 @@ const exactly = (deviceId: string | null): MediaTrackConstraints | true => (devi
 
 export function useWebRTC({
   incomingCallSignal,
+  callHandledElsewhere,
   publishCallSignal,
   setFastPoll,
   addCallEventMessage,
@@ -1424,6 +1430,23 @@ export function useWebRTC({
     }, RING_MS);
     return () => clearTimeout(timer);
   }, [callState]);
+
+  // Another page answered or declined the call ringing here (`callHandledElsewhere`): it stops ringing here as though it
+  // never had. That page wrote the call's lines into the history both show, and sent its answer; this one sends
+  // nothing, not even the `null` a hang-up clears its signal with, which would take that answer back.
+  const handledSeenRef = useRef(callHandledElsewhere ?? 0);
+  useEffect(() => {
+    const count = callHandledElsewhere ?? 0;
+    if (count === handledSeenRef.current) return;
+    handledSeenRef.current = count;
+    if (callStateRef.current !== "incoming") return;
+    traceCallEnd("handled-elsewhere", { state: "incoming" });
+    cleanupConnection();
+    updateCallState("idle");
+    pendingOfferRef.current = null;
+    callHadVideoRef.current = false;
+    setFastPoll(false);
+  }, [callHandledElsewhere, cleanupConnection, updateCallState, setFastPoll]);
 
   // The app or the tab closes mid-call (Ghostly Desktop's `ghostly-departing`, a page's `pagehide`): it hangs up as
   // its person would, so the contact's call ends now and not when its connection gives up, and this chat keeps the
