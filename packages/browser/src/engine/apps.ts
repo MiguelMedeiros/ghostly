@@ -1454,6 +1454,12 @@ export class Apps {
       const revokeRead = new Set<string>();
       const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
       app = withRevocations(app, before ?? []);
+      // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
+      if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
+        await this.removeBundle(app.pending.bytes, app.pending.digest);
+        const { pending: _p, ...rest } = app;
+        app = rest;
+      }
       // The newest first, whichever store or source names it (then in the order found): the next is tried only when it
       // cannot be taken.
       for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
