@@ -524,6 +524,18 @@ fn window_title(title: &str) -> String {
 }
 
 /// The window, with every layer that does not depend on the platform.
+/// An app window's answer to a permission request: never the microphone, the camera, the screen or the location.
+fn capture_answer(kind: tauri::webview::PermissionKind) -> tauri::webview::PermissionResponse {
+    use tauri::webview::{PermissionKind, PermissionResponse};
+    match kind {
+        PermissionKind::Microphone
+        | PermissionKind::Camera
+        | PermissionKind::DisplayCapture
+        | PermissionKind::Geolocation => PermissionResponse::Deny,
+        _ => PermissionResponse::Default,
+    }
+}
+
 fn window_builder<'a, R: Runtime>(
     app: &'a AppHandle<R>,
     label: &str,
@@ -564,6 +576,10 @@ fn window_builder<'a, R: Runtime>(
         })
         // Never a file saved by the window itself.
         .on_download(|_, event| crate::viewer::may_download(&event))
+        // No app permission covers capture or location: refused outright. Without an answer of ours the webview
+        // decides alone, and on macOS it grants the microphone and the camera with no question. Anything else keeps
+        // the platform's own answer (on Linux an unanswered request is how pointer lock works today).
+        .on_permission_request(|_, kind| capture_answer(kind))
         .inner_size(width, height);
     #[cfg(any(test, feature = "e2e-driver"))]
     if guard.proxy {
@@ -760,7 +776,11 @@ pub fn handle<R: Runtime>(
         .header("x-content-type-options", "nosniff")
         .header("referrer-policy", "no-referrer")
         .header("x-dns-prefetch-control", "off")
-        .header("cache-control", "no-store");
+        .header("cache-control", "no-store")
+        .header(
+            "permissions-policy",
+            "camera=(), microphone=(), display-capture=(), geolocation=()",
+        );
     if guard.header {
         let policy = if internet { NET_RUNNER_CSP } else { RUNNER_CSP };
         response = response.header("content-security-policy", policy);
@@ -1692,6 +1712,45 @@ mod tests {
                 "{other}"
             );
         }
+    }
+
+    /// No microphone, camera, screen or location for an app: no app permission covers them. Without a handler wry
+    /// grants a capture on macOS with no question, so every app window carries one that refuses, and the runner is
+    /// served with a policy that turns the features off.
+    #[test]
+    fn an_app_window_never_captures() {
+        let source = include_str!("app_sandbox.rs");
+        let start = source.find("fn window_builder<").unwrap();
+        let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        assert!(body.contains(".on_permission_request("), "window_builder");
+        use tauri::webview::{PermissionKind, PermissionResponse};
+        for kind in [
+            PermissionKind::Microphone,
+            PermissionKind::Camera,
+            PermissionKind::DisplayCapture,
+            PermissionKind::Geolocation,
+        ] {
+            assert!(matches!(capture_answer(kind), PermissionResponse::Deny));
+        }
+        assert!(matches!(
+            capture_answer(PermissionKind::PointerLock),
+            PermissionResponse::Default
+        ));
+        let app = app();
+        app.state::<AppSandboxState>()
+            .windows
+            .lock()
+            .unwrap()
+            .insert("app-1".into(), window("ana/chess", true, true));
+        let request = Request::builder()
+            .uri("ghostly-app://localhost/")
+            .body(Vec::new())
+            .unwrap();
+        let served = handle(app.handle(), "app-1", &request);
+        assert_eq!(
+            served.headers()["permissions-policy"],
+            "camera=(), microphone=(), display-capture=(), geolocation=()"
+        );
     }
 
     #[test]
