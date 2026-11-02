@@ -20,4 +20,14 @@ const relay = await startRelay({
 // Which pages it serves: a misspelt origin shows here, not only as browsers turned away.
 const serves = settings.origins.length ? `origins ${settings.origins.join(' ')}` : 'any origin'
 console.log(new Date().toISOString(), `Ghostly push relay on port ${relay.port}`, settings.proxies ? `(behind ${settings.proxies} ${settings.proxies === 1 ? 'proxy' : 'proxies'}, on ${settings.host}),` : `(no proxy, on ${settings.host}),`, serves)
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => void relay.close().finally(() => process.exit(0)))
+let closing = false
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => {
+  if (closing) return
+  closing = true
+  const clients = await relay.clients()
+  console.log(new Date().toISOString(), `Ghostly push relay stopping (${clients} ${clients === 1 ? 'client' : 'clients'})`)
+  void relay.close().finally(() => {
+    console.log(new Date().toISOString(), 'Ghostly push relay stopped')
+    process.exit(0)
+  })
+})

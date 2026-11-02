@@ -75,6 +75,8 @@ export class IdentityProofs {
   private proofs: StoredIdentityProof[] = [];
   private revocations: Revocation[] = [];
   private revocationsCheckedAt = 0;
+  /** "Clear all data" (`revokeAll`): a revocation lookup still on its way notes nothing. */
+  private ended = false;
   /** Unsealed proof-key seeds, by proof id, for this run only. */
   private seeds = new Map<string, Uint8Array>();
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -227,6 +229,7 @@ export class IdentityProofs {
    * contacts who check; proofs posted elsewhere (a Bluesky record, a Pubky file, a DNS record) are the person's to delete.
    */
   async revokeAll(): Promise<void> {
+    this.ended = true;
     this.stop();
     const shared = new Set(this.host.linkIds().flatMap(l => this.host.ledger(l)?.shared.map(s => s.id) ?? []));
     const at = now();
@@ -261,9 +264,12 @@ export class IdentityProofs {
     if (!this.host.online()) return;
     for (const linkId of this.host.linkIds()) {
       for (const r of this.host.ledger(linkId)?.received ?? []) {
+        if (this.ended) return;
         if (this.revocable(r)) await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
       }
     }
+    // "Clear all data" came meanwhile: the profile it was for is gone, and its time must not land in the cleared one.
+    if (this.ended) return;
     this.revocationsCheckedAt = Date.now();
     await transact([STORES.settings], stores => { stores[STORES.settings].put(this.revocationsCheckedAt, REVOCATIONS_CHECKED_AT); });
   }

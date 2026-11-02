@@ -70,7 +70,7 @@ Checked on 2026-09-26 before building: the unmodified engine starts on Node 22, 
 
 - `id` is chosen by the client (number or string) and echoed.
 - Methods are the CLI's own (`status`, `profile.*`, `settings.*`, `invite.*`, `chat.*`, `group.*`, `events.*`, `daemon.stop`, listed in [the CLI reference](../../packages/cli/README.md)) and **every engine call** through `engine.call` (`{"method": "walletCreate", "params": {…}, "confirmReal": false}`) with the engine's own parameters. The calls reachable are exactly the app's `EngineApi` (a test keeps the two lists equal) plus the reads `getState` and `getMessages`; nothing else on the engine object is. Nothing the app can do is out of reach. A call that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`) goes only with `"yes": true` in the request (`confirm` without it), as the CLI's own commands for them ask; `clearProfileData` answers `{"cleared": {"chats", "groups"}}`, and a daemon stops after answering it (`"stopped": true`) rather than serve the engine it shut down.
-- Error `code`s: `bad_request`, `usage` (the CLI's arguments), `not_found`, `refused` (the engine declined: a cross-network payment, a text the chat cannot carry, the own invite), `unavailable` (not live, no session), `confirm` (needs `force`, `yes` or `confirmReal`), `timeout` (a wait ran out), `busy` (another process holds the profile), `engine` (anything else the engine threw), `internal`.
+- Error `code`s: `bad_request`, `usage` (the CLI's arguments), `not_found`, `refused` (the engine declined: a cross-network payment, a text the chat cannot carry, the own invite), `unavailable` (not live, no session), `confirm` (needs `force`, `yes` or `confirmReal`), `timeout` (a wait ran out), `busy` (another process holds the profile), `engine` (anything else the engine threw), `internal`, `interrupted` (the CLI only: Ctrl-C ended the command).
 
 **Mainnet.** Every spend on Mainnet needs the engine's `confirmedReal: true` ([#298](https://github.com/MiguelMedeiros/ghostly/pull/298)); the engine refuses without it. The CLI sets it only when the command is given `--confirm-real`. `engine.call` refuses (`confirm`) parameters that carry `confirmedReal` unless the request itself says `"confirmReal": true`, so a `confirmedReal` copied into parameters by mistake moves nothing. A program speaking to the socket directly is responsible for setting it only on a person's explicit confirmation.
 
@@ -142,6 +142,7 @@ A typing `start` holds 6 s on the contact's side ([401](401-paired-chat.md#typin
 | 3 | Not found (profile, chat, message) |
 | 4 | Timed out waiting (`--wait`, `chat wait`, `file wait`) |
 | 5 | Needs confirmation (`--confirm-real`, `--force`, a received file that waits for `file accept`) |
+| 130 | Stopped with Ctrl-C (`interrupted`; revision 2026-11-02): a one-shot closes its profile first, and stderr says what became of what the command waited on (a message kept that still goes) |
 
 ## Parity with the app
 

@@ -102,13 +102,16 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
   const clock = (at: number) => clockTime(at, language);
-  const contact = link?.peerNick || t("pairing.contact");
+  // The contact's name; none when they shared none, and the Details text then says "your contact" in sentences of its
+  // own: a fallback name dropped into a sentence read "No attempt of Your contact's", "L'app di Il tuo contatto".
+  const contact = link?.peerNick || undefined;
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may
   // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
   const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
   const waitText = wait ? transportWaitText(wait, contact, clock, t) : undefined;
-  // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT only.
-  const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
+  // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT
+  // only, this side's or the contact's: no attempt comes then, and the DHT only choice says whose it is.
+  const notLive = paired && pinned && !dht && link?.dhtDelivery?.peerMode !== "dht" && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
   const words = usePairingWords();
   // A first pairing on its way: its stage names the connection until the chat is live, on the DHT or failed.
   // It reads the same view as the scene (`progress.view`): the same words, the same step, the same clock.
@@ -241,8 +244,12 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             onChange={e => link && void run(() => engine.call("setTransportPreference", {linkId:link.id,preferred,fallback:e.target.checked}))} /><span className="connection-switch-track" aria-hidden="true" /></span>
         </label>
       </fieldset>}
-      <div className="mt-1 flex items-start justify-between gap-2 border-t border-border pt-1">
-        <details className="min-w-0 flex-1 text-[11px]" data-testid="connection-details">
+      <div className="mt-1 border-t border-border pt-1">
+        {/* Its own row: beside Details it took a column down the whole open Details, and host names broke mid-word.
+            Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue. */}
+        {!dht && link?.dhtDelivery?.peerMode !== "dht" && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
+          onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>{t("connection.panel.reconnect")}</button>}
+        <details className="text-[11px]" data-testid="connection-details">
           <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
           <div className="space-y-2 px-1 pb-2">
             {wait && waitText && <div data-testid="connection-waiting" data-reason={wait.reason} data-transport={wait.transport} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
@@ -319,9 +326,6 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             </div>}
           </div>
         </details>
-        {/* Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue. */}
-        {!dht && link?.dhtDelivery?.peerMode !== "dht" && !ready && !awaitingJoin && online && link && <button className={`min-h-9 shrink-0 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
-          onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>{t("connection.panel.reconnect")}</button>}
       </div>
     </div>
   </details>

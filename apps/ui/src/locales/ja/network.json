@@ -4,7 +4,7 @@
   "domainLookupsHint": "連絡先のドメイン証明を確認します。リゾルバーにはドメインが見えます。",
   "domainLookupsInfo": "{{name}}を使い、失敗したらQuad9、Cloudflare、Googleに照会します。チャットは見えません。Webサイト上の証明を読むと、そのサイトにIPアドレスが見えます。",
   "hyperdht": "HyperDHTリレー",
-  "hyperdhtHint": "WebRTCが失敗したときの任意の代替手段。空欄:WebRTCのみ。",
+  "hyperdhtHint": "WebRTCが失敗したときの任意の代替手段。空欄:HyperDHTなし。",
   "hyperdhtInfo": "このブラウザからチャットでHyperDHTを使えるようにします。リレーは暗号化されたバイトを転送します。あなたのアドレスと通信した時刻は見えますが、内容は見えません。",
   "identityChecks": "IDの確認",
   "iroh": "Irohリレー",

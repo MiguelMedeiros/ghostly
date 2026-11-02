@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import { createRelayPayload, RELAY_PAYLOAD_MAX_BYTES } from "../src/pkarr";
 import { didDhtDocument, encodeDidDhtPacket, signDidDhtPacket } from "../src/didDht";
-import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl, readRelayBody } from "../src/relay";
+import { DEFAULT_RELAYS, RelayTransport, normalizeRelayUrl, readRelayBody, relayUrlProblem } from "../src/relay";
 import { DiscoveryBudgetError, heldBackError, isDiscoveryBudgetError } from "../src/transport";
 import { BREAKER_THRESHOLD } from "../src/relayBreaker";
 
@@ -19,6 +19,12 @@ describe("relay URLs", () => {
     expect(normalizeRelayUrl("http://relay.test")).toBe("http://relay.test");
     expect(normalizeRelayUrl("https://relay.test/?q=1#x")).toBe("https://relay.test");
     for (const bad of ["ftp://relay.test", "javascript:alert(1)", "relay.test", "", "file:///etc/passwd"]) expect(normalizeRelayUrl(bad)).toBeNull();
+  });
+
+  it("says why a relay list's line is not a relay, with the line as typed: https:// for a host alone or another scheme", () => {
+    expect(relayUrlProblem(" https://relay.test/pkarr ")).toBeNull();
+    for (const meant of ["wss://relay.example.org", "relay.example.org", "ftp://relay.example.org"]) expect(relayUrlProblem(meant)).toBe(`Use an https:// relay address: ${meant}`);
+    for (const bad of ["not a url", "https://relay .example.org", "javascript:alert(1)"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
   });
 
   it("defaults to the public relays, drops invalid and duplicate ones, and describes itself", () => {

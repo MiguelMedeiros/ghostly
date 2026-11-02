@@ -3,7 +3,7 @@
 Browsers have no UDP, so they cannot run HyperDHT (WISP 103) themselves. This relay runs the UDP half for them
 and talks to each browser over one WebSocket, with Holepunch's
 [`@hyperswarm/dht-relay`](https://github.com/holepunchto/hyperswarm-dht-relay) protocol. The web app and the
-extension use it when a relay is set in **Settings → Advanced → Network** (`packages/browser/src/platform/hyperdhtRelay.ts`).
+extension use it when a relay is set in **Settings → Network → HyperDHT relay** (`packages/browser/src/platform/hyperdhtRelay.ts`).
 
 ## What it sees, and what it doesn't
 
@@ -47,6 +47,8 @@ are in WISP 103, "Browser profile".
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
+| a client's part of a handshake (its answer) | 15 s | `GHOSTLY_RELAY_HANDSHAKE_MS` |
+| handshakes waiting on one client's answer at once (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_HANDSHAKES` |
 
 Past a limit the client is dropped, or its socket is paused (the byte rate), or an incoming stream past
 `streams` is closed. Topic lookups and announcements
@@ -71,11 +73,25 @@ each limit set away from its default, and which origins it serves (`any origin` 
 
 ## Running it
 
+It needs Node 22 (the image's `node:22-bookworm-slim`).
+
 ```bash
 npm ci && node server.mjs                        # public HyperDHT, port 49443
-GHOSTLY_HYPERDHT_TESTNET=3 node server.mjs       # its own HyperDHT network (tests, e2e/infra)
+GHOSTLY_HYPERDHT_BOOTSTRAP=host:port node server.mjs   # another HyperDHT network, by its bootstrap nodes
+GHOSTLY_HYPERDHT_TESTNET=3 node server.mjs       # a private 3-node network in the process, nobody else on it (tests, e2e/infra)
 docker compose up -d --build                     # the container, limits and all (docker-compose.yml)
 ```
+
+The start line names the network: `(public HyperDHT)`, `(bootstrap 2 nodes)` or `(own testnet of 3 nodes)`. A testnet
+with `GHOSTLY_HYPERDHT_BOOTSTRAP` set too does not start: the testnet would leave the bootstrap nodes out.
+
+`docker-compose.yml` is set up for one server, "zero" behind the Cloudflare tunnel: it counts each client by
+`CF-Connecting-IP` and lets in only Ghostly's own app and extension. Anywhere else, set two variables (in the shell or
+an `.env` file next to it):
+
+- `GHOSTLY_RELAY_CLOUDFLARE=0`, or every client could name its own address in that header; behind nginx or Caddy add
+  `GHOSTLY_RELAY_PROXIES=1`;
+- `GHOSTLY_RELAY_ORIGINS` with the origins of the web app you serve, or every browser on it is refused (403).
 
 `GET /healthz` answers with the counts (clients, accepted, refused, dropped) and the HyperDHT node's state: `nodes`
 in its routing table, `firewalled`, and `sinceAnswerMs` since another node last answered it (`null`: never). It is

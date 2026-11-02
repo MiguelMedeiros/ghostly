@@ -54,6 +54,17 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
 }
 
 /**
+ * Why a forward failed, as a word an operator can act on: `timeout`, `redirect`, or the system's or TLS's code
+ * (`ECONNREFUSED`, `ENOTFOUND`, `CERT_HAS_EXPIRED`). Never the message, which can hold the endpoint.
+ */
+export function failure (error) {
+  if (error?.name === 'TimeoutError') return 'timeout'
+  const code = error?.cause?.code ?? error?.code
+  if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code
+  return error?.cause?.message === 'unexpected redirect' ? 'redirect' : 'error'
+}
+
+/**
  * The address a request counts against. Behind `proxies` reverse proxies (a tunnel, nginx), the socket's address is the
  * last proxy's, so the client's is the entry that many from the end of `X-Forwarded-For` (the ones before it are the
  * client's to write). With none configured, the header is ignored.
@@ -82,6 +93,27 @@ export function rateKey (address) {
   return prefix.length === 4 && prefix.every(n => n >= 0 && n <= 0xffff) ? `${prefix.map(n => n.toString(16)).join(':')}::/64` : address
 }
 
+/**
+ * Refusals as counts, so a flood of them stays quiet: the first of a kind in a quiet minute is logged at once
+ * (`refused rate`), the rest of that minute as one line when `flush` runs (`refused rate 41 more`). `detail` goes on
+ * that first line only (`refused origin "https://app.example"`): it names one case, the count covers the rest.
+ */
+export function refusalLog (log) {
+  // Kind → refusals since its last line. Present: a line for it went out in this minute.
+  const pending = new Map()
+  return {
+    refuse: (why, detail) => {
+      if (pending.has(why)) pending.set(why, pending.get(why) + 1)
+      else { pending.set(why, 0); log('refused', why, ...(detail === undefined ? [] : [detail])) }
+    },
+    flush: () => {
+      for (const [why, more] of pending) {
+        if (more) { log('refused', why, `${more} more`); pending.set(why, 0) } else pending.delete(why)
+      }
+    },
+  }
+}
+
 export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, proxies = 0, log = () => {} } = {}) {
   const { bodyBytes, perMinute, tracked, requestMs } = { ...DEFAULT_LIMITS, ...limits }
   // The JSON around a body of `bodyBytes`: base64url is a third longer, and the headers add a few KB.
@@ -89,11 +121,11 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   const recent = new Map()
   let pruned = 0
   const prune = now => { pruned = now; for (const [ip, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(ip) }
-  const pruning = setInterval(() => prune(Date.now()), 60_000)
+  const refusals = refusalLog(log)
+  const pruning = setInterval(() => { prune(Date.now()); refusals.flush() }, 60_000)
   pruning.unref?.()
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const allowed = new Set(origins.map(origin => originOf(origin) ?? origin))
-  const refusedOrigin = originRefusals(log)
 
   // A slow client is closed after `requestMs`, checked every second (Node's default waits up to five minutes).
   const server = createServer({ requestTimeout: requestMs, headersTimeout: requestMs, connectionsCheckingInterval: Math.min(1000, requestMs) }, (req, res) => {
@@ -103,10 +135,12 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     // them its fetch fails as a CORS error and says nothing. The relay refuses the POST itself, forwarding nothing.
     const cors = origin === undefined ? {} : { 'Access-Control-Allow-Origin': allowed.size ? origin : '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
     const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
-    if (refused) refusedOrigin(origin)
+    const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
+    // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return }
-    if (req.method !== 'POST') return answer(405, { error: 'No' })
-    if (refused) return answer(403, { error: 'Origin not allowed' })
+    if (req.method !== 'POST') return refuse('method', 405, { error: 'No' })
+    // A refusal of kind `origin`, its first line in a minute naming the origin so a misspelt GHOSTLY_RELAY_ORIGINS shows.
+    if (refused) return refuse('origin', 403, { error: 'Origin not allowed' }, originShown(origin))
 
     const ip = rateKey(clientAddress(req, proxies))
     const now = Date.now()
@@ -114,26 +148,31 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     if (recent.size >= tracked && !recent.has(ip) && now - pruned >= 1000) prune(now)
     if (recent.size >= tracked && !recent.has(ip)) recent.delete(recent.keys().next().value)
     const times = (recent.get(ip) ?? []).filter(t => now - t < 60_000)
-    if (times.length >= perMinute) return answer(429, { error: 'Too many' })
+    if (times.length >= perMinute) return refuse('rate', 429, { error: 'Too many' })
     times.push(now)
     // Last in the map's order: the first entry is always the one seen longest ago.
     recent.delete(ip)
     recent.set(ip, times)
 
-    if (Number(req.headers['content-length']) > requestBytes) return answer(413, { error: 'Too large' })
+    if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
     const chunks = []
     let size = 0
     // Bytes, not characters: text of many-byte characters counts for what it weighs.
-    req.on('data', chunk => { size += chunk.length; if (size > requestBytes) req.destroy(); else chunks.push(chunk) })
+    req.on('data', chunk => {
+      size += chunk.length
+      if (size <= requestBytes) chunks.push(chunk)
+      else if (!req.destroyed) { refusals.refuse('size'); req.destroy() }
+    })
     req.on('end', async () => {
       const request = readRelayRequest(Buffer.concat(chunks).toString('utf8'), { hosts, bodyBytes })
-      if (request.error) { log('refused', request.error); return answer(400, { error: request.error }) }
+      // `<name> twice` names a header the client chose: the log says only which kind it was.
+      if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
         log('forwarded', response.status)
         answer(200, { status: response.status })
-      } catch {
-        log('failed')
+      } catch (error) {
+        log('failed', failure(error))
         answer(502, { error: 'The push service did not answer' })
       }
     })
@@ -142,7 +181,16 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   return new Promise(resolve => server.listen(port, host, () => resolve({
     port: server.address().port,
     tracked: () => recent.size,
-    close: () => new Promise(done => { clearInterval(pruning); server.close(() => done()) }),
+    /** Open connections, a request in them or not. */
+    clients: () => new Promise(done => server.getConnections((_, count) => done(count ?? 0))),
+    // `server.close` stops the check that ends a slow request, so a client holding half a request would hold the
+    // close for as long as it stays: a request still open after `stopMs` (a forward in flight, a slow client) is cut.
+    close: ({ stopMs = 3000 } = {}) => new Promise(done => {
+      clearInterval(pruning)
+      refusals.flush()
+      const cut = setTimeout(() => server.closeAllConnections(), stopMs)
+      server.close(() => { clearTimeout(cut); done() })
+    }),
   })))
 }
 
@@ -161,27 +209,10 @@ export function originOf (entry) {
 }
 
 /**
- * Logs a refused `Origin` (`refused origin "https://app.example"`, `(none)` for a request without one), each value
- * once an hour and at most `most` values an hour, so a misspelt GHOSTLY_RELAY_ORIGINS shows in the log and a client
- * sending a new value each time cannot flood it.
+ * A refused `Origin` as the log writes it: quoted and cut at 200 characters (`"https://app.example"`), so a value the
+ * client chose cannot break the line; `(none)` for a request without one.
  */
-export function originRefusals (log, { most = 16, now = Date.now } = {}) {
-  let seen = new Set()
-  let since = now()
-  let full = false
-  return origin => {
-    if (now() - since >= 3_600_000) { seen = new Set(); since = now(); full = false }
-    const shown = origin === undefined ? '(none)' : JSON.stringify(String(origin).slice(0, 200))
-    if (seen.has(shown)) return
-    if (seen.size >= most) {
-      if (!full) log('refused', 'origin', `(more than ${most} values this hour, not logged)`)
-      full = true
-      return
-    }
-    seen.add(shown)
-    log('refused', 'origin', shown)
-  }
-}
+const originShown = origin => (origin === undefined ? '(none)' : JSON.stringify(String(origin).slice(0, 200)))
 
 /**
  * One setting from the environment: absent gives `fallback`; present, it must read as `kind` says, or the start stops

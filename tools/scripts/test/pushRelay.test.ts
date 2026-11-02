@@ -1,7 +1,7 @@
 import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { PUSH_SERVICE_HOSTS } from "../../../packages/core/src/webPush";
-import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, originRefusals, rateKey, readRelayRequest, startRelay } from "../../../infra/services/push-relay/relay.mjs";
+import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, startRelay } from "../../../infra/services/push-relay/relay.mjs";
 
 // covers: push.wake.send
 
@@ -86,7 +86,7 @@ describe("the push relay (infra/services/push-relay)", () => {
     expect((await fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: request({ endpoint: "https://example.com/" }) })).status).toBe(400);
   });
 
-  it("answers a refused origin with a 403 the page can read, and logs that origin once", async () => {
+  it("answers a refused origin with a 403 the page can read, and names that origin on the refusal's first line", async () => {
     const lines: string[] = [];
     const relay = await startRelay({ origins: ["https://app.ghostly.tools"], log: (...words: unknown[]) => { lines.push(words.join(" ")); } });
     close = relay.close;
@@ -103,20 +103,25 @@ describe("the push relay (infra/services/push-relay)", () => {
       expect(await refused.json()).toEqual({ error: "Origin not allowed" });
     }
     expect((await fetch(url, { method: "POST", body: request() })).status).toBe(403);
-    expect(lines.filter((line) => line.startsWith("refused origin"))).toEqual(['refused origin "https://app.ghostly.tools.example"', "refused origin (none)"]);
-    expect(lines.filter((line) => line.startsWith("forwarded"))).toEqual([]);
+    // One kind among the refusals: the first line names the origin, the rest of the minute is a count (the preflights
+    // were answered, so three POSTs and one without an Origin are the four refusals).
+    expect(lines).toEqual(['refused origin "https://app.ghostly.tools.example"']);
+    await relay.close();
+    close = undefined;
+    expect(lines).toEqual(['refused origin "https://app.ghostly.tools.example"', "refused origin 3 more"]);
   });
 
-  it("logs each refused origin once an hour and at most a few an hour, so a crawler cannot flood the log", () => {
+  it("names a request without an Origin as (none), and cuts a long one, quoted, so it cannot break the line", async () => {
     const lines: string[] = [];
-    let now = 0;
-    const refused = originRefusals((...words: unknown[]) => { lines.push(words.join(" ")); }, { most: 2, now: () => now });
-    for (const origin of ["https://a.example", "https://a.example", "https://b.example", "https://c.example", "https://d.example"]) refused(origin);
-    expect(lines).toEqual(['refused origin "https://a.example"', 'refused origin "https://b.example"', "refused origin (more than 2 values this hour, not logged)"]);
-    now = 3_600_000;
-    refused("https://a.example");
-    expect(lines.at(-1)).toBe('refused origin "https://a.example"');
-    expect(lines).toHaveLength(4);
+    const relay = await startRelay({ origins: ["https://app.ghostly.tools"], log: (...words: unknown[]) => { lines.push(words.join(" ")); } });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    expect((await fetch(url, { method: "POST", body: request() })).status).toBe(403);
+    await relay.close();
+    const again = await startRelay({ origins: ["https://app.ghostly.tools"], log: (...words: unknown[]) => { lines.push(words.join(" ")); } });
+    close = again.close;
+    expect((await fetch(`http://127.0.0.1:${again.port}/`, { method: "POST", headers: { Origin: `https://${"a".repeat(300)}.example` }, body: request() })).status).toBe(403);
+    expect(lines).toEqual(["refused origin (none)", `refused origin ${JSON.stringify(`https://${"a".repeat(300)}.example`.slice(0, 200))}`]);
   });
 
   it("limits each client behind a proxy apart, not the proxy as one", async () => {
