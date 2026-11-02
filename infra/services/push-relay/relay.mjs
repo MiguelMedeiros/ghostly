@@ -54,6 +54,17 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
 }
 
 /**
+ * Why a forward failed, as a word an operator can act on: `timeout`, `redirect`, or the system's or TLS's code
+ * (`ECONNREFUSED`, `ENOTFOUND`, `CERT_HAS_EXPIRED`). Never the message, which can hold the endpoint.
+ */
+export function failure (error) {
+  if (error?.name === 'TimeoutError') return 'timeout'
+  const code = error?.cause?.code ?? error?.code
+  if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code
+  return error?.cause?.message === 'unexpected redirect' ? 'redirect' : 'error'
+}
+
+/**
  * The address a request counts against. Behind `proxies` reverse proxies (a tunnel, nginx), the socket's address is the
  * last proxy's, so the client's is the entry that many from the end of `X-Forwarded-For` (the ones before it are the
  * client's to write). With none configured, the header is ignored.
@@ -153,8 +164,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
         log('forwarded', response.status)
         answer(200, { status: response.status })
-      } catch {
-        log('failed')
+      } catch (error) {
+        log('failed', failure(error))
         answer(502, { error: 'The push service did not answer' })
       }
     })
