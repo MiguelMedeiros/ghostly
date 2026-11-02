@@ -440,7 +440,7 @@ describe("the boot guard's language file", () => {
 
   afterEach(() => {
     document.head.innerHTML = "";
-    localStorage.removeItem("ghostly_app_settings");
+    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -464,6 +464,20 @@ describe("the boot guard's language file", () => {
     document.head.innerHTML = "";
     open(["ar"], { saved: JSON.stringify({ language: "en" }) });
     expect(preloads()).toEqual([]);
+  });
+
+  it("follows the profile the page will start as, and the space a handoff moved it to, not the default profile", () => {
+    const registry = (active: string, space?: string) => JSON.stringify({ version: 1, active, profiles: [{ id: "", name: "Personal" }, { id: "abcdefghij", name: "Work", space }] });
+    localStorage.setItem("ghostly_profiles", registry("abcdefghij"));
+    localStorage.setItem("ghostly_abcdefghij_app_settings", JSON.stringify({ language: "pt" }));
+    open(["en-US"], { saved: JSON.stringify({ language: "ja" }) });
+    expect(preloads()).toEqual(["/assets/pt-ghi.js"]);
+    document.head.innerHTML = "";
+    localStorage.clear();
+    localStorage.setItem("ghostly_profiles", registry("abcdefghij", "moved-1"));
+    localStorage.setItem("ghostly_moved-1_app_settings", JSON.stringify({ language: "ar" }));
+    open(["en-US"]);
+    expect(preloads()).toEqual(["/assets/ar-abc.js"]);
   });
 
   it("asks for nothing where the page names no files (the dev server), or names them badly, and still guards", () => {
