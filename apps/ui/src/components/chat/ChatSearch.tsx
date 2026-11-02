@@ -4,7 +4,10 @@ import type { ChatSearch } from "../../hooks/useChatSearch";
 import { matchRanges } from "../../lib/chatSearch";
 import { useComposition } from "../../hooks/useComposition";
 
-/** `text` with the places that hold `term` marked; the text itself when there is no term or no match. */
+/**
+ * `text` with the places that hold `term` marked; the text itself when there is no term or no match. The mark's tint is
+ * faint enough for the bubble's words to read at 4.5:1 on it in every theme (at 35% they didn't on the dark sent bubbles).
+ */
 export function Highlight({ text, term }: { text: string; term?: string }) {
   const ranges = term ? matchRanges(text, term) : [];
   if (!ranges.length) return <>{text}</>;
@@ -12,7 +15,7 @@ export function Highlight({ text, term }: { text: string; term?: string }) {
   let at = 0;
   for (const [from, to] of ranges) {
     if (from > at) parts.push(text.slice(at, from));
-    parts.push(<mark key={from} data-search-match className="rounded-[2px] bg-accent/35 text-inherit">{text.slice(from, to)}</mark>);
+    parts.push(<mark key={from} data-search-match className="rounded-[2px] bg-accent/25 text-inherit">{text.slice(from, to)}</mark>);
     at = to;
   }
   if (at < text.length) parts.push(text.slice(at));

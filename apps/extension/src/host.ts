@@ -1,9 +1,19 @@
 import type { BrowserHost } from "@ghostly/browser/host";
-import { UI_PORT, type RuntimeMessage } from "./messages";
+import { UI_PORT, type RuntimeMessage, type ViewerPage } from "./messages";
 import { extensionUpdates } from "./updates";
 import { extensionOidc } from "./oidc";
 import { extensionAtproto } from "./atproto";
+import { loadSettings } from "../../ui/src/lib/settings";
+import { languageTag, textDirection } from "../../ui/src/lib/documentLanguage";
+import { translatorFor } from "../../ui/src/locales";
 import { markEngineRestart, pageProfileIsCurrent, startAsProfileInUse } from "./profile";
+
+/** The viewer tab's error page in the profile's language, as it is now. */
+export function viewerPage(): ViewerPage {
+  const { language } = loadSettings();
+  const t = translatorFor(language);
+  return { lang: languageTag(language), dir: textDirection(language), unreachable: t("services.window.unreachable"), failed: t("services.window.failed") };
+}
 
 /** Ghostly Browser: the peer lives in the offscreen document, reached through extension messaging. */
 export const extensionHost: BrowserHost = {
@@ -53,6 +63,7 @@ export const extensionHost: BrowserHost = {
       peerPubKeyZ32,
       serviceId,
       tag,
+      page: viewerPage(),
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },

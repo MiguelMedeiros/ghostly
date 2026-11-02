@@ -635,7 +635,7 @@ describe("a run of the train", () => {
     }
     // A wait whose way out needs no push still keeps its place.
     expect(positionText("dev", pr({ draft: true }), 2, null)).toMatch(/Waiting: it is a draft\. It keeps its place\.$/);
-    expect(positionText("dev", pr({ misplanned: true }), 2, null)).toMatch(/run CI on it again\. It keeps its place\.$/);
+    expect(positionText("dev", pr({ misplanned: true }), 2, null)).toMatch(/close and reopen it for a new run \(re-running that run plans it the same way again\)\. It keeps its place\.$/);
   });
 
   it("rebuilds a batch on the new tip when the base moved under it", async () => {
@@ -763,6 +763,33 @@ describe("a run of the train", () => {
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/big\.yml\)/);
     expect(repo.comments.get(14)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+  });
+
+  it("tells pull requests whose files GitHub does not list that it cannot tell which one changes the refused workflow", async () => {
+    // Two aboard with no file list and the push refused: both leave, but only one (or neither alone) changes the
+    // workflow. Each was told it changes it and lands by hand, which is false for at least one of them.
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n);
+    repo.files.set(12, null);
+    repo.files.set(13, null);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if ((sha.split(":")[1]?.split(",") ?? []).includes("13")) throw new Error("! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/big.yml` without `workflows` permission)");
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11]);
+    expect(r.dropped).toEqual([12, 13]);
+    for (const [n, other] of [[12, 13], [13, 12]]) {
+      const body = repo.comments.get(n)!.at(-1)!.body;
+      expect(repo.pulls.get(n)!.labels).toEqual([LABEL.failed]);
+      expect(body).not.toMatch(/this pull request changes a workflow/);
+      expect(body).not.toMatch(/lands by hand/);
+      expect(body).toMatch(/GitHub lists no files for this pull request/);
+      expect(body).toContain("`.github/workflows/big.yml`");
+      expect(body).toContain(`#${other}`);
+      expect(body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
+    }
   });
 
   it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
@@ -2241,6 +2268,17 @@ describe("a green CI run planned for other files", () => {
     expect(r.merged).toEqual([]);
     expect(repo.landed).toEqual([]);
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: the green CI run on its last commit skipped jobs that its changes need/);
+  });
+
+  it("asks for a new run, not a re-run: a re-run plans from the same merge commit and skips the same jobs", async () => {
+    // A run planned by the ci-changes.mjs of its merge commit, older than the base's (a file added to a gate since),
+    // skipped what the base's plan now turns on. GitHub re-runs a run at its own sha, so the same jobs skip again.
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    await repo.run();
+    const said = repo.comments.get(21)![0].body;
+    expect(said).toMatch(/close and reopen it for a new run \(re-running that run plans it the same way again\)\. It keeps its place\.$/);
+    expect(said).not.toMatch(/run CI on it again/);
   });
 
   it("passes over it for the pull request's own green run before it", async () => {

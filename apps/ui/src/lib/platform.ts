@@ -91,8 +91,13 @@ export interface PeerHoldState {
 }
 
 export interface NetworkSettings {
-  /** How this client reaches Pkarr, for display. */
+  /** How this client reaches Pkarr, as the engine words it in English (logs, the CLI). The page shows `kind` instead. */
   protocol: string;
+  /**
+   * How this client reaches the Mainline DHT, for a line in the page's language: `relays`, only through the Pkarr
+   * relays over HTTP (a browser); `direct`, the DHT itself over UDP and the relays too (Desktop, Android).
+   */
+  kind: "relays" | "direct";
   relays: string[];
   defaultRelays: string[];
   /** Optional TURN server, used only when no direct path exists. */

@@ -18,6 +18,15 @@
     "tryAgain": "Réessayer",
     "waiting": "En attente de votre autre appareil…"
   },
+  "defaultName": {
+    "app": "App {{os}}",
+    "browser": "Navigateur",
+    "desktop": "Ordinateur",
+    "on": "{{browser}} sur {{os}}",
+    "phone": "Téléphone",
+    "short": "{{browser}}, {{os}}",
+    "tablet": "Tablette"
+  },
   "fail": {
     "cancelled": "Arrêté. Rien n’a été ajouté.",
     "chat": "C’est une invitation à une discussion. Utilisez Rejoindre dans la liste des discussions.",

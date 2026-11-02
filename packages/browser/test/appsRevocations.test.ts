@@ -4,7 +4,7 @@ import * as core from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { canonicalJsonBytes, readAppRevocation, signAppRevocation, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
 import { APP_FETCH_LIMITS } from "../src/engine/appFetch";
-import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, apps, bundle, emptyProfile, keyOf, revocation } from "./appsSupport";
+import { BUNDLE_URL, FakeNet, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, emptyProfile, keyOf, revocation, storeFiles } from "./appsSupport";
 // covers: apps.engine.installed
 
 /*
@@ -104,4 +104,54 @@ describe("a publisher's ghostly-revoke.json", () => {
       verifies.mockImplementation(actual.readAppRevocation);
     }
   }, 60_000);
+});
+
+describe("a revocation a store's index carries", () => {
+  it("is kept on the app: the store's next index without it, or the store removed, does not let the version run again", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    // Its publisher serves no ghostly-revoke.json: the revocation reaches this client only through the store.
+    await net.putStore(await storeFiles());
+    await store.addStore({ url: STORE_URL });
+    await net.putStore(await storeFiles({ sequence: 2, revoked: [await revocation(v1.ref, [v1.digest])] }));
+    await store.checkUpdates();
+    expect(await store.runCheck({ ref: v1.ref })).toEqual({ status: "revoked", reason: "Leaked key" });
+
+    await net.putStore(await storeFiles({ sequence: 3 }));
+    await store.checkUpdates();
+    expect(await store.runCheck({ ref: v1.ref }), "an index that dropped it").toEqual({ status: "revoked", reason: "Leaked key" });
+
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    await store.checkUpdates();
+    expect(await store.runCheck({ ref: v1.ref }), "the store removed").toEqual({ status: "revoked", reason: "Leaked key" });
+    await expect(store.entry({ ref: v1.ref })).rejects.toThrow(/^revoked/);
+  });
+
+  it("is kept from when the store is added, with no update check, and stays when the store is removed", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    await net.putStore(await storeFiles({ revoked: [await revocation(v1.ref, [v1.digest])] }));
+    await store.addStore({ url: STORE_URL });
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    expect(await store.runCheck({ ref: v1.ref }), "added, then removed").toEqual({ status: "revoked", reason: "Leaked key" });
+  });
+
+  it("of another app, or of a version not held here, is not kept", async () => {
+    const v1 = await bundle();
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const other = await bundle({ sequence: 2 });
+    await net.putStore(await storeFiles({ revoked: [await revocation(v1.ref, [other.digest]), await signAppRevocation({ ghostlyRevoke: 1, app: `${keyOf(PUBLISHER)}/other`, upTo: 9 }, PUBLISHER)] }));
+    await store.addStore({ url: STORE_URL });
+    await store.checkUpdates();
+    expect((await appRows() as { revocations?: unknown[] }[])[0]!.revocations).toBeUndefined();
+  });
 });

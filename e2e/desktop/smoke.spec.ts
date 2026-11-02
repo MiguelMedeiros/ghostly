@@ -20,10 +20,10 @@ test("Desktop opens, with the peer Rust backs behind it", { tag: ["@feature:desk
   await app.click('[title="Settings"]');
   await expect.poll(() => app.text('[data-settings-section="network"]'), { message: "Settings shows its Network section" }).not.toBeNull();
 
-  // Only `apps/ui/src/desktop/host.ts` describes Pkarr this way. The browser stand-in
-  // would say "Pkarr relays (HTTP) → Mainline DHT (BEP44)": Rust is reaching
-  // the DHT itself, which is the whole reason Desktop exists.
-  await expect.poll(() => app.text('[data-testid="network-protocol"]')).toBe("Mainline DHT (BEP44) — Direct UDP");
+  // Only `apps/ui/src/desktop/host.ts` reaches the DHT directly (`kind: "direct"`, worded in
+  // the page's language). The browser stand-in would be `relays`: Rust is reaching the DHT
+  // itself, which is the whole reason Desktop exists.
+  await expect.poll(() => app.text('[data-testid="network-protocol"][data-kind="direct"]')).not.toBeNull();
 
   // And the host is installed, not only its transport: sharing a local web app
   // is offered, which no web page is allowed to do.

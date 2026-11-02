@@ -44,6 +44,21 @@ describe("Remove, on the active device", () => {
     expect(removed).toHaveTextContent("Removed");
   });
 
+  it("once the device is removed, the keyboard focus is on its Removed row, not on the page", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    let devices = activeSet().devices;
+    engine.on("deviceSet", () => activeSet({ devices }));
+    engine.on("deviceRemove", () => { devices = devices.slice(0, 2); return activeSet({ devices }); });
+    await user.click((await screen.findAllByTestId("device-menu"))[1]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    const removed = await screen.findByTestId("device-removed");
+    // The ⋮ that opened the dialog went with the Tablet's row.
+    await waitFor(() => expect(screen.getAllByTestId("device-row")).toHaveLength(2), { timeout: 3_000 });
+    await waitFor(() => expect(removed).toHaveFocus());
+    expect(removed).toHaveTextContent("Tablet");
+  });
+
   it("says why it could not, and changes nothing", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
@@ -121,6 +136,14 @@ describe("the money checklist", () => {
     expect(await screen.findByTestId("device-lost-storage")).toHaveTextContent("Change your storage keys");
     expect(screen.getByTestId("device-lost-lines").firstElementChild).toBe(screen.getByTestId("device-lost-storage"));
     expect(screen.queryByTestId("device-lost-remove")).toBeNull();
+  });
+
+  it("Remove <device> keeps its space: the sentence is one inline piece inside the flex button", () => {
+    renderApp(<LostChecklist device="Hunt Phone" onClose={() => {}} onRemove={() => {}} />);
+    const button = screen.getByTestId("device-lost-remove");
+    // In a flex box "Remove " and the name's <bdi> would be two flex items, and the item's trailing space is not drawn.
+    expect([...button.childNodes].map((node) => node.nodeName)).toEqual(["SPAN"]);
+    expect(button).toHaveTextContent("Remove Hunt Phone");
   });
 });
 

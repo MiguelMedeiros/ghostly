@@ -120,6 +120,8 @@
     "knockingCommunity": "Lascio una richiesta dove le app del gruppo la cercano…",
     "queueCount": "Altre {{count}} persone aspettano di entrare.",
     "queueOne": "Un'altra persona aspetta di entrare.",
+    "replaced": "Questo link è stato sostituito o disattivato",
+    "replacedBody": "Chiedi il link attuale a qualcuno del gruppo, poi aprilo.",
     "stale": "Ancora nessuna risposta. Se il link è cambiato, chiedi quello nuovo.",
     "staleBusy": "Ancora in attesa: il gruppo fa entrare poche persone alla volta.",
     "step": {
