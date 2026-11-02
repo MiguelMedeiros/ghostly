@@ -76,6 +76,16 @@ describe("the tabs filter both decks", () => {
     expect(screen.getByTestId("payment-tab-testnet-tag")).toHaveTextContent("Test money");
   });
 
+  it("gives a finger 44 px on a phone: Pay or request | Accept, the deck's arrows and Back to the cards", async () => {
+    const { user } = open();
+    for (const m of ["pay", "accept"]) expect(screen.getByTestId(`payment-mode-${m}`)).toHaveClass("max-md:min-h-11");
+    const arrows = [...screen.getAllByRole("button", { name: "Previous card" }), ...screen.getAllByRole("button", { name: "Next card" })];
+    expect(arrows).toHaveLength(2);
+    for (const arrow of arrows) expect(arrow).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
+    await user.click(screen.getByTestId("payment-card-lightning-mainnet"));
+    expect(screen.getByRole("button", { name: "Back to the cards" })).toHaveClass("max-md:min-h-11");
+  });
+
   it("pays a card of the tab on its own network, and goes back to that tab from the card", async () => {
     const { user, onRequest } = open();
     await user.click(tab("testnet"));

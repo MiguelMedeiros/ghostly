@@ -65,7 +65,7 @@ function turnMs(card:HTMLElement|null):number {
  */
 export function FlipTurnButton({testId,label,onClick}:{testId:string;label:string;onClick:()=>void}) {
  const cards=useOptionalI18n()?.t('common.deck.turnBack')??'Cards';
- return <button type="button" className="deck-flip-turn" data-testid={testId} aria-label={label} title={label} onClick={onClick}>
+ return <button type="button" className="deck-flip-turn max-md:min-h-11" data-testid={testId} aria-label={label} title={label} onClick={onClick}>
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
   <span>{cards}</span>
  </button>;

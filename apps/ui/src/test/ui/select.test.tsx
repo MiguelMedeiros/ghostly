@@ -234,6 +234,11 @@ describe("Select", () => {
     expect(combobox()).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("keeps the small size small with a mouse, and a finger's 44 px on a phone", () => {
+    renderApp(<Picker size="sm" />);
+    expect(combobox()).toHaveClass("min-h-8", "max-md:min-h-11");
+  });
+
   it("submits its value with a form through a hidden input when named", () => {
     const { container } = renderApp(<form><Picker name="resolver" /></form>);
     expect(Object.fromEntries(new FormData(container.querySelector("form")!))).toEqual({ resolver: "quad9" });
