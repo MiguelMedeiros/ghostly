@@ -60,6 +60,23 @@ describe("what the guard asks about", () => {
     expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
   });
 
+  /**
+   * A Polyseed, the 16-word seed Feather and Cake Wallet show for a Monero wallet: BIP39's English words with a checksum
+   * of its own. Before, only a BIP39 checksum over 12 or 15 of its words caught one, by chance: about 3 in 10.
+   */
+  it.each([
+    // 22 bytes of 0x11 and of 0x77, read as 16 words of 11 bits.
+    ["baby mass dust captain baby mass dust captain baby mass dust captain baby mass dust captain"],
+    ["jazz roof tape upon jazz roof tape upon jazz roof tape upon jazz roof tape upon"],
+  ])("a message that is only a 16-word Monero Polyseed: %s", (seed) => {
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(seed.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"))).toEqual({ kind: "mnemonic" });
+    // Not inside other text: no checksum of BIP39's holds for it.
+    expect(findSecret(`${seed} zoo`)).toBeNull();
+    // One word sixteen times is still no seed.
+    expect(findSecret("abandon ".repeat(16).trim())).toBeNull();
+  });
+
   it.each([
     ["an nsec", NSEC],
     ["an nsec in a sentence", `here is my key ${NSEC} ok`],
