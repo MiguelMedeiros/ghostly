@@ -132,6 +132,7 @@
     "inUse": "Em uso",
     "needsDesktop": "{{transport}} precisa do Ghostly Desktop",
     "noWebrtc": "Este app não tem WebRTC",
+    "relayUnreached": "{{transport}} não alcançou o relay · Ajustes, Rede",
     "throughRelay": "Via relay · usado quando nada direto conecta",
     "waiting": "Aguardando"
   },

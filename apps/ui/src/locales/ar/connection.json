@@ -132,6 +132,7 @@
     "inUse": "قيد الاستخدام",
     "needsDesktop": "يحتاج {{transport}} إلى Ghostly Desktop",
     "noWebrtc": "هذا التطبيق لا يدعم WebRTC",
+    "relayUnreached": "تعذّر على {{transport}} الوصول إلى مرحّله · الإعدادات، الشبكة",
     "throughRelay": "عبر مرحّل · يُستخدم حين يتعذّر الاتصال المباشر",
     "waiting": "في الانتظار"
   },
