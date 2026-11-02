@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { holdRow } from "../hooks/useRowWindow";
 import { usePictureZoom } from "../hooks/usePictureZoom";
 import { useI18n } from "../contexts/I18nContext";
@@ -26,6 +26,7 @@ export function AvatarViewer({ src, name, onClose, returnFocus, picture = false 
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
+  useBackCloses(onClose);
   const [natural, setNatural] = useState<number>();
   const area = useRef<HTMLDivElement>(null), image = useRef<HTMLImageElement>(null);
   const { zoom, gestured, handlers, onKey } = usePictureZoom(image, area);
