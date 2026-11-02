@@ -308,6 +308,12 @@ describe("a contact's app shown over the app", () => {
     expect(frame.getAttribute("sandbox")!.split(" ")).not.toContain("allow-modals");
   });
 
+  it("saves no file by itself: the contact's app starts no download on this device, as on Desktop", async () => {
+    await open("one");
+    const sandbox = document.querySelector("[data-testid=service-view-frame]")!.getAttribute("sandbox")!.split(" ");
+    expect(sandbox.filter((flag) => flag.startsWith("allow-downloads"))).toEqual([]);
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     setServiceWindowsCloser(closeServiceView);
     await open("one");
