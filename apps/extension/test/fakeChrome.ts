@@ -109,6 +109,13 @@ export interface FakeWorld {
   ports: { caller: FakePort; receiver: FakePort }[];
   /** The offscreen document's window events. */
   page: EventTarget;
+  /** The system's list: the notifications shown and not taken back, by id. */
+  notices: Map<string, unknown>;
+  /**
+   * The person grants the optional "notifications" permission: `chrome.notifications` appears in every context, and
+   * `permissions.onAdded` fires. Until then it is undefined, as in Chrome.
+   */
+  grantNotifications(): void;
   /** The origin's localStorage, shared by every context. */
   storage: Map<string, string>;
   /** Web Locks held now, by name, with the context holding each. */
@@ -282,7 +289,12 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         return {};
       },
     },
+    notifications: undefined as unknown,
     permissions: {
+      onAdded: event<(permissions: chrome.permissions.Permissions) => void>(),
+      async contains({ permissions }: chrome.permissions.Permissions) {
+        return (permissions ?? []).every((p) => p === "notifications" && chromeApi.notifications !== undefined);
+      },
       async request(request: chrome.permissions.Permissions) {
         record("permissions.request", request);
         return world.permissionsGranted;
@@ -294,6 +306,27 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         return world.webAuthFlow(details.url);
       },
     },
+  };
+
+  world.notices = new Map();
+  const onClicked = event<(id: string) => void>();
+  world.grantNotifications = () => {
+    chromeApi.notifications = {
+      onClicked,
+      async create(id: string, options: unknown) {
+        record("notifications.create", id, options);
+        world.notices.set(id, options);
+        return id;
+      },
+      async clear(id: string) {
+        record("notifications.clear", id);
+        return world.notices.delete(id);
+      },
+      async getAll() {
+        return Object.fromEntries([...world.notices.keys()].map((id) => [id, true]));
+      },
+    };
+    chromeApi.permissions.onAdded.dispatch({ permissions: ["notifications"] } as never);
   };
 
   world.chrome = chromeApi as unknown as typeof chrome;
