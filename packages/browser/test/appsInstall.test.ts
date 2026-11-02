@@ -378,6 +378,36 @@ describe("updates", () => {
     expect(await bundleIds()).toEqual([`app-${v4.digest}`]);
   });
 
+  it("an update the person accepts while a check reads its publisher's revocation of it keeps its files", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const v2 = await bundle({ sequence: 2, permissions: ["chat", "name"], sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v2.bytes);
+    expect((await store.checkUpdates())[0]!.outcome).toBe("ask");
+    // Its publisher revokes 2; the person presses Update while a check reads that.
+    net.put(`${REPO}/ghostly-revoke.json`, canonicalJsonBytes([await revocation(v1.ref, [v2.digest], "Broken build")]));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reading!: () => void;
+    const started = new Promise<void>((resolve) => { reading = resolve; });
+    const answer = net.fetch.getMockImplementation()!;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/ghostly-revoke.json")) { reading(); await held; }
+      return answer(input, init);
+    });
+    const check = store.checkUpdates();
+    await started;
+    expect(await store.acceptUpdate({ ref: v1.ref })).toMatchObject({ sequence: 2, digest: v2.digest });
+    release();
+    await check;
+    net.fetch.mockImplementation(answer);
+    expect((await store.list())[0], "the version accepted is the one installed").toMatchObject({ sequence: 2, digest: v2.digest });
+    expect(await bundleIds(), "it keeps the files it runs from").toEqual([`app-${v2.digest}`]);
+  });
+
   it("a lower sequence is never installed over a higher one", async () => {
     const { store } = await installed({ sequence: 3 });
     const old = await bundle({ sequence: 2 });
