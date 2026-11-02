@@ -7,19 +7,28 @@ import { useFittedNameField } from "../hooks/useGroupNameField";
 import { nameStepAllowed, nameStepDone, nameStepPending } from "../lib/nameStep";
 import { cleanOwnName, fitsOwnName } from "../lib/ownName";
 import { currentProfile } from "../lib/profiles";
+import { touchOnly } from "../lib/touchOnly";
 import { DeviceDialog, field, primaryButton } from "./devices/DeviceDialog";
 
 /**
  * Where the focus goes once the step closes. It opened as the app started, with nothing focused before it, so the
- * dialog gives the focus back to the page's body: New instead, the first thing a new person does, where the page has it
- * (the chat list); else the page's main area (a wide screen). Never away from something that took the focus in the meantime.
+ * dialog gives the focus back to the page's body. Over a chat (an invite link opens one) its message field, or on a
+ * touch screen, where that brings up the keyboard, its back button (a phone's header); else New, the first thing a new
+ * person does, where the page shows it; else the page's main area. Only what is on screen: a phone keeps the chat list,
+ * New in it, mounted but hidden under an open chat, where focus() does nothing. Never away from something that took
+ * the focus in the meantime.
  */
 function focusAfter() {
   const active = document.activeElement;
   if (active && active !== document.body) return;
-  const next = document.querySelector<HTMLElement>("[data-testid='sidebar-new-chat']");
-  if (next) next.focus();
-  else document.querySelector<HTMLElement>("main[tabindex]")?.focus();
+  const places = [...(touchOnly() ? [] : ["textarea.composer-textarea:not([disabled])"]), "[data-testid='chat-back']", "[data-testid='sidebar-new-chat']", "main[tabindex]"];
+  for (const place of places) {
+    for (const next of document.querySelectorAll<HTMLElement>(place)) {
+      if (next.closest("[hidden], [inert]") || !(next.checkVisibility?.() ?? true)) continue;
+      next.focus();
+      if (document.activeElement === next) return;
+    }
+  }
 }
 
 /**
