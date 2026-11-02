@@ -33,7 +33,7 @@ function mintsAnswering() {
     if (url.pathname === "/v1/info") return answer({ name: "Test", version: "cdk-mintd/0.17.7", nuts: { 4: { methods: [method], disabled: false }, 5: { methods: [method], disabled: false } } });
     if (url.pathname === "/v1/keysets") return answer({ keysets: [{ id, unit: "sat", active: true, input_fee_ppk: mint.fee }] });
     if (url.pathname === "/v1/keys" || url.pathname === `/v1/keys/${id}`) return answer({ keysets: [{ id, unit: "sat", active: true, input_fee_ppk: mint.fee, keys: mint.pubKeys }] });
-    if (url.pathname === "/v1/melt/quote/bolt11") return answer({ quote: "m1", amount: 30, unit: "sat", request: INVOICE, fee_reserve: 2, state: "UNPAID", expiry: 4_000_000_000 });
+    if (url.pathname === "/v1/melt/quote/bolt11" || url.pathname === "/v1/melt/quote/bolt11/m1") return answer({ quote: "m1", amount: 30, unit: "sat", request: INVOICE, fee_reserve: 2, state: "UNPAID", expiry: 4_000_000_000 });
     return new Response("not found", { status: 404 });
   }));
 }
@@ -74,8 +74,28 @@ describe("a Lightning quote at a mint that charges for each coin it takes in", (
     await expect(wallet([FEE_MINT]).quoteInvoice(INVOICE)).rejects.toThrow("Not enough sats in your wallet: 29 sats leave room for the fee");
   });
 
-  it("still quotes when the coins cover the payment, its reserve and their own fee", async () => {
+  it("still quotes when the coins cover the payment, its reserve and their own fee, and says that fee", async () => {
     seed("proofs", coins(FEE_MINT, [32, 4]));
-    await expect(wallet([FEE_MINT]).quoteInvoice(INVOICE)).resolves.toMatchObject({ quote: "m1", mint: FEE_MINT, amount: 30, feeReserve: 2 });
+    // A swap of both coins (2 sats) makes 32 and 2 for the melt, which takes those two in for 2 more: 36 out, 6 in fees.
+    await expect(wallet([FEE_MINT]).quoteInvoice(INVOICE)).resolves.toMatchObject({ quote: "m1", mint: FEE_MINT, amount: 30, feeReserve: 6 });
+  });
+
+  it("says the reserve alone at a mint that charges nothing for coins", async () => {
+    seed("proofs", coins(FREE_MINT, [32, 4]));
+    await expect(wallet([FREE_MINT]).quoteInvoice(INVOICE)).resolves.toMatchObject({ mint: FREE_MINT, amount: 30, feeReserve: 2 });
+  });
+
+  it("pays for no more than it said: coins that now cost more to spend stop it before the mint sees them", async () => {
+    seed("proofs", coins(FEE_MINT, [32, 4]));
+    const cashu = wallet([FEE_MINT]);
+    await expect(cashu.quoteInvoice(INVOICE)).resolves.toMatchObject({ feeReserve: 6 });
+    // Other coins by the time it is paid: it takes all four, 8 sats in fees, more than the 6 said.
+    resetDb();
+    seed("proofs", coins(FEE_MINT, [16, 16, 4, 4]));
+    await expect(cashu.payQuote("m1", FEE_MINT)).rejects.toThrow("The mint quoted another amount");
+    const asked = vi.mocked(fetch).mock.calls.map(([input]) => new URL(String(input)).pathname);
+    expect(asked).not.toContain("/v1/swap");
+    expect(asked).not.toContain("/v1/melt/bolt11");
+    expect(await cashu.balanceAt(FEE_MINT)).toBe(40);
   });
 });
