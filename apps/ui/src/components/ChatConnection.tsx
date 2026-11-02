@@ -35,7 +35,8 @@ const name = transportName;
 /** What the connection's label says, before it is put in words: the icon's kind is read from it, not from the words. */
 type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" | "dhtByYou" | "dhtByContact" | "switching" | "dhtWaiting"
   | "waiting" | "onDht" | "connected" | "confirm" | "pairing" | "noContact" | "waitingContact" | "connecting";
-
+/** Labels said aloud even while the pairing scene speaks for the connection: troubles of its own the scene does not tell. */
+const SAID_BESIDE_SCENE = new Set<LabelState>(["offline", "issue", "publication", "discovery"]);
 
 /**
  * The chat's one connection control, beside the call buttons: an icon, by shape before colour (the transport's own
@@ -56,7 +57,7 @@ type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" |
  * While a call is on in the chat (`callOn`), DHT only is off, with why: it closes the live link the call's hang-up
  * crosses, and the call would talk on with no way to end it from either side.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "", phone, callOn = false }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, scene = false, testIdPrefix = "", phone, callOn = false }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
@@ -65,6 +66,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   status?: string;
   /** A first pairing not live yet (`usePairingProgress`), and how to bring its scene into view, while there is one. */
   pairing?: { progress: PairingProgressState; onShow?(): void };
+  /** The pairing scene is in the chat, its "connected" moment included: it says each step aloud, so the label does not. */
+  scene?: boolean;
   /** Before its control's test ids, where a second copy is on screen (a mini-app's header: `app-`), so the chat's stay unique. */
   testIdPrefix?: string;
   /** A phone's header: as large as the call and ⋮ beside it. */
@@ -336,7 +339,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     {problem && problem.title !== label && <span className={`mt-0.5 block break-words ${failing ? "text-danger" : "text-text-secondary"}`}>{problem.title}</span>}
     {pairingReason && !failure && <span className="mt-0.5 block break-words text-danger">{pairingReason}</span>}
   </span>
-  <span className="sr-only" aria-live="polite">{label}</span>
+  {/* Off, not emptied, while the scene speaks: the scene going away then says nothing new. A failure the scene does not
+      tell (the relays, the connection, offline) is still said here. */}
+  <span className="sr-only" aria-live={scene && !SAID_BESIDE_SCENE.has(labelState) ? "off" : "polite"}>{label}</span>
   </div>;
 }
 
