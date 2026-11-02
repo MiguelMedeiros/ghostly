@@ -165,6 +165,49 @@ test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@
   expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
 });
 
+test("on a phone the browser's Back with the app over the chat goes back to the chat, as the app's own Back does", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  // A phone (touch, 375 × 667 once Chess is installed and Bob paired): the browser's Back, Android's back gesture,
+  // went to the chat list, and the app was still over the chat when it was opened again (agents#2449).
+  const [ana] = await setUp((name) => peer(name, name === "ana" ? { mobile: true, viewport: { width: 1280, height: 800 } } : undefined));
+  await ana.page.setViewportSize({ width: 375, height: 667 });
+  await ana.page.goto("/#/");
+  const chatList = ana.page.getByPlaceholder("Search chats...");
+  await ana.page.getByTestId("chat-row").first().click();
+  await expect(ana.page.getByPlaceholder("Message…")).toBeVisible();
+  const inChat = ana.page.url();
+  expect(inChat).toMatch(/#\/chat\//);
+  await openChess(ana);
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toBeVisible();
+  await expect(app).toHaveAttribute("data-place", "phone");
+  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Chess");
+  const frame = chessFrame(ana);
+  await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
+
+  // The browser's Back: still the chat, the app hidden and one tap away, still running.
+  await ana.page.goBack();
+  await expect(ana.page).toHaveURL(inChat);
+  await expect(app).toBeHidden();
+  await expect(ana.page.getByPlaceholder("Message…")).toBeVisible();
+  const resume = ana.page.getByTestId("mini-app-resume");
+  await expect(resume).toHaveText("Back to Chess");
+  expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
+
+  // "Back to Chess": the same game. The app's own Back still goes back to the chat, and takes its history entry with
+  // it (lib/layerHistory.ts marks it), so the browser's Back from the chat is the chat list.
+  await resume.click();
+  await expect(app).toBeVisible();
+  expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
+  await app.getByTestId("mini-app-back").click();
+  await expect(app).toBeHidden();
+  await expect(resume).toBeVisible();
+  await expect(ana.page).toHaveURL(inChat);
+  await expect.poll(() => ana.page.evaluate(() => (history.state as { ghostlyLayer?: number } | null)?.ghostlyLayer ?? 0)).toBe(0);
+  await ana.page.goBack();
+  await expect(chatList).toBeVisible();
+  await expect(ana.page).not.toHaveURL(/#\/chat\//);
+});
+
 test("a chat app's Open on the Apps page asks which chat, and opens it there, never alone", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const [ana, bob] = await setUp(peer);
   await ana.page.setViewportSize({ width: 1280, height: 800 });

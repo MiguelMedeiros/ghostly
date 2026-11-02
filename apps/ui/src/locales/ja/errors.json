@@ -315,6 +315,8 @@
     "requestGone": "支払い依頼はもうありません",
     "retryNext": "再試行すると、もう一度保留します。",
     "retryingNext": "Ghostly が自動で再試行します。",
+    "sealedBefore": "相手は以前使っていたデバイス宛てにアイテムを残しました",
+    "sealedBeforeNext": "相手のアプリがこのデバイス宛てに封をし直すと届きます。",
     "storeFailed": "アイテムをストレージに保存できませんでした",
     "storeFailedNext": "プロフィール → バックアップで S3 を確認してから、再試行してください。",
     "tooLarge": "不在の相手に保留できるアイテムは最大 {{mb}} MB です"

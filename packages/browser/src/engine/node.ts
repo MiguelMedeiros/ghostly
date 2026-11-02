@@ -330,6 +330,11 @@ const RTT_SAVE_MS = 5 * 60_000;
 const REACTION_RESEND_MS = 30_000;
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
 const REACTION_NOTES_KEPT = 8;
+/**
+ * The newest facts the pages heard of (`feedback`), kept so the same one is not heard twice: past this many the oldest
+ * goes, or a contact's reactions (each one a new fact) would grow it for as long as the engine runs.
+ */
+export const FEEDBACK_KEPT = 4096;
 /** A second press of one message's buttons waits this long (WISP 406 · Message Buttons). */
 export const BUTTON_PRESS_MS = 1_000;
 
@@ -400,6 +405,11 @@ interface LiveLink {
    */
   waitingSends?: Promise<Set<string>>;
   /**
+   * The messages of mine whose card is due to go again live (`cardDue`, `restoreCards`), by their id. Read from the
+   * chat's history once in a run (with the chat, at the start), then kept as rows come due and go.
+   */
+  cardsDue?: Promise<Set<string>>;
+  /**
    * When the contact's newest message over the DHT was sent (`GhostLinkOptions.lastSeenTimestamp`): from the chat's
    * history read at the start, then kept as they are stored (`storeNewMessage`). A link started again needs no history.
    */
@@ -412,6 +422,9 @@ const pkarrSeenAt = (messages: readonly StoredMessage[]): number =>
 
 /** A file or a payment request of mine that waits for the chat to be live (a text that waits is its outbox's). */
 const waitsForLive = (m: StoredMessage) => m.sender === "me" && m.delivery === "waiting" && (!!m.file || !!m.paymentId);
+
+/** A message of mine whose card went as its text alone and is due to go again live (`restoreCards`). */
+const cardDue = (m: StoredMessage) => m.sender === "me" && (m.cardRestore ?? m.buttonsRestore) === "due";
 
 /** This side's participation key in a chat: derived from its seed once, not at every state built. */
 /** A read of the contact's packet that found it as the last one did: online the same, the same packet, name and services. */
@@ -850,6 +863,7 @@ export class GhostlyNode implements EngineImplementation {
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;
     this.feedbackIds.add(key);
+    if (this.feedbackIds.size > FEEDBACK_KEPT) this.feedbackIds.delete(this.feedbackIds.values().next().value!);
     this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {}), ...(mention ? {mention:true} : {}), ...(cue ? {cue} : {})});
   }
   /** A fact that had no sound before the sound categories: its cue is its only sound (engine/cues.ts). */
@@ -1085,7 +1099,13 @@ export class GhostlyNode implements EngineImplementation {
     // A redeem finished after its call was over: the chat it belongs to learns of it, and ecash of ours that came
     // back this way ends its review as any ecash taken back does. The wallet waits for this before it lets the swap go.
     onSwapSettled: (swap, done) => this.desk.onSwapSettled(swap, done).then(() => (swap.payment?.direction === "out" ? this.reviewTakenBack(swap.payment.id) : undefined)),
+    requestClosed: (paymentId) => this.requestClosed(paymentId),
   }, () => this.settings.mints);
+  /** A chat request of ours that nobody is meant to pay any more: its invoice is asked about only once it expired. */
+  private requestClosed(paymentId: string): boolean {
+    const request = this.desk.payment(paymentId);
+    return request?.kind === "request" && request.direction === "out" && request.state !== "pending";
+  }
   private registry?: ProviderRegistry;
   private providers() { return this.registry ??= this.options.providers ?? defaultRegistry(); }
   /** A plugin registered or left after start: the pickers show the new list. */
@@ -1105,6 +1125,7 @@ export class GhostlyNode implements EngineImplementation {
       changed: () => this.walletChanged(),
       received: (op) => void this.desk.onLightningPaid(op),
       resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
+      requestClosed: (paymentId) => this.requestClosed(paymentId),
     },
   }));
   /** On-chain Bitcoin of each network, through its active source: none until the person sets one up. */
@@ -2053,6 +2074,8 @@ export class GhostlyNode implements EngineImplementation {
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
       this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
+      // So are the cards due to go again: a session that opens reads no history for them when there are none.
+      this.links.get(stored.id)!.cardsDue = Promise.resolve(new Set(messages.filter(cardDue).map(m => m.id)));
       this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
       // What the contact's clock was when the chat was last live: its first message of this run is read by it.
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
@@ -3808,10 +3831,13 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
+    // A removal names the contact's message by its wire id, which a message of mine goes by too: one naming mine takes
+    // no reference, or the replies quoting mine would lose its line and its pin would go.
+    const ref = edit.rm && !await this.namesMine(linkId, edit.id);
     if (live.stored.deletedIds?.includes(id)) {
       // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line, and
       // a pin of it goes.
-      if (edit.rm) {
+      if (ref) {
         this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
         if (!live.stored.removedRefs?.includes(edit.id)) {
           live.stored = { ...live.stored, removedRefs: withRemovedRef(live.stored.removedRefs, edit.id) };
@@ -3825,11 +3851,12 @@ export class GhostlyNode implements EngineImplementation {
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
       const message = await db.getMessage(linkId, id);
-      // Not here yet, under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused`
-      // after it, `spent_` and a token's digest): never forgotten ahead, or a contact could hide the line of a payment
-      // or request it sends next, which a removal never takes (`canRemove`; agents#1587). No text or file has such an id.
-      if (!message && PAYMENT_LINE_ID.test(edit.id)) return true;
-      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, message ?? true);
+      // Under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused` after it,
+      // `spent_` and a token's digest): never forgotten, here or not yet, or a contact could hide the line of a payment
+      // or request it sends next, or the line that says I refused one, which carries no `paymentId` for `canRemove` to
+      // read. A removal never takes those (agents#1587). No text or file has such an id.
+      if (PAYMENT_LINE_ID.test(edit.id)) return true;
+      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, ref && (message ?? true));
       return true;
     }
     const message = await db.getMessage(linkId, id);
@@ -3868,7 +3895,14 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async cardWentBare(linkId: string, message: Pick<StoredMessage, "id" | "card" | "cardRestore" | "buttonsRestore">): Promise<void> {
     if (!message.card || message.cardRestore || message.buttonsRestore) return;
-    await db.patchMessage(linkId, message.id, current => current.sender === "me" && current.card && !current.cardRestore && !current.buttonsRestore ? { cardRestore: "due" } : null);
+    const due = await db.patchMessage(linkId, message.id, current => current.sender === "me" && current.card && !current.cardRestore && !current.buttonsRestore ? { cardRestore: "due" } : null);
+    if (due) void this.links.get(linkId)?.cardsDue?.then(known => known.add(message.id), () => {});
+  }
+
+  /** `cardsDue`: a chat loaded at the start has them from that read; any other reads its history once in a run. */
+  private cardsDueOf(live: LiveLink): Promise<Set<string>> {
+    return live.cardsDue ??= db.getMessages(live.stored.id).then(history => new Set(history.filter(cardDue).map(m => m.id)),
+      error => { live.cardsDue = undefined; throw error; });
   }
 
   /** The session capability a contact's app lists when it shows a card of this kind, so a restore edit reads as a card there. */
@@ -3894,7 +3928,15 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId), link = live?.link;
     const offers = link?.sessionOffers.peer;
     if (!live?.stored.profile || live.stored.group || !link?.supportsEdits || !offers) return;
+    // None due (nearly every chat): the history is not read. Each session that opened read it, 220 ms at 10,000
+    // messages on the CLI's store.
+    const due = await this.cardsDueOf(live);
+    if (!due.size) return;
+    const asked = new Set(due);
     const mine = (await db.getMessages(linkId)).filter(m => m.sender === "me").sort((a, b) => b.timestamp - a.timestamp);
+    // What the read found due stays known; an id it did not (deleted, or restored meanwhile) is let go. One due since stays.
+    for (const id of asked) due.delete(id);
+    for (const message of mine) if (cardDue(message)) due.add(message.id);
     const since = Date.now() - CARD_RESTORE_MS;
     const changed: string[] = [];
     // Only the newest message of each card goes again: an older one of the same card is an older version, given up.
@@ -3919,6 +3961,8 @@ export class GhostlyNode implements EngineImplementation {
         const next = withEdit(current, { seq, at, text: current.text, preview: current.preview, card: current.card, pending: true });
         return { edit: { ...next.edit!, restore: true }, ...done };
       });
+      // Restored, given up, or not due any more: none of them is due again.
+      due.delete(message.id);
       if (patched?.edit?.pending) { changed.push(message.id); this.editsFor(linkId).edited(message.id); }
     }
     if (changed.length) await this.messagesChanged(linkId, changed);
@@ -3927,7 +3971,7 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * `restoreCards`, then what waits goes. One look at a time per chat, at most once per `CARD_RESTORE_EVERY_MS`: asked
    * again while one runs or within the gap, one more look goes once it is over, and what waits still goes at once (the
-   * edit queue reads the history once a session).
+   * edit queue reads the history once a run).
    */
   private restoreCardsSoon(linkId: string): void {
     const flush = () => this.editsFor(linkId).flush().catch(() => {});
@@ -4298,6 +4342,14 @@ export class GhostlyNode implements EngineImplementation {
     return entry.done;
   }
 
+  /** Whether a 1:1 chat's wire id names a message of mine: here, deleted here, removed, or a file or payment of mine. */
+  private async namesMine(linkId: string, wireId: string): Promise<boolean> {
+    const stored = this.links.get(linkId)?.stored, row = `me_${wireId}`;
+    if (stored?.deletedIds?.includes(row) || stored?.removals?.some(r => r.id === row || r.wireId === wireId)) return true;
+    for (const id of [row, ...await this.rowsNamed(linkId, wireId)]) if ((await db.getMessage(linkId, id))?.sender === "me") return true;
+    return false;
+  }
+
   /**
    * Forgets one message of a chat on this device, the bytes of its file and any transfer of it, and keeps its id so a
    * copy that comes again is not stored: a delete here, or the contact's own removal (WISP 400 § Delete for everyone),
@@ -4356,8 +4408,11 @@ export class GhostlyNode implements EngineImplementation {
   private async forgetQuotes(linkId: string, removed: RemovedQuotes): Promise<string[]> {
     const byRef = new Map<string, string>();
     for (const [id, ref] of removed) if (ref !== undefined) byRef.set(ref, id);
-    // The removed message a reply quotes: by its id here, or by the reference both sides know it by.
-    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byRef.get(reply.id);
+    // The removed message a reply quotes: by its id here, or by the reference both sides know it by, which a 1:1 chat's
+    // message of mine and one of the contact's may share: a quote that says who wrote it takes only that side's.
+    const side = (id: string) => id.startsWith("peer_") ? "peer" : id.startsWith("me_") ? "me" : undefined;
+    const byReference = (reply: MessageReply) => { const id = byRef.get(reply.id); return id === undefined || !reply.from || !side(id) || side(id) === reply.from ? id : undefined; };
+    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byReference(reply);
     const ids = (await db.getMessages(linkId)).filter(m => { const id = quoted(m.replyTo); return id !== undefined && (m.replyTo!.snippet || m.replyTo!.messageId !== id); }).map(m => m.id);
     if (!ids.length) return [];
     await db.patchMessages(linkId, ids, m => { const id = quoted(m.replyTo); return id === undefined ? null : { replyTo: { ...m.replyTo!, snippet: "", messageId: id } }; });
@@ -6014,6 +6069,16 @@ export class GhostlyNode implements EngineImplementation {
     const created = await (await this.lightningCard(n, card)).createInvoice(amount);
     this.awaitingSoon();
     return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
+  }
+
+  /**
+   * The screen shows this invoice of ours (Receive): its mint or its Lightning card asks about it at the fast pace for a
+   * while (`INVOICE_PACE.watchMs`), so a payment shows within seconds. The screen says it again while it shows it.
+   */
+  async walletWatchInvoice({ invoice, network }: { invoice: string; network?: WalletNetwork }) {
+    if (typeof invoice !== "string" || !invoice.trim()) throw new Error("invoice is required");
+    if (await this.wallet.watch(invoice)) return;
+    await this.lightnings[this.net(network)].watch(invoice);
   }
 
   /**
@@ -9062,6 +9127,8 @@ export class GhostlyNode implements EngineImplementation {
     if (!(await db.addMessage(message))) return false;
     // It waits for the live link: `sendWaiting` finds it by its id (a list not read yet reads it from the history).
     if (live && waitsForLive(message)) void live.waitingSends?.then(known => known.add(message.id), () => {});
+    // A card held as its text alone: `restoreCards` finds it by its id.
+    if (live && cardDue(message)) void live.cardsDue?.then(due => due.add(message.id), () => {});
     this.clockSample(message, straight);
     const newest = this.newestAt.get(message.linkId);
     if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, writtenAt(message, this.clockLeads.get(this.clockOf(message)))));

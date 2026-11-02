@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeed, publicKeyFromZ32, sign, verify } from "./identity";
 import { applyIdentityEvent, type IdentityTimelineEntry, type IdentityTimelineEvent } from "./identityTimeline";
+import { hasVisible, stripHidden } from "./text";
 
 /**
  * Identity proofs (WISP 300), provider-agnostic half.
@@ -169,9 +170,9 @@ export function verifyIdentityPresentation(key: string, sig: string, proofId: st
 
 const clean = (value: unknown, max: number): string | undefined => {
   if (typeof value !== "string") return undefined;
-  // eslint-disable-next-line no-control-regex -- Strip control and bidi-override characters from peer-supplied text.
-  const text = value.replace(/[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g, "").trim();
-  return text ? text.slice(0, max) : undefined;
+  // One line of plain text, as a nickname: no control, format, bidi or line-separator character from peer-supplied text.
+  const text = stripHidden(value).trim();
+  return text && hasVisible(text) ? text.slice(0, max) : undefined;
 };
 
 /**

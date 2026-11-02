@@ -463,7 +463,10 @@ describe("a profile made for a code", () => {
     // A headless test browser keeps its storage: nothing to warn about, so nothing to press.
     Object.defineProperty(navigator, "storage", { configurable: true, value: { persisted: async () => true, persist: async () => true } });
     try {
-      renderApp(<JoinHost />);
+      // The lock passed in the profile this one was made from, as the app opens under it.
+      handOverUnlock(activeProfileId(), hash);
+      renderApp(<LockScreenProvider><JoinHost /></LockScreenProvider>);
+      sessionStorage.removeItem(HANDOVER);
       expect(await screen.findByTestId("device-join-done", {}, { timeout: 3_000 })).toHaveAttribute("data-step", "done");
       expect(screen.queryByTestId("device-join-continue")).toBeNull();
       await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 4_000 });

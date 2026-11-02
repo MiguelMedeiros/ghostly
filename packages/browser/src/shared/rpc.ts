@@ -272,6 +272,8 @@ export interface EngineApi {
   walletRemoveMint(params: { url: string; acceptLoss?: boolean }): void;
   /** A Lightning invoice from the active source (`via: "cashu"`: from the mints, landing as ecash). */
   walletReceiveLightning(params: { amount: number; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; invoice: string; expiresAt: number | null; paymentHash?: string; source: string };
+  /** The screen shows this invoice of ours: it is asked about every few seconds for a while (agents#2447). Say it again while it shows. */
+  walletWatchInvoice(params: { invoice: string; network?: WalletNetwork }): void;
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string; amount?: number }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */

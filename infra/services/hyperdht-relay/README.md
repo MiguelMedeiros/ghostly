@@ -44,6 +44,7 @@ are in WISP 103, "Browser profile".
 | keys one client listens on | 16 | `GHOSTLY_RELAY_LISTENS` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
 | HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
+| bytes waiting for a client that it has not read yet | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |

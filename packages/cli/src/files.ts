@@ -330,6 +330,11 @@ export const FILE_METHODS: Record<string, Method> = {
       // One that ended (cancelled, declined, failed): the engine takes the action and does nothing, as for one all here.
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
       if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
+      // Sent whole (the engine's `sentWhole`): the engine takes no cancel and it ends done, so it is refused, not echoed.
+      if (outgoing && action === "cancel" && transfer?.state === "transferring" && (transfer.stage === "verifying"
+        || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"))) {
+        throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
+      }
     }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };

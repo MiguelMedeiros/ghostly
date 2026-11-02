@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -161,9 +161,10 @@ function Privacy({ from, internet, carried }: { from?: string; internet: boolean
   );
 }
 
-function Shell({ titleId, onClose, children, testId }: { titleId: string; onClose: () => void; children: ReactNode; testId: string }) {
+function Shell({ titleId, onClose, children, testId, box }: { titleId: string; onClose: () => void; children: ReactNode; testId: string; box?: RefObject<HTMLDivElement | null> }) {
   const backdrop = useBackdropDismiss(onClose);
-  const ref = useRef<HTMLDivElement>(null);
+  const own = useRef<HTMLDivElement>(null);
+  const ref = box ?? own;
   useDialogFocus(ref, onClose);
   // Over the whole window: opened from a card in the chat's timeline, whose scrolling box would hold a fixed layer.
   return createPortal(
@@ -304,11 +305,20 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     asked.current = true;
     (removing ? keep : uninstall).current?.focus({ preventScroll: true });
   }, [removing]);
+  // The waiting update's section goes once the update lands, and the focus its Update had with it: the screen takes it,
+  // so the next Tab starts in the screen, not on the page.
+  const box = useRef<HTMLDivElement>(null), waits = !!app.pending, waited = useRef(waits);
+  useEffect(() => {
+    const was = waited.current;
+    waited.current = waits;
+    const active = document.activeElement;
+    if (was && !waits && (!active || active === document.body)) box.current?.focus({ preventScroll: true });
+  }, [waits]);
   const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); setPending(null); }
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
@@ -327,7 +337,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     );
   }
   return (
-    <Shell titleId={titleId} onClose={onClose} testId="app-details">
+    <Shell titleId={titleId} onClose={onClose} testId="app-details" box={box}>
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
       {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}

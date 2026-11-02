@@ -138,7 +138,7 @@ test("with reduced motion the scene is a still picture of the stage", { tag: ["@
   expect(new Set(motion)).toEqual(new Set(["none"]));
   // Words and steps say it all without motion.
   await expect(alice.page.getByTestId("pairing-stage-label")).toHaveText("Waiting for your contact to open the invite");
-  await expect(alice.page.getByTestId("pairing-announcement")).toHaveText("Waiting for your contact to open the invite");
+  await expect(alice.page.getByTestId("pairing-stage-label")).toHaveAttribute("aria-live", "polite");
 });
 
 /** Every sound the page starts (its length, and when), and when the scene first shows its live stage. */

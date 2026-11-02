@@ -26,8 +26,8 @@ export interface EditQueueDeps {
   read(): Promise<StoredMessage[]>;
   /**
    * Rows by their ids, in the order asked, in one read (`db.getMessagesById`). With it the queue reads the chat's whole
-   * history once (and once per new session) to learn which rows have an edit on its way, and from then on those rows
-   * alone: an edit costs what it does in a short chat, however long this one is.
+   * history once per run to learn which rows have an edit on its way, and from then on those rows alone: an edit costs
+   * what it does in a short chat, however long this one is.
    */
   rows?(ids: string[]): Promise<(StoredMessage | undefined)[]>;
   /** Says one edit of this message: an error when it could not go now (it is tried again later). */
@@ -57,7 +57,7 @@ export class EditQueue {
   private readonly wires = new Map<string, string>();
   private readonly dhtIds = new Map<string, string>();
   private tick = 0;
-  /** The chat's history was read for the rows with an edit on its way: `known` has them all, until the next session. */
+  /** The chat's history was read for the rows with an edit on its way: `known` has them all from then on (`edited`). */
   private learnt = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private flushing: Promise<void> | null = null;
@@ -89,10 +89,11 @@ export class EditQueue {
    * A new session: what the last one sent without a confirmation may go again at once, with a fresh count of attempts.
    * Said once, as the session opens and before anything goes on it: said again later, it would send a second time what
    * this session already sent (two flushes of one opening, each starting over, sent a restored question's edit twice).
+   * What it learnt stays: every edit of this run is told (`edited`), so the rows it knows are still all of them, and a
+   * session that opened read the chat's whole history to find none (agents#2468). A new run learns them once.
    */
   reopened(): void {
     this.sent.clear();
-    this.learnt = false;
   }
 
   /** This row has an edit to send (it was just written so): the next look reads it. */

@@ -5,7 +5,7 @@
  * to the app, with the request's own port, so the answer goes straight back to the worker. Built on its own into
  * `/_ghostly-svc/bridge.js` (apps/web/svcBuild.ts).
  */
-import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, BRIDGE_READY, WORKER_SCRIPT, isServiceHostname, parseServicesHost } from "./protocol";
+import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PORT, BRIDGE_READY, SERVICE_FRAME_ALLOW, WORKER_SCRIPT, isServiceHostname, parseServicesHost } from "./protocol";
 import { clearSite } from "./clearSite";
 
 declare const __SERVICES_HOST__: string;
@@ -50,7 +50,7 @@ function start(): void {
       .then(() => {
         const frame = document.createElement("iframe");
         frame.title = document.title;
-        frame.setAttribute("allow", "fullscreen; clipboard-write");
+        frame.setAttribute("allow", SERVICE_FRAME_ALLOW);
         // This page sends no referrer (its server says so); the worker forwards a navigation only with this origin's.
         frame.setAttribute("referrerpolicy", "same-origin");
         frame.src = "/";

@@ -1386,15 +1386,35 @@ async function callPipeCommand(argv: string[]): Promise<void> {
 
 /**
  * The command's words when the line asks for help (`help <words>`, or `--help`/`--help=true`/`-h` before any `--`), else
- * null. `--help=false` asks for none: the command runs.
+ * null. `--help=false` asks for none: the command runs. A `-h` or `--help` that is an option's value, as the parser
+ * reads it (`profile set --name --help`, `edit … --text "$NEW"`), asks for none either: it printed the help with exit 0
+ * and changed nothing.
  */
 function helpAsked(argv: readonly string[]): string[] | null {
   const end = argv.indexOf("--");
   const head = end === -1 ? argv : argv.slice(0, end);
   const words = (list: readonly string[]) => { const out: string[] = []; for (const word of list) { if (word.startsWith("-")) break; out.push(word); } return out; };
   if (head[0] === "help") return words(head.slice(1));
-  if (head.some((word) => word === "--help" || word === "--help=true" || word === "-h")) return words(head);
+  const options = optionsOf(words(head));
+  for (let i = 0; i < head.length; i++) {
+    const word = head[i];
+    if (word === "--help" || word === "--help=true" || word === "-h") return words(head);
+    const option = word.startsWith("--") ? (word.includes("=") ? undefined : options[word.slice(2)]) : word.length === 2 && word.startsWith("-") ? Object.values(options).find((o) => o.short === word.slice(1)) : undefined;
+    if (!option || option.type === "boolean") continue;
+    if (option.optionalValue && !(i + 1 < head.length && head[i + 1] !== "" && Number.isFinite(Number(head[i + 1])))) continue;
+    i++;
+  }
   return null;
+}
+
+/** The options of the command `words` name (its longest command), with the global ones: what takes a value on its line. */
+function optionsOf(words: readonly string[]): Record<string, OptionSpec> {
+  for (let n = words.length; n > 0; n--) {
+    const asked = words.slice(0, n).join(" ");
+    const row = helpRows().find((r) => commandWords(r.usage).join(" ") === asked);
+    if (row) return { ...GLOBAL_OPTIONS, ...row.options };
+  }
+  return GLOBAL_OPTIONS;
 }
 
 /** No profile yet in the Ghostly folder these global options name: `ghostly`'s first run there. */

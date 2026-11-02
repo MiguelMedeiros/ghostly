@@ -32,11 +32,15 @@ export function useAppOpener(): AppOpener | null {
   return useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => opener, () => opener);
 }
 
-/** Why the client stopped a running app (WISP 1200 § Takedowns): its publisher revoked the version, or a store removed it. */
-export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string };
+/**
+ * Why the client stopped a running app (WISP 1200 § Takedowns): its publisher revoked the version, or a store removed it.
+ * `failed`: the app stopped on its own (its frame navigated, broke the protocol, or never started; § the runner, step 7).
+ */
+export type AppTakedown = { why: "revoked" } | { why: "removed"; store: string } | { why: "failed" };
 
 /** "Chess was stopped: its maker revoked this version", where the app ran. */
 export function takedownText(title: string, takedown: AppTakedown, t: Translate): string {
+  if (takedown.why === "failed") return t("apps.view.stoppedFailed", { title });
   return takedown.why === "revoked" ? t("apps.view.stoppedRevoked", { title }) : t("apps.view.stoppedRemoved", { title, store: takedown.store });
 }
 

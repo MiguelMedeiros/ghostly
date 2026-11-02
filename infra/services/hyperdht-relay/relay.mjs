@@ -37,6 +37,8 @@ export const DEFAULT_LIMITS = Object.freeze({
   handshakeMs: 15_000,
   /** Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. */
   handshakes: 64,
+  /** Bytes the relay may hold for one client that the client has not read yet (a chat's files have at most 2 MiB out). */
+  queuedBytes: 8 * 1024 * 1024,
 })
 
 /**
@@ -323,10 +325,13 @@ export async function startRelay(options = {}) {
       else if (request.headers['x-forwarded-for'] !== undefined) hint('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
     }
     const origin = request.headers.origin
+    // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
+    // would make the write fail with an error nobody catches, and that ends the relay for every other client.
     const refuse = (status, why) => {
       stats.refused++
       // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
       if (why) log('refused', why)
+      socket.on('error', () => {})
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
     if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
@@ -384,6 +389,14 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
+    // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
+    // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
+    // relay hold everything its far peers send. Past `queuedBytes` waiting for it, it is dropped.
+    stream._write = (data, cb) => {
+      ws.send(data)
+      if (ws.bufferedAmount > limits.queuedBytes) drop('queue')
+      cb(null)
+    }
     void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => {
       guardProtocol(node._protocol, drop)
       bound(node, limits, gone)

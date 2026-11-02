@@ -48,6 +48,10 @@ worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
 /// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
 const MAX_REQUESTS_PER_SECOND: usize = 50;
+/// What a window keeps of what it was refused: the last few, each cut short, so an app that keeps asking to
+/// leave does not grow the Ghostly process.
+const MAX_REFUSED: usize = 64;
+const MAX_REFUSED_BYTES: usize = 256;
 /// The largest id a request may carry: a safe integer in JavaScript.
 const MAX_ID: u64 = (1 << 53) - 1;
 /// How long a request waits for the Ghostly window's broker (a file read included), a file pick excepted
@@ -342,8 +346,9 @@ struct AppWindow {
     recent: VecDeque<Instant>,
     /// Requests the Ghostly window's broker has not answered yet, by the app's id.
     pending: HashMap<u64, oneshot::Sender<Value>>,
-    /// What the window was refused (navigations and new windows), for the spike's measurements.
-    refused: Vec<String>,
+    /// What the window was refused (navigations and new windows), for the spike's measurements: the last
+    /// `MAX_REFUSED`, each at most `MAX_REFUSED_BYTES` of its URL.
+    refused: VecDeque<String>,
     /// Its first size.
     view: AppView,
 }
@@ -360,9 +365,22 @@ impl AppWindow {
             brokered,
             recent: VecDeque::new(),
             pending: HashMap::new(),
-            refused: Vec::new(),
+            refused: VecDeque::new(),
             view: AppView::Chat,
         }
+    }
+
+    /// Notes a refusal: the oldest goes past `MAX_REFUSED`, and the URL is cut to `MAX_REFUSED_BYTES`.
+    fn refuse(&mut self, what: &str, to: &url::Url) {
+        let to = to.as_str();
+        let mut end = to.len().min(MAX_REFUSED_BYTES);
+        while !to.is_char_boundary(end) {
+            end -= 1;
+        }
+        if self.refused.len() == MAX_REFUSED {
+            self.refused.pop_front();
+        }
+        self.refused.push_back(format!("{what} {}", &to[..end]));
     }
 }
 
@@ -531,7 +549,7 @@ fn window_builder<'a, R: Runtime>(
                 .with(&nav_label, |window| {
                     let allowed = !window.guard.lock || may_navigate(to, window.started);
                     if !allowed {
-                        window.refused.push(format!("navigation {to}"));
+                        window.refuse("navigation", to);
                     }
                     allowed
                 })
@@ -541,9 +559,7 @@ fn window_builder<'a, R: Runtime>(
         .on_new_window(move |to, _| {
             new_app
                 .state::<AppSandboxState>()
-                .with(&new_label, |window| {
-                    window.refused.push(format!("new window {to}"))
-                });
+                .with(&new_label, |window| window.refuse("new window", &to));
             tauri::webview::NewWindowResponse::Deny
         })
         // Never a file saved by the window itself.
@@ -660,7 +676,7 @@ fn build_window<R: Runtime>(
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
 pub fn refused<R: Runtime>(app: &AppHandle<R>, label: &str) -> Option<Vec<String>> {
     app.state::<AppSandboxState>()
-        .with(label, |window| window.refused.clone())
+        .with(label, |window| window.refused.iter().cloned().collect())
 }
 
 /// Drops a window's state, and with it every request still waiting (each gets "No answer"). True when it had
@@ -2248,6 +2264,45 @@ mod tests {
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
         assert_eq!(refused(app.handle(), &label), None);
+    }
+
+    /// An app that keeps asking to leave, with long URLs, while its window stays open: the window keeps only
+    /// the last `MAX_REFUSED` refusals, each cut to `MAX_REFUSED_BYTES` of its URL.
+    #[test]
+    fn what_a_window_was_refused_stays_bounded() {
+        let mut window = window("ana/chess", true, true);
+        window.started = true;
+        let long = format!("https://x.example/{}", "a".repeat(2 << 20));
+        let long: url::Url = long.parse().unwrap();
+        for i in 0..10_000 {
+            let what = if i % 2 == 0 {
+                "navigation"
+            } else {
+                "new window"
+            };
+            window.refuse(what, &long);
+        }
+        assert_eq!(window.refused.len(), MAX_REFUSED);
+        for entry in &window.refused {
+            assert!(
+                entry.len() <= "new window ".len() + MAX_REFUSED_BYTES,
+                "{}",
+                entry.len()
+            );
+            assert!(
+                entry.starts_with("navigation https://x.example/")
+                    || entry.starts_with("new window https://x.example/")
+            );
+        }
+        assert!(window.refused.back().unwrap().starts_with("new window "));
+        // A short one is kept whole.
+        let short: url::Url = "https://x.example/a".parse().unwrap();
+        window.refuse("navigation", &short);
+        assert_eq!(
+            window.refused.back().unwrap(),
+            "navigation https://x.example/a"
+        );
+        assert_eq!(window.refused.len(), MAX_REFUSED);
     }
 
     /// Opened again in a chat where it runs: its window comes to the front. Only an app window, and one gone is
