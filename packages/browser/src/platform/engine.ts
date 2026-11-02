@@ -62,6 +62,7 @@ class EngineClient {
   private readonly messageListeners = new Set<MessagesListener>();
   private readonly attentionListeners = new Set<(event: AttentionEvent) => void>();
   private readonly callListeners = new Set<(linkId: string, signal: string) => void>();
+  private readonly callHandledListeners = new Set<(linkId: string) => void>();
   private readonly appListeners = new Set<(linkId: string, event: AppFrameEvent) => void>();
   private readonly appRangeListeners = new Set<(linkId: string, range: AppRangeAsk) => void>();
   private readonly appsCheckedListeners = new Set<() => void>();
@@ -192,6 +193,12 @@ class EngineClient {
     return () => this.callListeners.delete(listener);
   }
 
+  /** Another page on this engine (an extension tab) answered or declined the call ringing in a chat. */
+  onCallHandled(listener: (linkId: string) => void): () => void {
+    this.callHandledListeners.add(listener);
+    return () => this.callHandledListeners.delete(listener);
+  }
+
   /** A chat by its peer's key, or the edge of a group toward a member (payments with that member use it). */
   linkByPeer(peerPubKeyZ32: string): LinkView | undefined {
     return this.state?.links.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32) ?? this.state?.edges?.find((l) => l.peerPubKeyZ32 === peerPubKeyZ32);
@@ -295,6 +302,11 @@ class EngineClient {
         for (const listener of this.callListeners) listener(message.linkId, message.signal);
         break;
       }
+      case "call-handled":
+        // A chat opened later must not ring with it either.
+        this.offers.delete(message.linkId);
+        for (const listener of this.callHandledListeners) listener(message.linkId);
+        break;
       case "app-frame":
         for (const listener of this.appListeners) listener(message.linkId, message.event);
         break;

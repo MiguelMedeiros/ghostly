@@ -52,3 +52,34 @@ test("Clear all data in one tab starts the other tab again, without the cleared 
   await expect(second.page.getByText("It's quiet here...")).toBeVisible();
   await expect(second.page.getByPlaceholder("Message…")).toHaveCount(0);
 });
+
+/**
+ * A call rings in every tab of the extension, which share one peer. One tab answered it, and the other rang on: a minute
+ * later it wrote "Missed audio call" into the history of the call that was on, and its Decline ended that call. The
+ * others stop ringing now once one tab answers or declines.
+ */
+test("a call answered or declined in one tab stops ringing in the other", { tag: ["@client:extension", "@client:web", "@feature:extension.engine", "@feature:calls.paired", "@feature:calls.decline"] }, async ({ extensionPeer, webPeer }) => {
+  const [ext, web] = await Promise.all([extensionPeer("two-tabs-call"), webPeer("two-tabs-call-contact")]);
+  await pair(web, ext);
+  const second = { ...ext, page: await ext.context.newPage() };
+  await second.page.goto(ext.page.url());
+  await expect(chat(second)).toBeVisible({ timeout: 30_000 });
+  const ringing = (tab: typeof ext) => tab.page.getByText("Incoming audio call...");
+
+  await web.page.getByTestId("call-audio").click();
+  for (const tab of [ext, second]) await expect(ringing(tab)).toBeVisible({ timeout: 30_000 });
+  await ext.page.getByTitle("Accept audio call").click();
+  for (const p of [ext, web]) await expect(p.page.getByText(/^\d{1,2}:\d{2}$/).first()).toBeVisible({ timeout: 30_000 });
+  await expect(ringing(second)).toHaveCount(0, { timeout: 15_000 });
+  await ext.page.getByTitle("End call").click();
+  await expect(web.page.getByTitle("End call")).toHaveCount(0);
+  for (const tab of [ext, second]) await expect(chat(tab).getByText("Audio call ended")).toBeVisible();
+
+  // The other way: the second tab declines, and the first stops ringing.
+  await web.page.getByTestId("call-audio").click();
+  for (const tab of [ext, second]) await expect(ringing(tab)).toBeVisible({ timeout: 30_000 });
+  await second.page.getByTitle("Decline").click();
+  await expect(chat(web).getByText("Audio call declined")).toBeVisible({ timeout: 30_000 });
+  await expect(ringing(ext)).toHaveCount(0, { timeout: 15_000 });
+  for (const tab of [ext, second]) await expect(chat(tab).getByText(/Missed audio call/)).toHaveCount(0);
+});
