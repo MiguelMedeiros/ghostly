@@ -734,8 +734,9 @@ export class GroupSession {
     return this.hooks.save(structuredClone(this.state));
   }
   /**
-   * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message changes (what was seen, what is kept to hand
-   * on): the state holds the whole hand-on log, and a member back in a busy group wrote all of it once per message.
+   * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message, commit or secret changes (what was seen,
+   * what is kept to hand on, the chain): the state holds the whole hand-on log and chain, and a member back in a busy
+   * group wrote all of it once per message, and once per commit.
    * The message itself is stored before (`hooks.message`). An app killed before the save takes those frames again when
    * it syncs: its store has the messages already, and the state then catches up.
    */
@@ -1658,7 +1659,10 @@ export class GroupSession {
     if (sealed) this.takeSecret(commit.e, sealed);
     this.pruneSecrets();
     this.pruneRelay();
-    await this.persist();
+    // Saved like the messages that come with it: a member back after many joins and leaves wrote its whole state, the
+    // chain growing each time, once per commit it caught up (39.5 MB for 200). A save lost only means the commits are
+    // asked for again at the next sync; my own commits, sends and status changes are still saved at once.
+    this.persistSoon();
     this.hooks.changed();
     await this.replayWaiting();
   }
@@ -1682,7 +1686,7 @@ export class GroupSession {
       taken = this.takeSecret(entry.e, entry.s) || taken;
     }
     if (!taken) return;
-    await this.persist();
+    this.persistSoon();
     this.hooks.changed();
     await this.replayWaiting();
   }
