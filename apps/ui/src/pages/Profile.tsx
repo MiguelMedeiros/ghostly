@@ -21,6 +21,7 @@ import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
+import { useOwnNameField } from "../hooks/useOwnNameField";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
 
@@ -42,7 +43,8 @@ function useProfiles() {
 export function Profile() {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
-  const { settings, updateColorScheme, updateDefaultNickname, randomizeNickname } = useSettings();
+  const { settings, updateColorScheme, randomizeNickname } = useSettings();
+  const nickname = useOwnNameField();
   const platform = useServicesPlatform();
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
@@ -116,7 +118,7 @@ export function Profile() {
         <Row label={t("profile.color")}><ColorSwatches label={t("profile.colorLabel")} testIdPrefix="profile-theme" /></Row>
         <Row label={t("profile.mode")}><Segmented label={t("profile.mode")} value={settings.colorScheme} options={schemes} onChange={updateColorScheme} /></Row>
         <Row label={t("profile.nameInChats")}>
-          <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} value={settings.defaultNickname} maxLength={20} placeholder={t("common.anonymous")} onChange={(e) => updateDefaultNickname(e.target.value)} />
+          <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} placeholder={t("common.anonymous")} {...nickname} />
           <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
         </Row>
         {/* Per profile: contacts are told at once, or told there is nothing to show (WISP 401 § name and picture). */}
