@@ -124,6 +124,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   const refusals = refusalLog(log)
   const pruning = setInterval(() => { prune(Date.now()); refusals.flush() }, 60_000)
   pruning.unref?.()
+  // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
+  let hinted = false
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const allowed = new Set(origins.map(origin => originOf(origin) ?? origin))
 
@@ -143,6 +145,10 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     if (refused) return refuse('origin', 403, { error: 'Origin not allowed' }, originShown(origin))
 
     const ip = rateKey(clientAddress(req, proxies))
+    if (!proxies && !hinted && req.headers['x-forwarded-for'] !== undefined) {
+      hinted = true
+      log('requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set: every client counts as the proxy')
+    }
     const now = Date.now()
     // A newcomer to a full table: the idle go (a scan at most once a second), else the oldest entry.
     if (recent.size >= tracked && !recent.has(ip) && now - pruned >= 1000) prune(now)
