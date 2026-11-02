@@ -142,7 +142,8 @@
   },
   "store": {
     "count": "{{count}} 個のアプリ",
-    "countOne": "1 個のアプリ",
+    "count_one": "{{count}} 個のアプリ",
+    "count_other": "{{count}} 個のアプリ",
     "curated": "厳選",
     "empty": "このストアにはアプリがありません。",
     "filter": "このストアを検索",

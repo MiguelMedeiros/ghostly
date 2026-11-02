@@ -142,7 +142,8 @@
   },
   "store": {
     "count": "{{count}} apps",
-    "countOne": "1 app",
+    "count_one": "{{count}} app",
+    "count_other": "{{count}} apps",
     "curated": "Choisie",
     "empty": "Cette boutique ne propose aucune app.",
     "filter": "Rechercher dans cette boutique",

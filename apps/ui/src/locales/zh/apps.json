@@ -142,7 +142,8 @@
   },
   "store": {
     "count": "{{count}} 个应用",
-    "countOne": "1 个应用",
+    "count_one": "{{count}} 个应用",
+    "count_other": "{{count}} 个应用",
     "curated": "精选",
     "empty": "这个商店没有列出应用。",
     "filter": "搜索此商店",

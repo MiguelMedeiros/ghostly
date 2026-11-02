@@ -142,7 +142,8 @@
   },
   "store": {
     "count": "{{count}} app",
-    "countOne": "1 app",
+    "count_one": "{{count}} app",
+    "count_other": "{{count}} app",
     "curated": "Curato",
     "empty": "Questo store non elenca app.",
     "filter": "Cerca in questo store",
