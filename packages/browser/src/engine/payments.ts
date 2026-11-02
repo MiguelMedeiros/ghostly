@@ -161,8 +161,20 @@ export interface DeskSpark {
   sync(): Promise<void>;
 }
 
-/** Paying in ecash failed before any token existed, so nothing reached the contact and Lightning is safe to try. */
-class NoEcashError extends Error {}
+/**
+ * Paying in ecash failed before any token existed, so nothing reached the contact and Lightning is safe to try. The
+ * wallet's `engineCode` and `values` stay on it: a host reads why by them (the CLI's `refused`, the app's words).
+ */
+class NoEcashError extends Error {
+  declare readonly engineCode?: unknown;
+  declare readonly values?: unknown;
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    const { engineCode, values } = (cause ?? {}) as { engineCode?: unknown; values?: unknown };
+    if (engineCode !== undefined) Object.assign(this, { engineCode });
+    if (values !== undefined) Object.assign(this, { values });
+  }
+}
 
 const arkSats=(network:string)=>network==="bitcoin"?"sats":"test sats";
 /** The English line kept with a payment message (the CLI and older apps show it): test sats say so. */
@@ -1738,7 +1750,7 @@ export class PaymentDesk {
       paidFrom = created.mint;
       this.payments.set(id, record(created.token, created.mint));
     } catch (error) {
-      throw new NoEcashError(error instanceof Error ? error.message : String(error));
+      throw new NoEcashError(error);
     }
     this.host.onChange();
     await this.host.storeMessage({
