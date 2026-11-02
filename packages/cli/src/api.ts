@@ -525,7 +525,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
     noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
@@ -712,7 +712,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
-    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
@@ -720,7 +720,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
     await node(ctx).forgetGroup({ groupId: group.id });
     return { forgotten: group.id };
   },
