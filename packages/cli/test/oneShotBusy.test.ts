@@ -69,4 +69,17 @@ describe("one-shot commands at once on one profile", { timeout: 120_000 }, () =>
       await daemon.stop();
     }
   });
+
+  it.skipIf(process.platform === "win32")("one left by a holder that died, whose pid another process has now, is taken over at once", async () => {
+    const left = home("one-shot-left");
+    ok(await ghostly(["--home", left, "settings", "get"], { env }));
+    // A one-shot stopped with Ctrl-C left its lock and its start; this test's own process has its pid now.
+    const paths = profilePaths(left, "default");
+    writeFileSync(paths.lock, String(process.pid));
+    writeFileSync(`${paths.lock}.${process.pid}.start`, "the dead holder's start");
+    const started = Date.now();
+    ok(await ghostly(["--home", left, "chat", "list"], { env }));
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(existsSync(paths.lock)).toBe(false);
+  });
 });
