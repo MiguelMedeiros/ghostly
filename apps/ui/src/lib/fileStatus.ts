@@ -39,6 +39,15 @@ export function canRetryFile(file: ChatFile, transfer: FileTransferState | null,
 }
 
 /**
+ * Whether a file sent from here arrived whole, its contact checking it or about to: too late to cancel (a cancel then
+ * left the contact with the file while this side said it was cancelled). Its Cancel goes; the engine refuses it too.
+ * Not while the contact decides again, its turn there (`queued`), or paused.
+ */
+export const sentWhole = (transfer: FileTransferState): boolean =>
+  transfer.direction === "out" && (transfer.stage === "verifying"
+    || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
+
+/**
  * Whether a file sent from here never left this device: its copy into the app failed (no room, the file changed), so
  * nothing was kept to send again (`retry: false`). A file the contact declined or the sender cancelled has no `retry`.
  */
@@ -120,7 +129,8 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
     case "asking": return incoming ? tr("chat.file.askingYou", { size }) : tr("chat.file.askingThem", { name: peerName, size });
     case "queued": return incoming ? tr("chat.file.queuedHere", { done }) : tr("chat.file.queuedThere", { name: peerName, done });
     case "paused": return `${transfer.pausedBy === "peer" ? tr("chat.file.pausedBy", { name: peerName }) : tr("chat.file.paused")} · ${of}`;
-    case "verifying": return tr("chat.file.verifying", { size });
+    // Sent from here, it arrived: what is left is the contact's check (and too late to cancel).
+    case "verifying": return transfer.direction === "out" ? tr("chat.file.verifyingThere", { name: peerName, size }) : tr("chat.file.verifying", { size });
   }
   // Nothing moved for a while (or since the app started): said, so the person knows why "Send again" is there.
   if (transfer.stalled) return tr("chat.file.stalled", { progress: of });

@@ -41,6 +41,7 @@ describe("what a file's status line says", () => {
     ["paused here", t({ stage: "paused", pausedBy: "me" }), "Paused · 62% of 4.2 GB"],
     ["paused by the contact", t({ stage: "paused", pausedBy: "peer" }), "Paused by Ana · 62% of 4.2 GB"],
     ["checking", t({ stage: "verifying" }), "Checking the file… 4.2 GB"],
+    ["sent, arrived, the contact checks it", t({ stage: "verifying", direction: "out", transferred: f.size }), "Arrived, Ana is checking it… 4.2 GB"],
     ["copying before the offer", t({ stage: "preparing" }), "Preparing… 62% of 4.2 GB"],
     ["declined", { state: "failed", transferred: 0, size: f.size, error: "Declined by your contact" } as FileTransferState, "Declined"],
     ["cancelled", { state: "failed", transferred: 0, size: f.size, error: "Cancelled by the sender" } as FileTransferState, "Cancelled"],
@@ -154,6 +155,24 @@ describe("FileBubble: files/3", () => {
     fireEvent.click(screen.getByTestId("file-cancel"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
     view.unmount();
+  });
+
+  it("a file sent from here that arrived whole has no Cancel: too late, the contact keeps it; one arriving here still has", () => {
+    const whole = { state: "transferring", direction: "out", transferred: 4.2 * GB, size: 4.2 * GB } as const;
+    const view = show({ ...whole, stage: "verifying" }, { id: "chat1-out-late" });
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived, Ana is checking it… 4.2 GB");
+    expect(screen.queryByTestId("file-cancel")).toBeNull();
+    // Offered again after a quiet spell, or waiting for a connection, every byte still there.
+    act(() => fakeEngine.update({ transfers: { "chat1-out-late": whole } }));
+    expect(screen.queryByTestId("file-cancel")).toBeNull();
+    act(() => fakeEngine.update({ transfers: { "chat1-out-late": { ...whole, stage: "waiting" } } }));
+    expect(screen.queryByTestId("file-cancel")).toBeNull();
+    // The contact asks about it again: it can be cancelled.
+    act(() => fakeEngine.update({ transfers: { "chat1-out-late": { ...whole, stage: "asking" } } }));
+    expect(screen.getByTestId("file-cancel")).toBeInTheDocument();
+    view.unmount();
+    show({ state: "transferring", stage: "verifying", direction: "in", transferred: 4.2 * GB, size: 4.2 * GB });
+    expect(screen.getByTestId("file-cancel")).toBeInTheDocument();
   });
 
   it("a stuck file sent from here offers Send again, a stuck one arriving here Ask again; a moving one neither", async () => {

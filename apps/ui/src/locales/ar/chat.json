@@ -171,6 +171,7 @@
     "roomDevice": "{{size}} متاحة على هذا الجهاز",
     "stalled": "متوقف · {{progress}}",
     "verifying": "جارٍ فحص الملف… {{size}}",
+    "verifyingThere": "وصل، جارٍ فحصه لدى {{name}}… {{size}}",
     "viewPicture": "عرض {{name}}",
     "waitingDone": "في انتظار الاتصال · اكتمل {{done}}",
     "waitingSize": "في انتظار الاتصال · {{size}}",
