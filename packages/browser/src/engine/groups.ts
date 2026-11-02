@@ -2129,8 +2129,7 @@ export class Groups {
     }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
-      const group = this.stored.get(groupId);
-      if (group && this.hubs.enabled && this.hubs.reached(groupId, session, group, peerKey, frame as Record<string, unknown>, this.now())) await this.store.putGroup(group);
+      if (this.hubs.enabled) this.hubs.reached(groupId, session, peerKey, frame as Record<string, unknown>, this.now());
       this.host.emit();
       return;
     }
