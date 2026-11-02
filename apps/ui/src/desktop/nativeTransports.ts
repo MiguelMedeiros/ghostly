@@ -12,7 +12,9 @@ type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boole
   /** The endpoint itself ended in Rust (HyperDHT: its runtime died or dropped it). */
   | { type: "stopped" }
   /** The endpoint's own address came to be another (Iroh: it homed on a relay, the network changed). */
-  | { type: "address"; descriptor: unknown };
+  | { type: "address"; descriptor: unknown }
+  /** Iroh: the endpoint is connected to its home relay again after it lost it (a phone back from Doze). */
+  | { type: "relayBack" };
 
 /**
  * Ordered IPC writes and bounded buffering before the session installs its reader. A frame counts against the send
@@ -146,6 +148,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
       if (!endpoint) { moved = event.descriptor; return; }
       endpoint.descriptor = event.descriptor; endpoint.onDescriptor?.();
     }
+    else if (event.type === "relayBack") { if (!stopped) lifecycle.endpoint?.onRelayBack?.(); }
     else { connections.get(event.id)?.channel.close(); connections.delete(event.id); }
   };
   // In the spelling native Iroh names relays with (the trailing dot), as a contact's record and the dial use.
@@ -173,7 +176,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
   };
   let handler: NativeEndpoint["onConnection"] = null;
   const endpoint: NativeEndpoint = {
-    transport: kind === "iroh" ? "iroh/1" : "hyperdht/1", descriptor: moved ?? result.descriptor, onDescriptor: null,
+    transport: kind === "iroh" ? "iroh/1" : "hyperdht/1", descriptor: moved ?? result.descriptor, onDescriptor: null, onRelayBack: null,
     get onConnection() { return handler; },
     set onConnection(value) { handler = value; if (value) for (const bound of early.splice(0)) value(bound); },
     get onUnavailable() { return unavailable; },
