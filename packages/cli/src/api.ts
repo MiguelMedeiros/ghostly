@@ -199,6 +199,8 @@ const METHODS: Record<string, Method> = {
       chats: s.links.length, live: s.links.filter(isLive).length, groups: s.groups.length,
       discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
       events: { lastSeq: ctx.hub.lastSeq },
+      // A listen running the profile: `daemon stop` and `restart` end it too, as their answers say.
+      ...(ctx.listen && { listen: true }),
     };
   },
 

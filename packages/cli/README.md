@@ -380,7 +380,7 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   as not taken.
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
   `daemon stop` or `daemon restart` then ends that listen too: it exits 1 (`unavailable`) with a line on stderr, and
-  the stop's answer carries `listen: true`. Start `ghostly daemon --detach` first for a listen that follows a restart.
+  the stop's answer carries `listen: true`, as `daemon status` does while it runs. Start `ghostly daemon --detach` first for a listen that follows a restart.
 - `--translate <lang>`: received messages carry a translation, once the CLI has a language detector ([Translation](#translation)).
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
