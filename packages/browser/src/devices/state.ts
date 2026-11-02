@@ -535,7 +535,8 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
   for (const field of ["turnPacket", "d", "lineage"] as const) if (!optional(r[field], bytes)) return bad(field);
   if (!optional(r.signingKey, (v): v is DeviceSigningKeyKind => (DEVICE_SIGNING_KEY_KINDS as readonly unknown[]).includes(v))) return bad("signingKey");
   if (r.network !== undefined && !isNetwork(r.network)) return bad("network");
-  if (!optional(r.forks, (v): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((name) => text(name) && /^ghostly(_[A-Za-z0-9_-]{1,64})?$/.test(name)))) return bad("forks");
+  // No cap: each fork is a whole database on this device, and one left out of the list could never be discarded.
+  if (!optional(r.forks, (v): v is string[] => Array.isArray(v) && v.every((name) => text(name) && /^ghostly(_[A-Za-z0-9_-]{1,64})?$/.test(name)))) return bad("forks");
   if (!optional(r.breezDatabases, (v): v is string[] => Array.isArray(v) && v.length <= 8 && v.every((name) => text(name) && /^ghostly-breez-/.test(name)))) return bad("breezDatabases");
   if (!optional(r.releasedTurn, (v): v is number => count(v, 2 ** 32 - 1))) return bad("releasedTurn");
   if (!optional(r.seenSequence, (v): v is number => count(v, Number.MAX_SAFE_INTEGER))) return bad("seenSequence");
