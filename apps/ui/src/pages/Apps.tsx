@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -18,6 +18,7 @@ import { refreshInstalledApps, useBuiltInApps, useInstalledApps } from "../lib/a
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
+import { listText } from "../lib/listText";
 
 /*
  * Apps (WISP 1200 § Discovery, § Stores, § Updates), a page beside the chat list as Wallets and Identities are: the
@@ -128,6 +129,16 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   const [busy, setBusy] = useState(false);
   // Which button started the work in progress: that one shows it is going (Refresh, Remove).
   const [pending, setPending] = useState<"refresh" | "remove" | null>(null);
+  // Remove asks first, as Uninstall does: the question takes the place of the buttons, the focus goes to its Cancel
+  // (Enter again does not remove), and Cancel gives it back to Remove, never to the page.
+  const [asking, setAsking] = useState(false);
+  const questionId = useId();
+  const keep = useRef<HTMLButtonElement>(null), remove = useRef<HTMLButtonElement>(null), asked = useRef(false);
+  useEffect(() => {
+    if (!asking && !asked.current) return;
+    asked.current = true;
+    (asking ? keep : remove).current?.focus({ preventScroll: true });
+  }, [asking]);
   const focusBack = useFocusBack(busy);
   const work = async (call: () => Promise<unknown>, done?: () => void, which: "refresh" | "remove" | null = null) => {
     focusBack();
@@ -152,6 +163,8 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
     const words = filter.trim().toLocaleLowerCase();
     return words ? store.apps.filter((l) => `${l.title}\n${l.tagline}`.toLocaleLowerCase().includes(words)) : store.apps;
   }, [store.apps, filter]);
+  // The installed apps it vouches for: removed, it no longer brings their updates or takedowns.
+  const vouched = useMemo(() => store.apps.flatMap((l) => have.get(l.ref)?.title ?? []), [store.apps, have]);
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
   const toggle = () => {
@@ -181,11 +194,27 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
-        <div className="flex flex-wrap items-center gap-2 ms-auto">
-          {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
-          <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }), undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
-          <Button variant="danger" data-testid="app-store-remove" disabled={busy} loading={pending === "remove"} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved, "remove")}>{t("apps.store.remove")}</Button>
-        </div>
+        {!asking && (
+          <div className="flex flex-wrap items-center gap-2 ms-auto">
+            {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
+            <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }), undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
+            <Button ref={remove} variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => setAsking(true)}>{t("apps.store.remove")}</Button>
+          </div>
+        )}
+        {asking && (
+          <div role="group" aria-labelledby={questionId} data-testid="app-store-remove-question" className="basis-full space-y-2"
+            onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
+            <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.store.removeTitle", { name: store.name ?? store.url })}</p>
+            <p className="text-xs text-text-secondary">
+              {vouched.length ? t(vouched.length === 1 ? "apps.store.removeAppsOne" : "apps.store.removeApps", { titles: listText(vouched, t) }) : t("apps.store.removeNone")}
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
+              <Button variant="danger" data-testid="app-store-remove-confirm" disabled={busy} loading={pending === "remove"}
+                onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved, "remove")}>{t("apps.store.remove")}</Button>
+            </div>
+          </div>
+        )}
       </div>
       {open && store.apps.length > LISTING_PAGE && (
         <div className="border-t border-border px-4 py-2">

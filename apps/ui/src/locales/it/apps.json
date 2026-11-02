@@ -156,6 +156,10 @@
     "read": "Leggi",
     "refresh": "Aggiorna",
     "remove": "Rimuovi",
+    "removeApps": "Elenca app che hai installato: {{titles}}. Non riceveranno più aggiornamenti né rimozioni da questo store.",
+    "removeAppsOne": "Elenca un'app che hai installato: {{titles}}. Non riceverà più aggiornamenti né rimozioni da questo store.",
+    "removeNone": "Per aggiungerlo di nuovo ti servirà il suo link.",
+    "removeTitle": "Rimuovere {{name}}?",
     "showMore": "Mostra altre ({{count}})",
     "stale": "Non aggiornato dal {{date}}"
   },

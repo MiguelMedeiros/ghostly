@@ -156,6 +156,10 @@
     "read": "读取",
     "refresh": "刷新",
     "remove": "移除",
+    "removeApps": "它列有你已安装的应用：{{titles}}。它们将不再从此商店获得更新或下架通知。",
+    "removeAppsOne": "它列有你已安装的应用：{{titles}}。它将不再从此商店获得更新或下架通知。",
+    "removeNone": "要再次添加，你需要它的链接。",
+    "removeTitle": "移除 {{name}}？",
     "showMore": "显示更多 ({{count}})",
     "stale": "自 {{date}} 起已过期"
   },

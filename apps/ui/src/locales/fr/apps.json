@@ -156,6 +156,10 @@
     "read": "Lire",
     "refresh": "Actualiser",
     "remove": "Retirer",
+    "removeApps": "Elle liste des apps que vous avez installées : {{titles}}. Elles ne recevront plus de mises à jour ni de retraits de cette boutique.",
+    "removeAppsOne": "Elle liste une app que vous avez installée : {{titles}}. Elle ne recevra plus de mises à jour ni de retraits de cette boutique.",
+    "removeNone": "Pour l'ajouter à nouveau, il vous faudra son lien.",
+    "removeTitle": "Retirer {{name}} ?",
     "showMore": "Afficher plus ({{count}})",
     "stale": "Pas à jour depuis le {{date}}"
   },

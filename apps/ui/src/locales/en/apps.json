@@ -156,6 +156,10 @@
     "read": "Read",
     "refresh": "Refresh",
     "remove": "Remove",
+    "removeApps": "It lists apps you installed: {{titles}}. They will no longer get updates or takedowns from this store.",
+    "removeAppsOne": "It lists an app you installed: {{titles}}. It will no longer get updates or takedowns from this store.",
+    "removeNone": "To add it again, you will need its link.",
+    "removeTitle": "Remove {{name}}?",
     "showMore": "Show more ({{count}})",
     "stale": "Out of date since {{date}}"
   },
