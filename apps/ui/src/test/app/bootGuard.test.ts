@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stylesheetsFirst } from "../../../../web/firstPaint";
 
 // covers: app.boot
 
@@ -236,6 +237,33 @@ describe("the boot guard", () => {
     expect(PAGE.querySelector("style")!.textContent).toContain("#boot-shell");
     const policy = /Content-Security-Policy "([^"]+)"/.exec(readFileSync(join(REPO, "apps/web/nginx-headers.conf"), "utf8"))![1]!;
     expect(/(?:^|;)\s*style-src ([^;]*)/.exec(policy)![1]).toContain("'unsafe-inline'");
+  });
+
+  it("puts the built page's stylesheets ahead of its scripts: the first paint waits for every one of them", () => {
+    // What Vite writes: the entry script, its preloads, then the stylesheets.
+    const built = [
+      "<head>",
+      '    <script src="/boot-guard.js"></script>',
+      '    <script type="module" crossorigin src="/assets/main-a.js"></script>',
+      '    <link rel="modulepreload" crossorigin href="/assets/src-b.js">',
+      '    <link rel="stylesheet" crossorigin href="/assets/arrows-c.css">',
+      '    <link rel="stylesheet" crossorigin href="/assets/main-d.css">',
+      '    <meta name="ghostly-build" content="1.7.3 abc">',
+      "</head>",
+    ].join("\n");
+    expect(stylesheetsFirst(built).split("\n")).toEqual([
+      "<head>",
+      '    <script src="/boot-guard.js"></script>',
+      '    <link rel="stylesheet" crossorigin href="/assets/arrows-c.css">',
+      '    <link rel="stylesheet" crossorigin href="/assets/main-d.css">',
+      '    <script type="module" crossorigin src="/assets/main-a.js"></script>',
+      '    <link rel="modulepreload" crossorigin href="/assets/src-b.js">',
+      '    <meta name="ghostly-build" content="1.7.3 abc">',
+      "</head>",
+    ]);
+    // Already first, or nothing to move: unchanged.
+    expect(stylesheetsFirst(stylesheetsFirst(built))).toBe(stylesheetsFirst(built));
+    expect(stylesheetsFirst(readFileSync(join(REPO, "apps/web/index.html"), "utf8"))).toBe(readFileSync(join(REPO, "apps/web/index.html"), "utf8"));
   });
 
   it("takes the first paint for an empty page: it still says the app is taking long, or could not start", () => {

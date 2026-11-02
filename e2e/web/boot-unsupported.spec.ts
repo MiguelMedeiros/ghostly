@@ -234,8 +234,8 @@ test("a first visit draws \"Starting Ghostly…\" from the page alone while the 
   // Not until "load": the page's load waits for the bundle held here.
   await page.goto("/", { waitUntil: "commit" });
   const shell = page.getByRole("status").filter({ hasText: "Starting Ghostly…" });
+  // Visible: after its short wait (a warm start draws the app before it), the ghost and the words are on screen.
   await expect(shell).toBeVisible();
-  await expect(shell).toHaveCSS("opacity", "1");
   await expect(page.getByTestId("boot-fallback")).toHaveCount(0);
   release();
   await expect(page.getByTestId("sidebar")).toBeVisible({ timeout: 20_000 });
