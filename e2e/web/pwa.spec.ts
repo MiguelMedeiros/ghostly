@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { copyInvite } from "../support/clipboard";
 import { expect, link, test } from "../support/fixtures";
+import { choose } from "../support/select";
 
 /**
  * The installable web app (docs/WEB.md § Install it): the service worker, the offline shell, the share target, the
@@ -63,6 +64,29 @@ test.describe("service worker", () => {
       await ana.context.setOffline(false);
     }
     await expect(ana.page.getByTestId("offline-banner")).toBeHidden();
+  });
+
+  test("the install leaves the online-only libraries and the other languages out; a language picked later opens offline too", { tag: ["@feature:app.pwa.offline"] }, async ({ peer }) => {
+    const ana = await peer("Ana", { serviceWorkers: "allow" });
+    await controlled(ana.page);
+    const paths = async () => (await cached(ana.page)).map((entry) => entry.path);
+    // Pubky's approval, a Keet proof and the USDT wallet need the network, and the browser reads in English.
+    expect((await paths()).filter((path) => /^\/assets\/(pubky|keet-identity-key|usdt|ar|es|fr|it|ja|pt|zh)-/.test(path))).toEqual([]);
+
+    await ana.page.goto("/#/settings");
+    await choose(ana.page.getByTestId("settings-language"), "fr");
+    await expect(ana.page.getByTitle("Nouvelle conversation", { exact: true })).toBeVisible();
+    // Fetched through the worker, so kept like any file of the build.
+    await expect.poll(async () => (await paths()).filter((path) => /^\/assets\/fr-/.test(path)).length).toBe(1);
+
+    await ana.context.setOffline(true);
+    try {
+      await ana.page.reload();
+      await expect(ana.page.getByTitle("Nouvelle conversation", { exact: true })).toBeVisible();
+      await expect(ana.page.getByTestId("offline-banner")).toBeVisible();
+    } finally {
+      await ana.context.setOffline(false);
+    }
   });
 
   test("a chat opened offline says Offline in its header, not a connection issue with the relays' errors", { tag: ["@feature:app.pwa.offline"] }, async ({ peer }) => {
