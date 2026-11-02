@@ -1007,7 +1007,7 @@ html[data-standalone="true"] {
    where the keyboard starts, below the notch, and the picture is never taller than what is left once the caption and
    the buttons (about 12rem with the panel's edges) have their room. `--keyboard-room` passes the visible height down
    to the picture: `--app-height` itself is not inherited. */
-.keyboard-layer {
+.fixed.inset-0.keyboard-layer {
   --keyboard-room: var(--app-height, 100dvh);
 }
 
@@ -1016,7 +1016,7 @@ html[data-standalone="true"] {
 }
 
 @media (pointer: coarse) {
-  html[data-keyboard="true"] .keyboard-layer {
+  html[data-keyboard="true"] .fixed.inset-0.keyboard-layer {
     bottom: calc(100% - var(--app-height, 100%));
     padding-top: max(0.5rem, env(safe-area-inset-top));
     padding-bottom: 0.5rem;
