@@ -6,7 +6,6 @@ import { shortcutLabel, type OtherProfile, type useProfileGlances } from "../hoo
 import { THEME_COLOR, switchProfile, themeOf } from "../lib/profiles";
 import { ProfileBadge } from "./ProfileBadge";
 import { useAppNavigation } from "../hooks/useAppNavigation";
-import { useBackCloses } from "../hooks/useDismiss";
 import { InstallMenuItem } from "./InstallApp";
 import { openJoinAnother } from "../lib/devices";
 
@@ -36,8 +35,6 @@ export function ProfileSwitcherMenu({ variant, glances, onClose }: {
 
   // The most likely next step has focus: the first other profile, or adding one.
   useEffect(() => { items()[1]?.focus(); }, []);
-  // Back (Android's back gesture) closes it alone, as every other menu and sheet.
-  useBackCloses(() => onClose());
   useEffect(() => {
     const outside = (e: PointerEvent) => {
       const target = e.target as Element | null;
