@@ -102,16 +102,19 @@ test("a phone on its side: an open select's list stays clear of the notch", { ta
   await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { left: SIDE, right: SIDE, top: 0, bottom: HOME } });
   await page.goto("/#/settings/appearance");
   const select = page.getByTestId("settings-language");
+  // Scrolled to it by hand, as a person does: the page stops bringing Appearance back to the top as it loads.
+  await expect(select).toBeVisible();
+  const pane = (await page.locator("[data-page-body]").boundingBox())!;
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2);
+  await page.mouse.wheel(0, 150);
+  await expect(select).toBeInViewport({ ratio: 1 });
   const options = await optionsOf(select);
   const list = page.locator(`[id="${await select.getAttribute("aria-controls")}"]`);
   await expect(list).toHaveAttribute("data-placement", /.+/);
   await expect(list).toBeVisible();
-  // The settings may still scroll the button into view as it opens: the list follows a frame later.
-  await expect(async () => {
-    const box = (await list.boundingBox())!;
-    expect(box.x).toBeGreaterThanOrEqual(SIDE);
-    expect(box.x + box.width).toBeLessThanOrEqual(LANDSCAPE.width - SIDE);
-    expect(box.y + box.height).toBeLessThanOrEqual(LANDSCAPE.height - HOME);
-  }).toPass({ timeout: 5_000 });
+  const box = (await list.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(SIDE);
+  expect(box.x + box.width).toBeLessThanOrEqual(LANDSCAPE.width - SIDE);
+  expect(box.y + box.height).toBeLessThanOrEqual(LANDSCAPE.height - HOME);
   await expect(options.first()).toBeVisible();
 });
