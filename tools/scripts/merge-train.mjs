@@ -1284,13 +1284,25 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   };
   const runsRead = new Map();
   const jobsRead = new Map();
-  /** The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). */
-  const ciRunsOn = (sha) =>
-    once(runsRead, sha, async () => {
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+  /**
+   * The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). Pages are
+   * read, newest first, until `enough` of this repository's own runs are in (see `ciRuns`) or the list ends: anyone can
+   * open pull requests from a fork at a public commit, and their runs would fill a first page that holds none of ours.
+   * GitHub lists at most 1000 runs for one commit, PAGES_READ pages.
+   */
+  const readCiRuns = async (sha, enough) => {
+    const runs = [];
+    for (let page = 1; page <= PAGES_READ; page++) {
+      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100${page > 1 ? `&page=${page}` : ""}`);
       if (!r.ok && r.status !== 403) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
-      return r;
-    });
+      if (!r.ok) return r;
+      const list = r.data?.workflow_runs ?? [];
+      runs.push(...list);
+      if (list.length < 100 || ciRuns(runs, repo, sha).length >= enough) break;
+    }
+    return { ok: true, status: 200, data: { workflow_runs: runs } };
+  };
+  const ciRunsOn = (sha) => once(runsRead, sha, () => readCiRuns(sha, CI_RUNS_READ));
   const runJobs = (id) => once(jobsRead, id, () => all(`/actions/runs/${id}/jobs?filter=latest`));
   const pull = (p) => ({
     number: p.number,
@@ -1391,9 +1403,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      */
     cancelCi: async (sha) => {
       if (cancelDenied) return { cancelled: [], denied: cancelDenied };
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+      const r = await readCiRuns(sha, Infinity);
       if (r.status === 403) return { cancelled: [], denied: (cancelDenied = `HTTP 403 ${r.data?.message ?? ""}`.trim()) };
-      if (!r.ok) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
       const cancelled = [];
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).filter((x) => x.event === "pull_request" && x.status !== "completed")) {
         const c = await api("POST", `/actions/runs/${run.id}/cancel`);

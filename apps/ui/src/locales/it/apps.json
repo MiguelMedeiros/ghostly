@@ -65,6 +65,7 @@
     "notSigned": "Firma non valida. Ghostly non la installerà.",
     "offline": "Sei offline.",
     "otherApp": "Il link contiene un'altra app.",
+    "permissionsChanged": "Questo aggiornamento ora aggiunge altri permessi. Controllali di nuovo prima di aggiornare.",
     "refused": "Ghostly non la installerà",
     "removed": "Uno store che hai aggiunto ha rimosso questa app.",
     "revoked": "Il suo editore ha revocato questa versione.",

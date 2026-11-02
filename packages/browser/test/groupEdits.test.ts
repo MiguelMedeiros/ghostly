@@ -44,13 +44,13 @@ describe("GroupEdits on its own", () => {
   const mine = (n: number, text = `text ${n}`): StoredMessage => ({ linkId: chat, id: `${me}:1:${n}`, text, sender: "me", member: me, timestamp: n + 1, via: "datalink" });
   const bobs = (n: number, text = `bob ${n}`): StoredMessage => ({ linkId: chat, id: `${bob}:1:${n}`, text, sender: "peer", member: bob, timestamp: n + 100, via: "datalink" });
 
-  function setup(messages: StoredMessage[], members = [me, bob, carol], removed: string[] = []) {
+  function setup(messages: StoredMessage[], members = [me, bob, carol], removed: string[] = [], community = false) {
     const sent: { edit: GroupEdit; to?: string }[] = [];
     let clock = 1_000_000, connection = {};
     const edits = new GroupEdits({
       ...rows(messages, removed),
       changed: () => {},
-      membership: () => ({ me, members: new Set(members), community: false, admin: true }),
+      membership: () => ({ me, members: new Set(members), community, admin: true }),
       send: async (_g, edit, to) => { sent.push({ edit, ...(to && { to }) }); return null; },
       edge: () => connection,
       now: () => clock,
@@ -242,6 +242,18 @@ describe("GroupEdits on its own", () => {
     expect(await edits.receive("g1", bob, removal(notice.id))).toBe("dropped");
     expect(removed).toEqual([]);
     expect(messages).toHaveLength(4);
+  });
+
+  it("a private group's removal stands once its author is out of the group, its text edits do not; a community's neither", async () => {
+    const removed: string[] = [];
+    const { edits, messages } = setup([bobs(0, "secret"), bobs(1, "v0")], [me, carol], removed);
+    expect(await edits.receive("g1", bob, { id: bobs(1).id, e: 1, ts: 1, m: "rewritten" })).toBe("dropped");
+    expect(await edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
+    expect(removed).toEqual([bobs(0).id]);
+    expect(messages.map(m => m.text)).toEqual(["v0"]);
+    const community = setup([bobs(0, "secret")], [me, carol], [], true);
+    expect(await community.edits.receive("g1", bob, { id: bobs(0).id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("dropped");
+    expect(community.messages).toHaveLength(1);
   });
 
   it("an edit that came before its message is shown once the message is stored", async () => {

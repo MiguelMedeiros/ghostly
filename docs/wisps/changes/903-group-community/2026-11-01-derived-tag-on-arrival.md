@@ -1,0 +1,1 @@
+A member that holds the previous epoch's secret checks the confirmation tag of an `add`, `role` or `link` commit as it arrives and refuses one that does not match: not kept, followed or passed on. Before, such a commit became the newest on every member with no secret anyone could derive, and nobody could send until the admin re-keyed the group. No change on the wire.

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, SWITCH_RETIRE_MS, type GhostLinkEvents, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink, type LinkParams } from "../src/invite";
 import { createIdentity } from "../src/identity";
@@ -487,6 +487,40 @@ describe("what a paired peer says about itself", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("the contact's word on held items, ways of paying and adapters changing without end are read a handful of times a minute, and the newest still counts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    try {
+      const peer = { onHold: vi.fn(), onPairingState: vi.fn(), onTransportDiscovery: vi.fn(async () => {}) };
+      const t = linkedPair([{}, { holdSupport: true, events: peer }]);
+      await t.ready();
+      await t.settle("b");
+      peer.onHold.mockClear(); peer.onTransportDiscovery.mockClear();
+      const pairing = () => peer.onPairingState.mock.calls.length;
+      const before = pairing();
+      for (let i = 0; i < 200; i++) {
+        t.toB({ t: "paired-hold", on: i % 2 === 0 });
+        t.toB({ t: "paired-payments", m: [i % 2 ? "lightning" : "cashu"] });
+        t.toB({ t: "paired-adapters", descriptors: i % 2 ? { "iroh/1": IROH_N } : {} });
+      }
+      await t.settle("b");
+      // Six a minute each at most, the session's own included; the rest wait as one.
+      expect(peer.onHold.mock.calls.length).toBeLessThanOrEqual(6);
+      expect(peer.onTransportDiscovery.mock.calls.length).toBeLessThanOrEqual(6);
+      expect(pairing() - before).toBeLessThanOrEqual(12);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(peer.onHold.mock.calls.length).toBeLessThanOrEqual(7);
+      expect(peer.onHold).toHaveBeenLastCalledWith({ peerAllows: false, peerTop: undefined });
+      expect(t.b.peerAllowsHold).toBe(false);
+      expect(peer.onTransportDiscovery.mock.calls.length).toBeLessThanOrEqual(7);
+      expect((peer.onTransportDiscovery.mock.lastCall as unknown[] | undefined)?.[0]).toEqual({ "iroh/1": IROH_N });
+      expect([...(t.b as unknown as { peerPaymentMethods: Set<string> }).peerPaymentMethods]).toEqual(["lightning"]);
+      expect(pairing() - before).toBeLessThanOrEqual(14);
+      const settled = [peer.onHold.mock.calls.length, peer.onTransportDiscovery.mock.calls.length, pairing()];
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect([peer.onHold.mock.calls.length, peer.onTransportDiscovery.mock.calls.length, pairing()]).toEqual(settled);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("takes a small JPEG avatar or its removal and ignores anything else", async () => {
     const onPeerAvatar = vi.fn();
     const t = linkedPair([{}, { events: { onPeerAvatar } }]);
@@ -559,6 +593,16 @@ describe("what a paired peer says about itself", () => {
     await t.settle("b");
     expect(t.b.groupsSupport).toBe(true);
     expect(onGroupsSupport).toHaveBeenCalledWith(true);
+  });
+
+  it("turns groups on once a session: off again, a later announcement does not turn them back on", async () => {
+    const onGroupsSupport = vi.fn();
+    const t = linkedPair([{}, { groupsSupport: true, events: { onGroupsSupport } }]);
+    await t.ready();
+    for (let i = 0; i < 50; i++) t.toB({ t: "paired-groups", v: i % 2 ? [2] : [1, 2] });
+    await t.settle("b");
+    expect(onGroupsSupport.mock.calls).toEqual([[true], [false]]);
+    expect(t.b.groupsSupport).toBe(false);
   });
 
   it("answers a reconnect request and ignores an unexpected acknowledgement", async () => {
@@ -680,6 +724,8 @@ describe("paired payments", () => {
   });
 
   it("says the networks of its wallets per way of paying, and reads the contact's; an older contact's none means any", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
     const t = linkedPair([{ events: payEvents(), paymentNetworks: { cashu: ["testnet"], arkade: ["mainnet", "testnet"] } }, { events: payEvents() }]);
     await t.ready();
     await t.settle("b");
@@ -699,6 +745,9 @@ describe("paired payments", () => {
     // A malformed map is ignored and the last good word stays; an unknown method is left out.
     for (const n of [["testnet"], { cashu: "testnet" }, { cashu: ["regtest"] }, Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`m${i}`, []]))]) t.toB({ t: "paired-payments", m: ["cashu"], n });
     await t.settle("b");
+    expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet", "mainnet"]);
+    // Ways of paying are read six times a minute: the burst above used this minute's.
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet", "mainnet"]);
     t.toB({ t: "paired-payments", m: ["cashu", "future-coin"], n: { cashu: ["mainnet"], "future-coin": ["testnet"] } });
     await t.settle("b");

@@ -42,6 +42,7 @@ import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
 import { knownErrorText } from "../lib/errorText";
 import { english } from "../lib/english";
 import { loadSettings } from "../lib/settings";
+import { chatNamesForPeer } from "../lib/storage";
 import { translatorFor } from "../locales";
 import type { Translate } from "../locales/translate";
 import { webkitGtkSoundsRelease } from "../lib/webkitGtk";
@@ -50,7 +51,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
-import { hostErrorText, setServiceWindowsCloser } from "../lib/serviceWindows";
+import { hostErrorText, serviceFraming, setServiceWindowsCloser } from "../lib/serviceWindows";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
@@ -439,8 +440,11 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
       // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
       // Android opens none (`viewer` is Desktop's).
       if (!androidApp()) openedServiceWindows.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });
+      const t = profileT();
+      // Its window is titled "<title> — Ghostly": the title says whose app it is, never the contact's name for it alone.
+      const { label } = serviceFraming(service?.name ?? serviceId, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t);
       // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: label, unreachable: t("services.window.unreachable") });
     },
     forgetServices: forgetServiceWindows,
   });
