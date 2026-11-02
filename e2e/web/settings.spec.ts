@@ -175,11 +175,18 @@ test("network: relays can be changed and reset", { tag: ["@feature:settings.netw
   await expect(page).toHaveURL(/#\/settings\/network$/);
   const relays = page.getByTestId("network-relays");
   await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app\nhttps://pkarr.miguelmedeiros.dev");
+  // A line that is not a relay, next to one that is: named, and nothing is saved.
   await relays.fill("https://relay.example.org/\nnot a url");
+  await page.getByTestId("network-save").click();
+  await expect(page.getByText("Not a relay address: not a url", { exact: true })).toBeVisible();
+  await expect(page.getByText("Saved", { exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(relays).toHaveValue("https://pkarr.pubky.org\nhttps://pkarr.pubky.app\nhttps://pkarr.miguelmedeiros.dev");
+  await relays.fill("https://relay.example.org/");
   await page.getByTestId("network-save").click();
   await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   await page.reload();
-  // Kept normalized, and what is not a URL is dropped.
+  // Kept normalized.
   await expect(relays).toHaveValue("https://relay.example.org");
   await page.getByRole("button", { name: "Reset to defaults" }).click();
   await page.getByTestId("network-save").click();
