@@ -165,6 +165,8 @@
     "restoring": "Carregando… · {{size}}",
     "resume": "Continuar",
     "roomDevice": "{{size}} livres neste aparelho",
+    "senderOnly": "Só quem enviou tem este arquivo",
+    "senderOnlyHint": "Em um grupo deste tamanho, seu app se conecta por meio de poucos membros, não com quem enviou. Ele chega sozinho quando um deles baixar, ou peça a quem enviou que o mande para você em uma conversa.",
     "stalled": "Parado · {{progress}}",
     "verifying": "Verificando o arquivo… {{size}}",
     "verifyingThere": "Chegou, {{name}} está verificando… {{size}}",

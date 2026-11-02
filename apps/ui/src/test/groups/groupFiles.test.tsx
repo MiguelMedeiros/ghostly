@@ -185,6 +185,14 @@ describe("a group's file bubbles", () => {
     expect(within(bubble).getByTestId("file-why-text")).toHaveTextContent("It comes by itself when a member who has it is online.");
   });
 
+  it("only its sender has it, out of reach in a group on hubs: said, and why and what to do behind the ⓘ", async () => {
+    const { user } = openGroup({ [REPORT.id]: { state: "transferring", stage: "waiting", transferred: 0, size: REPORT.size, direction: "in", wait: "author", note: "Only its sender has this file, and you are not connected to them" } });
+    const bubble = await vi.waitFor(() => within(row(`${ALICE}:1:1`)).getByTestId("file-bubble"));
+    expect(within(bubble).getByTestId("file-status")).toHaveTextContent("Only its sender has this file");
+    await user.click(within(bubble).getByTestId("file-why"));
+    expect(within(bubble).getByTestId("file-why-text")).toHaveTextContent("In a group this large, your app connects through a few members, not to the sender. It comes by itself once one of them downloads it, or ask the sender to send it to you in a chat.");
+  });
+
   it("a Download that cannot start: a short title in the bubble's ⓘ, with the next step", async () => {
     const { user, engine } = openGroup({ [REPORT.id]: offered(REPORT) });
     engine.on("fileAction", () => { throw new Error("Not enough space on this device for this file"); });

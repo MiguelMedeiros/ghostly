@@ -165,6 +165,8 @@
     "restoring": "読み込み中… · {{size}}",
     "resume": "再開",
     "roomDevice": "この端末の空き {{size}}",
+    "senderOnly": "このファイルを持っているのは送信者だけです",
+    "senderOnlyHint": "大きなグループでは、アプリは送信者ではなく一部のメンバーを経由してつながります。そのうちの誰かがダウンロードすると自動で届きます。送信者にチャットで直接送ってもらうこともできます。",
     "stalled": "進んでいません · {{progress}}",
     "verifying": "ファイルを確認中… {{size}}",
     "verifyingThere": "届きました。{{name}} が確認中… {{size}}",

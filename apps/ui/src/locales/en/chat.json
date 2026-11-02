@@ -165,6 +165,8 @@
     "restoring": "Loading… · {{size}}",
     "resume": "Resume",
     "roomDevice": "{{size}} free on this device",
+    "senderOnly": "Only its sender has this file",
+    "senderOnlyHint": "In a group this large, your app connects through a few members, not to the sender. It comes by itself once one of them downloads it, or ask the sender to send it to you in a chat.",
     "stalled": "Not moving · {{progress}}",
     "verifying": "Checking the file… {{size}}",
     "verifyingThere": "Arrived, {{name}} is checking it… {{size}}",

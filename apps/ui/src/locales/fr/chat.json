@@ -165,6 +165,8 @@
     "restoring": "Chargement… · {{size}}",
     "resume": "Reprendre",
     "roomDevice": "{{size}} libres sur cet appareil",
+    "senderOnly": "Seul son expéditeur a ce fichier",
+    "senderOnlyHint": "Dans un groupe aussi grand, votre app se connecte via quelques membres, pas à l'expéditeur. Il arrive tout seul dès que l'un d'eux l'a téléchargé, ou demandez à l'expéditeur de vous l'envoyer dans une discussion.",
     "stalled": "Bloqué · {{progress}}",
     "verifying": "Vérification du fichier… {{size}}",
     "verifyingThere": "Arrivé, {{name}} le vérifie… {{size}}",

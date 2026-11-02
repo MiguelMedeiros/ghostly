@@ -91,11 +91,11 @@ class FilesWorld {
   }
 
   /** `binary`: its edges agreed files/4, so what it serves goes as binary messages. */
-  add(name: string, binary = false): Peer {
+  add(name: string, binary = false, staysOnline = false): Peer {
     const files: Files = { store: new MemoryFiles(), transfers: new Map(), brief: new Map(), settings: { autoDownloads: true, serveFiles: true } };
     const brief = (id: string) => { const view = files.transfers.get(id); if (view) files.brief.set(id, view); };
     const peer = this.world.add(name, p => ({ groupFiles: { store: files.store, transfers: files.transfers, brief, settings: () => files.settings, sendFiles: (linkId, frame) => this.world.sendFiles(p, linkId, frame),
-      ...(binary && { sendData: (linkId: string, id: string, offset: number, data: Uint8Array) => this.world.sendData(p, linkId, id, offset, data) }) } }));
+      ...(binary && { sendData: (linkId: string, id: string, offset: number, data: Uint8Array) => this.world.sendData(p, linkId, id, offset, data) }) } }), { staysOnline });
     this.files.set(peer, files);
     return peer;
   }
@@ -108,6 +108,23 @@ class FilesWorld {
     for (const p of rest) await p.groups.joinByLink(link);
     const peers = [admin, ...rest];
     await this.world.until(() => peers.every(p => this.world.view(p, id)?.members.length === peers.length && this.world.view(p, id)!.members.every(m => m.online)), 20 * 60_000, 1000);
+    return { peers, id };
+  }
+
+  /**
+   * A private group of `n` past 16 members on hubs (WISP 902 § Hubs): the peers at `hubs` stay online and become its
+   * hubs, the others keep edges with them only. The first is its admin.
+   */
+  async onHubs(n: number, hubs: number[]): Promise<{ peers: Peer[]; id: string }> {
+    const [admin, ...rest] = Array.from({ length: n }, (_, i) => this.add(`p${i}`, false, hubs.includes(i)));
+    const id = await admin.groups.create("Files", "mesh");
+    const link = await admin.groups.enableLink(id);
+    for (const p of rest) {
+      await p.groups.joinByLink(link);
+      await this.world.until(() => this.world.member(p, id), 5 * 60_000, 500);
+    }
+    const peers = [admin, ...rest];
+    await this.world.until(() => peers.every(p => !!this.world.view(p, id)?.hubs && this.world.view(p, id)!.members.length === n && this.world.view(p, id)!.members.every(m => m.online)), 10 * 60_000, 1000);
     return { peers, id };
   }
 
@@ -1398,6 +1415,23 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(bob, id, big.messageId).bytes!)).toBe(big.meta.d);
     // Asked for, it does not count toward what the group fetches by itself.
     expect(t.files.get(bob)!.store.records.get(t.got(bob, id, big.messageId).message!.file!.id)!.group).toMatchObject({ asked: true });
+  });
+
+  it("on hubs, a file only its author holds says so to a member with no edge to the author, and comes once a hub has it", { timeout: 600_000 }, async () => {
+    const t = new FilesWorld();
+    const { peers, id } = await t.onHubs(20, [2, 5]);
+    const [author, reader, hub] = [peers[1], peers[8], peers[2]];
+    for (const h of [peers[2], peers[5]]) t.files.get(h)!.settings.autoDownloads = false;
+    const { messageId, meta } = await t.send(author, id, pattern(50_000, 3));
+    // Its hubs, which do not fetch it by themselves, say they do not hold it: only its author does, out of the reader's reach.
+    await t.world.until(() => t.got(reader, id, messageId).transfer?.stage === "waiting", 5 * 60_000);
+    expect(t.got(reader, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "author", note: "Only its sender has this file, and you are not connected to them" });
+    // The author is not asked: the reader has no edge with it.
+    expect(t.seen.filter(s => s.from === reader.name && s.frame.t === "group-want").map(s => s.to)).not.toContain(author.name);
+    // A hub's Download brings it to the hub, which says it holds it: the reader gets it from there.
+    await hub.groups.downloadFile(t.got(hub, id, messageId).message!.file!.id);
+    await t.world.until(() => t.done(reader, id, messageId), 10 * 60_000);
+    expect(sha(t.got(reader, id, messageId).bytes!)).toBe(meta.d);
   });
 
   it("a member who leaves keeps none of the group's files: they go with its history, not when the admin has heard", async () => {

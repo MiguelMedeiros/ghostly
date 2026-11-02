@@ -150,10 +150,10 @@ export interface FileTransferState {
    */
   stalled?: boolean;
   /**
-   * A group's file, `waiting`: why. `nobody` connected has it, its holders are `busy`, or what came was `damaged`
-   * (it was dropped; `stalled`, so its person can ask again).
+   * A group's file, `waiting`: why. `nobody` connected has it, only its `author` has it (out of reach, on hubs), its
+   * holders are `busy`, or what came was `damaged` (it was dropped; `stalled`, so its person can ask again).
    */
-  wait?: "nobody" | "busy" | "day" | "damaged";
+  wait?: "nobody" | "author" | "busy" | "day" | "damaged";
   /** The same, in the engine's words. */
   note?: string;
 }
