@@ -5,7 +5,7 @@ import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { SharePicker } from "../../pages/SharePicker";
 import { groupChat } from "../../lib/chatMute";
-import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
+import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, sharePreview, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
 import { saveSession, setSessionDraft } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
@@ -30,6 +30,15 @@ describe("the text a share puts in the draft", () => {
     expect(shareText(share({ url: "https://a.example", title: "A page" }))).toBe("https://a.example");
     expect(shareText(share({ title: "Only a title" }))).toBe("Only a title");
     expect(shareText(share())).toBe("");
+  });
+
+  it("the picker previews the start of a long text, never half a character, and the draft gets it whole", () => {
+    expect(sharePreview(share({ text: "Look", url: "https://a.example" }))).toBe("Look\nhttps://a.example");
+    // A pair astride the preview's end is left out whole.
+    const text = `${"a".repeat(2047)}👻${"b".repeat(100_000)}`;
+    expect(sharePreview(share({ text }))).toBe(`${"a".repeat(2047)}…`);
+    expect(sharePreview(share({ text: `${"a".repeat(2046)}👻${"b".repeat(10)}` }))).toBe(`${"a".repeat(2046)}👻…`);
+    expect(shareText(share({ text })).length).toBe(102_049);
   });
 
   it("an empty share is dropped; a picked one waits for its chat's composer, once", () => {
