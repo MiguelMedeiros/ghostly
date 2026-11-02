@@ -65,15 +65,24 @@ export class MeshSignals {
    * one of them is a link of the two of us, or reaches the admin (`CarriedHooks.carry`).
    */
   carry(groupId: string, to: string, payload: Uint8Array): { taken: number; sure: boolean } {
-    const session = this.scope.session(groupId), group = this.scope.stored(groupId);
-    if (!session || !group || group.left || session.status !== "active" || to === session.myKey || !rosterHas(session.roster, to)) return { taken: 0, sure: false };
-    const frame = groupSignalFrame(groupId, session.myKey, to, payload);
-    const { links, sure } = this.links(groupId, session, group, to);
+    const carriers = this.carriers(groupId, to);
+    if (!carriers) return { taken: 0, sure: false };
+    const frame = groupSignalFrame(groupId, carriers.session.myKey, to, payload);
+    const { links, sure } = carriers;
     let taken = 0;
     for (const linkId of links) {
       try { this.host.sendOnLink(linkId, frame); taken++; } catch { /* it closed: the relays carry it */ }
     }
     return { taken, sure: sure && taken > 0 };
+  }
+
+  /** Whether `carry` would hand my packet for the edge to `to` to any link now (`CarriedHooks.canCarry`). */
+  canCarry(groupId: string, to: string): boolean { return !!this.carriers(groupId, to)?.links.length; }
+
+  private carriers(groupId: string, to: string): { session: GroupSession; links: string[]; sure: boolean } | undefined {
+    const session = this.scope.session(groupId), group = this.scope.stored(groupId);
+    if (!session || !group || group.left || session.status !== "active" || to === session.myKey || !rosterHas(session.roster, to)) return undefined;
+    return { session, ...this.links(groupId, session, group, to) };
   }
 
   /**
