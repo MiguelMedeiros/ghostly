@@ -459,6 +459,24 @@ describe("with the apps flag on", () => {
     expect(tried).toEqual(["app"]);
   });
 
+  it("Add: a host answering 500 says try again later; a store link holding no valid store says so, its refusal behind the ⓘ", async () => {
+    fakeEngine.on("appStorePreview", () => { throw new Error("status: The host answered 500"); });
+    const first = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await first.user.type(screen.getByTestId("apps-add-url"), "https://raw.githubusercontent.com/ana/store/main/ghostly-store.json");
+    await first.user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("The host had a problem (error 500). Try again later.");
+    first.unmount();
+
+    fakeEngine.on("appStorePreview", () => { throw new Error("not-json: This is not a store Ghostly can read"); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://raw.githubusercontent.com/ana/store/main/ghostly-store.json");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error-title")).toHaveTextContent("That link holds no valid store.");
+    expect(screen.getByTestId("apps-add-error")).not.toHaveTextContent("install");
+    await user.click(screen.getByTestId("apps-add-error-info"));
+    expect(screen.getByTestId("apps-add-error-details")).toHaveTextContent("not-json: This is not a store Ghostly can read");
+  });
+
   it("a link without https:// to a host of the list is read as https://, as a repository is usually written", async () => {
     const asked: unknown[] = [];
     fakeEngine.on("appPreview", (params) => { asked.push(params); return preview(); });
