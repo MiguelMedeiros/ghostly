@@ -126,9 +126,9 @@ describe("chats", () => {
     // An ambiguous name stays what it is, from either side; group:<id> is a group only.
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
-    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
-    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
+    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}" (ghostly chat list)` });
     // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
     const respelled = KEY.slice(0, 51) + "t";
     expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
@@ -498,6 +498,14 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
     expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
   });
+
+  // "pass yes (--yes)" put the socket's name first: a person at a terminal types the flag.
+  it("each confirm refusal names the flag first, the socket's name after it", async () => {
+    const { ctx } = fake();
+    for (const [method, params] of [["chat.remove", { chat: "Alice" }], ["group.leave", { group: "g1" }], ["group.forget", { group: "g1" }]] as const) {
+      await expect(callApi(ctx, method, params)).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/; pass --yes \(yes: true over the socket\) to go on$/) });
+    }
+  });
 });
 
 describe("group leave", () => {
@@ -506,7 +514,7 @@ describe("group leave", () => {
     const { ctx, node } = fake();
     const leaveGroup = vi.fn(async () => ({}));
     Object.assign(node, { leaveGroup });
-    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass yes \(--yes\)/) });
+    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass --yes \(yes: true over the socket\) to go on/) });
     expect(leaveGroup).not.toHaveBeenCalled();
     expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1" });
     expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
@@ -1027,5 +1035,44 @@ describe("a name every object has", () => {
   it("is no method: not found, as any other unknown one", async () => {
     const { ctx } = fake();
     for (const name of [...NAMES, "nope"]) await expect(callApi(ctx, name, {}), name).rejects.toMatchObject({ code: "not_found", message: `No method ${name}` });
+  });
+});
+
+/**
+ * `chat transport` toward a contact whose app has no WebRTC (`GHOSTLY_WEBRTC=0`) kept the choice and answered the chat
+ * still on HyperDHT, with nothing waiting: a bot could not tell it never would be. For one this app lacks, the engine
+ * answered `engine`, "Transport unavailable". The Connection menu offers neither; the CLI refuses them the same way.
+ */
+describe("chat transport", () => {
+  const withChat = (fields: Partial<LinkView>) => {
+    const made = fake();
+    made.node.getState = () => ({ links: [link("chat-one", { label: "Alice", ...fields })], groups: [], settings: {} }) as unknown as EngineState;
+    return made;
+  };
+
+  it("refuses a transport the contact's app lacks, and the engine is not asked", async () => {
+    const { ctx, node } = withChat({ availableTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], peerTransports: ["hyperdht/1", "iroh/1"] });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({
+      code: "refused", message: "Your contact's app doesn't have WebRTC: choose another, or auto", details: { reason: "contact-lacks", transport: "webrtc/1" },
+    });
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.transport", { chat: "Alice", transport: "hyperdht" });
+    expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "hyperdht/1" });
+  });
+
+  it("refuses one this app lacks, with why it is not running", async () => {
+    const { ctx, node } = withChat({ availableTransports: ["hyperdht/1"], peerTransports: ["webrtc/1", "hyperdht/1", "iroh/1"], transportErrors: { "iroh/1": "Iroh relay unreachable" } });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "webrtc" })).rejects.toMatchObject({ code: "refused", message: "This app has no WebRTC running", details: { reason: "app-lacks" } });
+    await expect(callApi(ctx, "chat.transport", { chat: "Alice", transport: "iroh" })).rejects.toMatchObject({ code: "refused", message: "This app has no Iroh running: Iroh relay unreachable", details: { reason: "app-lacks" } });
+    expect(node.setChatTransport).not.toHaveBeenCalled();
+  });
+
+  it("takes any on DHT only that this app can start, auto and dht always, and any while the contact's are not known", async () => {
+    const dhtOnly = withChat({ deliveryMode: "dht", availableTransports: [], runnableTransports: ["webrtc/1", "iroh/1"], peerTransports: ["webrtc/1", "iroh/1"] });
+    await callApi(dhtOnly.ctx, "chat.transport", { chat: "Alice", transport: "iroh" });
+    await expect(callApi(dhtOnly.ctx, "chat.transport", { chat: "Alice", transport: "hyperdht" })).rejects.toMatchObject({ details: { reason: "app-lacks" } });
+    const unknown = withChat({ availableTransports: ["webrtc/1", "hyperdht/1"], peerTransports: [] });
+    for (const transport of ["webrtc", "auto", "dht"]) await callApi(unknown.ctx, "chat.transport", { chat: "Alice", transport });
+    expect(unknown.node.setChatTransport).toHaveBeenCalledTimes(3);
   });
 });

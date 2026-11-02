@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, supersededBy, testedAs } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -441,5 +441,77 @@ describe("a push to dev that dev already moved past", () => {
   it("says in its plan why it skips, apart from a tested tree", () => {
     expect(plan(null, { draft: false, superseded: true }).why[0]).toContain("dev already moved past this commit");
     expect(plan(null, { draft: false, tested: true }).why[0]).toContain("This tree already passed CI Success");
+  });
+});
+
+// "Open as draft, `gh pr ready` seconds later": the draft event's run plans after the pull request left draft. Leaving
+// draft's run cancels nothing (ci.yml's concurrency) and waits behind it, so this run stays the fast tier.
+describe("a draft run whose pull request left draft after its event", () => {
+  const sha = "4".repeat(40);
+  const repo = "o/r";
+  const own = 500;
+  const ciRun = (over: object = {}) => ({
+    id: 501,
+    head_sha: sha,
+    status: "queued",
+    path: ".github/workflows/ci.yml",
+    head_repository: { full_name: repo },
+    pull_requests: [{ number: 7 }],
+    html_url: "https://github.com/o/r/actions/runs/501",
+    ...over,
+  });
+  const fake = (...reads: object[][]) => {
+    const asked: string[] = [];
+    let settled = 0;
+    const api = async (path: string) => {
+      asked.push(path);
+      if (path.startsWith("actions/workflows/ci.yml/runs?")) return { workflow_runs: reads[Math.min(asked.length - 1, reads.length - 1)] };
+      throw new Error(path);
+    };
+    const settle = async () => {
+      settled++;
+    };
+    return { api, asked, settle, settled: () => settled };
+  };
+  const self = ciRun({ id: own, status: "in_progress", html_url: "https://github.com/o/r/actions/runs/500" });
+
+  it("plans the fast tier when leaving draft's run waits behind it on the same head", async () => {
+    const { api, asked, settle, settled } = fake([self, ciRun()]);
+    expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe("https://github.com/o/r/actions/runs/501");
+    expect(asked).toEqual([`actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`]);
+    expect(settled()).toBe(0);
+  });
+
+  it("asks once more after settling when leaving draft's run does not exist yet", async () => {
+    const { api, settle, settled } = fake([self], [self, ciRun()]);
+    expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe("https://github.com/o/r/actions/runs/501");
+    expect(settled()).toBe(1);
+  });
+
+  it("runs everything when a run on this head is older: GitHub created leaving draft's first, and this one cancelled it", async () => {
+    const { api, settle, settled } = fake([self, ciRun({ id: 499, status: "completed" })]);
+    expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
+    expect(settled()).toBe(0);
+  });
+
+  it("runs everything when no run waits behind it (a rerun of an old draft run, a ready left by a token that starts no workflow)", async () => {
+    for (const runs of [[self], [self, ciRun({ status: "completed" })]]) {
+      const { api, settle, settled } = fake(runs);
+      expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
+      expect(settled()).toBe(1);
+    }
+  });
+
+  it("counts only this repository's ci.yml runs of this pull request on this head", async () => {
+    for (const other of [
+      ciRun({ head_sha: "5".repeat(40) }),
+      ciRun({ path: ".github/workflows/other.yml" }),
+      ciRun({ head_repository: { full_name: "fork/r" } }),
+      ciRun({ pull_requests: [{ number: 8 }] }),
+      ciRun({ pull_requests: [] }),
+    ]) {
+      const { api, settle } = fake([self, other]);
+      expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
+    }
   });
 });

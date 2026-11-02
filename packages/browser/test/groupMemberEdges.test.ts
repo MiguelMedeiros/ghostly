@@ -312,6 +312,30 @@ describe("the app back in front reconnects its group's dropped edges at once (WI
       }
     }
   }, 30_000);
+
+  it("back after a restart, a member live then whose packet no read finds is reconnecting only for presence's window", async () => {
+    const a = await adminOf(["bob"]);
+    const [bob] = a.members;
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === bob.linkId)?.edgeLive).toBe(true));
+    await a.node.shutdown();
+    nodes.splice(nodes.indexOf(a.node), 1);
+
+    // The app starts again; the member's app stays closed and the relays hold no packet of it (`resolve` finds none).
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() } as never, { transport, automaticWallets: false });
+    nodes.push(node);
+    await node.start();
+    const inner = node as unknown as Inner;
+    await startedEdge(() => [...inner.links.values()].find(live => live.stored.id === bob.linkId));
+    const edge = () => node.getState().groups.find(g => g.id === a.groupId)?.members.find(m => m.key === bob.key)?.edge;
+    // The resume is under way: its reads and its dial go in the first seconds.
+    expect(edge()?.reconnecting).toBe(true);
+    // Ten minutes on, nothing of the member read: it is not dialled (no presence), so not "Reconnecting…" for good.
+    const later = Date.now() + 11 * 60_000;
+    vi.spyOn(Date, "now").mockReturnValue(later);
+    try { expect(edge()).not.toHaveProperty("reconnecting"); }
+    finally { vi.mocked(Date.now).mockRestore(); }
+  }, 30_000);
 });
 
 describe("a profile no longer in a private group", () => {

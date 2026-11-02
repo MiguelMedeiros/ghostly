@@ -72,6 +72,8 @@
     "created": "群组已创建。",
     "forked": "成员历史出现了分叉",
     "gone": "{{name}} 已不再是成员",
+    "goneBy": "{{by}} 将 {{name}} 移出了群组",
+    "goneByYou": "你将 {{name}} 移出了群组",
     "joined": "{{name}} 已加入",
     "left": "{{name}} 已退出",
     "pictureChanged": "{{name}} 更换了群组头像",
@@ -85,6 +87,7 @@
     "renamedNoName": "群组现在名为“{{group}}”",
     "renamedYou": "你将群组重命名为“{{group}}”",
     "rotated": "密钥已轮换：新的纪元",
+    "withNote": "{{event}}{{note}}",
     "youJoined": "你已加入。",
     "youJoinedAgain": "你已重新加入。"
   },

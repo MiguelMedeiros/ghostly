@@ -14,7 +14,7 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, mintRefused } from "./paymentAdapters/cashu";
-import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
+import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
   MintInfoView,
@@ -69,6 +69,8 @@ const SWAP_SLOW_POLL_MS = 600_000;
 const SWAP_WATCH_MS = 3_600_000;
 /** How many proofs of tokens refused as spent are remembered. */
 const SPENT_KEPT = 1_000;
+/** The most coins `sendCoins` makes for one token. */
+const MAX_SEND_COINS = 64;
 /** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
 /**
  * `attemptEndedAt`: when the approval's swap failed with no answer. `abandoned`: the mint proved the swap never
@@ -121,6 +123,8 @@ type SwapOutcome =
 
 /** When a swap with no answer can no longer reach the mint: a request's longest life, and a margin after its last try. */
 const swapOverdueAt = (swap: PendingSwap) => Math.max(swap.createdAt + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS, (swap.attemptEndedAt ?? Number.POSITIVE_INFINITY) + SWAP_SETTLED_MS);
+/** When a melt with no answer can no longer reach the mint: its one request is sent right after it is written down. */
+const meltOverdueAt = (melt: PendingMelt) => melt.createdAt + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS;
 
 const swapOf = (swap: PendingSwap) => swap.swap as SerializedSwapPreview;
 
@@ -133,7 +137,7 @@ export function normalizeMintUrl(input: string): string {
   }
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw engineError("mintNotHttps");
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  return mintUrlSpelling(url.href);
 }
 
 export function assertAmount(amount: number): void {
@@ -156,6 +160,36 @@ const sats = (proofs: Proof[]) => total(proofs.map((p) => ({ amount: p.amount.to
 const inOneFrame = (encode: typeof import("@cashu/cashu-ts").getEncodedToken, mint: string) => (send: Proof[]) =>
   encode({ mint, proofs: send, unit: UNIT }).length <= LIMITS.maxPaymentEndpointChars;
 
+/**
+ * The coins a swap makes to send `amount` with the fee their receiver pays to redeem them: the fewest sats whose coins,
+ * less that fee, are exactly `amount`. cashu-ts' includeFees adds coins for the fee that can be worth more than it, and
+ * the contact is credited more than was sent. Undefined at a mint that charges nothing for coins, or when no such
+ * coins are found up to what cashu-ts would make: its own choice is used then.
+ */
+function sendCoins(wallet: Wallet, amount: number): number[] | undefined {
+  const included = wallet.getFeesToInclude(amount).toNumber();
+  if (included === 0) return undefined;
+  const keyset = wallet.getKeyset();
+  const fee = (coins: number) => wallet.getFeesForKeyset(coins, keyset.id).toNumber();
+  const sizes = Object.keys(keyset.keys).map(Number).filter((size) => size > 0).sort((a, b) => b - a);
+  const coinsOf = (value: number, among = sizes) => {
+    const coins: number[] = [];
+    for (const size of among) while (value >= size) { coins.push(size); value -= size; }
+    return value === 0 ? coins : undefined;
+  };
+  for (let value = amount; value <= amount + included; value++) {
+    let coins = coinsOf(value);
+    // Fewer coins than the sats over `amount` pay for: the largest coin split in smaller ones until they do, if ever.
+    while (coins && coins.length <= MAX_SEND_COINS && fee(coins.length) < value - amount) {
+      const [largest, ...rest] = coins;
+      const parts = coinsOf(largest, sizes.filter((size) => size < largest));
+      coins = parts && [...parts, ...rest].sort((a, b) => b - a);
+    }
+    if (coins && coins.length <= MAX_SEND_COINS && fee(coins.length) === value - amount) return coins;
+  }
+  return undefined;
+}
+
 function fitsAt(wallet: Wallet, proofs: StoredProof[], amount: number): boolean {
   return outlayAt(wallet, proofs, amount) !== undefined;
 }
@@ -172,7 +206,8 @@ function outlayAt(wallet: Wallet, proofs: StoredProof[], amount: number, inOneFr
     // no exact coins: a swap makes them
   }
   try {
-    const outputs = amount + wallet.getFeesToInclude(amount).toNumber();
+    const coins = sendCoins(wallet, amount);
+    const outputs = coins ? coins.reduce((sum, coin) => sum + coin, 0) : amount + wallet.getFeesToInclude(amount).toNumber();
     const { send } = wallet.selectProofsToSend(asProofLike(proofs), outputs, true);
     const taken = outputs + wallet.getFeesForProofs(send).toNumber();
     return send.length > 0 && sats(send) >= taken ? taken : undefined;
@@ -679,21 +714,27 @@ export class CashuWallet {
     // A send without mints comes from this network's mints. A request names its mints, but a contact may name a
     // real mint on a Testnet request: only mints of the network asked for are ever spent from.
     const mine = preferred ? this.getKnownMints() : this.getMints(network);
-    const candidates = (preferred ? preferred.map((m) => m.replace(/\/+$/, "")).filter((m) => mine.includes(m)) : mine)
+    const candidates = (preferred ? preferred.map(mintUrlSpelling).filter((m) => mine.includes(m)) : mine)
       .filter((m) => !network || mintNetwork(m) === network);
     /** The most a mint that holds the amount could send with its fees on top. */
     let room = 0;
-    for (const mint of candidates) {
-      if ((await this.balanceAt(mint)) < amount) continue;
+    /** The coins held at `mint` when they send the amount. */
+    const fitting = async (mint: string): Promise<StoredProof[] | undefined> => {
+      const proofs = await this.proofsAt(mint);
+      if (total(proofs) < amount) return undefined;
       // At a mint that charges for each coin it takes in, the amount held may not cover its fees: the next mint may.
       const wallet = await this.wallet(mint);
-      const proofs = await this.proofsAt(mint);
-      if (!fitsAt(wallet, proofs, amount)) {
-        room = Math.max(room, roomAt(wallet, proofs));
-        continue;
-      }
-      return this.locked(mint, async () => {
-        const { inputs, keep, send, swap } = await this.split(mint, amount, await this.proofsAt(mint));
+      if (fitsAt(wallet, proofs, amount)) return proofs;
+      room = Math.max(room, roomAt(wallet, proofs));
+      return undefined;
+    };
+    for (const mint of candidates) {
+      if (!(await fitting(mint))) continue;
+      const sent = await this.locked(mint, async () => {
+        // Asked again in the mint's turn: another payment may have taken these coins since.
+        const proofs = await fitting(mint);
+        if (!proofs) return undefined;
+        const { inputs, keep, send, swap } = await this.split(mint, amount, proofs);
         const token = (await loadCashu()).getEncodedToken({ mint, proofs: send, unit: UNIT });
         // Everything that left the balance beyond the amount: the swap's fee and the redeem fee prepaid for the receiver.
         const spent = total(inputs) - sats(keep);
@@ -708,6 +749,7 @@ export class CashuWallet {
         this.events.onChange();
         return { token, mint };
       });
+      if (sent) return sent;
     }
     if (room > 0) throw engineError("notEnoughForFee", { amount: room });
     throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
@@ -926,7 +968,7 @@ export class CashuWallet {
     try {
       if (/^cashu[AB]/i.test(value)) {
         const metadata = getTokenMetadata(value);
-        const mint = metadata.mint.replace(/\/+$/, "");
+        const mint = mintUrlSpelling(metadata.mint);
         return {
           kind: "token",
           amount: Number(metadata.amount),
@@ -943,7 +985,7 @@ export class CashuWallet {
           kind: "request",
           amount: request.amount === undefined ? null : Number(request.amount),
           unit: request.unit ?? UNIT,
-          mints: request.mints ?? [],
+          mints: (request.mints ?? []).map(mintUrlSpelling),
           description: request.description || undefined,
         };
       }
@@ -970,7 +1012,8 @@ export class CashuWallet {
     try {
       const metadata = getTokenMetadata(token);
       unit = metadata.unit;
-      mint = metadata.mint.replace(/\/+$/, "");
+      // In this wallet's spelling of its mints. The library redeems the token at the same mint in any spelling.
+      mint = mintUrlSpelling(metadata.mint);
       faceValue = Number(metadata.amount);
     } catch {
       throw new Error("That is not a valid ecash token");
@@ -1036,7 +1079,10 @@ export class CashuWallet {
     } catch {
       // no exact coins: the mint makes them
     }
-    const preview = await wallet.prepareSwapToSend(amount, asProofLike(proofs), { includeFees: true });
+    const coins = sendCoins(wallet, amount);
+    const preview = coins
+      ? await wallet.prepareSwapToSend(coins.reduce((sum, coin) => sum + coin, 0), asProofLike(proofs), {}, { send: { type: "random", denominations: coins } })
+      : await wallet.prepareSwapToSend(amount, asProofLike(proofs), { includeFees: true });
     const swap: PendingSwap = { id: swapId(), mint, kind: "send", swap: serializeSwapPreview(preview), createdAt: Date.now() };
     const inputs = among(preview.inputs);
     // Written down before the mint sees the proofs: from here on they may be spent, and only these outputs replace them.
@@ -1428,6 +1474,11 @@ export class CashuWallet {
     if (!shown || quote.quote !== quoteId || quoteMismatch(quote, shown.request, shown.amount) || (outlay ?? needed) > shown.amount + shown.feeReserve) {
       throw new Error(MINT_QUOTE_MISMATCH);
     }
+    // Coins another payment took since the quote was shown: said as the quote would have said it.
+    if (outlay === undefined) {
+      const room = roomAt(wallet, proofs, quote.fee_reserve.toNumber());
+      throw room > 0 ? engineError("notEnoughForFee", { amount: room }) : engineError("notEnoughSats");
+    }
     const { inputs, keep, send, swap } = await this.split(mint, needed, proofs);
     let preview: MeltPreview<MeltQuoteBolt11Response>;
     try {
@@ -1469,7 +1520,7 @@ export class CashuWallet {
       // A dropped connection or a gateway timeout says nothing: the payment may still be going through.
       if (!mintRefused(error) && !(error instanceof MeltChangeError)) return "pending";
       // The mint answered (a refusal), or took the proofs and only the change failed: its word decides.
-      const outcome = await this.settleMelt(melt).catch((): MeltOutcome => "pending");
+      const outcome = await this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
       if (outcome === "unpaid") {
         const lost = this.takeFailedFee(melt.quote);
         // Its ecash was spent somewhere else: said in plain words, whatever the mint's own were.
@@ -1486,7 +1537,7 @@ export class CashuWallet {
       await this.finishMelt(melt, result.change);
       return "paid";
     }
-    return this.settleMelt(melt).catch((): MeltOutcome => "pending");
+    return this.settleMelt(melt, true).catch((): MeltOutcome => "pending");
   }
 
   /**
@@ -1530,9 +1581,10 @@ export class CashuWallet {
   /**
    * Asks the mint where a recorded melt stands and books the answer. Paid: the reserved proofs are gone and
    * the change is ours. Unpaid: what the mint says is unspent is spendable again. Pending: nothing moves.
-   * Throws when the mint cannot be asked, and the melt stays as it is.
+   * Throws when the mint cannot be asked, and the melt stays as it is. `answered`: the mint answered the melt request
+   * itself, so it has acted on it; without that, an unpaid quote may only mean the request has not landed yet.
    */
-  private async settleMelt(melt: PendingMelt): Promise<MeltOutcome> {
+  private async settleMelt(melt: PendingMelt, answered = false): Promise<MeltOutcome> {
     const wallet = await this.wallet(melt.mint);
     const { Amount, OutputData } = await loadCashu();
     const quote = await wallet.checkMeltQuoteBolt11(melt.quote);
@@ -1556,6 +1608,9 @@ export class CashuWallet {
       return "paid";
     }
     if (quote.state === "PENDING") return "pending";
+    // UNPAID with no answer to the request: it may still reach the mint and be paid with these very proofs. Held
+    // until no request of this melt can land any more.
+    if (!answered && Date.now() < meltOverdueAt(melt)) return "pending";
 
     // UNPAID: the payment failed, or never started. The mint says which proofs are still unspent.
     const inputs = await this.reservedProofs(melt);

@@ -5,7 +5,7 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -525,7 +525,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
     noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
     ctx.calls.forgetChat(link.id);
@@ -537,6 +537,7 @@ const METHODS: Record<string, Method> = {
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
     if (transport === "dht") noCallOn(ctx, link.id, "put the chat on DHT only");
+    else if (transport !== "auto") transportOffered(link, transport);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     // A choice made during a hold (`chat disconnect --hold`) ends it: its time running out takes nothing back.
     await releaseHold(ctx, link.id, "lifted", true);
@@ -711,7 +712,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
-    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
@@ -719,7 +720,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
     await node(ctx).forgetGroup({ groupId: group.id });
     return { forgotten: group.id };
   },

@@ -272,7 +272,8 @@ ghostly routine update owner nightly --state paused                             
 ```
 
 `--schedule` is words people read (80 characters) and `--cron` is only shown. `--run ok|failed|skipped[:summary]`
-records a run as the last one (the card keeps 10); `--next` takes a date or milliseconds, up to a year ahead.
+records a run as the last one (the card keeps 10); `--next` takes a date or milliseconds, up to a year ahead: `2026-10-01` and
+`2026-10-01 01:00` are local time (a date alone is local midnight), `2026-10-01T01:00:00Z` or `+02:00` keep their zone.
 
 ### 11. Safety
 

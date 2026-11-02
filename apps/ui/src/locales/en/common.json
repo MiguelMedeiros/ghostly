@@ -24,6 +24,7 @@
     "show": "Show",
     "title": "Waiting for you"
   },
+  "notCopied": "Not copied",
   "save": "Save",
   "size": {
     "b": "{{n}} B",
