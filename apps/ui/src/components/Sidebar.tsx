@@ -425,6 +425,9 @@ export function Sidebar() {
       style={isMobile ? undefined : collapsed ? { width: RAIL_WIDTH } : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       <PinMoveNote text={moveNote} />
+      {/* For a screen reader's heading keys: the list is a phone's whole screen, its h1; beside the open chat, whose
+          name is the window's h1, an h2. */}
+      {isMobile ? <h1 className="sr-only">{t("sidebar.chats")}</h1> : <h2 className="sr-only">{t("sidebar.chats")}</h2>}
       {collapsed ? <>
         <div className="h-14 header-safe shrink-0 flex items-center justify-center bg-panel-header">
           <RailToggle ref={toggleRef} collapsed onToggle={toggleCollapsed} />

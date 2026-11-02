@@ -858,7 +858,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               />
             ) : (
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
-              {/* The one way to rename the chat: a button, so the keyboard reaches it too. */}
+              {/* The one way to rename the chat: a button, so the keyboard reaches it too. Inside the screen's heading,
+                  as a menu page's title is (layout/Page.tsx). */}
+              <h1 className="m-0 flex min-w-0 text-[15px] font-normal leading-tight">
               <button
                 type="button"
                 ref={nameRef}
@@ -887,6 +889,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   </svg>
                 )}
               </button>
+              </h1>
               {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
                 footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
