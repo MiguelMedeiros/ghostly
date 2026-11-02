@@ -141,7 +141,7 @@ export class EngineServer implements PeerServer {
     if (request?.kind !== "request") return;
     const response: RpcResponse = { kind: "response", id: request.id };
     // This app answered, declined or called in that chat: the contact's offer is not one to ring for any more.
-    if (request.method === "setCallSignal") this.offers.delete((request.params as { linkId?: string } | undefined)?.linkId ?? "");
+    if (request.method === "setCallSignal") this.callHandled(client, request.params);
     let params: unknown = request.params;
     // One page's call: the engine is told whether a call is on in any of them.
     if (request.method === "setCallOn") {
@@ -269,6 +269,20 @@ export class EngineServer implements PeerServer {
 
   private broadcast(event: EngineEvent): void {
     for (const client of [...this.clients]) this.post(client, event);
+  }
+
+  /**
+   * A page sent a call signal in a chat. While the contact's offer rang there, an answer or a hang-up is that page taking
+   * the call or declining it: the other pages (the extension's tabs share one engine) stop ringing. Before, they rang
+   * on to their timeout and then wrote "Missed call" into the history of a call that was on, and a Decline pressed in
+   * one of them ended it.
+   */
+  private callHandled(from: EngineClientSink, params: unknown): void {
+    const { linkId, signal } = (params ?? {}) as { linkId?: unknown; signal?: unknown };
+    if (typeof linkId !== "string" || !this.offers.delete(linkId)) return;
+    const kind = typeof signal === "string" ? signalKind(signal) : undefined;
+    if (kind !== "a" && kind !== "h") return;
+    for (const client of [...this.clients]) if (client !== from) this.post(client, { kind: "call-handled", linkId });
   }
 }
 

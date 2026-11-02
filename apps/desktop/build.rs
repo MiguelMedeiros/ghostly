@@ -127,10 +127,34 @@ const COMMANDS: &[&str] = &[
     "webkit_version",
 ];
 
+/// The Windows manifest tauri-build gives the app (Common Controls 6, which WebView2's windows need).
+const WINDOWS_MANIFEST: &str = r#"<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*" />
+    </dependentAssembly>
+  </dependency>
+</assembly>
+"#;
+
 fn main() {
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
-    )
-    .expect("failed to run tauri-build");
+    let attributes = tauri_build::Attributes::new()
+        .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS));
+    // tauri-build puts the manifest in the app's binary only, so a test that opens real windows on Windows does not
+    // start (STATUS_ENTRYPOINT_NOT_FOUND). With this set (desktop-media's Windows job), every binary the linker makes
+    // gets it instead. The app's own builds never set it.
+    println!("cargo:rerun-if-env-changed=GHOSTLY_WINDOWS_TEST_MANIFEST");
+    let attributes = if std::env::var_os("GHOSTLY_WINDOWS_TEST_MANIFEST").is_some()
+        && std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+    {
+        let manifest = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap())
+            .join("windows-app-manifest.xml");
+        std::fs::write(&manifest, WINDOWS_MANIFEST).expect("manifest");
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+        attributes.windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest())
+    } else {
+        attributes
+    };
+    tauri_build::try_build(attributes).expect("failed to run tauri-build");
 }

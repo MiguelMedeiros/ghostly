@@ -389,6 +389,12 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("cancel"));
   });
 
+  it("one sent from here that arrived whole, the contact checking it, has no Cancel: too late", () => {
+    const file = song({ id: "chat1-out-song-late", size: 10 * MB });
+    show(file, { state: "transferring", stage: "verifying", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("audio-cancel")).toBeNull();
+  });
+
   it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {
     const file = song({ id: "chat1-out-song-early", size: 10 * MB });
     getFile.mockResolvedValue(null);

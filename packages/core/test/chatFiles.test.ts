@@ -3,7 +3,7 @@ import { appendFileSync } from "node:fs";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
+import { ChatFiles, FILE_LIMITS, refusalText, sentWhole, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
 // covers: files.video.meta, files.image.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request, apps.offer.wire
 
@@ -437,6 +437,107 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => w.b.disks.get("restart-a")!.discarded);
   });
 
+  it("a file the sender deleted while the receiver was away: asked about it, the sender says it ended, before or after its restart", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("forgot-01", 4 * 1024 * 1024));
+    send(w, file("forgot-02", 4 * 1024 * 1024));
+    await until(() => ["forgot-01", "forgot-02"].every((id) => (w.b.transferred.get(`in:${id}`) ?? 0) > 100_000));
+    w.drop();
+    // Its message deleted: the abort finds no session, and the record goes with the message.
+    w.a.files.forget("out", "forgot-01");
+    w.a.files.forget("out", "forgot-02");
+    w.a.records.delete("out:forgot-01");
+    w.a.records.delete("out:forgot-02");
+    w.attach();
+    expect(w.b.files.request("forgot-01")).toBe(true);
+    await until(() => state(w.b, "in", "forgot-01") === "cancelled");
+    expect(w.b.records.get("in:forgot-01")?.error).toBe("Cancelled by the sender");
+    await until(() => w.b.disks.get("forgot-01")!.discarded);
+    w.drop();
+    w.restart("a");
+    w.attach();
+    expect(w.b.files.request("forgot-02")).toBe(true);
+    await until(() => state(w.b, "in", "forgot-02") === "cancelled");
+    await until(() => w.b.disks.get("forgot-02")!.discarded);
+  });
+
+  it("an offer that expired on the sender's side first: accepted then, the receiver hears it ended", async () => {
+    let now = 1_000;
+    const w = wire();
+    w.b.decide = async () => "ask";
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    // Offered while the receiver was away: its week begins when the offer arrives, a day after the sender's.
+    w.drop();
+    send(w, file("week-003", 40 * 1024 * 1024));
+    now += 24 * 60 * 60 * 1000;
+    w.attach();
+    await until(() => state(w.b, "in", "week-003") === "asking");
+    w.drop();
+    now += FILE_LIMITS.offerTtlMs - 24 * 60 * 60 * 1000 + 1;
+    w.a.files.sweep();
+    expect(state(w.a, "out", "week-003")).toBe("failed");
+    w.attach();
+    w.b.files.accept("week-003");
+    await until(() => state(w.b, "in", "week-003") === "cancelled");
+    expect(state(w.a, "out", "week-003")).toBe("failed");
+  });
+
+  it("an offer still asked about that the sender cancelled or deleted while the receiver was away: back, Accept goes", async () => {
+    const w = wire();
+    w.b.decide = async () => "ask";
+    w.attach();
+    for (const id of ["askgone-1", "askgone-2", "askkeep-1"]) send(w, file(id, 40 * 1024 * 1024));
+    await until(() => ["askgone-1", "askgone-2", "askkeep-1"].every((id) => state(w.b, "in", id) === "asking"));
+    w.drop();
+    w.restart("b");
+    w.a.files.cancel("out", "askgone-1");
+    w.a.files.forget("out", "askgone-2");
+    w.attach();
+    await until(() => state(w.b, "in", "askgone-1") === "cancelled" && state(w.b, "in", "askgone-2") === "cancelled");
+    expect(w.b.records.get("in:askgone-2")?.error).toBe("Cancelled by the sender");
+    // One the sender still offers is still asked about, on both sides.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.b.files.get("in", "askkeep-1")?.state).toBe("asking");
+    expect(w.a.files.get("out", "askkeep-1")?.state).toBe("asking");
+  });
+
+  it("an offer that expires on the sender's side first, while the session is open, ends on the receiver's too", async () => {
+    let now = 1_000;
+    const w = wire();
+    w.b.decide = async () => "ask";
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    // Offered while the receiver was away: its week begins when the offer arrives, a day after the sender's.
+    w.drop();
+    send(w, file("week-004", 40 * 1024 * 1024));
+    now += 24 * 60 * 60 * 1000;
+    w.attach();
+    await until(() => state(w.b, "in", "week-004") === "asking");
+    now += FILE_LIMITS.offerTtlMs - 24 * 60 * 60 * 1000 + 1;
+    // While the session is open, the sender's sweep says it.
+    w.a.files.sweep();
+    expect(state(w.a, "out", "week-004")).toBe("failed");
+    await until(() => state(w.b, "in", "week-004") === "cancelled");
+  });
+
+  it("an offer that expired on the sender's side while the receiver was away: back, Accept goes", async () => {
+    let now = 1_000;
+    const w = wire();
+    w.b.decide = async () => "ask";
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    w.drop();
+    send(w, file("week-006", 40 * 1024 * 1024));
+    now += 24 * 60 * 60 * 1000;
+    w.attach();
+    await until(() => state(w.b, "in", "week-006") === "asking");
+    w.drop();
+    now += FILE_LIMITS.offerTtlMs - 24 * 60 * 60 * 1000 + 1;
+    w.a.files.sweep();
+    expect(state(w.a, "out", "week-006")).toBe("failed");
+    w.attach();
+    await until(() => state(w.b, "in", "week-006") === "cancelled");
+  });
+
   it("the sender pauses, then cancels while the receiver is away: back, the receiver hears it ended and drops what it had", async () => {
     const w = wire();
     w.attach();
@@ -493,6 +594,34 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(disk.length).toBe(0);
   });
+
+  for (const when of ["checking there", "away", "offered again"] as const) {
+    it(`a file whose every byte arrived counts as sent whole (${when}): its person's cancel is refused, it ends done on both sides`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const w = wire({ drop: (frame) => when === "offered again" && frame.t === "pf-sum" && w.a.sent.filter((f) => f.t === "pf-sum").length === 1 });
+      const disk = new Disk(false);
+      let release!: () => void;
+      // A large file's digest takes a while to check: the cancel comes meanwhile.
+      disk.checking = new Promise<void>((resolve) => { release = resolve; });
+      w.b.disks.set("whole-01", disk);
+      w.attach();
+      send(w, file("whole-01", 3_000_000));
+      if (when === "offered again") {
+        await until(() => state(w.a, "out", "whole-01") === "verifying");
+        await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
+        expect(state(w.a, "out", "whole-01")).toBe("offered");
+      } else await until(() => state(w.b, "in", "whole-01") === "verifying");
+      if (when === "away") w.drop();
+      // The person's Cancel, as the app takes it.
+      if (!sentWhole(w.a.files.get("out", "whole-01")!)) w.a.files.cancel("out", "whole-01");
+      expect(state(w.a, "out", "whole-01")).not.toBe("cancelled");
+      if (when === "away") w.attach();
+      release();
+      await until(() => state(w.a, "out", "whole-01") === "done" && state(w.b, "in", "whole-01") === "done");
+      expect(disk.discarded).toBe(false);
+      expect(w.a.sent.some((f) => f.t === "pf-abort")).toBe(false);
+    });
+  }
 
   it("a drop mid-way resumes from the receiver's last byte, and nothing is sent twice that arrived", async () => {
     const w = wire();
@@ -1070,6 +1199,24 @@ describe("when a transfer counts as stuck", () => {
   });
   it("waits longer than the automatic offer again, so that goes first", () => {
     expect(FILE_LIMITS.stallMs).toBeGreaterThan(FILE_LIMITS.idleMs);
+  });
+});
+
+describe("when a sent file is too late to cancel", () => {
+  const record = (over: Partial<FileTransferRecord>): FileTransferRecord => ({ id: "whole-02", direction: "out", file: file("whole-02", 1000), state: "active", confirmed: 1000, since: 0, ...over });
+  it.each<[string, Partial<FileTransferRecord>, boolean]>([
+    ["the receiver checks it", { state: "verifying" }, true],
+    ["every byte confirmed, offered again", { state: "offered" }, true],
+    ["every byte confirmed, waiting for a session", { state: "queued" }, true],
+    ["an empty file checked there", { state: "verifying", file: file("whole-02", 0), confirmed: 0 }, true],
+    ["bytes still to go", { confirmed: 999 }, false],
+    ["an empty file not answered yet", { state: "offered", file: file("whole-02", 0), confirmed: 0 }, false],
+    ["the receiver asks about it again", { state: "asking", waitingFor: "consent" }, false],
+    ["paused here", { state: "paused", pausedBy: "me" }, false],
+    ["received", { state: "verifying", direction: "in" }, false],
+    ["done", { state: "done" }, false],
+  ])("%s", (_, over, whole) => {
+    expect(sentWhole(record(over))).toBe(whole);
   });
 });
 

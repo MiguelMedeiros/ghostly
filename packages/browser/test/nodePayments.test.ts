@@ -377,6 +377,16 @@ describe("a reviewed Cashu payment taken back, through the engine", () => {
   });
 });
 
+describe("a pasted token redeemed through the engine", () => {
+  // agents#2255: the UI and the CLI's JSON had only what arrived, never what the mint kept to take the token in.
+  it("answers what arrived and what the mint kept as its fee", async () => {
+    const { node } = track(engine());
+    const redeem = vi.spyOn(node["wallet"], "receiveToken").mockResolvedValue({ amount: 1, mint: TEST_MINT, fee: 2 });
+    expect(await node.walletReceiveToken({ token: " cashuBtoken \n" })).toEqual({ amount: 1, fee: 2 });
+    expect(redeem).toHaveBeenCalledWith("cashuBtoken");
+  });
+});
+
 describe("sending, requesting and asking", () => {
   it("ecash is never held for an away contact; with the contact there it goes to the desk", async () => {
     const { node } = track(engine());

@@ -3,6 +3,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useSavedMessages, useSavedRead } from "../../hooks/useSavedMessages";
 import { getPrefix } from "../../lib/storage";
 import { SavedIcon } from "./SavedIcon";
+import { RailAction } from "../ChatRail";
 
 /**
  * Whether this profile had the way to its saved messages when they were last read: drawn at once from this, so the
@@ -20,7 +21,7 @@ function rememberShown(shown: boolean) {
  * The way to the Saved view, above the chat list (the phone's chat list too): there only while this profile has a
  * saved message, so a profile that never saved one sees no empty place. It says how many there are.
  */
-export function SidebarSaved({ active, onOpen }: { active: boolean; onOpen: () => void }) {
+export function SidebarSaved({ active, onOpen, rail }: { active: boolean; onOpen: () => void; rail?: boolean }) {
   const { t } = useI18n();
   const saved = useSavedMessages();
   const read = useSavedRead();
@@ -28,6 +29,12 @@ export function SidebarSaved({ active, onOpen }: { active: boolean; onOpen: () =
   const shown = read ? saved.length > 0 : before;
   useEffect(() => { if (read) rememberShown(shown); }, [read, shown]);
   if (!shown) return null;
+  // The list folded to a rail: the same way as an icon, its count in the name.
+  if (rail) return (
+    <RailAction testId="rail-saved" label={read ? t("saved.rowLabel", { count: saved.length }) : t("saved.title")} title={t("saved.title")} active={active} onClick={onOpen}>
+      <SavedIcon size={18} />
+    </RailAction>
+  );
   return (
     <div className="px-3 pb-2 bg-sidebar-bg">
       <button type="button" data-testid="sidebar-saved" onClick={onOpen} aria-label={read ? t("saved.rowLabel", { count: saved.length }) : t("saved.title")} aria-current={active ? "page" : undefined}

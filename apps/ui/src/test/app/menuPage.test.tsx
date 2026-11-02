@@ -37,6 +37,14 @@ it("shows a page once its file has loaded, with nothing in its place meanwhile",
   expect(screen.queryByTestId("page-not-loaded")).not.toBeInTheDocument();
 });
 
+it("a page whose file is quick to come shows as it comes, not after React's 300 ms wait to reveal a suspended page", async () => {
+  const Page = menuPage(() => Promise.resolve<ComponentType>(Settings));
+  const opened = performance.now();
+  renderApp(app(Page));
+  expect(await screen.findByRole("heading", { name: "Settings" }, { interval: 5 })).toBeInTheDocument();
+  expect(performance.now() - opened).toBeLessThan(150);
+});
+
 it("a page whose file did not load says so in its place, and the rest of the app stays", async () => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   const warned = vi.spyOn(console, "warn").mockImplementation(() => {});

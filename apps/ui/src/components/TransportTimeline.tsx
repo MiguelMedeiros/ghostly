@@ -59,7 +59,7 @@ const HISTORY_SHOWN = 20;
  * The connection panel's "Connection history": every event of the chat's connection, newest first, including
  * what the timeline leaves out (drops it came back from, restarts, failed attempts, round trips).
  */
-export function ConnectionHistory({ events, contact }: { events: readonly TransportEvent[]; contact: string }) {
+export function ConnectionHistory({ events, contact }: { events: readonly TransportEvent[]; contact: string | undefined }) {
   const [all, setAll] = useState(false);
   const { t, language } = useI18n();
   const newest = [...events].reverse(), shown = all ? newest : newest.slice(0, HISTORY_SHOWN);

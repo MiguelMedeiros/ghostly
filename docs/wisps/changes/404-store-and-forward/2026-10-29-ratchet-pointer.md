@@ -1,0 +1,1 @@
+The note that holding has no forward secrecy now points at the draft [4xx · Forward Secrecy](../../4xx-ratchet.md), which proposes keys used once for item bundles (version 2); the manifest and pointer stay as they are. No wire change here.

@@ -19,6 +19,12 @@ const others = LANGUAGES.filter((l) => l !== "en");
 const placeholders = (text: string) => [...new Set(text.match(/\{\{\w+\}\}/g) ?? [])];
 /** The English key a plural form (`chat.forward.messages_two`) is said for, or undefined. */
 const pluralBase = (key: string) => /^(.+)_(zero|one|two|few|many|other)$/.exec(key)?.[1];
+/**
+ * English keys that are not a plural form of another one. A form (`apps.store.count_one`) is checked against its
+ * key instead, as every language's forms are: Arabic's one reads "تطبيق واحد" without the English "{{count}} app"'s
+ * number, and French's one, said for 0 too, needs it.
+ */
+const ownKeys = () => [...en].filter(([key]) => !en.has(pluralBase(key) ?? ""));
 
 const LOCALE_DIR = join(fileURLToPath(import.meta.url), "../../../locales");
 const areaFiles = (language: string) => readdirSync(join(LOCALE_DIR, language)).filter((f) => f.endsWith(".json")).sort();
@@ -60,7 +66,7 @@ describe("every locale has the same keys as English", () => {
   });
 
   it.each(others)("%s keeps every {{placeholder}} of the English text", (language) => {
-    const lost = [...en].flatMap(([key, text]) => {
+    const lost = ownKeys().flatMap(([key, text]) => {
       const translation = lookup(language, key);
       if (translation === undefined) return [];
       return placeholders(text as string).filter((p) => !translation.includes(p)).map((p) => `${key} ${p}`);
@@ -79,7 +85,7 @@ describe("every locale has the same keys as English", () => {
 
   it.each(others)("%s adds no {{placeholder}} English does not fill", (language) => {
     // `t()` only fills the params the English text was written for; a new one would show up raw.
-    const unknown = [...en].flatMap(([key, text]) => {
+    const unknown = ownKeys().flatMap(([key, text]) => {
       const translation = lookup(language, key);
       if (translation === undefined) return [];
       return placeholders(translation).filter((p) => !(text as string).includes(p)).map((p) => `${key} ${p}`);

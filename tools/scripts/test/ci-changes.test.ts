@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, supersededBy, testedAs } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -70,12 +70,57 @@ describe("the packages gate", () => {
   });
 });
 
+describe("the Rust gate", () => {
+  it("covers every repository file and folder the crates' code names by include_str!, include_bytes! or CARGO_MANIFEST_DIR", () => {
+    // include_str!/include_bytes! name a path from the file's own folder; env!("CARGO_MANIFEST_DIR") one from the
+    // crate's, joined (`.join("…")`), concatenated (`concat!(env!(…), "/…")`) or formatted (`format!("{}/…", env!(…))`).
+    const named: { file: string; path: string }[] = [];
+    for (const crate of ["apps/desktop", "native/transports"]) {
+      const walk = (dir: string) => {
+        for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+          if (["target", "node_modules", "native-runtime", "gen"].includes(entry.name)) continue;
+          const path = `${dir}/${entry.name}`;
+          if (entry.isDirectory()) walk(path);
+          else if (entry.name.endsWith(".rs")) {
+            const source = readFileSync(join(root, path), "utf8");
+            for (const m of source.matchAll(/include_(?:str|bytes)!\(\s*"([^"]+)"/g)) named.push({ file: path, path: posix.join(posix.dirname(path), m[1]) });
+            for (const m of source.matchAll(/env!\("CARGO_MANIFEST_DIR"\)(?:\s*\)\s*\.join\(\s*"([^"]*)"|\s*,\s*"([^"]*)")?/g)) named.push({ file: path, path: posix.join(crate, m[1] ?? m[2] ?? "") });
+            for (const m of source.matchAll(/"\{\}([^"]*)",\s*env!\("CARGO_MANIFEST_DIR"\)/g)) named.push({ file: path, path: posix.join(crate, m[1].replace(/\{.*$/, "")) });
+          }
+        }
+      };
+      walk(crate);
+    }
+    expect(named.map((n) => n.path)).toEqual(
+      expect.arrayContaining(["apps/web/public/app-frame.html", "packages/core/src/miniApp.ts", "native/translation/package.json", "native/translation/dist", "native/transports/hyperdht", "Cargo.lock", "packages/core/test/vectors/turn-record.json"]),
+    );
+    for (const { file, path } of named) {
+      const isFile = (() => { try { return statSync(join(root, path)).isFile(); } catch { return false; } })();
+      expect(covers(RUST_INPUTS, isFile ? path : `${path}/any`), `${file} names ${path}`).toBe(true);
+    }
+  });
+
+  it("a ready pull request runs Tauri Backend only when it changes something the job reads", () => {
+    const ready = { draft: false };
+    for (const file of ["apps/ui/src/App.tsx", "packages/core/src/invite.ts", "docs/TESTING.md", "native/README.md", "tools/scripts/merge-train.mjs"]) expect(plan([file], ready).rust, file).toBe(false);
+    for (const file of ["apps/desktop/src/clipboard.rs", "native/transports/src/lib.rs", "Cargo.lock", "Cargo.toml", "apps/web/public/app-frame.html", "packages/core/src/miniApp.ts", "native/translation/protocol.mjs", "packages/core/test/vectors/turn-record.json", ".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]) {
+      expect(plan(["apps/ui/src/App.tsx", file], ready).rust, file).toBe(true);
+    }
+    expect(plan(["apps/ui/src/App.tsx"], ready).why).toContain("Nothing the Rust job reads changed: Tauri Backend skipped");
+  });
+
+  it("a draft runs it for what the crates read, but not for a change to the workflow alone", () => {
+    expect(plan(["packages/core/src/miniApp.ts"], { draft: true }).rust).toBe(true);
+    expect(plan([".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"], { draft: true }).rust).toBe(false);
+  });
+});
+
 describe("plan", () => {
   const ready = { draft: false };
   const draft = { draft: true };
 
-  it("an app change skips the website and runs the Desktop jobs", () => {
-    expect(plan(["apps/ui/src/components/ChatRow.tsx", "packages/browser/src/engine.ts"], ready)).toMatchObject({ rust: true, website: false, app: true });
+  it("an app change skips the website and Tauri Backend, and runs the Desktop jobs", () => {
+    expect(plan(["apps/ui/src/components/ChatRow.tsx", "packages/browser/src/engine.ts"], ready)).toMatchObject({ rust: false, website: false, app: true });
   });
 
   it("a site change runs the website and skips the Desktop jobs", () => {
@@ -93,7 +138,7 @@ describe("plan", () => {
   });
 
   it("a ready pull request runs the full tier, whatever it changes", () => {
-    expect(plan(["apps/ui/src/App.tsx"], ready)).toMatchObject({ rust: true, full: true, affected: false, packages: true, app: true });
+    expect(plan(["apps/ui/src/App.tsx"], ready)).toMatchObject({ rust: false, full: true, affected: false, packages: true, app: true });
     expect(plan([".github/workflows/ci.yml"], ready)).toMatchObject({ rust: true, website: true, website_e2e: true, app: true, packages: true, full: true, affected: false });
   });
 
@@ -104,9 +149,10 @@ describe("plan", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft)).toMatchObject({ ...fast, rust: false, website: false });
   });
 
-  it("only a draft skips the Rust jobs, unless it changed Rust", () => {
+  it("draft or ready, the Rust jobs run only when Rust changed", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft).rust).toBe(false);
-    expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(true);
+    expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(false);
+    expect(plan(["apps/desktop/src/lib.rs"], ready).rust).toBe(true);
     expect(plan(["apps/desktop/src/lib.rs"], draft).rust).toBe(true);
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
   });
@@ -132,11 +178,44 @@ describe("plan", () => {
 
 describe("a push to dev whose tree a pull request already tested", () => {
   it("runs only Tauri Backend, which saves the Cargo cache, and CI Success accepts that plan", () => {
-    expect(plan(null, { draft: false, tested: true })).toMatchObject({ rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
+    expect(plan(null, { draft: false, tested: true })).toMatchObject({ lint: false, rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
     expect(plan(null, { draft: false }).tested).toBe(false);
     const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
     expect(ci).toContain('if [[ "$DRAFT" != "true" && "$TESTED" != "true" && ( "$FULL" != "true"');
     expect(ci).toContain('if [[ "$TESTED" == "true" && "$PUSH_TO_DEV" != "true" ]]; then');
+  });
+
+  // agents#1830: lint and types ran again on a tree they had passed (2 to 3.5 min), and Tauri Backend built and tested
+  // it (3 to 4 min) to save a Cargo cache that was already there on 29 of 33 pushes.
+  it("skips lint and types, and Tauri Backend stops at the cache lookup when dev's Cargo cache for its key is saved", () => {
+    expect(plan(null, { draft: false }).lint).toBe(true);
+    expect(plan(null, { draft: true }).lint).toBe(true);
+    expect(plan(["docs/A.md"], { draft: false }).lint).toBe(true);
+    expect(plan(null, { draft: false, superseded: true }).lint).toBe(false);
+    const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+    const job = (id: string) => ci.match(new RegExp(`^  ${id}:\n[\\s\\S]*?(?=^  [\\w-]+:\n|(?![\\s\\S]))`, "m"))?.[0] ?? "";
+    expect(job("changes")).toContain("lint: ${{ steps.plan.outputs.lint }}");
+    expect(job("frontend-checks")).toMatch(/^ {4}needs: changes\n {4}if: needs\.changes\.outputs\.lint == 'true'$/m);
+    expect(job("ci-success")).toContain("LINT: ${{ needs.changes.outputs.lint }}");
+    expect(job("ci-success")).toContain('! ok "$FRONTEND_CHECKS" "$LINT"');
+
+    const steps = job("tauri").split(/^(?= {6}- name: )/m).slice(1);
+    const named = (name: string) => steps.findIndex((s) => s.startsWith(`      - name: ${name}\n`));
+    const lookup = steps[named("Is the Cargo cache saved already")] ?? "";
+    // Only on a tested push, the exact key Restore Cargo and Save Cargo use, and no download.
+    expect(lookup).toContain("if: needs.changes.outputs.tested == 'true'");
+    expect(lookup).toContain("lookup-only: true");
+    expect(lookup).toContain("key: ${{ steps.cargo-key.outputs.key }}");
+    expect(lookup).not.toContain("restore-keys");
+    expect(steps[named("Restore Cargo")]).toContain("key: ${{ steps.cargo-key.outputs.key }}");
+    expect(steps[named("Save Cargo")]).toContain("key: ${{ steps.cargo-cache.outputs.cache-primary-key }}");
+    // Every step from Restore Cargo to the last test is off on a hit; pruning and saving already need the tests to pass.
+    const from = named("Restore Cargo");
+    const to = named("Test (native/transports)");
+    expect(from).toBeGreaterThan(named("Is the Cargo cache saved already"));
+    expect(to).toBeGreaterThan(from);
+    for (const step of steps.slice(from, to + 1)) expect(step).toMatch(/^ {8}if: steps\.cargo-saved\.outputs\.cache-hit != 'true'( &&.*)?$/m);
+    expect(steps[named("Keep only what this build used in the saved Cargo cache")]).toContain("steps.test.outcome == 'success'");
   });
 
   // dev's new commit, its tree, and the batch's head that holds that tree (tested at 20:54, landed at 21:01).
@@ -362,5 +441,77 @@ describe("a push to dev that dev already moved past", () => {
   it("says in its plan why it skips, apart from a tested tree", () => {
     expect(plan(null, { draft: false, superseded: true }).why[0]).toContain("dev already moved past this commit");
     expect(plan(null, { draft: false, tested: true }).why[0]).toContain("This tree already passed CI Success");
+  });
+});
+
+// "Open as draft, `gh pr ready` seconds later": the draft event's run plans after the pull request left draft. Leaving
+// draft's run cancels nothing (ci.yml's concurrency) and waits behind it, so this run stays the fast tier.
+describe("a draft run whose pull request left draft after its event", () => {
+  const sha = "4".repeat(40);
+  const repo = "o/r";
+  const own = 500;
+  const ciRun = (over: object = {}) => ({
+    id: 501,
+    head_sha: sha,
+    status: "queued",
+    path: ".github/workflows/ci.yml",
+    head_repository: { full_name: repo },
+    pull_requests: [{ number: 7 }],
+    html_url: "https://github.com/o/r/actions/runs/501",
+    ...over,
+  });
+  const fake = (...reads: object[][]) => {
+    const asked: string[] = [];
+    let settled = 0;
+    const api = async (path: string) => {
+      asked.push(path);
+      if (path.startsWith("actions/workflows/ci.yml/runs?")) return { workflow_runs: reads[Math.min(asked.length - 1, reads.length - 1)] };
+      throw new Error(path);
+    };
+    const settle = async () => {
+      settled++;
+    };
+    return { api, asked, settle, settled: () => settled };
+  };
+  const self = ciRun({ id: own, status: "in_progress", html_url: "https://github.com/o/r/actions/runs/500" });
+
+  it("plans the fast tier when leaving draft's run waits behind it on the same head", async () => {
+    const { api, asked, settle, settled } = fake([self, ciRun()]);
+    expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe("https://github.com/o/r/actions/runs/501");
+    expect(asked).toEqual([`actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`]);
+    expect(settled()).toBe(0);
+  });
+
+  it("asks once more after settling when leaving draft's run does not exist yet", async () => {
+    const { api, settle, settled } = fake([self], [self, ciRun()]);
+    expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe("https://github.com/o/r/actions/runs/501");
+    expect(settled()).toBe(1);
+  });
+
+  it("runs everything when a run on this head is older: GitHub created leaving draft's first, and this one cancelled it", async () => {
+    const { api, settle, settled } = fake([self, ciRun({ id: 499, status: "completed" })]);
+    expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
+    expect(settled()).toBe(0);
+  });
+
+  it("runs everything when no run waits behind it (a rerun of an old draft run, a ready left by a token that starts no workflow)", async () => {
+    for (const runs of [[self], [self, ciRun({ status: "completed" })]]) {
+      const { api, settle, settled } = fake(runs);
+      expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
+      expect(settled()).toBe(1);
+    }
+  });
+
+  it("counts only this repository's ci.yml runs of this pull request on this head", async () => {
+    for (const other of [
+      ciRun({ head_sha: "5".repeat(40) }),
+      ciRun({ path: ".github/workflows/other.yml" }),
+      ciRun({ head_repository: { full_name: "fork/r" } }),
+      ciRun({ pull_requests: [{ number: 8 }] }),
+      ciRun({ pull_requests: [] }),
+    ]) {
+      const { api, settle } = fake([self, other]);
+      expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
+    }
   });
 });

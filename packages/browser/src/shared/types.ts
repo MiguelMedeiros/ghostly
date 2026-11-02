@@ -10,7 +10,7 @@ import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinSer
 import type { Removal } from "../engine/removals";
 import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
-import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind, RatchetState } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { BackupReminders } from "./backupReminder";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
@@ -37,6 +37,11 @@ export interface StoredLink {
   wakeMuted?: boolean;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
+  /**
+   * Paired 1:1 chats: the ratchet of the DHT floor and held items (WISP 4xx). State of this device only: never in a
+   * backup or a handoff (`profileBackup.ts`), and dropped by a forced takeover (`raisedLink`).
+   */
+  ratchetState?: RatchetState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
   capsState?: CapsState;
   publicProfiles?: PublicProfile[];
@@ -293,6 +298,15 @@ export interface GroupEdgeView {
    * again); `other`, anything else (a refused key, no common transport...).
    */
   cause?: GroupEdgeCause;
+  /**
+   * Down after it was live (in this run, or when the app last ran), for nothing the app can't get past: the app dials it
+   * again by itself, at WISP 100's background pace, while the member is seen.
+   */
+  reconnecting?: true;
+  /** When this side dials again by itself, in ms: set while it is the side that dials and its wait between attempts runs. */
+  retryAt?: number;
+  /** Automatic dials since the edge was last live or its wait started over, the one under way included. */
+  attempt?: number;
 }
 
 export type GroupEdgeCause = "relays" | "session" | "other";
@@ -394,6 +408,11 @@ export interface HeldEntry {
   expires: number;
   state: "queued" | "held" | "failed";
   error?: string;
+  /**
+   * The chat's ratchet session it was last sealed in (WISP 4xx), when ratcheted: once the ratchet seals in another one (the
+   * contact moved to another device or restored), it is sealed again there. Absent: plain, or sealed by an older build.
+   */
+  sid?: string;
 }
 
 /** Everything store-and-forward keeps per chat: the switch, what the contact said, sequences and the outbox. */

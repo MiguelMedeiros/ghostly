@@ -102,12 +102,12 @@ describe("files in a private group of three daemons", { timeout: 480_000 }, () =
     writeFileSync(minutes, randomBytes(50_000));
     ok(await as(alice, "file", "send", group, minutes, "--name", "minutes.bin"));
     const waiting = (await until("carol hears of it", () => files(carol, group), (l) => l.length === 3))[2];
-    expect(waiting.transfer).toMatchObject({ state: "transferring", stage: "asking" });
+    expect(waiting.transfer).toMatchObject({ state: "transferring", stage: "asking", waitingFor: "me" });
     const offered = await until("file.offered", async () => (ok(await as(carol, "events")).events as { type: string; file?: string }[]).filter((e) => e.type === "file.offered"), (e) => e.length > 0);
     expect(offered.map((e) => e.file)).toEqual([waiting.file.id]);
     await running.get(carol)!.stop();
     await up(carol);
-    expect((await files(carol, group))[2].transfer).toMatchObject({ state: "transferring", stage: "asking" });
+    expect((await files(carol, group))[2].transfer).toMatchObject({ state: "transferring", stage: "asking", waitingFor: "me" });
     ok(await as(carol, "file", "accept", waiting.file.id));
     await until("carol has it", () => files(carol, group), (l) => l[2]?.transfer?.state === "done");
     expect(sha(ok(await as(carol, "file", "save", waiting.file.id, "--path", join(carol, "minutes.bin"))).path as string)).toBe(sha(minutes));

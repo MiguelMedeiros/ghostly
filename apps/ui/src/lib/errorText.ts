@@ -281,6 +281,7 @@ const RULES: readonly Rule[] = [
   exact("Add a mint in Settings first", "errors.cashu.addMint"),
   exact("Not enough sats in your wallet", "errors.cashu.notEnough"),
   { match: /^Not enough sats in your wallet: (?<amount>\d[\d.,\s']*?) sats leave room for the fee$/, key: "errors.cashu.notEnoughForFee", params: ({ amount }, t) => ({ amount: sats(amount, t) }) },
+  exact("None of your mints can pay an invoice with no amount", "errors.cashu.mintsNoAnyAmount", "errors.cashu.mintsNoAnyAmountNext"),
   exact("This invoice is already being paid", "errors.cashu.alreadyPaying"),
   exact("A Lightning payment from this wallet is still in flight: wait for it to settle, then remove the wallet.", "errors.cashu.inFlight", "errors.cashu.inFlightNext"),
   // A failed payment and what came back: "<why> The sats are back in your wallet[, less N sats the mint kept as its fee]."
@@ -502,6 +503,9 @@ const RULES: readonly Rule[] = [
   { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
   exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
   { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
+  // Sealed in the ratchet session the device this profile was on before shares with the contact (WISP 4xx § Held items): it
+  // waits for the contact's app to seal it again, not for anything this device retries. Before the general pick-up rule.
+  exact("Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", "errors.hold.sealedBefore", "errors.hold.sealedBeforeNext"),
   { match: /^Could not pick up held items: [\s\S]+$/, key: "errors.hold.pickUpFailed", next: "errors.hold.retryingNext", detail: true },
   { match: /^Refused a held item from the contact: [\s\S]+$/, key: "errors.hold.refusedItem", detail: true },
   { match: /^Picked up, but could not acknowledge: [\s\S]+$/, key: "errors.hold.ackFailed", detail: true },
@@ -605,10 +609,20 @@ const RULES: readonly Rule[] = [
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
   { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
-  // An Iroh, push or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts, nostr/relay.ts):
-  // the address typed stays in the line, which has no ⓘ.
+  // An Iroh, push, Pkarr or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts,
+  // packages/core/src/relay.ts, nostr/relay.ts): the address typed stays in the line, which has no ⓘ. A Pkarr relay
+  // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
-  { match: /^Not a relay address: (?<address>\S+)$/, key: "errors.relays.notAddress" },
+  { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
+  // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
+  { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
+  exact("Use a wss:// relay address", "errors.relays.useWss"),
+  exact("Leave the user and password out of the address", "errors.relays.noLogin"),
+  exact("Use at most four Iroh relays", "errors.relays.irohAtMost"),
+  exact("Enter the TURN server address", "errors.turn.enterAddress"),
+  { match: /^“(?<address>\S+)” is not a TURN or STUN address \(turn:host:port\)$/, key: "errors.turn.notAddress" },
+  exact("A TURN server needs its username and credential", "errors.turn.needsLogin"),
   // A read that no Nostr relay answered: offline, or the relays blocked (engine/nostrSocial.ts, profiles/activity.ts, readers.ts).
   exact("No relay answered", "errors.relays.noneAnswered", "errors.relays.noneAnsweredNext"),
   exact("Choose a picture", "errors.picture.choose"),
@@ -656,6 +670,8 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   parkedSigned: "errors.engine.parkedSigned",
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
   ecashBeingReceived: "errors.engine.ecashBeingReceived",
+  ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
+  lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
@@ -685,6 +701,7 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",
+  lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
@@ -693,6 +710,8 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   sentAfterReview: "errors.engine.sentAfterReviewNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
+/** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 
@@ -773,7 +792,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const amount = (value: string) => { const digits = value.replace(/\D/g, ""); return digits ? formatAmount(Number(digits), t.language ?? "en") : value; };
     const values = Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value]));
     const next = ENGINE_NEXT[known.code];
-    return { title: t(key, values), ...(next && { next: t(next, values) }) };
+    return { title: t(key, values), ...(next && { next: t(next, values) }), ...(ENGINE_DETAIL.has(known.code) && { detail: raw }) };
   }
   return null;
 }

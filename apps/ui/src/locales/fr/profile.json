@@ -108,6 +108,7 @@
     "backupFirst": "Téléchargez d’abord une sauvegarde",
     "backupPassphrase": "Phrase secrète de la sauvegarde",
     "cashuSats": "{{amount}} sats en Cashu",
+    "cashuSats_one": "{{amount}} sat en Cashu",
     "confirmLabel": "Tapez le nom du profil pour confirmer",
     "confirmPlaceholder": "Tapez {{name}}",
     "deleting": "Suppression…",
@@ -144,5 +145,6 @@
   "restoredTag": "Restauré",
   "restoredTagHint": "Récupéré depuis une sauvegarde",
   "sats": "{{amount}} sats",
+  "sats_one": "{{amount}} sat",
   "switch": "Basculer"
 }

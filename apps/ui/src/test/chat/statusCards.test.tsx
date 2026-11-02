@@ -5,7 +5,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { RoutineStack } from "../../components/chat/RoutineCard";
 import { TasksButton } from "../../components/chat/TasksButton";
 import { jumpToMessage, messageSnippet, quoteFor, replyIndex } from "../../lib/replies";
-import { activeTaskCount, cardEntries, durationIn, goingCardCount, panelModel, routineStacks, routineSummary, taskElapsed, type CardRow } from "../../lib/statusCards";
+import { activeTaskCount, cardEntries, durationIn, goingCardCount, panelModel, routineStacks, routineStacksReader, routineSummary, taskElapsed, type CardRow } from "../../lib/statusCards";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
 
@@ -617,6 +617,49 @@ describe("routines in a row in the chat", () => {
     ];
     const stacks = routineStacks(rows, m => m);
     expect([...stacks].map(([first, run]) => [first, run.map(m => m.id)])).toEqual([["a1", ["a1", "a2", "a3"]], ["c1", ["c1", "c2", "c3", "c4"]]]);
+  });
+
+  it("are read as a chat's list changes from the rows that changed, the runs before them kept", () => {
+    const reads = { n: 0 };
+    const read = routineStacksReader<ReturnType<typeof msg>, ReturnType<typeof msg>>(m => { reads.n++; return m; });
+    // A long chat, a run of 4 routines from one bot every 10 rows, and a run still going at its end.
+    const rows = Array.from({ length: 1_000 }, (_, i) => i % 10 < 4 || i >= 996 ? msg(`m${i}`, r(`${i}`)) : msg(`m${i}`, undefined));
+    const first = read(rows);
+    expect(first.size).toBe(101);
+    reads.n = 0;
+    // A routine comes: it goes on the run at the end, which is read again from its start, and nothing before it.
+    const list = [...rows, msg("new", r("new"))];
+    const stacks = read(list);
+    // Back over the run and the row before it, then the run and the new row: the whole list was 1,001.
+    expect(reads.n).toBeLessThan(15);
+    expect(stacks).toEqual(routineStacks(list, m => m));
+    expect(stacks.get("m996")!.map(m => m.id)).toEqual(["m996", "m997", "m998", "m999", "new"]);
+    expect(stacks.get("m0")).toBe(first.get("m0"));
+    expect(read(list)).toBe(stacks);
+  });
+
+  it("read as a chat's list changes, are what routineStacks finds, whatever happens to the list", () => {
+    // A small generator with a fixed seed: the same lists on every run.
+    let seed = 5;
+    const pick = (n: number) => { seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648; return seed % n; };
+    const read = routineStacksReader<ReturnType<typeof msg>, ReturnType<typeof msg>>(m => m);
+    let list: ReturnType<typeof msg>[] = [], next = 0;
+    const steps: (() => void)[] = [
+      // A routine from one of two bots, a task, a text.
+      () => { list = [...list, msg(`m${next}`, r(`${next++}`), pick(4) ? "z" : "o")]; },
+      () => { list = [...list, msg(`m${next}`, r(`${next++}`), "z")]; },
+      () => { list = [...list, msg(`m${next++}`, card())]; },
+      () => { list = [...list, msg(`m${next++}`, undefined)]; },
+      // The newest rows handed out anew, or one deleted.
+      () => { list = [...list.slice(0, -3), ...list.slice(-3).map(m => ({ ...m }))]; },
+      () => { list = list.filter((_, i) => i !== pick(list.length || 1)); },
+    ];
+    for (let k = 0; k < 800; k++) {
+      steps[pick(steps.length)]();
+      const found = (stacks: Map<string, ReturnType<typeof msg>[]>) => [...stacks].map(([first, run]) => [first, run.map(m => m.id)]);
+      expect(found(read(list)), `step ${k}`).toEqual(found(routineStacks(list, m => m)));
+    }
+    expect(list.length).toBeGreaterThan(50);
   });
 
   const Stack = ({ n }: { n: number }) => {

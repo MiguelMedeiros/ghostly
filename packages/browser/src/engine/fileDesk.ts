@@ -4,6 +4,7 @@ import {
   claimedTime,
   fileMessageText,
   randomBytes,
+  sentWhole,
   toBase64Url,
   transferEnded,
   transferStalled,
@@ -299,7 +300,8 @@ export class FileDesk {
       case "decline": if (!out) chat.files.decline(wireId); break;
       case "pause": chat.files.pause(direction, wireId); break;
       case "resume": chat.files.resume(direction, wireId); break;
-      case "cancel": chat.files.cancel(direction, wireId); break;
+      // Arrived whole: too late to cancel, it ends done on both sides (the bubble shows no Cancel then).
+      case "cancel": if (!sentWhole(record)) chat.files.cancel(direction, wireId); break;
       case "retry": if (out) chat.files.retry(wireId); break;
       case "resend": case "request": {
         if ((action === "resend") !== out) throw new Error(out ? "A file you sent is sent again, not asked for" : "A file you receive is asked for again, not sent");

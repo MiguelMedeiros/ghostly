@@ -285,10 +285,39 @@ export function playSound(name: SoundName, { kind }: { kind?: SoundKind } = {}):
   return stop;
 }
 
+/** How often a ringing call's sound starts again. */
+const RING_EVERY_MS = 3500;
+
+/**
+ * Pages that ring at once ring as one: the extension's tabs share one engine, and a call rang in each of them, out of
+ * step. The page holding this lock (one per sound) plays it; the others wait, and the next takes over if that page goes.
+ * Only a page that can sound asks for it (its audio started by a gesture, sounds on): one that cannot would hold the ring
+ * silent. Without Web Locks, each page rings, as before.
+ */
+const RING_LOCK = "ghostly-ring:";
+
 export function startRinging(kind: "ring" | "ringback"): () => void {
   ringing++;
-  let stop=playSound(kind);
-  const timer=setInterval(()=>{stop();stop=playSound(kind);},3500);
-  let done=false;
-  return ()=>{if(done)return;done=true;ringing--;clearInterval(timer);stop();idleLater();};
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  let mine = !locks, asked = false, done = false;
+  let stop = () => {}, letGo = () => {};
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const tick = () => {
+    stop();
+    stop = () => {};
+    if (mine) { stop = playSound(kind); return; }
+    // A page that could not sound yet asks again at its next ring: a gesture may have started its audio meanwhile.
+    if (asked || !locks || !context || !unlocked || !loadSettings().notifications.soundEnabled) return;
+    asked = true;
+    void locks.request(RING_LOCK + kind, () => {
+      if (done) return;
+      mine = true;
+      loop();
+      return new Promise<void>((resolve) => { letGo = resolve; });
+    }).catch(() => { if (!done) { mine = true; loop(); } });
+  };
+  // From the first ring on: a page that takes over mid-way starts its own, not one cut short by the next.
+  const loop = () => { clearInterval(timer); tick(); timer = setInterval(tick, RING_EVERY_MS); };
+  loop();
+  return ()=>{if(done)return;done=true;ringing--;clearInterval(timer);stop();letGo();idleLater();};
 }

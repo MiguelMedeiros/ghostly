@@ -185,6 +185,16 @@ const FINAL: ReadonlySet<TransferState> = new Set(["done", "failed", "declined",
 export const transferEnded = (record: FileTransferRecord): boolean => FINAL.has(record.state);
 
 /**
+ * Whether a file sent from here arrived whole (the receiver confirmed every byte, and may be checking it): too late
+ * for its person to cancel. The receiver's check comes before a `pf-abort` behind it, so it would keep the file while
+ * the sender said it was cancelled. Not once the receiver asks about it again (`asking`), nor paused here.
+ */
+export function sentWhole(record: FileTransferRecord): boolean {
+  if (record.direction !== "out" || transferEnded(record)) return false;
+  return record.state === "verifying" || (record.file.size > 0 && record.confirmed === record.file.size && record.state !== "asking" && record.state !== "paused");
+}
+
+/**
  * Whether an unfinished transfer is stuck, so its person is offered to push it: "Send again" (sending) or "Ask again"
  * (receiving). `movedAt` is when its bytes last moved, `restored` that it has not moved since the app started. What
  * waits for a person (an answer, a pause) is not stuck, and a failed one has its own "Retry".
@@ -640,6 +650,9 @@ export class ChatFiles {
       // Paused there: a sender that cancelled it meanwhile no longer offers it, and asked, ends it (`pf-abort`). One
       // that still has it paused answers with its paused offer, and nothing moves.
       else if (entry.record.state === "paused" && entry.record.pausedBy === "peer") this.send({ t: "pf-accept", id: entry.record.id, offset: entry.in!.written });
+      // Still asked about here: a sender that cancelled, deleted or let it expire meanwhile no longer offers it, and asked,
+      // ends it (`pf-abort`), so Accept is not shown for a file that will never come. One that still offers it waits.
+      else if (entry.record.state === "asking") this.send({ t: "pf-wait", id: entry.record.id, why: "consent" });
     }
   }
 
@@ -669,7 +682,8 @@ export class ChatFiles {
       if (!["queued", "offered", "asking"].includes(record.state) || record.since + FILE_LIMITS.offerTtlMs > now) continue;
       if (record.direction === "in" && record.state === "queued" && (entry.in?.starting || this.moved(entry) > 0)) continue;
       this.end(entry, "failed", record.direction === "in" ? "The offer expired" : record.state === "queued" ? "Not delivered in time" : "Not accepted in time");
-      if (record.direction === "in") this.send({ t: "pf-refuse", id: record.id, why: "expired" });
+      // Ended here, it ends there too: the receiver's week began when the offer arrived, later, and it still showed Accept.
+      this.send(record.direction === "in" ? { t: "pf-refuse", id: record.id, why: "expired" } : { t: "pf-abort", id: record.id });
     }
   }
 
@@ -1156,7 +1170,10 @@ export class ChatFiles {
       return;
     }
     if (!outgoing || transferEnded(outgoing.record)) {
-      if (outgoing?.record.state === "cancelled" && frame.t !== "pf-refuse") this.send({ t: "pf-abort", id });
+      // Asked about a file this side does not send any more (deleted with its message, expired or failed while the
+      // receiver was away): it hears so, and ends it. Unanswered, it stayed under way there for good, its bytes kept.
+      const asked = frame.t === "pf-accept" || frame.t === "pf-wait";
+      if (outgoing?.record.state === "cancelled" ? frame.t !== "pf-refuse" : asked && outgoing?.record.state !== "done") this.send({ t: "pf-abort", id });
       return;
     }
     const { record } = outgoing, out = outgoing.out!;

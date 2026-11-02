@@ -35,7 +35,8 @@ const name = transportName;
 /** What the connection's label says, before it is put in words: the icon's kind is read from it, not from the words. */
 type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" | "dhtByYou" | "dhtByContact" | "switching" | "dhtWaiting"
   | "waiting" | "onDht" | "connected" | "confirm" | "pairing" | "noContact" | "waitingContact" | "connecting";
-
+/** Labels said aloud even while the pairing scene speaks for the connection: troubles of its own the scene does not tell. */
+const SAID_BESIDE_SCENE = new Set<LabelState>(["offline", "issue", "publication", "discovery"]);
 
 /**
  * The chat's one connection control, beside the call buttons: an icon, by shape before colour (the transport's own
@@ -56,7 +57,7 @@ type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" |
  * While a call is on in the chat (`callOn`), DHT only is off, with why: it closes the live link the call's hang-up
  * crosses, and the call would talk on with no way to end it from either side.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "", phone, callOn = false }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, scene = false, testIdPrefix = "", phone, callOn = false }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
@@ -65,6 +66,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   status?: string;
   /** A first pairing not live yet (`usePairingProgress`), and how to bring its scene into view, while there is one. */
   pairing?: { progress: PairingProgressState; onShow?(): void };
+  /** The pairing scene is in the chat, its "connected" moment included: it says each step aloud, so the label does not. */
+  scene?: boolean;
   /** Before its control's test ids, where a second copy is on screen (a mini-app's header: `app-`), so the chat's stay unique. */
   testIdPrefix?: string;
   /** A phone's header: as large as the call and ⋮ beside it. */
@@ -102,13 +105,16 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
   const clock = (at: number) => clockTime(at, language);
-  const contact = link?.peerNick || t("pairing.contact");
+  // The contact's name; none when they shared none, and the Details text then says "your contact" in sentences of its
+  // own: a fallback name dropped into a sentence read "No attempt of Your contact's", "L'app di Il tuo contatto".
+  const contact = link?.peerNick || undefined;
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may
   // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
   const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
   const waitText = wait ? transportWaitText(wait, contact, clock, t) : undefined;
-  // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT only.
-  const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
+  // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT
+  // only, this side's or the contact's: no attempt comes then, and the DHT only choice says whose it is.
+  const notLive = paired && pinned && !dht && link?.dhtDelivery?.peerMode !== "dht" && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
   const words = usePairingWords();
   // A first pairing on its way: its stage names the connection until the chat is live, on the DHT or failed.
   // It reads the same view as the scene (`progress.view`): the same words, the same step, the same clock.
@@ -241,8 +247,12 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             onChange={e => link && void run(() => engine.call("setTransportPreference", {linkId:link.id,preferred,fallback:e.target.checked}))} /><span className="connection-switch-track" aria-hidden="true" /></span>
         </label>
       </fieldset>}
-      <div className="mt-1 flex items-start justify-between gap-2 border-t border-border pt-1">
-        <details className="min-w-0 flex-1 text-[11px]" data-testid="connection-details">
+      <div className="mt-1 border-t border-border pt-1">
+        {/* Its own row: beside Details it took a column down the whole open Details, and host names broke mid-word.
+            Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue. */}
+        {!dht && link?.dhtDelivery?.peerMode !== "dht" && !ready && !awaitingJoin && online && link && <button className={`-mx-1 min-h-9 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
+          onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>{t("connection.panel.reconnect")}</button>}
+        <details className="text-[11px]" data-testid="connection-details">
           <summary data-testid="connection-details-summary" className={`w-fit cursor-pointer rounded-md px-1 py-2 text-text-secondary ${focus}`}>{t("connection.panel.details")}</summary>
           <div className="space-y-2 px-1 pb-2">
             {wait && waitText && <div data-testid="connection-waiting" data-reason={wait.reason} data-transport={wait.transport} className="rounded-lg bg-surface-hover px-2.5 py-2 leading-4">
@@ -319,9 +329,6 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             </div>}
           </div>
         </details>
-        {/* Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue. */}
-        {!dht && link?.dhtDelivery?.peerMode !== "dht" && !ready && !awaitingJoin && online && link && <button className={`min-h-9 shrink-0 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
-          onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>{t("connection.panel.reconnect")}</button>}
       </div>
     </div>
   </details>
@@ -332,21 +339,23 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     {problem && problem.title !== label && <span className={`mt-0.5 block break-words ${failing ? "text-danger" : "text-text-secondary"}`}>{problem.title}</span>}
     {pairingReason && !failure && <span className="mt-0.5 block break-words text-danger">{pairingReason}</span>}
   </span>
-  <span className="sr-only" aria-live="polite">{label}</span>
+  {/* Off, not emptied, while the scene speaks: the scene going away then says nothing new. A failure the scene does not
+      tell (the relays, the connection, offline) is still said here. */}
+  <span className="sr-only" aria-live={scene && !SAID_BESIDE_SCENE.has(labelState) ? "off" : "polite"}>{label}</span>
   </div>;
 }
 
 /** A key in full, copied by a click, as the chat's Tech Info has it. */
 function KeyRow({ label, value, testId }: { label: string; value: string; testId: string }) {
-  const { copied, copy } = useCopyKey(value);
+  const { copied, failed, copy } = useCopyKey(value);
   const { t } = useI18n();
   return (
     <div className="grid grid-cols-[5.5rem_1fr] gap-x-3">
       <dt>{label}</dt>
       <dd className="min-w-0">
         <button type="button" data-testid={testId} onClick={copy} title={t("chat.message.copyHint")} aria-label={t("connection.panel.copyKey", { label, value })}
-          className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
-          {copied ? t("common.copied") : value}
+          className={`break-all rounded bg-transparent p-0 text-start font-mono transition-colors hover:text-accent max-md:min-h-6 ${copied ? "text-accent" : "text-text-secondary"} ${focus}`}>
+          {copied ? t("common.copied") : failed ? t("common.notCopied") : value}
         </button>
       </dd>
     </div>

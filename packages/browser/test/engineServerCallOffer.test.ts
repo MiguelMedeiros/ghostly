@@ -64,3 +64,44 @@ describe("a call that rings before the page opens", () => {
     expect(page.signals()).toEqual([]);
   });
 });
+
+/**
+ * The extension's tabs share one engine, and a call rings in each. One answered it or declined it, and the others rang on
+ * to their timeout, then wrote "Missed call" into the history of a call that was on; a Decline in one ended it.
+ */
+describe("a call one page answers or declines", () => {
+  const answer = (o: number) => JSON.stringify({ t: "a", ts: Date.now(), o });
+  const setCallSignal = (linkId: string, signal: string | null) => ({ kind: "request", id: 1, method: "setCallSignal", params: { linkId, signal } }) as never;
+  const handled = (page: ReturnType<typeof client>) => page.posted.filter((m) => m.kind === "call-handled");
+
+  it("stops ringing on the other pages, not on the one that took it", async () => {
+    const { server, node } = await started();
+    const [first, second, third] = [client(), client(), client()];
+    for (const page of [first, second, third]) server.attach(page);
+    await flush();
+    const ts = Date.now();
+    node.events.onCallSignal("answered", offer(ts));
+    node.events.onCallSignal("declined", offer(ts));
+
+    await server.handle(first, setCallSignal("answered", answer(ts)));
+    await server.handle(second, setCallSignal("declined", hangUp()));
+    expect(handled(first)).toEqual([{ kind: "call-handled", linkId: "declined" }]);
+    expect(handled(second)).toEqual([{ kind: "call-handled", linkId: "answered" }]);
+    expect(handled(third)).toEqual([{ kind: "call-handled", linkId: "answered" }, { kind: "call-handled", linkId: "declined" }]);
+  });
+
+  it("says nothing for a signal sent while nothing rang, nor for a clear", async () => {
+    const { server, node } = await started();
+    const [first, second] = [client(), client()];
+    for (const page of [first, second]) server.attach(page);
+    await flush();
+    // The call is on: the next answer or hang-up is no page taking a ring.
+    node.events.onCallSignal("on", offer());
+    await server.handle(first, setCallSignal("on", answer(Date.now())));
+    await server.handle(first, setCallSignal("on", hangUp()));
+    await server.handle(first, setCallSignal("quiet", hangUp()));
+    node.events.onCallSignal("cleared", offer());
+    await server.handle(first, setCallSignal("cleared", null));
+    expect(handled(second)).toEqual([{ kind: "call-handled", linkId: "on" }]);
+  });
+});

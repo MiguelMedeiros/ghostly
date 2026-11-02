@@ -1571,6 +1571,124 @@ describe("an away contact", () => {
   });
 });
 
+describe("a 1:1 session that opens (agents#2468)", () => {
+  // Each open of a session read the chat's whole history three times beside what it sent: the outbox's look twice (the
+  // link says it is open, and that it switched transport) and the edit queue's relearning, with nothing to send again.
+  const WIRE_OLD = "o".repeat(22);
+  async function chatWithHistory(rows = 300) {
+    const chat = row();
+    await db.putLink(chat);
+    for (let i = 0; i < rows; i++) await db.putMessage({ linkId: chat.id, id: `peer_${i}`, text: `hello ${i}`, sender: "peer", timestamp: 1_000 + i, via: "datalink" });
+    await db.putMessage({ linkId: chat.id, id: `me_${WIRE_OLD}`, wireId: WIRE_OLD, text: "old", sender: "me", timestamp: 900, via: "datalink", delivery: "delivered" });
+    return chat;
+  }
+  /** The recorded link, live or not, with edits as the real one takes them: only on a live session. */
+  function wire(link: Recorded, open: boolean) {
+    Object.assign(link, { isDataLinkOpen: open, supportsEdits: open });
+    (link as unknown as { sendEdit: ReturnType<typeof vi.fn> }).sendEdit ??= vi.fn(() => link.isDataLinkOpen ? null : "Not live");
+    return (link as unknown as { sendEdit: ReturnType<typeof vi.fn> }).sendEdit;
+  }
+  /** A session opens as GhostLink says so: its data link is open, then the transport it settled on. */
+  function opens(link: Recorded) {
+    wire(link, true);
+    link.options.events.onDataLinkState("open");
+    link.options.events.onTransportSwitched("webrtc/1", "iroh/1");
+  }
+  function closes(link: Recorded) {
+    wire(link, false);
+    link.options.events.onDataLinkState("idle");
+  }
+  const settle = () => new Promise(resolve => setTimeout(resolve, 150));
+  /** The chat's whole-history reads while `run` goes and what it started settles. */
+  async function historyReads(linkId: string, run: () => unknown): Promise<number> {
+    const whole = vi.spyOn(db, "getMessages");
+    try {
+      await run();
+      await settle();
+      return whole.mock.calls.filter(([id]) => id === linkId).length;
+    } finally { whole.mockRestore(); }
+  }
+  const wires = (link: Recorded) => link.sendMessage.mock.calls.map(call => call[2] as string);
+  /** An engine with these chats, hosted as the CLI and the web app host it: the pages hear the rows that changed, not the whole history. */
+  async function hosted(...chats: StoredLink[]) {
+    const setup = await started(...chats);
+    Object.assign(setup.events, { onMessageChanges: vi.fn() });
+    vi.spyOn(setup.node["desk"], "replay").mockResolvedValue();
+    return setup;
+  }
+
+  it("with nothing to send again, a session that opens reads none of the chat's history", async () => {
+    const chat = await chatWithHistory();
+    const { linkOf } = await hosted(chat);
+    const link = linkOf(chat.id);
+    // The run's first session: the edit queue learns once what waits in the chat.
+    const first = await historyReads(chat.id, () => opens(link));
+    for (let n = 0; n < 3; n++) {
+      closes(link);
+      await settle();
+      expect.soft(await historyReads(chat.id, () => opens(link)), `whole-history reads at reconnect ${n + 1}`).toBe(0);
+    }
+    expect.soft(first).toBeLessThanOrEqual(1);
+    expect(link.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("a text awaiting its receipt goes again on the new transport, and what waited while away goes when the session opens, without a whole-history read", async () => {
+    const chat = await chatWithHistory();
+    const { node, linkOf } = await hosted(chat);
+    const link = linkOf(chat.id);
+    const sendEdit = wire(link, true);
+    await historyReads(chat.id, () => opens(link));
+    // Sent, no receipt: a transport switch sends it again at once, under the same id.
+    const awaiting = await node.sendMessage({ linkId: chat.id, text: "are you there?" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, awaiting.messageId!))?.delivery).toBe("sent"));
+    const awaitingWire = (await db.getMessage(chat.id, awaiting.messageId!))!.wireId!;
+    expect.soft(await historyReads(chat.id, () => link.options.events.onTransportSwitched("iroh/1", "hyperdht/1")), "whole-history reads at a switch").toBe(0);
+    await vi.waitFor(() => expect(wires(link)).toEqual([awaitingWire, awaitingWire]));
+    // The contact goes away: a text written meanwhile waits, and so does an edit.
+    closes(link);
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, awaiting.messageId!))?.delivery).toBe("queued"));
+    const away = await node.sendMessage({ linkId: chat.id, text: "written while you were away" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, away.messageId!))?.delivery).toBe("waiting"));
+    expect(await node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "old, edited" })).toMatchObject({ error: null });
+    await settle();
+    expect(sendEdit).not.toHaveBeenCalledWith(expect.objectContaining({ m: "old, edited" }), expect.anything());
+    const awayWire = (await db.getMessage(chat.id, away.messageId!))!.wireId!;
+    // Back: oldest first, then the edit.
+    expect.soft(await historyReads(chat.id, () => opens(link)), "whole-history reads at the reopen").toBe(0);
+    await vi.waitFor(() => expect(wires(link).slice(2)).toEqual([awaitingWire, awayWire]));
+    await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
+  });
+
+  it("after a restart, what was queued, unconfirmed or edited while away goes when the session opens", async () => {
+    const chat = await chatWithHistory();
+    const first = await hosted(chat);
+    const link = first.linkOf(chat.id);
+    wire(link, true);
+    const unconfirmed = await first.node.sendMessage({ linkId: chat.id, text: "no receipt" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, unconfirmed.messageId!))?.delivery).toBe("sent"));
+    closes(link);
+    const away = await first.node.sendMessage({ linkId: chat.id, text: "written while you were away" });
+    await vi.waitFor(async () => expect((await db.getMessage(chat.id, away.messageId!))?.delivery).toBe("waiting"));
+    expect(await first.node.editMessage({ linkId: chat.id, messageId: `me_${WIRE_OLD}`, text: "old, edited" })).toMatchObject({ error: null });
+    const [unconfirmedWire, awayWire] = await Promise.all([unconfirmed, away].map(async sent => (await db.getMessage(chat.id, sent.messageId!))!.wireId!));
+    await first.node.shutdown();
+    nodes.splice(nodes.indexOf(first.node), 1);
+    links.length = 0;
+
+    const again = await hosted();
+    const back = again.linkOf(chat.id);
+    const sendEdit = wire(back, false);
+    // The new run reads the chat's history once for the edit queue (it starts with nothing known); the outbox has what
+    // the start read.
+    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the first open after a restart").toBeLessThanOrEqual(1);
+    await vi.waitFor(() => expect(wires(back)).toEqual([unconfirmedWire, awayWire]));
+    await vi.waitFor(() => expect(sendEdit).toHaveBeenCalledWith(expect.objectContaining({ id: WIRE_OLD, m: "old, edited" }), expect.anything()));
+    closes(back);
+    await settle();
+    expect.soft(await historyReads(chat.id, () => opens(back)), "whole-history reads at the next open").toBe(0);
+  });
+});
+
 describe("what arrives from held storage", () => {
   it("a held file lands once, its bytes before its message, and not in a chat that deleted it", async () => {
     const chat = row({ deletedIds: ["peer_gone"] });

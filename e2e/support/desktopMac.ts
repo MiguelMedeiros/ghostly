@@ -70,6 +70,9 @@ function forget(bundleId: string): void {
 
 const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
+/** A synchronous command blocks the worker, so the test's own timeout cannot end it: without this a hang names no test. */
+const SYSTEM_TOOL_TIMEOUT = 2 * 60_000;
+
 /** A copy of the app with a bundle id of its own, ad-hoc signed again (its Info.plist changed). */
 function copyApp(source: string, name: string, parent = tmpdir()): { app: string; bundleId: string; remove: () => void } {
   mkdirSync(parent, { recursive: true });
@@ -79,13 +82,13 @@ function copyApp(source: string, name: string, parent = tmpdir()): { app: string
   const dir = mkdtempSync(join(realpathSync(parent), `ghostly-mac-${name}-`));
   const app = join(dir, `Ghostly-${name}.app`);
   const bundleId = `${BUNDLE_PREFIX}${name}`;
-  execFileSync("ditto", [source, app]);
-  execFileSync("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleIdentifier ${bundleId}`, join(app, "Contents", "Info.plist")]);
-  execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "ignore" });
+  execFileSync("ditto", [source, app], { timeout: SYSTEM_TOOL_TIMEOUT });
+  execFileSync("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleIdentifier ${bundleId}`, join(app, "Contents", "Info.plist")], { timeout: SYSTEM_TOOL_TIMEOUT });
+  execFileSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "ignore", timeout: SYSTEM_TOOL_TIMEOUT });
   const remove = () => {
     // Started outside a temporary folder, macOS registers the copy with Launch Services: forgotten with the
     // copy, so no record points at a folder that is gone.
-    try { execFileSync(LSREGISTER, ["-u", app], { stdio: "ignore" }); } catch { /* never registered */ }
+    try { execFileSync(LSREGISTER, ["-u", app], { stdio: "ignore", timeout: SYSTEM_TOOL_TIMEOUT }); } catch { /* never registered */ }
     rmSync(dir, { recursive: true, force: true });
   };
   return { app, bundleId, remove };

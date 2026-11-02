@@ -461,6 +461,17 @@ describe("ChatConnection: what the panel does", () => {
     expect(engine.callsTo("connect")).toEqual([{ linkId: "link-1" }]);
   });
 
+  // Beside Details, Reconnect took a column down the whole open Details: they shrank from 294 to 210 px and relay
+  // host names broke mid-word, just when the chat is down and Details are read the most.
+  it("puts Reconnect on its own row above Details, which keep the panel's width", () => {
+    banner({ dataLink: "idle", peerOnline: false, peerParticipationKey: "saved" });
+    const reconnect = screen.getByRole("button", { name: "Reconnect" });
+    const details = screen.getByTestId("connection-details");
+    expect(reconnect.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(details.parentElement).not.toHaveClass("flex");
+    expect(details).not.toHaveClass("flex-1");
+  });
+
   // The contact's daemon was down when Reconnect was pressed, then came back and the chat went live by itself: the
   // header stayed a red "Connection issue" with the old refusal until the menu was used again.
   it("forgets a failed Reconnect once the chat is live again by itself", async () => {

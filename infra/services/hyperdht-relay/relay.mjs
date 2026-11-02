@@ -242,9 +242,12 @@ export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
 
 /**
  * What `clientsPerAddress` counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its
- * /64, the block one subscriber usually holds whole. The push relay's `rateKey`; the two services ship separately.
+ * /64, the block one subscriber usually holds whole. A port some proxies write with it (`203.0.113.7:51234`,
+ * `[2001:db8::1]:51234`) and IPv6 brackets are dropped first: each connection has a new port, so keyed with it the
+ * limit never applies. The push relay's `rateKey`; the two services ship separately.
  */
 export function addressKey(address) {
+  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(address)?.[1] ?? address
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
   if (mapped) return mapped[1]
   if (!address.includes(':')) return address
@@ -263,7 +266,7 @@ export function addressKey(address) {
  * 503 while its routing table is empty.
  *
  * options: port, host, bootstrap (host:port list), testnet (size of an in-process HyperDHT network, for tests
- * and e2e), limits, origins (allowed `Origin` values; empty allows any), proxies, cloudflare (see addressOf), log.
+ * and e2e), limits, origins (allowed `Origin` values, see originOf; empty allows any), proxies, cloudflare (see addressOf), log.
  */
 export async function startRelay(options = {}) {
   const limits = { ...DEFAULT_LIMITS, ...options.limits }
@@ -293,7 +296,16 @@ export async function startRelay(options = {}) {
   const nodes = new Set()
   const perAddress = new Map()
   const stats = { accepted: 0, refused: 0, dropped: 0 }
-  const origins = new Set(options.origins ?? [])
+  // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
+  const origins = new Set((options.origins ?? []).map(origin => originOf(origin) ?? origin))
+  const refusedOrigin = originRefusals(log)
+  // Once per start each: a proxy in front the relay was not told about makes every client count as that proxy.
+  const hinted = new Set()
+  const hint = (header, setting) => {
+    if (hinted.has(header)) return
+    hinted.add(header)
+    log(`requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
+  }
 
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
@@ -310,15 +322,22 @@ export async function startRelay(options = {}) {
 
   server.on('upgrade', (request, socket, head) => {
     const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
+    // Cloudflare writes both headers: its own setting is the one to name.
+    if (!options.cloudflare && !options.proxies) {
+      if (request.headers['cf-connecting-ip'] !== undefined) hint('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
+      else if (request.headers['x-forwarded-for'] !== undefined) hint('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+    }
     const origin = request.headers.origin
     // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
     // would make the write fail with an error nobody catches, and that ends the relay for every other client.
     const refuse = (status, why) => {
-      stats.refused++; log('refused', why)
+      stats.refused++
+      // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
+      if (why) log('refused', why)
       socket.on('error', () => {})
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
-    if (origins.size && !origins.has(origin)) return refuse('403 Forbidden', 'origin')
+    if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
     if (clients.size >= limits.clients) return refuse('503 Service Unavailable', 'full')
     if ((perAddress.get(address) ?? 0) >= limits.clientsPerAddress) return refuse('429 Too Many Requests', 'address')
     wss.handleUpgrade(request, socket, head, ws => accept(ws, address))
@@ -392,6 +411,11 @@ export async function startRelay(options = {}) {
   await new Promise((resolve, reject) => {
     server.once('error', reject)
     server.listen(options.port ?? 0, options.host ?? '127.0.0.1', resolve)
+  }).catch(async error => {
+    // The node (and a testnet) are up by now: a relay that cannot listen leaves none of them running.
+    if (!options.dht) await dht.destroy()
+    if (testnet) await testnet.destroy()
+    throw error
   })
   const { port } = server.address()
   const host = options.host && options.host !== '0.0.0.0' ? options.host : '127.0.0.1'
@@ -405,12 +429,60 @@ export async function startRelay(options = {}) {
       ...stats,
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
-    async close() {
+    // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;
+    // one that has not closed within `stopMs` is cut.
+    async close({ stopMs = 1000 } = {}) {
+      for (const ws of clients) ws.close(1001, 'The relay is stopping')
+      if (clients.size) {
+        let timer
+        await Promise.race([
+          Promise.all([...clients].map(ws => new Promise(resolve => ws.once('close', resolve)))),
+          new Promise(resolve => { timer = setTimeout(resolve, stopMs) }),
+        ])
+        clearTimeout(timer)
+      }
       for (const ws of clients) ws.terminate()
-      await new Promise(resolve => { wss.close(); server.close(() => resolve()) })
+      await new Promise(resolve => { wss.close(); server.close(() => resolve()); server.closeAllConnections() })
       if (!options.dht) await dht.destroy()
       if (testnet) await testnet.destroy()
     },
+  }
+}
+
+/**
+ * An entry of GHOSTLY_RELAY_ORIGINS as a browser writes it in `Origin`: scheme and host in lower case, a default port
+ * left out, no trailing `/` (`HTTPS://App.Example:443/` is `https://app.example`). An extension's or an app's own
+ * scheme (`chrome-extension://<id>`, `tauri://localhost`) keeps its host as written. Null for an entry that is no
+ * origin (not a URL, no host, a user, a path past `/`, a query, a fragment, `file:`): a browser never sends one, so
+ * such an entry would turn every browser away.
+ */
+export function originOf (entry) {
+  let url
+  try { url = new URL(entry) } catch { return null }
+  if (url.protocol === 'file:' || !url.host || url.username || url.password || !['', '/'].includes(url.pathname) || /[?#]/.test(entry)) return null
+  return url.origin !== 'null' ? url.origin : `${url.protocol}//${url.host}`
+}
+
+/**
+ * Logs a refused `Origin` (`refused origin "https://app.example"`, `(none)` for a request without one), each value
+ * once an hour and at most `most` values an hour, so a misspelt GHOSTLY_RELAY_ORIGINS shows in the log and a client
+ * sending a new value each time cannot flood it.
+ */
+export function originRefusals (log, { most = 16, now = Date.now } = {}) {
+  let seen = new Set()
+  let since = now()
+  let full = false
+  return origin => {
+    if (now() - since >= 3_600_000) { seen = new Set(); since = now(); full = false }
+    const shown = origin === undefined ? '(none)' : JSON.stringify(String(origin).slice(0, 200))
+    if (seen.has(shown)) return
+    if (seen.size >= most) {
+      if (!full) log('refused', 'origin', `(more than ${most} values this hour, not logged)`)
+      full = true
+      return
+    }
+    seen.add(shown)
+    log('refused', 'origin', shown)
   }
 }
 
@@ -428,6 +500,12 @@ function setting (env, name, fallback, kind) {
   if (kind === 'positive') return /^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number above 0')
   if (kind === 'flag') return value === '1' ? true : value === '0' ? false : fail('1 or 0')
   if (kind === 'text') return value || fail('a value (leave it out for the default)')
+  if (kind === 'origins') {
+    const entries = list(value)
+    const wrong = entries.find(entry => !originOf(entry))
+    if (wrong !== undefined) fail(`origins like https://app.example, comma-separated: a scheme, a host and a port only (${JSON.stringify(wrong)} is not one)`)
+    return [...new Set(entries.map(originOf))]
+  }
   return value
 }
 
@@ -436,10 +514,16 @@ const list = value => (value ?? '').split(',').map(item => item.trim()).filter(B
 /** `GHOSTLY_RELAY_<LIMIT>` for a limit's name in DEFAULT_LIMITS: `clientsPerAddress` is GHOSTLY_RELAY_CLIENTS_PER_ADDRESS. */
 export const limitVariable = name => `GHOSTLY_RELAY_${name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`
 
+const nodeCount = count => `${count} ${count === 1 ? 'node' : 'nodes'}`
+
+/** The HyperDHT network the relay's settings put it on, as the start line says it. */
+export const networkOf = ({ testnet, bootstrap }) =>
+  testnet ? `(own testnet of ${nodeCount(testnet)})` : bootstrap.length ? `(bootstrap ${nodeCount(bootstrap.length)})` : '(public HyperDHT)'
+
 /**
  * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
- * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind.
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes.
  */
 export function readSettings (env) {
   const limits = {}
@@ -447,14 +531,50 @@ export function readSettings (env) {
     const value = setting(env, limitVariable(name), undefined, 'positive')
     if (value !== undefined) limits[name] = value
   }
+  const bootstrap = bootstrapSetting(env)
+  const testnet = setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined
+  // startRelay drops the bootstrap nodes for the testnet: both set is one of them meant for another start.
+  if (testnet && bootstrap.length) throw new Error(`GHOSTLY_HYPERDHT_TESTNET=${JSON.stringify(env.GHOSTLY_HYPERDHT_TESTNET)}: expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)`)
   return {
     port: setting(env, 'PORT', 49443, 'port'),
     host: setting(env, 'HOST', '0.0.0.0', 'text'),
-    bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
-    testnet: setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined,
-    origins: list(env.GHOSTLY_RELAY_ORIGINS),
+    bootstrap,
+    testnet,
+    origins: setting(env, 'GHOSTLY_RELAY_ORIGINS', [], 'origins'),
     proxies: setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count'),
     cloudflare: setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag'),
     limits,
+  }
+}
+
+/**
+ * GHOSTLY_HYPERDHT_BOOTSTRAP: `host:port` entries (`ip@host:port` too, as HyperDHT's own list), comma-separated, each
+ * port from 1 to 65535. Left out, the public HyperDHT. One without a port (`127.0.0.1`) or with a word for one stops the
+ * start here, by name, rather than as a stack out of dht-rpc; an empty one too, which would quietly be the public one.
+ */
+function bootstrapSetting (env) {
+  const raw = env.GHOSTLY_HYPERDHT_BOOTSTRAP
+  if (raw === undefined) return []
+  const entries = list(raw)
+  const wrong = entries.find(entry => {
+    const match = /^[^\s:]+:(\d+)$/.exec(entry)
+    return !match || Number(match[1]) < 1 || Number(match[1]) > 65535
+  })
+  if (entries.length && wrong === undefined) return entries
+  throw new Error(`GHOSTLY_HYPERDHT_BOOTSTRAP=${JSON.stringify(raw)}: expected host:port nodes, comma-separated, each port from 1 to 65535 (leave it out for the public HyperDHT)${wrong === undefined ? '' : `; ${JSON.stringify(wrong)} is not one`}`)
+}
+
+/**
+ * Why the relay could not listen, as one line naming the setting to change, for server.mjs to print instead of Node's
+ * stack: a port another program holds, a port below 1024 for a user without the right, a HOST that is no address of
+ * this machine or no name at all. Null for any other error, which keeps its stack.
+ */
+export function listenProblem (error, { port, host }) {
+  switch (error?.code) {
+    case 'EADDRINUSE': return `port ${port} on ${host} is already in use (PORT)`
+    case 'EACCES': return `port ${port} on ${host} needs more rights than this user has (PORT): below 1024, root or the cap_net_bind_service capability`
+    case 'EADDRNOTAVAIL': return `cannot listen on ${host}: it is no address of this machine (HOST)`
+    case 'ENOTFOUND': case 'EAI_AGAIN': case 'EAI_FAIL': case 'EAI_NONAME': return `cannot listen on ${JSON.stringify(host)}: no such host (HOST)`
+    default: return null
   }
 }

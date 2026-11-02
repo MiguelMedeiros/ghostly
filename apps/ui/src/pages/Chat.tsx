@@ -16,6 +16,8 @@ import { ChatAppsDialog } from "../components/apps/ChatAppsDialog";
 import { ChatAppPanel, ChatAppResume } from "../components/apps/ChatAppPanel";
 import { takeOpenRequest, useChatAppCovers, useOpenRequested } from "../lib/apps/running";
 import { openAppInChat } from "../lib/apps/installed";
+import { rowDaysReader } from "../lib/chatDays";
+import { readContactNick, rowPicker, type NickRead } from "../lib/chatRows";
 import { appErrorText } from "../lib/apps/errors";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { appsComposerHint } from "../lib/apps/availability";
@@ -30,14 +32,16 @@ import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useId, useRef, useState, useCallback, useMemo } from "react";
+import { InfoButton } from "../components/layout/Section";
 import { Navigate } from "react-router-dom";
 import { useChat } from "../hooks/useChat";
 import { useComposerTranslation } from "../hooks/useComposerTranslation";
 import { keepSentOriginal } from "../lib/sentOriginals";
-import { leftOn, useChatScroll } from "../hooks/useChatScroll";
+import { leftOn, useChatScroll, type ScrollRow } from "../hooks/useChatScroll";
 import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
+import { DaySections } from "../components/chat/DaySections";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
 import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
@@ -94,7 +98,7 @@ import { useSameValue } from "../hooks/useSameValue";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
 import { TransportLine } from "../components/TransportTimeline";
-import { mergeTimeline } from "../lib/transportEvents";
+import { timelineMerger, type TimelineRow } from "../lib/transportEvents";
 import { walletCards } from "../components/walletCardData";
 import { cardOn } from "../lib/chatPayments";
 import { formatAt } from "../lib/time";
@@ -102,6 +106,7 @@ import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
+import { OfflineBanner } from "../components/OfflineBanner";
 import { TasksButton } from "../components/chat/TasksButton";
 import { cardEntries, goingCardCount } from "../lib/statusCards";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -112,7 +117,7 @@ import { WorkingLine } from "../components/chat/WorkingMark";
 import { useWorkingOf } from "../hooks/useWorking";
 import { useJumpTo } from "../hooks/useJumpTo";
 import { RoutineStack } from "../components/chat/RoutineCard";
-import { panelCard, routineStacks } from "../lib/statusCards";
+import { panelCard, routineStacksReader } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
 import { usePageShown } from "../hooks/usePageShown";
@@ -207,6 +212,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     peerAck,
     forceRefresh,
     incomingCallSignal,
+    callHandledElsewhere,
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
@@ -276,6 +282,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const platform = useServicesPlatform();
   const webrtc = useWebRTC({
     incomingCallSignal,
+    callHandledElsewhere,
     publishCallSignal: setCallSignal,
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
@@ -305,8 +312,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
-  // Out of sight, a ringing call is a system notification too.
-  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"));
+  // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
+  const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
 
   useEffect(() => () => onCallChange(sessionId, false), [onCallChange, sessionId]);
 
@@ -466,7 +474,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // the whole history, so it is put together again only when its messages or its lines change.
   const transportLog = useSameValue(paired ? chatLink?.transportLog : undefined);
   const identityTimeline = useSameValue(paired ? chatLink?.identityTimeline : undefined);
-  const timeline = useMemo(() => mergeTimeline(messages, transportLog ?? [], identityTimeline ?? []), [messages, transportLog, identityTimeline]);
+  // A new list puts together only the rows after those it has the same as the list before.
+  const [mergeRows] = useState(() => timelineMerger<ChatMessage>());
+  const timeline = useMemo(() => mergeRows(messages, transportLog ?? [], identityTimeline ?? []), [mergeRows, messages, transportLog, identityTimeline]);
   // Forward, and Select then Forward (WISP 400 § Forwards): texts and files, to other chats and groups.
   const forwarding = useForwarding(chatLink?.id, messages);
   // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.
@@ -506,8 +516,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [readReplies] = useState(() => replyIndexer());
   const quoteIndex = useMemo(() => readReplies(messages, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId, readReplies]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
-  const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
-  const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
+  // Both read only the questions with buttons and the replies, found in the rows that changed.
+  const [pickButtonRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => m.card?.kind === "buttons" || m.replyTo ? m : undefined));
+  const buttonRows = useMemo(() => pickButtonRow(messages), [pickButtonRow, messages]);
+  const buttonsOf = useMemo(() => buttonsViews(buttonRows, m => m.ref), [buttonRows]);
+  const presses = useMemo(() => compactPresses(buttonRows, m => m.ref), [buttonRows]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
   const [showTranslate, setShowTranslate] = useState(false);
@@ -527,29 +540,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     }
   }, [sessionId]);
 
+  const nickRead = useRef<NickRead | undefined>(undefined);
   useEffect(() => {
-    // From the newest back, to the first that names the contact: a reversed copy of the whole history was made for it on
-    // every message that came.
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i]!;
-      if (msg.sender !== "peer" && !(msg.sender === "system" && msg.id.startsWith("peer_"))) continue;
-      if (msg.nick) {
-        const nick = peerDisplayName(msg.nick);
-        if (nick && nick !== peerNick) {
-          setPeerNick(nick);
-        }
-        return;
-      }
-
-      const joinMatch = msg.text.match(/^👋 (.+) joined$/);
-      if (joinMatch && joinMatch[1]) {
-        const extractedNick = peerDisplayName(joinMatch[1]);
-        if (extractedNick && extractedNick !== peerNick) {
-          setPeerNick(extractedNick);
-        }
-        return;
-      }
-    }
+    nickRead.current = readContactNick(messages, nickRead.current);
+    const nick = nickRead.current.nick && peerDisplayName(nickRead.current.nick);
+    if (nick && nick !== peerNick) setPeerNick(nick);
   }, [messages, peerNick]);
 
   const startEditLabel = () => {
@@ -597,17 +592,24 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards). Found over the whole timeline, so a
   // run is the same whichever of its rows are in the page.
-  const stacks = useMemo(() => routineStacks(timeline, r => r.kind === "message" ? r.message : undefined), [timeline]);
+  const [readStacks] = useState(() => routineStacksReader<TimelineRow<ChatMessage>, ChatMessage>(r => r.kind === "message" ? r.message : undefined));
+  const stacks = useMemo(() => readStacks(timeline), [readStacks, timeline]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
   // A long chat has a window of its rows in the page, never the whole history (useRowWindow): its last ones, or those
   // around the message it was left on, and more as the view goes up or down.
-  const rowIds = useMemo(() => timeline.map(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`), [timeline]);
+  // Read, as the days below, only from the rows a new timeline does not have the same as the one before.
+  const [pickRowId] = useState(() => rowPicker<TimelineRow<ChatMessage>, string>(row => row.kind === "message" ? row.message.id : `${row.kind}:${row.entry.id}`));
+  const rowIds = useMemo(() => pickRowId(timeline), [pickRowId, timeline]);
   const rowWindow = useRowWindow(rowIds, sessionId, { opensOn: leftOn(sessionId), heads: stackHeads });
+  // The day each row goes under, over the whole timeline: a day keeps one date whichever of its rows are in the page.
+  const [readDays] = useState(() => rowDaysReader<TimelineRow<ChatMessage>>(row => row.kind === "message" ? row.message.timestamp : row.kind === "transport" ? row.entry.since ?? row.entry.at : row.entry.at));
+  const days = useMemo(() => readDays(timeline), [readDays, timeline]);
   // At the bottom a new message keeps the view there; scrolled up, nothing moves it and the ↓ pill counts the contact's.
   // A notice (joined, a call) is not a message to count. Always every message, in the page or not; a new list when the
   // window moves, so the view is put back in the same commit, before a scroll can see the rows moved.
+  const [pickScrollRow] = useState(() => rowPicker<ChatMessage, ScrollRow>(m => m.sender === "system" ? undefined : { id: m.id, mine: m.sender === "me" }));
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the window's edges: see above
-  const scrollRows = useMemo(() => messages.filter(m => m.sender !== "system").map(m => ({ id: m.id, mine: m.sender === "me" })), [messages, rowWindow.from, rowWindow.to]);
+  const scrollRows = useMemo(() => pickScrollRow(messages).slice(), [pickScrollRow, messages, rowWindow.from, rowWindow.to]);
   const jump = useChatScroll({ rows: scrollRows, chat: sessionId, keys: visible, window: rowWindow });
   const search = useChatSearch({ messages, chat: sessionId, active: visible, t, returnFocus: optionsRef });
 
@@ -686,7 +688,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
   const phoneHeader = usePhoneHeader();
   // The tasks still going and the routines not paused: a phone's ⋮ counts them, and has Tasks while there is one.
-  const goingCards = useMemo(() => goingCardCount(cardEntries(messages)), [messages]);
+  const [pickCardRow] = useState(() => rowPicker<ChatMessage, ChatMessage>(m => panelCard(m.card) ? m : undefined));
+  const cardRows = useMemo(() => pickCardRow(messages), [pickCardRow, messages]);
+  const goingCards = useMemo(() => goingCardCount(cardEntries(cardRows)), [cardRows]);
   useEffect(() => { setTasksOpen(false); setShowMore(false); }, [sessionId]);
 
   if (!params) {
@@ -821,7 +825,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             {face && <FaceCorner face={face} />}
             {inviteCode && !pairedReady && (
               <span className="absolute -bottom-0.5 -end-0.5 w-[16px] h-[16px] flex items-center justify-center rounded-full text-[8px] bg-accent text-on-accent z-10 group/star">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                {/* Its meaning is the words beside it, read though they show only on hover. */}
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
                   <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z" />
                 </svg>
                 <span className="absolute top-1/2 -translate-y-1/2 start-full ms-2 px-2 py-1 bg-surface-alt text-text-primary text-[10px] rounded whitespace-nowrap opacity-0 group-hover/star:opacity-100 transition-opacity pointer-events-none shadow-lg border border-border">
@@ -905,10 +910,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
               ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
-            phone={phoneHeader} callOn={callState !== "idle"} />
+            scene={pairing.scene && !!pairing.progress} phone={phoneHeader} callOn={callState !== "idle"} />
           <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
-          <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
+          <TasksButton rows={cardRows} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
@@ -1020,6 +1025,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       </div>
 
+      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      <OfflineBanner inChat />
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />
@@ -1104,7 +1111,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 {...forwarding.rowProps(row.message)}
               />
             );
-            return drawn.map(row => {
+            return <DaySections rows={drawn} days={days} from={rowWindow.from} draw={row => {
               if (row.kind !== "message") return draw(row);
               if (stackHeads.has(row.message.id)) return null;
               const run = stacks.get(row.message.id);
@@ -1112,7 +1119,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               return <RoutineStack key={`stack:${row.message.id}`} mine={row.message.sender === "me"} cards={run.map(m => m.card as RoutineCard)}>
                 {run.map(message => draw({ kind: "message", message }))}
               </RoutineStack>;
-            });
+            }} />;
           })()}
         </div>
       </div>
@@ -1261,6 +1268,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             <TechInfoRow label={t("chat.tech.network")}
               value={techInfo.peerToPeer ? t("chat.tech.networkPeerToPeer", { webrtc: "WebRTC DataChannel", pkarr: "Pkarr" }) : techInfo.protocol} />
             <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
+            {paired && deliveryPeer?.dhtDelivery?.forwardSecrecy && <ForwardSecrecyRow state={deliveryPeer.dhtDelivery.forwardSecrecy} />}
             <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
             <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
           </TechInfoSection>
@@ -1341,6 +1349,27 @@ function TechInfoSection({ title, children }: { title: string; children: React.R
   );
 }
 
+/**
+ * Whether what this chat sends while the contact is away (DHT text, held messages) has keys used once (WISP 4xx): On or
+ * Off, and why behind ⓘ. A live connection has fresh keys either way, which the ⓘ says too.
+ */
+function ForwardSecrecyRow({ state }: { state: "on" | "starting" | "unsupported" | "stopped" }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const why = ({ on: "chat.tech.forwardSecrecyOnInfo", starting: "chat.tech.forwardSecrecyStartingInfo", unsupported: "chat.tech.forwardSecrecyOldAppInfo", stopped: "chat.tech.forwardSecrecyStoppedInfo" } as const)[state];
+  return (
+    <div data-testid="tech-forward-secrecy" data-state={state} className="text-xs">
+      <div className="flex justify-between items-center gap-3">
+        <span className="text-text-muted shrink-0 flex items-center gap-1.5">{t("chat.tech.forwardSecrecy")}
+          <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="tech-forward-secrecy-info" className="-my-1" /></span>
+        <span className={state === "on" ? "text-success" : "text-text-secondary"}>{t(state === "on" ? "chat.tech.forwardSecrecyOn" : "chat.tech.forwardSecrecyOff")}</span>
+      </div>
+      {open && <p id={id} className="mt-1.5 text-text-secondary leading-relaxed">{t(why)} {t("chat.tech.forwardSecrecyLive")}</p>}
+    </div>
+  );
+}
+
 function TechInfoRow({ label, value, mono, copyable }: { label: string; value: string; mono?: boolean; copyable?: boolean }) {
   const [copied, setCopied] = useState(false);
   const { t } = useI18n();
@@ -1356,8 +1385,9 @@ function TechInfoRow({ label, value, mono, copyable }: { label: string; value: s
       <span className="text-text-muted shrink-0">{label}</span>
       {copyable ? (
         <button
+          type="button"
           onClick={handleCopy}
-          className={`text-end break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
+          className={`text-end break-all bg-transparent border-none p-0 cursor-pointer hover:text-accent transition-colors max-md:min-h-6 ${mono ? "font-mono" : ""} ${copied ? "text-accent" : "text-text-secondary"}`}
           title={t("chat.message.copyHint")}
         >
           {copied ? t("common.copied") : value}

@@ -373,10 +373,16 @@ describe("wallet and settings", () => {
   });
 
   it("unwraps the peer's answers to what the UI expects", async () => {
-    engine.answers = { walletPayQuote: { paid: true }, walletReceiveToken: { amount: 42 }, walletInspectCashu: { inspection: { amount: 3 } } };
+    engine.answers = { walletPayQuote: { paid: true }, walletReceiveToken: { amount: 42, fee: 2 }, walletInspectCashu: { inspection: { amount: 3 } } };
     expect(await services.wallet.payQuote("q", "m")).toBe(true);
-    expect(await services.wallet.receiveToken("cashuB...")).toBe(42);
+    // What arrived and what the mint kept of the token as its fee (agents#2255).
+    expect(await services.wallet.receiveToken("cashuB...")).toEqual({ amount: 42, fee: 2 });
     expect(await services.wallet.inspectCashu("cashuB...")).toEqual({ amount: 3 });
+  });
+
+  it("reads a redeem with no fee from an engine that does not say one as no fee", async () => {
+    engine.answers = { walletReceiveToken: { amount: 42 } };
+    expect(await services.wallet.receiveToken("cashuB...")).toEqual({ amount: 42, fee: 0 });
   });
 
   it("finds the answer to an ask only among incoming requests", () => {
@@ -399,7 +405,10 @@ describe("wallet and settings", () => {
     expect(services.wallet.getPayment("p")).toBeNull();
     withLinks(chat({ peerOnline: true }));
     expect(services.isOnline()).toBe(true);
-    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", relays: ["wss://r"], turn: null });
+    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", kind: "relays", relays: ["wss://r"], turn: null });
+    // The Desktop's transport reaches the DHT itself: the page words that from `kind`, not from the English line.
+    engine.state = { ...engine.state!, transport: { ...engine.state!.transport, direct: true } };
+    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", kind: "direct" });
     expect(services.getPeer("peer-1")).toMatchObject({ id: "link-1", online: true });
   });
 

@@ -38,7 +38,8 @@ export interface PeerOptions {
   offlineMainnet?: boolean;
   /**
    * Runs Iroh through this relay (the e2e infra's, `endpoints.irohRelay`). Without it the page's peer has no Iroh:
-   * the suite stays offline, and a browser is WebRTC only, as most specs expect.
+   * the suite stays offline, and a browser is WebRTC only, as most specs expect. A deployed build (`E2E_WEB_URL`)
+   * ignores the suite's storage switch, so there its Iroh gets a closed port instead (`NO_IROH_RELAY`).
    */
   irohRelay?: string;
   /**
@@ -98,6 +99,17 @@ export async function guardMainnet(context: BrowserContext): Promise<void> {
   });
 }
 
+/**
+ * A closed port on this machine, as an Iroh relay: Iroh fails to start and the peer is WebRTC only (the extension's
+ * way, e2e/support/extension.ts). For a deployed build, which ignores `ghostly-test-iroh`, so n0's relays stay unreached.
+ */
+export const NO_IROH_RELAY = "http://127.0.0.1:9/";
+/**
+ * Running against a deployed build (`E2E_WEB_URL` off this machine, https://app.ghostly.tools): a release build, which
+ * reads none of the suite's storage switches. A build served here (test-affected.mjs, the perf specs) is the suite's.
+ */
+export const deployedBuild = !!process.env.E2E_WEB_URL && !/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(process.env.E2E_WEB_URL);
+
 /** The Mainnet Ark server and explorer, and the Ethereum RPC: what a spec that moves test coins only refuses at once. */
 export const MAINNET_SERVICES = [/^https:\/\/arkade\.computer\//, /^https:\/\/mempool\.space\/api\//, /^https:\/\/ethereum\.publicnode\.com/];
 
@@ -142,7 +154,8 @@ export async function openPeer(browser: Browser, relay: LocalRelay, baseURL: str
   if (cpuRate > 1 && browser.browserType().name() === "chromium") await (await context.newCDPSession(page)).send("Emulation.setCPUThrottlingRate", { rate: cpuRate });
   await page.goto("/");
   await expect(page.getByTitle("New Chat")).toBeVisible();
-  if (options.irohRelay) await setIrohRelay(page, options.irohRelay);
+  const irohRelay = options.irohRelay ?? (deployedBuild ? NO_IROH_RELAY : undefined);
+  if (irohRelay) await setIrohRelay(page, irohRelay);
   return { name, context, page };
 }
 

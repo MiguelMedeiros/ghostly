@@ -16,6 +16,7 @@ import { Select } from "./ui/Select";
 import { ButtonGroup, Field, FieldGrid, InputGroup, Truncate } from "./layout";
 import { said } from "../lib/notices";
 import { fillNames } from "../lib/fillNodes";
+import { exactText } from "../lib/exactText";
 
 const EMPTY_S3: S3Config = { endpoint: "", region: "us-east-1", bucket: "", prefix: "ghostly", accessKeyId: "", secretAccessKey: "" };
 type Open = "none" | "backup" | "restore" | "s3";
@@ -271,7 +272,7 @@ export function ProfileBackups({ canSwitch, openBackup = false }: { canSwitch: b
         <Block>
           <FieldGrid>
             {([["endpoint", t("profile.backups.s3.endpoint")], ["bucket", t("profile.backups.s3.bucket")], ["accessKeyId", t("profile.backups.s3.accessKey")], ["secretAccessKey", t("profile.backups.s3.secretKey")], ["region", t("profile.backups.s3.region")], ["prefix", t("profile.backups.s3.folder")]] as const).map(([key, label]) => (
-              <input key={key} data-testid={`s3-${key}`} aria-label={label} placeholder={label} spellCheck={false} autoComplete="off" type={key === "secretAccessKey" ? "password" : "text"} className={input}
+              <input key={key} data-testid={`s3-${key}`} aria-label={label} placeholder={label} {...exactText} autoComplete="off" type={key === "secretAccessKey" ? "password" : "text"} className={input}
                 value={draft[key]} onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
             ))}
           </FieldGrid>

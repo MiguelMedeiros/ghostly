@@ -15,3 +15,12 @@ export const APPS_ENABLED: boolean = true;
  * themselves are still in the bundle (the registries import them); plugins may still pass fakes to the registry.
  */
 export const testBuild = (): boolean => { try { return !!import.meta.env?.DEV || import.meta.env?.VITE_APPS_TEST === "1"; } catch { return false; } };
+
+/**
+ * A suite's switch in the page's storage (`localStorage["ghostly-test-…"]`), read only in a test build (`testBuild`): a
+ * release build reads none, so a leftover or pasted key changes nothing there. Null when unset, unreadable or released.
+ */
+export const testSwitch = (key: string): string | null => {
+  if (!testBuild()) return null;
+  try { return globalThis.localStorage?.getItem(key) ?? null; } catch { return null; }
+};

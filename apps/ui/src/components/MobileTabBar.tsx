@@ -129,7 +129,7 @@ export function MobileTabBar() {
                   </span>
                 )}
               </span>
-              <span className="max-w-full truncate text-[11px] max-[359px]:text-[10px] font-medium leading-none">{t(tab.label)}</span>
+              <span className="max-w-full truncate text-[0.6875rem] max-[359px]:text-[0.625rem] font-medium leading-none">{t(tab.label)}</span>
             </button>
           );
         })}

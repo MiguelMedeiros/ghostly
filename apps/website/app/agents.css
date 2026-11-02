@@ -162,6 +162,60 @@
   overflow-wrap: anywhere;
 }
 
+/* ── Security model, fit and what you can check: cards of .ag-shows, the limit in a callout, two columns for fit ── */
+.ag-limit {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--cyan);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.ag-limit p {
+  font-size: 15px;
+  line-height: 1.55;
+}
+.ag-limit-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.ag-limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
+}
+.ag-limits .ag-limit {
+  margin-top: 0;
+}
+.ag-fit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.ag-fit .ag-show {
+  grid-template-rows: auto 1fr;
+}
+.ag-list,
+.ag-trust {
+  display: grid;
+  gap: 8px;
+  padding-left: 1.1em;
+  list-style: disc;
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.ag-list li {
+  color: var(--muted);
+}
+.ag-trust {
+  margin-top: 16px;
+  font-size: 15px;
+}
+
 /* ── Connect your agent: three numbered steps, each command on its own line with Copy ── */
 .ag-connect {
   display: grid;

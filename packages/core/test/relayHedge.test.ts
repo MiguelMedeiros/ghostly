@@ -89,7 +89,7 @@ describe("hedged relay reads", () => {
       await timed(() => transport.resolve(id.pubKeyZ32));
       expect(calls).toEqual(["slow.test", "fast.test"]);
     }
-    expect(logs).toEqual([expect.stringMatching(/^slow\.test tripped \(slow\); left alone for 60 s$/)]);
+    expect(logs).toEqual([expect.stringMatching(/^relay slow\.test answered too slowly; asked again in 60 s$/)]);
     const health = transport.discovery().relays.find((h) => h.relay === "https://slow.test");
     expect(health).toMatchObject({ state: "failing", reason: "slow" });
     // Left alone: a read asks the fast relay alone, with no hedge delay.

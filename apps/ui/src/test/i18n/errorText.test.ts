@@ -190,6 +190,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Add a mint in Settings first", `${BROWSER}/engine/wallet.ts`],
   ["Not enough sats in your wallet", CODES],
   ["Not enough sats in your wallet: 690 sats leave room for the fee", CODES, ": {amount} sats leave room for the fee"],
+  ["None of your mints can pay an invoice with no amount", CODES],
   ["The Lightning payment did not go through. The sats are back in your wallet.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet."],
   ["The Lightning payment did not go through. The sats are back in your wallet, less 2 sats the mint kept as its fee.", `${BROWSER}/engine/wallet.ts`, "The sats are back in your wallet, less "],
   // Never alone: the start of the two above, said on its own before what came back.
@@ -495,6 +496,17 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
   ["Not a relay address: ftp//x", `${BROWSER}/nostr/relay.ts`, "Not a relay address: ${value.slice(0, 40)}"],
+  ["Use an https:// relay address: wss://relay.example.org", `${CORE}/relay.ts`, "`Use an https:// relay address: ${line}`"],
+  ["Not a relay address: not a url", `${CORE}/relay.ts`, "`Not a relay address: ${line}`"],
+  // What Settings, Network refuses before Save, and the engine on it (agents#2373).
+  ["Enter a relay address (wss://…)", `${BROWSER}/shared/hyperdhtRelay.ts`],
+  ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
+  ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
+  ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
+  ["Use at most four Iroh relays", `${BROWSER}/engine/node.ts`],
+  ["Enter the TURN server address", `${BROWSER}/shared/ice.ts`],
+  ["“https://turn.example.org” is not a TURN or STUN address (turn:host:port)", `${BROWSER}/shared/ice.ts`, "” is not a TURN or STUN address (turn:host:port)"],
+  ["A TURN server needs its username and credential", `${BROWSER}/shared/ice.ts`],
   ["No relay answered", `${BROWSER}/engine/nostrSocial.ts`, "throw new Error(\"No relay answered\")"],
   ["No relay answered", `${BROWSER}/profiles/activity.ts`, "throw new Error(\"No relay answered\")"],
   ["No relay answered", `${BROWSER}/profiles/readers.ts`, "throw new Error(\"No relay answered\")"],
@@ -512,6 +524,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", `${BROWSER}/engine/hold.ts`],
   ["Refused what the contact's storage offered: The manifest is malformed", `${BROWSER}/engine/hold.ts`, "Refused what the contact's storage offered: "],
   ["Could not pick up held items: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not pick up held items: "],
+  ["Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", `${BROWSER}/engine/hold.ts`],
   ["Refused a held item from the contact: The held item is larger than allowed", `${BROWSER}/engine/hold.ts`, "Refused a held item from the contact: "],
   ["Picked up, but could not acknowledge: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Picked up, but could not acknowledge: "],
 ];
@@ -717,7 +730,7 @@ describe("errors in the app's language", () => {
 });
 
 describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
-  const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500" };
+  const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500", reason: "Lightning payment failed: no route" };
   const texts = (Object.keys(ENGINE_ERRORS) as EngineErrorCode[]).map((code) => [code, engineText(code, Object.fromEntries([...ENGINE_ERRORS[code].matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, SAMPLE[name]])))] as const);
 
   it.each(LANGUAGES.filter((l) => l !== "en"))("every one reads in %s, by a rule or by its code", (language) => {
@@ -741,6 +754,13 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText(new Error("The fee exceeds your limit"), pt)).toBe("A taxa passa do seu limite");
     expect(errorText("Error: Unknown payment intent", pt)).toBe("Pagamento desconhecido");
     expect(errorText("Outcome unknown. Check the existing payment; do not send another.", translators.fr)).toContain("Résultat inconnu");
+  });
+
+  it("a mint's refusal of a Lightning payment says, in the language, that no sats left; its own words go behind the ⓘ (agents#2253)", () => {
+    const raw = engineText("lightningRefused", { reason: "Lightning payment failed: no route" });
+    expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "A mint recusou este pagamento Lightning", next: "Nenhum sat saiu da sua carteira. Pode tentar de novo com segurança.", detail: raw });
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "The mint refused this Lightning payment", next: "No sats left your wallet. It's safe to try again.", detail: raw });
+    for (const language of LANGUAGES) expect(errorText(raw, translators[language]), language).not.toContain("no route");
   });
 
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {

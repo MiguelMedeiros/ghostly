@@ -22,7 +22,8 @@ import { defaultRegistry, type ProviderRegistry } from "./paymentAdapters/provid
 import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
-import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
+import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED, testBuild, testSwitch } from '../shared/features';
+import { RATCHET_CAPABILITY, RatchetBox, emptyRatchetState } from "@ghostly/core";
 import { APP_RANGE_LIMITS, chatAppId, isAppRef, isAppVersion, isServeId, publicKeyFromZ32, type AppFrameEvent, type AppRangeTask, type AppSendError } from "@ghostly/core";
 import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
@@ -35,7 +36,7 @@ import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';
 import { PublicActivity } from './publicActivity';
 import { normalizeNostrRelays } from '../nostr/relay';
-import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
+import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { APPS_CAPABILITY, BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, STATUS_CARD_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
@@ -372,6 +373,8 @@ interface LiveLink {
   entryDone?: boolean;
   /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
   edgeSessionNoted?: boolean;
+  /** A group's edge: when its link started in this run (`startEdge`), which a resume's "Reconnecting…" is bounded by (`edgeView`). */
+  edgeStartedAt?: number;
   /** A private group's edge: its Pkarr transport, which members carry packets for (WISP 902 § Signaling through members). */
   carried?: CarriedTransport;
   /**
@@ -391,6 +394,11 @@ interface LiveLink {
   appsOpen?: Map<string, string>;
   /** The public key of `stored.participationSeed`, derived once for that seed (`participationKeyOf`). */
   participationKey?: { seed: string; key: string };
+  /**
+   * The chat's ratchet (WISP 4xx): one per chat for as long as the engine runs, shared by the DHT floor and held items,
+   * so its one lock covers both, a link started again included.
+   */
+  ratchet?: RatchetBox;
   /**
    * The messages of mine that wait for the live link and go from `sendWaiting` (`waitsForLive`), by their id. Read from
    * the chat's history once in a run (with the chat, at the start), then kept as they are stored (`storeNewMessage`).
@@ -1083,7 +1091,13 @@ export class GhostlyNode implements EngineImplementation {
     // A redeem finished after its call was over: the chat it belongs to learns of it, and ecash of ours that came
     // back this way ends its review as any ecash taken back does. The wallet waits for this before it lets the swap go.
     onSwapSettled: (swap, done) => this.desk.onSwapSettled(swap, done).then(() => (swap.payment?.direction === "out" ? this.reviewTakenBack(swap.payment.id) : undefined)),
+    requestClosed: (paymentId) => this.requestClosed(paymentId),
   }, () => this.settings.mints);
+  /** A chat request of ours that nobody is meant to pay any more: its invoice is asked about only once it expired. */
+  private requestClosed(paymentId: string): boolean {
+    const request = this.desk.payment(paymentId);
+    return request?.kind === "request" && request.direction === "out" && request.state !== "pending";
+  }
   private registry?: ProviderRegistry;
   private providers() { return this.registry ??= this.options.providers ?? defaultRegistry(); }
   /** A plugin registered or left after start: the pickers show the new list. */
@@ -1103,6 +1117,7 @@ export class GhostlyNode implements EngineImplementation {
       changed: () => this.walletChanged(),
       received: (op) => void this.desk.onLightningPaid(op),
       resolved: (op, paid) => void this.desk.onLightningResolved(op, paid),
+      requestClosed: (paymentId) => this.requestClosed(paymentId),
     },
   }));
   /** On-chain Bitcoin of each network, through its active source: none until the person sets one up. */
@@ -1242,11 +1257,18 @@ export class GhostlyNode implements EngineImplementation {
       return null;
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
+    taken: (linkId, id) => db.hasMessage(linkId, `peer_${id}`),
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
-    // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
-    ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
+    // Tests shorten the lifetime to watch an item expire, in a test build only; it never lengthens it.
+    ttlMs: () => { const raw = testSwitch("ghostly-test-hold-ttl"); const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; },
+    // The chat's ratchet (WISP 4xx), the same one its DHT floor seals with: one lock over both.
+    ratchet: (linkId) => {
+      const live = this.links.get(linkId), stored = live?.stored;
+      if (!live || !stored?.profile || !stored.participationSeed || !stored.pairedPeerKey || GhostlyNode.testNoRatchet()) return undefined;
+      return { box: this.ratchetOf(linkId, live, { seedB64: stored.participationSeed, peerKey: stored.pairedPeerKey }), peerSupports: () => this.peerRatchets(live) };
+    },
   });
 
   /** x401 credentials (WISP 3xx): kept for websites the headless CLI calls, never shared with a contact. */
@@ -3027,6 +3049,8 @@ export class GhostlyNode implements EngineImplementation {
   nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): Promise<void> { return this.nostrSocial.loadContact(params); }
   nostrForgetContact(params: { linkId: string; subject: string }): Promise<void> { return this.nostrSocial.forgetContact(params); }
   nostrLoadOwn(params: { subject: string }): Promise<void> { return this.nostrSocial.loadOwn(params); }
+  nostrOwnFollows(params: { subject: string }): string[] { return this.nostrSocial.ownFollowList({ subject: String(params?.subject) }); }
+  nostrContactNotes(params: { linkId: string; subject: string }): NostrNoteView[] { return this.nostrSocial.contactNotes({ linkId: String(params?.linkId), subject: String(params?.subject) }); }
   nostrLookup(params: NostrLookupRequest): Promise<NostrLookupResult> { return this.nostrSocial.lookup(params); }
   nostrDraft(params: NostrDraftRequest): Promise<NostrDraft> { return this.nostrSocial.draft(params); }
   nostrPublish(params: { draftId: string; event: unknown }): Promise<NostrPublishResult> { return this.nostrSocial.publish(params); }
@@ -3691,9 +3715,20 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** A paired row's reply as it goes on the wire again (a resend, a hold). */
-  /** `localStorage["ghostly-test-no-edit"]`: this app offers no edit/1, as an older one (the e2e's old contact). Nothing else reads it. */
+  /** `localStorage["ghostly-test-no-edit"]`: this app offers no edit/1, as an older one (the e2e's old contact). A test build only. */
   private static testNoEdit(): boolean {
-    try { return typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-edit") === "1"; } catch { return false; }
+    return testSwitch("ghostly-test-no-edit") === "1";
+  }
+  /**
+   * Whether the contact's capability record lists `ratchet/1` (WISP 4xx): the record read this run, or else the last one
+   * kept with the chat (the run's is cleared while offline and on a restart of the chat's transports).
+   */
+  private peerRatchets(live: LiveLink): boolean {
+    return !!(live.caps?.peer ?? live.stored.capsState?.peer)?.capabilities.includes(RATCHET_CAPABILITY);
+  }
+  /** An e2e run playing an app from before forward secrecy (WISP 4xx): no ratchet/1, no ratchet, as that app. A release build ignores the key. */
+  private static testNoRatchet(): boolean {
+    try { return testBuild() && typeof localStorage !== "undefined" && localStorage.getItem("ghostly-test-no-ratchet") === "1"; } catch { return false; }
   }
 
   private static wireReply(message: StoredMessage): WireReply | undefined {
@@ -3909,7 +3944,7 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * `restoreCards`, then what waits goes. One look at a time per chat, at most once per `CARD_RESTORE_EVERY_MS`: asked
    * again while one runs or within the gap, one more look goes once it is over, and what waits still goes at once (the
-   * edit queue reads the history once a session).
+   * edit queue reads the history once a run).
    */
   private restoreCardsSoon(linkId: string): void {
     const flush = () => this.editsFor(linkId).flush().catch(() => {});
@@ -4890,6 +4925,21 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** The chat's connection story, for paired chats (not group edges). */
+  /**
+   * The chat's ratchet (WISP 4xx), made once per chat: its keys are read from the chat's row when used (each start of
+   * the link has credentials of its own), so a contact pinned later is the one it seals to. Saved in the row as
+   * `ratchetState`, which no backup or handoff takes along.
+   */
+  private ratchetOf(linkId: string, live: LiveLink, credentials: PairingCredentials): RatchetBox {
+    return live.ratchet ??= new RatchetBox(() => ({
+      seed: fromBase64Url(live.stored.participationSeed ?? credentials.seedB64), self: identityFromSeedB64(live.stored.participationSeed ?? credentials.seedB64).pubKeyZ32,
+      peer: live.stored.pairedPeerKey ?? credentials.peerKey!,
+      rendezvous: [identityFromSeedB64(live.stored.seedB64).pubKeyZ32, live.stored.peerPubKeyZ32], secret: fromBase64Url(live.stored.encKeyB64),
+    }), live.stored.ratchetState ?? emptyRatchetState(), async state => {
+      await db.patchLink(linkId, { ratchetState: state });
+      live.stored = { ...live.stored, ratchetState: state };
+    });
+  }
   private transportLogOf(live: LiveLink): TransportLog | undefined {
     if (!live.stored.profile || live.stored.group) return undefined;
     if (live.transportLog) return live.transportLog;
@@ -5994,10 +6044,23 @@ export class GhostlyNode implements EngineImplementation {
     return { quote: created.paymentHash, invoice: created.invoice, expiresAt: created.expiresAt, paymentHash: created.paymentHash, source: created.source };
   }
 
-  /** `card`: the Lightning card that will pay; absent, the network's default one. */
-  walletQuoteInvoice({ invoice, via, network, card }: { invoice: string; via?: "cashu"; network?: WalletNetwork; card?: string }) {
+  /**
+   * The screen shows this invoice of ours (Receive): its mint or its Lightning card asks about it at the fast pace for a
+   * while (`INVOICE_PACE.watchMs`), so a payment shows within seconds. The screen says it again while it shows it.
+   */
+  async walletWatchInvoice({ invoice, network }: { invoice: string; network?: WalletNetwork }) {
+    if (typeof invoice !== "string" || !invoice.trim()) throw new Error("invoice is required");
+    if (await this.wallet.watch(invoice)) return;
+    await this.lightnings[this.net(network)].watch(invoice);
+  }
+
+  /**
+   * `card`: the Lightning card that will pay; absent, the network's default one. `amount`: the sats chosen for an
+   * invoice with no amount, which only the mints pay (`via: "cashu"`); a Lightning source refuses one.
+   */
+  walletQuoteInvoice({ invoice, via, network, card, amount }: { invoice: string; via?: "cashu"; network?: WalletNetwork; card?: string; amount?: number }) {
     const n = this.net(network);
-    return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightningCard(n, card).then((c) => c.quote(invoice));
+    return via === "cashu" ? this.wallet.quoteInvoice(invoice, n, amount) : this.lightningCard(n, card).then((c) => c.quote(invoice));
   }
 
   /**
@@ -6110,8 +6173,8 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async walletReceiveToken({ token }: { token: string }) {
-    const { amount } = await this.wallet.receiveToken(token.trim());
-    return { amount };
+    const { amount, fee } = await this.wallet.receiveToken(token.trim());
+    return { amount, fee };
   }
 
   /** `network`: only that network's Cashu wallet (its mints). */
@@ -7599,6 +7662,7 @@ export class GhostlyNode implements EngineImplementation {
     const resumeOn: PairedTransport | undefined = native
       ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
+    live.edgeStartedAt = Date.now();
     // A private group's edge signals through members that reach both ends, beside the relays (WISP 902 § Signaling through members).
     live.carried?.stop();
     live.carried = entry || this.groups.isCommunityGroup(group) ? undefined : new CarriedTransport(this.groupTransport, live.myPubKeyZ32, stored.peerPubKeyZ32, {
@@ -7943,6 +8007,7 @@ export class GhostlyNode implements EngineImplementation {
         // show its name as a text.
         peerAcceptsFile: () => !!live.caps?.peer?.capabilities.includes(DHT_FILE_CAPABILITY),
         reactions: () => live.stored.reactionsOut ?? [],
+        ratchet: credentials && !GhostlyNode.testNoRatchet() ? { box: this.ratchetOf(linkId, live, credentials), peerSupports: () => this.peerRatchets(live) } : undefined,
       } : undefined,
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports,
         peerFallback: stored.peerFallback, preferred: stored.preferredTransport, fallback: stored.transportFallback,
@@ -8307,7 +8372,7 @@ export class GhostlyNode implements EngineImplementation {
     return {
       versions: [1],
       transports: this.runnableTransports(live),
-      capabilities: ["chat/1", DHT_TEXT_CAPABILITY, DHT_FILE_CAPABILITY, ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
+      capabilities: ["chat/1", DHT_TEXT_CAPABILITY, DHT_FILE_CAPABILITY, ...(GhostlyNode.testNoRatchet() ? [] : [RATCHET_CAPABILITY]), ...(live?.stored.hold?.enabled ? [HOLD_CAPABILITY] : []), "files/2",
         // A session live on a relay moves to a direct path (WISP 100): the contact knocks there at once.
         UPGRADE_CAPABILITY,
         // Edits on the DHT floor too (WISP 403 § Edits): an app from before would show one as a new message.

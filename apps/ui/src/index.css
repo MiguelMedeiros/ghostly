@@ -180,7 +180,8 @@
   --theme-border-bright: #3a3a3a;
   --theme-text-primary: #f5f5f5;
   --theme-text-secondary: #a0a0a0;
-  --theme-text-muted: #707070;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #949494;
   --theme-received-bg: #1a1a1a;
   --theme-input-bg: #2a2a2a;
   --theme-search-bg: #1a1a1a;
@@ -205,7 +206,8 @@
   --theme-border-bright: #d0d0d0;
   --theme-text-primary: #0a0a0a;
   --theme-text-secondary: #505050;
-  --theme-text-muted: #808080;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #666666;
   --theme-received-bg: #ffffff;
   --theme-input-bg: #f5f5f5;
   --theme-search-bg: #f5f5f5;
@@ -293,7 +295,8 @@
   --theme-border-bright: #3d3455;
   --theme-text-primary: #f3e8ff;
   --theme-text-secondary: #b8a5d0;
-  --theme-text-muted: #8b7aa8;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #9a8ab6;
   --theme-received-bg: #1a1625;
   --theme-input-bg: #2a2438;
   --theme-search-bg: #1a1625;
@@ -998,6 +1001,28 @@ html[data-standalone="true"] {
   }
 }
 
+/* Send files (components/composer/AttachmentSheet.tsx): a layer over the whole screen with its panel centred, which
+   opens with the focus in its caption, so on a phone the keyboard comes up at once. As the rule above, but on a phone
+   held upright too: centred on the whole screen, the caption and Cancel/Send were under the keyboard. The layer ends
+   where the keyboard starts, below the notch, and the picture is never taller than what is left once the caption and
+   the buttons (about 12rem with the panel's edges) have their room. `--keyboard-room` passes the visible height down
+   to the picture: `--app-height` itself is not inherited. */
+.fixed.inset-0.keyboard-layer {
+  --keyboard-room: var(--app-height, 100dvh);
+}
+
+.keyboard-layer-picture {
+  max-height: min(55vh, max(4rem, calc(var(--keyboard-room, 100dvh) - env(safe-area-inset-top) - 12rem)));
+}
+
+@media (pointer: coarse) {
+  html[data-keyboard="true"] .fixed.inset-0.keyboard-layer {
+    bottom: calc(100% - var(--app-height, 100%));
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-bottom: 0.5rem;
+  }
+}
+
 /* Where the card would cover the field it is about (a short screen with the keyboard up: a phone on its side shows
    about 200px), it goes to the top instead (Toast.tsx measures both). After the rules above, as specific as they are. */
 html .toast-place[data-at="top"] {
@@ -1335,10 +1360,15 @@ html .toast-place.toast-place-page[data-at="top"] {
 .account-action { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-width: 0; border-radius: 8px; cursor: pointer; color: var(--theme-text-secondary); }
 .account-action:hover, .account-action[aria-expanded="true"], .account-action[aria-current="page"] { background: var(--theme-surface-hover); color: var(--theme-accent); }
 .account-action:focus-visible { outline: 2px solid var(--theme-accent); outline-offset: -2px; }
-.account-label { font-size: 10px; line-height: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-label { font-size: 0.625rem; line-height: 0.75rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A place's name that would be cut at this width hides with the others; the icon, its tooltip and its name stay. It
    keeps its line, so the icons stay level. The profile's own name never decides it: a long one ends in "…". */
 .account-actions[data-compact] .account-label { visibility: hidden; }
+/* Under the chat list folded to a rail (ChatRail.tsx): the places stacked, by their icons; the switcher as wide as on the list. */
+.account-footer[data-rail] .account-actions { grid-auto-flow: row; grid-auto-rows: 44px; height: auto; }
+.account-footer[data-rail] .account-label { display: none; }
+.account-footer[data-rail] .profile-switcher-popover { right: auto; width: 20rem; }
+[dir="rtl"] .account-footer[data-rail] .profile-switcher-popover { left: auto; right: 0.5rem; }
 /* Something to look at behind an icon (Identities, sats that came in): a dot on its corner, ringed in the bar's color. */
 .nav-dot { --dot-ring: var(--theme-sidebar-bg); position: absolute; top: -2px; right: -3px; width: 9px; height: 9px; border-radius: 999px;
   background: var(--theme-accent); box-shadow: 0 0 0 2px var(--dot-ring); animation: nav-dot-in 0.45s cubic-bezier(.2,1.6,.4,1) both; }
@@ -1410,6 +1440,12 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
     padding-bottom: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
     min-height: var(--conversation-footer-height);
   }
+  html[data-keyboard="true"] .account-footer { padding-bottom: 0; }
+}
+/* A phone on its side: the keyboard leaves about 150px, and the list pane's header, its search field and the account bar
+   took all of it (a search showed no chat). The bar goes behind the keyboard, as the tab bar does upright. */
+@media (min-width: 768px) and (pointer: coarse) and (max-height: 500px) {
+  html[data-keyboard="true"] .account-footer { display: none; }
 }
 
 .conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }

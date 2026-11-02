@@ -59,8 +59,9 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   // screen finds it (Label in Name), and a screen reader hears the line under the title (Stopped, an update that asks).
   const shown = [app.title, app.version, hint.lead && `${hint.lead} ·`, hint.text].filter(Boolean).join(" ");
   return (
-    <div className="flex items-center gap-3 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-1 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    // Open goes under the name when both don't fit (a large text size on a phone), as in a built-in app's row.
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
+      <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-[1_1_12rem] text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
@@ -74,7 +75,7 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
           <HintLine testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
-      {app.run.status === "ok" && <Button data-testid="installed-app-open" onClick={onOpen}>{t("apps.page.open")}</Button>}
+      {app.run.status === "ok" && <Button data-testid="installed-app-open" className="ms-auto" onClick={onOpen}>{t("apps.page.open")}</Button>}
     </div>
   );
 }
@@ -173,14 +174,14 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           </span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             {kind && <span>{kind}</span>}
-            {read && <span>{t(store.apps.length === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps.length })}</span>}
+            {read && <span>{t("apps.store.count", { count: store.apps.length })}</span>}
             <Fingerprint value={store.fingerprint} />
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
           {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 ms-auto">
           {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
           <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }), undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
           <Button variant="danger" data-testid="app-store-remove" disabled={busy} loading={pending === "remove"} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved, "remove")}>{t("apps.store.remove")}</Button>
@@ -202,14 +203,17 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
             const removed = removals.get(`${listing.ref} ${listing.digest}`);
             return (
               <li key={listing.ref} tabIndex={i === added ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
-                className="flex items-center gap-3 px-4 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
-                <AppIcon size={32} installed={app} />
-                <span className="min-w-0 flex-1">
-                  <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
-                  <span dir="auto" className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                {/* Install (or Installed) goes under the name when both don't fit, rather than leaving it a letter. */}
+                <span className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
+                  <AppIcon size={32} installed={app} />
+                  <span className="min-w-0 flex-1">
+                    <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
+                    <span dir="auto" className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
+                  </span>
                 </span>
-                {app ? <span className="text-xs text-text-muted">{t("apps.store.installed")}</span>
-                  : !removed && <Button data-testid="app-listing-install" onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
+                {app ? <span className="ms-auto text-xs text-text-muted">{t("apps.store.installed")}</span>
+                  : !removed && <Button data-testid="app-listing-install" className="ms-auto" onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
               </li>
             );
           })}

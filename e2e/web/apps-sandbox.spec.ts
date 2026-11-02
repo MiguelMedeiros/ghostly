@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { ESCAPES, PRECONNECT_PROBES, RTC_PROBES, appEntry, hitTags, startListeners, type Listeners, type ProbeTargets } from "../support/appsSandbox";
+import { ESCAPES, HISTORY_WAYS, PRECONNECT_PROBES, RTC_PROBES, appEntry, hitTags, startListeners, type Listeners, type ProbeTargets } from "../support/appsSandbox";
 import { chessEntryHtml } from "../support/chessFixture";
 import { RUNNER_CSP } from "../../apps/web/runnerPolicy";
 
@@ -189,6 +189,48 @@ test("ways out that take the page with them reach nothing, and a load the broker
     });
   }
   testInfo.annotations.push({ type: `escapes (${browserName})`, description: JSON.stringify(outcome) });
+});
+
+const FRAGMENT_WAYS = new Set<string>(["history-hash", "history-link-hash", "history-assign-hash"]);
+
+test("an app adds no entry to the page's history and moves the page nowhere: Back still leaves it", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page, browserName }, testInfo) => {
+  await appPage(page);
+  // The page's own entries carry a query (the router follows the hash only, and sends a fresh profile's routes to `#/`).
+  const where = () => page.evaluate(() => location.search + location.hash);
+  const length = () => page.evaluate(() => history.length);
+  const outcome: Record<string, unknown> = {};
+  for (const way of HISTORY_WAYS) {
+    await test.step(way, async () => {
+      // Where the person was, and where they are when the app opens.
+      await page.evaluate((way) => { history.pushState(null, "", `?was=${way}${location.hash}`); history.pushState(null, "", `?is=${way}${location.hash}`); }, way);
+      const was = `?was=${way}#/`;
+      const is = await where();
+      expect(is).toBe(`?is=${way}#/`);
+      const before = await length();
+      const ref = `evilpublisherkey/${way}`;
+      const handle = await open(page, ref, appEntry("history", { way }));
+      await expect.poll(() => stored(page, ref)).toMatchObject({ started: true });
+      await page.waitForTimeout(2_000);
+      const now = await status(page, handle);
+      outcome[way] = { ...now, tried: (await stored(page, ref)).outcome ?? null, at: await where(), added: (await length()) - before };
+      // The page did not move.
+      expect(await where(), way).toBe(is);
+      if (FRAGMENT_WAYS.has(way)) {
+        // A fragment navigation (location.hash, a link to "#…") is the one way no policy refuses: it becomes a load, and
+        // the app is gone. What it pushed before its first one was heard stays in the history (WISP 1200, threats).
+        expect(now, way).toEqual({ phase: "stopped", stopped: "navigated" });
+        return;
+      }
+      // Its history has no entry of the app's: one Back takes the person where they were.
+      expect(now, way).toEqual({ phase: "running", stopped: null });
+      expect(await length(), way).toBe(before);
+      await page.evaluate(() => history.back());
+      await expect.poll(where, { message: way }).toBe(was);
+    });
+  }
+  testInfo.annotations.push({ type: `history (${browserName})`, description: JSON.stringify(outcome) });
 });
 
 test("the broker answers 50 requests a second and refuses one over 64 KiB", {

@@ -429,10 +429,13 @@ const emojiCount = (text: string) => {
   return parts.filter((part) => part.trim()).length;
 };
 
-/** Up to 6 emoji and nothing else show big. */
+/**
+ * Up to 6 emoji and nothing else show big. Besides the pictures: a keycap (a digit, # or * with U+20E3) and a tag
+ * sequence's tags (the flags of England, Scotland and Wales), which the emoji panel offers too.
+ */
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
-    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
+    /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|[0-9#*]\uFE0F?\u20E3|[\u{E0020}-\u{E007F}]|\u200d|\uFE0F|\s)+$/u;
   return emojiPattern.test(text.trim()) && emojiCount(text) <= 6;
 }
 
@@ -440,7 +443,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   if (side === "right") {
     return (
       <span className="absolute top-0 -end-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
-        <svg viewBox="0 0 8 13" width="8" height="13" className="block">
+        <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
           <path d="M5 0H0V13C0 13 1.8 8.5 5 4.5C6.4 2.7 8 1 8 1L5 0Z" className="fill-sent-bg" />
         </svg>
       </span>
@@ -448,7 +451,7 @@ function TailSvg({ side }: { side: "left" | "right" }) {
   }
   return (
     <span className="absolute top-0 -start-[8px] rtl:-scale-x-100 block w-[8px] h-[13px] overflow-hidden">
-      <svg viewBox="0 0 8 13" width="8" height="13" className="block">
+      <svg viewBox="0 0 8 13" width="8" height="13" className="block" aria-hidden="true" focusable="false">
         <path d="M3 0H8V13C8 13 6.2 8.5 3 4.5C1.6 2.7 0 1 0 1L3 0Z" className="fill-received-bg" />
       </svg>
     </span>
@@ -1084,6 +1087,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
+            aria-hidden="true"
+            focusable="false"
           >
             <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
             <polyline points="10 17 15 12 10 7" />
