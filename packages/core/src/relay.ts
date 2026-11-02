@@ -47,6 +47,71 @@ const firstWriter = (who: Asker): "chat" | "group" | null => (!who.write || who.
 const staleTurn = (turn: { servedAt: number; askedAt: number }, now: number): boolean => now - Math.max(turn.askedAt, turn.servedAt) >= 60_000;
 
 /**
+ * Keys and when each was last set, those of the last minute: how many and the latest, without walking them all (the
+ * chats that need a relay, `chatNeeds`). Each is set at the time it is set, so the sets come oldest first; a clock
+ * gone back makes the later ones as of now.
+ */
+class RecentKeys {
+  private readonly at = new Map<string, number>();
+  /** Every set, oldest first, from `head`; one a later set or a delete replaced is skipped. */
+  private order: [string, number][] = [];
+  private head = 0;
+
+  set(key: string, now: number): void {
+    this.prune(now);
+    this.at.set(key, now);
+    this.order.push([key, now]);
+  }
+
+  delete(key: string): void {
+    this.at.delete(key);
+  }
+
+  size(now: number): number {
+    this.prune(now);
+    return this.at.size;
+  }
+
+  /** When the key set last was, -Infinity with none in the last minute. */
+  latest(now: number): number {
+    this.prune(now);
+    while (this.order.length > this.head) {
+      const [key, at] = this.order[this.order.length - 1];
+      if (this.at.get(key) === at) return at;
+      this.order.pop();
+    }
+    return -Infinity;
+  }
+
+  /** The keys set in the last minute, oldest first. */
+  *entries(now: number): Generator<[string, number]> {
+    this.prune(now);
+    for (let i = this.head; i < this.order.length; i++) if (this.at.get(this.order[i][0]) === this.order[i][1]) yield this.order[i];
+  }
+
+  /** Drops the keys set a minute ago or more. */
+  private prune(now: number): void {
+    if (this.order.length > this.head && now < this.order[this.order.length - 1][1]) {
+      for (const [key, at] of this.at) this.at.set(key, Math.min(at, now));
+      this.order = [...this.at].sort((a, b) => a[1] - b[1]);
+      this.head = 0;
+    }
+    while (this.head < this.order.length) {
+      const [key, at] = this.order[this.head];
+      if (this.at.get(key) === at) {
+        if (now - at < 60_000) break;
+        this.at.delete(key);
+      }
+      this.head++;
+    }
+    if (this.head > 64 && this.head * 2 > this.order.length) {
+      this.order = this.order.slice(this.head);
+      this.head = 0;
+    }
+  }
+}
+
+/**
  * Public Pkarr relays. They are generic Pkarr infrastructure (an HTTP bridge to
  * the Mainline DHT), not a Ghostly backend: they only ever see signed,
  * encrypted packets. Every client uses this list: the browser clients read and
@@ -434,9 +499,11 @@ export class RelayTransport implements PkarrTransport {
   /**
    * Per key a 1:1 chat asks for: when it last read urgently (for the next minute, groups leave it `CHAT_RESERVE` on
    * every relay) and when the budget last refused it on each relay (the same, on that relay). A read of the key at a
-   * slow pace (the chat is live, or back in the background) drops it: `CHAT_RESERVE`.
+   * slow pace (the chat is live, or back in the background) drops it: `CHAT_RESERVE`. Per relay, the later of the two
+   * for each key (`chatNeed`); `chatUrgentAt` keeps the urgent ones for a relay not asked yet.
    */
-  private readonly chatNeeds = new Map<string, { urgentAt: number; refused: Map<string, number> }>();
+  private readonly chatNeeds = new Map<string, RecentKeys>();
+  private readonly chatUrgentAt = new RecentKeys();
   /** When a link (a chat's or a group's) last asked urgently: background requests yield for `SIGNALING_WINDOW_MS`. */
   private urgentAt = -Infinity;
   /** Timestamp of the last packet sent to each relay, per key: the compare-and-swap value for the next one. */
@@ -867,7 +934,7 @@ export class RelayTransport implements PkarrTransport {
   async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}, keptOnFailure = true): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
     // A chat reading its contact at a slow pace has nothing due: the reserve kept for it lapses (`CHAT_RESERVE`).
-    if (options.background && !options.urgent && !options.group) this.chatNeeds.delete(pubKeyZ32);
+    if (options.background && !options.urgent && !options.group) this.chatNeedLapsed(pubKeyZ32);
     const readAt = this.readAt.get(pubKeyZ32);
     if (readAt !== undefined && Date.now() - readAt < this.freshReadMs) return this.newest.get(pubKeyZ32) ?? null;
 
@@ -1189,14 +1256,14 @@ export class RelayTransport implements PkarrTransport {
     // Asked, whether or not it gets a request now: the link is signaling, and a chat's needs its reserve from now on.
     if (who.urgent && !who.background) {
       this.urgentAt = now;
-      if (isChat(who)) this.chatNeed(key).urgentAt = now;
+      if (isChat(who)) this.chatNeed(key, now);
     }
     if (isGroupRead(who) || isChatWatch(who)) this.readAsked(key, who, now);
     if (isTurnRead(who)) this.turnAsked(key, who, now);
     if (this.heldFor(relay, who, now, key) > 0) {
       // The minute is full: the groups' reads are rationed from now on.
       if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
-      if (isChat(who)) this.chatNeed(key).refused.set(relay, now);
+      if (isChat(who)) this.chatNeed(key, now, relay);
       if (writer) this.writeWaiting.set(`${writer} ${relay}`, now);
       return false;
     }
@@ -1403,21 +1470,36 @@ export class RelayTransport implements PkarrTransport {
     this.departedOver.set(key, [...(this.departedOver.get(key) ?? []), now]);
   }
 
-  private chatNeed(key: string): { urgentAt: number; refused: Map<string, number> } {
-    let need = this.chatNeeds.get(key);
-    if (!need) this.chatNeeds.set(key, need = { urgentAt: -Infinity, refused: new Map() });
-    return need;
+  /** A chat's request of `key` asked urgently (it needs every relay), or the budget refused it on `relay` (it needs that one). */
+  private chatNeed(key: string, now: number, relay?: string): void {
+    if (relay !== undefined) { this.chatNeedsOn(relay, now).set(key, now); return; }
+    this.chatUrgentAt.set(key, now);
+    for (const needs of this.chatNeeds.values()) needs.set(key, now);
   }
 
-  /** How long groups still leave a chat its reserve on this relay (`CHAT_RESERVE`); a chat's need a minute old goes. */
-  private chatReservedFor(relay: string, now: number): number {
-    let until = -Infinity;
-    for (const [key, need] of this.chatNeeds) {
-      const last = Math.max(need.urgentAt, ...need.refused.values());
-      if (now - last >= 60_000) { this.chatNeeds.delete(key); continue; }
-      until = Math.max(until, need.urgentAt, need.refused.get(relay) ?? -Infinity);
+  /** The chats that need this relay: those a request of was refused there, and the urgent ones. */
+  private chatNeedsOn(relay: string, now: number): RecentKeys {
+    let needs = this.chatNeeds.get(relay);
+    if (!needs) {
+      this.chatNeeds.set(relay, needs = new RecentKeys());
+      for (const [key, at] of this.chatUrgentAt.entries(now)) needs.set(key, at);
     }
-    return until + 60_000 - now;
+    return needs;
+  }
+
+  /** The chat reading `key` has nothing due: it needs no relay any more. */
+  private chatNeedLapsed(key: string): void {
+    this.chatUrgentAt.delete(key);
+    for (const needs of this.chatNeeds.values()) needs.delete(key);
+  }
+
+  /**
+   * How long groups still leave a chat its reserve on this relay (`CHAT_RESERVE`); a chat's need a minute old goes.
+   * Kept up to date as needs come and go (`RecentKeys`): walking them all for each request cost a daemon with 500
+   * contacts away 2.7 s of CPU per 10 idle minutes (bug hunt, 2026-11-01).
+   */
+  private chatReservedFor(relay: string, now: number): number {
+    return this.chatNeedsOn(relay, now).latest(now) + 60_000 - now;
   }
 
   /**
@@ -1441,8 +1523,7 @@ export class RelayTransport implements PkarrTransport {
 
   /** What the chats that need the relays keep on this relay (`CHAT_RESERVE_PER_CHAT`), never less than `reserveOf`. */
   private chatReserveOf(relay: string, now: number): number {
-    let needing = 0;
-    for (const need of this.chatNeeds.values()) if (now - Math.max(need.urgentAt, need.refused.get(relay) ?? -Infinity) < 60_000) needing++;
+    const needing = this.chatNeedsOn(relay, now).size(now);
     return Math.max(this.reserveOf(relay), Math.min(needing * CHAT_RESERVE_PER_CHAT, Math.floor(this.limitOf(relay) * CHAT_RESERVE_MOST_SHARE)));
   }
 
