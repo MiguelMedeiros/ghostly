@@ -78,8 +78,12 @@ export class CookieJar {
   }
 }
 
-/** Sends one request from the app over the link and streams the answer back on its port. */
-export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords): Promise<void> {
+/**
+ * Sends one request from the app over the link and streams the answer back on its port. `view`: aborted once the page
+ * that asked is gone (the view closed, its frame loaded again), so a request still waiting on the contact ends there
+ * too, rather than running on their machine and holding one of the link's places.
+ */
+export async function serve(port: MessagePort, data: unknown, send: ServiceSend, jar: CookieJar, words: OpenerWords, view?: AbortSignal): Promise<void> {
   const request = readRequest(data);
   if (!request) { port.close(); return; }
   // Once an error went, nothing more does: the port is the worker's, and it took that as the whole answer.
@@ -97,6 +101,9 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
   };
   const stop = new AbortController();
   port.onmessage = (event) => { if ((event.data as { type?: unknown } | null)?.type === "cancel") stop.abort(); };
+  const pageGone = () => stop.abort();
+  if (view?.aborted) stop.abort();
+  else view?.addEventListener("abort", pageGone);
   let headed = false;
   const late = setTimeout(() => {
     if (headed) return;
@@ -135,6 +142,7 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     post({ type: "error", status: gone ? 503 : 502, text: gone ? words.unreachable : words.failed });
   } finally {
     clearTimeout(late);
+    view?.removeEventListener("abort", pageGone);
     port.close();
   }
 }
@@ -245,14 +253,19 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   retry.addEventListener("click", present);
 
   const ports = new Set<MessagePort>();
+  // The requests of the bridge now in the frame: aborted, still waiting on the contact or not, once it is gone.
+  let bridge = new AbortController();
   const onMessage = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow || event.origin !== origin || (event.data as { type?: unknown } | null)?.type !== BRIDGE_READY) return;
     // A new bridge (the frame loaded again): a new channel, and the old one's requests end.
     for (const old of ports) old.close();
     ports.clear();
+    bridge.abort();
+    bridge = new AbortController();
+    const { signal } = bridge;
     const channel = new MessageChannel();
     ports.add(channel.port1);
-    channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words); };
+    channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words, signal); };
     frame.contentWindow!.postMessage({ type: BRIDGE_PORT }, origin, [channel.port2]);
   };
   // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
@@ -266,6 +279,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     removeEventListener("keydown", onKey);
     removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
+    bridge.abort();
     view.remove();
     for (const el of shut) el.removeAttribute("inert");
     const active = document.activeElement;

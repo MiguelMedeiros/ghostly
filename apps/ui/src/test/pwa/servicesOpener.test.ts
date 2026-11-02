@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ANSWER_BY_MS, CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
 import { closeServiceWindows, hostErrorText, setServiceWindowsCloser } from "../../lib/serviceWindows";
 import { translatorFor } from "../../locales";
-import { HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
+import { BRIDGE_READY, HEAD_TIMEOUT_MS, SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
 // covers: services.web-open
@@ -207,6 +207,36 @@ describe("a contact's app shown over the app", () => {
     await open("two");
     expect(document.querySelectorAll(`#${SERVICE_VIEW_ID}`)).toHaveLength(1);
     expect(document.getElementById(SERVICE_VIEW_ID)?.getAttribute("aria-label")).toBe("two");
+  });
+
+  it("ends every request of the app still waiting on the contact when it closes, or when its frame loads again: none holds a place on the link", async () => {
+    const signals: AbortSignal[] = [];
+    const send = (request: ClientRequest) => new Promise<ClientResponse>((_, reject) => {
+      signals.push(request.signal!);
+      request.signal!.addEventListener("abort", () => reject(new GhostlyHttpError("aborted", "x")));
+    });
+    await openServiceView({ host, tag: "ybndrfg8ejkmcpqx", peer: PEER, service: "demo", title: "Demo", send, words });
+    const frame = document.querySelector<HTMLIFrameElement>("[data-testid=service-view-frame]")!;
+    const origin = new URL(frame.src).origin;
+    // The bridge in the frame (happy-dom loads none): says it is ready, takes its channel, and asks for what the app's page asks.
+    const inFrame = { postMessage: vi.fn() };
+    Object.defineProperty(frame, "contentWindow", { value: inFrame, configurable: true });
+    const bridge = async () => {
+      inFrame.postMessage.mockClear();
+      dispatchEvent(new MessageEvent("message", { data: { type: BRIDGE_READY }, origin, source: inFrame as unknown as Window }));
+      const channel = (inFrame.postMessage.mock.calls[0]![2] as MessagePort[])[0]!;
+      return (count: number) => {
+        for (let i = 0; i < count; i++) channel.postMessage({ type: "request", method: "GET", path: `/poll/${i}`, headers: [], body: null }, [new MessageChannel().port2]);
+      };
+    };
+    const until = (n: number) => vi.waitFor(() => expect(signals).toHaveLength(n));
+    (await bridge())(3);
+    await until(3);
+    (await bridge())(2);
+    await until(5);
+    expect(signals.map((s) => s.aborted), "the frame loaded again: the old page's requests end").toEqual([true, true, true, false, false]);
+    document.querySelector<HTMLButtonElement>("[data-testid=service-view-close]")!.click();
+    expect(signals.every((s) => s.aborted), "closed: every request ends").toBe(true);
   });
 
   it("reads the app's name in its own direction: in the Arabic app a Latin name is cut at its end, not its start", async () => {
