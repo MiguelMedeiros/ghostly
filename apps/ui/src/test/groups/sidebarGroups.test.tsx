@@ -182,7 +182,7 @@ describe("Sidebar: groups in the chat list", () => {
   it("says why a group is over in the app's language", () => {
     fakeEngine.update({ groups: [groupView({ id: "g-removed", name: "Old", status: "removed", statusReason: "You were removed from this group" })] });
     renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>, { language: "pt" });
-    expect(row("g-removed")).toHaveTextContent("Você foi removido deste grupo");
+    expect(row("g-removed")).toHaveTextContent("Removeram você deste grupo");
   });
 
   it("opens a group", async () => {
