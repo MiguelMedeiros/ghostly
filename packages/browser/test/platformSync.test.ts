@@ -175,6 +175,23 @@ describe("keeping links and chats in step", () => {
     expect(engine.calls).toContainEqual(["removeLink", { linkId: "fresh" }]);
   });
 
+  it("has the host forget what the contact's apps opened from a deleted chat kept on this device", async () => {
+    const forgotten: unknown[] = [];
+    const { setBrowserHost } = await import("../src/host");
+    const { viewerTag } = await import("@ghostly/core");
+    setBrowserHost({ forgetServices: async (which: unknown) => { forgotten.push(which); } } as unknown as import("../src/host").BrowserHost);
+    imported();
+    storage.saveSession(session({ id: "s1", peerPubKeyB64: "p-gone" }));
+    await start([link({ id: "gone", peerPubKeyZ32: "p-gone", myPubKeyZ32: "me-gone" })]);
+    expect(forgotten).toEqual([]);
+    storage.deleteSession("s1");
+    window.dispatchEvent(new Event("session-updated"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.calls).toContainEqual(["removeLink", { linkId: "gone" }]);
+    // The tag `openService` gave the host for that chat's apps.
+    expect(forgotten).toContainEqual({ tag: viewerTag("me-gone") });
+  });
+
   it("keeps a link whose chat still exists, and takes its delivery mode", async () => {
     imported();
     storage.saveSession(session({ deliveryMode: "stream" }));
