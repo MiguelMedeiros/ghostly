@@ -292,6 +292,13 @@ export async function startRelay(options = {}) {
   const perAddress = new Map()
   const stats = { accepted: 0, refused: 0, dropped: 0 }
   const origins = new Set(options.origins ?? [])
+  // Once per start each: a proxy in front the relay was not told about makes every client count as that proxy.
+  const hinted = new Set()
+  const hint = (header, setting) => {
+    if (hinted.has(header)) return
+    hinted.add(header)
+    log(`requests carry ${header} but ${setting} is not set: every client counts as the proxy`)
+  }
 
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
@@ -308,6 +315,11 @@ export async function startRelay(options = {}) {
 
   server.on('upgrade', (request, socket, head) => {
     const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
+    // Cloudflare writes both headers: its own setting is the one to name.
+    if (!options.cloudflare && !options.proxies) {
+      if (request.headers['cf-connecting-ip'] !== undefined) hint('CF-Connecting-IP', 'GHOSTLY_RELAY_CLOUDFLARE')
+      else if (request.headers['x-forwarded-for'] !== undefined) hint('X-Forwarded-For', 'GHOSTLY_RELAY_PROXIES')
+    }
     const origin = request.headers.origin
     const refuse = (status, why) => {
       stats.refused++; log('refused', why)
