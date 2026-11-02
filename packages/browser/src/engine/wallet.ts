@@ -14,6 +14,7 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, mintRefused } from "./paymentAdapters/cashu";
+import { INVOICE_PACE, nextInvoiceAsk } from "./invoicePace";
 import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
@@ -52,7 +53,6 @@ function amountlessUnderOptions(info: GetInfoResponse): GetInfoResponse {
   const moved = info.nuts[5].methods.map((method) => (saysAmountlessBeside(method) ? { ...method, options: { ...method.options, amountless: true } } : method));
   return { ...info, nuts: { ...info.nuts, 5: { ...info.nuts[5], methods: moved } } };
 }
-const QUOTE_POLL_MS = 4_000;
 /** A Lightning payment can stay in flight for minutes or hours; the mint is asked again this often. */
 const MELT_POLL_MS = 30_000;
 const MAX_AMOUNT = 1_000_000;
@@ -287,6 +287,11 @@ export interface WalletEvents {
    * the wallet with its records; otherwise the mint never made it, and what it held is free again.
    */
   onSwapSettled?(swap: PendingSwap, done: boolean): void | Promise<void>;
+  /**
+   * Whether the chat request an invoice of ours belongs to (`StoredQuote.paymentId`) was closed: withdrawn, closed, or
+   * paid some other way. Its invoice is then asked about only once more, after it expired (`nextInvoiceAsk`).
+   */
+  requestClosed?(paymentId: string): boolean;
 }
 
 /**
@@ -307,6 +312,12 @@ export class CashuWallet {
   private readonly infos = new Map<string, MintInfoView>();
   private readonly locks = new Map<string, Promise<unknown>>();
   private quoteTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When `quoteTimer` fires: a round that would fire later leaves it as it is. */
+  private quoteTimerAt = 0;
+  /** Per open quote: when its mint was last asked about it, in this run (`nextInvoiceAsk`). */
+  private readonly quoteAsked = new Map<string, number>();
+  /** Per quote the screen shows: until when (`watch`). */
+  private readonly quoteWatched = new Map<string, number>();
   private meltTimer: ReturnType<typeof setTimeout> | null = null;
   private restoredTimer: ReturnType<typeof setTimeout> | null = null;
   private swapTimer: ReturnType<typeof setTimeout> | null = null;
@@ -510,8 +521,23 @@ export class CashuWallet {
       ...(paysItsOwnInvoices(mint) ? { held: true } : {}),
     };
     await committed((await store(STORES.quotes, "readwrite")).put(quote));
+    // Nobody paid it yet: it is first asked about after the fast pace's gap.
+    this.quoteAsked.set(quote.quote, Date.now());
     void this.pollQuotes();
     return quote;
+  }
+
+  /**
+   * The screen shows this invoice of ours (Receive): it is asked about at the fast pace for `INVOICE_PACE.watchMs`, and
+   * now if it was not just asked. The screen says it again while it shows it. Returns whether it is one of ours here.
+   */
+  async watch(invoice: string): Promise<boolean> {
+    const wanted = invoice.trim().toLowerCase();
+    const quote = (await this.quotes()).find((q) => q.invoice.toLowerCase() === wanted);
+    if (!quote) return false;
+    this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
+    await this.pollQuotes();
+    return true;
   }
 
   /**
@@ -524,7 +550,9 @@ export class CashuWallet {
     const quote = (await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll())).find((q) => q.invoice.toLowerCase() === wanted);
     if (!quote) return false;
     if (quote.held) await committed((await store(STORES.quotes, "readwrite")).put({ ...quote, held: undefined } satisfies StoredQuote));
-    await this.pollQuotes();
+    // The payment may take a moment to settle at the mint: the invoice is asked about at the fast pace meanwhile.
+    this.quoteWatched.set(quote.quote, Date.now() + INVOICE_PACE.watchMs);
+    await this.pollQuotes(true);
     return true;
   }
 
@@ -573,7 +601,7 @@ export class CashuWallet {
    * these mints (one network's wallet, before it is removed), claiming what is paid; the regular round is left alone.
    */
   async checkQuotes(mints?: readonly string[]): Promise<void> {
-    if (!mints) return this.pollQuotes();
+    if (!mints) return this.pollQuotes(true);
     const at = new Set(mints);
     await this.settleQuotes((await this.quotes()).filter((q) => at.has(q.mint)));
   }
@@ -586,28 +614,62 @@ export class CashuWallet {
   /**
    * Invoices are paid by someone else, somewhere else; all we can do is ask the mint. A quote is the only
    * claim on the sats paid to it, so it is dropped only once the mint says it is unpaid and it has expired.
+   * Each quote is asked about at its own pace (`nextInvoiceAsk`): often while it is new or on screen, then less.
+   * `now`: every open quote is asked about, whatever its pace (someone says it was paid). The store is read once.
    */
-  private async pollQuotes(): Promise<void> {
+  private async pollQuotes(now = false): Promise<void> {
     if (this.quoteTimer) clearTimeout(this.quoteTimer);
     this.quoteTimer = null;
     if (this.stopped) return;
-    const quotes = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
+    const quotes = await this.quotes();
+    const gone = new Set<string>();
 
     // A held quote is not asked about: its mint's "paid" means nothing. It only goes once it has expired.
-    for (const held of quotes.filter((q) => q.held && q.expiresAt && q.expiresAt + 60_000 < Date.now())) {
+    for (const held of quotes.filter((q) => q.held && q.expiresAt && q.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now())) {
       await committed((await store(STORES.quotes, "readwrite")).delete(held.quote));
+      gone.add(held.quote);
     }
-    await this.settleQuotes(quotes);
+    // What this run knows of quotes that are no longer stored goes with them.
+    const stored = new Set(quotes.map((q) => q.quote));
+    for (const pace of [this.quoteAsked, this.quoteWatched]) for (const id of pace.keys()) if (!stored.has(id)) pace.delete(id);
 
-    const remaining = await wrap<StoredQuote[]>((await store(STORES.quotes, "readonly")).getAll());
-    if (!this.stopped && remaining.some((q) => !q.issuedUnclaimed && !q.held)) this.quoteTimer = setTimeout(() => void this.pollQuotes(), QUOTE_POLL_MS);
+    const open = quotes.filter((q) => !q.issuedUnclaimed && !q.held);
+    const at = Date.now();
+    for (const settled of await this.settleQuotes(open.filter((q) => now || this.nextAsk(q, at) <= at + INVOICE_PACE.dueSlackMs))) gone.add(settled);
+
+    const next = open.filter((q) => !gone.has(q.quote)).map((q) => this.nextAsk(q, Date.now()));
+    if (next.length) this.scheduleQuotes(Math.min(...next));
   }
 
-  private async settleQuotes(quotes: readonly StoredQuote[]): Promise<void> {
+  /** When the mint is next asked about this quote. */
+  private nextAsk(quote: StoredQuote, now: number): number {
+    return nextInvoiceAsk({
+      createdAt: quote.createdAt,
+      expiresAt: quote.expiresAt,
+      watchedUntil: this.quoteWatched.get(quote.quote),
+      closed: !!quote.paymentId && !!this.events.requestClosed?.(quote.paymentId),
+      paid: !!quote.paid,
+    }, this.quoteAsked.get(quote.quote), now);
+  }
+
+  /** The next round at `at`, unless one is due sooner. */
+  private scheduleQuotes(at: number): void {
+    if (this.stopped) return;
+    if (this.quoteTimer && this.quoteTimerAt <= at) return;
+    if (this.quoteTimer) clearTimeout(this.quoteTimer);
+    this.quoteTimerAt = at;
+    this.quoteTimer = setTimeout(() => { this.quoteTimer = null; void this.pollQuotes(); }, Math.max(0, at - Date.now()));
+  }
+
+  /** Asks the mints about these quotes. Returns the ones minted. */
+  private async settleQuotes(quotes: readonly StoredQuote[]): Promise<string[]> {
+    const minted: string[] = [];
     for (const { quote, mint } of quotes.filter((q) => !q.issuedUnclaimed && !q.held)) {
+      this.quoteAsked.set(quote, Date.now());
       try {
         const paid = await this.locked(mint, () => this.settleQuote(quote));
         if (paid) {
+          minted.push(quote);
           // Test coins are no invoice anyone else knows of.
           if (!paid.testCoins) this.events.onQuotePaid(paid);
           this.events.onChange();
@@ -616,6 +678,7 @@ export class CashuWallet {
         // mint unreachable: try again on the next round
       }
     }
+    return minted;
   }
 
   /** Runs under the mint's lock, so two rounds never mint one quote twice. Returns the quote once its ecash is in. */
