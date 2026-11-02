@@ -424,7 +424,29 @@ describe("the password proof and its limits", () => {
     w.profile.add("f1", bytesOf(100));
     await w.taker.pull(PASSWORD);
     await until(() => w.quiesced.length === 1);
-    expect(w.giverRecords.record.handoffAttempts?.[B]).toEqual({ recent: [], total: 0 });
+    expect(w.giverRecords.record.handoffAttempts?.[B]).toBeUndefined();
+  });
+
+  it("the counts of devices no longer in the set go at the next try: a giver holding 16 of them still hands over", async () => {
+    // Before, every device that ever pulled kept an entry (a device removed and added again has a new key): with 16, the
+    // record's cap, the count of the next pull could not be written, and that pull got no answer.
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const gone = Array.from({ length: 16 }, (_, i) => toBase64Url(new Uint8Array(32).fill(i + 1)));
+    w.giverRecords.record = { ...w.giverRecords.record, handoffAttempts: Object.fromEntries(gone.map((key) => [key, { recent: [], total: 3 }])) };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    expect(w.giverRecords.record.handoffAttempts).toEqual({});
+  });
+
+  it("the device that takes the profile keeps the counts of the devices in the set only, its own old ones too", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const gone = toBase64Url(new Uint8Array(32).fill(0x01));
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [], total: 9 }, [gone]: { recent: [], total: 4 } } });
+    await w.takerRecords.amend({ handoffAttempts: { [gone]: { recent: [], total: 2 } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts).toEqual({ [C]: { recent: [], total: 9 } });
   });
 
   it("fifteen with no success: refused until the person lets that device try again", { timeout: 30_000 }, async () => {
