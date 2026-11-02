@@ -197,6 +197,24 @@ describe("HTTPS only", () => {
   });
 });
 
+describe("nothing written into a page on its way", () => {
+  // Cloudflare's Web Analytics setup wrote its beacon <script> into every page of both sites. The script policy refused
+  // it, but every visit logged a console error and a failed request. A proxy changes nothing in an answer that says
+  // no-transform (the website's own: apps/website/instrumentation.ts, e2e/csp.spec.ts).
+  it("every location of the web app's server that names a Cache-Control says no-transform in it, the services origin's too", () => {
+    for (const file of ["apps/web/nginx.conf", "apps/web/nginx-services.conf"]) {
+      const values = [...read(file).matchAll(/add_header Cache-Control "([^"]+)"/g)].map((m) => m[1]!);
+      expect(values.length, file).toBeGreaterThan(0);
+      for (const value of values) expect(value.split(",").map((d) => d.trim()), `${file}: ${value}`).toContain("no-transform");
+    }
+    // The app's pages, its sign-in return page and the runner's frames name one, so none answers without it.
+    const nginx = read("apps/web/nginx.conf");
+    const pages = [...nginx.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].filter(([, match]) => match!.trim() === "/" || /\.html$/.test(match!.trim()));
+    expect(pages.map(([, match]) => match!.trim()).sort()).toEqual(["/", "= /app-frame-net.html", "= /app-frame.html", "= /oidc-callback.html"]);
+    for (const [, match, body] of pages) expect(body, match).toMatch(/add_header Cache-Control "[^"]*no-transform[^"]*"/);
+  });
+});
+
 describe("the web app's window", () => {
   // A page of another site that opened the app would keep a handle to its window, and could set its address again and
   // again (an invite link each time) without a reload. The header cuts that handle; `-allow-popups` keeps the windows
