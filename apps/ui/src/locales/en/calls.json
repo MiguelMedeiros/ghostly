@@ -13,6 +13,7 @@
   "devices": {
     "back": "{{name}} is back",
     "failed": "Could not use {{name}}. The call keeps the one it had.",
+    "gone": "{{name}} disconnected. Connect another to go on.",
     "lost": "{{name}} disconnected. Using the default.",
     "menu": "Devices",
     "switchBack": "Switch back"
