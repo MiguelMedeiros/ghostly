@@ -273,6 +273,12 @@ export interface IncomingMessage {
   card?: StatusCard;
 }
 
+/** Frames the contact says of itself and this side saves when they change, each read within its own window. */
+type PeerSaidKind = "paired-nick" | "paired-avatar" | "paired-hold" | "paired-payments" | "paired-adapters";
+function peerSaidWindow() {
+  return { window: new RateWindow(6, 60_000), read: null as (() => void | Promise<void>) | null, timer: null as ReturnType<typeof setTimeout> | null };
+}
+
 /**
  * What files/3 may hold on a session's channel (WISP 501, Backpressure): a quarter of its send budget (native and iroh
  * channels throw past 120 KiB), or the high water mark of a WebRTC channel, which has none.
@@ -861,6 +867,11 @@ export class GhostLink {
   private peerNickOverride: string | null = null;
   /** Group protocol versions the peer announced on this session; null until it does. */
   private peerGroupVersions: number[] | null = null;
+  /**
+   * Groups were on on this session. Off again, they stay off until the next session: each "on" runs a group edge's
+   * whole opening, and the peer says its versions once a session.
+   */
+  private peerGroupsWereOn = false;
   /** What each side announced after the handshake (`paired-capabilities`): calls, services. */
   private readonly sessionCapabilities = new SessionCapabilities(() => this.offeredCapabilities());
   private readonly pairedCalls = new PairedCalls();
@@ -881,12 +892,16 @@ export class GhostLink {
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
   /**
-   * The contact's name and picture, each saved when it changes: said once a session and when changed, so a handful a
-   * minute each. Past that only the newest waits, read once the window has room again.
+   * The contact's name and picture, its word on held items, its ways of paying and its transport descriptors, each saved
+   * on this side when it changes: said once a session and when changed, so a handful a minute each. Past that only the
+   * newest waits, read once the window has room again.
    */
   private readonly peerSaid = {
-    "paired-nick": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
-    "paired-avatar": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
+    "paired-nick": peerSaidWindow(),
+    "paired-avatar": peerSaidWindow(),
+    "paired-hold": peerSaidWindow(),
+    "paired-payments": peerSaidWindow(),
+    "paired-adapters": peerSaidWindow(),
   };
   /** Identity-proof frames the contact may send per window; the rest are dropped before they are read. */
   private readonly identityReceived = new RateWindow(IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS);
@@ -3678,17 +3693,25 @@ export class GhostLink {
   /**
    * The session ended or a new one took its place (a transport switch, a resume, a re-dial): what the contact had open
    * is held for `APP_RESUME_GRACE_MS` (WISP 1200 § In a chat). The next session's `open` takes each back, and the app
-   * hears only that open, not a close first; one not said again by then is closed with `offline`.
+   * hears only that open, not a close first; one not said again by then is closed with `offline`. Each suspension
+   * gives what it held its own grace: a later one's apps do not close at an earlier one's time.
    */
   private appsSuspended(): void {
     // Serve ids and requests last one session, even where the apps are held across it.
     this.appRanges.reset();
-    this.apps.sessionSuspended();
-    if (!this.apps.holding || this.appsGrace) return;
+    this.apps.sessionSuspended(this.options.appResumeGraceMs ?? APP_RESUME_GRACE_MS);
+    this.armAppsGrace();
+  }
+  /** A timer for the next held app's grace, as long as any is held. */
+  private armAppsGrace(): void {
+    if (this.appsGrace) { clearTimeout(this.appsGrace); this.appsGrace = null; }
+    const until = this.apps.heldUntil;
+    if (until === undefined) return;
     this.appsGrace = setTimeout(() => {
       this.appsGrace = null;
       for (const event of this.apps.heldExpired()) this.options.events?.onAppFrame?.(event);
-    }, this.options.appResumeGraceMs ?? APP_RESUME_GRACE_MS);
+      this.armAppsGrace();
+    }, Math.max(0, until - Date.now()));
   }
   /** Whether files/3 was agreed on the session open now; kept to say when that changes. */
   private filesOpen = false;
@@ -4204,6 +4227,7 @@ export class GhostLink {
           this.peerPaymentMethods = null; this.peerNetworks = null;
           this.peerHoldOverride = null;
           this.sessionCapabilities.reset();
+          this.peerGroupsWereOn = false;
           this.leaveHangUp();
           this.typingSender.reset(); this.typingReceiver.clear();
           this.appsSuspended();
@@ -4316,7 +4340,7 @@ export class GhostLink {
             await this.options.events?.onPeerProof?.(frame); return;
           }
           if (frame?.t === "paired-avatar" || frame?.t === "paired-nick") {
-            this.peerSays(channel, frame.t, frame);
+            this.peerSaysOfItself(channel, frame.t, frame);
             return;
           }
           if (frame?.t === SESSION_CAPABILITIES_FRAME) {
@@ -4412,15 +4436,21 @@ export class GhostLink {
           if (frame?.t === "paired-payments") {
             // A method this app does not know yet (a newer contact) is left out, not a reason to drop the list.
             if (!Array.isArray(frame.m) || frame.m.length > 16 || !frame.m.every(m => typeof m === "string")) return;
-            this.peerPaymentMethods = new Set((frame.m as string[]).filter((m): m is PaymentMethodName => PAYMENT_METHODS.includes(m as PaymentMethodName)));
-            this.peerNetworks = frame.n === undefined ? null : parsePaymentNetworks(frame.n) ?? this.peerNetworks;
-            this.emitPairingState();
+            const methods = new Set((frame.m as string[]).filter((m): m is PaymentMethodName => PAYMENT_METHODS.includes(m as PaymentMethodName)));
+            const networks = frame.n === undefined ? null : parsePaymentNetworks(frame.n);
+            this.peerSays(channel, "paired-payments", () => {
+              this.peerPaymentMethods = methods;
+              this.peerNetworks = frame.n === undefined ? null : networks ?? this.peerNetworks;
+              this.emitPairingState();
+            });
             return;
           }
           if (frame?.t === "paired-groups") {
             if (!Array.isArray(frame.v) || frame.v.length > 8 || !frame.v.every(v => Number.isSafeInteger(v) && v > 0)) return;
             const before = this.groupsSupport;
+            if (!before && this.peerGroupsWereOn && frame.v.includes(1)) return;
             this.peerGroupVersions = frame.v as number[];
+            if (this.groupsSupport) this.peerGroupsWereOn = true;
             if (this.groupsSupport !== before) this.options.events?.onGroupsSupport?.(this.groupsSupport);
             return;
           }
@@ -4439,11 +4469,14 @@ export class GhostLink {
           if (frame?.t === "paired-hold") {
             // The contact's latest word on held items; an older app never sends it and keeps its handshake offer.
             if (typeof frame.on !== "boolean" || (frame.top !== undefined && !(Number.isSafeInteger(frame.top) && (frame.top as number) >= 0))) return;
-            this.peerHoldOverride = frame.on;
-            // Not awaited: the owner may be picking up held items (from the contact's storage, seconds or more), and
-            // every frame after this one would wait for it, the edits, texts and pings that keep this session alive too.
-            void Promise.resolve(this.options.events?.onHold?.({ peerAllows: frame.on, peerTop: frame.top as number | undefined })).catch(() => {});
-            this.emitPairingState();
+            const on = frame.on, top = frame.top as number | undefined;
+            this.peerSays(channel, "paired-hold", () => {
+              this.peerHoldOverride = on;
+              // Not awaited: the owner may be picking up held items (from the contact's storage, seconds or more), and
+              // every frame after this one would wait for it, the edits, texts and pings that keep this session alive too.
+              void Promise.resolve(this.options.events?.onHold?.({ peerAllows: on, peerTop: top })).catch(() => {});
+              this.emitPairingState();
+            });
             return;
           }
           if (frame?.t === "paired-reconnect") {
@@ -4454,10 +4487,12 @@ export class GhostLink {
           if (frame?.t === "paired-adapters") {
             if (!frame.descriptors || typeof frame.descriptors !== "object" || JSON.stringify(frame.descriptors).length > 4096) return;
             const descriptors = checkedDescriptors(frame.descriptors);
-            const transports = [...(this.paired?.peerTransports ?? [])] as PairedTransport[];
-            const fallback = this.paired?.peerAllowsFallback ?? false;
-            await this.options.events?.onTransportDiscovery?.(descriptors, transports, fallback);
-            this.peerDescriptors = descriptors; this.peerTransports = transports; this.peerFallback = fallback;
+            await this.peerSays(channel, "paired-adapters", async () => {
+              const transports = [...(this.paired?.peerTransports ?? [])] as PairedTransport[];
+              const fallback = this.paired?.peerAllowsFallback ?? false;
+              await this.options.events?.onTransportDiscovery?.(descriptors, transports, fallback);
+              this.peerDescriptors = descriptors; this.peerTransports = transports; this.peerFallback = fallback;
+            });
             return;
           }
           if (!frame || typeof frame.id !== "string" || !/^[A-Za-z0-9_-]{22}$/.test(frame.id)) return;
@@ -4802,11 +4837,8 @@ export class GhostLink {
     this.dataLink.abandon();
   }
 
-  /**
-   * A name or picture the contact said, once it is one (reading it costs little; saving it is what counts): past the
-   * window the newest waits for room on this session, so the last word still counts.
-   */
-  private peerSays(channel: FrameChannel, kind: "paired-nick" | "paired-avatar", frame: Record<string, unknown>): void {
+  /** A name or picture the contact said, once it is one (reading it costs little; saving it is what counts). */
+  private peerSaysOfItself(channel: FrameChannel, kind: "paired-nick" | "paired-avatar", frame: Record<string, unknown>): void {
     let read: () => void;
     if (kind === "paired-avatar") {
       const avatar = sanitizeAvatar(frame.a);
@@ -4823,8 +4855,15 @@ export class GhostLink {
         }
       };
     }
+    this.peerSays(channel, kind, read);
+  }
+  /**
+   * Something the contact said that this side saves, read within its window: past it the newest waits for room on this
+   * session (handed on unawaited then), so the last word still counts. What `read` returns when read at once is returned.
+   */
+  private peerSays(channel: FrameChannel, kind: PeerSaidKind, read: () => void | Promise<void>): void | Promise<void> {
     const held = this.peerSaid[kind];
-    if (!held.timer && held.window.take()) { read(); return; }
+    if (!held.timer && held.window.take()) return read();
     held.read = read;
     if (held.timer) return;
     const due = () => {
@@ -4833,7 +4872,7 @@ export class GhostLink {
       if (!held.window.take()) { held.timer = setTimeout(due, held.window.wait()); return; }
       const next = held.read;
       held.read = null;
-      next();
+      void Promise.resolve(next()).catch(() => {});
     };
     held.timer = setTimeout(due, held.window.wait());
   }
@@ -4888,6 +4927,7 @@ export class GhostLink {
     this.typingSender.reset(); this.typingReceiver.clear();
     this.appsSuspended();
     this.emitFilesSession();
+    this.peerGroupsWereOn = false;
     if (this.peerGroupVersions) { this.peerGroupVersions = null; this.options.events?.onGroupsSupport?.(false); }
     this.session.setDataLinkOpen(false);
     if (wasNative) this.options.events?.onDataLinkState?.("idle");

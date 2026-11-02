@@ -73,12 +73,15 @@ describe("GroupMembersDialog: a large roster", () => {
 describe("a member's missing-messages chip", () => {
   it("is singular for one missing message in every language, and the count's own form for more", () => {
     const one = Object.fromEntries(Object.entries(LOCALES).map(([language, dict]) => [language, translateWith(dict, language as never)("group.members.missingOne", { count: 1 })]));
-    expect(one).toMatchObject({ en: "1 missing", fr: "1 manquant", es: "falta 1", it: "1 mancante" });
+    expect(one).toMatchObject({
+      en: "1 of their messages has not arrived yet", fr: "1 message de ce membre n'est pas encore arrivé",
+      es: "Falta por llegar 1 mensaje de este miembro", it: "1 messaggio di questo membro non è ancora arrivato",
+    });
     for (const said of Object.values(one)) expect(said).toContain("1");
     const g = group({ members: roster((m) => (m.key === keyOf(0) ? { missing: 1 } : m.key === keyOf(1) ? { missing: 3 } : {})) });
     fakeEngine.update({ groups: [g] });
     renderApp(<GroupMembersDialog group={g} onClose={() => {}} />);
-    expect(within(rowOf(keyOf(0))).getByText("1 missing")).toBeInTheDocument();
-    expect(within(rowOf(keyOf(1))).getByText("3 missing")).toBeInTheDocument();
+    expect(within(rowOf(keyOf(0))).getByText("1 of their messages has not arrived yet")).toBeInTheDocument();
+    expect(within(rowOf(keyOf(1))).getByText("3 of their messages have not arrived yet")).toBeInTheDocument();
   });
 });

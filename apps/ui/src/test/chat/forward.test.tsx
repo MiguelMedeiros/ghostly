@@ -243,6 +243,7 @@ describe("the Forward to… picker", () => {
     for (const row of rows) await user.click(row);
     const isolated = (id: string) => [...screen.getByTestId(id).querySelectorAll("bdi")].map(b => b.textContent);
     expect(isolated("forward-chosen")).toEqual(["Ana!", "Friends", "Bo?"]);
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana! وFriends وBo\?$/);
     await user.click(screen.getByTestId("forward-send"));
     const lines = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
     expect(lines.map(line => line.querySelector("bdi")?.textContent)).toEqual(["Ana!", "Bo?"]);
@@ -250,7 +251,8 @@ describe("the Forward to… picker", () => {
     expect(isolated("forward-sent")).toEqual(["Friends"]);
     expect(screen.getByTestId("forward-sent")).toHaveTextContent(/^أُرسل إلى Friends$/);
     expect(isolated("forward-chosen")).toEqual(["Ana!", "Bo?"]);
-    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana!, Bo\?$/);
+    // Listed the Arabic way, not with an English comma.
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana! وBo\?$/);
   });
 
   // Send again sends one call per set of owed messages: a chat that got everything was called with none, which the engine

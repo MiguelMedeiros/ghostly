@@ -36,7 +36,7 @@ function fakeRepo() {
   const kinds = new Map<string, { event: string; head_branch: string }>();
   /** The run a list of jobs comes from, where it is not what `kinds` (or a push to dev) says. */
   const meta = new Map<object[], { event: string; head_branch: string; created_at?: string }>();
-  const files = new Map<number, string[]>();
+  const files = new Map<number, string[] | null>();
   /** The draft gate's jobs per commit (the fast tier), and CI's runs still going on each head, which the train may cancel. */
   const drafts = new Map<string, object[]>();
   const going = new Map<string, number[]>();
@@ -97,7 +97,7 @@ function fakeRepo() {
         if (await counts(jobs, run)) return jobs;
       return [];
     },
-    pullFiles: async (n: number) => (readState(pulls.get(n)?.body) ? readState(pulls.get(n)!.body).prs.flatMap((m: { number: number }) => files.get(m.number) ?? [`packages/core/src/fix${m.number}.ts`]) : (files.get(n) ?? [`packages/core/src/fix${n}.ts`])),
+    pullFiles: async (n: number) => (readState(pulls.get(n)?.body) ? readState(pulls.get(n)!.body).prs.flatMap((m: { number: number }) => files.get(m.number) ?? [`packages/core/src/fix${m.number}.ts`]) : files.has(n) ? files.get(n)! : [`packages/core/src/fix${n}.ts`]),
     draftJobs: async (sha: string) => drafts.get(sha) ?? [],
     cancelCi: async (sha: string) => {
       if (cancelAccess.denied) return { cancelled: [], denied: cancelAccess.denied };
@@ -690,6 +690,49 @@ describe("a run of the train", () => {
     repo.add(14);
     repo.batch()!.open = false;
     await expect(repo.run()).rejects.toThrow(/unable to access/);
+  });
+
+  it("drops a conflicting pull request once when the batch's push is then refused for a workflow", async () => {
+    // The batch is built again without the one that changes a workflow: built from the whole line, the one that
+    // conflicted was dropped a second time, with a second comment and its labels taken off again.
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14]) repo.add(n);
+    repo.conflicts.add(13);
+    repo.files.set(12, [".github/workflows/ci.yml"]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if (sha.split(":")[1]?.split(",").includes("12")) throw new Error("! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml` without `workflows` permission)");
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 14]);
+    expect(r.dropped).toEqual([13, 12]);
+    expect(r.log.filter((line: string) => line.startsWith("DROP #13"))).toHaveLength(1);
+    expect(repo.comments.get(13)).toHaveLength(1);
+  });
+
+  it("takes out a pull request whose files GitHub does not list when the batch's push is refused for a workflow", async () => {
+    // GitHub lists no files for a pull request of 3000 or more: every run threw on the list it could not read, and the
+    // line waited behind it. One that lists a workflow leaves first; the unlisted one only when the push is still refused.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    repo.add(13);
+    repo.add(14);
+    repo.files.set(12, null);
+    repo.files.set(14, [".github/workflows/ci.yml"]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      const aboard = sha.split(":")[1]?.split(",") ?? [];
+      if (aboard.includes("12") || aboard.includes("14")) throw new Error(`! [remote rejected] (refusing to allow a GitHub App to create or update workflow \`.github/workflows/big.yml\` without \`workflows\` permission)`);
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 13]);
+    expect(r.dropped).toEqual([14, 12]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/big\.yml\)/);
+    expect(repo.comments.get(14)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
 
   it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
@@ -1610,6 +1653,11 @@ describe("one pull request alone", () => {
     repo.files.set(22, ["README.md"]);
     expect((await repo.run()).dropped).toEqual([22]);
     expect(repo.comments.get(22)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    // GitHub lists no files for a pull request of 3000 or more: the same, where every run threw on the list.
+    repo.add(23, { behind: true });
+    repo.files.set(23, null);
+    expect((await repo.run()).dropped).toEqual([23]);
+    expect(repo.comments.get(23)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
 
   it("gives a red pull request one more run on a fresh rebase, then queue:failed", async () => {
@@ -1911,6 +1959,24 @@ describe("one pull request alone", () => {
     expect(r.inFlight).toBe(11);
     repo.gh.squash = squash;
     expect((await repo.run()).merged).toEqual([11]);
+  });
+
+  it("sends a rebased pull request the batch way when GitHub refuses its squash merge for good, so the line moves on", async () => {
+    // Kept in flight, it was picked first on every run while dev stood still, and nobody behind it boarded.
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle();
+    repo.gh.squash = async () => ({ ok: false, status: 405, message: "HTTP 405 Squash merges are not allowed on this repository." });
+    repo.add(12);
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/Could not merge #11 alone: HTTP 405 Squash merges are not allowed on this repository\.; it goes the batch way/);
+    expect(r.inFlight).not.toBe(11);
+    expect(repo.members()).toEqual([11]);
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11"]); // the batch lands by the rebase merge
+    expect((await repo.run()).inFlight).toBe(12); // next, alone: rebased onto the tip #11 landed on
   });
 
   it("goes the batch way for a head the train must never push to", async () => {
@@ -2777,6 +2843,27 @@ describe("GitHub over REST", () => {
     expect(ciState(await gh.ciJobs("abc"))).toBe("failure");
     expect(await gh.ciJobs("def")).toEqual([]);
     expect(sent.some((p) => p.includes("check-runs"))).toBe(false);
+  });
+
+  it("finds CI's own run behind pages of runs pull requests from forks made on the same commit", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", head_repository: { full_name: "o/r" }, status: "completed", ...extra });
+    // Newest first: 150 runs of fork pull requests at the batch's head, then the batch's own green run 1000.
+    const runs = [...Array.from({ length: 150 }, (_, i) => wf(2150 - i, { head_repository: { full_name: "fork/r" }, status: "in_progress" })), wf(1000)];
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(`${init.method} ${path}`);
+      if (init.method === "POST") return reply(202, {});
+      if (path.startsWith("/actions/runs/1000/jobs")) return reply(200, { jobs: [{ id: 7, name: "CI Success", status: "completed", conclusion: "success" }] });
+      const page = Number(/&page=(\d+)/.exec(path)?.[1] ?? 1);
+      return reply(200, { workflow_runs: runs.slice((page - 1) * 100, page * 100) });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await gh.ciJobs("abc"))).toBe("success");
+    expect(sent.filter((s) => s.includes("ci.yml/runs"))).toEqual(["GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100", "GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100&page=2"]);
+    // The cancel never touches a fork's runs, however many pages they take.
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [] });
+    expect(sent.filter((s) => s.startsWith("POST"))).toEqual([]);
   });
 
   it("falls back to GitHub Actions' check runs, with one warning, when the token may not read Actions", async () => {

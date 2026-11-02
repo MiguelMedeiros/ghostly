@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { chmod, copyFile, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { nativeRuntimeFiles } from './native-runtime-files.mjs'
 
 /**
@@ -28,8 +28,14 @@ await rm(target, { recursive: true, force: true })
 await mkdir(target, { recursive: true })
 // The `bare` binary of this platform, from bare-runtime's package for it, at the top of the folder.
 const bare = process.platform === 'win32' ? 'bare.exe' : 'bare'
-await copyFile(createRequire(resolve(source, 'package.json'))('bare-runtime')(), resolve(target, bare))
+const bareBinary = createRequire(resolve(source, 'package.json'))('bare-runtime')()
+await copyFile(bareBinary, resolve(target, bare))
 await chmod(resolve(target, bare), 0o755)
+// bare is Apache-2.0 (Holepunch): a copy of it carries its LICENSE and NOTICE (section 4). The binary's package (bin/bare
+// in bare-runtime-<platform>) has both; bare-runtime's packages themselves are left out below.
+const licenses = resolve(target, 'licenses', 'bare-runtime')
+await mkdir(licenses, { recursive: true })
+for (const file of ['LICENSE', 'NOTICE']) await copyFile(resolve(dirname(dirname(bareBinary)), file), resolve(licenses, file))
 for (const file of nativeRuntimeFiles(source, 'runtime.mjs')) await copyFile(resolve(source, file), resolve(target, file))
 
 /**

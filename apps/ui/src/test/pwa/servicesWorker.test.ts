@@ -91,3 +91,27 @@ describe("a navigation the services worker hands to the contact", () => {
     expect(bridge.postMessage).not.toHaveBeenCalled();
   });
 });
+
+describe("a request the app's page could not get an answer to", () => {
+  it("is said in the profile's language and direction, as a page with nothing to run: never the worker's plain English", async () => {
+    bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+      (transfer[0] as MessagePort).postMessage({ type: "error", status: 503, text: "لا يمكن الوصول <b>إليه</b>", lang: "ar", dir: "rtl" });
+    });
+    const response = await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!;
+    expect(response.status).toBe(503);
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self' https://app.ghostly.example; default-src 'none'; style-src 'unsafe-inline'");
+    const html = await response.text();
+    expect(html).toContain('<html lang="ar" dir="rtl">');
+    expect(html).toContain("<p>لا يمكن الوصول &#60;b&#62;إليه&#60;/b&#62;</p>");
+    expect(html).not.toContain("<script");
+  });
+
+  it("keeps a page language it cannot vouch for out of the page", async () => {
+    bridge.postMessage.mockImplementation((_message: unknown, transfer: Transferable[]) => {
+      (transfer[0] as MessagePort).postMessage({ type: "error", status: 502, text: "Failed", lang: 'en" onload="x', dir: "sideways" });
+    });
+    const html = await (await fetchThrough({ mode: "navigate", destination: "iframe", referrer: `${ORIGIN}/` }, "app")!).text();
+    expect(html).toContain("<html><head>");
+  });
+});

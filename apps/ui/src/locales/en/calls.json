@@ -12,6 +12,7 @@
   "decline": "Decline",
   "devices": {
     "back": "{{name}} is back",
+    "failed": "Could not use {{name}}. The call keeps the one it had.",
     "lost": "{{name}} disconnected. Using the default.",
     "menu": "Devices",
     "switchBack": "Switch back"

@@ -119,7 +119,7 @@
     "theirProfile": "their public profile",
     "title": "Identities with {{name}}",
     "unconfirmed": "{{status}}: could not be confirmed",
-    "unconfirmedWhy": "{{status}}: could not be confirmed ({{error}})",
+    "unconfirmedWhy": "{{status}}: {{error}}",
     "validity": "Validity"
   },
   "did": {

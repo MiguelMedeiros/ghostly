@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, installList, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -23,6 +23,8 @@ import { SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
 
 declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
+/** The files of each language but English, left out of `__SW_PRECACHE__`: the install takes the person's own (`installList`). */
+declare const __SW_LANGUAGES__: Record<string, string[]>;
 
 // The few worker APIs used here, typed locally: the web app's tsconfig has the DOM library, not WebWorker's.
 interface ExtendableEvent extends Event { waitUntil(promise: Promise<unknown>): void }
@@ -56,13 +58,20 @@ const PUSH_PROFILE = pushScopeProfile(worker.registration.scope);
 
 worker.addEventListener("install", (event) => {
   if (PUSH_PROFILE !== null) return;
-  // The page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(__SW_PRECACHE__.map((path) => new Request(path, { cache: precacheMode(path) })))));
+  event.waitUntil((async () => {
+    // The languages the person reads in: the browser's, and those a page of the previous build fetched into its cache.
+    const older = (await caches.keys()).filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE);
+    const held = (await Promise.all(older.map(async (name) => (await (await caches.open(name)).keys()).map((request) => new URL(request.url).pathname)))).flat();
+    const list = installList(__SW_PRECACHE__, __SW_LANGUAGES__, navigator.languages?.length ? navigator.languages : [navigator.language], held);
+    // The page and the files beside it past the browser's HTTP cache; the hashed files from it when it has them.
+    const cache = await caches.open(CACHE);
+    await cache.addAll(list.map((path) => new Request(path, { cache: precacheMode(path) })));
+  })());
 });
 
 worker.addEventListener("activate", (event) => {
-  // Only ever active on a first install, after Reload (the page reloads at once), or with no tab open: taking
-  // the open pages swaps nothing under anyone.
+  // Only ever active on a first install, after Reload (the page reloads at once), or with no tab open. Another
+  // tab of the old build, taken here with its files deleted, reloads into this one (`followNewVersion`).
   if (PUSH_PROFILE !== null) return;
   event.waitUntil((async () => {
     const names = await caches.keys();

@@ -69,6 +69,8 @@
     "created": "Group created.",
     "forked": "The membership history forked",
     "gone": "{{name}} is no longer a member",
+    "goneBy": "{{by}} removed {{name}}",
+    "goneByYou": "You removed {{name}}",
     "joined": "{{name}} joined",
     "left": "{{name}} left",
     "pictureChanged": "{{name}} changed the group's picture",
@@ -82,6 +84,7 @@
     "renamedNoName": "The group is now called “{{group}}”",
     "renamedYou": "You renamed the group to “{{group}}”",
     "rotated": "Keys rotated: a fresh epoch",
+    "withNote": "{{event}} {{note}}",
     "youJoined": "You joined.",
     "youJoinedAgain": "You joined again."
   },
@@ -97,9 +100,9 @@
   "hubs": {
     "auto": "Hub if always on",
     "badge": "hub",
-    "badgeHint": "Passes the group's messages on to the members it is connected to. It sees who talks when, not what is said.",
     "choice": "Hub",
     "exclude": "Never a hub",
+    "note": "A hub passes the group's messages on to the members it is connected to. It sees who talks when, not what is said.",
     "pin": "Always a hub"
   },
   "join": {
@@ -117,6 +120,8 @@
     "knockingCommunity": "Leaving a knock where the group's apps look for one…",
     "queueCount": "{{count}} more people are waiting to be let in.",
     "queueOne": "1 more person is waiting to be let in.",
+    "replaced": "This link was replaced or turned off",
+    "replacedBody": "Ask someone in the group for the current link, then open it.",
     "stale": "Still no answer. If the link was replaced, ask for the new one.",
     "staleBusy": "Still waiting: the group lets people in a few at a time.",
     "step": {
@@ -179,7 +184,9 @@
     "shareTitleUnnamed": "Join a group on Ghostly",
     "shared": "Shared",
     "showQr": "Show QR",
-    "title": "Group link"
+    "title": "Group link",
+    "tooMany": "Too many group links opened",
+    "tooManyNext": "Delete a group that is still waiting to be let in, or paste the link in Join."
   },
   "makeAdmin": {
     "body": "You will no longer be the admin. Only {{name}} can then rename the group, change its picture and link, invite or remove members, and give the role back.",
@@ -211,9 +218,8 @@
     "inviteAction": "Invite",
     "invited": "Invited…",
     "makeAdmin": "Hand over admin",
-    "missing": "{{count}} missing",
-    "missingHint": "Messages of this epoch that have not arrived yet",
-    "missingOne": "{{count}} missing",
+    "missing": "{{count}} of their messages have not arrived yet",
+    "missingOne": "{{count}} of their messages has not arrived yet",
     "needsBothHint": "Groups need both apps connected and updated",
     "needsUpdate": "Needs an updated Ghostly",
     "noContacts": "Every paired contact is already in, or you have none yet.",

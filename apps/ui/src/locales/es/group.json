@@ -69,6 +69,8 @@
     "created": "Grupo creado.",
     "forked": "El historial de miembros se bifurcó",
     "gone": "{{name}} ya no es miembro",
+    "goneBy": "{{by}} eliminó a {{name}} del grupo",
+    "goneByYou": "Eliminaste a {{name}} del grupo",
     "joined": "{{name}} se unió",
     "left": "{{name}} salió",
     "pictureChanged": "{{name}} cambió la foto del grupo",
@@ -82,6 +84,7 @@
     "renamedNoName": "El grupo ahora se llama «{{group}}»",
     "renamedYou": "Cambiaste el nombre del grupo a «{{group}}»",
     "rotated": "Claves renovadas: una nueva época",
+    "withNote": "{{event}} {{note}}",
     "youJoined": "Te uniste.",
     "youJoinedAgain": "Te uniste de nuevo."
   },
@@ -97,9 +100,9 @@
   "hubs": {
     "auto": "Hub si está siempre activo",
     "badge": "hub",
-    "badgeHint": "Reenvía los mensajes del grupo a los miembros conectados a él. Ve quién habla y cuándo, no lo que se dice.",
     "choice": "Hub",
     "exclude": "Nunca hub",
+    "note": "Un hub reenvía los mensajes del grupo a los miembros conectados a él. Ve quién habla y cuándo, no lo que se dice.",
     "pin": "Siempre hub"
   },
   "join": {
@@ -117,6 +120,8 @@
     "knockingCommunity": "Dejando una llamada donde las apps del grupo la buscan…",
     "queueCount": "{{count}} personas más esperan para entrar.",
     "queueOne": "1 persona más espera para entrar.",
+    "replaced": "Este enlace se reemplazó o se desactivó",
+    "replacedBody": "Pide a alguien del grupo el enlace actual y ábrelo.",
     "stale": "Aún sin respuesta. Si el enlace cambió, pide el nuevo.",
     "staleBusy": "Aún esperando: el grupo deja entrar a pocos a la vez.",
     "step": {
@@ -179,7 +184,9 @@
     "shareTitleUnnamed": "Únete a un grupo en Ghostly",
     "shared": "Compartido",
     "showQr": "Mostrar QR",
-    "title": "Enlace del grupo"
+    "title": "Enlace del grupo",
+    "tooMany": "Demasiados enlaces de grupo abiertos",
+    "tooManyNext": "Elimina un grupo que aún espera para entrar o pega el enlace en Unirse."
   },
   "makeAdmin": {
     "body": "Dejarás de ser el admin. Solo {{name}} podrá renombrar el grupo, cambiar su foto y su enlace, invitar o eliminar miembros, y devolverte el rol.",
@@ -211,9 +218,8 @@
     "inviteAction": "Invitar",
     "invited": "Invitado…",
     "makeAdmin": "Ceder admin",
-    "missing": "{{count}} faltan",
-    "missingHint": "Mensajes de esta época que aún no llegaron",
-    "missingOne": "falta {{count}}",
+    "missing": "Faltan por llegar {{count}} mensajes de este miembro",
+    "missingOne": "Falta por llegar {{count}} mensaje de este miembro",
     "needsBothHint": "Los grupos necesitan ambas apps conectadas y actualizadas",
     "needsUpdate": "Necesita un Ghostly actualizado",
     "noContacts": "Todos tus contactos emparejados ya están dentro, o aún no tienes ninguno.",

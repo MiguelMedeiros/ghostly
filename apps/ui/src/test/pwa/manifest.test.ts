@@ -35,6 +35,30 @@ describe("installable", () => {
   });
 });
 
+describe("a link to the app, shared", () => {
+  /** The `content` of the page's meta tag with this name or property, or undefined. */
+  const meta = (key: string) => new RegExp(`<meta (?:name|property)="${key.replace(/[:.]/g, "\\$&")}" content="([^"]*)" />`).exec(html)?.[1];
+
+  it("shows the app's description and the website's share card, not a bare \"Ghostly\"", () => {
+    expect(meta("description")).toBe(manifest.description);
+    expect(meta("og:description")).toBe(manifest.description);
+    expect(meta("og:title")).toBe(manifest.name);
+    expect(meta("og:site_name")).toBe(manifest.name);
+    expect(meta("og:type")).toBe("website");
+    expect(meta("twitter:card")).toBe("summary_large_image");
+    // The website's image (apps/website/lib/pageMeta.ts), at its size: absolute, so it is the same from any host.
+    const website = read("apps/website/lib/pageMeta.ts");
+    expect(meta("og:image")).toBe("https://ghostly.tools/og-image.png");
+    expect(website).toContain("url: `${SITE_URL}/og-image.png`");
+    expect(website).toContain('export const SITE_URL = "https://ghostly.tools"');
+    expect(() => read("apps/website/public/og-image.png")).not.toThrow();
+    expect([meta("og:image:width"), meta("og:image:height")]).toEqual(["1200", "630"]);
+    expect(meta("og:image:alt")).toBe(/alt: "([^"]+)"/.exec(website)?.[1]);
+    // No og:url: a card links to the address that was shared (an invite in its fragment, another host's copy).
+    expect(meta("og:url")).toBeUndefined();
+  });
+});
+
 describe("what it declares, the app answers", () => {
   it("each shortcut opens a route the app has", () => {
     const urls = manifest.shortcuts.map((s: { url: string }) => s.url);

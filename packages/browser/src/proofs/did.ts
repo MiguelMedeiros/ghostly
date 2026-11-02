@@ -1,5 +1,5 @@
 import {
-  DidError, DID_DOCUMENT_MAX_BYTES, resolveDidDht, DID_FILE_MAX_BYTES, didWebDocumentUrl, didWebFileUrl, didWebHost, parseDid, parseDidDocument, staticDidDocument,
+  DidError, DID_DOCUMENT_MAX_BYTES, IdentityCheckUnavailable, resolveDidDht, DID_FILE_MAX_BYTES, didWebDocumentUrl, didWebFileUrl, didWebHost, parseDid, parseDidDocument, staticDidDocument,
   type DidDocumentView, type DidMethod,
 } from "@ghostly/core";
 import type { IdentityFetch } from "./contract";
@@ -59,12 +59,13 @@ async function fetchDidWeb(did: string, url: string, maxBytes: number, options: 
     response = await options.fetch(url, { headers: { accept: "application/did+json, application/json" }, maxBytes, signal: options.signal, redirect: "error" });
   } catch (e) {
     if (options.signal?.aborted) throw e;
-    throw new DidError(/too large/i.test(String(e)) ? `${url} is too large`
-      : `${host} could not be reached. It must serve ${url} over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: *`);
+    if (/too large/i.test(String(e))) throw new DidError(`${url} is too large`);
+    // What this side's network did is not the contact's to learn (the host and port are theirs to choose).
+    throw new IdentityCheckUnavailable(`${host} could not be reached. It must serve ${url} over HTTPS, without a redirect, with the header Access-Control-Allow-Origin: *`);
   }
   if (response.status === 404 || response.status === 410) return undefined;
-  if (response.status >= 300 && response.status < 400) throw new DidError(`${host} answered with a redirect; it must serve exactly ${url}`);
-  if (response.status !== 200) throw new DidError(`${host} answered ${response.status} for ${url}`);
+  if (response.status >= 300 && response.status < 400) throw new IdentityCheckUnavailable(`${host} answered with a redirect; it must serve exactly ${url}`);
+  if (response.status !== 200) throw new IdentityCheckUnavailable(`${host} answered ${response.status} for ${url}`);
   try { return new TextDecoder("utf-8", { fatal: true }).decode(response.bytes); } catch { throw new DidError(`${url} is not text`); }
 }
 

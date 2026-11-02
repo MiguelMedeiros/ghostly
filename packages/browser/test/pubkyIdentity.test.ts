@@ -239,6 +239,13 @@ describe("Pubky proofs: verify", () => {
     await expect(provider.verify(statementFor("npub1notapubkykey"), { folder }, ctxOf(net))).rejects.toThrow(/not a Pubky key/);
   });
 
+  it("blames the homeserver, not the person's key, when only the homeserver's key has no records", async () => {
+    const net = new PubkyNet();
+    const me = net.user(createIdentity());
+    await expect(verify(net, statementFor(me.pubKeyZ32), { folder })).rejects.toThrow("The homeserver of this Pubky key has no records on the Pkarr relays");
+    await expect(verify(net, statementFor(createIdentity().pubKeyZ32), { folder })).rejects.toThrow("This Pubky key has no records on the Pkarr relays");
+  });
+
   it("reads relay answers bounded: an oversized one does not count", async () => {
     const net = new PubkyNet();
     const me = createIdentity();

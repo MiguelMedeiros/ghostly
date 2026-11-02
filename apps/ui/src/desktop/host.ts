@@ -42,6 +42,7 @@ import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
 import { knownErrorText } from "../lib/errorText";
 import { english } from "../lib/english";
 import { loadSettings } from "../lib/settings";
+import { chatNamesForPeer } from "../lib/storage";
 import { translatorFor } from "../locales";
 import type { Translate } from "../locales/translate";
 import { webkitGtkSoundsRelease } from "../lib/webkitGtk";
@@ -50,12 +51,14 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
-import { hostErrorText, setServiceWindowsCloser } from "../lib/serviceWindows";
+import { hostErrorText, serviceFraming, setServiceWindowsCloser } from "../lib/serviceWindows";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
 import { builtInAppOption } from "../lib/apps/builtIns";
 import { androidApp } from "../lib/touchOnly";
+import { activeProfileId } from "../lib/profiles";
+import { openedServices, type Opened } from "../lib/openedServices";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -251,6 +254,26 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
   }
 }
 
+/** A contact's app this device opened in a viewer window, by what names its origin (`ghostly-svc://<service>.<peer>.<tag>`). */
+export interface OpenedServiceWindow extends Opened { service: string; peer: string }
+/** A service id or a key as `viewer.rs` takes them (`is_label_safe`); a tag is `viewerTag`'s 16 characters of z-base-32. */
+const SERVICE_LABEL = /^[A-Za-z0-9-]{1,64}$/;
+const TAG = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{16}$/;
+export const openedServiceWindows = openedServices<OpenedServiceWindow>(
+  (o) => typeof o.service === "string" && SERVICE_LABEL.test(o.service) && typeof o.peer === "string" && SERVICE_LABEL.test(o.peer) && TAG.test(o.tag as string),
+  (a, b) => a.service === b.service && a.peer === b.peer && a.tag === b.tag,
+);
+
+/**
+ * What the contacts' apps opened from one chat or by one profile kept on their origins, forgotten by Rust
+ * (`forget_service_origins`): their windows close, and each origin cleared leaves the list. One Rust did not clear (it
+ * failed, or this platform clears none yet) stays on it, for the next clear.
+ */
+export function forgetServiceWindows(which: { tag: string } | { profile: string }): Promise<void> {
+  return openedServiceWindows.forget(which, async ({ service, peer, tag }) =>
+    (await invoke<boolean[]>("forget_service_origins", { origins: [{ service, peer, tag }] }))[0] === true);
+}
+
 /** `t()` in the profile's language, as it is now. */
 const profileT = (): Translate => translatorFor(loadSettings().language);
 
@@ -414,9 +437,16 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId, tag) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
+      // Noted first: what the app keeps on its origin goes with the chat, its data or its profile (`forgetServices`).
+      // Android opens none (`viewer` is Desktop's).
+      if (!androidApp()) openedServiceWindows.note({ profile: activeProfileId(), tag, service: serviceId, peer: peerPubKeyZ32 });
+      const t = profileT();
+      // Its window is titled "<title> — Ghostly": the title says whose app it is, never the contact's name for it alone.
+      const { label } = serviceFraming(service?.name ?? serviceId, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t);
       // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: label, unreachable: t("services.window.unreachable") });
     },
+    forgetServices: forgetServiceWindows,
   });
   const connect = host.connect;
   return Object.defineProperties(host, {

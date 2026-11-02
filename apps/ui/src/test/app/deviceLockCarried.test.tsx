@@ -2,13 +2,15 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
+import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { DeviceStandby } from "../../components/DeviceStandby";
+import { JoinProfileDialog } from "../../components/devices/JoinProfileDialog";
 import { TakeoverDialog } from "../../components/devices/TakeoverDialog";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
 import { handOverUnlock } from "../../lib/lockHandover";
 import { activeProfileId } from "../../lib/profiles";
 import { renderApp } from "../render";
-// covers: devices.takeover, devices.gate
+// covers: devices.takeover, devices.gate, devices.enroll
 
 /** happy-dom has no <dialog> modal; the dialog only needs to open. */
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
@@ -104,6 +106,49 @@ describe("a forced takeover", () => {
     engine.on("deviceTakeover", () => { act(() => lock()); return { kind: "start" }; });
     await user.click(screen.getByTestId("takeover-go"));
     await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    expect(marker()).toBeNull();
+  });
+});
+
+describe("a device just added to a profile", () => {
+  const dialog = <JoinProfileDialog request={{ code: "ghostly1zexample", start: "go" }} onClose={() => {}} onRestore={() => {}} />;
+  const digits: EnrollView = { role: "joiner", step: "confirm", digits: "482913" };
+
+  /** The dialog at the digits, its enrollment answering `view` from then on. */
+  async function atDigits(view: { current: EnrollView }) {
+    const page = unlockedPage(dialog);
+    page.engine.on("deviceEnrollJoin", () => digits);
+    page.engine.on("deviceEnrollView", () => view.current);
+    await screen.findByTestId("device-join-digits");
+    return page;
+  }
+
+  it("carries the lock across the reload when its done screen opens the profile", async () => {
+    const view: { current: EnrollView } = { current: digits };
+    await atDigits(view);
+    view.current = { role: "joiner", step: "done", device: "Laptop" };
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce(), { timeout: 5_000 });
+    expect(marker()).toMatchObject({ profile: activeProfileId(), hash: HASH });
+  });
+
+  it("carries nothing when the lock closed again before it was done", async () => {
+    const view: { current: EnrollView } = { current: digits };
+    await atDigits(view);
+    act(() => lock());
+    view.current = { role: "joiner", step: "done", device: "Laptop" };
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce(), { timeout: 5_000 });
+    expect(marker()).toBeNull();
+  });
+
+  it("carries nothing on Continue or Close once the lock closed again", async () => {
+    const view: { current: EnrollView } = { current: digits };
+    const { user } = await atDigits(view);
+    view.current = { role: "joiner", step: "unfinished", device: "Laptop" };
+    await screen.findByTestId("device-join-continue");
+    act(() => lock());
+    await user.click(screen.getByTestId("device-join-continue"));
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(2));
     expect(marker()).toBeNull();
   });
 });

@@ -112,6 +112,40 @@ describe("a community's pin reaches a member who was away however much was said 
     expect(pinsOf(bob)).toEqual([{ t: "pin", id: "m1", n: 5_000 }]);
   });
 
+  it("away while 300 went by after the admin had said 100 things: the pin comes all the same, though another member's frame in the store has its number", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    await net.settle();
+    bob.online = false;
+    let t = 1_000;
+    // Each member counts its own frames: the pin's number is one Carol's frames reach too, in the same epoch.
+    for (let i = 0; i < 100; i++) {
+      const sent = await alice.session.sendText(`Alice ${i}`, "Alice", t++);
+      if ("error" in sent) throw new Error(sent.error);
+      await net.settle();
+    }
+    const sentPin = await alice.session.sendApp({ t: "pin", id: "m1", n: 5_000 }, "Alice", t++);
+    if ("error" in sentPin) throw new Error(sentPin.error);
+    await net.settle();
+    for (let i = 0; i < 300; i++) {
+      const sent = await carol.session.sendText(`Carol ${i}`, "Carol", t++);
+      if ("error" in sent) throw new Error(sent.error);
+      await net.settle();
+    }
+    const pin = carol.session.state.lasting!.pin;
+    expect(carol.session.state.store.some(f => f.s === pin.s)).toBe(false);
+    expect(carol.session.state.store.some(f => f.s !== pin.s && f.e === pin.e && f.h === pin.h && f.n === pin.n)).toBe(true);
+    bob.online = true;
+    for (let i = 0; i < 4; i++) {
+      bob.session.catchUp(carol.session.myKey);
+      await net.settle();
+      net.now += 6_000;
+    }
+    expect(pinsOf(bob)).toEqual([{ t: "pin", id: "m1", n: 5_000 }]);
+  });
+
   it("an unpin, newest of its kind, replaces the pin kept, and is what a member back after 300 gets", async () => {
     const { bob, carol } = await away(300, [{ id: "m1", n: 5_000 }, { id: "", n: 6_000 }]);
     expect(Object.keys(carol.session.state.lasting ?? {})).toEqual(["pin"]);

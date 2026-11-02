@@ -5,7 +5,7 @@ import { parseMessage, type Block, type ListBlock, type Segment } from "../../li
 import { markMentions, type MentionView } from "../../lib/parse/mentions";
 import { Highlight } from "../chat/ChatSearch";
 import { CodeBlock } from "./CodeBlock";
-import { VIEWS, type AtomViewProps } from "./views";
+import { ISOLATES_ITSELF, VIEWS, type AtomViewProps } from "./views";
 import "./rich-text.css";
 
 /** `||spoiler||`: covered until tapped (or Enter/Space), and read out as hidden text until then. */
@@ -86,9 +86,10 @@ function segments(list: Segment[], sentAt: number | undefined, budget: Budget, k
       }
       case "atom": {
         // Each atom is isolated from the text around it: a direction control in the message cannot reorder a link,
-        // a name or a time, and one inside an atom stops at its edge.
+        // a name or a time, and one inside an atom stops at its edge. A view that isolates its own parts is left bare.
         const View = VIEWS[segment.kind] as ComponentType<AtomViewProps> | undefined;
-        out.push(<bdi key={k}>{View ? <View atom={segment} sentAt={sentAt} /> : segment.text}</bdi>);
+        if (View && ISOLATES_ITSELF.has(segment.kind)) out.push(<View key={k} atom={segment} sentAt={sentAt} />);
+        else out.push(<bdi key={k}>{View ? <View atom={segment} sentAt={sentAt} /> : segment.text}</bdi>);
         break;
       }
     }

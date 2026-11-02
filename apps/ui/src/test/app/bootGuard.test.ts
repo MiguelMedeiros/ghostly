@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stylesheetsFirst } from "../../../../web/firstPaint";
 
 // covers: app.boot
 
@@ -9,7 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  * as the page runs it, a classic script before the bundle, against a document with an empty #root.
  */
 
-const SOURCE = readFileSync(join(import.meta.dirname, "..", "..", "..", "..", "..", "apps/web/public/boot-guard.js"), "utf8");
+const REPO = join(import.meta.dirname, "..", "..", "..", "..", "..");
+const SOURCE = readFileSync(join(REPO, "apps/web/public/boot-guard.js"), "utf8");
+/** The page the guard runs in: its #root holds the first paint (#boot-shell) until the app draws. */
+const PAGE = new DOMParser().parseFromString(readFileSync(join(REPO, "apps/web/index.html"), "utf8"), "text/html");
+const FIRST_PAINT = PAGE.getElementById("root")!.innerHTML;
 const OLD_WEBVIEW = "Mozilla/5.0 (Linux; Android 9; SM-G960F; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.159 Mobile Safari/537.36";
 const NEW_ANDROID = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
 const OLD_IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 15_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.3 Mobile/15E148 Safari/604.1";
@@ -18,11 +23,11 @@ interface Guard { details(): string; clean(text: string): string }
 const guard = () => (window as unknown as { __ghostlyBoot: Guard }).__ghostlyBoot;
 const panel = () => document.getElementById("boot-fallback");
 
-function start({ agent = NEW_ANDROID, language = "en-US", loaded = true } = {}) {
+function start({ agent = NEW_ANDROID, language = "en-US", loaded = true, root = "" } = {}) {
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent);
   vi.spyOn(navigator, "language", "get").mockReturnValue(language);
   vi.spyOn(document, "readyState", "get").mockReturnValue(loaded ? "complete" : "loading");
-  document.body.innerHTML = '<div id="root"></div>';
+  document.body.innerHTML = `<div id="root">${root}</div>`;
   // The guard listens for as long as the page lives: a test takes its listeners away with the page.
   const listen = window.addEventListener.bind(window);
   const spy = vi.spyOn(window, "addEventListener").mockImplementation((...args: Parameters<typeof window.addEventListener>) => { listening.push(args); listen(...args); });
@@ -219,6 +224,82 @@ describe("the boot guard", () => {
     expect(panel()).toHaveTextContent("Ghostly could not start");
   });
 
+  it("draws a first paint from the page alone: \"Starting Ghostly…\" as a status in #root, no inline script, styles the web's policy allows", () => {
+    const shell = PAGE.querySelector("#root > #boot-shell")!;
+    expect(shell).not.toBeNull();
+    expect(shell.getAttribute("role")).toBe("status");
+    expect(shell.textContent).toBe("Starting Ghostly…");
+    expect(shell.querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
+    // React's first render replaces it: it is the only thing in #root.
+    expect(PAGE.getElementById("root")!.childElementCount).toBe(1);
+    // script-src 'self': every script of the page is a file; the shell's look is an inline <style>, which needs 'unsafe-inline'.
+    for (const script of PAGE.querySelectorAll("script")) expect(script.getAttribute("src"), script.outerHTML).toBeTruthy();
+    expect(PAGE.querySelector("style")!.textContent).toContain("#boot-shell");
+    const policy = /Content-Security-Policy "([^"]+)"/.exec(readFileSync(join(REPO, "apps/web/nginx-headers.conf"), "utf8"))![1]!;
+    expect(/(?:^|;)\s*style-src ([^;]*)/.exec(policy)![1]).toContain("'unsafe-inline'");
+  });
+
+  it("puts the built page's stylesheets ahead of its scripts: the first paint waits for every one of them", () => {
+    // What Vite writes: the entry script, its preloads, then the stylesheets.
+    const built = [
+      "<head>",
+      '    <script src="/boot-guard.js"></script>',
+      '    <script type="module" crossorigin src="/assets/main-a.js"></script>',
+      '    <link rel="modulepreload" crossorigin href="/assets/src-b.js">',
+      '    <link rel="stylesheet" crossorigin href="/assets/arrows-c.css">',
+      '    <link rel="stylesheet" crossorigin href="/assets/main-d.css">',
+      '    <meta name="ghostly-build" content="1.7.3 abc">',
+      "</head>",
+    ].join("\n");
+    expect(stylesheetsFirst(built).split("\n")).toEqual([
+      "<head>",
+      '    <script src="/boot-guard.js"></script>',
+      '    <link rel="stylesheet" crossorigin href="/assets/arrows-c.css">',
+      '    <link rel="stylesheet" crossorigin href="/assets/main-d.css">',
+      '    <script type="module" crossorigin src="/assets/main-a.js"></script>',
+      '    <link rel="modulepreload" crossorigin href="/assets/src-b.js">',
+      '    <meta name="ghostly-build" content="1.7.3 abc">',
+      "</head>",
+    ]);
+    // Already first, or nothing to move: unchanged.
+    expect(stylesheetsFirst(stylesheetsFirst(built))).toBe(stylesheetsFirst(built));
+    expect(stylesheetsFirst(readFileSync(join(REPO, "apps/web/index.html"), "utf8"))).toBe(readFileSync(join(REPO, "apps/web/index.html"), "utf8"));
+  });
+
+  it("takes the first paint for an empty page: it still says the app is taking long, or could not start", () => {
+    start({ loaded: false, root: FIRST_PAINT });
+    window.dispatchEvent(new Event("load"));
+    vi.advanceTimersByTime(6100);
+    expect(panel()).toHaveAttribute("data-reason", "timeout");
+    fail("Object.hasOwn is not a function");
+    vi.advanceTimersByTime(1500);
+    expect(panel()!.querySelector("textarea")!.value).toContain("error: TypeError: Object.hasOwn is not a function");
+    // The app's first render takes the first paint's place: the guard leaves.
+    document.getElementById("root")!.replaceChildren(document.createElement("main"));
+    vi.advanceTimersByTime(600);
+    expect(panel()).toBeNull();
+
+    start({ root: FIRST_PAINT });
+    fail("window.matchMedia is not a function");
+    vi.advanceTimersByTime(1500);
+    expect(panel()).toHaveAttribute("data-reason", "error");
+  });
+
+  it("gives the first paint the browser's language once the page is read, right to left for Arabic", () => {
+    start({ loaded: false, language: "ar-EG", root: FIRST_PAINT });
+    const shell = document.getElementById("boot-shell")!;
+    document.dispatchEvent(new Event("readystatechange"));
+    expect(shell).toHaveAttribute("lang", "ar");
+    expect(shell).toHaveAttribute("dir", "rtl");
+    expect(shell).toHaveTextContent("جارٍ تشغيل Ghostly…");
+    expect(shell.querySelector("svg")).not.toBeNull();
+    draw(); vi.advanceTimersByTime(1000);
+
+    start({ language: "pt-BR", root: FIRST_PAINT });
+    expect(document.getElementById("boot-shell")).toHaveTextContent("Iniciando o Ghostly…");
+    expect(document.getElementById("boot-shell")).toHaveAttribute("dir", "ltr");
+  });
+
   it("has every string in all eight languages, without em dashes", () => {
     const table = /var TEXT = (\{[\s\S]*?\n {2}\});/.exec(SOURCE)![1];
     const text = new Function(`return ${table};`)() as Record<string, Record<string, string>>;
@@ -256,5 +337,60 @@ describe("the boot guard", () => {
       vi.unstubAllGlobals();
       vi.useFakeTimers();
     }
+  });
+});
+
+describe("the boot guard's language file", () => {
+  // As the build names them in the page (apps/web/localePreload.ts): every language but English, which is in the entry.
+  const FILES = { ar: "/assets/ar-abc.js", ja: "/assets/ja-def.js", pt: "/assets/pt-ghi.js" };
+  const preloads = () => [...document.head.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"]')].map((link) => link.getAttribute("href"));
+
+  function open(languages: string[], { files = FILES as Record<string, string> | null, saved = undefined as string | undefined } = {}) {
+    if (files) {
+      const meta = document.createElement("meta");
+      meta.name = "ghostly-locales";
+      meta.content = JSON.stringify(files);
+      document.head.appendChild(meta);
+    }
+    if (saved !== undefined) localStorage.setItem("ghostly_app_settings", saved);
+    vi.spyOn(navigator, "languages", "get").mockReturnValue(languages);
+    start({ language: languages[0] });
+  }
+
+  afterEach(() => {
+    document.head.innerHTML = "";
+    localStorage.removeItem("ghostly_app_settings");
+    vi.restoreAllMocks();
+  });
+
+  it("asks for a new profile's language file as it runs, before the bundle has run, with the module's credentials", () => {
+    open(["ar-EG", "en-US"]);
+    expect(preloads()).toEqual(["/assets/ar-abc.js"]);
+    expect(document.head.querySelector("link[rel=modulepreload]")).toHaveAttribute("crossorigin", "");
+  });
+
+  it("picks the language as the app does: the first of the browser's it speaks, English included", () => {
+    open(["de-DE", "ja-JP", "ar"]);
+    expect(preloads()).toEqual(["/assets/ja-def.js"]);
+    document.head.innerHTML = "";
+    open(["en-GB", "ar"]);
+    expect(preloads()).toEqual([]);
+  });
+
+  it("follows the language the profile saved, over the browser's", () => {
+    open(["ar"], { saved: JSON.stringify({ language: "pt" }) });
+    expect(preloads()).toEqual(["/assets/pt-ghi.js"]);
+    document.head.innerHTML = "";
+    open(["ar"], { saved: JSON.stringify({ language: "en" }) });
+    expect(preloads()).toEqual([]);
+  });
+
+  it("asks for nothing where the page names no files (the dev server), or names them badly, and still guards", () => {
+    open(["ar"], { files: null });
+    expect(preloads()).toEqual([]);
+    document.head.innerHTML = '<meta name="ghostly-locales" content="{not json">';
+    open(["ar"], { files: null, saved: "{also not json" });
+    expect(preloads()).toEqual([]);
+    expect(guard().details()).toContain("Ghostly boot report");
   });
 });

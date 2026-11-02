@@ -192,6 +192,26 @@ export const db = {
     }
   },
   /**
+   * The oldest `limit` messages of a chat after `after` (and before `before`, when given), oldest first, and whether
+   * newer ones remain in that window. Reads those rows only: a bot that reads what came since its last message costs
+   * a page, where reading the whole history and cutting it cost 94 ms of the daemon's time a call at 7,000 messages.
+   */
+  async getMessagePageAfter(linkId: string, { limit, before, after }: { limit: number; before?: { timestamp: number; id?: string }; after: { timestamp: number; id?: string } }): Promise<MessagePage> {
+    const upper = before?.timestamp ?? Infinity;
+    // A window with nothing in it (crossed, or one time both ends leave out): IndexedDB refuses such a range.
+    if (after.timestamp > upper || (after.timestamp === upper && (after.id === undefined || before?.id === undefined))) return { messages: [], more: false };
+    const range = IDBKeyRange.bound([linkId, after.timestamp], [linkId, upper], after.id === undefined, !!before && before.id === undefined);
+    // Messages of `after`'s time up to it, and of `before`'s from it on, are in the range but not in the window.
+    const kept = (m: StoredMessage) => !(after.id !== undefined && m.timestamp === after.timestamp && m.id <= after.id)
+      && !(before?.id !== undefined && m.timestamp === before.timestamp && m.id >= before.id);
+    for (let want = limit + 1; ;) {
+      const oldest = await wrap<StoredMessage[]>((await store(STORES.messages, "readonly")).index("byLinkTime").getAll(range, want));
+      const page = oldest.filter(kept);
+      if (page.length > limit || oldest.length < want) return { messages: page.slice(0, limit), more: page.length > limit };
+      want += oldest.length - page.length;
+    }
+  },
+  /**
    * Every message of this profile that carries a task, a routine or a usage card, from every chat and group, oldest first (time,
    * then id). Reads the card index only (`CARD_INDEX`): no chat's history is read, however long. The index follows the
    * rows, so an edit's card, a deleted message and a deleted chat or group are in step with no bookkeeping.

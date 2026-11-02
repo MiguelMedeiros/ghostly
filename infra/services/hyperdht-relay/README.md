@@ -44,6 +44,7 @@ are in WISP 103, "Browser profile".
 | keys one client listens on | 16 | `GHOSTLY_RELAY_LISTENS` |
 | dials per client per minute | 60 | `GHOSTLY_RELAY_CONNECTS_PER_MINUTE` |
 | HyperDHT streams one client holds open (its dials and incoming ones) | 64 | `GHOSTLY_RELAY_STREAMS` |
+| bytes waiting for a client that it has not read yet | 8 MiB | `GHOSTLY_RELAY_QUEUED_BYTES` |
 | a client with no listen open and no dial | 30 s | `GHOSTLY_RELAY_IDLE_MS` |
 | ping, dropped when the last went unanswered | every 30 s | `GHOSTLY_RELAY_PING_MS` |
 | a connection's request before it upgrades | 15 s | `GHOSTLY_RELAY_REQUEST_MS` |
@@ -62,6 +63,10 @@ Other settings:
   Without either, the headers are ignored. A client that reaches the port past the proxy could write them itself,
   so publish it only where the proxy is (`HYPERDHT_RELAY_BIND`, loopback by default).
 
+A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
+start with one line that names it; leave a setting out for its default. The start line says how clients are counted
+and each limit set away from its default.
+
 ## Running it
 
 ```bash
@@ -70,8 +75,12 @@ GHOSTLY_HYPERDHT_TESTNET=3 node server.mjs       # its own HyperDHT network (tes
 docker compose up -d --build                     # the container, limits and all (docker-compose.yml)
 ```
 
-`GET /healthz` answers with the counts (clients, accepted, refused, dropped). The log has counts and reasons
-only: never a key, an address or anyone's traffic.
+`GET /healthz` answers with the counts (clients, accepted, refused, dropped) and the HyperDHT node's state: `nodes`
+in its routing table, `firewalled`, and `sinceAnswerMs` since another node last answered it (`null`: never). It is
+`ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a
+firewall or a container network without it), so nobody reaches the browsers listening through it. The start log
+says `bootstrap reached no node` then. The log has counts and reasons only: never a key, an address or anyone's
+traffic.
 
 ## Cost, measured
 

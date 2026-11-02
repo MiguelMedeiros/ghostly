@@ -342,6 +342,51 @@ describe("a pull with the right password", () => {
     expect(w.giverRecords.record.handoff?.secret).toBeUndefined();
   });
 
+  it("the earlier device sets move as the part `devices`, so the new active device puts their tombstones and delivers their frames", async () => {
+    // A removed a device before B was added: only A holds the old set (B never took its `set-update`). Before, the part
+    // was never sent: B, active, put no tombstone, and A, on standby, put none either.
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const oldD = toBase64Url(new Uint8Array(32).fill(0xc0)), olderD = toBase64Url(new Uint8Array(32).fill(0xb0));
+    const earlier = { d: oldD, tombstone: toBase64Url(bytesOf(200)), setUpdate: JSON.stringify({ t: "set-update", d: D }), pending: [C], removed: toBase64Url(new Uint8Array(32).fill(0xee)) };
+    await w.giverRecords.amend({ earlierSets: [earlier] });
+    // B's own copy of an even older set (a `set-update` it took) stays beside it.
+    const own = { d: olderD, tombstone: toBase64Url(bytesOf(200)), setUpdate: "{}", pending: [] };
+    await w.takerRecords.amend({ earlierSets: [own] });
+    await fullPull(w);
+    const manifests = w.link.sent.filter((s) => s.frame.t === "handoff-manifest").map((s) => readHandoffManifest(s.frame)!);
+    const devices = manifests.flatMap((m) => m.parts).find((p) => p[0] === "devices");
+    expect(devices).toBeDefined();
+    expect(manifests.find((m) => m.parts.includes(devices!))!.pass).toBe(2);
+    // In H on both sides: the release B took names the same digest.
+    const [file] = await w.profile.files();
+    const parts: HandoffPart[] = [[`file/${file.sha256}`, file.size, file.sha256], ["db/peer", w.profile.rest.length, toBase64Url(sha256(w.profile.rest))], devices!];
+    expect(toBase64Url(w.takes[0].release.h)).toBe(toBase64Url(handoffDigest(N + 1, giverKey.publicKey, takerKey.publicKey, parts)));
+    expect(w.takerRecords.record.earlierSets).toEqual([own, earlier]);
+    // The giver keeps its copy, unused while it is on standby.
+    expect(w.giverRecords.record.earlierSets).toEqual([earlier]);
+  });
+
+  it("a set both devices hold is the giver's: its list of devices still waiting is the current one", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const oldD = toBase64Url(new Uint8Array(32).fill(0xc0));
+    const giverSet = { d: oldD, tombstone: toBase64Url(bytesOf(200)), setUpdate: "{\"by\":\"A\"}", pending: [] };
+    await w.giverRecords.amend({ earlierSets: [giverSet] });
+    await w.takerRecords.amend({ earlierSets: [{ ...giverSet, setUpdate: "{\"by\":\"A\",\"kept\":1}", pending: [C] }] });
+    await fullPull(w);
+    expect(w.takerRecords.record.earlierSets).toEqual([giverSet]);
+  });
+
+  it("a profile with no earlier device set sends no part `devices`", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    await fullPull(w);
+    const names = w.link.sent.filter((s) => s.frame.t === "handoff-manifest").flatMap((s) => readHandoffManifest(s.frame)!.parts.map((p) => p[0]));
+    expect(names).not.toContain("devices");
+    expect(w.takerRecords.record.earlierSets).toEqual([]);
+  });
+
   it("asks for the password once per handoff: the session after A's reload derives its key from the first one", async () => {
     const w = world();
     w.profile.add("f1", bytesOf(5_000));
@@ -379,7 +424,29 @@ describe("the password proof and its limits", () => {
     w.profile.add("f1", bytesOf(100));
     await w.taker.pull(PASSWORD);
     await until(() => w.quiesced.length === 1);
-    expect(w.giverRecords.record.handoffAttempts?.[B]).toEqual({ recent: [], total: 0 });
+    expect(w.giverRecords.record.handoffAttempts?.[B]).toBeUndefined();
+  });
+
+  it("the counts of devices no longer in the set go at the next try: a giver holding 16 of them still hands over", async () => {
+    // Before, every device that ever pulled kept an entry (a device removed and added again has a new key): with 16, the
+    // record's cap, the count of the next pull could not be written, and that pull got no answer.
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const gone = Array.from({ length: 16 }, (_, i) => toBase64Url(new Uint8Array(32).fill(i + 1)));
+    w.giverRecords.record = { ...w.giverRecords.record, handoffAttempts: Object.fromEntries(gone.map((key) => [key, { recent: [], total: 3 }])) };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    expect(w.giverRecords.record.handoffAttempts).toEqual({});
+  });
+
+  it("the device that takes the profile keeps the counts of the devices in the set only, its own old ones too", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    const gone = toBase64Url(new Uint8Array(32).fill(0x01));
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [], total: 9 }, [gone]: { recent: [], total: 4 } } });
+    await w.takerRecords.amend({ handoffAttempts: { [gone]: { recent: [], total: 2 } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts).toEqual({ [C]: { recent: [], total: 9 } });
   });
 
   it("fifteen with no success: refused until the person lets that device try again", { timeout: 30_000 }, async () => {
@@ -1489,6 +1556,16 @@ describe("Use here on a replaced device (WISP 06 § States and events, supersede
     // What only the phone held stays: its old namespace is not dropped, and the new record lists it.
     expect(w.storage.dropped).toEqual([]);
     expect(w.takerRecords.record.forks).toEqual(["ghostly"]);
+    expect(w.takerRecords.record.handoff).toBeUndefined();
+  });
+
+  it("lists the old namespace as one more fork when the device already keeps 8: none is left on disk unlisted", async () => {
+    const w = world();
+    const earlier = Array.from({ length: 8 }, (_, i) => `ghostly_fork${i}`);
+    w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen", forks: earlier };
+    await fullPull(w);
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.takerRecords.record.forks).toEqual([...earlier, "ghostly"]);
     expect(w.takerRecords.record.handoff).toBeUndefined();
   });
 });

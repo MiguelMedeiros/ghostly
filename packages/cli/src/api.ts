@@ -5,7 +5,7 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -140,7 +140,8 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
 /**
  * Refuses DHT only (a hold, `chat transport dht`) while a call is on in the chat. A call's signals cross the live
  * link: off it, the call talked on over its own connection, and a hang-up from either side never reached the other
- * (that call ended only when its media stalled out, 16 s later).
+ * (that call ended only when its media stalled out, 16 s later). Removing the chat (`chat remove`) is refused the same
+ * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross.
  */
 function noCallOn(ctx: ApiContext, linkId: string, then: string): void {
   const call = ctx.calls.list().find((c) => c.chat === linkId);
@@ -198,6 +199,8 @@ const METHODS: Record<string, Method> = {
       chats: s.links.length, live: s.links.filter(isLive).length, groups: s.groups.length,
       discovery: { protocol: s.transport.protocol, relays: s.transport.relays },
       events: { lastSeq: ctx.hub.lastSeq },
+      // A listen running the profile: `daemon stop` and `restart` end it too, as their answers say.
+      ...(ctx.listen && { listen: true }),
     };
   },
 
@@ -522,8 +525,10 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.remove"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group forget", "--yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass --yes (yes: true over the socket) to go on");
+    noCallOn(ctx, link.id, "remove the chat");
     await node(ctx).removeLink({ linkId: link.id });
+    ctx.calls.forgetChat(link.id);
     return { removed: link.id };
   },
   async "chat.transport"(ctx, params) {
@@ -532,6 +537,7 @@ const METHODS: Record<string, Method> = {
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
     if (transport === "dht") noCallOn(ctx, link.id, "put the chat on DHT only");
+    else if (transport !== "auto") transportOffered(link, transport);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     // A choice made during a hold (`chat disconnect --hold`) ends it: its time running out takes nothing back.
     await releaseHold(ctx, link.id, "lifted", true);
@@ -690,7 +696,8 @@ const METHODS: Record<string, Method> = {
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
     const seconds = params.for === undefined ? 0 : num(params, "for", 0, { min: 1, max: 600 });
     if (!typing && seconds) throw new CliError("bad_request", "for keeps typing on: not with stop");
-    if (typing && group.status !== "active") throw new CliError("bad_request", "You are not in this group");
+    // Removed or gone, as `group send` says it: `refused`, with the group's reason.
+    if (typing && group.status !== "active") throw new CliError("refused", group.statusReason ?? "You are not in this group");
     const target = { groupId: group.id };
     endTyping(ctx, target, false);
     sayTyping(ctx, target, typing, word);
@@ -705,7 +712,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
-    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass --yes (yes: true over the socket) to go on");
     const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
     // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
     const next = admin ? group.members.find((m) => m.key === admin) : undefined;
@@ -713,7 +720,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params, "chat remove <chat> --yes");
-    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass yes (--yes) to go on");
+    if (!bool(params, "yes")) throw new CliError("confirm", "Forgetting a group deletes its history on this device; pass --yes (yes: true over the socket) to go on");
     await node(ctx).forgetGroup({ groupId: group.id });
     return { forgotten: group.id };
   },
@@ -735,7 +742,7 @@ const METHODS: Record<string, Method> = {
   async "daemon.stop"(ctx) {
     if (ctx.mode !== "daemon" || !ctx.stop) throw new CliError("unavailable", "No daemon runs this profile");
     setTimeout(() => ctx.stop!(), 10);
-    return { stopping: true, pid: process.pid };
+    return { stopping: true, pid: process.pid, ...(ctx.listen && { listen: true }) };
   },
 
   async "engine.call"(ctx, params) {
@@ -770,7 +777,10 @@ const METHODS: Record<string, Method> = {
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     try {
-      return (await target.call(node(ctx), args)) ?? null;
+      const result = (await target.call(node(ctx), args)) ?? null;
+      // The chat is gone, as with `chat remove`: auto-answer no longer names it.
+      if (method === "removeLink") ctx.calls.forgetChat(str(args ?? {}, "linkId", true));
+      return result;
     } catch (error) {
       // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
       // not there. Not every TypeError: Node's `fetch failed` is the network.
@@ -926,10 +936,6 @@ async function connectWithin(ctx: ApiContext, link: LinkView, ms: number): Promi
     : `It reconnects by itself while this profile is online; ghostly chat wait ${shown} --until live waits for it`}`, { chat: link.id });
 }
 
-/**
- * A page of a chat's or a group's history. Without `after` only that page is read from the store (the newest, or those
- * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
- */
 async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
   const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
@@ -939,17 +945,20 @@ async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
 }
 
+/**
+ * A page of a chat's or a group's history: only that page is read from the store (the newest, those before `before`,
+ * or the oldest after `after`), so a long chat's is as quick as a short one's.
+ */
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
-  if (params.after !== undefined && params.after !== null) {
-    const whole = await node(ctx).getMessages(chat), { messages, more } = history(whole, params);
-    const originals = await originalsNow(ctx, chat, messages, whole);
-    return { messages: messages.map((m) => quoteChecked(json(m), m, originals)), more };
-  }
   const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
-  const before = params.before ?? undefined;
-  if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
-  const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
-    throw error instanceof Error && error.message === `No message ${before}` ? new CliError("not_found", error.message) : error;
+  const bound = (side: "before" | "after"): string | number | undefined => {
+    const value = params[side] ?? undefined;
+    if (value !== undefined && typeof value !== "number" && typeof value !== "string") throw new CliError("bad_request", `${side} must be a timestamp or a message id`);
+    return value;
+  };
+  const before = bound("before"), after = bound("after");
+  const page = await node(ctx).messagePage({ linkId: chat, limit, before, ...(after !== undefined && { after }) }).catch((error: unknown) => {
+    throw error instanceof Error && [before, after].some((id) => error.message === `No message ${id}`) ? new CliError("not_found", error.message) : error;
   });
   const originals = await originalsNow(ctx, chat, page.messages);
   return { messages: page.messages.map((m) => quoteChecked(json(m), m, originals)), more: page.more };
@@ -991,28 +1000,6 @@ function quoteChecked(json: MessageJson, message: StoredMessage, originals: Orig
   if (!original) return { ...json, replyTo: { ...json.replyTo, snippet: "", found: false, deleted: true } };
   if (!original.edit || json.replyTo.button || original.card || original.file) return json;
   return { ...json, replyTo: { ...json.replyTo, snippet: replySnippet(original.text) } };
-}
-
-function history(messages: StoredMessage[], params: Params): { messages: StoredMessage[]; more: boolean } {
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
-  const before = params.before;
-  const after = params.after;
-  const sorted = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
-  // Each id is found in the whole history, not in what the other side already cut away: a window with nothing in it
-  // (`--after b --before b`, or crossed) is an empty page, not "No message b".
-  const bound = (value: unknown, side: "before" | "after"): ((m: StoredMessage, at: number) => boolean) | undefined => {
-    if (value === undefined || value === null) return;
-    if (typeof value === "number") return (m) => (side === "before" ? m.timestamp < value : m.timestamp > value);
-    if (typeof value !== "string") throw new CliError("bad_request", `${side} must be a timestamp or a message id`);
-    const index = sorted.findIndex((m) => m.id === value);
-    if (index === -1) throw new CliError("not_found", `No message ${value}`);
-    return (_, at) => (side === "before" ? at < index : at > index);
-  };
-  const bounds = [bound(before, "before"), bound(after, "after")].filter((b) => b !== undefined);
-  const list = sorted.filter((m, at) => bounds.every((within) => within(m, at)));
-  const more = after !== undefined && after !== null ? list.length > limit : list.length > limit;
-  const page = after !== undefined && after !== null ? list.slice(0, limit) : list.slice(-limit);
-  return { messages: page, more };
 }
 
 export { findChat, findGroup } from "./apiKit";

@@ -1077,6 +1077,23 @@ describe("auto-answer from the chats named", () => {
     expect(existsSync(saved(calls))).toBe(false);
   });
 
+  it("drops a removed chat from the list, and turns auto-answer off when the last one goes", () => {
+    const calls = manager();
+    calls.setAuto({ on: true, from: ["chat-mallory", "alice"], rate: 16000 });
+    calls.forgetChat("chat-mallory");
+    expect(calls.getAuto()).toEqual({ on: true, from: ["chat-real-alice"], rate: 16000 });
+    calls.forgetChat("chat-real-alice");
+    expect(calls.getAuto()).toEqual({ on: false, from: [], rate: 48000 });
+    expect(JSON.parse(readFileSync(saved(calls), "utf8"))).toEqual({ autoAnswer: { on: false, from: [], rate: 48000 } });
+  });
+
+  it("leaves auto-answer from anyone on when a chat is removed", () => {
+    const calls = manager();
+    calls.setAuto({ on: true });
+    calls.forgetChat("chat-mallory");
+    expect(calls.getAuto()).toMatchObject({ on: true, from: [] });
+  });
+
   it("names the command that gives the chat a label when it refuses one", () => {
     expect(() => manager().setAuto({ on: true, from: ["Bob"] })).toThrow(/ghostly chat rename <chat> <name>/);
   });

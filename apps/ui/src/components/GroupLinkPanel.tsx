@@ -141,8 +141,11 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal();
-    // Share first, not the address field (which would select itself and scroll to its end).
-    element.querySelector<HTMLButtonElement>('[data-testid="group-link-share"]')?.focus();
+    // Share first, not the address field (which would select itself and scroll to its end). Then scrolled into view by
+    // scrollIntoView, which keeps it clear of the sticky footer (the dialog's scroll-padding below) in every engine.
+    const share = element.querySelector<HTMLButtonElement>('[data-testid="group-link-share"]');
+    share?.focus({ preventScroll: true });
+    share?.scrollIntoView?.({ block: "nearest" });
     return () => {
       element.close();
       const back = before && before !== document.body && before.isConnected ? before : opener;
@@ -150,14 +153,16 @@ export function GroupShareDialog({ group, created = false, onClose, returnFocus 
     };
   }, [returnFocus]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} data-testid="group-share-dialog"
-    className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
+    className="m-auto w-[calc(100%_-_2rem)] max-w-sm max-h-[92dvh] overflow-y-auto scroll-pb-20 rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <div className="mb-4 text-center">
       <GroupAvatar picture={group.picture} size={64} testId="group-share-avatar" className="mx-auto mb-3 bg-accent/15" />
-      <h2 id={`${id}-title`} className="text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
+      <h2 id={`${id}-title`} className="break-words text-lg font-semibold">{created ? (group.name ? t("group.share.ready", { name: group.name }) : t("group.share.readyUnnamed")) : (group.name ? t("group.share.title", { name: group.name }) : t("group.share.titleUnnamed"))}</h2>
       <p className="mt-1 text-sm text-text-muted">{created ? t("group.share.createdHint") : t("group.share.hint")}</p>
     </div>
     <GroupLinkPanel group={group} large />
-    {/* The way out stays in view at the dialog's foot while the rest scrolls: on a phone it was under the fold. */}
+    {/* The way out stays in view at the dialog's foot while the rest scrolls: on a phone it was under the fold. It is
+        4.5rem high (pt-2, a min-h-11 button, pb-5); the dialog's scroll-pb-20 is that plus room for a focus ring, so
+        whatever the focus or a scroll into view brings up (Share on open, the next button on Tab) stops above it. */}
     <div className="sticky -bottom-5 -mx-5 -mb-5 mt-4 bg-sidebar-bg px-5 pb-5 pt-2">
       <button onClick={onClose} data-testid="group-share-done" className="min-h-11 w-full rounded-lg px-4 text-sm text-text-secondary hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">
         {created ? t("group.share.open") : t("group.share.done")}

@@ -94,6 +94,12 @@ export const FILE_LIMITS = {
   autoAcceptBytesPerPeer: 500 * 1024 * 1024,
   /** Offers from one contact waiting for an answer here. */
   maxWaitingOffers: 16,
+  /**
+   * Files from one contact not finished here, whatever their state (asked about, taken and waiting their turn, paused,
+   * arriving). Only bytes were counted before: offers of 0 bytes were each taken, and 2,500 of them were 2,500
+   * messages and records waiting for good.
+   */
+  maxUnfinishedIncoming: 256,
   /** Files one contact sends at once; accepted ones beyond wait their turn. */
   maxActiveIncoming: 3,
   /** An offer nobody answered ends after this long. */
@@ -631,6 +637,9 @@ export class ChatFiles {
       else if (entry.record.state === "queued") this.startIncoming(entry);
       // The sender offers again on its own; one that does not (an older app, one stuck) is asked.
       else if (entry.record.state === "active") this.armNudge(entry);
+      // Paused there: a sender that cancelled it meanwhile no longer offers it, and asked, ends it (`pf-abort`). One
+      // that still has it paused answers with its paused offer, and nothing moves.
+      else if (entry.record.state === "paused" && entry.record.pausedBy === "peer") this.send({ t: "pf-accept", id: entry.record.id, offset: entry.in!.written });
     }
   }
 
@@ -648,13 +657,17 @@ export class ChatFiles {
     }
   }
 
-  /** Offers ended by their time to live. The host calls it now and then; `attach` does too. */
+  /**
+   * Offers ended by their time to live. The host calls it now and then; `attach` does too. A file taken here and waiting
+   * its turn ends too once nothing of it arrived in that time: its sender never sent it. Offered again, it is taken
+   * again (`retakeAgreed`).
+   */
   sweep(): void {
     const now = this.now();
     for (const entry of this.entries.values()) {
       const { record } = entry;
       if (!["queued", "offered", "asking"].includes(record.state) || record.since + FILE_LIMITS.offerTtlMs > now) continue;
-      if (record.direction === "in" && record.state === "queued") continue;
+      if (record.direction === "in" && record.state === "queued" && (entry.in?.starting || this.moved(entry) > 0)) continue;
       this.end(entry, "failed", record.direction === "in" ? "The offer expired" : record.state === "queued" ? "Not delivered in time" : "Not accepted in time");
       if (record.direction === "in") this.send({ t: "pf-refuse", id: record.id, why: "expired" });
     }
@@ -823,6 +836,10 @@ export class ChatFiles {
     return [...this.entries.values()].filter((e) => e.record.direction === "in" && e.record.state === "asking").length;
   }
 
+  private unfinishedIncoming(): number {
+    return [...this.entries.values()].filter((e) => e.record.direction === "in" && !transferEnded(e.record)).length;
+  }
+
   private activeIncoming(except: Entry): number {
     return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying" || e.in?.starting)).length;
   }
@@ -938,7 +955,9 @@ export class ChatFiles {
       this.startIncoming(existing);
       return;
     }
-    if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers) { this.send({ t: "pf-refuse", id, why: "too-many" }); return; }
+    if (this.waitingOffers() >= FILE_LIMITS.maxWaitingOffers || this.unfinishedIncoming() >= FILE_LIMITS.maxUnfinishedIncoming) {
+      this.send({ t: "pf-refuse", id, why: "too-many" }); return;
+    }
     let decision: OfferDecision;
     try { decision = await this.host.decide(file); } catch { decision = { refuse: "invalid" }; }
     if (this.entries.has(key("in", id))) return;
@@ -961,6 +980,7 @@ export class ChatFiles {
    */
   private async retakeAgreed(entry: Entry): Promise<boolean> {
     const { record } = entry;
+    if (this.unfinishedIncoming() >= FILE_LIMITS.maxUnfinishedIncoming) { this.send({ t: "pf-refuse", id: record.id, why: "too-many" }); return false; }
     if (!record.consented) {
       let decision: OfferDecision;
       try { decision = await this.host.decide(record.file, true); } catch { decision = { refuse: "invalid" }; }
@@ -1231,6 +1251,8 @@ export class ChatFiles {
     if (entry.record.state !== "asking") return;
     entry.record.state = "queued";
     entry.record.consented = entry.record.agreed = true;
+    // Its time to live, now to arrive, starts with the answer: one accepted late does not end at once (`sweep`).
+    entry.record.since = this.now();
     this.changed(entry);
     this.startIncoming(entry);
   }
@@ -1261,6 +1283,7 @@ export class ChatFiles {
     if (record.state !== "paused" || record.pausedBy !== "me") return;
     record.pausedBy = undefined;
     record.state = "queued";
+    if (direction === "in") record.since = this.now();
     this.changed(entry);
     if (direction === "out") { if (this.attached) this.announce(entry); }
     else this.startIncoming(entry);

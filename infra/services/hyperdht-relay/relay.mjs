@@ -37,6 +37,8 @@ export const DEFAULT_LIMITS = Object.freeze({
   handshakeMs: 15_000,
   /** Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. */
   handshakes: 64,
+  /** Bytes the relay may hold for one client that the client has not read yet (a chat's files have at most 2 MiB out). */
+  queuedBytes: 8 * 1024 * 1024,
 })
 
 /**
@@ -74,9 +76,11 @@ function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
   let dials = []
   let idle = null
+  // Once the client has gone, its servers still close one by one: none of them may arm the idle timer again.
+  let left = false
   const watchIdle = () => {
     clearTimeout(idle)
-    idle = listening > 0 ? null : setTimeout(() => drop('idle'), limits.idleMs)
+    idle = left || listening > 0 ? null : setTimeout(() => drop('idle'), limits.idleMs)
   }
   watchIdle()
   // Every HyperDHT stream the relay holds for this client: its dials and the connections its servers get, taken or
@@ -84,7 +88,6 @@ function clientDht(dht, limits, drop, gone, log) {
   // takes) and would leave them open after the client has gone, outside every limit; they all close with it. While
   // it stays, it holds at most `streams` of them: a dial past that drops it, an incoming one past that is closed.
   const streams = new Set()
-  let left = false
   const hold = stream => {
     if (left || streams.size >= limits.streams) { stream.destroy(); return stream }
     streams.add(stream)
@@ -256,7 +259,8 @@ export function addressKey(address) {
 /**
  * Starts a relay: an HTTP server whose WebSocket upgrades each carry one browser's HyperDHT (dht-relay,
  * non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream itself;
- * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts.
+ * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts and the node's state,
+ * 503 while its routing table is empty.
  *
  * options: port, host, bootstrap (host:port list), testnet (size of an in-process HyperDHT network, for tests
  * and e2e), limits, origins (allowed `Origin` values; empty allows any), proxies, cloudflare (see addressOf), log.
@@ -276,7 +280,13 @@ export async function startRelay(options = {}) {
   // Until then two browsers on this relay reach each other only by holepunching the relay's own socket, which on
   // loopback often fails. On loopback nothing stands between the nodes, so the relay says so from the start.
   const dht = options.dht ?? new DHT(bootstrap.length ? { bootstrap, ...(loopback ? { host: '127.0.0.1', firewalled: false } : {}) } : {})
+  // When another node last answered this one. With no outgoing UDP (a firewall, a tunnel, a container network) none
+  // ever does: the node is up, its routing table stays empty, and a browser's listen through it still resolves.
+  let answeredAt = null
+  const onresponse = dht.io.onresponse
+  dht.io.onresponse = (...args) => { answeredAt = Date.now(); return onresponse(...args) }
   await dht.ready()
+  if (dht.toArray().length === 0) log('bootstrap reached no node')
 
   const clients = new Set()
   // Each client's dht-relay session, for what it holds (`stats().held`).
@@ -288,8 +298,10 @@ export async function startRelay(options = {}) {
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
     if (request.url === '/healthz') {
-      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-      response.end(JSON.stringify({ ok: true, clients: clients.size, ...stats, firewalled: dht.firewalled }))
+      // Healthy while the node's routing table holds another node: with none, nobody reaches what it announces.
+      const reached = dht.toArray().length
+      response.writeHead(reached > 0 ? 200 : 503, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ ok: reached > 0, clients: clients.size, ...stats, firewalled: dht.firewalled, nodes: reached, sinceAnswerMs: answeredAt === null ? null : Date.now() - answeredAt }))
       return
     }
     response.writeHead(426, { 'content-type': 'text/plain' }); response.end('Ghostly HyperDHT relay: connect with a WebSocket\n')
@@ -299,8 +311,11 @@ export async function startRelay(options = {}) {
   server.on('upgrade', (request, socket, head) => {
     const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
     const origin = request.headers.origin
+    // A refusal goes straight to the raw socket, which nothing else listens on: a client that has already reset it
+    // would make the write fail with an error nobody catches, and that ends the relay for every other client.
     const refuse = (status, why) => {
       stats.refused++; log('refused', why)
+      socket.on('error', () => {})
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
     if (origins.size && !origins.has(origin)) return refuse('403 Forbidden', 'origin')
@@ -346,6 +361,8 @@ export async function startRelay(options = {}) {
     let leave
     const gone = new Promise(resolve => { leave = resolve })
     ws.once('close', () => {
+      // A client that has closed is no longer dropped, counted or logged.
+      dropped = true
       clearInterval(ping)
       leave()
       clients.delete(ws)
@@ -356,6 +373,14 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
+    // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
+    // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
+    // relay hold everything its far peers send. Past `queuedBytes` waiting for it, it is dropped.
+    stream._write = (data, cb) => {
+      ws.send(data)
+      if (ws.bufferedAmount > limits.queuedBytes) drop('queue')
+      cb(null)
+    }
     void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => {
       guardProtocol(node._protocol, drop)
       bound(node, limits, gone)
@@ -386,5 +411,50 @@ export async function startRelay(options = {}) {
       if (!options.dht) await dht.destroy()
       if (testnet) await testnet.destroy()
     },
+  }
+}
+
+/**
+ * One setting from the environment: absent gives `fallback`; present, it must read as `kind` says, or the start stops
+ * with one line naming it (an empty `PORT=` in an env file, `GHOSTLY_RELAY_PROXIES=one`), never a quiet default.
+ */
+function setting (env, name, fallback, kind) {
+  const raw = env[name]
+  if (raw === undefined) return fallback
+  const value = raw.trim()
+  const fail = expected => { throw new Error(`${name}=${JSON.stringify(raw)}: expected ${expected}`) }
+  if (kind === 'port') return /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535 ? Number(value) : fail('a port from 1 to 65535')
+  if (kind === 'count') return /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number of 0 or more')
+  if (kind === 'positive') return /^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number above 0')
+  if (kind === 'flag') return value === '1' ? true : value === '0' ? false : fail('1 or 0')
+  if (kind === 'text') return value || fail('a value (leave it out for the default)')
+  return value
+}
+
+const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
+
+/** `GHOSTLY_RELAY_<LIMIT>` for a limit's name in DEFAULT_LIMITS: `clientsPerAddress` is GHOSTLY_RELAY_CLIENTS_PER_ADDRESS. */
+export const limitVariable = name => `GHOSTLY_RELAY_${name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`
+
+/**
+ * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0), GHOSTLY_HYPERDHT_BOOTSTRAP,
+ * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind.
+ */
+export function readSettings (env) {
+  const limits = {}
+  for (const name of Object.keys(DEFAULT_LIMITS)) {
+    const value = setting(env, limitVariable(name), undefined, 'positive')
+    if (value !== undefined) limits[name] = value
+  }
+  return {
+    port: setting(env, 'PORT', 49443, 'port'),
+    host: setting(env, 'HOST', '0.0.0.0', 'text'),
+    bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
+    testnet: setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined,
+    origins: list(env.GHOSTLY_RELAY_ORIGINS),
+    proxies: setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count'),
+    cloudflare: setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag'),
+    limits,
   }
 }

@@ -30,6 +30,8 @@ mod e2e_driver;
 mod file_store;
 mod file_stream;
 #[cfg(desktop)]
+mod forget_origins;
+#[cfg(desktop)]
 mod fullscreen;
 #[cfg(desktop)]
 mod hyperdht;
@@ -76,7 +78,9 @@ mod viewer;
 
 use commands::AppState;
 #[cfg(mobile)]
-use mobile::{app_sandbox, hyperdht, keep_awake, share, translate, translate_models, viewer};
+use mobile::{
+    app_sandbox, forget_origins, hyperdht, keep_awake, share, translate, translate_models, viewer,
+};
 use pkarr_network::Pkarr;
 use tauri::Manager;
 #[cfg(desktop)]
@@ -182,6 +186,7 @@ macro_rules! commands {
             file_store::file_bytes_usage,
             file_stream::file_bytes_stream_close,
             file_stream::file_bytes_stream_open,
+            forget_origins::forget_service_origins,
             hyperdht::paired_hyperdht_address,
             hyperdht::paired_hyperdht_close,
             hyperdht::paired_hyperdht_connect,
@@ -324,6 +329,9 @@ pub fn run() {
             app_window::on_menu_event(app, event.id().as_ref());
         })
         .on_page_load(on_page_load);
+    // What a contact's app kept, cleared in a hidden window of its origin when the page forgets it.
+    #[cfg(target_os = "linux")]
+    let builder = builder.manage(forget_origins::ForgetState::default());
 
     // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
     #[cfg(target_os = "android")]
@@ -332,7 +340,7 @@ pub fn run() {
         .manage(android::Incoming::default())
         .manage(android::NotificationTap::default());
 
-    builder
+    let app = builder
         // The Ghostly window stays on the app's own pages, whatever is dropped on it.
         .plugin(navigation::guard())
         .plugin(tauri_plugin_process::init())
@@ -414,8 +422,12 @@ pub fn run() {
         )
         .invoke_handler(only_main(commands!()))
         .build(context)
-        .expect("error while running tauri application")
-        .run(on_run_event);
+        .expect("error while running tauri application");
+    // Before any window (they are made when the app runs): the files a contact's app forgotten last time left behind,
+    // which WebKit no longer holds open now.
+    #[cfg(target_os = "linux")]
+    forget_origins::clean_at_launch(app.handle());
+    app.run(on_run_event);
 }
 
 /// Android: rustls-platform-verifier checks every HTTPS certificate with Android's own verifier, through the JVM, and

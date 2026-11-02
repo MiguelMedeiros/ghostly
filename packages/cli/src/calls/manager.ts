@@ -480,10 +480,25 @@ export class CallManager {
     // The daemon answers these chats' calls from now on: never one found only by a name its contact chose.
     const from = (next.from ?? []).map((ref) => findOwnNamedChat(this.host.engine.getState().links, ref).id);
     this.auto = { on: next.on, from: next.on ? from : [], rate: rateOf(next.rate, next.on ? this.auto.rate : DEFAULT_RATE) };
+    this.saveAuto();
+    return this.getAuto();
+  }
+
+  /**
+   * A chat removed from this device leaves the chats auto-answer answers. The last one gone turns auto-answer off:
+   * an empty list is "answer everyone", never what was asked for.
+   */
+  forgetChat(chat: string): void {
+    if (!this.auto.from.includes(chat)) return;
+    const from = this.auto.from.filter((c) => c !== chat);
+    this.auto = from.length > 0 ? { ...this.auto, from } : { on: false, from: [], rate: DEFAULT_RATE };
+    this.saveAuto();
+  }
+
+  private saveAuto(): void {
     const tmp = `${this.configPath}.tmp`;
     writeFileSync(tmp, JSON.stringify({ autoAnswer: this.auto }, null, 2) + "\n", { mode: 0o600 });
     renameSync(tmp, this.configPath);
-    return this.getAuto();
   }
 
   /** Before the engine stops: every call is hung up (the contact's app is told), its program gets EOF. */

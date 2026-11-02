@@ -1,9 +1,15 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { didDhtDocument, didDhtKey, openDidDhtPayload, toBase64Url } from "@ghostly/core";
+import { didDhtDocument, didDhtKey, encodeDidDhtPacket, openDidDhtPayload, toBase64Url } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { DID_REPUBLISH_MS, ProfileDid, type ProfileDidHost } from "../src/engine/did";
 // covers: did.dht.profile, did.dht.public-links
+
+// Counted, not replaced: the real encoder still runs.
+vi.mock("@ghostly/core", async importOriginal => {
+  const real = await importOriginal<typeof import("@ghostly/core")>();
+  return { ...real, encodeDidDhtPacket: vi.fn(real.encodeDidDhtPacket) };
+});
 
 // The seed is sealed with a 600k-iteration PBKDF2 key; a cheap reversible seal keeps these tests fast.
 vi.mock("../src/engine/paymentAdapters/persistence", async importOriginal => {
@@ -74,6 +80,29 @@ describe("the profile's did:dht", () => {
     // did:dht sequence numbers are seconds.
     expect(Math.abs(Number(seq) - Date.now() / 1000)).toBeLessThan(5);
     expect(did.view()).toMatchObject({ id: did.id, listed: [], alsoKnownAs: [], upToDate: true, published: { versionId: String(seq) } });
+  });
+
+  it("encodes the document once across engine states, and again when what it lists changes", async () => {
+    const { state } = world();
+    const listable = vi.fn(() => new Map([...state.identities].filter((e): e is [string, string] => !!e[1])));
+    const did = new ProfileDid({ online: () => true, emit: () => {}, listable, proofIds: () => [...state.identities.keys()], publish: async () => {} });
+    await did.load();
+    await did.publishNow();
+    const encoded = vi.mocked(encodeDidDhtPacket);
+    encoded.mockClear();
+    for (let i = 0; i < 100; i++) expect(did.view()?.upToDate).toBe(true);
+    expect(encoded.mock.calls.length).toBeLessThanOrEqual(1);
+
+    await did.setListed({ id: "nostr-1", listed: true });
+    encoded.mockClear(); listable.mockClear();
+    for (let i = 0; i < 100; i++) expect(did.view()).toMatchObject({ alsoKnownAs: ["nostr:npub1abc"], upToDate: false });
+    expect(encoded.mock.calls.length).toBeLessThanOrEqual(1);
+    expect(listable).toHaveBeenCalledTimes(100);
+
+    // The proof expires: its URI leaves the document with no call to the DID, and the view says so at once.
+    state.identities.delete("nostr-1");
+    await did.publishNow();
+    expect(did.view()).toMatchObject({ alsoKnownAs: [], upToDate: true });
   });
 
   it("ends with a newer packet reading deactivated when the profile's data is cleared, and only if it was ever published", async () => {

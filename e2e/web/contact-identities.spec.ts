@@ -174,9 +174,25 @@ test("a contact's identities: two marks and +1 in the chat list, a stack in the 
   expect((await box("chat-identities")).x + (await box("chat-identities")).width).toBeCloseTo(1440, 0);
   expect(await visibleMarks()).toBe(3);
   await shot(bob, "w1440");
+  // Docked, the keyboard reaches the chat too: a region, not a dialog; Tab leaves it for the chat, F6 goes back and
+  // forth, and an Escape in the message field leaves it open.
+  await expect(panel).not.toHaveAttribute("role", "dialog");
+  await expect(panel).not.toHaveAttribute("aria-modal");
+  await panel.getByTestId("chat-identities-close").focus();
+  await page.keyboard.press("Shift+Tab");
+  expect(await page.evaluate(() => !!document.activeElement?.closest(".chat-column"))).toBe(true);
+  await page.keyboard.press("F6");
+  await expect(panel).toBeFocused();
+  await page.keyboard.press("F6");
+  expect(await page.evaluate(() => !!document.activeElement?.closest(".chat-column"))).toBe(true);
+  await page.getByPlaceholder(/Message/).focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeVisible();
   // 1100: the column is too narrow to share; the panel lies over the chat, a backdrop behind it.
   await page.setViewportSize({ width: 1100, height: 800 });
   await expect(page.locator(".contact-panel-backdrop")).toBeVisible();
+  // Over the chat, it is a dialog again.
+  await expect(panel).toHaveAttribute("aria-modal", "true");
   expect(await visibleMarks()).toBe(3);
   await shot(bob, "w1100");
   // The chat list at its narrowest: one mark and "+2", the time untouched.

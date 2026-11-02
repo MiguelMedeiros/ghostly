@@ -153,12 +153,21 @@ export function checkWebhook(url: string): URL {
   return parsed;
 }
 
+/**
+ * The event number a cursor file holds, or undefined when there is no file (a first start: live events). A file that is
+ * there and holds no whole number (empty, half-written, edited by hand) is refused, naming the file and what it holds:
+ * taken as no cursor, the listener started at the journal's end and skipped every event since the last one handled,
+ * without a word, and its next write replaced the file.
+ */
 export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
   let text: string;
   try { text = readFileSync(path, "utf8"); } catch (error) { throw localFileError(error, path) ?? error; }
-  const value = Number(text.trim());
-  return Number.isInteger(value) && value >= 0 ? value : undefined;
+  const trimmed = text.trim();
+  const value = trimmed === "" ? NaN : Number(trimmed);
+  if (Number.isSafeInteger(value) && value >= 0 && /^\d+$/.test(trimmed)) return value;
+  const shown = trimmed === "" ? "nothing" : JSON.stringify(trimmed.length > 32 ? `${trimmed.slice(0, 32)}…` : trimmed);
+  throw new CliError("bad_request", `${path} holds no event number (${shown}): fix or remove it, or give --since`);
 }
 
 /**
@@ -387,7 +396,7 @@ export const MAX_BEHIND = 1_000;
 export class Feed {
   private held = false;
 
-  /** `since`: the last event taken, where a new subscription starts. */
+  /** `since`: the last event taken (or, before one, the daemon's last seq when it subscribed), where a new subscription starts. */
   constructor(private readonly handle: EventHandler, public since: number | undefined, private readonly pause: () => void, private readonly resume: (since: number | undefined) => void) {}
 
   get paused(): boolean { return this.held; }
@@ -454,10 +463,15 @@ export function followDaemon(address: DaemonAddress, client: DaemonClient, handl
     clearTimeout(holding);
     if (current) current.resume(); else reconnect(0);
   });
+  // A feed that took no event yet goes on after the last seq the daemon had when it subscribed: one that restarts
+  // otherwise subscribes it from its own now, past what it journaled before the reconnect (its daemon.started).
   const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
     if (current !== c) return;
     current = null;
     reconnect(1000);
+  }).then((answer) => {
+    if (feed.since === undefined && typeof answer?.lastSeq === "number") feed.since = answer.lastSeq;
+    return answer;
   });
   return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

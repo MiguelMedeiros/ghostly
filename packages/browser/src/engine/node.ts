@@ -227,7 +227,11 @@ import { traceJoin } from "./joinTrace";
 import { SETUP_NETWORK, WalletSetup } from "./walletSetup";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
 
-/** How long a chat waits before listening again after its HyperDHT relay went away. */
+/**
+ * How long a chat waits, on average, before listening again after its HyperDHT relay went away. Each app draws its own
+ * wait within half of it either side: a relay that restarts closes every app's socket at once, and with one fixed wait
+ * they all came back in the same instant, more listens than its one HyperDHT node sends out in time.
+ */
 const RELAY_RETRY_MS = 30_000;
 /** Native listeners an app may hold per transport (the Desktop's Rust Iroh allows eight, `paired_transport.rs`). */
 const NATIVE_SLOTS = 8;
@@ -302,6 +306,8 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** How many deleted ids a link remembers: enough to outlast what a peer republishes. */
 const MAX_DELETED_IDS = 500;
+/** A link's `removedRefs` with `ref`, the newest `MAX_DELETED_IDS`. */
+const withRemovedRef = (refs: readonly string[] | undefined, ref: string) => [...(refs ?? []).filter(r => r !== ref), ref].slice(-MAX_DELETED_IDS);
 /**
  * A card that went on the DHT floor or into a hold goes again live (`restoreCards`) only for the newest this many
  * messages of a chat, sent within this long: an old chat's cards are not worth a burst of edits.
@@ -323,6 +329,11 @@ const RTT_SAVE_MS = 5 * 60_000;
 const REACTION_RESEND_MS = 30_000;
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
 const REACTION_NOTES_KEPT = 8;
+/**
+ * The newest facts the pages heard of (`feedback`), kept so the same one is not heard twice: past this many the oldest
+ * goes, or a contact's reactions (each one a new fact) would grow it for as long as the engine runs.
+ */
+export const FEEDBACK_KEPT = 4096;
 /** A second press of one message's buttons waits this long (WISP 406 · Message Buttons). */
 export const BUTTON_PRESS_MS = 1_000;
 
@@ -836,6 +847,7 @@ export class GhostlyNode implements EngineImplementation {
     const key = type + ":" + id;
     if (this.feedbackIds.has(key)) return;
     this.feedbackIds.add(key);
+    if (this.feedbackIds.size > FEEDBACK_KEPT) this.feedbackIds.delete(this.feedbackIds.values().next().value!);
     this.events.onAttention?.({type, id:key, at:Date.now(), ...(linkId ? {linkId} : {}), ...(mention ? {mention:true} : {}), ...(cue ? {cue} : {})});
   }
   /** A fact that had no sound before the sound categories: its cue is its only sound (engine/cues.ts). */
@@ -2717,20 +2729,29 @@ export class GhostlyNode implements EngineImplementation {
     return message && withoutFrame(message);
   }
 
-  async messagePage(asked: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+  /**
+   * A page of a chat's or a group's history: the newest `limit` (before `before`), or with `after` the oldest `limit`
+   * after it (and before `before`). Each bound is a time or a message's place; only the page's rows are read.
+   */
+  async messagePage(asked: { linkId: string; limit?: number; before?: string | number; after?: string | number }): Promise<MessagePage> {
     const page = await this.storedPage(asked);
     return { ...page, messages: page.messages.map(withoutFrame) };
   }
-  private async storedPage({ linkId, limit = 50, before }: { linkId: string; limit?: number; before?: string | number }): Promise<MessagePage> {
+  private async storedPage({ linkId, limit = 50, before, after }: { linkId: string; limit?: number; before?: string | number; after?: string | number }): Promise<MessagePage> {
     if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("limit: a whole number of messages, at least 1");
-    if (before === undefined) return db.getMessagePage(linkId, { limit });
-    if (typeof before === "number") {
-      if (Number.isNaN(before)) throw new Error("before: a time or a message id");
-      return db.getMessagePage(linkId, { limit, before: { timestamp: before } });
+    const end = before === undefined ? undefined : await this.pagePlace(linkId, before, "before");
+    if (after === undefined) return db.getMessagePage(linkId, { limit, before: end });
+    return db.getMessagePageAfter(linkId, { limit, before: end, after: await this.pagePlace(linkId, after, "after") });
+  }
+  /** A page's bound: a time, or the place of a message of the chat. */
+  private async pagePlace(linkId: string, bound: string | number, side: "before" | "after"): Promise<{ timestamp: number; id?: string }> {
+    if (typeof bound === "number") {
+      if (Number.isNaN(bound)) throw new Error(`${side}: a time or a message id`);
+      return { timestamp: bound };
     }
-    const from = await db.getMessage(linkId, before);
-    if (!from) throw new Error(`No message ${before}`);
-    return db.getMessagePage(linkId, { limit, before: from });
+    const from = await db.getMessage(linkId, bound);
+    if (!from) throw new Error(`No message ${bound}`);
+    return from;
   }
 
   /** Saves a message on this device, or unsaves it (`engine/saved.ts`): nothing is sent. */
@@ -3619,6 +3640,15 @@ export class GhostlyNode implements EngineImplementation {
       const row = rowId === message.id ? undefined : await db.getMessage(message.linkId, rowId);
       if (row && replyRef(row, group) === reply.id) { original = row; break; }
     }
+    // Deleted for everyone (mine, the contact's or a member's): as the sweep leaves a reply already here, "Original
+    // message deleted". A group's message goes by its own id. A chat's keeps its row's id when its reference names it
+    // (`peer_`/`me_`), else the reference, which names no row here either (a file of mine, kept by its time).
+    if (!original && group && this.groups.isRemoved(message.linkId.slice("group:".length), reply.id)) return { ...message, replyTo: { ...reply, snippet: "", messageId: reply.id } };
+    const live = group ? undefined : this.links.get(message.linkId)?.stored;
+    if (!original && live?.removedRefs?.includes(reply.id)) {
+      const row = [`peer_${reply.id}`, `me_${reply.id}`].find(id => live.deletedIds?.includes(id));
+      return { ...message, replyTo: { ...reply, snippet: "", messageId: row ?? reply.id, from: reply.from ?? (row?.startsWith("peer_") ? "peer" : "me") } };
+    }
     if (!original && !group) {
       history = await db.getMessages(message.linkId);
       original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
@@ -3756,20 +3786,32 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
+    // A removal names the contact's message by its wire id, which a message of mine goes by too: one naming mine takes
+    // no reference, or the replies quoting mine would lose its line and its pin would go.
+    const ref = edit.rm && !await this.namesMine(linkId, edit.id);
     if (live.stored.deletedIds?.includes(id)) {
-      // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line.
-      if (edit.rm) this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
+      // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line, and
+      // a pin of it goes.
+      if (ref) {
+        this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
+        if (!live.stored.removedRefs?.includes(edit.id)) {
+          live.stored = { ...live.stored, removedRefs: withRemovedRef(live.stored.removedRefs, edit.id) };
+          await this.writeDeletions(linkId, { removedRefs: live.stored.removedRefs });
+          this.emitState();
+        }
+      }
       return true;
     }
     // The contact deleted its message for everyone (WISP 400 § Delete for everyone): forgotten as a delete here is, a
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
       const message = await db.getMessage(linkId, id);
-      // Not here yet, under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused`
-      // after it, `spent_` and a token's digest): never forgotten ahead, or a contact could hide the line of a payment
-      // or request it sends next, which a removal never takes (`canRemove`; agents#1587). No text or file has such an id.
-      if (!message && PAYMENT_LINE_ID.test(edit.id)) return true;
-      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, true);
+      // Under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused` after it,
+      // `spent_` and a token's digest): never forgotten, here or not yet, or a contact could hide the line of a payment
+      // or request it sends next, or the line that says I refused one, which carries no `paymentId` for `canRemove` to
+      // read. A removal never takes those (agents#1587). No text or file has such an id.
+      if (PAYMENT_LINE_ID.test(edit.id)) return true;
+      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, ref && (message ?? true));
       return true;
     }
     const message = await db.getMessage(linkId, id);
@@ -4192,12 +4234,12 @@ export class GhostlyNode implements EngineImplementation {
     const out = `${linkId}-out-`;
     const wireId = message.wireId ?? (message.file?.id.startsWith(out) ? message.file.id.slice(out.length) : undefined);
     // Never left this device: deleting it here is all there is.
-    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId, true); return { error: null }; }
+    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId, message); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
     const written = this.writeDeletions(linkId, { removals: live.stored.removals });
     // Its id to `deletedIds` goes in the same write of the chat's row (forgetMessage adds it before its first await).
-    const forgot = this.forgetMessage(linkId, messageId, true);
+    const forgot = this.forgetMessage(linkId, messageId, message);
     await written;
     await forgot;
     const edits = this.editsFor(linkId);
@@ -4224,7 +4266,7 @@ export class GhostlyNode implements EngineImplementation {
    * values are `live.stored`'s at the time of the call, so the newest of each field wins. `relaxed` (no disk sync of its
    * own, `db.patchLink`) holds only while every change merged into the write is.
    */
-  private writeDeletions(linkId: string, patch: Pick<Partial<StoredLink>, "removals" | "deletedIds">, relaxed = false): Promise<void> {
+  private writeDeletions(linkId: string, patch: Pick<Partial<StoredLink>, "removals" | "deletedIds" | "removedRefs">, relaxed = false): Promise<void> {
     const waiting = this.deletionWrites.get(linkId);
     if (waiting) { Object.assign(waiting.patch, patch); waiting.relaxed &&= relaxed; return waiting.done; }
     const entry = { patch: { ...patch } as Partial<StoredLink>, relaxed, done: Promise.resolve() };
@@ -4238,19 +4280,30 @@ export class GhostlyNode implements EngineImplementation {
     return entry.done;
   }
 
+  /** Whether a 1:1 chat's wire id names a message of mine: here, deleted here, removed, or a file or payment of mine. */
+  private async namesMine(linkId: string, wireId: string): Promise<boolean> {
+    const stored = this.links.get(linkId)?.stored, row = `me_${wireId}`;
+    if (stored?.deletedIds?.includes(row) || stored?.removals?.some(r => r.id === row || r.wireId === wireId)) return true;
+    for (const id of [row, ...await this.rowsNamed(linkId, wireId)]) if ((await db.getMessage(linkId, id))?.sender === "me") return true;
+    return false;
+  }
+
   /**
    * Forgets one message of a chat on this device, the bytes of its file and any transfer of it, and keeps its id so a
    * copy that comes again is not stored: a delete here, or the contact's own removal (WISP 400 § Delete for everyone),
-   * also of a message not here yet. `removed`: deleted for everyone, so the replies here that quote it lose its line too.
+   * also of a message not here yet. `removed`: deleted for everyone (its row, when the caller read it), so the replies
+   * here that quote it lose its line too, and a pin of it goes (`removedRefs`).
    */
-  private async forgetMessage(linkId: string, messageId: string, removed = false): Promise<void> {
+  private async forgetMessage(linkId: string, messageId: string, removed: StoredMessage | boolean = false): Promise<void> {
     const live = this.links.get(linkId);
     if (!live) return;
+    const ref = removed ? replyRef(removed === true ? { id: messageId, linkId } : removed) : undefined;
     live.stored = {
       ...live.stored,
       deletedIds: [...(live.stored.deletedIds ?? []), messageId].slice(-MAX_DELETED_IDS),
+      ...(ref && { removedRefs: withRemovedRef(live.stored.removedRefs, ref) }),
     };
-    void this.writeDeletions(linkId, { deletedIds: live.stored.deletedIds }).catch(() => {});
+    void this.writeDeletions(linkId, { deletedIds: live.stored.deletedIds, ...(ref && { removedRefs: live.stored.removedRefs }) }).catch(() => {});
     void this.hold.forget(linkId, messageId).catch(() => {});
 
     const message = await db.getMessage(linkId, messageId);
@@ -4293,8 +4346,11 @@ export class GhostlyNode implements EngineImplementation {
   private async forgetQuotes(linkId: string, removed: RemovedQuotes): Promise<string[]> {
     const byRef = new Map<string, string>();
     for (const [id, ref] of removed) if (ref !== undefined) byRef.set(ref, id);
-    // The removed message a reply quotes: by its id here, or by the reference both sides know it by.
-    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byRef.get(reply.id);
+    // The removed message a reply quotes: by its id here, or by the reference both sides know it by, which a 1:1 chat's
+    // message of mine and one of the contact's may share: a quote that says who wrote it takes only that side's.
+    const side = (id: string) => id.startsWith("peer_") ? "peer" : id.startsWith("me_") ? "me" : undefined;
+    const byReference = (reply: MessageReply) => { const id = byRef.get(reply.id); return id === undefined || !reply.from || !side(id) || side(id) === reply.from ? id : undefined; };
+    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byReference(reply);
     const ids = (await db.getMessages(linkId)).filter(m => { const id = quoted(m.replyTo); return id !== undefined && (m.replyTo!.snippet || m.replyTo!.messageId !== id); }).map(m => m.id);
     if (!ids.length) return [];
     await db.patchMessages(linkId, ids, m => { const id = quoted(m.replyTo); return id === undefined ? null : { replyTo: { ...m.replyTo!, snippet: "", messageId: id } }; });
@@ -5335,18 +5391,36 @@ export class GhostlyNode implements EngineImplementation {
     const { live, app } = this.appChat(linkId, ref);
     if (!isAppVersion(version)) throw new Error("Not an app version");
     // A version removed or revoked since it started says nothing more to the contact (WISP 1200 § Takedowns).
+    // The calls run side by side: a close (or a later open) that came while this one read the store wins.
+    const turn = this.appTurn(linkId, app);
     await this.appChatRunnable(ref, digest);
+    if (this.appTurns.get(`${linkId} ${app}`) !== turn) return { app };
     const open = live.appsOpen ??= new Map();
     if (live.link) live.link.openApp(app, version);
     else open.set(app, version);
     return { app };
   }
 
+  /** The last open or close of each app in each chat, by chat and chat app id: an open still reading the store is not the last. */
+  private readonly appTurns = new Map<string, number>();
+  private nextAppTurn = 0;
+  private appTurn(linkId: string, app: string): number {
+    const turn = ++this.nextAppTurn;
+    this.appTurns.set(`${linkId} ${app}`, turn);
+    return turn;
+  }
+
+  /** Closes `app` in a chat, and any open of it still on its way. */
+  private appCloseIn(linkId: string, live: LiveLink, app: string): void {
+    this.appTurn(linkId, app);
+    if (live.link) live.link.closeApp(app);
+    else live.appsOpen?.delete(app);
+  }
+
   /** This side closed an app in a paired chat: `close` goes now when the session is live. */
   appClose({ linkId, ref }: { linkId: string; ref: string }): void {
     const { live, app } = this.appChat(linkId, ref);
-    if (live.link) live.link.closeApp(app);
-    else live.appsOpen?.delete(app);
+    this.appCloseIn(linkId, live, app);
   }
 
   /** One data frame of an app open on both sides, on the live session only; nothing is kept to send later. */
@@ -5434,12 +5508,9 @@ export class GhostlyNode implements EngineImplementation {
 
   /** Every page went away: no app runs here any more, so each open one is closed (`close` goes where it can). */
   appsCloseAll(): void {
-    for (const live of this.links.values()) {
-      for (const app of [...live.appsOpen?.keys() ?? []]) {
-        if (live.link) live.link.closeApp(app);
-        else live.appsOpen?.delete(app);
-      }
-    }
+    for (const [linkId, live] of this.links) for (const app of [...live.appsOpen?.keys() ?? []]) this.appCloseIn(linkId, live, app);
+    // Opens still reading the store: no page is left to run them.
+    for (const key of this.appTurns.keys()) this.appTurns.set(key, ++this.nextAppTurn);
   }
 
   /** An app that went (uninstalled) is closed in every chat it was open in, as `appClose` does. */
@@ -5447,9 +5518,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const [linkId, live] of this.links) {
       if (!live.appsOpen?.size) continue;
       const { app } = this.appChat(linkId, ref);
-      if (!live.appsOpen.has(app)) continue;
-      if (live.link) live.link.closeApp(app);
-      else live.appsOpen.delete(app);
+      if (live.appsOpen.has(app)) this.appCloseIn(linkId, live, app);
     }
   }
 
@@ -5482,6 +5551,25 @@ export class GhostlyNode implements EngineImplementation {
     this.pinTimers.delete(linkId);
     live.stored = { ...live.stored, pinOut: undefined };
     await db.patchLink(linkId, { pinOut: undefined });
+  }
+
+  /**
+   * A 1:1 chat's pin that came before its message (pinned while I was away: the pin goes as the session opens, ahead of
+   * what waited) names its row once the row is here. Only the rows that changed are read, and only while such a pin stands.
+   */
+  private async pinnedRowCame(linkId: string, ids: readonly string[]): Promise<void> {
+    const live = this.links.get(linkId), pin = live?.stored.pin;
+    if (!live || live.stored.group || !pin?.id || pin.messageId) return;
+    for (const id of new Set(ids)) {
+      const row = await db.getMessage(linkId, id);
+      if (!row || replyRef(row) !== pin.id) continue;
+      // A newer pin (or unpin) taken meanwhile is left as it is.
+      if (live.stored.pin !== pin) return;
+      live.stored = { ...live.stored, pin: { ...pin, messageId: row.id } };
+      await db.patchLink(linkId, { pin: live.stored.pin });
+      this.emitState();
+      return;
+    }
   }
 
   /** A pin that came, as it is kept: who pinned, and its row when it is here. */
@@ -6674,6 +6762,8 @@ export class GhostlyNode implements EngineImplementation {
     // Earlier device sets (a removal, a new secret): their tombstones put again now and every hour, and their frames
     // delivered over the old links, as a removal that a crash cut short resumes from the record alone.
     this.watchTombstones();
+    // A removal cut short after its write: the removed device's wake subscription and wallet marks are cleared now.
+    await this.finishRemovals().catch(() => {});
     // A device was given the secret and never finished its enrollment: the set moves to a new one by itself.
     await this.rotateIfDue().catch(() => {});
   }
@@ -6777,6 +6867,13 @@ export class GhostlyNode implements EngineImplementation {
   private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
     this.setMoveAllowed();
     if (this.settingMove) throw new Error("remove-busy: The device set is already changing.");
+    // Removed already, by a move cut short after its write (Remove pressed again): that removal is finished, not refused.
+    const record = remove === undefined ? null : await readDeviceRecord(databaseName()).catch(() => null);
+    if (record?.state === "active" && record.earlierSets.some((set) => set.removed === remove) && !record.deviceSet.some((slot) => slot?.key === remove)) {
+      await this.finishRemovals().catch(() => {});
+      this.watchTombstones();
+      return this.deviceSet();
+    }
     const work = (async () => {
       const ports = await this.setMovePorts();
       if (!ports) throw new Error("remove-state: This device cannot sign for its device set.");
@@ -6784,7 +6881,7 @@ export class GhostlyNode implements EngineImplementation {
     })();
     this.settingMove = work;
     try { await work; } finally { this.settingMove = null; }
-    if (remove !== undefined) await this.afterDeviceRemoved(remove).catch(() => {});
+    if (remove !== undefined) await this.finishRemovals().catch(() => {});
     // The giver signs releases over the turn address, which moved with the secret: it is made again for the new one.
     if (this.handoffGiver) { this.deviceLinks?.setHandoff(null); this.handoffGiver = null; await this.startHandoff().catch(() => {}); }
     this.watchTombstones();
@@ -6814,6 +6911,27 @@ export class GhostlyNode implements EngineImplementation {
       await this.loadWalletHomes();
       await this.refreshWallet().catch(() => {});
     }
+  }
+
+  /**
+   * What each removal left in the profile (`afterDeviceRemoved`), for every earlier set that still names the device it
+   * removed: after the move, and at start for one a reload, a crash or a stop cut short after its write. The name is
+   * dropped once its device's leftovers are cleared.
+   */
+  private async finishRemovals(): Promise<void> {
+    const profile = databaseName();
+    const record = await readDeviceRecord(profile);
+    if (record?.state !== "active") return;
+    const done = new Set<string>();
+    for (const set of record.earlierSets) {
+      if (set.removed === undefined || done.has(set.removed)) continue;
+      // One that fails keeps its name: it is tried again at the next start.
+      if (await this.afterDeviceRemoved(set.removed).then(() => true, () => false)) done.add(set.removed);
+    }
+    if (!done.size) return;
+    const now = await readDeviceRecord(profile);
+    if (now?.state !== "active") return;
+    await amendDevice(profile, { earlierSets: now.earlierSets.map(({ removed, ...set }) => (removed === undefined || done.has(removed) ? set : { ...set, removed })) });
   }
 
   /**
@@ -6885,8 +7003,9 @@ export class GhostlyNode implements EngineImplementation {
       // The record now lists the new device: the network settings go into it, and the links start.
       afterWrite: async () => { await this.syncDeviceNetwork(); await this.startDeviceSet(); },
       // An enrollment that ended after its grant went out and before the new device said it stored it: that device
-      // may hold the secret, so the set moves to a new one (once this enrollment is over).
-      onChange: (view) => { if (view.step === "failed") setTimeout(() => void this.rotateIfDue().catch(() => {}), 0); },
+      // may hold the secret, so the set moves to a new one (once this enrollment is over). Any end tries it: one that
+      // a second Add cancelled was refused while that one ran, and is due once it is over, done included.
+      onChange: (view) => { if (view.step === "failed" || view.step === "done") setTimeout(() => void this.rotateIfDue().catch(() => {}), 0); },
     });
     this.enrollment = inviter;
     try { return await inviter.start(); } catch (error) {
@@ -8319,7 +8438,7 @@ export class GhostlyNode implements EngineImplementation {
         if (live.link && live.stored.profile && (!live.stored.group || this.keepsGroupNative(live.stored)) && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
           && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
       }
-    }, RELAY_RETRY_MS);
+    }, RELAY_RETRY_MS / 2 + Math.random() * RELAY_RETRY_MS);
   }
 
   /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */
@@ -8787,6 +8906,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
     this.chatSearch.changed(linkId);
+    await this.pinnedRowCame(linkId, ids);
     // The chat list's reaction line quotes its message: an edit of that message changes the quote too, and a delete (here
     // or for everyone) takes the line back to the reaction before it that still stands.
     const reacted = this.reactionNotes.get(linkId);
@@ -8962,7 +9082,9 @@ export class GhostlyNode implements EngineImplementation {
       ...(stored.profile && !stored.group && live.link?.peerTyping ? typingView(live.link.peerTypingActivity) : {}),
       ...(stored.profile && !stored.group && { wakeToken: this.settings.wake ? stored.wakeToken : undefined, peerWakes: !!stored.peerWake, ...(stored.wakeMuted && { wakeMuted: true }) }),
       ...(this.reactionNotes.has(stored.id) && { lastReaction: this.reactionNotes.get(stored.id) }),
-      ...(stored.pin && { pin: pinView(stored.pin) }),
+      // The pinned message was deleted for everyone: nothing of it stays, its pin neither, as in a group (`Groups.pinned`).
+      // The pin is kept as it came, so the same pin said again is no newer.
+      ...(stored.pin && { pin: pinView(stored.pin.id && stored.removedRefs?.includes(stored.pin.id) ? { ...stored.pin, id: "", messageId: undefined } : stored.pin) }),
       participationKey: participationKeyOf(live),
       peerParticipationKey: stored.pairedPeerKey,
       publicProfiles: EXTERNAL_IDENTITIES_ENABLED ? stored.publicProfiles : undefined,

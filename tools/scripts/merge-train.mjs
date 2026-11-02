@@ -734,10 +734,19 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // requests aboard that change one leave the line, saying so, and the rest board without them. Else every run
       // failed here, and the whole line waited behind them.
       if (!WORKFLOW_PUSH_REFUSED.test(`${e?.message ?? e}`)) throw e;
+      // GitHub lists no files for a pull request of 3000 or more: those leave only when none aboard lists a workflow,
+      // naming the one GitHub refused (a push still refused without the others says one of them changes it).
       const changing = [];
+      const unlisted = [];
       for (const p of aboard) {
-        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
+        const files = await gh.pullFiles(p.number);
+        if (!files) unlisted.push(p);
+        const workflows = (files ?? []).filter((f) => f.startsWith(".github/workflows/"));
         if (workflows.length) changing.push([p, workflows]);
+      }
+      if (!changing.length) {
+        const refused = `${e?.message ?? e}`.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow";
+        for (const p of unlisted) changing.push([p, [refused]]);
       }
       if (!changing.length) throw e;
       for (const [p, workflows] of changing) {
@@ -745,7 +754,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         done.dropped.push(p.number);
         await leave(p, LABEL.failed, workflowText(base, workflows));
       }
-      return board(prs.filter((p) => !changing.some(([c]) => c === p)), next, extra);
+      // From the ones aboard: those the build dropped have left the line already, and building them again drops them twice.
+      return board(aboard.filter((p) => !changing.some(([c]) => c === p)), next, extra);
     }
     const title = `train: ${aboard.length} into ${base} (${aboard.map((p) => `#${p.number}`).join(" ")})`;
     const pr = await w.createPull({ base, head: branch, title, body: batchBody(base, built.baseSha, built.sha, aboard, next, extra, built.commits) });
@@ -1044,8 +1054,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (!pushed.ok && WORKFLOW_PUSH_REFUSED.test(pushed.message)) {
         // As for a batch's push: it leaves the line, saying so. Else every run rebased it and was refused again, and it
         // waited for good under a comment naming a commit GitHub never took. A diff that lists no workflow (commits
-        // that change one and change it back, which the rebase replays) names the one GitHub refused.
-        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
+        // that change one and change it back, which the rebase replays) or none at all (3000 files or more) names the one
+        // GitHub refused.
+        const workflows = ((await gh.pullFiles(p.number)) ?? []).filter((f) => f.startsWith(".github/workflows/"));
         if (!workflows.length) workflows.push(pushed.message.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow");
         say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
         done.dropped.push(p.number);
@@ -1085,8 +1096,15 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (p.ci === "success") {
       const r = await landAlone(p);
       if (r.ok) return null;
-      say(`::warning::Could not land #${p.number}: ${r.message}`);
-      return stay;
+      // A base or head that moved under the merge: the next run rebases it onto the new tip, or reads its new head.
+      if (r.status === 409 || /Base branch was modified/.test(r.message ?? "")) {
+        say(`::warning::Could not land #${p.number}: ${r.message}`);
+        return stay;
+      }
+      // Any other refusal (squash merges turned off, a rule the train does not read) comes back on every run, and the
+      // whole line waited behind it: as in `goAlone`, it goes the batch way, which lands by another merge.
+      say(`::warning::Could not merge #${p.number} alone: ${r.message}; it goes the batch way.`);
+      return (await board([p])) ?? false;
     }
     if (p.ci === "none" && now - Date.parse(mark.at) > CI_START_TIMEOUT) {
       say(`CI never started on #${p.number} at ${p.sha.slice(0, 12)}, so it is rebased again.`);
@@ -1252,13 +1270,25 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   };
   const runsRead = new Map();
   const jobsRead = new Map();
-  /** The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). */
-  const ciRunsOn = (sha) =>
-    once(runsRead, sha, async () => {
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+  /**
+   * The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). Pages are
+   * read, newest first, until `enough` of this repository's own runs are in (see `ciRuns`) or the list ends: anyone can
+   * open pull requests from a fork at a public commit, and their runs would fill a first page that holds none of ours.
+   * GitHub lists at most 1000 runs for one commit, PAGES_READ pages.
+   */
+  const readCiRuns = async (sha, enough) => {
+    const runs = [];
+    for (let page = 1; page <= PAGES_READ; page++) {
+      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100${page > 1 ? `&page=${page}` : ""}`);
       if (!r.ok && r.status !== 403) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
-      return r;
-    });
+      if (!r.ok) return r;
+      const list = r.data?.workflow_runs ?? [];
+      runs.push(...list);
+      if (list.length < 100 || ciRuns(runs, repo, sha).length >= enough) break;
+    }
+    return { ok: true, status: 200, data: { workflow_runs: runs } };
+  };
+  const ciRunsOn = (sha) => once(runsRead, sha, () => readCiRuns(sha, CI_RUNS_READ));
   const runJobs = (id) => once(jobsRead, id, () => all(`/actions/runs/${id}/jobs?filter=latest`));
   const pull = (p) => ({
     number: p.number,
@@ -1359,9 +1389,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      */
     cancelCi: async (sha) => {
       if (cancelDenied) return { cancelled: [], denied: cancelDenied };
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+      const r = await readCiRuns(sha, Infinity);
       if (r.status === 403) return { cancelled: [], denied: (cancelDenied = `HTTP 403 ${r.data?.message ?? ""}`.trim()) };
-      if (!r.ok) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
       const cancelled = [];
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).filter((x) => x.event === "pull_request" && x.status !== "completed")) {
         const c = await api("POST", `/actions/runs/${run.id}/cancel`);

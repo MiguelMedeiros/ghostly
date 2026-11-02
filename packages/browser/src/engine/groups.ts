@@ -2034,7 +2034,8 @@ export class Groups {
         // Back after a removal: who wrote the history I kept stays named, those gone since included.
         const session = this.sessions.get(g)!;
         for (const [key, nick] of Object.entries(group.formerNames ?? {})) if (!session.state.nicks[key]) await session.setNick(key, nick);
-        await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
+        // Back in a group I kept (its chain checked above): the read note was said when I first joined, as in a community.
+        await this.event(g, "joined", group.invitation.genesis ? "You joined again" : `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
           this.lastKnock.delete(g); this.knocked.delete(g); this.knockingSince.delete(g);
@@ -2798,14 +2799,17 @@ export class Groups {
       for (const [key] of after) if (!rosterHas(before, key) && key !== session.myKey) await this.event(groupId, "joined", `${name(key)} joined`, when, top.e, key);
       const gone = before.filter(([key]) => !rosterHas(after, key)).map(([key]) => key);
       this.hubs.removed(groupId, gone, this.now());
-      // One who left on their own: the admin's remove carries its `left` mark (WISP 902 § Admission and departure).
-      const left = (key: string) => {
-        const chain = session.state.chain;
-        for (let e = chain.length - 1; e > 0; e--) if (chain[e].k === "remove" && chain[e].s === key) return !!session.state.leftMarks?.[e];
-        return false;
+      // The commit that took the member out: one who left on their own has the admin's `left` mark on it (WISP 902 §
+      // Admission and departure); one removed, the admin who signed it named on the line.
+      const chain = session.state.chain;
+      const removal = (key: string) => {
+        for (let e = chain.length - 1; e > 0; e--) if (chain[e].k === "remove" && chain[e].s === key) return e;
+        return -1;
       };
       for (const key of gone) {
-        if (left(key)) await this.event(groupId, "left", `${name(key)} left`, when, top.e, key);
+        const e = removal(key), by = e > 0 && chain[e].by !== key ? chain[e].by : undefined;
+        if (e > 0 && session.state.leftMarks?.[e]) await this.event(groupId, "left", `${name(key)} left`, when, top.e, key);
+        else if (by) await this.event(groupId, "gone", `${name(by)} removed ${name(key)}`, when, top.e, key, by);
         else await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
       }
       if (top.k === "role") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === session.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
@@ -2863,10 +2867,10 @@ export class Groups {
 
   /** `member`: whom it is about, so the apps can name them as they are known now, not as they were then. */
   /** A line in the group's history; lines at the same time (two members gone in one change) get distinct ones, see `eventTime`. */
-  private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
+  private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string, by?: string): Promise<void> {
     timestamp = eventTime(this.eventTimes, groupId, timestamp);
     const id = `event:${epoch}:${event}:${timestamp}`, placing = this.lineOrder.placing(MESSAGE_LINK(groupId), { id, epoch, line: true }, this.now());
-    placing(await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id, text, sender: "peer", event, member, timestamp, via: "datalink" }) !== false);
+    placing(await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id, text, sender: "peer", event, member, ...(by && { by }), timestamp, via: "datalink" }) !== false);
   }
   private readonly eventTimes = new Map<string, Set<number>>();
 }

@@ -3,7 +3,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { listSessions } from "../lib/storage";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import type { SharedService } from "../lib/platform";
-import { Block, Button, Notice, Row, Section, Switch, input } from "../components/wallet/ui";
+import { Block, Button, Notice, Row, Section, Switch, SwitchLook, input } from "../components/wallet/ui";
 import { ButtonGroup, FieldGrid, Page } from "../components/layout";
 import { externalLinkProps } from "../lib/externalLink";
 import { useI18n } from "../contexts/I18nContext";
@@ -46,10 +46,13 @@ export function Services() {
 
   return (
     <Page title={t("tabs.services")} testId="my-services" trailing={
-      <button data-testid="online-toggle" onClick={() => void platform.setOnline(!online)} title={online ? t("services.goOffline") : t("services.goOnline")}
+      // Ghostly's own network switch: off, every chat goes offline. Where nothing can be shared (the web) it says so,
+      // with a name that stays put, rather than a state and a hint about shares.
+      <button type="button" role="switch" aria-checked={online} data-testid="online-toggle" onClick={() => void platform.setOnline(!online)}
+        title={!online ? t("services.goOnline") : canShare ? t("services.goOffline") : t("services.offDisconnectsChats")}
         className={`flex items-center gap-2 rounded-full px-3 min-h-9 text-sm border transition-colors cursor-pointer ${online ? "border-accent/40 bg-accent/10 text-accent" : "border-border bg-surface-alt text-text-muted"}`}>
-        <span aria-hidden="true" className={`w-2 h-2 rounded-full ${online ? "bg-accent" : "bg-gray-500"}`} />
-        <span>{online ? t("services.online") : t("services.offline")}</span>
+        {canShare ? <span aria-hidden="true" className={`w-2 h-2 rounded-full ${online ? "bg-accent" : "bg-gray-500"}`} /> : <SwitchLook checked={online} className="scale-75 -mx-1.5" />}
+        <span>{canShare ? (online ? t("services.online") : t("services.offline")) : t("services.ghostlyOnline")}</span>
       </button>
     }>
       <Section title={t("services.yourApps")} testId="your-apps">
@@ -83,13 +86,25 @@ export function Services() {
           ? <Block><Notice>{t("services.fromContactsEmpty")}</Notice></Block>
           : fromContacts.map((contact) => (
             <Row key={contact.key} label={contact.name} hint={<span className="font-mono">{contact.short}</span>}>
-              {contact.apps.map((app) => (
-                <Button key={app.id} variant="primary" data-testid="contact-service-open" onClick={() => {
-                  setOpenError("");
-                  if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
-                  platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
-                }}>{t("services.open", { app: app.name ?? app.id })}</Button>
-              ))}
+              {contact.apps.map((app) => {
+                const appName = app.name ?? app.id;
+                // The verb around the name ("Open {{app}}", "{{app}} を開く") stays whole; the name alone is cut.
+                const [before, after = ""] = t("services.open", { app: "\u0000" }).split("\u0000");
+                return (
+                  // At most the row's width, the name cut with an ellipsis in its own direction: a 46-character name went
+                  // 51 px past a 375 px phone's edge, its start cut off in Arabic. The whole label is in the title.
+                  <Button key={app.id} variant="primary" data-testid="contact-service-open" title={t("services.open", { app: appName })}
+                    className="flex items-center max-w-full min-w-0" onClick={() => {
+                      setOpenError("");
+                      if (!platform.features.openServices) { setOpenError(t("services.openNeedsApp")); return; }
+                      platform.openService(contact.key, app.id).catch((e) => setOpenError(problemLine(e, t)));
+                    }}>
+                    {before && <span className="whitespace-pre">{before}</span>}
+                    <span data-testid="contact-service-name" className="truncate" dir="auto">{appName}</span>
+                    {after && <span className="whitespace-pre">{after}</span>}
+                  </Button>
+                );
+              })}
             </Row>
           ))}
         {openError && <Block><Notice tone="error">{openError}</Notice></Block>}

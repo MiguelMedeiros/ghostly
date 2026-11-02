@@ -437,6 +437,31 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => w.b.disks.get("restart-a")!.discarded);
   });
 
+  it("the sender pauses, then cancels while the receiver is away: back, the receiver hears it ended and drops what it had", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("pcancel-1", 4 * 1024 * 1024));
+    send(w, file("pkeep-01", 4 * 1024 * 1024));
+    await until(() => (w.b.transferred.get("in:pcancel-1") ?? 0) > 100_000 && (w.b.transferred.get("in:pkeep-01") ?? 0) > 100_000);
+    w.a.files.pause("out", "pcancel-1");
+    w.a.files.pause("out", "pkeep-01");
+    await until(() => ["pcancel-1", "pkeep-01"].every((id) => w.b.records.get(`in:${id}`)?.pausedBy === "peer"));
+    w.drop();
+    w.restart("b");
+    w.a.files.cancel("out", "pcancel-1");
+    const dataBefore = w.a.sent.filter((f) => f.t === "pf-data" && f.id === "pkeep-01").length;
+    w.attach();
+    await until(() => state(w.b, "in", "pcancel-1") === "cancelled");
+    expect(w.b.records.get("in:pcancel-1")?.error).toBe("Cancelled by the sender");
+    await until(() => w.b.disks.get("pcancel-1")!.discarded);
+    // One the sender still has paused stays paused on both sides, and nothing moves.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.b.files.get("in", "pkeep-01")).toMatchObject({ state: "paused", pausedBy: "peer" });
+    expect(w.a.files.get("out", "pkeep-01")).toMatchObject({ state: "paused", pausedBy: "me" });
+    expect(w.a.sent.filter((f) => f.t === "pf-data" && f.id === "pkeep-01").length).toBe(dataBefore);
+    expect(w.b.disks.get("pkeep-01")!.discarded).toBe(false);
+  });
+
   it("the sender cancels: the receiver drops what it had; the receiver cancels: the sender stops", async () => {
     const w = wire();
     w.attach();
@@ -871,6 +896,58 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => state(w.a, "out", "ask-0016") === "failed");
     expect(w.a.records.get("out:ask-0016")?.error).toContain("too many files");
     expect([...w.b.records.values()].filter((r) => r.state === "asking")).toHaveLength(16);
+  });
+
+  it("a contact's files not finished here are counted, not only their bytes: past the limit an offer of 0 bytes is refused", async () => {
+    // Every offer of 0 bytes was taken (only bytes were counted): 2,500 of them were 2,500 messages and records here.
+    const w = wire();
+    w.attach();
+    const offer = (id: string) => w.b.files.handle({ t: "pf-offer", id, name: `${id}.txt`, mime: "text/plain", size: 0, ts: 1_700_000_000_000 });
+    const extra = 40;
+    for (let i = 0; i < FILE_LIMITS.maxUnfinishedIncoming + extra; i++) await offer(`flood-${String(i).padStart(4, "0")}`);
+    const unfinished = () => [...w.b.records.values()].filter((r) => r.direction === "in" && !["done", "failed", "declined", "cancelled"].includes(r.state)).length;
+    expect(unfinished()).toBe(FILE_LIMITS.maxUnfinishedIncoming);
+    expect(w.b.records.size).toBe(FILE_LIMITS.maxUnfinishedIncoming);
+    expect(w.b.sent.filter((f) => f.t === "pf-refuse" && f.why === "too-many")).toHaveLength(extra);
+    // One the sender stopped, offered again, is taken again only within the limit too.
+    await w.b.files.handle({ t: "pf-abort", id: "flood-0100" });
+    expect(state(w.b, "in", "flood-0100")).toBe("cancelled");
+    await offer("flood-new1");
+    expect(state(w.b, "in", "flood-new1")).toBe("queued");
+    w.b.sent.length = 0;
+    await offer("flood-0100");
+    expect(w.b.sent).toEqual([{ t: "pf-refuse", id: "flood-0100", why: "too-many" }]);
+    expect(state(w.b, "in", "flood-0100")).toBe("cancelled");
+    expect(unfinished()).toBe(FILE_LIMITS.maxUnfinishedIncoming);
+  });
+
+  it("a file taken here that waits its turn and never arrives ends after a week; offered again, it is taken again", async () => {
+    let now = 1_000;
+    const w = wire();
+    (w.b.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    w.attach();
+    const offer = (id: string, size = 0) => w.b.files.handle({ t: "pf-offer", id, name: `${id}.txt`, mime: "text/plain", size, ts: 1_700_000_000_000 });
+    // Three take the turns; a sender that never sends leaves the fourth waiting.
+    for (let i = 0; i < 4; i++) await offer(`stuck-00${i}`);
+    await until(() => [...w.b.records.values()].filter((r) => r.state === "active").length === 3);
+    expect(state(w.b, "in", "stuck-003")).toBe("queued");
+    // One the person accepted late, waiting its turn too: its week starts with the answer.
+    w.b.decide = async () => "ask";
+    await offer("late-0001", 40 * 1024 * 1024);
+    expect(state(w.b, "in", "late-0001")).toBe("asking");
+    now += FILE_LIMITS.offerTtlMs - 1_000;
+    w.b.files.accept("late-0001");
+    expect(state(w.b, "in", "late-0001")).toBe("queued");
+    now += 2_000;
+    w.b.sent.length = 0;
+    w.b.files.sweep();
+    expect(state(w.b, "in", "stuck-003")).toBe("failed");
+    expect(w.b.records.get("in:stuck-003")?.error).toBe("The offer expired");
+    expect(w.b.sent).toContainEqual({ t: "pf-refuse", id: "stuck-003", why: "expired" });
+    expect(state(w.b, "in", "late-0001")).toBe("queued");
+    w.b.decide = async () => "accept";
+    await offer("stuck-003");
+    expect(state(w.b, "in", "stuck-003")).toBe("queued");
   });
 
   it("an offer nobody answers ends after a week, on both sides", async () => {

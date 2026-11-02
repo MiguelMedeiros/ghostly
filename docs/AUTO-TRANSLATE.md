@@ -1,7 +1,7 @@
-# Auto-translation in chats (design, not built)
+# Auto-translation in chats
 
-Status: a design and a spike for review. Nothing here ships, and nothing on `dev` changes for users until the design is
-approved. The feature then lands slice by slice on an `epic/auto-translate` branch, behind a flag.
+Status: shipped in the Desktop app (Linux, macOS, Windows) from 1.7.0. This page is the design and the spike it was
+built from, slice by slice on the `epic/auto-translate` branch.
 
 ## What it does
 
@@ -31,8 +31,14 @@ sent is the translated text, exactly as if I had typed it.
 
 QVAC (Tether's local AI SDK, `@qvac/sdk`) translates with its NMT plugin, `@qvac/translation-nmtcpp`. For the
 languages Ghostly has, the plugin runs **Bergamot**, the Marian models Mozilla trained for Firefox Translations
-(the addon is Apache-2.0; the weights are Mozilla's, and their license is to be checked before we ship them). Bergamot
-is CPU only and needs no GPU.
+(the addon is Apache-2.0; the Bergamot engine compiled into it is `bergamot-translator`, MPL-2.0, from QVAC's fork,
+whose source is at https://github.com/tetherto/qvac-ext-bergamot-translator). Bergamot is CPU only and needs no GPU.
+
+License check (2026-11-01): the model weights are Mozilla's, under MPL-2.0. Ghostly does not redistribute them: the app
+downloads each model from Mozilla's own CDN, the files Firefox reads, checked against pinned SHA-256s. A Ghostly mirror
+would make Ghostly a distributor with MPL-2.0's section 3 duties, so there is none. The translation runtime's archive
+carries `bare`'s Apache-2.0 LICENSE and NOTICE (`licenses/bare-runtime/`), and
+[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md) credits the models and links the engine's source.
 
 QVAC runs in Node.js (it starts its own Bare worker), in Bare, and in Expo apps. It does not run in a browser.
 

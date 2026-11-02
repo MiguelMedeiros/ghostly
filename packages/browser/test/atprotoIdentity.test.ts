@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { ATPROTO_PROOF_COLLECTION, atprotoProofRecord, identityStatement, newIdentityBinding, type IdentityStatement } from "@ghostly/core";
+import { ATPROTO_PROOF_COLLECTION, atprotoProofRecord, IdentityCheckUnavailable, identityStatement, newIdentityBinding, type IdentityStatement } from "@ghostly/core";
 import type { IdentityFetch } from "../src/proofs/contract";
 import { createAtprotoIdentityProvider, RECORD_PROOF_MAX_BYTES } from "../src/proofs/providers/atproto";
 import { IDENTITY_PROVIDERS } from "../src/proofs/registry";
@@ -81,6 +81,32 @@ describe("the AT Protocol provider", () => {
     expect(verified.display?.source).toMatch(/not shown/);
   });
 
+  it("tells a document with no handle, and a handle check that failed, from one that points elsewhere; a cancel fails", async () => {
+    const net = testAtprotoNetwork();
+    const alice = net.account("alice");
+    const s = statementFor(alice.did);
+    publish(alice, s);
+    const provider = createAtprotoIdentityProvider({ host: () => undefined });
+    // After the record: every handle lookup fails on the network, or the check is cancelled during it.
+    const failingAfterRecord = (fail: () => never): IdentityFetch => {
+      let recordRead = false;
+      return async (url, init) => {
+        if (url.includes("getRecord")) recordRead = true;
+        else if (recordRead) fail();
+        return net.fetch(url, init);
+      };
+    };
+    const offline = await verifyIdentity([provider], s, {}, ctxOf(failingAfterRecord(() => { throw new TypeError("Failed to fetch"); })));
+    expect(offline.display).toMatchObject({ source: "The account's handle could not be checked, so it is not shown" });
+    expect(offline.display?.name).toBeUndefined();
+    const controller = new AbortController();
+    const cancelled = failingAfterRecord(() => { controller.abort(); throw new DOMException("Aborted", "AbortError"); });
+    await expect(verifyIdentity([provider], s, {}, { ...ctxOf(cancelled), signal: controller.signal })).rejects.toThrow();
+    alice.doc.alsoKnownAs = [];
+    const none = await verifyIdentity([provider], s, {}, ctxOf(net.fetch));
+    expect(none.display).toMatchObject({ source: "The account's DID document names no handle" });
+  });
+
   it.each([
     ["the record was deleted", (a: TestAccount) => a.records.clear(), "no longer in the account's repository"],
     ["the record carries another statement", (a: TestAccount, s: IdentityStatement) => a.records.set(`${ATPROTO_PROOF_COLLECTION}/${s.binding.key}`, { ...atprotoProofRecord(statementFor(a.did), new Date()) }), "another statement"],
@@ -124,6 +150,27 @@ describe("the AT Protocol provider", () => {
     await expect(verifyIdentity([provider], s, {}, ctxOf(big))).rejects.toThrow("too large");
     const down: IdentityFetch = async (url, init) => { if (url.includes("getRecord")) throw new TypeError("Failed to fetch"); return net.fetch(url, init); };
     await expect(verifyIdentity([provider], s, {}, ctxOf(down))).rejects.toThrow("could not be reached");
+  });
+
+  it("keeps what this side's network saw from the contact: a server on any port that cannot be reached, fails, or is private", async () => {
+    // The DID document, the contact's, chooses the server and its port.
+    const net = testAtprotoNetwork();
+    const alice = net.account("alice", { pds: "https://pds.example.org:8443" });
+    const s = statementFor(alice.did);
+    publish(alice, s);
+    const provider = createAtprotoIdentityProvider({ host: () => undefined });
+    const down: IdentityFetch = async (url, init) => { if (url.includes("getRecord")) throw new TypeError("Failed to fetch"); return net.fetch(url, init); };
+    await expect(verifyIdentity([provider], s, {}, ctxOf(down))).rejects.toThrow(IdentityCheckUnavailable);
+    const failing: IdentityFetch = async (url, init) => url.includes("getRecord") ? { status: 502, contentType: "text/html", text: "", bytes: new Uint8Array() } : net.fetch(url, init);
+    await expect(verifyIdentity([provider], s, {}, ctxOf(failing))).rejects.toThrow(IdentityCheckUnavailable);
+    net.zone.a!["pds.example.org"] = ["10.1.2.3"];
+    await expect(verifyIdentity([provider], s, {}, ctxOf(net.fetch))).rejects.toThrow(IdentityCheckUnavailable);
+    // What the server says about the record is about the proof: the contact is told.
+    const gone: IdentityFetch = async (url, init) => url.includes("getRecord")
+      ? { status: 400, contentType: "application/json", text: JSON.stringify({ error: "RecordNotFound" }), bytes: new Uint8Array() } : net.fetch(url, init);
+    net.zone.a!["pds.example.org"] = ["203.0.113.9"];
+    const missing = await verifyIdentity([provider], s, {}, ctxOf(gone)).catch((e: unknown) => e);
+    expect(missing).not.toBeInstanceOf(IdentityCheckUnavailable);
   });
 
   it("never contacts a server on a private network, whatever the DID document says", async () => {
@@ -217,10 +264,24 @@ describe("AT Protocol resolution", () => {
     const net = testAtprotoNetwork();
     const a = net.account("a");
     const doc = await resolveAtprotoDid(a.did, { fetch: net.fetch });
-    expect(await verifiedAtprotoHandle(doc, { fetch: net.fetch })).toBe(a.handle);
-    expect(await verifiedAtprotoHandle({ ...doc, handle: undefined }, { fetch: net.fetch })).toBeUndefined();
+    expect(await verifiedAtprotoHandle(doc, { fetch: net.fetch })).toEqual({ handle: a.handle });
+    expect(await verifiedAtprotoHandle({ ...doc, handle: undefined }, { fetch: net.fetch })).toEqual({ missing: "none" });
     net.zone.txt![`_atproto.${a.handle}`] = [`did=${net.account("b").did}`];
-    expect(await verifiedAtprotoHandle(doc, { fetch: net.fetch })).toBeUndefined();
-    expect(await verifiedAtprotoHandle(doc, { fetch: async () => { throw new Error("offline"); } })).toBeUndefined();
+    expect(await verifiedAtprotoHandle(doc, { fetch: net.fetch })).toEqual({ missing: "elsewhere" });
+    expect(await verifiedAtprotoHandle(doc, { fetch: async () => { throw new Error("offline"); } })).toEqual({ missing: "unchecked" });
+  });
+
+  it("says a handle points nowhere only when the lookups answered", async () => {
+    const net = testAtprotoNetwork();
+    const web = net.account("web", { dns: false });
+    const doc = await resolveAtprotoDid(web.did, { fetch: net.fetch });
+    // The resolver answers no TXT record, and the handle's website cannot be reached.
+    const siteDown: IdentityFetch = async (url, init) => { if (url.startsWith(`https://${web.handle}/`)) throw new TypeError("Failed to fetch"); return net.fetch(url, init); };
+    expect(await verifiedAtprotoHandle(doc, { fetch: siteDown })).toEqual({ missing: "unchecked" });
+    net.wellKnown.delete(web.handle);
+    expect(await verifiedAtprotoHandle(doc, { fetch: net.fetch })).toEqual({ missing: "elsewhere" });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(verifiedAtprotoHandle(doc, { fetch: net.fetch, signal: controller.signal })).rejects.toThrow();
   });
 });

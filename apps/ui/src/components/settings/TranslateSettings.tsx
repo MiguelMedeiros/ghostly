@@ -7,7 +7,7 @@ import { rawError } from "../../lib/errorText";
 import { forgetTranslations } from "../../lib/translateReceived";
 import { downloadedLanguages } from "../../lib/translateSettings";
 import { Row } from "../layout";
-import { useTranslateDownload } from "../../hooks/useTranslateDownload";
+import { useTranslateDownload, useTranslateDownloading } from "../../hooks/useTranslateDownload";
 import { Button, Switch } from "../wallet/ui";
 
 /**
@@ -34,7 +34,8 @@ export function TranslateSettings() {
     }
   }, []);
   useEffect(() => { void read(); }, [read]);
-  const { ask, question } = useTranslateDownload(() => void read());
+  const { ask, question } = useTranslateDownload(read);
+  const downloading = useTranslateDownloading();
 
   const remove = async (pair: string) => {
     setRemoving(pair);
@@ -57,11 +58,13 @@ export function TranslateSettings() {
       <Row label={title} hint={t("settings.translate.hint")} info={t("settings.translate.info")} testId="settings-translate-row">
         <Switch testId="settings-translate" label={title} checked={settings.translateMessages} onChange={(on) => {
           updateTranslateMessages(on);
-          // Turned on with no language here: what it needs is asked before anything downloads.
-          if (on && unread === null && lines.length === 0) void ask(settings.language);
+          // Turned on: what the app's language is missing is asked before anything downloads, whatever other pairs are
+          // here (a chat set to On brought its own). Nothing is asked when both ways are here.
+          if (on && unread === null) void ask(settings.language);
         }} />
       </Row>
       {question}
+      {downloading && <Row label={t("settings.translate.downloaded")} hint={<span role="status">{t("settings.translate.downloading")}</span>} testId="settings-translate-downloading" />}
       {unread !== null ? (
         <Row label={t("settings.translate.downloaded")} hint={<span role="status">{t("settings.translate.unread")}</span>} info={rawError(unread)}
           testId="settings-translate-unread">

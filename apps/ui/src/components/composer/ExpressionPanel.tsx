@@ -51,6 +51,12 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   useLayoutEffect(() => {
     const bounds = boundsRef.current;
     if (!bounds) return;
+    // A new object would render the panel again for nothing: only a position that changed is set.
+    let last = "";
+    const set = (next: CSSProperties) => {
+      const key = JSON.stringify(next);
+      if (key !== last) { last = key; setPosition(next); }
+    };
     const place = () => {
       const viewport = window.visualViewport;
       const left = viewport?.offsetLeft ?? 0, top = viewport?.offsetTop ?? 0;
@@ -60,29 +66,34 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
         // On a short screen (a phone on its side) half is too little for any emoji row: take up to SHEET_FLOOR.
         const keyboard = document.documentElement.dataset.keyboard === "true";
         const sheet = keyboard ? height * 0.82 : Math.max(height * 0.52, Math.min(height * 0.82, SHEET_FLOOR));
-        setPosition({ left, right: "auto", width, bottom: Math.max(0, window.innerHeight - top - height), maxHeight: height * 0.82,
+        set({ left, right: "auto", width, bottom: Math.max(0, window.innerHeight - top - height), maxHeight: height * 0.82,
           "--expression-height": `${Math.round(sheet)}px` } as CSSProperties);
         return;
       }
       const rect = bounds.getBoundingClientRect();
       const panelWidth = Math.max(0, Math.min(WIDTH, rect.width - MARGIN * 2, width - MARGIN * 2));
       const panelHeight = Math.max(0, Math.min(HEIGHT, rect.top - top - GAP - MARGIN));
-      setPosition({ position: "fixed", zIndex: 60, width: panelWidth, height: panelHeight, top: rect.top - GAP - panelHeight,
+      set({ position: "fixed", zIndex: 60, width: panelWidth, height: panelHeight, top: rect.top - GAP - panelHeight,
         left: Math.max(left + MARGIN, Math.min(rect.left + MARGIN, left + width - panelWidth - MARGIN)) });
     };
     place();
     const observer = new ResizeObserver(place);
     observer.observe(bounds);
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    window.visualViewport?.addEventListener("resize", place);
-    window.visualViewport?.addEventListener("scroll", place);
+    // One measure a frame however many events come; a scroll inside the panel (its grid) does not move it.
+    let frame = 0;
+    const later = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
+    const scrolled = (e: Event) => { if (!ref.current?.contains(e.target as Node)) later(); };
+    window.addEventListener("resize", later);
+    window.addEventListener("scroll", scrolled, true);
+    window.visualViewport?.addEventListener("resize", later);
+    window.visualViewport?.addEventListener("scroll", later);
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-      window.visualViewport?.removeEventListener("resize", place);
-      window.visualViewport?.removeEventListener("scroll", place);
+      window.removeEventListener("resize", later);
+      window.removeEventListener("scroll", scrolled, true);
+      window.visualViewport?.removeEventListener("resize", later);
+      window.visualViewport?.removeEventListener("scroll", later);
     };
   }, [boundsRef, phone]);
 

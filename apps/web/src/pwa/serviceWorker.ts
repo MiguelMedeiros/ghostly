@@ -42,26 +42,31 @@ export function prepareUpdate(): void {
   void container()?.getRegistration().then((registration) => registration?.update()).catch(() => {});
 }
 
+/**
+ * The new worker once it is installed. Called after `update()` settled: a new script is `installing` by then, so
+ * with neither a waiting nor an installing worker the active one is already the newest (another tab's Reload put it
+ * in control of this page too) and there is nothing to wait for.
+ */
 function installed(registration: ServiceWorkerRegistration, timeoutMs: number): Promise<ServiceWorker | null> {
   if (registration.waiting) return Promise.resolve(registration.waiting);
+  const worker = registration.installing;
+  if (!worker) return Promise.resolve(null);
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(registration.waiting), timeoutMs);
-    const follow = (worker: ServiceWorker | null) => {
-      if (!worker) return;
-      worker.addEventListener("statechange", () => {
-        if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
-        if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
-      });
-    };
-    if (registration.installing) follow(registration.installing);
-    else registration.addEventListener("updatefound", () => follow(registration.installing), { once: true });
+    worker.addEventListener("statechange", () => {
+      if (worker.state === "installed") { clearTimeout(timer); resolve(worker); }
+      if (worker.state === "redundant") { clearTimeout(timer); resolve(null); }
+    });
   });
 }
+
+/** This page pressed Reload and reloads on its own once the new worker takes it (not `followNewVersion`). */
+let applying = false;
 
 /**
  * Reload into the new version: the waiting worker (fetched now if it is not yet) takes over, then the page
  * reloads on it. The worker never does this on its own, so a deploy never swaps the app under a chat. With no
- * worker, or none newer after a while, it is a plain reload.
+ * worker, none newer, or one that does not finish installing in time, it is a plain reload.
  */
 export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.location.reload() } = {}): Promise<void> {
   const workers = container();
@@ -70,14 +75,51 @@ export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.lo
     await registration.update().catch(() => {});
     const next = await installed(registration, timeoutMs);
     if (next) {
+      applying = true;
       await new Promise<void>((resolve) => {
         workers.addEventListener("controllerchange", () => resolve(), { once: true });
         setTimeout(resolve, 10_000);
         tell(next, { type: "skip-waiting" });
       });
+      applying = false;
     }
   }
   reload();
+}
+
+// ---------- another tab took a new version ----------
+
+/**
+ * Keeps this page off a build another tab replaced. Reload on "New version" in one tab activates the new worker,
+ * which takes every open page of the app and deletes the old build's files: a page still running that build could
+ * no longer open any screen it had not opened yet. A page that runs the app reloads into the new version at once.
+ * A page waiting for another tab's lock reloads instead of starting once the lock is its own, after `handOver` (the
+ * tab that pressed Reload asking for it again), so that tab runs the app and this one waits on the new build.
+ *
+ * Called before anything else of the page's start. Returns what the page awaits once the lock is its own: it
+ * resolves when the app may start here, and never when the page reloads instead.
+ */
+export function followNewVersion({ reload = () => window.location.reload() } = {}): (handOver: () => Promise<void>) => Promise<void> {
+  const workers = container();
+  let current = workers?.controller ?? null;
+  let replaced = false;
+  let running = false;
+  workers?.addEventListener("controllerchange", () => {
+    const before = current;
+    current = workers.controller;
+    // The first worker of all takes a page that had none: the same build, nothing replaced.
+    if (!before || current === before || applying) return;
+    replaced = true;
+    if (running) reload();
+  });
+  return async (handOver) => {
+    if (replaced) {
+      await handOver();
+      reload();
+      return new Promise<never>(() => {});
+    }
+    running = true;
+  };
 }
 
 // ---------- a build gone from the server ----------

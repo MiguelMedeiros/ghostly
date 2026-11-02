@@ -5,7 +5,9 @@ export type RuntimeMessage =
   | { target: "background"; type: "ensure-engine" }
   /** The peer stopped for good ("Clear all data"): its document closes and a new one starts. */
   | { target: "background"; type: "restart-engine" }
-  | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string }
+  | { target: "background"; type: "open-service"; peerPubKeyZ32: string; serviceId: string; tag: string; page?: ViewerPage }
+  /** The profile locked: every tab showing a contact's app closes (`closeServiceWindows`). */
+  | { target: "background"; type: "close-services" }
   /** A `lightning:` or `bitcoin:` link, for a wallet on this device: the app page cannot open one itself. */
   | { target: "background"; type: "open-payment-link"; uri: string }
   /** Answered with an `EngineStatus` once the peer is up. */
@@ -22,6 +24,20 @@ export type RuntimeMessage =
       headers: [string, string][];
       bodyB64: string | null;
     };
+
+/**
+ * What a viewer tab says when its contact's app cannot answer, in the profile's language. The worker has no settings
+ * and no dictionary: the page that opens the service hands it these.
+ */
+export interface ViewerPage {
+  /** `<html lang>`, a BCP 47 tag. */
+  lang: string;
+  dir: "ltr" | "rtl";
+  /** The contact is gone, or no longer shares the app (`services.window.unreachable`). */
+  unreachable: string;
+  /** Any other failure (`services.window.failed`); the engine's own words go to the console. */
+  failed: string;
+}
 
 export type HttpRequestReply =
   | { ok: true; status: number; headers: [string, string][]; bodyB64: string }

@@ -190,6 +190,8 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     engine.on("connect", () => { throw new Error("You are offline. Go online before reconnecting."); });
     // Only the member who is down can be reconnected.
     expect(screen.getAllByTestId("group-connection-reconnect")).toHaveLength(1);
+    // Thumb-sized on a phone; the desktop keeps its 32 px.
+    expect(screen.getByTestId("group-connection-reconnect")).toHaveClass("min-h-8", "max-md:min-h-11");
     await user.click(screen.getByTestId("group-connection-reconnect"));
     expect(engine.callsTo("connect")).toEqual([{ linkId: "edge-b" }]);
     expect(await screen.findByRole("alert")).toHaveTextContent("Go online before reconnecting");

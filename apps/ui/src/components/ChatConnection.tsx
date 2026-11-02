@@ -86,6 +86,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   // answer meanwhile (nothing reachable, cooling down) is that and nothing more, so it is no connection issue.
   const id = useId(), ghostlyOnline = state?.settings.online ?? true, deviceOnline = useOnline(), online = ghostlyOnline && deviceOnline;
   const dht = link?.deliveryMode === "dht", textDht = link?.textDelivery === "dht", ready = online && pair?.status === "ready" && link?.dataLink === "open" && !!pair.transport;
+  // A failed Reconnect (the contact's app was down) is over once the chat is live again by itself. One that failed
+  // while live (a transport choice) stays: it is about that choice.
+  const [wasReady, setWasReady] = useState(ready);
+  if (ready !== wasReady) { setWasReady(ready); if (ready) setError(""); }
   const connectionFailure = error || (online ? pair?.transitionError || (pair?.status === "error" ? pair.error : "") || ((dht || textDht) ? link?.dhtDelivery?.error : "") : "");
   const discoveryFailure = !ready && online ? link?.discoveryError : "";
   const failure = connectionFailure || discoveryFailure;
@@ -315,7 +319,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
             </div>}
           </div>
         </details>
-        {!dht && !ready && !awaitingJoin && online && link && <button className={`min-h-9 shrink-0 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
+        {/* Not while the contact keeps the chat on DHT only either: the engine refuses the dial, and the refusal read as a connection issue. */}
+        {!dht && link?.dhtDelivery?.peerMode !== "dht" && !ready && !awaitingJoin && online && link && <button className={`min-h-9 shrink-0 rounded-md px-2 text-accent hover:bg-surface-hover disabled:opacity-40 ${focus}`} disabled={busy}
           onClick={() => void run(() => engine.call("connect", {linkId:link.id}))}>{t("connection.panel.reconnect")}</button>}
       </div>
     </div>

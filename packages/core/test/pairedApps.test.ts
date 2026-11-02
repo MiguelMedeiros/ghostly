@@ -10,7 +10,7 @@ import { createLink } from "../src/invite";
 import { APPS_CAPABILITY, KNOWN_SESSION_CAPABILITIES } from "../src/pairedCapabilities";
 import { isAppRef } from "../src/appStatements";
 import {
-  APP_DATA_MAX_BYTES, APP_FRAME, APP_PEER_OPEN_MAX, APP_RATE_LIMIT, APP_RATE_WINDOW_MS, APP_SEND_LIMIT, AppSessions, appCloseFrame, appDataBytes,
+  APP_DATA_MAX_BYTES, APP_FRAME, APP_PEER_OPEN_MAX, APP_RATE_LIMIT, APP_RESUME_GRACE_MS, APP_RATE_WINDOW_MS, APP_SEND_LIMIT, AppSessions, appCloseFrame, appDataBytes,
   appDataFrame, appOpenFrame, chatAppId, isAppVersion, isChatAppId, parseAppFrame, readAppFrame, type AppFrameEvent,
 } from "../src/pairedApps";
 import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedTransports";
@@ -232,7 +232,7 @@ describe("the receiver's limits", () => {
   });
 
   it("a session that ends or is replaced holds what the peer had open: an open on the next one takes it back, with no close first", () => {
-    const { apps } = sessions();
+    const { apps, clock } = sessions();
     apps.open.set(id, "1.0.0");
     apps.receive(wire(appOpenFrame(id, "1.0.0")));
     apps.receive(wire(appOpenFrame(other, "2.0.0")));
@@ -247,9 +247,60 @@ describe("the receiver's limits", () => {
     // One the peer closed meanwhile is closed now; the grace closes the rest, with offline, once.
     apps.sessionSuspended();
     expect(apps.receive(wire(appCloseFrame(id)))).toEqual({ app: id, o: "close" });
+    expect(apps.heldUntil).toBe(clock.now + APP_RESUME_GRACE_MS);
+    clock.now += APP_RESUME_GRACE_MS - 1;
+    expect(apps.heldExpired()).toEqual([]);
+    clock.now += 1;
     expect(apps.heldExpired()).toEqual([{ app: other, o: "close", offline: true }]);
     expect(apps.heldExpired()).toEqual([]);
     expect(apps.holding).toBe(false);
+    expect(apps.heldUntil).toBeUndefined();
+  });
+
+  it("counts the held apps against the 16: quick re-dials that each open new apps do not get past it", () => {
+    const { apps, clock } = sessions();
+    const fresh = (n: number) => String(n).padStart(22, "A");
+    let taken = 0, n = 0;
+    // Before, each suspension moved the 16 aside and the next session took 16 more: 800 opens taken here, 800 held.
+    for (let round = 0; round < 50; round++) {
+      for (let i = 0; i < 2 * APP_PEER_OPEN_MAX; i++) if (apps.receive(wire(appOpenFrame(fresh(n++), "1.0.0")))) taken++;
+      apps.sessionSuspended();
+      clock.now += 100;
+    }
+    expect(taken).toBe(APP_PEER_OPEN_MAX);
+    clock.now += APP_RESUME_GRACE_MS;
+    expect(apps.heldExpired()).toHaveLength(APP_PEER_OPEN_MAX);
+    // The held apps said open again move back, every session: a peer that keeps its 16 open loses none of them.
+    for (const app of ids.slice(0, APP_PEER_OPEN_MAX)) apps.receive(wire(appOpenFrame(app, "1.0.0")));
+    for (let round = 0; round < 3; round++) {
+      apps.sessionSuspended();
+      expect(apps.receive(wire(appOpenFrame(ids[APP_PEER_OPEN_MAX], "1.0.0")))).toBeNull();
+      for (const app of ids.slice(0, APP_PEER_OPEN_MAX)) expect(apps.receive(wire(appOpenFrame(app, "1.0.0")))).toEqual({ app, o: "open", v: "1.0.0" });
+    }
+    // One the peer closes while held leaves room for a new one.
+    apps.sessionSuspended();
+    apps.receive(wire(appCloseFrame(id)));
+    expect(apps.receive(wire(appOpenFrame(ids[APP_PEER_OPEN_MAX], "1.0.0")))).not.toBeNull();
+  });
+
+  it("gives each suspension its own grace: apps said open again after an earlier one are kept for their own 10 s", () => {
+    const { apps, clock } = sessions({ now: 0 });
+    apps.receive(wire(appOpenFrame(id, "1.0.0")));
+    apps.receive(wire(appOpenFrame(other, "1.0.0")));
+    apps.sessionSuspended();
+    // A new session 8 s later says open again for one; it is suspended too.
+    clock.now = 8_000;
+    apps.receive(wire(appOpenFrame(id, "1.0.0")));
+    apps.sessionSuspended();
+    expect(apps.heldUntil).toBe(10_000);
+    // Before, the first suspension's grace closed both at 10 s.
+    clock.now = 10_000;
+    expect(apps.heldExpired()).toEqual([{ app: other, o: "close", offline: true }]);
+    expect(apps.heldUntil).toBe(18_000);
+    clock.now = 17_999;
+    expect(apps.heldExpired()).toEqual([]);
+    clock.now = 18_000;
+    expect(apps.heldExpired()).toEqual([{ app: id, o: "close", offline: true }]);
   });
 
   it("the sender says why a frame cannot go, and keeps under the receiver's rate", () => {
@@ -398,6 +449,28 @@ describe("apps on a paired session (apps/1)", () => {
     await vi.waitFor(() => expect(a.events.at(-1)).toEqual({ app, o: "close", offline: true }));
     expect(a.link.sendAppData(app, 1)).toBe("offline");
     expect(a.link.peerApps.size).toBe(0);
+  });
+
+  it("a contact that leaves soon after coming back keeps its apps for a full grace from then", async () => {
+    const { a, b, app } = pair({ a: { appResumeGraceMs: 1_000 } });
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps).toBe(true));
+    a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
+    await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
+    const first = Date.now();
+    (a.link as unknown as { channel: FrameChannel }).channel.close();
+    await vi.waitFor(() => expect(a.link.isDataLinkOpen || b.link.isDataLinkOpen).toBe(false));
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.peerApps.get(app)).toBe("1.0.0"));
+    await new Promise(resolve => setTimeout(resolve, 600 - (Date.now() - first)));
+    const left = Date.now();
+    await b.link.stop(false);
+    await vi.waitFor(() => expect(a.link.isDataLinkOpen).toBe(false));
+    // Before, the first session's grace closed it 1 s after that one ended, 0.4 s after the contact left.
+    await new Promise(resolve => setTimeout(resolve, first + 1_200 - Date.now()));
+    expect(a.events).not.toContainEqual({ app, o: "close", offline: true });
+    await vi.waitFor(() => expect(a.events.at(-1)).toEqual({ app, o: "close", offline: true }), { timeout: 2_000 });
+    expect(Date.now() - left).toBeGreaterThanOrEqual(1_000);
   });
 
   it("says open again when the session comes back over a new connection, and the apps never hear a close", async () => {

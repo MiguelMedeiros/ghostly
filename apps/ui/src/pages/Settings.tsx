@@ -34,8 +34,9 @@ import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
 import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
+import { useOwnNameField } from "../hooks/useOwnNameField";
 import { FieldError } from "../components/ui/FieldError";
-import { focusToRetype } from "../lib/focus";
+import { focusLost, focusToRetype } from "../lib/focus";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
 import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
@@ -104,9 +105,10 @@ function SettingsGroup({ id, view, children }: { id: SettingsSection; view: Sect
 
 export function Settings() {
   const nav = useAppNavigation();
-  const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
+  const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications,
     updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
     useSettings();
+  const nickname = useOwnNameField();
   const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
@@ -140,6 +142,17 @@ export function Settings() {
     // Once the entry knows what is under it (a deep link is given that first), it takes the new address in its place.
     if (isOldSection(params.section) && section && readNav(location.state)) void navigate(settingsPath(section), { replace: true, state: location.state });
   }, [location.key]); // eslint-disable-line react-hooks/exhaustive-deps -- once per entry
+  // A phone's menu and a section's screen take each other's place, and the focus on the line or the Back that went falls
+  // to the page: the section's screen gives it to its title, the menu to the line of the section just left. (The header's
+  // Back may be the same button on both screens, but the menu hides it: a focus there is lost too.)
+  const shownSection = useRef(section);
+  useLayoutEffect(() => {
+    const left = shownSection.current;
+    shownSection.current = section;
+    if (!isMobile || left === section || !(focusLost() || document.activeElement?.getAttribute("data-testid") === "page-back")) return;
+    const target = section ? `[data-testid="settings-${section}-page"] h1` : `[data-testid="settings-open-${left}"]`;
+    document.querySelector<HTMLElement>(target)?.focus();
+  }, [section, isMobile]);
   // A wide screen: the index shows the section in view, and an address naming one scrolls to it.
   const content = useRef<HTMLDivElement>(null);
   const [inView, setInView] = useState<SettingsSection>(section ?? SETTINGS_SECTIONS[0]);
@@ -505,8 +518,8 @@ export function Settings() {
         )}
         <Field label={t("settings.defaultNickname")} hint={t("settings.defaultNicknameHint")} htmlFor="settings-nickname">
           <InputGroup>
-            <input id="settings-nickname" type="text" value={settings.defaultNickname} onChange={(e) => updateDefaultNickname(e.target.value)}
-              placeholder={t("settings.nicknamePlaceholder")} maxLength={20} className={field} />
+            <input id="settings-nickname" type="text" {...nickname}
+              placeholder={t("settings.nicknamePlaceholder")} className={field} />
             <button onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")}
               className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt transition-colors cursor-pointer">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">

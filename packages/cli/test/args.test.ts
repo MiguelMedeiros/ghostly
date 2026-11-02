@@ -85,10 +85,28 @@ describe("the argument parser", () => {
   it("says to put -- before a two-character word that starts with a dash, as it does for a longer one", () => {
     const send = TEXT_COMMANDS.send;
     for (const word of ["-1", "-5", "-ph"]) {
-      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send)), word)
-        .toThrow(new CliError("usage", `Unknown option ${word} (put -- before text that starts with a dash)`));
+      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send), { command: "send", text: true }), word)
+        .toThrow(new CliError("usage", `Unknown option ${word} for ghostly send (put -- before text that starts with a dash; ghostly help send)`));
     }
     expect(parseArgs(["bob", "--", "-1"], send.options, idSlot(send)).positionals).toEqual(["bob", "-1"]);
+    // Only where text comes, and only for a word with one dash: there is no text to put after `--` in these.
+    expect(() => parseArgs(["-x"], {}, undefined, { command: "version" })).toThrow(new CliError("usage", "Unknown option -x for ghostly version (ghostly help version)"));
+    expect(() => parseArgs(["bob", "--nope"], send.options, idSlot(send), { command: "send", text: true })).toThrow(new CliError("usage", "Unknown option --nope for ghostly send (ghostly help send)"));
+  });
+
+  it("names the nearest option of the command for a typo, and none for a word near nothing", () => {
+    const send = TEXT_COMMANDS.send, history = COMMANDS["chat history"];
+    expect(() => parseArgs(["bob", "--wiat", "sent"], send.options, idSlot(send), { command: "send", text: true }))
+      .toThrow(new CliError("usage", "Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)"));
+    // `--wiat=sent` too, a single-dash `-wait`, a negated boolean, and a global option.
+    expect(() => parseArgs(["bob", "--wiat=sent"], send.options, idSlot(send))).toThrow(new CliError("usage", "Unknown option --wiat (did you mean --wait?)"));
+    expect(() => parseArgs(["bob", "-wait"], send.options, idSlot(send), { command: "send", text: true }))
+      .toThrow(new CliError("usage", "Unknown option -wait for ghostly send (did you mean --wait? put -- before text that starts with a dash; ghostly help send)"));
+    expect(() => parseArgs(["bob", "--no-forse"], send.options, idSlot(send))).toThrow(new CliError("usage", "Unknown option --no-forse (did you mean --no-force?)"));
+    expect(() => parseArgs(["bob", "--prety"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --prety (did you mean --pretty?)"));
+    expect(() => parseArgs(["bob", "--frobnicate"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --frobnicate"));
+    // Two edits in a short word are another word: `--nope` is not `--home`.
+    expect(() => parseArgs(["--nope"], {})).toThrow(new CliError("usage", "Unknown option --nope"));
   });
 
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
@@ -507,6 +525,8 @@ describe("errors", () => {
       "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
       "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
       "No invitation to accept", "No invitation to decline",
+      // A removed member's (or a former admin's) group rename, rotate, remove, admin, hub or picture.
+      "You are no longer in this group",
     ]) expect(asCliError(new Error(message)).toJSON(), message).toEqual({ code: "refused", message });
     const community = "Share the group's link with them: anyone who opens it joins";
     expect(asCliError(new Error(community)).toJSON()).toEqual({ code: "bad_request", message: community });

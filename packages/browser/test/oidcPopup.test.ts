@@ -70,6 +70,17 @@ describe("the sign-in pop-up", () => {
     w.close();
   });
 
+  it("a cancel that came before the request was ready ends it at once, without going to the provider", async () => {
+    const { popup } = fakePopup();
+    const w = popupWindow("https://app.ghostly.tools");
+    const controller = new AbortController();
+    controller.abort();
+    const answer = w.authorize(AUTHORIZE, controller.signal);
+    expect(popup.location.href).toBe("about:blank");
+    await expect(answer).rejects.toThrow(/cancelled/);
+    w.close();
+  });
+
   it("gives up after ten minutes", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     fakePopup();

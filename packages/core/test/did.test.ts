@@ -175,6 +175,20 @@ describe("DID documents", () => {
     expect(view.services).toEqual([{ id: `${did}#ghostly-cccccccccccc`, key: "y".repeat(52), proof: "c".repeat(64) }]);
   });
 
+  it("reads a did:web port written %3a or %3A as the same DID", () => {
+    const ported = normalizeDid("did:web:example.com%3a8443:u");
+    for (const written of ["did:web:example.com%3a8443:u", "did:web:example.com%3A8443:u"]) {
+      const view = parseDidDocument(ported, {
+        id: written,
+        verificationMethod: [{ id: `${written}#key-1`, type: "JsonWebKey2020", publicKeyJwk: { kty: "OKP", crv: "Ed25519", x: b64u(ed) } }],
+        authentication: [`${written}#key-1`],
+      });
+      expect(view.keys.map(k => [k.id, k.relationships.join("+")]), written).toEqual([[`${ported}#key-1`, "authentication"]]);
+    }
+    expect(didWebFileNames(JSON.stringify({ ghostly: 1, did: "did:web:example.com%3a8443:u", statement: STATEMENT }), ported, STATEMENT)).toBe(true);
+    expect(() => parseDidDocument(ported, { id: "did:web:example.com%3a8444:u" })).toThrow(/another DID/);
+  });
+
   it("refuses a document for another DID, or not an object", () => {
     expect(() => parseDidDocument(did, { ...doc, id: "did:web:evil.example" })).toThrow(/another DID/);
     expect(() => parseDidDocument(did, [])).toThrow(/not a JSON object/);
@@ -259,6 +273,21 @@ describe("DID signatures", () => {
     const view = parseDidDocument(did, { id: did, verificationMethod: [{ id: "#delegate", type: "Multikey", publicKeyMultibase: k.did.slice(8) }], capabilityDelegation: ["#delegate"] });
     expect(() => checkDidJws(k.jws({}), messages, view)).toThrow(/not list under authentication or assertionMethod/);
     expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view)).toThrow(/not list under authentication or assertionMethod/);
+  });
+
+  it("takes a key listed under two ids when one of them may sign", () => {
+    const k = keyOn("Ed25519");
+    const did = "did:web:example.com";
+    const vm = (id: string) => ({ id, type: "Multikey", publicKeyMultibase: k.did.slice(8) });
+    for (const order of [["#enc", "#sig"], ["#sig", "#enc"]]) {
+      const view = parseDidDocument(did, { id: did, verificationMethod: order.map(vm), authentication: ["#sig"] });
+      expect(checkDidJws(k.jws({}), messages, view).key.id, order.join()).toBe(`${did}#sig`);
+      expect(checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view).key.id, order.join()).toBe(`${did}#sig`);
+    }
+    // Named by its id that may not sign, it is still refused.
+    const view = parseDidDocument(did, { id: did, verificationMethod: [vm("#enc"), vm("#sig")], authentication: ["#sig"] });
+    expect(() => checkDidJws(k.jws({ kid: "#enc" }), messages, view)).toThrow(/#enc, which the DID document does not list/);
+    expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, "#enc")).toThrow(/#enc, which the DID document does not list/);
   });
 
   it("parses only JWS it can check", () => {

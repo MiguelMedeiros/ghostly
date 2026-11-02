@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { linkView } from "../fakeEngine";
@@ -81,18 +81,60 @@ describe("ContactIdentitiesPanel", () => {
       ]);
     });
 
+    it("shows a long domain by its end, the part that names who owns it, and the whole of it on the back", async () => {
+      // Any owner of a domain can prove github.com.<anything>.theirs: its start was all the card showed.
+      const name = "github.com.account-security-verification-and-login-session-check.e2e-jq01xlo0.ghostly.tools";
+      const { user } = open(withReceived([receivedView({ id: "r1", provider: "domain", subject: name, verified: { subject: name, source: `DNS TXT record for ${name}` } })]));
+      const face = theirs()[0]!.querySelector<HTMLElement>("[data-deck=face]")!;
+      const subject = within(face).getByTestId("identity-proof-subject");
+      expect(subject).toHaveTextContent(/^…ghostly\.tools$/);
+      expect(subject).not.toHaveTextContent("github.com");
+      // In its own direction, also in the Arabic app: the dots stay where they are.
+      expect(subject.querySelector("bdi")).toHaveAttribute("dir", "ltr");
+      const card = await turnOver(user, 0);
+      const whole = within(card).getByTestId("chat-identity-received-subject");
+      expect(whole).toHaveTextContent(name);
+      expect(whole).toHaveClass("id-card-back-subject-whole");
+    });
+
     it("turns a card over to how it was checked, and back", async () => {
       const { user } = open(withReceived([receivedView({ id: "r1", status: "unconfirmed", error: "DNS lookup failed" })]));
       expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument();
       const card = await turnOver(user, 0);
       expect(card).toHaveAttribute("data-status", "failed");
-      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent("Check failed: could not be confirmed (DNS lookup failed)");
+      expect(within(card).getByTestId("chat-identity-received-status")).toHaveTextContent(/^Check failed: DNS lookup failed$/);
       expect(card).toHaveTextContent("DNS TXT record for example.org");
       expect(within(card).getByTestId("chat-identity-checked")).toHaveTextContent(/^On this device /);
       expect(card).toHaveTextContent("Valid until");
       await user.click(within(card).getByTestId("chat-identity-cards"));
       await vi.waitFor(() => expect(screen.queryByTestId("chat-identity-back")).not.toBeInTheDocument());
       expect(theirs()).toHaveLength(1);
+    });
+
+    it("says why a long domain's check failed in the app's language, whole and in its own direction", async () => {
+      // A domain may be 253 characters; the reason names its record and still reads as the one the app knows how to say.
+      const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.example`;
+      const reason = `No Ghostly TXT record at _ghostly.${domain} (DNS changes can take a few minutes)`;
+      const source = `DNS TXT record at _ghostly.${domain}, via Quad9`;
+      const { user } = open(withReceived([receivedView({ id: "r1", provider: "domain", subject: domain, status: "unconfirmed", error: reason, verified: { subject: domain, source } })]));
+      const card = await turnOver(user, 0);
+      const status = within(card).getByTestId("chat-identity-received-status");
+      expect(status).toHaveTextContent("Check failed: No Ghostly TXT record in the domain's DNS. DNS changes can take a few minutes.");
+      expect(status.textContent!.match(/could not be confirmed/g) ?? []).toHaveLength(0);
+      expect(status.querySelector("bdi")).toHaveTextContent("No Ghostly TXT record in the domain's DNS");
+      expect(card).toHaveTextContent(source);
+    });
+
+    it("says a long domain's failed check in Portuguese, not in English after a generic title", async () => {
+      const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.example`;
+      const reason = `No Ghostly TXT record at _ghostly.${domain} (DNS changes can take a few minutes)`;
+      const onClose = vi.fn();
+      const { user, engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={onClose} />, { language: "pt" });
+      document.documentElement.dataset.reduceMotion = "true";
+      act(() => engine.update(withReceived([receivedView({ id: "r1", provider: "domain", subject: domain, status: "unconfirmed", error: reason, verified: { subject: domain, source: "DNS" } })])));
+      const status = within(await turnOver(user, 0)).getByTestId("chat-identity-received-status");
+      expect(status).toHaveTextContent(/Nenhum registro TXT do Ghostly no DNS do domínio/);
+      expect(status).not.toHaveTextContent(/No Ghostly|Algo deu errado/);
     });
 
     it("says who vouches for an attested identity and that a key proof is the holder's own", async () => {
@@ -215,6 +257,53 @@ describe("ContactIdentitiesPanel", () => {
       expect(facts.textContent).not.toContain("{{");
       expect(isolated(within(card).getByTestId("chat-identity-received-name-source"))).toEqual(["keys.openpgp.org (WKD)"]);
     });
+  });
+
+  /** The panel with the chat's message field before it, as Chat.tsx lays them out. */
+  function besideChat(docked: boolean) {
+    // contact-panel.css hides the backdrop where the panel docks beside the chat (the tests load no stylesheets).
+    const style = document.createElement("style");
+    style.textContent = docked ? ".contact-panel-backdrop{display:none}" : "";
+    document.head.append(style);
+    onTestFinished(() => style.remove());
+    const onClose = vi.fn();
+    const result = renderApp(<div className="chat-pane">
+      <textarea data-testid="composer" aria-label="Message" />
+      <ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={onClose} />
+    </div>);
+    document.documentElement.dataset.reduceMotion = "true";
+    act(() => result.engine.update(withReceived([receivedView({ id: "r1" })])));
+    return { onClose, ...result };
+  }
+
+  it("docked beside the chat, is a region of the page: Tab goes on to the chat, F6 between them, Escape closes it from inside only", async () => {
+    const { user, onClose } = besideChat(true);
+    const panel = screen.getByRole("complementary", { name: "Identities with Alice" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(panel).not.toHaveAttribute("aria-modal");
+    expect(panel).toHaveFocus();
+    const composer = screen.getByTestId("composer");
+    for (let i = 0; i < 14 && document.activeElement !== composer; i++) await user.tab();
+    expect(composer).toHaveFocus();
+    // Escape in the message field is the field's: the panel stays.
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    await user.keyboard("{F6}");
+    expect(panel).toHaveFocus();
+    await user.keyboard("{F6}");
+    expect(composer).toHaveFocus();
+    await user.keyboard("{F6}");
+    await user.tab();
+    expect(screen.getByTestId("chat-identities-close")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("over the chat (its backdrop shown), is a modal dialog: Tab stays in it", async () => {
+    const { user } = besideChat(false);
+    const panel = screen.getByRole("dialog", { name: "Identities with Alice" });
+    expect(panel).toHaveAttribute("aria-modal", "true");
+    for (let i = 0; i < 14; i++) { await user.tab(); expect(panel).toContainElement(document.activeElement as HTMLElement); }
   });
 });
 

@@ -224,6 +224,7 @@
   "title": "Settings",
   "translate": {
     "downloaded": "Downloaded languages",
+    "downloading": "Downloading…",
     "hint": "The default for chats that have not chosen",
     "info": "Messages in another language are translated on this device by a language model downloaded once. No text leaves it, and contacts are never told.",
     "name": "Translate messages",

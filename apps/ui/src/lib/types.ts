@@ -60,6 +60,8 @@ export interface ChatMessage {
   forwarded?: number;
   /** A bot's task or routine (WISP 405 · Status Cards), shown instead of `text`, its fallback. */
   card?: import("@ghostly/core").StatusCard;
+  /** A line this app wrote in the chat itself (a payment of the contact's it refused): said from these values. */
+  notice?: import("@ghostly/browser/shared/types").ChatNotice;
   systemEvent?: {
     type: SystemEventType;
     pubKey?: string;

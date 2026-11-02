@@ -370,7 +370,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
   const modes = onSaveMethods && (
     <span role="tablist" aria-label={t("payments.mode.label", { name: who })} className="payment-modes" onKeyDown={modeKeys}>
       {MODES.map((m) => (
-        <button key={m} type="button" role="tab" data-testid={`payment-mode-${m}`} aria-selected={mode === m} tabIndex={mode === m ? 0 : -1} onClick={() => switchMode(m)}>
+        <button key={m} type="button" role="tab" data-testid={`payment-mode-${m}`} aria-selected={mode === m} tabIndex={mode === m ? 0 : -1} onClick={() => switchMode(m)} className="max-md:min-h-11">
           {t(m === "pay" ? "payments.mode.pay" : "payments.mode.accept")}
         </button>
       ))}

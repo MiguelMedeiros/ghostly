@@ -86,7 +86,7 @@ test("a large video asks first: Download <size>, then it plays", { tag: ["@featu
   const received = videos(bob).last();
   const accept = received.getByTestId("video-accept");
   await expect(accept).toBeVisible({ timeout: 60_000 });
-  await expect(accept).toHaveText(/^Download 26\.0 MB$/);
+  await expect(accept).toHaveText(/^Download 26\.0\sMB$/);
   // Its poster is there before a byte of it is.
   await expect(received.getByTestId("video-poster")).toBeVisible();
   await accept.click();

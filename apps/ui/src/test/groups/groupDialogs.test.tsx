@@ -37,7 +37,7 @@ describe("GroupMembersDialog", () => {
     expect(within(row(ALICE)).getByRole("img", { name: "reachable" })).toBeInTheDocument();
     expect(row(BOB)).toHaveTextContent(/^Member bobyyy/);
     expect(within(row(BOB)).getByRole("img", { name: "not reachable" })).toBeInTheDocument();
-    expect(within(row(BOB)).getByText("3 missing")).toBeInTheDocument();
+    expect(within(row(BOB)).getByText("3 of their messages have not arrived yet")).toBeInTheDocument();
     expect(screen.getByTestId("group-read-note")).toHaveTextContent("Everyone in the group can read everything sent while they are a member.");
   });
 
@@ -64,6 +64,16 @@ describe("GroupMembersDialog", () => {
     const remove = within(row(BOB)).getByTestId("group-remove-member");
     expect(remove).toHaveClass("text-danger-ink");
     expect(remove).not.toHaveClass("text-danger");
+  });
+
+  // They were 24 px tall, and the close button 30, under the link panel's 44 px buttons.
+  it("Hand over admin, Remove and the close button are a thumb's height on a phone, as the link panel's buttons are", () => {
+    members_(groupView({ status: "active", isAdmin: true, members }));
+    for (const id of ["group-make-admin", "group-remove-member"]) {
+      expect(within(row(BOB)).getByTestId(id)).toHaveClass("max-md:min-h-11", "max-md:px-3");
+    }
+    expect(within(row(BOB)).getByTestId("group-member-actions")).toHaveClass("max-md:gap-2");
+    expect(within(screen.getByTestId("group-members-dialog")).getByRole("button", { name: "Close" })).toHaveClass("max-md:h-11", "max-md:w-11", "place-items-center");
   });
 
   it("lets the admin promote or remove anyone but themselves", async () => {
@@ -242,8 +252,24 @@ describe("GroupMembersDialog", () => {
     expect(contacts[2]).toHaveTextContent("Needs an updated Ghostly");
     expect(contacts[3]).toHaveTextContent("Not connected");
     expect(screen.getAllByTestId("group-invite")).toHaveLength(1);
+    // Why, in words on the page: a tooltip never shows on a phone, where the row read "Not connected" and nothing more.
+    expect(screen.getByTestId("group-invite-why")).toHaveTextContent("Groups need both apps connected and updated");
     await user.click(within(contacts[0]).getByTestId("group-invite"));
     expect(engine.callsTo("inviteToGroup")).toEqual([{ groupId: "group-1", linkId: "link-carol" }]);
+  });
+
+  // It was 24 px tall on a phone, under the members' 44 px Hand over admin and Remove.
+  it("Invite is a thumb's height on a phone, as a member's Remove is", () => {
+    members_(groupView({ status: "active", isAdmin: true, members }), [paired({ id: "link-carol", label: "Carol" })]);
+    expect(screen.getByTestId("group-invite")).toHaveClass("max-md:min-h-11", "max-md:px-3");
+  });
+
+  it("says nothing of why when every contact can be invited", () => {
+    members_(groupView({ status: "active", isAdmin: true, members, invited: ["link-pending"] }), [
+      paired({ id: "link-carol", label: "Carol" }),
+      paired({ id: "link-pending", peerNick: "Dan", groups: false, dataLink: "idle" }),
+    ]);
+    expect(screen.queryByTestId("group-invite-why")).not.toBeInTheDocument();
   });
 
   it("gives the group's, each member's and each contact's name its own direction, so in Arabic a Latin name is cut at its end", () => {
@@ -251,6 +277,16 @@ describe("GroupMembersDialog", () => {
     expect(screen.getByTestId("group-members-name")).toHaveAttribute("dir", "auto");
     expect(screen.getAllByTestId("group-member-name").map(name => [name.textContent, name.getAttribute("dir")])).toEqual([["You", "auto"], ["Alice", "auto"], ["Bob", "auto"]]);
     expect(within(screen.getByTestId("group-invite-contact")).getByText("Carol")).toHaveAttribute("dir", "auto");
+  });
+
+  // On a phone the panel is the group's only info screen, and a member has no Rename field to read the name in: cut with
+  // "…" there, a long name was never read whole.
+  it("wraps a long group name in its title instead of cutting it, for a member too", () => {
+    members_(groupView({ status: "active", name: "Ghostly design reviewers of the northern hemisphere", members }));
+    const title = screen.getByTestId("group-members-name");
+    expect(title).toHaveTextContent("Ghostly design reviewers of the northern hemisphere");
+    expect(title).toHaveClass("break-words");
+    expect(title).not.toHaveClass("truncate");
   });
 
   it("Invite from the keyboard keeps the focus: on the button while it runs, then on the contact's row, which says Invited", async () => {
@@ -322,6 +358,19 @@ describe("GroupMembersDialog", () => {
     expect(screen.getByTestId("group-members-dialog")).toHaveTextContent("3 members · removed");
     expect(screen.queryByTestId("group-invite-list")).not.toBeInTheDocument();
     expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
+  });
+
+  it("promises no connection to the members of a group I am out of", () => {
+    const { unmount } = members_(groupView({ status: "active", members }));
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["No connection yet", "No connection yet"]);
+    unmount();
+    for (const status of ["removed", "left", "forked"] as const) {
+      const { unmount } = members_(groupView({ status, members: [...members, member({ key: "c".repeat(52), nick: "Carol", edge: { linkId: "e1", state: "connecting", lastSeenAt: 1 } })] }));
+      expect(screen.getAllByTestId("group-member")).toHaveLength(4);
+      expect(screen.queryAllByTestId("group-member-status")).toEqual([]);
+      expect(within(screen.getByTestId("group-member-list")).queryAllByRole("img", { name: /reachable/i })).toEqual([]);
+      unmount();
+    }
   });
 
   it("closes from its button", async () => {

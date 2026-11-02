@@ -34,6 +34,8 @@ import { useTransfer } from "../hooks/useServicesPlatform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
+import { paymentRefusal } from "@ghostly/browser/shared/refusals";
+import { refusedLine } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
 import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
@@ -415,10 +417,23 @@ const linkPictureBox = ({ width, height }: ImageMeta): React.CSSProperties => ({
 });
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
+type Segmenter = { segment(text: string): Iterable<{ segment: string }> };
+const SegmenterCtor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
+const graphemeSegmenter = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: "grapheme" }) : null;
+/**
+ * The emoji a person sees, spaces aside: a family, a flag or a skin-toned thumb is one, however many UTF-16 units it
+ * takes. Where the browser cannot tell characters apart, code points.
+ */
+const emojiCount = (text: string) => {
+  const parts = graphemeSegmenter ? Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment) : Array.from(text);
+  return parts.filter((part) => part.trim()).length;
+};
+
+/** Up to 6 emoji and nothing else show big. */
 function isOnlyEmojis(text: string): boolean {
   const emojiPattern =
     /^(?:[\p{Emoji_Presentation}\p{Extended_Pictographic}]|\u200d|\uFE0F|\s)+$/u;
-  return emojiPattern.test(text.trim()) && text.trim().length <= 12;
+  return emojiPattern.test(text.trim()) && emojiCount(text) <= 6;
 }
 
 function TailSvg({ side }: { side: "left" | "right" }) {
@@ -1033,6 +1048,22 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     </span>
   );
 
+  // A payment of the contact's this app refused: the app's own line, centred as a call's, never a bubble of theirs.
+  // From the row's values, or the English an older version stored under the same id (shared/refusals.ts).
+  const refusedPayment = paymentRefusal(message);
+  if (refusedPayment) {
+    return (
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+          <span>{refusedLine(refusedPayment, t)}</span>
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
+        </div>
+        {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
+        {detailsPanel}
+      </div>
+    );
+  }
+
   if (isSystem && message.systemEvent?.type === "join") {
     const joiner = message.systemEvent.pubKey ?? "";
     // Both sides announce themselves (useChat.ts), so a 1:1 chat has two lines: mine says so, the contact's names
@@ -1064,7 +1095,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               {" "}{t("chat.joined")}
             </span>
           )}
-          <span className="text-text-muted text-[10px]">{time}</span>
+          {/* Whole on one line: "02:11 م" split at its space when the text took two lines at 320 px. */}
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
         {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}
@@ -1090,7 +1122,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           {duration !== undefined && duration >= 1000 && (
             <span className="text-text-muted">({formatCallLength(duration, t)})</span>
           )}
-          <span className="text-text-muted text-[10px]">{time}</span>
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
         </div>
         {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
         {detailsPanel}

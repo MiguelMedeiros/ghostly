@@ -290,6 +290,12 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
   });
 
+  it("Cancel joining is a thumb's height on a phone", () => {
+    // It was 24 px tall, the only way off the joining card.
+    openGroup({ ...groupView({ canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }), profile: "community" });
+    expect(screen.getByTestId("group-joining-cancel")).toHaveClass("max-md:min-h-11", "max-md:px-3");
+  });
+
   it("says when the admin's app answered", () => {
     openGroup(viaLink(ALICE));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
@@ -311,6 +317,15 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining")).toHaveTextContent(text);
     expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", stage);
     expect(steps()).toEqual(states);
+  });
+
+  it("says the link was replaced or turned off, with no steps left to wait on", () => {
+    openGroup({ ...staged("replaced"), profile: "community" });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("This link was replaced or turned off");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Ask someone in the group for the current link, then open it.");
+    expect(screen.queryByTestId("group-joining-steps")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-joining").querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
   });
 
   it("in a community, says a member (any) is answering, then that it connects to the group", () => {
@@ -1033,6 +1048,24 @@ describe("GroupChat: history and sending", () => {
     return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
       "Carol entrou", "Carol agora é o admin", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
     ]));
+  });
+
+  it.each([
+    ["ja", "グループを作成しました。グループの全員が", "参加しました。グループの全員が"],
+    ["zh", "群组已创建。", "你已加入。"],
+    ["pt", "Grupo criado. ", "Você entrou. "],
+  ] as const)("in %s, the first line joins its sentence and the read note as the language does", async (language, created, joined) => {
+    // Bug hunt 1102-groups-ux: "参加しました。 グループの全員が…", a Latin space after 。 in Japanese and Chinese.
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "created", text: "Group created. Everyone in the group can read…" }),
+      stored({ id: "e2", event: "joined", text: "You joined. Everyone in the group can read…", timestamp: 1_700_000_000_001 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active()] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language });
+    const [first, second] = (await screen.findAllByTestId("group-event")).map(l => l.textContent ?? "");
+    expect(first.startsWith(created)).toBe(true);
+    expect(second.startsWith(joined)).toBe(true);
+    if (language !== "pt") expect(`${first}${second}`).not.toMatch(/。 /);
   });
 
   for (const profile of ["mesh", "community"] as const) it(`after being removed (${profile}), my own lines still read as mine, in the app's language`, async () => {

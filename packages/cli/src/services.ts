@@ -34,8 +34,11 @@ export const nodeLocalFetch: LocalFetch = async (request) => {
   };
 };
 
-/** Contact services open on loopback ports, by `<peer>/<service>`, while this process runs. */
-const open = new Map<string, OpenedService>();
+/**
+ * Contact services open on loopback ports, by `<peer>/<service>`, while this process runs: each as soon as it starts
+ * opening, so a second `service open` meanwhile answers the same one. A server that could not open is taken out.
+ */
+const open = new Map<string, Promise<OpenedService>>();
 const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** Cookie names an opened service may set and have passed back (browsers keep about 180 per host). */
 const MAX_COOKIE_NAMES = 256;
@@ -265,7 +268,8 @@ export const SERVICE_METHODS: Record<string, Method> = {
     const service = str(params, "service", true);
     const key = `${link.peerPubKeyZ32}/${service}`;
     const port = num(params, "port", 0, { min: 0, max: 65535, whole: true });
-    const already = open.get(key);
+    // One still opening counts: before, two opens at once each made a server, and `service close` closed only the second.
+    const already = await open.get(key)?.catch(() => undefined);
     if (already) {
       // Another port asked for: the link on this one, with exit 0, left a script that was told a port on the wrong one.
       const on = (already.server.address() as AddressInfo).port;
@@ -274,16 +278,23 @@ export const SERVICE_METHODS: Record<string, Method> = {
     }
     if (!link.peerServices?.some((s) => s.id === service)) throw new CliError("not_found", `The contact shares no service ${service} (or is not live)`);
     const peer = link.peerPubKeyZ32;
-    const opened = await openServiceServer((request) => node(ctx).request(peer, service, request), port).catch((error: unknown) => { throw portError(error, port); });
-    open.set(key, opened);
+    // Another open began while this one waited: it answers that one.
+    if (open.has(key)) return SERVICE_METHODS["service.open"](ctx, params);
+    const opening = openServiceServer((request) => node(ctx).request(peer, service, request), port).catch((error: unknown) => {
+      if (open.get(key) === opening) open.delete(key);
+      throw portError(error, port);
+    });
+    open.set(key, opening);
+    const opened = await opening;
     return { chat: link.id, service, url: opened.url };
   },
   async "service.close"(ctx, params) {
     const link = chatOf(ctx, params);
     const key = `${link.peerPubKeyZ32}/${str(params, "service", true)}`;
-    const entry = open.get(key);
-    if (!entry) throw new CliError("not_found", "That service is not open here");
+    const pending = open.get(key);
     open.delete(key);
+    const entry = await pending?.catch(() => undefined);
+    if (!entry) throw new CliError("not_found", "That service is not open here");
     // Closed means closed: an answer still streaming (a page's EventSource) kept `close` waiting for good, and kept coming.
     // Each connection's end stops the contact's answer too (`proxy`).
     await new Promise<void>((resolve) => {

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
 import type { GroupMemberView, GroupView } from "@ghostly/browser/shared/types";
 import { GroupShareDialog } from "../../components/GroupLinkPanel";
+import { LeaveGroupDialog } from "../../components/LeaveGroupDialog";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -83,6 +84,20 @@ describe("the group header's Share link", () => {
   });
 });
 
+describe("a group's long one-word name", () => {
+  const name = "Donaudampfschifffahrtsgesellschaftskapitaenswitwenrentenkassen";
+
+  it("breaks onto the next line in the title of the share dialog", () => {
+    renderApp(<GroupShareDialog group={admin({ name, entryLink: LINK })} created onClose={() => {}} />);
+    expect(screen.getByRole("heading", { name: `${name} is ready` }).className).toContain("break-words");
+  });
+
+  it.each([false, true])("breaks onto the next line in the title of the leave dialog (forget: %s)", (forget) => {
+    renderApp(<LeaveGroupDialog group={admin({ name })} forget={forget} onClose={() => {}} onConfirm={async () => {}} />);
+    expect(within(screen.getByTestId("group-leave-dialog")).getByRole("heading").className).toContain("break-words");
+  });
+});
+
 describe("GroupShareDialog", () => {
   it("is where a new group ends: ready, and on to the group", async () => {
     const onClose = vi.fn();
@@ -129,6 +144,17 @@ describe("GroupShareDialog", () => {
     await user.click(await screen.findByRole("button", { name: "Go to the group" }));
     expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
     expect([screen.getByPlaceholderText("Message…"), screen.getByTestId("group-share")]).toContain(document.activeElement);
+  });
+
+  it("hands out the public web app's address from the desktop app and Android, served over http from an address no other device opens", () => {
+    // Windows and Android serve the app from http://tauri.localhost: an http page, but not one a link may name.
+    Object.assign(window, { __TAURI_INTERNALS__: {} });
+    try {
+      renderApp(<GroupShareDialog group={admin({ entryLink: LINK })} onClose={() => {}} />);
+      expect(screen.getByRole("textbox", { name: "Group link" })).toHaveValue(`https://app.ghostly.tools/#/join/${LINK}`);
+    } finally {
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    }
   });
 
   it("closes on Escape", () => {

@@ -99,6 +99,69 @@ describe("the quick bar", () => {
     expect(onReact).not.toHaveBeenCalled();
   });
 
+  it("from the keyboard, the bar takes the focus: Left/Right move between the six and +, Enter picks, Escape gives it back", async () => {
+    const onReact = vi.fn();
+    const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={onReact} reactionName={names} />);
+    const react = screen.getByTestId("message-react-action");
+    react.focus();
+    await user.keyboard("{Enter}");
+    const quick = screen.getAllByTestId("reaction-quick");
+    expect(quick[0]).toHaveFocus();
+    // One stop for Tab: the others are reached with the arrows.
+    expect(quick.map(b => b.tabIndex)).toEqual([0, -1, -1, -1, -1, -1]);
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.getByTestId("reaction-more")).toHaveFocus();
+    await user.keyboard("{ArrowRight}{ArrowRight}");
+    expect(quick[1]).toHaveFocus();
+    expect(quick[1].tabIndex).toBe(0);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+    expect(react).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{ArrowRight}{Enter}");
+    expect(onReact).toHaveBeenCalledWith("❤️");
+    expect(screen.queryByTestId("reaction-bar")).not.toBeInTheDocument();
+  });
+
+  it("from the keyboard, the one I chose takes the focus", async () => {
+    const { user } = renderApp(<MessageBubble message={message({ reactions: { me: r("😂") } })} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    screen.getByTestId("message-react-action").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getAllByTestId("reaction-quick").find(b => b.dataset.emoji === "😂")).toHaveFocus();
+  });
+
+  it("⋮ → React from the keyboard puts the focus on the bar, not back on ⋮", async () => {
+    const onReact = vi.fn();
+    const { user } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReply={() => {}} onReact={onReact} reactionName={names} />);
+    screen.getByTestId("message-options").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("message-reply")).toHaveFocus();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getAllByTestId("reaction-quick")[0]).toHaveFocus();
+    await user.keyboard("{ArrowRight}{ArrowRight}{Enter}");
+    expect(onReact).toHaveBeenCalledWith("😂");
+  });
+
+  it("a finger held on the message: Up/Down move between the emoji and the rows under them", () => {
+    vi.useFakeTimers();
+    const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
+    const row = container.querySelector<HTMLElement>("[data-message-row]")!;
+    fireEvent.pointerDown(row, { pointerType: "touch", button: 0, clientX: 20, clientY: 20, pointerId: 1 });
+    act(() => { vi.advanceTimersByTime(600); });
+    fireEvent.pointerUp(row, { pointerType: "touch", clientX: 20, clientY: 20, pointerId: 1 });
+    const bar = screen.getByTestId("reaction-bar");
+    expect(screen.getAllByTestId("reaction-quick")[0]).toHaveFocus();
+    const key = (k: string) => fireEvent.keyDown(document.activeElement!, { key: k });
+    key("ArrowRight");
+    key("ArrowDown");
+    expect(within(bar).getByTestId("reaction-bar-copy")).toHaveFocus();
+    key("ArrowDown");
+    expect(within(bar).getByTestId("reaction-bar-details")).toHaveFocus();
+    key("ArrowDown");
+    // Back in the row of emoji, on the one left there.
+    expect(screen.getAllByTestId("reaction-quick")[1]).toHaveFocus();
+  });
+
   it("a finger held on the message opens the bar, with the details one tap under it", () => {
     vi.useFakeTimers();
     const { container } = renderApp(<MessageBubble message={message()} peerPubKey="peer" onReact={() => {}} reactionName={names} />);
@@ -187,6 +250,19 @@ describe("chips under the bubble", () => {
     fireEvent.pointerUp(chip, { pointerType: "touch", pointerId: 3 });
     fireEvent.click(chip);
     expect(onReact).toHaveBeenCalledWith("👍");
+  });
+
+  // Who reacted was joined with ", " in every language: "أنت, Bo" read as English punctuation in a translated line.
+  it.each([
+    ["ar", "Alice وBo"],
+    ["ja", "Alice、Bo"],
+    ["en", "Alice, Bo"],
+  ] as const)("lists who reacted the way %s lists them", async (language, who) => {
+    renderApp(<MessageBubble message={message({ reactions: { peer: r("👍"), k1: r("👍", 2) } })} peerPubKey="peer" onReact={() => {}} reactionName={names} />, { language });
+    const chip = await screen.findByTestId("reaction-chip");
+    expect(chip).toHaveAccessibleName(new RegExp(`${who}$`));
+    fireEvent.pointerEnter(chip, { pointerType: "mouse" });
+    expect(await screen.findByTestId("reaction-who")).toHaveTextContent(who);
   });
 });
 

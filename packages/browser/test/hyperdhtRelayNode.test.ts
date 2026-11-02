@@ -123,19 +123,26 @@ it("leaves a chat's session on the old relay alone until it can let go", async (
   expect(link.registerEndpoint).toHaveBeenCalledTimes(1);
 });
 
-it("listens again a while after the relay went away", async () => {
+it("listens again a while after the relay went away, each app at a time of its own", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  const node = engine();
-  const link = stubLink();
-  const chat = await addChat(node, link);
-  await node.updateSettings({ settings: { hyperdhtRelay: "wss://relay.example" } });
-  await vi.waitFor(() => expect(link.registerEndpoint).toHaveBeenCalledTimes(1));
-  // The relay dropped: GhostLink removed the endpoint and said its transports changed.
-  link.available.splice(link.available.indexOf("hyperdht/1"), 1);
-  node["retryRelayLater"]();
-  await vi.advanceTimersByTimeAsync(29_000);
-  expect(link.registerEndpoint).toHaveBeenCalledTimes(1);
-  await vi.advanceTimersByTimeAsync(1_000);
-  await vi.waitFor(() => expect(link.registerEndpoint).toHaveBeenCalledTimes(2));
-  expect(chat.id).toBeTruthy();
+  // A relay that restarts closes every app's socket at once: with one fixed wait they all came back in the same
+  // instant, and on a relay of 512 apps a fifth of their listens timed out in that burst. The waits now spread over
+  // 30 s around the same 30 s.
+  for (const [draw, wait] of [[0, 15_000], [0.5, 30_000], [0.999, 44_970]]) {
+    const node = engine();
+    const link = stubLink();
+    await addChat(node, link);
+    await node.updateSettings({ settings: { hyperdhtRelay: "wss://relay.example" } });
+    await vi.waitFor(() => expect(link.registerEndpoint).toHaveBeenCalledTimes(1));
+    // The relay dropped: GhostLink removed the endpoint and said its transports changed.
+    link.available.splice(link.available.indexOf("hyperdht/1"), 1);
+    const random = vi.spyOn(Math, "random").mockReturnValue(draw);
+    node["retryRelayLater"]();
+    random.mockRestore();
+    await vi.advanceTimersByTimeAsync(wait - 1_000);
+    expect(link.registerEndpoint).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(link.registerEndpoint).toHaveBeenCalledTimes(2));
+    await node.shutdown();
+  }
 });

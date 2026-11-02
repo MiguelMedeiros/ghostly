@@ -354,12 +354,23 @@ export function quota(card: Record<string, unknown>, usage: string): Record<stri
   return card;
 }
 
-/** A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). */
+/** How the time flags say the dates they take (`--next`, `--resets`, `--also`'s `@`). */
+const CARD_TIME_FORMS = "2026-09-30 or 2026-09-30 01:00 (no zone: local time; a date alone is its midnight), 2026-09-30T01:00:00Z or 2026-09-30T01:00+02:00";
+
+/** An ISO date with no time, which `Date.parse` alone reads as UTC midnight: `2026-09-30`, `2026-09`. */
+const ISO_DAY = /^(?:[+-]\d{6}|\d{4})-\d{2}(-\d{2})?$/;
+
+/**
+ * A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). A date with no
+ * zone is local time in every form: `Date.parse` reads `2026-09-30 01:00` and `Sep 30 2026` as local but an ISO date
+ * alone as UTC midnight (21:00 the day before in UTC-03, agents#2355), so that one is read as `2026-09-30T00:00`.
+ */
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
-  const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(text);
-  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date like 2026-09-30T01:00:00Z, not ${JSON.stringify(value)}`);
+  const day = ISO_DAY.exec(text);
+  const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(day ? `${text}${day[1] ? "" : "-01"}T00:00` : text);
+  if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date: ${CARD_TIME_FORMS}, not ${JSON.stringify(value)}`);
   return ms;
 }
 
@@ -398,7 +409,7 @@ export const routineOptions: Record<string, OptionSpec> = {
   schedule: { type: "string", description: "When it runs, as people say it: \"every day 01:00\" (80 characters)" },
   cron: { type: "string", description: "Its cron line, shown beside the schedule (never run)" },
   state: { type: "string", description: "active (default on send) or paused" },
-  next: { type: "string", description: "Its next run: milliseconds or a date like 2026-09-30T01:00:00Z" },
+  next: { type: "string", description: `Its next run: milliseconds or a date: ${CARD_TIME_FORMS}` },
   run: { type: "string", description: "Record a run now: ok, failed or skipped, with :a summary if you like (it becomes the last run)" },
   ...cardOptions,
 };
@@ -459,8 +470,8 @@ export const usageOptions: Record<string, OptionSpec> = {
   label: { type: "string", description: "What the quota is of, like Claude (24 characters)" },
   account: { type: "string", description: "Which of your accounts it is, short (24 characters)" },
   window: { type: "string", description: "The quota's window, as people say it: \"5 h\", \"week\" (16 characters)" },
-  resets: { type: "string", description: "When the window starts again: milliseconds or a date like 2026-10-07T18:00:00Z" },
-  also: { type: "list", description: "Another window, window=percent[@time], like week=80@2026-10-10T00:00:00Z (up to 3; shown in the details)" },
+  resets: { type: "string", description: `When the window starts again: milliseconds or a date: ${CARD_TIME_FORMS}` },
+  also: { type: "list", description: "Another window, window=percent[@time], like week=80@2026-10-10T00:00:00Z or week=80@2026-10-10 (up to 3; shown in the details; a time as --resets takes, no zone: local time)" },
   id: { type: "string", description: "The card's id (default usage: one card per chat)" },
   all: { type: "boolean", description: "Every 1:1 chat with a contact, instead of one chat" },
   json: cardOptions.json,

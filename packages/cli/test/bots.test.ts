@@ -40,6 +40,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
     connect: vi.fn(async () => undefined),
     setChatTransport: vi.fn(async ({ linkId, transport }: { linkId: string; transport: string }) => { setLink(linkId, transport === "dht" ? { deliveryMode: "dht", textDelivery: "dht" } : { deliveryMode: "stream" }); }),
     setDeliveryMode: vi.fn(async ({ linkId, mode: m }: { linkId: string; mode: string }) => { setLink(linkId, { deliveryMode: m as never }); }),
+    removeLink: vi.fn(({ linkId }: { linkId: string }) => { s.links = s.links.filter((l) => l.id !== linkId); }),
   };
   const setLink = (linkId: string, fields: Partial<LinkView>) => { s.links = s.links.map((l) => (l.id === linkId ? { ...l, ...fields } : l)); };
   const dir = mkdtempSync(join(tmpdir(), "ghostly-bots-profile-"));
@@ -47,7 +48,7 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
   const calls: { call: string; chat: string; state: string }[] = [];
   const ctx = {
     runtime: { server: { node }, paths: { name: "default", dir } },
-    calls: { list: () => calls },
+    calls: { list: () => calls, forgetChat: () => {} },
     hub: {
       onEvent: (l: (e: GhostlyEvent) => void) => { events.add(l); return () => events.delete(l); },
       onState: (l: (s: EngineState) => void) => { states.add(l); return () => states.delete(l); },
@@ -96,6 +97,7 @@ describe("file wait", () => {
     expect(await callApi(ctx, "file.action", { file: "chat-two-in-d", action: "accept" })).toMatchObject({ chat: "chat-two", action: "accept" });
     expect(node.fileAction).toHaveBeenLastCalledWith({ linkId: "chat-two", fileId: "chat-two-in-d", action: "accept" });
     await expect(callApi(ctx, "file.action", { chat: "Alice", file: "chat-two-in-d", action: "cancel" })).rejects.toMatchObject({ code: "not_found" });
+    transfer("chat-two-in-d", { state: "transferring", transferred: 0, size: 5, direction: "in", stage: "queued" });
     // The bytes are not in this fake's store: saving fails after the wait, not before it.
     const saving = callApi(ctx, "file.save", { file: "chat-two-in-d", wait: true, timeout: 5 });
     let settled = false;
@@ -105,6 +107,24 @@ describe("file wait", () => {
     transfer("chat-two-in-d", { state: "done", transferred: 5, size: 5, direction: "in" });
     await expect(saving).rejects.toMatchObject({ code: "not_found", message: "No file chat-two-in-d" });
   });
+
+  it("a received file that waits for file accept says so at once, whether it waited so from the start or came to", async () => {
+    const { ctx, transfer } = fake();
+    const confirm = { code: "confirm", message: "The file (40 MB) waits for you to take it: ghostly file accept chat-one-in-e (or file decline)", details: { file: "chat-one-in-e", chat: "chat-one", size: 40_000_000, stage: "asking" } };
+    transfer("chat-one-in-e", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
+    const started = Date.now();
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-e", timeout: 30 })).rejects.toMatchObject(confirm);
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-e", wait: true, timeout: 30 })).rejects.toMatchObject(confirm);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // Not there yet when the wait began: the offer reaches this side during it.
+    transfer("chat-one-in-f", { state: "transferring", transferred: 0, size: 26_214_401, direction: "in", stage: "waiting" });
+    const waiting = callApi(ctx, "file.wait", { file: "chat-one-in-f", timeout: 30 });
+    transfer("chat-one-in-f", { state: "transferring", transferred: 0, size: 26_214_401, direction: "in", stage: "asking" });
+    await expect(waiting).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("(26.2 MB) waits for you to take it: ghostly file accept chat-one-in-f") });
+    // A file sent from here that waits for the contact's person goes on waiting: only they can take it.
+    transfer("chat-one-out-g", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-out-g", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+  }, 10_000);
 });
 
 describe("typing --for", () => {
@@ -268,6 +288,22 @@ describe("chat disconnect --hold", () => {
     calls.length = 0;
     await callApi(ctx, "chat.transport", { chat: "Alice", transport: "dht" });
     expect(node.setChatTransport).toHaveBeenCalledWith({ linkId: "chat-one", transport: "dht" });
+  });
+
+  // Removed mid-call, the chat was gone and its call talked on (sound both ways, `call list` naming a chat `chat show`
+  // could not find); a hang-up then had no chat to cross, and the contact's call ended only when its media stalled out.
+  it("chat remove is refused while a call is on in the chat, which stays; another chat is removed", async () => {
+    const { ctx, node, calls } = fake();
+    calls.push({ call: "c1", chat: "chat-one", state: "connected" });
+    await expect(callApi(ctx, "chat.remove", { chat: "Alice" })).rejects.toMatchObject({ code: "confirm" });
+    const refused = await callApi(ctx, "chat.remove", { chat: "Alice", yes: true }).then(() => undefined, (error: unknown) => error as CliError);
+    expect(refused).toMatchObject({ code: "busy", details: { call: "c1" } });
+    expect(refused?.message).toBe("A call is on in this chat: hang it up first (ghostly call hangup chat-one), then remove the chat");
+    expect(node.removeLink).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "chat.remove", { chat: "Bob", yes: true })).toEqual({ removed: "chat-two" });
+    calls.length = 0;
+    expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
+    expect(node.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
   });
 
   // The engine refused it as `engine`, "Both peers must choose a live method first", though this side had: a bot retried.

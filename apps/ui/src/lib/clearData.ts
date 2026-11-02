@@ -1,6 +1,6 @@
 import { clearProfileStores } from "@ghostly/browser/shared/idb";
 import { removeFileBytes } from "@ghostly/browser/shared/fileBytes";
-import { getBrowserHost } from "@ghostly/browser/host";
+import { forgetServicesOf, getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { LEGACY_JOIN_PREFIX, getStorageProfile, ownsKey } from "./storage";
 import { activeProfileId, registryKey } from "./profiles";
@@ -22,6 +22,7 @@ export const CLEAR_ENGINE_MS = 15_000;
  * 3. Its files, wherever they are kept, and on the web its apps' linked files (the paths and folders they were given;
  *    the Desktop's go with its files).
  * 4. Its push subscription ends at the push service, so contacts who kept it can no longer wake this app.
+ *    On the web and Desktop, what the contacts' apps it opened kept on their own origins goes too (`forgetServices`).
  * 5. A host whose peer outlives the page starts a new one. The caller then reloads.
  */
 export async function clearAllData(): Promise<void> {
@@ -51,6 +52,7 @@ export async function clearAllData(): Promise<void> {
     } catch { resolve(); }
   });
   await pushPlatform()?.unsubscribe(activeProfileId()).catch(() => {});
+  await forgetServicesOf({ profile: activeProfileId() });
   let host: ReturnType<typeof getBrowserHost> | null = null;
   try { host = getBrowserHost(); } catch { /* none in tests */ }
   await host?.restartEngine?.().catch(() => {});

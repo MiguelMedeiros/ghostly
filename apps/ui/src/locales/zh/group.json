@@ -69,6 +69,8 @@
     "created": "群组已创建。",
     "forked": "成员历史出现了分叉",
     "gone": "{{name}} 已不再是成员",
+    "goneBy": "{{by}} 将 {{name}} 移出了群组",
+    "goneByYou": "你将 {{name}} 移出了群组",
     "joined": "{{name}} 已加入",
     "left": "{{name}} 已退出",
     "pictureChanged": "{{name}} 更换了群组头像",
@@ -82,6 +84,7 @@
     "renamedNoName": "群组现在名为“{{group}}”",
     "renamedYou": "你将群组重命名为“{{group}}”",
     "rotated": "密钥已轮换：新的纪元",
+    "withNote": "{{event}}{{note}}",
     "youJoined": "你已加入。",
     "youJoinedAgain": "你已重新加入。"
   },
@@ -97,9 +100,9 @@
   "hubs": {
     "auto": "常在线时作为中继",
     "badge": "中继",
-    "badgeHint": "将群组消息转发给与其连接的成员。它能看到谁在何时发言，看不到说了什么。",
     "choice": "中继",
     "exclude": "从不作为中继",
+    "note": "中继将群组消息转发给与其连接的成员。它能看到谁在何时发言，看不到说了什么。",
     "pin": "始终作为中继"
   },
   "join": {
@@ -117,6 +120,8 @@
     "knockingCommunity": "正在群组应用会查看的地方留下敲门请求…",
     "queueCount": "还有 {{count}} 人在等待加入。",
     "queueOne": "还有 1 人在等待加入。",
+    "replaced": "此链接已被替换或关闭",
+    "replacedBody": "请向群组中的人索取当前链接，然后打开它。",
     "stale": "仍未收到回复。如果链接已更换，请索取新链接。",
     "staleBusy": "仍在等待：群组每次只让少数人加入。",
     "step": {
@@ -179,7 +184,9 @@
     "shareTitleUnnamed": "在 Ghostly 上加入群组",
     "shared": "已分享",
     "showQr": "显示二维码",
-    "title": "群组链接"
+    "title": "群组链接",
+    "tooMany": "打开的群组链接太多",
+    "tooManyNext": "请删除一个仍在等待加入的群组，或在“加入”中粘贴链接。"
   },
   "makeAdmin": {
     "body": "你将不再是管理员。之后只有 {{name}} 能重命名群组、更换头像和链接、邀请或移除成员，以及把管理员身份交还给你。",
@@ -211,9 +218,8 @@
     "inviteAction": "邀请",
     "invited": "已邀请…",
     "makeAdmin": "转让管理员",
-    "missing": "缺少 {{count}} 条",
-    "missingHint": "本纪元中尚未收到的消息",
-    "missingOne": "缺少 {{count}} 条",
+    "missing": "此成员还有 {{count}} 条消息未送达",
+    "missingOne": "此成员还有 {{count}} 条消息未送达",
     "needsBothHint": "群组需要双方应用都已连接且为最新版本",
     "needsUpdate": "需要更新 Ghostly",
     "noContacts": "所有已配对的联系人都已在群里，或者你还没有联系人。",

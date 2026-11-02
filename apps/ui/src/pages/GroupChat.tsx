@@ -194,12 +194,19 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   const text = message.text;
   // My own key is me whatever the roster says: once removed, it no longer lists me, and my lines still read "You …".
   const me = !!member?.me || (!!message.member && message.member === group.myKey);
+  // A private group's removal names the admin who signed it (`by`), as the roster or the group's former names know
+  // them now; my own removal of someone in my words. Mine, the line of a member back in the group, stays "You were removed".
+  if (message.event === "gone" && message.member && message.by && !me) {
+    const name = authorName(group, message.member, t);
+    const byMe = message.by === group.myKey || !!group.members.find(m => m.key === message.by)?.me;
+    return byMe ? t("group.event.goneByYou", { name }) : t("group.event.goneBy", { by: authorName(group, message.by, t), name });
+  }
   // A member who has left since: the group still knows the name they had (`formerNames`), so their lines are said in
   // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
   const former = !member && !!message.member && FORMER_EVENTS.has(message.event) && (me || group.profile !== "community" || !!group.formerNames?.[message.member]);
   if (!member && !former) {
-    if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
-    if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
+    if (message.event === "created" && text.startsWith("Group created. ")) return t("group.event.withNote", { event: t("group.event.created"), note: readNote(group, t) });
+    if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return t("group.event.withNote", { event: t("group.event.youJoined"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
@@ -276,6 +283,7 @@ const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "
 
 function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
   const waiting = t("group.join.waiting");
+  if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
     body: community ? t("group.join.admittedCommunity") : t("group.join.admitted") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
@@ -582,6 +590,8 @@ export function GroupChat() {
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
   // Nobody answered the link for an hour: the app stopped knocking, and Try again knocks again.
   const linkUnanswered = !!group.invitation?.viaLink && !!group.invitation.unanswered;
+  // The link was replaced since it was shared: nothing more happens here, only the current link gets in.
+  const linkReplaced = stage === "replaced";
   // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
   // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
   const noLinks = state?.transport.groupLinks === false;
@@ -712,11 +722,11 @@ export function GroupChat() {
       : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
-            <svg className={noLinks || linkUnanswered ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
+            <svg className={noLinks || linkUnanswered || linkReplaced ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
           </div>
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
-          <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
+          {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
             {joinSteps(group.profile === "community", t).map(step => {
               const done = JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step.stage);
               const current = !done && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stage;
@@ -725,7 +735,7 @@ export function GroupChat() {
                 {step.label}
               </li>;
             })}
-          </ol>
+          </ol>}
           {/* Others knocking too: a wait behind them, said as soon as it is known (a community lets people in a few at a time). */}
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
@@ -733,7 +743,7 @@ export function GroupChat() {
           {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
             className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
           <button onClick={() => { void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {}); nav.home(); }} data-testid="group-joining-cancel"
-            className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
+            className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
       <div ref={jump.listRef} data-message-list aria-busy={reading || undefined} className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
@@ -832,14 +842,14 @@ function ManageHere({ groupId }: { groupId: string }) {
     <div role="status" data-testid="group-manage-off" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="min-w-0 flex-1">{t("devices.manage.off")}</span>
-        {!asking && <button ref={turnOn} type="button" data-testid="group-manage-open" onClick={() => ask(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer">{t("devices.manage.turnOn")}</button>}
+        {!asking && <button ref={turnOn} type="button" data-testid="group-manage-open" onClick={() => ask(true)} className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer max-md:min-h-11 max-md:px-3">{t("devices.manage.turnOn")}</button>}
       </div>
       {asking && (
         <div className="flex flex-wrap items-center gap-2">
           <span data-testid="group-manage-warning" className="min-w-0 flex-1 text-danger-ink">{t("devices.manage.warning")}</span>
           <button type="button" data-testid="group-manage-confirm" {...working(busy)} onClick={confirm}
-            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40">{t("devices.manage.confirm")}</button>
-          <button ref={cancel} type="button" data-testid="group-manage-cancel" onClick={() => ask(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer">{t("common.cancel")}</button>
+            className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40 max-md:min-h-11 max-md:px-3">{t("devices.manage.confirm")}</button>
+          <button ref={cancel} type="button" data-testid="group-manage-cancel" onClick={() => ask(false)} className="rounded px-2 py-1 hover:bg-surface-hover cursor-pointer max-md:min-h-11 max-md:px-3">{t("common.cancel")}</button>
         </div>
       )}
       {problem && <Notice problem={problem} testId="group-manage-problem" className="text-xs" />}

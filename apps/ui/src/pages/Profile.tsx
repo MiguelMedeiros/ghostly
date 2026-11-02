@@ -7,7 +7,7 @@ import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import { listSessions } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
-import { baseProfileName, clearRestoredMark, createProfile, currentProfile, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
+import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
 import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
@@ -21,6 +21,8 @@ import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
+import { useOwnNameField } from "../hooks/useOwnNameField";
+import { useFittedNameField } from "../hooks/useGroupNameField";
 import { openJoinAnother } from "../lib/devices";
 import { problemText, type Problem } from "../lib/problemText";
 
@@ -42,7 +44,8 @@ function useProfiles() {
 export function Profile() {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
-  const { settings, updateColorScheme, updateDefaultNickname, randomizeNickname } = useSettings();
+  const { settings, updateColorScheme, randomizeNickname } = useSettings();
+  const nickname = useOwnNameField();
   const platform = useServicesPlatform();
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
@@ -53,6 +56,8 @@ export function Profile() {
   const plain = baseProfileName(current.id) ?? current.name;
   const [name, setName] = useState(plain);
   const nameComposition = useComposition();
+  // Both name fields keep what the name takes, between whole characters (`fitsProfileName`).
+  const nameField = useFittedNameField(name, setName, fitsProfileName);
   // "Add a profile" in the account switcher lands here with the form open.
   const location = useLocation();
   const navigate = useNavigate();
@@ -61,6 +66,7 @@ export function Profile() {
   // The wallet's backup reminder (Cashu has no phrase) lands here with the profile's Back up open.
   const wantsBackup = !!asked?.backupProfile;
   const [creating, setCreating] = useState(wantsNew), [newName, setNewName] = useState("");
+  const newNameField = useFittedNameField(newName, setNewName, fitsProfileName);
   useEffect(() => { if (wantsNew) { setCreating(true); document.querySelector("[data-testid='profile-list']")?.scrollIntoView({ block: "nearest" }); } }, [wantsNew]);
   const [deleting, setDeleting] = useState<ProfileEntry | null>(null);
   // A backup restored to replace the profile it was made from lands here, the copy running: the original's removal
@@ -97,7 +103,8 @@ export function Profile() {
           <input data-testid="profile-avatar-input" type="file" accept="image/*" aria-label={myAvatar ? t("profile.changePicture") : t("profile.addPicture")} className="sr-only"
             onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void avatarFromFile(file).then(setMyAvatar).then(() => setError(null), (err: unknown) => setError(problemText(err, t))); }} />
         </label>
-        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} maxLength={32} onChange={(e) => setName(e.target.value)} onBlur={saveName} {...nameComposition.inputProps} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
+        <input data-testid="profile-name" aria-label={t("profile.nameLabel")} value={name} {...nameField} onBlur={saveName}
+          onCompositionEnd={(e) => { nameComposition.inputProps.onCompositionEnd(e); nameField.onCompositionEnd(e); }} onKeyDown={(e) => !nameComposition.composing(e) && e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
           className="min-w-0 flex-[1_1_8rem] bg-transparent text-xl font-semibold text-text-primary rounded-lg px-2 -mx-2 py-1 border border-transparent hover:border-border focus:border-accent focus:outline-none" />
         {current.restored && (
           <span data-testid="profile-restored-tag" title={t("profile.restoredTagHint")} className="inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap rounded-full border border-border bg-surface-alt ps-2.5 pe-0.5 text-xs text-text-muted">
@@ -116,7 +123,7 @@ export function Profile() {
         <Row label={t("profile.color")}><ColorSwatches label={t("profile.colorLabel")} testIdPrefix="profile-theme" /></Row>
         <Row label={t("profile.mode")}><Segmented label={t("profile.mode")} value={settings.colorScheme} options={schemes} onChange={updateColorScheme} /></Row>
         <Row label={t("profile.nameInChats")}>
-          <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} value={settings.defaultNickname} maxLength={20} placeholder={t("common.anonymous")} onChange={(e) => updateDefaultNickname(e.target.value)} />
+          <input data-testid="account-nickname" aria-label={t("settings.nicknamePlaceholder")} className={`${input} w-44 flex-1`} placeholder={t("common.anonymous")} {...nickname} />
           <button type="button" onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">↻</button>
         </Row>
         {/* Per profile: contacts are told at once, or told there is nothing to show (WISP 401 § name and picture). */}
@@ -158,7 +165,7 @@ export function Profile() {
         {!canSwitch ? <Block><Notice>{t("profile.oneOnly")}</Notice></Block> : creating ? (
           <Block>
             <InputGroup as="form" onSubmit={(e) => { e.preventDefault(); attempt(() => { const entry = createProfile(newName); askNameIn(entry.id); switchProfile(entry.id, { route: "/profile" }); }); }}>
-              <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} maxLength={32} value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <input data-testid="profile-new-name" autoFocus className={input} placeholder={t("profile.name")} value={newName} {...newNameField} />
               <Button type="submit" variant="primary" data-testid="profile-create" disabled={!newName.trim()}>{t("profile.create")}</Button>
               <Button onClick={() => { setCreating(false); setNewName(""); }}>{t("common.cancel")}</Button>
             </InputGroup>

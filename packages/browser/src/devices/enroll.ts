@@ -292,6 +292,8 @@ export class EnrollInviter extends Enrollment {
   private seen = false;
   /** The person answered the digits: one answer is taken, before the record is read or written for it. */
   private answered = false;
+  /** When the code's ten minutes end, in ms. */
+  private expiresAt = 0;
 
   constructor(private readonly options: InviterOptions) {
     super(options, { role: "inviter", step: "waiting", code: "", expires: 0 });
@@ -338,7 +340,9 @@ export class EnrollInviter extends Enrollment {
         this.timer(this.options.timing?.proofMs ?? ENROLL_PROOF_TIMEOUT_MS, () => { if (this.view.step === "waiting") void this.fail("unreached"); });
       },
     });
-    // The ten minutes bound the admission: a code nobody confirmed by then is spent.
+    // The ten minutes bound the admission: a code nobody confirmed by then is spent. The timer may not run on time (a
+    // computer that slept, a throttled tab): the hello and the answer read the clock too.
+    this.expiresAt = side.invite.expires * 1000;
     this.timer(Math.max(0, side.invite.expires * 1000 - this.now()), () => { if (this.view.step === "waiting" || this.view.step === "confirm") void this.fail("expired", "expired"); });
     return this.view;
   }
@@ -348,6 +352,7 @@ export class EnrollInviter extends Enrollment {
     const cancelled = enrollCancelReason(frame);
     if (cancelled) { await this.fail(failureOf(cancelled), undefined, this.joiner?.name); return; }
     if (frame.t === ENROLL_HELLO && this.view.step === "waiting" && this.session && !this.joiner) {
+      if (this.now() >= this.expiresAt) { await this.fail("expired", "expired"); return; }
       const hello = readEnrollHello(frame, this.session.hash, this.key.publicKey, this.session.peerKey);
       if (!hello) { await this.fail("proof", "failed"); return; }
       // The first joiner that authenticated: the code is spent.
@@ -366,6 +371,7 @@ export class EnrollInviter extends Enrollment {
   async confirm(match: boolean): Promise<EnrollView> {
     if (this.over || this.answered || this.view.step !== "confirm" || !this.joiner) throw new Error("There are no digits to confirm");
     this.answered = true;
+    if (this.now() >= this.expiresAt) { await this.fail("expired", "expired", this.joiner.name); return this.view; }
     if (!match) { await this.fail("digits", "digits", this.joiner.name); return this.view; }
     const joiner = this.joiner;
     let slots: EnrollSlot[], ownSlot: number, turn: number, rev: number;

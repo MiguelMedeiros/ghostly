@@ -101,11 +101,16 @@ export function ReferenceMarkdown({
       if (node.tagName === "table") {
         const [head, ...body] = rows(node);
         const labels = head ? cells(head).map((cell) => text(cell).trim()) : [];
+        // An untitled header (`| | Mesh | Community |`) is a plain cell, or a screen reader hears a blank column
+        // header; a header row with no title at all is no header row.
+        const untitled = !labels.some(Boolean);
+        if (head) cells(head).forEach((cell, index) => !labels[index] && (cell.tagName = "td"));
+        if (head && untitled) node.children = node.children?.filter((group) => group.tagName !== "thead");
         if (labels.length >= 3) {
           node.properties = { ...node.properties, dataStack: "", role: "table" };
           const role = (child: HtmlNode, value: string) => (child.properties = { ...child.properties, role: value });
           node.children?.forEach((group) => (group.tagName === "thead" || group.tagName === "tbody") && role(group, "rowgroup"));
-          for (const row of [head, ...body]) {
+          for (const row of untitled ? body : [head, ...body]) {
             role(row, "row");
             cells(row).forEach((cell) => role(cell, cell.tagName === "th" ? "columnheader" : "cell"));
           }
