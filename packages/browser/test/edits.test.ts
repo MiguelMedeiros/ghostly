@@ -639,7 +639,7 @@ describe("EditQueue", () => {
       return { q, sent, reads };
     }
 
-    it("reads the history once, then only the rows it was told of; a new session reads it again", async () => {
+    it("reads the history once, then only the rows it was told of, in a new session too; a new run learns them again", async () => {
       rows.set("me_1", row(1));
       const { q, sent, reads } = byId();
       await q.flush();
@@ -652,12 +652,31 @@ describe("EditQueue", () => {
       await q.received("W".repeat(22), 1);
       await q.receivedOnDht("nothing");
       expect([sent.map(e => e.m), reads.n, rows.get("me_2")!.edit!.pending]).toEqual([["t1", "t2"], 1, undefined]);
-      // An edit it was not told of waits for the next session, which reads the history again.
+      // A new session (agents#2468): what it was told of still goes, and the history is not read again for it.
       rows.set("me_3", row(3));
+      q.edited("me_3");
+      q.reopened();
       await q.flush();
-      expect(sent).toHaveLength(2);
+      expect([sent.map(e => e.m), reads.n]).toEqual([["t1", "t2", "t3"], 1]);
+      // An edit it was not told of (none in a run: each edit says so) is found by the next run, which learns once.
+      rows.set("me_4", row(4));
       await q.flush({ reopened: true });
-      expect([sent.map(e => e.m), reads.n]).toEqual([["t1", "t2", "t3"], 2]);
+      expect([sent.map(e => e.m).includes("t4"), reads.n]).toEqual([false, 1]);
+      const next = byId();
+      await next.q.flush();
+      // The one still unconfirmed goes again too.
+      expect([next.sent.map(e => e.m), next.reads.n]).toEqual([["t3", "t4"], 1]);
+    });
+
+    it("a new session sends again what the last one sent without a confirmation, reading those rows alone", async () => {
+      rows.set("me_1", row(1));
+      const asked: string[][] = [];
+      const { q, sent, reads } = byId(undefined, asked);
+      await q.flush();
+      asked.length = 0;
+      // The session opens twice over (the link is open, then the transport it settled on), with no confirmation yet.
+      for (let i = 0; i < 2; i++) { q.reopened(); await q.flush(); }
+      expect([sent.map(e => e.m), reads.n, asked]).toEqual([["t1", "t1", "t1"], 1, [["me_1"], ["me_1"]]]);
     });
 
     it("a confirmation, live or on the DHT floor, reads the one row it is for", async () => {
