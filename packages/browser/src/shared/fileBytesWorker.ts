@@ -115,9 +115,13 @@ async function runRequest(request: WorkerRequest): Promise<{ value?: unknown; tr
   switch (request.op) {
     case "probe": {
       // Sync access handles are the reason for this worker: a browser without them keeps files in IndexedDB.
-      const sync = await handle(space, "ghostly-probe", true);
-      release(space, "ghostly-probe");
-      await (await folder(space, false))?.removeEntry("ghostly-probe").catch(() => {});
+      // A file of its own: every page of the profile and its peer probe the same folder, and a handle is exclusive.
+      // On one shared name, two app tabs opening their storage at once (their first large received file finishing)
+      // had one refused, and that tab then read every file kept here as "No longer available" (agents#2504).
+      const name = `ghostly-probe-${Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, "0")).join("")}`;
+      const sync = await handle(space, name, true);
+      release(space, name);
+      await (await folder(space, false))?.removeEntry(name).catch(() => {});
       return { value: !!sync };
     }
     case "stage": {
