@@ -1,9 +1,8 @@
 import { useEffect } from "react";
 import { clearNotification, showPrivateNotification } from "../lib/notifications";
 import { loadSettings } from "../lib/settings";
-
-/** The app is out of sight: another tab or window is in front, or the app is behind another one. */
-const away = () => document.visibilityState === "hidden" || !document.hasFocus();
+import { appAway } from "../lib/appInSight";
+import { windowAway } from "../lib/windowAway";
 
 /**
  * A call that rings while the app is out of sight says so with a system notification, as a new message does
@@ -17,10 +16,19 @@ export function useIncomingCallNotice(ringing: boolean, chat: string, body: stri
   useEffect(() => {
     if (!ringing) return;
     let told: { event: string; shown: Promise<void> } | undefined;
+    let over = false;
+    let asking = false;
     const tell = () => {
-      if (told || !away() || !loadSettings().notifications.systemEnabled) return;
-      const event = `call:${chat}:${Date.now()}`;
-      told = { event, shown: showPrivateNotification(event, body, chat) };
+      if (told || asking || !windowAway() || !loadSettings().notifications.systemEnabled) return;
+      // Not while another page of the app is in sight (an extension tab in front): the call rings there too, before the
+      // person's eyes. That page tells once it goes out of sight itself.
+      asking = true;
+      void appAway().then((away) => {
+        asking = false;
+        if (!away || told || over) return;
+        const event = `call:${chat}:${Date.now()}`;
+        told = { event, shown: showPrivateNotification(event, body, chat) };
+      });
     };
     tell();
     document.addEventListener("visibilitychange", tell);
@@ -28,6 +36,7 @@ export function useIncomingCallNotice(ringing: boolean, chat: string, body: stri
     return () => {
       document.removeEventListener("visibilitychange", tell);
       window.removeEventListener("blur", tell);
+      over = true;
       // Once it is shown: a ring that ended at once would otherwise leave the notification it was about to post.
       const { event, shown } = told ?? {};
       if (event) void shown?.then(() => clearNotification(event));
