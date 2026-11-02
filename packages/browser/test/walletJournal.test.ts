@@ -268,7 +268,9 @@ describe("Lightning in", () => {
   });
 
   it("asks again every few seconds only while an invoice is open", async () => {
-    seed("quotes", [paidQuote()]);
+    // A new invoice: an older one is asked about less often (agents#2447, invoicePace.test.ts). Its pace reads the clock.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    seed("quotes", [{ ...paidQuote(), createdAt: Date.now() }]);
     mint.checkMintQuoteBolt11.mockResolvedValue({ state: "UNPAID" });
     const { wallet, events } = setup();
     await wallet.checkQuotes();

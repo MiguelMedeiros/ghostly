@@ -54,6 +54,9 @@ const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LAB
   const key = ENGINE_NOTES[kind]?.[note];
   return key ? t(key) : note;
 };
+/** How often the Receive screen says again that it shows its invoice (the engine's watch lasts 90 s). */
+const INVOICE_WATCH_AGAIN_MS = 60_000;
+
 /** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 
@@ -201,6 +204,17 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     const timer = setTimeout(() => setInvoiceExpired(true), Math.max(0, invoiceExpiresAt - Date.now()));
     return () => clearTimeout(timer);
   }, [invoice, invoiceExpiresAt]);
+  // While the invoice shows, its mint or source is asked about it every few seconds: the engine asks less and less about
+  // an invoice nobody looks at (agents#2447). Said again before the engine's watch (90 s) runs out.
+  const walletNow = useRef(wallet);
+  useEffect(() => { walletNow.current = wallet; });
+  useEffect(() => {
+    if (showing !== "invoice" || invoicePaid || !invoice) return;
+    const watch = () => void walletNow.current.watchInvoice?.(invoice)?.catch(() => {});
+    watch();
+    const timer = setInterval(watch, INVOICE_WATCH_AGAIN_MS);
+    return () => clearInterval(timer);
+  }, [showing, invoicePaid, invoice]);
 
   // The button pressed keeps the keys while it works (Button's `loading`, by the key `run` was given); the others wait,
   // disabled. A mint's question closed hands them back to its Remove, or (the mint gone) to the field that adds one.
