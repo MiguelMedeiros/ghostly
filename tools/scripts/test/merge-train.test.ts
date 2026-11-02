@@ -765,6 +765,33 @@ describe("a run of the train", () => {
     expect(repo.comments.get(14)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
   });
 
+  it("tells pull requests whose files GitHub does not list that it cannot tell which one changes the refused workflow", async () => {
+    // Two aboard with no file list and the push refused: both leave, but only one (or neither alone) changes the
+    // workflow. Each was told it changes it and lands by hand, which is false for at least one of them.
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n);
+    repo.files.set(12, null);
+    repo.files.set(13, null);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if ((sha.split(":")[1]?.split(",") ?? []).includes("13")) throw new Error("! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/big.yml` without `workflows` permission)");
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11]);
+    expect(r.dropped).toEqual([12, 13]);
+    for (const [n, other] of [[12, 13], [13, 12]]) {
+      const body = repo.comments.get(n)!.at(-1)!.body;
+      expect(repo.pulls.get(n)!.labels).toEqual([LABEL.failed]);
+      expect(body).not.toMatch(/this pull request changes a workflow/);
+      expect(body).not.toMatch(/lands by hand/);
+      expect(body).toMatch(/GitHub lists no files for this pull request/);
+      expect(body).toContain("`.github/workflows/big.yml`");
+      expect(body).toContain(`#${other}`);
+      expect(body).toMatch(/add `queue` again[^.]*\(the train takes `queue:failed` off\)\.$/);
+    }
+  });
+
   it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
     // A file name can hold the train's marks: quoted as is in the drop comment, the train's own comment then read as
     // #12's position comment, naming a head pushed later, and one still in line (queue:priority added during that run)

@@ -467,8 +467,12 @@ export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
+const escapeMark = (f) => f.replaceAll("<", "&lt;");
+// Several aboard whose files GitHub does not list, and a push refused for one workflow: any of them may change it.
+const unlistedText = (workflow, others) =>
+  `Merge train: GitHub lists no files for this pull request (it has 3000 or more), and it refused the batch's push for a workflow (${workflow ? `\`${escapeMark(workflow)}\`: ` : ""}the queue app's token has no \`workflows\` permission). GitHub lists none for ${others.map((o) => `#${o.number}`).join(", ")} either, so the train cannot tell which of them changes it, and all of them left the line: the rest of the line goes on without them. Once the others are out of the line, add \`queue\` again: it boards alone among them, and only leaves again if it is the one that changes it (the train takes \`queue:failed\` off).`;
 const workflowText = (base, workflows) =>
-  `Merge train: this pull request changes a workflow (${workflows.map((f) => f.replaceAll("<", "&lt;")).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
+  `Merge train: this pull request changes a workflow (${workflows.map(escapeMark).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -742,24 +746,25 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // failed here, and the whole line waited behind them.
       if (!WORKFLOW_PUSH_REFUSED.test(`${e?.message ?? e}`)) throw e;
       // GitHub lists no files for a pull request of 3000 or more: those leave only when none aboard lists a workflow,
-      // naming the one GitHub refused (a push still refused without the others says one of them changes it).
+      // naming the one GitHub refused (a push still refused without the others says one of them changes it). With
+      // several of them the train cannot tell which one, and each one's comment says so.
       const changing = [];
       const unlisted = [];
       for (const p of aboard) {
         const files = await gh.pullFiles(p.number);
         if (!files) unlisted.push(p);
         const workflows = (files ?? []).filter((f) => f.startsWith(".github/workflows/"));
-        if (workflows.length) changing.push([p, workflows]);
+        if (workflows.length) changing.push([p, workflowText(base, workflows)]);
       }
       if (!changing.length) {
-        const refused = `${e?.message ?? e}`.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow";
-        for (const p of unlisted) changing.push([p, [refused]]);
+        const named = `${e?.message ?? e}`.match(/workflow `([^`]+)`/)?.[1];
+        for (const p of unlisted) changing.push([p, unlisted.length > 1 ? unlistedText(named, unlisted.filter((o) => o !== p)) : workflowText(base, [named ?? "a workflow"])]);
       }
       if (!changing.length) throw e;
-      for (const [p, workflows] of changing) {
+      for (const [p, text] of changing) {
         say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
         done.dropped.push(p.number);
-        await leave(p, LABEL.failed, workflowText(base, workflows));
+        await leave(p, LABEL.failed, text);
       }
       // From the ones aboard: those the build dropped have left the line already, and building them again drops them twice.
       return board(aboard.filter((p) => !changing.some(([c]) => c === p)), next, extra);
