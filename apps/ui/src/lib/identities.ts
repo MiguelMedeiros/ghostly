@@ -177,11 +177,14 @@ const subscribeSeen = (listener: () => void) => {
   return () => { window.removeEventListener("identities-seen", listener); window.removeEventListener("storage", listener); };
 };
 
-/** Whether the Identities item carries its dot. */
+/**
+ * Whether the Identities item carries its dot. The account bar and a phone's tab bar ask, always on screen: they draw
+ * again when the items change, not on every engine state.
+ */
 export function useIdentityAttention(): boolean {
-  const state = usePlainEngineState();
+  const items = usePlainEngineValue(state => identityAttention(state));
   const seen = useSyncExternalStore(subscribeSeen, rawSeen);
-  return unseenAttention(identityAttention(state), parseSeen(seen)).length > 0;
+  return unseenAttention(items, parseSeen(seen)).length > 0;
 }
 
 /**

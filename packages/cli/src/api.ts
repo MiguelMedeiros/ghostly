@@ -739,7 +739,7 @@ const METHODS: Record<string, Method> = {
   async "daemon.stop"(ctx) {
     if (ctx.mode !== "daemon" || !ctx.stop) throw new CliError("unavailable", "No daemon runs this profile");
     setTimeout(() => ctx.stop!(), 10);
-    return { stopping: true, pid: process.pid };
+    return { stopping: true, pid: process.pid, ...(ctx.listen && { listen: true }) };
   },
 
   async "engine.call"(ctx, params) {

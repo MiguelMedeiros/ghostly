@@ -229,8 +229,15 @@
     "setAsideInfo": "Held for a payment the mint has not confirmed yet. It leaves with the payment or returns to your balance once the mint answers.",
     "settings": "Settings",
     "testBalance": "{{amount}} test sats (worthless)",
+    "testBalance_one": "{{amount}} test sat (worthless)",
     "testMintInvoice": "Waiting for the payment… Test mints mark every invoice paid by themselves, so this one counts only once a contact pays it in a chat. For test sats now, use Get test coins above.",
     "tokenHint": "Got an ecash token instead? Paste it under Send.",
+    "tokenRedeemedFee": "Redeemed {{amount}} sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest": "Redeemed {{amount}} test sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest_one": "Redeemed {{amount}} test sat (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFeeTest_other": "Redeemed {{amount}} test sats (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFee_one": "Redeemed {{amount}} sat (the mint kept {{fee}} as its fee).",
+    "tokenRedeemedFee_other": "Redeemed {{amount}} sats (the mint kept {{fee}} as its fee).",
     "tx": {
       "ecashIn": "Received ecash",
       "ecashOut": "Sent ecash",
@@ -250,6 +257,7 @@
     "alreadyRedeemed": "Already redeemed by someone.",
     "amountFee": "{{amount}} (fee {{fee}})",
     "asNotes": "{{amount}} sats as notes",
+    "asNotes_one": "{{amount}} sat as a note",
     "asking": "Asking its guardians…",
     "backup": "Wallet backup",
     "backupHint": "The phrase and the federations; the profile backup has everything",
@@ -587,7 +595,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "test sats"
+    "mainnet_one": "sat",
+    "testnet": "test sats",
+    "testnet_one": "test sat"
   },
   "send": {
     "balance": "Balance: {{amount}} {{unit}}",
@@ -639,6 +649,7 @@
     "experimental": "Experimental",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "Join a federation with a Lightning gateway on the Fedimint card first.",
       "label": "Federation",
       "unknownNetwork": "unknown network",
