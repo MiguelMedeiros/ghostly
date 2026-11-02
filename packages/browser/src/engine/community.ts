@@ -253,6 +253,8 @@ interface Live {
   lastKnockPoll: number;
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
+  /** The entry key those entry sessions were opened through: a link replaced since reaches nobody, and they go with it. */
+  doorKey?: string;
   knocksSeen: Map<string, { first: number; doors: string; changed?: boolean }>;
   /** Knock records: every one read at once next time (`knocksScanned` false); the last of the others read, and when; the bell full until. */
   knocksScanned: boolean;
@@ -795,6 +797,9 @@ export class Communities {
     // An entry session kept open after the welcome went, until the joiner closes its side (it does on the
     // welcome) or a while: left open, it would look fast for a joiner that is gone, spending the relays' budget.
     for (const [linkId, until] of live.lingering) if (now >= until || !this.host.linkReady(linkId, 2)) { live.lingering.delete(linkId); if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId); }
+    // The admin replaced the link (or turned it off) while I let someone in through it, as its own door does
+    // (`replaceLink`): a welcome said now names the new entry key, which that joiner, holding the old link, refuses.
+    if (live.doorKey && live.doorKey !== s.entryKey) { live.doorKey = undefined; await this.closeEntries(groupId); }
     const alone = live.hub && !freshHubs(this.hubs(live), now).some(h => h.key !== me);
     // A read that failed is tried again in a moment, not at the next turn of the usual pace.
     const readDue = live.beaconFailedAt ? now - live.beaconFailedAt >= BEACON_RETRY_MS : now - live.lastBeaconRead >= this.beaconEvery(groupId, live, alone);
@@ -1594,6 +1599,7 @@ export class Communities {
       // read is read again in the background, and this knock waits for the next turn of the door: the tick never waits.
       if (this.host.adminTurn && !(await this.host.adminTurn(groupId, { wait: false }))) break;
       live.pendingEntries.set(key, now);
+      live.doorKey = link.host;
       traceJoin(groupId, "knock.seen", { age: now - ts, turn });
       try { await this.host.openEntry(link, "host", s.state.entry.seedB64, key); } catch { live.pendingEntries.delete(key); }
     }
@@ -1723,6 +1729,8 @@ export class Communities {
         const live = this.live.get(g);
         const peer = [...this.host.entries(g)].find(([, id]) => id === linkId)?.[0];
         if (!live || !peer || frame.key !== peer || !live.pendingEntries.has(peer)) return;
+        // Opened through a link replaced since: nobody is admitted on it (the tick closes it).
+        if (live.doorKey !== live.session.entryKey) return;
         let welcome;
         // Already in the roster (their welcome was lost): the welcome again, with nothing committed.
         try { welcome = rosterHas(live.session.roster, peer) ? await live.session.rewelcome(peer) : await live.session.admit(peer, this.now()); }
