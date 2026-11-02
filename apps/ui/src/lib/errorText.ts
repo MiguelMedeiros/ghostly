@@ -611,6 +611,15 @@ const RULES: readonly Rule[] = [
   // list's line may hold spaces ("relay .example.org").
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>.+)$/, key: "errors.relays.notAddress" },
+  // The rest of what Settings, Network refuses before or on Save (packages/browser/src/shared: hyperdhtRelay.ts,
+  // pushRelay.ts, ice.ts; engine/node.ts updateSettings). The field it is about is marked there, so no line names it.
+  { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
+  exact("Use a wss:// relay address", "errors.relays.useWss"),
+  exact("Leave the user and password out of the address", "errors.relays.noLogin"),
+  exact("Use at most four Iroh relays", "errors.relays.irohAtMost"),
+  exact("Enter the TURN server address", "errors.turn.enterAddress"),
+  { match: /^“(?<address>\S+)” is not a TURN or STUN address \(turn:host:port\)$/, key: "errors.turn.notAddress" },
+  exact("A TURN server needs its username and credential", "errors.turn.needsLogin"),
   // A read that no Nostr relay answered: offline, or the relays blocked (engine/nostrSocial.ts, profiles/activity.ts, readers.ts).
   exact("No relay answered", "errors.relays.noneAnswered", "errors.relays.noneAnsweredNext"),
   exact("Choose a picture", "errors.picture.choose"),

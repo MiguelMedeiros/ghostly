@@ -562,10 +562,14 @@
   },
   "relays": {
     "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل",
+    "enterAddress": "أدخل عنوان مرحّل ({{example}}…)",
+    "irohAtMost": "استخدم أربعة مرحّلات Iroh على الأكثر",
+    "noLogin": "أزِل اسم المستخدم وكلمة المرور من العنوان",
     "noneAnswered": "لم تستجب المرحّلات",
     "noneAnsweredNext": "تحقّق من اتصالك، ثم أعد المحاولة.",
     "notAddress": "ليس عنوان مرحّل: {{address}}",
-    "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}"
+    "useHttps": "استخدم https:// في عنوان المرحّل: {{address}}",
+    "useWss": "استخدم wss:// في عنوان المرحّل"
   },
   "startAgain": "ابدأ من جديد",
   "transport": {
@@ -614,6 +618,11 @@
     "switchRetryNext": "حاول مرة أخرى، أو اختر وسيلة نقل أخرى.",
     "switchSlow": "لم يتصل {{transport}} في الوقت المحدد",
     "switchTimedOut": "استغرق التبديل وقتًا طويلًا"
+  },
+  "turn": {
+    "enterAddress": "أدخل عنوان خادم TURN",
+    "needsLogin": "يحتاج خادم TURN إلى اسم المستخدم وبيانات الاعتماد",
+    "notAddress": "ليس عنوان TURN أو STUN (مثل turn:host:port): {{address}}"
   },
   "verify": {
     "closed": "أُغلق الاتصال",
