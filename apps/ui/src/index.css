@@ -180,7 +180,8 @@
   --theme-border-bright: #3a3a3a;
   --theme-text-primary: #f5f5f5;
   --theme-text-secondary: #a0a0a0;
-  --theme-text-muted: #707070;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #949494;
   --theme-received-bg: #1a1a1a;
   --theme-input-bg: #2a2a2a;
   --theme-search-bg: #1a1a1a;
@@ -205,7 +206,8 @@
   --theme-border-bright: #d0d0d0;
   --theme-text-primary: #0a0a0a;
   --theme-text-secondary: #505050;
-  --theme-text-muted: #808080;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #666666;
   --theme-received-bg: #ffffff;
   --theme-input-bg: #f5f5f5;
   --theme-search-bg: #f5f5f5;
@@ -293,7 +295,8 @@
   --theme-border-bright: #3d3455;
   --theme-text-primary: #f3e8ff;
   --theme-text-secondary: #b8a5d0;
-  --theme-text-muted: #8b7aa8;
+  /* At least 4.5:1 on the list, the panels, a field and a chosen row. */
+  --theme-text-muted: #9a8ab6;
   --theme-received-bg: #1a1625;
   --theme-input-bg: #2a2438;
   --theme-search-bg: #1a1625;
