@@ -4195,6 +4195,11 @@ export class GhostLink {
             // session retired first), and closing it left the move to its 8 s and the 20 s retry (bh-zero43).
             const oldRtc = oldBinding ? null : this.dataLink.connection;
             if (oldChannel) this.retire(oldChannel, () => { if (oldRtc && this.activeBinding && this.dataLink.connection === oldRtc) this.dataLink.close(); }, !oldBinding);
+            // A move that lands on a native transport while its own WebRTC try still connects (the contact's app ended
+            // and is back over the chat's native transport, which the move allows): that try goes to the app that
+            // ended, and held the data link until it failed (30 s on the CLI's WebRTC), so the next move to WebRTC
+            // offered nothing and waited 40 s more (CLI twoPeers on CI).
+            if (migration.plan && binding && oldBinding && WEBRTC_ATTEMPT.has(this.dataLink.state)) this.dataLink.close();
             this.session.setDataLinkOpen(true);
             if (migration.plan) switched = { from, to: paired.state.transport! };
             else { replaced = true; traceLink(this.myPubKeyZ32, "replaced", { from, to: paired.state.transport }); }
