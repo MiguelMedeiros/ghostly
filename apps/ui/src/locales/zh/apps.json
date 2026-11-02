@@ -165,6 +165,7 @@
     "resume": "返回 {{title}}",
     "resumeSharing": "正在共享文件",
     "sharingWith": "正在与 {{name}} 共享文件",
+    "stoppedFailed": "{{title}} 已停止运行并被关闭。如果反复出现，请告知其作者。",
     "stoppedRemoved": "{{title}} 已停止：{{store}} 移除了此版本",
     "stoppedRevoked": "{{title}} 已停止：其作者撤销了此版本",
     "with": "与 {{name}} 的 {{title}}",
