@@ -1033,6 +1033,87 @@ describe("a member removed while it was away is told when it is back (farewell)"
   });
 });
 
+describe("a key let in only on a branch that lost", () => {
+  /** A key that only records what reaches it. */
+  function listener(net: Net, name: string): { key: string; got: CommunityFrame[] } {
+    const key = createIdentity().pubKeyZ32, got: CommunityFrame[] = [];
+    const session = { myKey: key, handle: async (_from: string, frame: CommunityFrame) => { got.push(frame); return false; } } as unknown as CommunitySession;
+    net.members.set(name, { name, session, saved: null as unknown as CommunityState, messages: [], online: true, seedB64: "" });
+    return { key, got };
+  }
+
+  it("is no member once its branch cannot win: told the commits that make it lose, never a later link", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.admit(alice, "dave");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol);
+    // Bob signs the admission of a key of his own two commits behind the tip: a shorter branch, kept by everyone.
+    const chain = alice.session.state.chain, at = chain.length - 3;
+    const parentRoster = chain.slice(0, at + 1).reduce<Roster | null>((r, c) => communityRoster(r, c, true), null)!;
+    const hidden = listener(net, "hidden");
+    const planted = forge(bob, chain[at], parentRoster, { k: "add", s: hidden.key }).commit;
+    for (const m of [alice, carol]) await m.session.handle(bob.session.myKey, commitFrame(planted));
+    await net.settle();
+    for (const m of [alice, carol]) {
+      expect(m.session.state.side.map(c => communityCommitHash(c))).toContain(communityCommitHash(planted));
+      expect(m.session.roster.map(([k]) => k)).not.toContain(hidden.key);
+      // While its branch could still grow past the main one, it is heard as the race it may be.
+      expect(m.session.isRecentMember(hidden.key)).toBe(true);
+    }
+    // The admin removes Bob and replaces the link to keep him out.
+    await alice.session.remove(bob.session.myKey);
+    await net.settle();
+    const entry = await alice.session.replaceLink();
+    await net.settle();
+    for (const m of [alice, carol]) {
+      expect(m.session.wasRemoved(bob.session.myKey)).toBe(true);
+      expect(m.session.isRecentMember(hidden.key)).toBe(false);
+    }
+    // The planted key says where it is: the main branch's commits from where its branch parts up to the one that makes
+    // it lose, and nothing more (no secret, no frame, not the link that keeps Bob out).
+    const sync = { t: "group-sync", v: 2, g: alice.session.id, e: planted.e, h: communityCommitHash(planted), loc: [planted.p] };
+    for (const m of [alice, carol]) {
+      hidden.got.length = 0;
+      await m.session.handle(hidden.key, clone(sync));
+      await net.settle();
+      expect(hidden.got.length).toBeGreaterThan(0);
+      expect(hidden.got.every(f => f.t === "group-commit")).toBe(true);
+      const commits = hidden.got.map(f => (f as { commit: CommunityCommit }).commit);
+      expect(commits).toEqual(m.session.state.chain.slice(at + 1, at + 1 + commits.length));
+      expect(commits.some(c => c.k === "link")).toBe(false);
+      expect(JSON.stringify(hidden.got)).not.toContain(entry);
+    }
+    // A key no branch names is answered nothing.
+    const stranger = listener(net, "stranger");
+    await alice.session.handle(stranger.key, clone(sync));
+    await net.settle();
+    expect(stranger.got).toEqual([]);
+  });
+
+  it("a member let in on a branch that lost to a new link asks again at the link it came by", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const old = alice.session.entryKey;
+    // Alice replaces the link while Bob, cut off, lets Carol in by the old one.
+    bob.online = false;
+    const entry = await alice.session.replaceLink();
+    await net.settle();
+    bob.online = true; alice.online = false;
+    const carol = await net.admit(bob, "carol");
+    alice.online = true;
+    await net.meet(alice, bob);
+    expect(bob.session.topHash).toBe(alice.session.topHash);
+    // Carol is told her admission lost (the link commit is what makes it lose) and asks again by the link she knew.
+    await net.meet(bob, carol);
+    expect(carol.session.status).toBe("lost");
+    expect(carol.session.lostEntryKey).toBe(old);
+    expect(carol.session.lostEntryKey).not.toBe(entry);
+  });
+});
+
 describe("a leave ends one admission", { timeout: 60_000 }, () => {
   /** Alice's group with Bob and Carol; Carol left (Bob committed it) and was let in again. `first`: the commit of her leave. */
   async function rejoined() {

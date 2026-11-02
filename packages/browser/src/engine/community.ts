@@ -141,6 +141,19 @@ const KNOCK_SLOT_OPEN_MS = 20_000;
 /** How long a hub missing from the beacon still counts as one for the edges already up. */
 const HUB_GRACE_MS = 3 * 60_000;
 /**
+ * A member's look past its hubs (`tipCheck`): the beacon's head names a newer epoch than mine for this long, or readings
+ * of the beacon this far apart left my hub out while listing another (`HUB_MISSING_MS`, kept that long). A hub the
+ * admin removed whose app does not take that in keeps my edge up and lists itself: heard only from it, I stayed on the
+ * epoch before, and what I wrote went to it alone (bug hunt, 2026-11-02). Then another hub is asked too, for a while,
+ * and not again before `TIP_CHECK_EVERY_MS`.
+ */
+const TIP_AHEAD_MS = 45_000;
+const HUB_MISSING_MS = 20_000;
+const HUB_MISSING_KEPT_MS = 3 * 60_000;
+const TIP_CHECK_MS = 2 * 60_000;
+const TIP_CHECK_UP_MS = 20_000;
+const TIP_CHECK_EVERY_MS = 5 * 60_000;
+/**
  * A member cut off by a hub that left waits this long for the hub that takes it in its place before it may step up as
  * a hub itself: long enough for that hub's lobby reading (every 6 s once a hub left) and an edge, short enough that a
  * group that needs one more hub gets it.
@@ -249,6 +262,14 @@ interface Live {
   lobbyHeldUntil?: number;
   /** As a member: the hubs I want, and when I last wrote in each one's lobby. */
   myHubs: string[];
+  /**
+   * As a member: another hub asked too, to hear what mine may not pass on (`TIP_AHEAD_MS`): which, since when, its edge
+   * up since; when the last such look ended; since when the head is ahead of me; the readings that left my hub out.
+   */
+  tipCheck?: { key: string; since: number; upAt?: number };
+  tipCheckedAt?: number;
+  aheadSince?: number;
+  hubMissing?: number[];
   lobbyWrites: Map<string, number>;
   /** As a member: the lobby requests to read back (`LOBBY_CHECK_MS`): hub → when, and the time my request said. */
   lobbyChecks?: Map<string, { at: number; ts: number }>;
@@ -774,10 +795,10 @@ export class Communities {
       if (!live) continue;
       if (live.session.status === "lost" && !group.joining) {
         // My admission lost a race: I am nobody's hub and nobody's door any more; I knock again with
-        // the same key, and whoever is there lets me in.
+        // the same key, at the link I was let in by, and whoever is there lets me in.
         if (live.hub) { live.hub = false; live.leaving = 0; await this.publishBeacon(group.id, live, now, false).catch(() => {}); }
         await this.closeEntries(group.id);
-        await this.startJoining({ g: group.id, host: live.session.entryKey }, live.session.state.seedB64, now);
+        await this.startJoining({ g: group.id, host: live.session.lostEntryKey }, live.session.state.seedB64, now);
         continue;
       }
       if (live.session.status !== "active") {
@@ -991,6 +1012,7 @@ export class Communities {
         if ((gone.length || lost || bare) && !edges.has(key)) live.expect.add(key);
         if (gone.length || lost) (live.replacing ??= new Set()).add(key);
       }
+      await this.lookPast(groupId, live, others, kept, now);
       live.myHubs = kept;
       // Every hub I know is full or will not take me: I carry myself, if the beacon has room.
       live.forceHub = !kept.length && others.length < COMMUNITY_TOPOLOGY.maxHubs;
@@ -1033,7 +1055,7 @@ export class Communities {
     // Missing a secret or waiting on an epoch: ask whoever I am connected to, now and then, until it
     // comes. And every half minute anyway: a commit or a message that went by while an edge was
     // down leaves nothing waiting here to ask about, and the other side's sync says what it has.
-    if ((s.needsCatchUp && now - (live.lastCatchUp ?? 0) >= 5_000) || now - (live.lastCatchUp ?? 0) >= 30_000) {
+    if (((s.needsCatchUp || live.tipCheck?.upAt) && now - (live.lastCatchUp ?? 0) >= 5_000) || now - (live.lastCatchUp ?? 0) >= 30_000) {
       live.lastCatchUp = now;
       const ready = [...this.host.edges(groupId)].filter(([key, id]) => this.host.linkReady(id, 2) && !s.wasRemoved(key)).map(([key]) => key);
       for (const key of ready.slice(0, 3)) s.catchUp(key);
@@ -1063,6 +1085,47 @@ export class Communities {
       const id = entries.get(key);
       if (id && !this.host.linkReady(id, 2)) this.host.expectPeer(id);
     }
+  }
+
+  /**
+   * As a member: does my hub pass the chain on? A hub removed whose app does not take that in keeps my edge up and goes
+   * on listing itself, and I heard of the removal only from it (`TIP_AHEAD_MS`). The other hubs drop it from the beacon
+   * each time they write, and the head they carry names their newer epoch once someone speaks in it. On either, another
+   * hub is asked too (`kept`, for its lobby and edge) and the catch-up asks it with mine, until its edge has been up a
+   * while: the commit I lacked comes with it, and a hub the chain took out goes as after a leave (`gone`).
+   */
+  private async lookPast(groupId: string, live: Live, others: Hub[], kept: string[], now: number): Promise<void> {
+    const s = live.session, edges = this.host.edges(groupId);
+    const up = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
+    live.aheadSince = live.head && live.head.e > s.epoch ? live.aheadSince ?? now : undefined;
+    // A reading just now that lists another hub, fresh, and not mine, whose edge is up.
+    if (live.beaconAt === now) {
+      const listed = freshHubs(live.beacon, now);
+      if (kept.some(key => up(key) && !listed.some(h => h.key === key)) && listed.some(h => h.key !== s.myKey && !kept.includes(h.key))) (live.hubMissing ??= []).push(now);
+    }
+    if (live.hubMissing) live.hubMissing = live.hubMissing.filter(at => now - at <= HUB_MISSING_KEPT_MS);
+    const check = live.tipCheck;
+    if (check) {
+      if (up(check.key)) check.upAt ??= now;
+      const over = kept.includes(check.key) || live.hubsAvoided.has(check.key) || this.gone(live, check.key)
+        || (check.upAt !== undefined && now - check.upAt >= TIP_CHECK_UP_MS) || now - check.since >= TIP_CHECK_MS;
+      if (!over) { kept.push(check.key); return; }
+      live.tipCheck = undefined; live.tipCheckedAt = now; live.hubMissing = undefined;
+      // Not my hub after all: its edge goes, as a member keeps `hubsPerMember` (an edge up to a listed hub stays otherwise).
+      const id = edges.get(check.key);
+      if (id && !kept.includes(check.key)) await this.host.closeEdge(id);
+      return;
+    }
+    const missing = live.hubMissing ?? [];
+    const ahead = live.aheadSince !== undefined && now - live.aheadSince >= TIP_AHEAD_MS;
+    if (!kept.length || !(ahead || (missing.length >= 2 && missing[missing.length - 1] - missing[0] >= HUB_MISSING_MS))) return;
+    if (now - (live.tipCheckedAt ?? -Infinity) < TIP_CHECK_EVERY_MS) return;
+    // An edge up with another hub already: the catch-up asks it as well.
+    if ([...edges].some(([key, id]) => !kept.includes(key) && this.host.linkReady(id, 2) && !this.gone(live, key))) return;
+    const [key] = pickHubs(s.myKey, others, now, new Set([...kept, ...live.hubsAvoided.keys()]));
+    if (!key) return;
+    live.tipCheck = { key, since: now };
+    kept.push(key);
   }
 
   /**
@@ -1848,8 +1911,10 @@ export class Communities {
     // where it is does not know it is out (it was away): it is told so, with the commit that did it, and nothing more.
     if (live.session.wasRemoved(peerKey)) { if (f.t === "group-sync" && live.session.isMember) this.sayFarewell(groupId, live, peerKey, f); return; }
     // A key no commit I hold names (asking in my lobby, or listed as a hub) may be a member ahead of me: what brings
-    // me up to date is taken (commits and secrets; a message waits for them), and nothing else it says is heard.
+    // me up to date is taken (commits and secrets; a message waits for them), and nothing else it says is heard. One let
+    // in only on a branch that lost says where it is: the session hands it the commits that make it lose, and no more.
     const named = live.session.isRecentMember(peerKey);
+    if (!named && f.t === "group-sync") { await live.session.handle(peerKey, frame); return; }
     if (!named && f.t !== "group-commit" && f.t !== "group-msg" && f.t !== "group-secrets" && !(f.t === "group-secret" && f.to === live.session.myKey)) return;
     // Addressed to someone else: a hub routes it, whoever it is for.
     if ((f.t === "group-secret" || f.t === "group-entry") && typeof f.to === "string" && f.to !== live.session.myKey) {
