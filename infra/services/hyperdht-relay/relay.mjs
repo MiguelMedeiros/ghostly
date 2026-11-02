@@ -68,7 +68,9 @@ const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(
  * Every client shares the relay's one HyperDHT node, which refuses a second listen on a key it already listens
  * on (`KEYPAIR_ALREADY_USED`, whoever asked first). dht-relay 0.4.3 does not catch that rejection, so it would end
  * the process and every client with it. A listen the node refuses closes that server only: the client that holds
- * the key, and the asking client's other listens, go on.
+ * the key, and the asking client's other listens, go on. The asking client is told: dht-relay has no message for a
+ * refusal and its client drops a `closed` for a server that has had no `listening`, so the server says `listening` at
+ * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`.
  */
 function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
@@ -106,6 +108,8 @@ function clientDht(dht, limits, drop, gone, log) {
         const listen = server.listen.bind(server)
         server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone)).catch(error => {
           log('refused listen', error?.code ?? 'error')
+          server.address = () => ({ publicKey: keyPair?.publicKey, host: '0.0.0.0', port: 0 })
+          server.emit('listening')
           void server.close().catch(() => {})
         })
         server.once('close', () => { listening--; watchIdle() })

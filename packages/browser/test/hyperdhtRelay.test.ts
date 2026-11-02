@@ -328,6 +328,65 @@ it("refuses a listen on a key already listened on, by another client or the same
   }
 }, 60_000);
 
+/**
+ * A dht-relay server whose node answers every listen as `answer` says: `refused` as the relay answers a listen its
+ * node refuses (`listening` at no address, then `closed`), `closed later` with `listening` at an address and a
+ * `closed` once `close()` is called here.
+ */
+async function answeringRelay(answer: "refused" | "closed later") {
+  const { EventEmitter } = await import("node:events");
+  const { WebSocketServer } = await import("ws");
+  const { relay: serve } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  const servers: InstanceType<typeof EventEmitter>[] = [];
+  const dht = {
+    createServer() {
+      const server = Object.assign(new EventEmitter(), {
+        port: 0,
+        address: () => ({ host: answer === "refused" ? "0.0.0.0" : "127.0.0.1", port: server.port }),
+        listen() {
+          if (answer === "closed later") server.port = 49737;
+          setImmediate(() => { server.emit("listening"); if (answer === "refused") server.emit("close"); });
+          return Promise.resolve();
+        },
+        close() { server.emit("close"); return Promise.resolve(); },
+      });
+      servers.push(server);
+      return server;
+    },
+  };
+  const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  await new Promise(resolve => wss.once("listening", resolve));
+  wss.on("connection", ws => { void serve(dht, new WebSocketStream(false, ws)); });
+  return {
+    url: `ws://127.0.0.1:${(wss.address() as { port: number }).port}`,
+    closeServers: () => { for (const server of servers) server.emit("close"); },
+    close: () => new Promise<void>(resolve => { for (const ws of wss.clients) ws.terminate(); wss.close(() => resolve()); }),
+  };
+}
+
+it("fails at once when the relay refuses the listen, not after its own timeout, and says the endpoint is gone when the relay closes it later", async () => {
+  const refusing = await answeringRelay("refused");
+  try {
+    const started = Date.now();
+    await expect(createRelayedHyperEndpoint(seed(), refusing.url)).rejects.toThrow("The HyperDHT relay did not let this chat listen");
+    expect(Date.now() - started).toBeLessThan(5_000);
+  } finally {
+    await refusing.close();
+  }
+  const closing = await answeringRelay("closed later");
+  try {
+    const endpoint = await createRelayedHyperEndpoint(seed(), closing.url);
+    const gone = vi.fn();
+    endpoint.onUnavailable = gone;
+    closing.closeServers();
+    await vi.waitFor(() => expect(gone).toHaveBeenCalledTimes(1));
+    await endpoint.close();
+  } finally {
+    await closing.close();
+  }
+}, 30_000);
+
 it("frees the slot of a client that neither listens nor dials, one that stops answering pings, and a request that never ends, but keeps a browser", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { WebSocket: NodeWebSocket } = await import("ws");
