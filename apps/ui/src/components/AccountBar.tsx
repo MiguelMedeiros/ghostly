@@ -104,7 +104,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
   // Where there is one profile only, the place is the way to the Profile page.
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
-  const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? "Online" : "Offline"}${
+  const profileLabel = `${t("settings.profile")}: ${profile.name}${name ? `, ${name}` : `, ${t("common.anonymous")}`}, ${online ? t("services.online") : t("services.offline")}${
     canSwitch && glances.othersFresh ? `, ${t("profileSwitcher.othersNew")}` : canSwitch && glances.othersUnread ? `, ${t("profileSwitcher.othersUnread")}` : ""}`;
   const walletLabel = `${unseenSatsLabel(t("tabs.wallets"), unseen, t)}${backupDue ? `, ${t("wallet.backupReminder.label")}` : ""}`;
 
