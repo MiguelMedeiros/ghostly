@@ -362,8 +362,11 @@ export interface CommunityState {
   /** My next sequence number under the commit `seqH` (full hash). */
   seq: number;
   seqH: string;
-  /** Sender → `e:h16` → highest seen and the window below it. */
-  seen: Record<string, Record<string, { high: number; window: number[] }>>;
+  /**
+   * Sender → `e:h16` → highest seen and the window below it. `gap`: the lowest number missing below it, how many syncs
+   * asked for it and when the last did (`haveOf`); `floor`: what is missing at or below it is given up.
+   */
+  seen: Record<string, Record<string, { high: number; window: number[]; gap?: [number, number, number]; floor?: number }>>;
   nicks: Record<string, string>;
   /** Recent frames from everyone (mine included), oldest first. */
   store: CommunityMessageFrame[];
@@ -497,6 +500,9 @@ function readOriginal(o: unknown, frame: { e: number; h: string }): { e: number;
   if (e === frame.e && h === frame.h) return null;
   return { e: e as number, h, n: n as number };
 }
+/** Syncs that ask for a sender's missing frame, at least `GAP_ASK_MS` apart, before it is given up (`haveOf`). */
+const GAP_ASKS = 3;
+const GAP_ASK_MS = 5_000;
 /** Whether a frame, by its identity, is one this state took already (or is too old to be taken again). */
 function seenIn(seen: CommunityState["seen"], f: { s: string; e: number; h: string; n: number }): boolean {
   const entry = seen[f.s]?.[seenKey(f.e, f.h)];
@@ -1657,15 +1663,16 @@ export class CommunitySession {
     if (to) this.asked.set(to, this.hooks.clock?.() ?? Date.now());
     const have: Record<string, Record<string, number>> = {};
     const recent = new Set(this.state.store.map(f => seenKey(f.e, f.h)));
+    const now = this.hooks.clock?.() ?? Date.now();
     for (const [sender, byKey] of Object.entries(this.state.seen)) for (const [key, entry] of Object.entries(byKey)) {
       if (!recent.has(key)) continue;
-      (have[sender] ??= {})[key] = entry.high;
+      (have[sender] ??= {})[key] = this.haveOf(entry, now);
     }
     // The lasting frames I hold too: once their epoch has no frame left in the store, every answer handed me the pin
     // again, dropped as a duplicate (2026-10-16).
     for (const f of Object.values(this.state.lasting ?? {})) {
       const key = seenKey(f.e, f.h);
-      (have[f.s] ??= {})[key] = Math.max(f.n, have[f.s][key] ?? -1, this.state.seen[f.s]?.[key]?.high ?? -1);
+      (have[f.s] ??= {})[key] ??= Math.max(f.n, this.state.seen[f.s]?.[key]?.high ?? -1);
     }
     const secrets = this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c)).filter(h => this.state.secrets[h]).map(shortHash);
     const loc: string[] = [];
@@ -1843,6 +1850,25 @@ export class CommunitySession {
     this.persistSoon();
   }
   private isDuplicate(f: { s: string; e: number; h: string; n: number }): boolean { return seenIn(this.state.seen, f); }
+  /**
+   * What a sync says I have of a sender under a commit: below the lowest number missing, not the highest seen. A live
+   * frame raises the highest above that sender's frames still coming in a catch-up answer, and when the rest of the
+   * answer never came (my app closed or my edge dropped, or the hub's app closed), every later sync said I had them:
+   * they were lost for good (2026-10-18). A gap asked for by `GAP_ASKS` syncs at least `GAP_ASK_MS` apart that none
+   * filled (the stores rolled past it, a leaver's frames) is given up: each answer hands what is stored above it again.
+   */
+  private haveOf(entry: CommunityState["seen"][string][string], now: number): number {
+    const got = new Set(entry.window);
+    let gap = -1;
+    for (let n = Math.max(0, entry.high - COMMUNITY_LIMITS.replay + 1, (entry.floor ?? -1) + 1); n < entry.high; n++) if (!got.has(n)) { gap = n; break; }
+    if (gap < 0) { if (entry.gap) { delete entry.gap; this.persistSoon(); } return entry.high; }
+    const [asked, times, at] = entry.gap ?? [-1, 0, 0];
+    if (asked === gap && now - at < GAP_ASK_MS) return gap - 1;
+    this.persistSoon();
+    if (asked === gap && times >= GAP_ASKS) { delete entry.gap; entry.floor = entry.high; return entry.high; }
+    entry.gap = [gap, asked === gap ? times + 1 : 1, now];
+    return gap - 1;
+  }
   private markSeen(f: CommunityMessageFrame): void {
     const bySender = (this.state.seen[f.s] ??= {});
     const entry = (bySender[seenKey(f.e, f.h)] ??= { high: -1, window: [] });
