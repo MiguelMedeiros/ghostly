@@ -181,7 +181,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 ms-auto">
           {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
           <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }), undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
           <Button variant="danger" data-testid="app-store-remove" disabled={busy} loading={pending === "remove"} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved, "remove")}>{t("apps.store.remove")}</Button>
