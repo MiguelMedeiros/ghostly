@@ -13,6 +13,7 @@
   "devices": {
     "back": "{{name}} 已重新连接",
     "failed": "无法使用 {{name}}。通话继续使用原来的设备。",
+    "gone": "{{name}} 已断开。请连接其他设备以继续。",
     "lost": "{{name}} 已断开。正在使用默认设备。",
     "menu": "设备",
     "switchBack": "切换回去"

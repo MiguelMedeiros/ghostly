@@ -13,6 +13,7 @@
   "devices": {
     "back": "{{name}} è tornato",
     "failed": "Impossibile usare {{name}}. La chiamata continua con quello che aveva.",
+    "gone": "{{name}} scollegato. Collegane un altro per continuare.",
     "lost": "{{name}} scollegato. Uso quello predefinito.",
     "menu": "Dispositivi",
     "switchBack": "Torna a usarlo"
