@@ -294,7 +294,7 @@ function Links() {
                   {answer[device.key] && <span data-testid="device-standby-check-result" role="status" className="block">{answer[device.key]}</span>}
                 </p>
               </div>
-              {live && <button type="button" data-testid="device-standby-check" onClick={() => void check(device.key)} className="min-h-10 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
+              {live && <button type="button" data-testid="device-standby-check" onClick={() => void check(device.key)} className="min-h-10 max-md:min-h-11 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
             </li>
           );
         })}
