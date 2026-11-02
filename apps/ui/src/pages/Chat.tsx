@@ -211,6 +211,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     peerAck,
     forceRefresh,
     incomingCallSignal,
+    callHandledElsewhere,
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
@@ -280,6 +281,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const platform = useServicesPlatform();
   const webrtc = useWebRTC({
     incomingCallSignal,
+    callHandledElsewhere,
     publishCallSignal: setCallSignal,
     setFastPoll: setChatFastPoll,
     addCallEventMessage,

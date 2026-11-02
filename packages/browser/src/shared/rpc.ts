@@ -670,6 +670,8 @@ export type EngineEvent =
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }
+  /** Another page on this engine answered or declined the contact's call ringing in that chat: it rings here no more. */
+  | { kind: "call-handled"; linkId: string }
   /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat), already checked; never stored. */
   | { kind: "app-frame"; linkId: string; event: import("@ghostly/core").AppFrameEvent }
   /** The contact's app asks for a range of a file this side's app serves (`appServe`): the page that served it answers. */

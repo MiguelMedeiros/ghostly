@@ -583,6 +583,40 @@ describe("answering a call", () => {
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_missed")).toHaveLength(1);
   });
 
+  // The extension's tabs share one engine, and the call rang in each: the one that answered wrote the lines and sent the
+  // answer. The others rang on and then wrote "Missed call" into that history, with the call on.
+  it("stops ringing, with no line and nothing sent, once another page answered or declined it", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    expect(call.result.current.callState).toBe("incoming");
+
+    call.handledElsewhere();
+
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.fastPoll()).toBe(false);
+    act(() => { vi.advanceTimersByTime(RING_MS * 2); });
+    expect(lines(call)).toEqual(["call_received"]);
+    // Not even a cleared record: it would take back the answer the other page sent.
+    expect(call.published).toEqual([]);
+    // The call's later signals (its picture, its end) start nothing here.
+    call.receive(remote.hangUp(Date.now() + 1));
+    expect(call.result.current.callState).toBe("idle");
+    expect(lines(call)).toEqual(["call_received"]);
+  });
+
+  it("a call on here is not ended by another page's answer elsewhere", async () => {
+    const call = renderCall();
+    const { pc } = await offered(call);
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc.setIceState("connected"));
+
+    call.handledElsewhere();
+
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["o"]);
+  });
+
   it("a contact ringing again faster than a person redials after a missed call does not ring: each call is kept as missed", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
