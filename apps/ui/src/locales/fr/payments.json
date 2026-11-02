@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "Approuver le paiement",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin on-chain",
@@ -289,6 +290,7 @@
     "qrTooLong": "Trop long pour un QR code : copiez-le plutôt.",
     "redeem": "Encaisser",
     "redeemed": "Encaissé ✓",
+    "redeemedFee": "Encaissé ✓ (la mint a gardé {{fee}} comme frais)",
     "redeeming": "Encaissement…"
   },
   "mode": {

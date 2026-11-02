@@ -2,7 +2,8 @@ import { useLocation } from "react-router-dom";
 import { useI18n } from "../contexts/I18nContext";
 import { useIdentityAttention } from "../lib/identities";
 import { IdentitiesIcon } from "./identities/IdentitiesIcon";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { useMyAvatar } from "../hooks/useAvatars";
 import { ProfileBadge } from "./ProfileBadge";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
@@ -79,7 +80,8 @@ export function MobileTabBar() {
   const { pathname } = useLocation();
   const { t } = useI18n();
   const identityAttention = useIdentityAttention();
-  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  // Drawn again when it changes, not on every engine state: the tab bar is always on screen.
+  const canSwitch = usePlatformValue(() => !!servicesPlatform?.features.profiles);
   const switcher = useProfileSwitcher(canSwitch);
   const glances = useProfileGlances();
   const longPress = useLongPress(switcher.show);

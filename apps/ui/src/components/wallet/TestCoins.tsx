@@ -3,7 +3,7 @@ import { SEPOLIA_TEST_USDT } from "@ghostly/core";
 import type { WalletNetwork, WalletPlatform, WalletState } from "../../lib/platform";
 import type { WalletRail } from "../walletCardTypes";
 import { CASHU_MINT_SOURCE } from "../walletCardData";
-import { NetworkTag } from "../NetworkTag";
+import { NetworkTag, satsIn } from "../NetworkTag";
 import { Block, Button, Notice, Row, Section, Signed } from "./ui";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
@@ -97,7 +97,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
     try {
       const result = await wallet.testCoins({ type: rail, network, ...(wallet.lightningCard ? { card: wallet.lightningCard } : {}) });
       // The engine names its unit in English; sats are said in the app's language, a token by its symbol.
-      const unit = result.unit === "test sats" ? t("wallet.sats.testnet") : result.unit === "sats" ? t("wallet.sats.mainnet") : result.unit;
+      const unit = result.unit === "test sats" ? satsIn(t, "testnet", result.amount) : result.unit === "sats" ? satsIn(t, "mainnet", result.amount) : result.unit;
       // "+10,000" in its own left-to-right run (Signed): a bare "+" in a right-to-left line goes after the number.
       setGot(fillNodes(t(result.pending ? "wallet.testCoins.gotPending" : "wallet.testCoins.got", { unit }), { amount: <Signed sign="+" amount={formatAmount(result.amount, t.language)} /> }));
     } catch (e) {

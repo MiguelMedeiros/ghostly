@@ -312,8 +312,10 @@
     "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "本物のお金",
     "sats": "{{amount}} sats",
+    "sats_one": "{{amount}} sat",
     "testMoney": "テスト用のお金",
     "testSats": "{{amount}} テスト sats",
+    "testSats_one": "{{amount}} テスト sat",
     "usdtAddress": "USDT アドレス",
     "video": "🎬 動画 ({{duration}})",
     "voice": "🎤 ボイスメッセージ ({{duration}})"
@@ -325,6 +327,14 @@
     "noteMine": "「{{snippet}}」に{{emoji}}でリアクションしました",
     "notice": "あなたのメッセージにリアクションがありました",
     "react": "リアクション"
+  },
+  "refused": {
+    "fedimint": "Fedimint の ecash を受け取れませんでした：{{reason}}",
+    "payment": "支払いを受け取れませんでした：{{reason}}",
+    "sats": "{{amount}} sats を受け取れませんでした：{{reason}}",
+    "satsFedimint": "Fedimint で {{amount}} sats を受け取れませんでした：{{reason}}",
+    "testSats": "{{amount}} テスト sats を受け取れませんでした：{{reason}}",
+    "testSatsFedimint": "Fedimint で {{amount}} テスト sats を受け取れませんでした：{{reason}}"
   },
   "reply": {
     "cancel": "返信をキャンセル",

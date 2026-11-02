@@ -717,7 +717,7 @@ describe("errors in the app's language", () => {
 });
 
 describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
-  const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500" };
+  const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com", domain: "shop.example", chain: "mutinynet", network: "Testnet", amount: "1,000", fee: "1200", min: "5", max: "500", reason: "Lightning payment failed: no route" };
   const texts = (Object.keys(ENGINE_ERRORS) as EngineErrorCode[]).map((code) => [code, engineText(code, Object.fromEntries([...ENGINE_ERRORS[code].matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, SAMPLE[name]])))] as const);
 
   it.each(LANGUAGES.filter((l) => l !== "en"))("every one reads in %s, by a rule or by its code", (language) => {
@@ -741,6 +741,13 @@ describe("the engine's known errors (@ghostly/core ENGINE_ERRORS)", () => {
     expect(errorText(new Error("The fee exceeds your limit"), pt)).toBe("A taxa passa do seu limite");
     expect(errorText("Error: Unknown payment intent", pt)).toBe("Pagamento desconhecido");
     expect(errorText("Outcome unknown. Check the existing payment; do not send another.", translators.fr)).toContain("Résultat inconnu");
+  });
+
+  it("a mint's refusal of a Lightning payment says, in the language, that no sats left; its own words go behind the ⓘ (agents#2253)", () => {
+    const raw = engineText("lightningRefused", { reason: "Lightning payment failed: no route" });
+    expect(problemText(new Error(raw), translators.pt)).toEqual({ tone: "error", title: "A mint recusou este pagamento Lightning", next: "Nenhum sat saiu da sua carteira. Pode tentar de novo com segurança.", detail: raw });
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "The mint refused this Lightning payment", next: "No sats left your wallet. It's safe to try again.", detail: raw });
+    for (const language of LANGUAGES) expect(errorText(raw, translators[language]), language).not.toContain("no route");
   });
 
   it("a contact with no wallet, or none of its ways on, reads as the chat's payment line says it", () => {

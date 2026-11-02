@@ -214,6 +214,18 @@ describe("a contact refusing ecash", () => {
     expect(link.sendPaymentResult).toHaveBeenCalledWith(expect.objectContaining({ id: "in2", ok: false }));
     expect(host.storeMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "peer_7_refused", text: "Could not receive 10 sats: Ecash from other.example is not accepted" }));
   });
+  // agents#2252: the app says the line in its own language from these values, and test sats as test sats.
+  it("stores the refusal's values with its line, test sats for ecash of a test mint", async () => {
+    const { desk, wallet, host } = await setup([]);
+    Object.assign(wallet, { inspect: vi.fn(async () => ({ kind: "token", mint: "http://127.0.0.1:3338" })) });
+    wallet.receiveToken.mockRejectedValue(new Error("Ecash from 127.0.0.1 is not accepted"));
+    await desk.onPayment("l1", { id: "in3", timestamp: 8, amount: { value: "21", asset: "sat" }, endpoint: [ENDPOINT.cashu, "cashuBtoken"] });
+    expect(host.storeMessage).toHaveBeenCalledWith(expect.objectContaining({
+      id: "peer_8_refused", sender: "peer",
+      text: "Could not receive 21 test sats: Ecash from 127.0.0.1 is not accepted",
+      notice: { type: "paymentRefused", amount: 21, network: "testnet", reason: "Ecash from 127.0.0.1 is not accepted" },
+    }));
+  });
 });
 
 describe("test sats are never money", () => {
