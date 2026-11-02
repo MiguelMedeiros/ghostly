@@ -19,7 +19,12 @@ older Node it would start and then fail every push.
 ```bash
 node server.mjs                                   # port 49480
 PORT=8443 GHOSTLY_RELAY_ORIGINS=https://app.ghostly.tools node server.mjs
+curl -s http://127.0.0.1:49480/healthz           # {"ok":true,"forwarded":12,"failed":0,"refused":3,"tracked":4}
 ```
+
+`GET /healthz` answers 200 while the relay runs, with counts since the start: pushes forwarded, forwards the push
+service did not answer, requests refused, and addresses in the rate table. Point a monitor at it; any other `GET` is
+refused (405).
 
 Put it behind HTTPS (a tunnel or a reverse proxy) and enter its address in Settings. Behind a proxy, set
 `GHOSTLY_RELAY_PROXIES` to the number of proxies in front of it (`1` for one tunnel), so the limit counts each
