@@ -76,10 +76,11 @@ describe("the colour theme swatches, by keyboard", () => {
 /** Each theme block's custom properties by its selector list, and the 8 themes over their scheme's base (as mutedInk.test.ts). */
 const CSS = readFileSync(join(fileURLToPath(import.meta.url), "../../..", "index.css"), "utf8");
 function themes(): { name: string; vars: Record<string, string> }[] {
-  const all = [...CSS.matchAll(/((?::root[^{,]*,?\s*)+)\{([^}]*)\}/g)].map(match => ({
-    selector: match[1].trim(),
-    vars: Object.fromEntries([...match[2].matchAll(/--([\w-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()])),
-  }));
+  // Split by braces, no regex over the selector lists: the theme blocks hold no nested braces.
+  const all = CSS.split("}").map(chunk => chunk.split("{")).filter(parts => parts.length === 2).map(([selector, body]) => ({
+    selector: selector.replace(/\/\*[\s\S]*?\*\//g, "").split(";").pop()!.trim(),
+    vars: Object.fromEntries([...body.matchAll(/--([\w-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()])),
+  })).filter(block => block.selector.startsWith(":root"));
   const base = (scheme: "dark" | "light") => all.find(b => scheme === "dark" ? b.selector.startsWith(":root,") : b.selector.startsWith(':root[data-theme="light"],'))!.vars;
   return THEMES.flatMap(color => (["dark", "light"] as const).map(scheme => {
     const own = all.find(b => b.selector.includes(`[data-theme="${scheme}"][data-color-theme="${color}"]`))!.vars;
