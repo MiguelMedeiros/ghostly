@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, groupName } from "@ghostly/core";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { useGroupNameField } from "../hooks/useGroupNameField";
@@ -32,6 +32,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const backdrop = useBackdropDismiss(onClose);
+  useBackCloses(onClose);
   // An app with no transport for a group's links (no WebRTC, no native transport) could make the group and show its
   // link, but never let anyone in, nor reach a member (GroupConnection says the same once in). It says so here instead.
   const noLinks = useSyncExternalStore(subscribe, snapshot)?.transport.groupLinks === false;
