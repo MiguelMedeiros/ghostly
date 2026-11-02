@@ -111,12 +111,17 @@ describe("the contacts' apps this device opened", () => {
 });
 
 describe("the bridge's clear of its origin", () => {
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 
   it("erases each kind the app may keep, and one the browser refuses keeps none of the others", async () => {
     localStorage.setItem("probe-k", "1");
     sessionStorage.setItem("probe-s", "1");
     document.cookie = "probe-c=1; Path=/";
+    // The clock does not move while it clears: the cookie goes all the same.
+    vi.useFakeTimers({ toFake: ["Date"] });
     const deleted: string[] = [];
     vi.stubGlobal("indexedDB", {
       databases: async () => [{ name: "probe-db" }, { name: "other" }],
