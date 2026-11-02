@@ -18,6 +18,7 @@ export function moreMoneyPreview(money: MoreMoney, t: Translate = englishT): str
     case "bolt12": return line(t("chat.preview.lightningOffer"), money.offer.network, money.offer.amountSat);
     case "ark": return line(t("chat.preview.arkAddress"), money.request.network, money.request.amountSat);
     case "usdt": return line(t("chat.preview.usdtAddress"), money.request.network);
+    case "monero": return line(t("chat.preview.moneroAddress"), money.request.network);
   }
 }
 

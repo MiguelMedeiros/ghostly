@@ -184,6 +184,9 @@
     "maxFee": "Comisión máxima que aceptas ({{unit}})",
     "maxFeeAria": "Comisión máxima en {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly no tiene billetera Monero. Pagar abre este enlace en la billetera Monero de este dispositivo, donde lo revisas y lo envías.",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "Abre tu billetera Monero en este dispositivo",
     "networkNotStated": "Red no indicada",
     "noWallet": {
       "mainnet": "No tienes una cartera {{wallet}} Mainnet para pagar este dinero real.",
