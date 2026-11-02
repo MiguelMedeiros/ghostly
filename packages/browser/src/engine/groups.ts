@@ -2034,7 +2034,8 @@ export class Groups {
         // Back after a removal: who wrote the history I kept stays named, those gone since included.
         const session = this.sessions.get(g)!;
         for (const [key, nick] of Object.entries(group.formerNames ?? {})) if (!session.state.nicks[key]) await session.setNick(key, nick);
-        await this.event(g, "joined", `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
+        // Back in a group I kept (its chain checked above): the read note was said when I first joined, as in a community.
+        await this.event(g, "joined", group.invitation.genesis ? "You joined again" : `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
           this.lastKnock.delete(g); this.knocked.delete(g); this.knockingSince.delete(g);
