@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "الموافقة على الدفع",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin على السلسلة",
@@ -289,6 +290,7 @@
     "qrTooLong": "أطول من أن يتسع له رمز QR: انسخه بدلًا من ذلك.",
     "redeem": "استرداد",
     "redeemed": "تم الاسترداد ✓",
+    "redeemedFee": "تم الاسترداد ✓ (واحتفظت الـ mint بـ {{fee}} رسمًا لها)",
     "redeeming": "جارٍ الاسترداد…"
   },
   "mode": {

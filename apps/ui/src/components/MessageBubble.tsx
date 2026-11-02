@@ -34,6 +34,8 @@ import { useTransfer } from "../hooks/useServicesPlatform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
+import { paymentRefusal } from "@ghostly/browser/shared/refusals";
+import { refusedLine } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
 import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
@@ -1032,6 +1034,22 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {selection.selected && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7" /></svg>}
     </span>
   );
+
+  // A payment of the contact's this app refused: the app's own line, centred as a call's, never a bubble of theirs.
+  // From the row's values, or the English an older version stored under the same id (shared/refusals.ts).
+  const refusedPayment = paymentRefusal(message);
+  if (refusedPayment) {
+    return (
+      <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>
+        <div data-testid="refused-line" className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs bg-surface-alt/80 text-text-secondary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}>
+          <span>{refusedLine(refusedPayment, t)}</span>
+          <span className="text-text-muted text-[10px] whitespace-nowrap shrink-0">{time}</span>
+        </div>
+        {!choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} align="right" />}
+        {detailsPanel}
+      </div>
+    );
+  }
 
   if (isSystem && message.systemEvent?.type === "join") {
     const joiner = message.systemEvent.pubKey ?? "";

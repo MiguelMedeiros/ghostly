@@ -25,6 +25,7 @@
   },
   "bubble": {
     "amountSats": "{{amount}} sats",
+    "amountSats_one": "{{amount}} sat",
     "approve": "Aprobar pago",
     "balance": "{{amount}} {{unit}}",
     "bitcoinOnchain": "Bitcoin on-chain",
@@ -289,6 +290,7 @@
     "qrTooLong": "Demasiado largo para un código QR: cópialo.",
     "redeem": "Canjear",
     "redeemed": "Canjeado ✓",
+    "redeemedFee": "Canjeado ✓ (la mint se quedó con {{fee}} de comisión)",
     "redeeming": "Canjeando…"
   },
   "mode": {
