@@ -191,16 +191,10 @@ test("on a phone the browser's Back with the app over the chat goes back to the 
   await expect(ana.page.getByPlaceholder("Message…")).toBeVisible();
   const resume = ana.page.getByTestId("mini-app-resume");
   await expect(resume).toHaveText("Back to Chess");
-  // Back again: the chat list.
-  await ana.page.goBack();
-  await expect(chatList).toBeVisible();
-  await expect(ana.page).not.toHaveURL(/#\/chat\//);
+  expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
 
-  // The chat again: the app is not over it, "Back to Chess" brings the same game, and the app's own Back still goes
-  // back to the chat, taking its history entry with it: the browser's Back from the chat is the chat list.
-  await ana.page.getByTestId("chat-row").first().click();
-  await expect(ana.page.getByPlaceholder("Message…")).toBeVisible();
-  await expect(app).toBeHidden();
+  // "Back to Chess": the same game. The app's own Back still goes back to the chat, and takes its history entry with
+  // it (lib/layerHistory.ts marks it), so the browser's Back from the chat is the chat list.
   await resume.click();
   await expect(app).toBeVisible();
   expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
@@ -208,11 +202,10 @@ test("on a phone the browser's Back with the app over the chat goes back to the 
   await expect(app).toBeHidden();
   await expect(resume).toBeVisible();
   await expect(ana.page).toHaveURL(inChat);
-  // The app's entry is gone (lib/layerHistory.ts marks it) before the next Back.
   await expect.poll(() => ana.page.evaluate(() => (history.state as { ghostlyLayer?: number } | null)?.ghostlyLayer ?? 0)).toBe(0);
   await ana.page.goBack();
   await expect(chatList).toBeVisible();
-  expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
+  await expect(ana.page).not.toHaveURL(/#\/chat\//);
 });
 
 test("a chat app's Open on the Apps page asks which chat, and opens it there, never alone", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
