@@ -1,6 +1,9 @@
 {
   "copied": "Copiato",
   "copy": "Copia dettagli",
+  "linkHint": "Chiudila e questa scheda apre il tuo link.",
+  "linkTaken": "Il tuo link si è aperto in Ghostly nell'altra scheda.",
+  "linkTakenHint": "Continua lì. Puoi chiudere questa.",
   "lockdown": "La modalità di isolamento sembra attiva, e spegne ciò di cui Ghostly ha bisogno. Disattivala per questo sito, poi ricarica.",
   "lockdownHow": "Come disattivarla per questo sito",
   "lockdownOtherBrowser": "Altri browser su iPhone o iPad: Impostazioni › Privacy e sicurezza › Modalità di isolamento › Configura navigazione web, e disattivala per quel browser.",

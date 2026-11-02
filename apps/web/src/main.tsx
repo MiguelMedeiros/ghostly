@@ -14,7 +14,8 @@ import { restartWhenRestored } from "../../ui/src/lib/restoredPage";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
-import { OtherTab } from "../../ui/src/components/OtherTab";
+import { OtherTab, type OtherTabState } from "../../ui/src/components/OtherTab";
+import { forwardLink, linkInAddress, takeLinks } from "../../ui/src/lib/otherTabLink";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
@@ -75,19 +76,31 @@ if (missing.length) await cannotRun(missing);
 
 const peerLock = profile ? `ghostly-peer-${profile}` : "ghostly-peer";
 let isPeer = false;
+let stopLink = () => {};
 await becomeThePeer(peerLock, () => {
+  const draw = (state: OtherTabState) => root.render(<OtherTab state={state} t={profileTranslator()} />);
   // Opened for a share while the app runs in another tab: that tab gets it. Not at once: a share posted from this
   // same tab (the system opens the app's window for it) replaces a page that holds the lock a moment longer on its
   // way out, and a forward then would hand the share to that page as it goes. Once the lock is this tab's, it asks.
   const sharing = openedForShare();
   if (sharing) setTimeout(() => { if (!isPeer) forwardShare(); }, SHARE_FORWARD_AFTER_MS);
-  root.render(<OtherTab sharing={!!sharing} t={profileTranslator()} />);
+  // Opened for a link (an invite, a group's, a device code's): that tab opens it, with the same wait. Taken there, it
+  // leaves this address, so this tab opens nothing twice if it takes over later; until then, this tab keeps it.
+  const link = sharing ? null : linkInAddress(window.location.hash);
+  if (link) {
+    stopLink = forwardLink(peerLock, link, () => {
+      history.replaceState(history.state, "", `${window.location.pathname}${window.location.search}#/`);
+      draw("linkTaken");
+    }, SHARE_FORWARD_AFTER_MS);
+  }
+  draw(sharing ? "shared" : link ? "link" : "plain");
   // The lock is there but the browser refuses it: the same screen as a browser without it.
 }).catch((error: unknown) => (error instanceof PeerLockUnavailable ? cannotRun(["locks"], error) : Promise.reject(error)));
 // A tab that waited while another took a new version reloads into it instead, once that tab asked for the lock again.
 await mayStart(() => untilAskedFor(peerLock));
 
 isPeer = true;
+stopLink();
 // The device state, before anything of the profile starts (WISP 06 § The gate): one small local read. A profile that
 // never enrolled a device is `single` and goes on exactly as before. On a device that is not the active one nothing
 // below touches the profile: no session sync, no share taken in, and the host starts device-link-only mode.
@@ -100,6 +113,8 @@ if (gate.full) {
   // Shares for this tab: the one it opened for, and any another tab forwards while this one is the app.
   listenForShares();
   askForShare();
+  // Links another tab of this profile opened: here, as if this tab's address had changed to them.
+  takeLinks(peerLock, (route) => { window.location.hash = route; });
 }
 addEventListener("pagehide", () => webHost.announceDeparture());
 // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.

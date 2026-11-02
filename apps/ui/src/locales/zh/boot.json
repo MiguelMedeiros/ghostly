@@ -1,6 +1,9 @@
 {
   "copied": "已复制",
   "copy": "复制详情",
+  "linkHint": "关闭它，此标签页即可打开你的链接。",
+  "linkTaken": "你的链接已在另一个标签页的 Ghostly 中打开。",
+  "linkTakenHint": "请在那里继续。你可以关闭此标签页。",
   "lockdown": "锁定模式似乎已开启，它会关闭 Ghostly 所需的功能。请为此网站关闭它，然后重新加载。",
   "lockdownHow": "如何为此网站关闭它",
   "lockdownOtherBrowser": "iPhone 或 iPad 上的其他浏览器：设置 › 隐私与安全性 › 锁定模式 › 配置网页浏览，为该浏览器关闭。",
