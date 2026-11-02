@@ -22,7 +22,8 @@ const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJA
 const heads = {
   png: (w: number, h: number) => [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, w >>> 24, (w >>> 16) & 255, (w >>> 8) & 255, w & 255, h >>> 24, (h >>> 16) & 255, (h >>> 8) & 255, h & 255, 8, 6, 0, 0, 0],
   jpeg: (w: number, h: number) => [0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3],
-  gif: (w: number, h: number) => [...new TextEncoder().encode("GIF89a"), w & 255, w >> 8, h & 255, h >> 8, 0, 0, 0],
+  // The screen, then a frame of its size: a browser decodes the frame.
+  gif: (w: number, h: number) => [...new TextEncoder().encode("GIF89a"), w & 255, w >> 8, h & 255, h >> 8, 0, 0, 0, 0x2c, 0, 0, 0, 0, w & 255, w >> 8, h & 255, h >> 8, 0],
   webp: (w: number, h: number) => [...new TextEncoder().encode("RIFF"), 22, 0, 0, 0, ...new TextEncoder().encode("WEBPVP8X"), 10, 0, 0, 0, 0, 0, 0, 0,
     (w - 1) & 255, ((w - 1) >> 8) & 255, (w - 1) >> 16, (h - 1) & 255, ((h - 1) >> 8) & 255, (h - 1) >> 16],
 };
@@ -44,7 +45,7 @@ describe("MessageBubble: pictures", () => {
   it.each([
     ["an inline PNG", PNG],
     ["an inline JPEG", inline("jpeg", 640, 480)],
-    ["an inline GIF", "data:image/gif;base64,R0lGODlhAQABAAAAACw="],
+    ["an inline GIF", "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=="],
     ["an inline WebP", inline("webp", 320, 240)],
     ["an inline picture as large as a 50 MP photo", inline("png", 8160, 6120)],
     ["a Giphy GIF", "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif"],
@@ -61,6 +62,8 @@ describe("MessageBubble: pictures", () => {
     ["a JPEG", inline("jpeg", 60000, 60000)],
     ["a WebP", inline("webp", 16383, 16383)],
     ["a picture wider than a panorama", inline("png", 40000, 10)],
+    // A 1×1 screen whose frame is 12000×12000: the browser decodes the frame.
+    ["a GIF with a frame past its screen", `data:image/gif;base64,${btoa(String.fromCharCode(...heads.gif(1, 1).slice(0, 13), 0x2c, 0, 0, 0, 0, 0xe0, 0x2e, 0xe0, 0x2e, 0))}`],
   ])("does not draw an inline %s whose header declares more pixels than a picture file may have", (_, url) => {
     // About 90 characters that would take gigabytes once decoded, on every receiver's page as the bubble is drawn.
     const { container } = bubble({ text: url });
