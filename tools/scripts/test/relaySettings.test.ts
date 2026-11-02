@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readSettings as pushSettings } from "../../../infra/services/push-relay/relay.mjs";
-import { DEFAULT_LIMITS, readSettings as hyperdhtSettings } from "../../../infra/services/hyperdht-relay/relay.mjs";
+import { DEFAULT_LIMITS, networkOf as hyperdhtNetwork, readSettings as hyperdhtSettings } from "../../../infra/services/hyperdht-relay/relay.mjs";
 
 // covers: push.wake.send, transport.hyperdht-relay
 
@@ -51,6 +51,20 @@ describe("the relays' settings", () => {
     ["GHOSTLY_HYPERDHT_TESTNET", "three", "a whole number of 0 or more"],
   ])("the HyperDHT relay refuses %s=%j", (name, value, expected) => {
     expect(() => hyperdhtSettings({ [name]: value })).toThrow(`${name}=${JSON.stringify(value)}: expected ${expected}`);
+  });
+
+  it("the HyperDHT relay refuses a testnet with bootstrap nodes, which it would drop without a word", () => {
+    expect(() => hyperdhtSettings({ GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:1" }))
+      .toThrow('GHOSTLY_HYPERDHT_TESTNET="3": expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)');
+    expect(hyperdhtSettings({ GHOSTLY_HYPERDHT_TESTNET: "0", GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:1" }).bootstrap).toEqual(["127.0.0.1:1"]);
+  });
+
+  it("the HyperDHT relay's start line names its network: its own testnet, the bootstrap nodes or the public one", () => {
+    expect(hyperdhtNetwork({ testnet: 3, bootstrap: [] })).toBe("(own testnet of 3 nodes)");
+    expect(hyperdhtNetwork({ testnet: 1, bootstrap: [] })).toBe("(own testnet of 1 node)");
+    expect(hyperdhtNetwork({ bootstrap: ["127.0.0.1:1"] })).toBe("(bootstrap 1 node)");
+    expect(hyperdhtNetwork({ bootstrap: ["127.0.0.1:1", "127.0.0.1:2"] })).toBe("(bootstrap 2 nodes)");
+    expect(hyperdhtNetwork({ bootstrap: [] })).toBe("(public HyperDHT)");
   });
 
   it.each(["push-relay", "hyperdht-relay"])("stop %s's start with one line naming the setting, and exit 1", (service) => {

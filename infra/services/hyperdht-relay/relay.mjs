@@ -434,10 +434,16 @@ const list = value => (value ?? '').split(',').map(item => item.trim()).filter(B
 /** `GHOSTLY_RELAY_<LIMIT>` for a limit's name in DEFAULT_LIMITS: `clientsPerAddress` is GHOSTLY_RELAY_CLIENTS_PER_ADDRESS. */
 export const limitVariable = name => `GHOSTLY_RELAY_${name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase()}`
 
+const nodeCount = count => `${count} ${count === 1 ? 'node' : 'nodes'}`
+
+/** The HyperDHT network the relay's settings put it on, as the start line says it. */
+export const networkOf = ({ testnet, bootstrap }) =>
+  testnet ? `(own testnet of ${nodeCount(testnet)})` : bootstrap.length ? `(bootstrap ${nodeCount(bootstrap.length)})` : '(public HyperDHT)'
+
 /**
  * The relay's settings from its environment (server.mjs): PORT (49443), HOST (0.0.0.0), GHOSTLY_HYPERDHT_BOOTSTRAP,
  * GHOSTLY_HYPERDHT_TESTNET, GHOSTLY_RELAY_ORIGINS, GHOSTLY_RELAY_CLOUDFLARE (1 or 0), GHOSTLY_RELAY_PROXIES (0) and
- * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind.
+ * GHOSTLY_RELAY_<LIMIT>. Throws on one present but not of its kind, and on a testnet with bootstrap nodes.
  */
 export function readSettings (env) {
   const limits = {}
@@ -445,11 +451,15 @@ export function readSettings (env) {
     const value = setting(env, limitVariable(name), undefined, 'positive')
     if (value !== undefined) limits[name] = value
   }
+  const bootstrap = list(env.GHOSTLY_HYPERDHT_BOOTSTRAP)
+  const testnet = setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined
+  // startRelay drops the bootstrap nodes for the testnet: both set is one of them meant for another start.
+  if (testnet && bootstrap.length) throw new Error(`GHOSTLY_HYPERDHT_TESTNET=${JSON.stringify(env.GHOSTLY_HYPERDHT_TESTNET)}: expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)`)
   return {
     port: setting(env, 'PORT', 49443, 'port'),
     host: setting(env, 'HOST', '0.0.0.0', 'text'),
-    bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
-    testnet: setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined,
+    bootstrap,
+    testnet,
     origins: list(env.GHOSTLY_RELAY_ORIGINS),
     proxies: setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count'),
     cloudflare: setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag'),

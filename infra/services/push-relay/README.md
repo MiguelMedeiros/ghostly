@@ -13,6 +13,9 @@ to send its whole request; a request is weighed in bytes and one too large is re
 a header named twice. It learns that a push to an endpoint happened, when, and the sender's address; it never
 sees what the push says (only "wake up"), since that is encrypted to the contact's browser.
 
+It needs Node 18 or later (22 is what the HyperDHT relay's image runs): it posts with Node's own `fetch`, and on an
+older Node it would start and then fail every push.
+
 ```bash
 node server.mjs                                   # port 49480
 PORT=8443 GHOSTLY_RELAY_ORIGINS=https://app.ghostly.tools node server.mjs
