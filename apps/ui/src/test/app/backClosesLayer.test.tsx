@@ -180,6 +180,26 @@ describe("Back with a layer open", () => {
     expect(layerEntry()).toBe(false);
   });
 
+  it("a layer closed as the page starts to unload (Escape, then the browser's reload) starts no traversal that would cancel it; a key after it puts the history right", async () => {
+    await inChat();
+    fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await waitFor(() => expect(layerEntry()).toBe(true));
+    const go = vi.spyOn(history, "go");
+    // Escape closes the dialog, and the reload's beforeunload comes before the history is settled.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    window.dispatchEvent(new Event("beforeunload"));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // On Chromium a traversal landing after the reload started aborts it (net::ERR_ABORTED in the e2e specs).
+    expect(go).not.toHaveBeenCalled();
+
+    // The page stayed (a download, a wallet's link): the next key puts the history right.
+    fireEvent.keyDown(document.body, { key: "Shift" });
+    await waitFor(() => expect(layerEntry()).toBe(false));
+    expect(go).toHaveBeenCalledOnce();
+    expect(where()).toBe("/chat/s1");
+    go.mockRestore();
+  });
+
   // Last: the page is on its way out after it, and the history stays as it is.
   it("a reload into the gate as the dialog under it goes (a move's last step) goes back over its entry first, never after the reload", async () => {
     const user = await inChat();

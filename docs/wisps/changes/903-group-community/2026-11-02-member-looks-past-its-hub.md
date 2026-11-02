@@ -1,0 +1,1 @@
+A member no longer hears the chain from its one hub alone: when the beacon's head names a newer epoch than its own for 45 seconds, or the beacon keeps listing other hubs but not its own, it asks another hub too and catches up from it, so a removed hub whose app ignores the removal no longer keeps its members on the epoch before. No change on the wire.

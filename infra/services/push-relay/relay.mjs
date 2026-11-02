@@ -79,9 +79,11 @@ export function clientAddress (req, proxies = 0) {
 
 /**
  * What a limit counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its /64, the block
- * one subscriber usually holds whole.
+ * one subscriber usually holds whole. A port some proxies write with it (`203.0.113.7:51234`, `[2001:db8::1]:51234`)
+ * and IPv6 brackets are dropped first: each connection has a new port, so keyed with it the limit never applies.
  */
 export function rateKey (address) {
+  address = /^\[([^\]]+)\](?::\d+)?$/.exec(address)?.[1] ?? /^(\d+\.\d+\.\d+\.\d+):\d+$/.exec(address)?.[1] ?? address
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
   if (mapped) return mapped[1]
   if (!address.includes(':')) return address
