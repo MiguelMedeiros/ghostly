@@ -4,7 +4,8 @@ import { DEFAULT_LIMITS, limitVariable, readSettings, startRelay } from './relay
 //   PORT (49443), HOST (0.0.0.0)
 //   GHOSTLY_HYPERDHT_BOOTSTRAP  "host:port,…" instead of the public bootstrap nodes
 //   GHOSTLY_HYPERDHT_TESTNET    size of an in-process HyperDHT network instead of any other (e2e)
-//   GHOSTLY_RELAY_ORIGINS       allowed Origin values, comma-separated (empty: any)
+//   GHOSTLY_RELAY_ORIGINS       allowed origins, comma-separated (empty: any): https://app.example, read as a browser
+//                               sends it (no path; case, a default port and a trailing / do not matter)
 //   GHOSTLY_RELAY_CLOUDFLARE    "1" behind Cloudflare (a tunnel): each client counts by CF-Connecting-IP
 //   GHOSTLY_RELAY_PROXIES       reverse proxies in front of it (0): each client counts by the X-Forwarded-For entry
 //                               that many from the end. A client that reaches the port past them could write either
@@ -22,8 +23,10 @@ const relay = await startRelay({
 })
 // What it counts clients by, and each limit set away from its default: a setting meant to apply shows that it does.
 const counting = settings.cloudflare ? 'clients by CF-Connecting-IP' : settings.proxies ? `clients behind ${settings.proxies} ${settings.proxies === 1 ? 'proxy' : 'proxies'}` : 'clients by their own address'
+// Which pages it serves: a misspelt origin shows here, not only as browsers turned away.
+const serves = settings.origins.length ? `origins ${settings.origins.join(' ')}` : 'any origin'
 const changed = Object.entries(settings.limits).filter(([name, value]) => value !== DEFAULT_LIMITS[name]).map(([name, value]) => `${limitVariable(name)}=${value}`)
-console.log(new Date().toISOString(), `Ghostly HyperDHT relay on port ${relay.port}`, relay.bootstrap.length ? `(bootstrap ${relay.bootstrap.length} nodes)` : '(public HyperDHT)', [`on ${settings.host}`, counting, ...(changed.length ? [`limits ${changed.join(' ')}`] : [])].join(', '))
+console.log(new Date().toISOString(), `Ghostly HyperDHT relay on port ${relay.port}`, relay.bootstrap.length ? `(bootstrap ${relay.bootstrap.length} nodes)` : '(public HyperDHT)', [`on ${settings.host}`, counting, ...(changed.length ? [`limits ${changed.join(' ')}`] : []), serves].join(', '))
 
 // One client's request that fails where nothing catches it must not end the relay for every other client.
 process.on('unhandledRejection', error => console.log(new Date().toISOString(), 'unhandled', error?.code ?? error?.name ?? 'error'))

@@ -261,7 +261,7 @@ export function addressKey(address) {
  * 503 while its routing table is empty.
  *
  * options: port, host, bootstrap (host:port list), testnet (size of an in-process HyperDHT network, for tests
- * and e2e), limits, origins (allowed `Origin` values; empty allows any), proxies, cloudflare (see addressOf), log.
+ * and e2e), limits, origins (allowed `Origin` values, see originOf; empty allows any), proxies, cloudflare (see addressOf), log.
  */
 export async function startRelay(options = {}) {
   const limits = { ...DEFAULT_LIMITS, ...options.limits }
@@ -291,7 +291,9 @@ export async function startRelay(options = {}) {
   const nodes = new Set()
   const perAddress = new Map()
   const stats = { accepted: 0, refused: 0, dropped: 0 }
-  const origins = new Set(options.origins ?? [])
+  // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
+  const origins = new Set((options.origins ?? []).map(origin => originOf(origin) ?? origin))
+  const refusedOrigin = originRefusals(log)
 
   // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
   const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
@@ -310,10 +312,12 @@ export async function startRelay(options = {}) {
     const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
     const origin = request.headers.origin
     const refuse = (status, why) => {
-      stats.refused++; log('refused', why)
+      stats.refused++
+      // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
+      if (why) log('refused', why)
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
-    if (origins.size && !origins.has(origin)) return refuse('403 Forbidden', 'origin')
+    if (origins.size && !origins.has(origin)) { refusedOrigin(origin); return refuse('403 Forbidden') }
     if (clients.size >= limits.clients) return refuse('503 Service Unavailable', 'full')
     if ((perAddress.get(address) ?? 0) >= limits.clientsPerAddress) return refuse('429 Too Many Requests', 'address')
     wss.handleUpgrade(request, socket, head, ws => accept(ws, address))
@@ -402,6 +406,43 @@ export async function startRelay(options = {}) {
 }
 
 /**
+ * An entry of GHOSTLY_RELAY_ORIGINS as a browser writes it in `Origin`: scheme and host in lower case, a default port
+ * left out, no trailing `/` (`HTTPS://App.Example:443/` is `https://app.example`). An extension's or an app's own
+ * scheme (`chrome-extension://<id>`, `tauri://localhost`) keeps its host as written. Null for an entry that is no
+ * origin (not a URL, no host, a user, a path past `/`, a query, a fragment, `file:`): a browser never sends one, so
+ * such an entry would turn every browser away.
+ */
+export function originOf (entry) {
+  let url
+  try { url = new URL(entry) } catch { return null }
+  if (url.protocol === 'file:' || !url.host || url.username || url.password || !['', '/'].includes(url.pathname) || /[?#]/.test(entry)) return null
+  return url.origin !== 'null' ? url.origin : `${url.protocol}//${url.host}`
+}
+
+/**
+ * Logs a refused `Origin` (`refused origin "https://app.example"`, `(none)` for a request without one), each value
+ * once an hour and at most `most` values an hour, so a misspelt GHOSTLY_RELAY_ORIGINS shows in the log and a client
+ * sending a new value each time cannot flood it.
+ */
+export function originRefusals (log, { most = 16, now = Date.now } = {}) {
+  let seen = new Set()
+  let since = now()
+  let full = false
+  return origin => {
+    if (now() - since >= 3_600_000) { seen = new Set(); since = now(); full = false }
+    const shown = origin === undefined ? '(none)' : JSON.stringify(String(origin).slice(0, 200))
+    if (seen.has(shown)) return
+    if (seen.size >= most) {
+      if (!full) log('refused', 'origin', `(more than ${most} values this hour, not logged)`)
+      full = true
+      return
+    }
+    seen.add(shown)
+    log('refused', 'origin', shown)
+  }
+}
+
+/**
  * One setting from the environment: absent gives `fallback`; present, it must read as `kind` says, or the start stops
  * with one line naming it (an empty `PORT=` in an env file, `GHOSTLY_RELAY_PROXIES=one`), never a quiet default.
  */
@@ -415,6 +456,12 @@ function setting (env, name, fallback, kind) {
   if (kind === 'positive') return /^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number above 0')
   if (kind === 'flag') return value === '1' ? true : value === '0' ? false : fail('1 or 0')
   if (kind === 'text') return value || fail('a value (leave it out for the default)')
+  if (kind === 'origins') {
+    const entries = list(value)
+    const wrong = entries.find(entry => !originOf(entry))
+    if (wrong !== undefined) fail(`origins like https://app.example, comma-separated: a scheme, a host and a port only (${JSON.stringify(wrong)} is not one)`)
+    return [...new Set(entries.map(originOf))]
+  }
   return value
 }
 
@@ -439,7 +486,7 @@ export function readSettings (env) {
     host: setting(env, 'HOST', '0.0.0.0', 'text'),
     bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
     testnet: setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined,
-    origins: list(env.GHOSTLY_RELAY_ORIGINS),
+    origins: setting(env, 'GHOSTLY_RELAY_ORIGINS', [], 'origins'),
     proxies: setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count'),
     cloudflare: setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag'),
     limits,

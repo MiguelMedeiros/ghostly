@@ -1,7 +1,7 @@
 import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { PUSH_SERVICE_HOSTS } from "../../../packages/core/src/webPush";
-import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, rateKey, readRelayRequest, startRelay } from "../../../infra/services/push-relay/relay.mjs";
+import { DEFAULT_LIMITS, PUSH_HOSTS, clientAddress, originRefusals, rateKey, readRelayRequest, startRelay } from "../../../infra/services/push-relay/relay.mjs";
 
 // covers: push.wake.send
 
@@ -74,6 +74,49 @@ describe("the push relay (infra/services/push-relay)", () => {
     expect(bad.status).toBe(400);
     const limited = await fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: request({ endpoint: "https://example.com/" }) });
     expect(limited.status).toBe(429);
+  });
+
+  it("lets a browser in whose origin was set with a trailing slash, in upper case or with its default port", async () => {
+    const relay = await startRelay({ origins: ["HTTPS://App.Ghostly.Tools:443/"] });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    const preflight = await fetch(url, { method: "OPTIONS", headers: { Origin: "https://app.ghostly.tools" } });
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("https://app.ghostly.tools");
+    // Past the origin check: refused for its endpoint, not for where it came from.
+    expect((await fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: request({ endpoint: "https://example.com/" }) })).status).toBe(400);
+  });
+
+  it("answers a refused origin with a 403 the page can read, and logs that origin once", async () => {
+    const lines: string[] = [];
+    const relay = await startRelay({ origins: ["https://app.ghostly.tools"], log: (...words: unknown[]) => { lines.push(words.join(" ")); } });
+    close = relay.close;
+    const url = `http://127.0.0.1:${relay.port}/`;
+    for (let n = 0; n < 3; n++) {
+      // The app posts JSON, so the browser sends the POST only after a preflight it may read.
+      const preflight = await fetch(url, { method: "OPTIONS", headers: { Origin: "https://app.ghostly.tools.example" } });
+      expect(preflight.status).toBe(204);
+      expect(preflight.headers.get("access-control-allow-origin")).toBe("https://app.ghostly.tools.example");
+      expect(preflight.headers.get("access-control-allow-headers")).toBe("Content-Type");
+      const refused = await fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools.example", "Content-Type": "application/json" }, body: request() });
+      expect(refused.status).toBe(403);
+      expect(refused.headers.get("access-control-allow-origin")).toBe("https://app.ghostly.tools.example");
+      expect(await refused.json()).toEqual({ error: "Origin not allowed" });
+    }
+    expect((await fetch(url, { method: "POST", body: request() })).status).toBe(403);
+    expect(lines.filter((line) => line.startsWith("refused origin"))).toEqual(['refused origin "https://app.ghostly.tools.example"', "refused origin (none)"]);
+    expect(lines.filter((line) => line.startsWith("forwarded"))).toEqual([]);
+  });
+
+  it("logs each refused origin once an hour and at most a few an hour, so a crawler cannot flood the log", () => {
+    const lines: string[] = [];
+    let now = 0;
+    const refused = originRefusals((...words: unknown[]) => { lines.push(words.join(" ")); }, { most: 2, now: () => now });
+    for (const origin of ["https://a.example", "https://a.example", "https://b.example", "https://c.example", "https://d.example"]) refused(origin);
+    expect(lines).toEqual(['refused origin "https://a.example"', 'refused origin "https://b.example"', "refused origin (more than 2 values this hour, not logged)"]);
+    now = 3_600_000;
+    refused("https://a.example");
+    expect(lines.at(-1)).toBe('refused origin "https://a.example"');
+    expect(lines).toHaveLength(4);
   });
 
   it("limits each client behind a proxy apart, not the proxy as one", async () => {

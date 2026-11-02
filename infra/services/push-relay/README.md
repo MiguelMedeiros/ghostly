@@ -24,6 +24,13 @@ client's address from `X-Forwarded-For` rather than the proxy's; without it the 
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
 
+`GHOSTLY_RELAY_ORIGINS` lists the pages allowed to use it, comma-separated, each an origin as a browser sends it:
+scheme, host and a port only (`https://app.ghostly.tools`, `http://localhost:5173`). Case, a default port (`:443`)
+and a trailing `/` do not matter; an entry with a path, a query or no scheme (`https://app.ghostly.tools/chat`,
+`app.ghostly.tools`) stops the start. Left out, any page may use it. A page it refuses gets a 403 it can read
+(`{"error":"Origin not allowed"}`), and the log says `refused origin "<origin>"` once an hour per origin, for at most
+16 origins an hour. It keeps other websites from using the relay; it is no defence against other programs.
+
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`) stops the start with one
-line that names it; leave a setting out for its default. The start line says how many proxies it counts and where it
-listens.
+line that names it; leave a setting out for its default. The start line says how many proxies it counts, where it
+listens and which origins it serves (`any origin` when none is set).
