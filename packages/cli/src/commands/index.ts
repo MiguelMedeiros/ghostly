@@ -80,6 +80,12 @@ export function idSlot(command: { args?: string[] }): (index: number) => boolean
   return (index) => at(index) && (shift === 0 || index + shift >= names.length || at(index + shift));
 }
 
+/** Whether a command's last positional takes the rest of the line as words, not ids: a text, a name, a path, emoji. */
+export function takesText(command: { args?: string[] }): boolean {
+  const last = command.args?.at(-1)?.replace(/\?$/, "");
+  return !!last?.endsWith("...") && !ID_ARGS.has(last.slice(0, -3));
+}
+
 /**
  * The placeholders a usage line shows for its positionals, in order: `chat pay <chat> <sats> [--memo t]` →
  * ["chat", "sats"]. One that is not a plain `<x>` (`[text... | --text <text>]`) is undefined; the flags end them.

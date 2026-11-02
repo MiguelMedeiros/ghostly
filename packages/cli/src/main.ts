@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
+import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
-import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
+import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, since as sinceOf, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
@@ -15,7 +15,7 @@ import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
-import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
+import { completeWithPipedEvidence, identityFields, identitySecretFields, secretsFromStdin, secretValuesWarning, settingValue, textFromStdin } from "./secretInput";
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
@@ -408,7 +408,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
     translate,
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
-  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
+  ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick. <json-value> - (or none, piped) reads it from stdin: a TURN password stays out of ps"],
   ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
@@ -439,7 +439,65 @@ function beside(rows: [string, string][], more: [string, string][]): [string, st
   return out;
 }
 
-function help(): string {
+/**
+ * The width the help is laid out to: $COLUMNS, else the terminal's when stdout is one (80 when it says nothing), else
+ * none: piped, each row stays one line for grep. At a fixed 58-column usage, 170 of the 195 lines of `ghostly help` passed
+ * 80 columns, and an 80-column terminal broke every summary mid-word into column 0.
+ */
+function helpColumns(): number | undefined {
+  const given = Number(process.env.COLUMNS);
+  if (Number.isInteger(given) && given > 0) return given;
+  return process.stdout.isTTY ? process.stdout.columns || 80 : undefined;
+}
+
+/** `prefix`, then `text`'s words in lines of at most `columns` (a longer word alone), each after the first `indent` in. */
+function wrap(prefix: string, text: string, columns: number, indent: number): string[] {
+  const lines: string[] = [];
+  let line = prefix, started = false;
+  for (const word of text.trim().match(/\S+ */g) ?? []) {
+    if (started && (line + word.trimEnd()).length > columns) { lines.push(line.trimEnd()); line = " ".repeat(indent); }
+    line += word;
+    started = true;
+  }
+  return [...lines, line.trimEnd()];
+}
+
+/** Lines of text as written, or, laid out to `columns` and one of them wider, as one paragraph wrapped at their indent. */
+function paragraph(lines: string[], columns: number | undefined): string[] {
+  if (columns === undefined || lines.every((line) => line.length <= columns)) return lines;
+  const indent = lines[0].length - lines[0].trimStart().length;
+  return wrap(" ".repeat(indent), lines.join(" "), columns, indent);
+}
+
+/**
+ * A help row: `label` (a usage or an option, with its indent), its `text` from column `at`, or under the label when the
+ * label takes that room. Laid out to `columns`, the text wraps at its column; with under 40 columns left for it (an
+ * 80-column terminal beside the 58 of a usage), it goes under its label, 2 further in.
+ */
+function helpRow(label: string, text: string, at: number, columns: number | undefined): string[] {
+  const long = label.length > at - 2;
+  if (columns === undefined) return [long ? `${label}\n${" ".repeat(at)}${text}` : label.padEnd(at) + text];
+  const indent = label.length - label.trimStart().length;
+  const labelLines = wrap(" ".repeat(indent), label, columns, indent + 4);
+  if (columns - at < 40) return [...labelLines, ...wrap(" ".repeat(indent + 2), text, columns, indent + 2)];
+  if (long) return [...labelLines, ...wrap(" ".repeat(at), text, columns, at)];
+  return wrap(label.padEnd(at), text, columns, at);
+}
+
+/**
+ * What `ghostly` says first in a Ghostly folder with no profile yet: where to start, as the README's "Five minutes"
+ * does, before the whole list. `$ ` keeps the lines apart from the list's commands.
+ */
+const FIRST_STEPS = [
+  "First steps:",
+  "  $ ghostly invite create --label alice   make an invite for a contact",
+  "  $ ghostly invite join -                 join one (pasted on stdin)",
+  "  $ ghostly daemon --detach               keep the profile online",
+  "  $ ghostly help <command>                one command and its options",
+];
+
+function help(firstSteps = false): string {
+  const columns = helpColumns();
   const rows: [string, string][] = [
     ...beside([
       ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
@@ -452,26 +510,31 @@ function help(): string {
   ];
   const width = 58;
   return [
-    `ghostly ${VERSION}: Ghostly for bots and terminals, the app's own engine without a screen.`,
+    ...paragraph([`ghostly ${VERSION}: Ghostly for bots and terminals, the app's own engine without a screen.`], columns),
     "",
-    "Usage: ghostly <command> [options]   (JSON on stdout; errors as {\"error\":{code,message}} with an exit code)",
+    ...(firstSteps ? [...FIRST_STEPS, ""] : []),
+    ...paragraph(["Usage: ghostly <command> [options]   (JSON on stdout; errors as {\"error\":{code,message}} with an exit code)"], columns),
     "",
-    ...rows.map(([usage, summary]) => `  ${usage.length > width ? usage + "\n  " + " ".repeat(width) : usage.padEnd(width)}  ${summary}`),
+    ...rows.flatMap(([usage, summary]) => helpRow(`  ${usage}`, summary, width + 4, columns)),
     "",
     "Options for every command:",
-    ...Object.entries(GLOBAL_OPTIONS).map(([name, o]) => `  --${name}${o.short ? `, -${o.short}` : ""}`.padEnd(24) + o.description),
+    ...Object.entries(GLOBAL_OPTIONS).flatMap(([name, o]) => helpRow(`  --${name}${o.short ? `, -${o.short}` : ""}`, o.description, 24, columns)),
     "",
-    "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
-    "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real, 130 stopped with Ctrl-C.",
-    "More: https://ghostly.tools/cli, or the README.md beside this CLI.",
+    ...paragraph([
+      "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
+      "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real, 130 stopped with Ctrl-C.",
+    ], columns),
+    ...paragraph(["More: https://ghostly.tools/cli, or the README.md beside this CLI."], columns),
   ].join("\n");
 }
 
+const EVERY_COMMAND = "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h";
+
 /** What `ghostly help help` answers. */
-const HELP_USAGE = [
+const helpUsage = (columns: number | undefined) => [
   "Usage: ghostly help [<command>...]", "",
-  "  Help for every command, or for one command or a group of them (also ghostly <command> --help)", "",
-  "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h",
+  ...paragraph(["  Help for every command, or for one command or a group of them (also ghostly <command> --help)"], columns), "",
+  ...paragraph([EVERY_COMMAND], columns),
 ].join("\n");
 
 /** Every command's help row: usage, summary and, for the table and text commands, their options. */
@@ -499,14 +562,15 @@ function commandWords(usage: string): string[] {
  */
 export function commandHelp(words: readonly string[]): string {
   // `help` is no command of the tables: its own usage, rather than "Unknown command: help".
-  if (words[0] === "help") return HELP_USAGE;
+  const columns = helpColumns();
+  if (words[0] === "help") return helpUsage(columns);
   const named = (list: readonly string[]) => helpRows().filter((row) => { const own = commandWords(row.usage); return list.every((word, i) => own[i] === word); });
   // Arguments after the command's words (`ghostly send bob hi --help`) are not part of its name.
   const given = words;
   let rows = named(words);
   while (!rows.length && words.length > 1) rows = named(words = words.slice(0, -1));
   const asked = words.join(" ");
-  if (!rows.length) throw new CliError("usage", `Unknown command: ${asked || '""'} (ghostly help)`);
+  if (!rows.length) throw unknownCommand(given[0], given[1], given[2]);
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
   // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
   // says, not the group's list with exit 0.
@@ -515,29 +579,29 @@ export function commandHelp(words: readonly string[]): string {
   // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
   // own options were shown nowhere.
   for (const row of exact) {
-    lines.push(`Usage: ghostly ${row.usage}`, "", `  ${row.summary}`);
+    lines.push(...(columns === undefined ? [`Usage: ghostly ${row.usage}`] : wrap("Usage: ghostly ", row.usage, columns, 4)), "", ...paragraph([`  ${row.summary}`], columns));
     const options = Object.entries(row.options ?? {}).filter(([, o]) => o.description);
     if (options.length) {
       lines.push("", "Options:");
       const labels = options.map(([name, o]) => `  --${o.negatedOnly ? "no-" : ""}${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`);
       // At least two spaces between an option and its text, however long the option.
       const width = Math.max(26, ...labels.map((label) => label.length + 2));
-      options.forEach(([, o], i) => lines.push(labels[i].padEnd(width) + o.description));
+      options.forEach(([, o], i) => lines.push(...helpRow(labels[i], o.description, width, columns)));
     }
     // A text that starts with a dash goes after `--`, and so does everything else on the line.
     if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
-      lines.push("", "  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --.");
+      lines.push("", ...paragraph(["  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --."], columns));
     lines.push("");
   }
   const rest = rows.filter((row) => !exact.includes(row));
   if (rest.length) {
     const width = Math.min(58, Math.max(...rest.map((row) => row.usage.length)));
     const count = `${rest.length}${exact.length ? " more" : ""} command${rest.length === 1 ? "" : "s"}`;
-    lines.push(`ghostly ${asked}: ${count} (ghostly help ${asked} <command> for one)`, "");
-    for (const row of rest) lines.push(`  ${row.usage.length > width ? row.usage + "\n  " + " ".repeat(width) : row.usage.padEnd(width)}  ${row.summary}`);
+    lines.push(...paragraph([`ghostly ${asked}: ${count} (ghostly help ${asked} <command> for one)`], columns), "");
+    for (const row of rest) lines.push(...helpRow(`  ${row.usage}`, row.summary, width + 4, columns));
     lines.push("");
   }
-  lines.push("Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h");
+  lines.push(...paragraph([EVERY_COMMAND], columns));
   return lines.join("\n");
 }
 
@@ -550,7 +614,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true } },
   };
-  const parsed = parseArgs(argv, specs[sub ?? ""] ?? {});
+  const parsed = parseArgs(argv, specs[sub ?? ""] ?? {}, undefined, { command: commandOf("profile", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
   switch (sub) {
@@ -715,7 +779,7 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
 
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
-  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
+  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } }, undefined, { command: commandOf("daemon", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
@@ -961,7 +1025,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
     from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
     translate: { type: "string", description: "" },
-  });
+  }, undefined, { command: "listen" });
   // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
   noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
   // Before the profile opens: a unit file's `--webhook "$URL"` with URL unset ran a plain listen, no hook and no word.
@@ -1083,7 +1147,7 @@ async function listenCommand(argv: string[]): Promise<void> {
 }
 
 async function engineCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } });
+  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } }, undefined, { command: "engine" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (parsed.options.list) {
@@ -1116,14 +1180,18 @@ async function engineCommand(argv: string[]): Promise<void> {
 }
 
 async function settingsCommand(sub: string | undefined, argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } });
+  // A JSON value may start with a dash (`settings set k -- -1`).
+  const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } }, undefined, { command: commandOf("settings", sub), text: sub === "set" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
   if (sub === "set") {
-    const [key, value] = parsed.positionals;
-    if (!key || value === undefined) throw new CliError("usage", `Missing <${key ? "json-value" : "key"}>: ghostly settings set <key> <json-value>`);
+    const [key, given] = parsed.positionals;
+    if (!key) throw new CliError("usage", "Missing <key>: ghostly settings set <key> <json-value>");
     noMoreThan(2, parsed.positionals, "settings set <key> <json-value>");
+    // `-`, or no value on a pipe: the value from stdin, out of ps and the shell's history (a TURN password).
+    const { value, warning } = await settingValue(key, given, readStdin, process.stdin.isTTY === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
+    if (warning) process.stderr.write(`ghostly: ${warning}\n`);
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
@@ -1136,7 +1204,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
 
 async function textCommand(name: string, argv: string[]): Promise<void> {
   const spec = TEXT_COMMANDS[name];
-  const parsed = parseArgs(argv, spec.options, idSlot(spec));
+  const parsed = parseArgs(argv, spec.options, idSlot(spec), { command: name, text: true });
   const g = globals(parsed);
   pretty = g.pretty;
   const [target, ...rest] = parsed.positionals;
@@ -1183,7 +1251,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
 async function identityAddCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {
     signer: { type: "string", description: "" }, field: { type: "list", description: "" }, stdin: { type: "boolean", description: "" }, days: { type: "number", description: "" }, timeout: { type: "number", description: "" },
-  });
+  }, undefined, { command: "identity add" });
   const g = globals(parsed);
   pretty = g.pretty;
   const [provider, ...subject] = parsed.positionals;
@@ -1229,7 +1297,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
 
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
-  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, text: takesText(command) });
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
@@ -1294,7 +1362,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
  * contact's, raw PCM); what the command says goes to stderr. It ends when the call does.
  */
 async function callPipeCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }));
+  const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }), { command: "call pipe" });
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
   const client = await connectDaemon(g.paths);
@@ -1329,15 +1397,24 @@ function helpAsked(argv: readonly string[]): string[] | null {
   return null;
 }
 
+/** No profile yet in the Ghostly folder these global options name: `ghostly`'s first run there. */
+function newHome(argv: readonly string[]): boolean {
+  try {
+    return listProfiles(ghostlyHome(parseArgs([...argv], {}).options.home as string | undefined)).length === 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function main(input: string[]): Promise<number> {
   const argv = liftGlobals(input);
   // Global options alone (`ghostly --pretty`, `ghostly -p bot`) name no command: lifted, one of them comes first.
   const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
-  if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
+  if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help(argv[0] !== "help" && newHome(argv))) + "\n"); return 0; }
   if (argv[0] === "--version" || argv[0] === "version") {
     // Global options come after the command once lifted: `--pretty` indents this answer too. Anything else is refused,
     // as every command refuses it: `version --json` (a typo) answered the version.
-    const parsed = parseArgs(argv.slice(1), {});
+    const parsed = parseArgs(argv.slice(1), {}, undefined, { command: "version" });
     noMoreThan(0, parsed.positionals, "version");
     pretty = parsed.options.pretty === true;
     print({ version: VERSION });
@@ -1367,18 +1444,32 @@ export async function main(input: string[]): Promise<number> {
  * A command line that names no command. The words of a group (`ghostly chat`, `ghostly wallet frob`, `ghostly x401
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
+ * A word near one of them is a typo: `chat lst` and `sned hi` say the command meant (`chat list`, `send`) and its help.
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);
   const all = helpRows().map((row) => commandWords(row.usage));
+  const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
+  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
   for (let depth = Math.min(asked.length, 2); depth >= 1; depth--) {
     const group = asked.slice(0, depth), name = group.join(" "), extra = asked[depth];
-    const subs = [...new Set(all.filter((words) => words.length > depth && group.every((word, i) => words[i] === word)).map((words) => words[depth]))];
+    const subs = takes(group);
     if (!subs.length) continue;
+    const near = extra === undefined ? undefined : nearest(extra, subs);
+    if (near) return meant([...group, extra!], [...group, near]);
     const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
     return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
   }
-  return new CliError("usage", `Unknown command: ${asked.slice(0, 2).join(" ") || '""'} (ghostly help)`);
+  // A first word that names no command: the words after it are its arguments (`sned hi`), unless they are a command
+  // word of the one it meant (`chta list`).
+  const near = asked[0] === undefined ? undefined : nearest(asked[0], takes([]));
+  if (!near) return new CliError("usage", `Unknown command: ${asked[0] ?? '""'} (ghostly help)`);
+  return asked[1] !== undefined && takes([near]).includes(asked[1]) ? meant(asked.slice(0, 2), [near, asked[1]]) : meant([asked[0]], [near]);
+}
+
+/** The command a group's word names (`profile set`), for its usage errors; the group itself for a word it does not take. */
+function commandOf(group: string, sub: string | undefined): string {
+  return sub !== undefined && helpRows().some((row) => commandWords(row.usage).join(" ") === `${group} ${sub}`) ? `${group} ${sub}` : group;
 }
 
 /** Leaves once what was printed reached stdout (a pipe drains asynchronously). */

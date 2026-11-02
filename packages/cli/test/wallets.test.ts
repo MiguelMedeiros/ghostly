@@ -182,6 +182,31 @@ describe("wallets", () => {
     expect(asCliError(await callApi(ctx, "wallet.receive", { amount: 10 }).catch((e: unknown) => e)).code).toBe("engine");
   });
 
+  it("pay or ask from a profile with no wallet of the network: refused, naming the wallet to make", async () => {
+    // Found in a bug hunt: `chat pay` answered `engine` "Not enough sats in your wallet" (a code a bot may retry) and
+    // `chat request` `unavailable` "No mint configured", from a profile that had no wallet at all.
+    const { ctx, node } = fake();
+    const answer = async (method: string, params: Record<string, unknown>) => asCliError(await callApi(ctx, method, params).catch((e: unknown) => e)).toJSON();
+    const short = () => Object.assign(new Error("Not enough sats in your wallet"), { engineCode: "notEnoughSats" });
+    // With the wallet, the engine's words, and its code says why.
+    node.sendPayment.mockRejectedValueOnce(short());
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toEqual({ code: "refused", message: "Not enough sats in your wallet" });
+    const engine = node.getState;
+    node.getState = () => { const s = engine(); s.wallet.wallets = []; return s; };
+    const none = { code: "refused", message: "You have no Testnet Cashu wallet: ghostly wallet create cashu", details: { reason: "no_wallet" } };
+    node.sendPayment.mockRejectedValueOnce(short());
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toEqual(none);
+    node.requestPayment.mockRejectedValueOnce(new Error("No mint could create an invoice: No mint configured"));
+    expect(await answer("chat.request", { chat: "Alice", amount: 100 })).toEqual(none);
+    node.requestPayment.mockRejectedValueOnce(new Error("You have no Testnet Cashu wallet: create one in Wallet → New"));
+    expect(await answer("chat.request", { chat: "Alice", amount: 100, rail: "cashu" })).toEqual(none);
+    node.sendPayment.mockRejectedValueOnce(short());
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100, network: "mainnet", confirmReal: true })).toEqual({ ...none, message: "You have no Mainnet Cashu wallet: ghostly wallet create cashu --network mainnet" });
+    // A contact with no wallet is still said first: that is the engine's answer before any of these.
+    node.sendPayment.mockRejectedValueOnce(Object.assign(new Error("Your contact has no wallet yet: they need one to pay or be paid"), { engineCode: "contactNoWallet" }));
+    expect(await answer("chat.pay", { chat: "Alice", amount: 100 })).toMatchObject({ code: "refused", details: { reason: "contact_no_wallet" } });
+  });
+
   it("a wallet source that is not offered is the person's value, refused before the engine is asked", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bitcoin", provider: "nope" })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("ghostly wallet list") });

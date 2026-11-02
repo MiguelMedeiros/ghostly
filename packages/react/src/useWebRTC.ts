@@ -1265,6 +1265,8 @@ export function useWebRTC({
     // Hung up while the track was swapped: the call's tracks were stopped without this one.
     if (attemptRef.current !== attempt || !localStreamRef.current) { track.stop(); return; }
     const current = localStreamRef.current;
+    // Mute pressed while it was swapped in (the Linux Desktop opens the device meanwhile) went to the old track.
+    track.enabled = current.getAudioTracks()[0]?.enabled ?? track.enabled;
     current.getAudioTracks().forEach((old) => {
       old.onended = null;
       old.stop();
