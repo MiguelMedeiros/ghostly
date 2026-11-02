@@ -908,6 +908,25 @@ describe("DHT delivery: the relays' request budget", () => {
     await spent.bob.stop();
   });
 
+  it("builds no envelope the budget would refuse: none is signed, sealed or saved, and the first that goes takes the next sequence", async () => {
+    const h = setup({ pollMs: null, bobCredentials: { seedB64: createIdentity().seedB64 } });
+    // As `RelayTransport`: `publish` refuses what `publishHeld` says it would, after the envelope was built for it.
+    let spent = true;
+    h.transport.publish.mockImplementation(async () => { if (spent) throw held(30_000); });
+    Object.assign(h.transport, { publishHeld: vi.fn(() => (spent ? held(30_000) : null)) });
+    await h.bob.start();
+    await vi.advanceTimersByTimeAsync(30 * 60_000);
+    expect.soft(h.transport.publish.mock.calls.length, "an envelope built for each refusal").toBe(0);
+    expect.soft(h.saved.length, "a save for each refusal").toBe(0);
+
+    spent = false;
+    const built = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(h.transport.publish.mock.calls.length - built).toBe(1);
+    expect.soft(h.openPublished()[1], "the first sequence: none was set aside for an envelope that did not go").toBe(1);
+    await h.bob.stop();
+  });
+
   it("a read the budget held back is no error either", async () => {
     const h = setup({ bobCredentials: pinned() });
     h.transport.resolve.mockRejectedValue(held(5_000));
