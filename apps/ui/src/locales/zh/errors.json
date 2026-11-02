@@ -185,6 +185,8 @@
     "pasteLate": "刚才粘贴的内容暂时无法添加。请在完成后重新粘贴。",
     "pasteTooLarge": "内容太大,无法粘贴。请用 + → 文档 发送。",
     "pasteUnreadable": "无法粘贴这些文件。请用 + → 文档 发送。",
+    "pictureMetadata": "无法发送这张图片：Ghostly 无法删除其中保存的信息，例如拍摄地点",
+    "pictureMetadataNext": "请发送它的截图，或在照片编辑器中另存一份副本后发送。",
     "refused": {
       "damaged": "文件到达时已损坏",
       "expired": "未及时接受",

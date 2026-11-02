@@ -185,6 +185,8 @@
     "pasteLate": "Impossibile aggiungere ora ciò che hai incollato. Incollalo di nuovo quando hai finito.",
     "pasteTooLarge": "È troppo grande da incollare. Invialo con + → Documento.",
     "pasteUnreadable": "Impossibile incollare questi file. Inviali con + → Documento.",
+    "pictureMetadata": "Questa immagine non può essere inviata: Ghostly non è riuscito a rimuovere i dati salvati al suo interno, come il luogo in cui è stata scattata",
+    "pictureMetadataNext": "Invia uno screenshot dell'immagine, oppure salvane una copia in un editor di foto e invia quella.",
     "refused": {
       "damaged": "Il file è arrivato danneggiato",
       "expired": "Non accettato in tempo",
