@@ -272,14 +272,19 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
 
 // ---------- waiting ----------
 
-/** Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. */
+/**
+ * Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. A check that
+ * throws on a later state (`chat wait`'s chat removed) ends the wait with its error: the hub swallows what its
+ * listeners throw, and the wait went on to its timeout.
+ */
 export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
     const off = ctx.hub.onState((next) => {
-      const value = check(next);
+      let value: T | undefined;
+      try { value = check(next); } catch (error) { clearTimeout(timer); off(); reject(error); return; }
       if (value === undefined) return;
       clearTimeout(timer);
       off();
