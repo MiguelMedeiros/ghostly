@@ -305,6 +305,47 @@ describe("GroupChat: joining through a link", () => {
 
   const staged = (stage: GroupJoinStage, admin = "") => groupView({ canSend: false, invitation: { linkId: "", contact: "", admin, members: 0, accepted: true, viaLink: true, stage } });
   const steps = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.getAttribute("data-state"));
+  /** The text of every live region on the page that says something now: what a screen reader is told. */
+  const spoken = () => [...document.querySelectorAll("[role=status], [role=alert], [role=log], [aria-live]")]
+    .filter(el => el.getAttribute("aria-live") !== "off" && !el.parentElement?.closest("[role=status], [role=alert], [role=log], [aria-live]"))
+    .map(el => el.textContent!.trim()).filter(Boolean);
+
+  it.each([
+    ["knocking", "", [], "Knock left for the admin's app", "Waiting to be let in"],
+    ["knocked", "", ["Knock left for the admin's app"], "The admin's app answered", "Knock left for the admin's app"],
+    ["answered", "", ["Knock left for the admin's app", "The admin's app answered"], "Let in: getting the group's keys", "The admin's app answered"],
+    ["admitted", ALICE, ["Knock left for the admin's app", "The admin's app answered", "Let in: getting the group's keys"], "Connecting to the members", "Let in: getting the group's keys"],
+  ] as const)("each join step says its state to a screen reader, and only the step just reached is said: %s", (stage, admin, done, current, said) => {
+    // Knocked just now: the two-minute hint is not due.
+    openGroup({ ...staged(stage, admin), createdAt: Date.now() });
+    const items = within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem");
+    // The step under way is the current one; the ones reached say so in words, not only with a hidden ✓.
+    expect(items.filter(li => li.getAttribute("aria-current") === "step").map(li => li.textContent)).toEqual([current]);
+    expect(items.filter(li => li.textContent!.endsWith(" (done)")).map(li => li.textContent!.replace("✓", "").replace(" (done)", ""))).toEqual(done);
+    // The card is no live region: one short line is, and Cancel joining is outside it.
+    expect(screen.getByTestId("group-joining")).not.toHaveAttribute("role");
+    expect(screen.getByTestId("group-joining-cancel").closest("[role=status], [aria-live]")).toBeNull();
+    expect(spoken()).toEqual([said]);
+  });
+
+  it("a stage change is said once, as the step just reached, not the whole card again", () => {
+    const view = openGroup({ ...staged("knocking"), profile: "community", createdAt: Date.now() });
+    const said: string[][] = [spoken()];
+    for (const stage of ["knocked", "answered", "admitted"] as const) {
+      act(() => view.engine.update({ groups: [{ ...staged(stage, stage === "admitted" ? ALICE : ""), profile: "community", createdAt: Date.now() }] }));
+      said.push(spoken());
+    }
+    expect(said).toEqual([["Waiting to be let in"], ["Knock sent to the group"], ["A member's app is answering"], ["Let in: getting the group's keys"]]);
+  });
+
+  it("a dead end or the two-minute hint is what the live line says", async () => {
+    const view = openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
+    expect(spoken()).toEqual(["Knock sent to the group"]);
+    await screen.findByTestId("group-joining-stale", {}, { timeout: 3_000 });
+    expect(spoken()).toEqual(["Still no answer. If the link was replaced, ask for the new one."]);
+    act(() => view.engine.update({ groups: [{ ...staged("replaced"), profile: "community" }] }));
+    expect(spoken()).toEqual(["This link was replaced or turned off"]);
+  });
 
   it.each([
     ["knocking", "", "Leaving a knock where the admin's app looks for one", ["current", "todo", "todo", "todo"]],
@@ -332,7 +373,7 @@ describe("GroupChat: joining through a link", () => {
     const labels = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent);
     openGroup({ ...staged("answered"), profile: "community" });
     expect(screen.getByTestId("group-joining")).toHaveTextContent("A member is letting you in");
-    expect(labels()).toEqual(["✓Knock sent to the group", "✓A member's app is answering", "Let in: getting the group's keys", "Connecting to the group"]);
+    expect(labels()).toEqual(["✓Knock sent to the group (done)", "✓A member's app is answering (done)", "Let in: getting the group's keys", "Connecting to the group"]);
     expect(steps()).toEqual(["done", "done", "current", "todo"]);
   });
 
