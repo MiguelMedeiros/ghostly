@@ -354,6 +354,11 @@ describe("the forced takeover", () => {
     await user.click(screen.getByTestId("takeover-info"));
     expect(screen.getByTestId("takeover-info-text")).toHaveTextContent("Messages and money that reached iPhone after that are not here.");
   });
+
+  it("on a phone its × is 44 px, as the device dialogs' buttons are", () => {
+    renderApp(<TakeoverDialog device="iPhone" password onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: "Close" })).toHaveClass("max-md:h-11", "max-md:w-11");
+  });
 });
 
 describe("the standby screen", () => {
@@ -371,6 +376,14 @@ describe("the standby screen", () => {
     expect(links[0]).toHaveTextContent("Active");
     expect(screen.getByRole("navigation", { name: "Other profiles" })).toHaveTextContent("Switch to Work");
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
+  });
+
+  it("on a phone Check connection is 44 px tall, as the screen's other buttons are", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? "live" as const : undefined })) }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    expect(await screen.findByTestId("device-standby-check")).toHaveClass("max-md:min-h-11");
   });
 
   it("is a landmark, not a live region: only the state is read when it changes, and no live part sits in another", async () => {
