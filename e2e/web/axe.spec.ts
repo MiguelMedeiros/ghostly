@@ -128,6 +128,36 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
   });
 }
 
+/**
+ * A group's Mute menu, the popover at 1280 and the sheet on a 375 × 667 touch phone, with its "Still notify me when I'm
+ * mentioned" row (only a group's has it): that row claimed `menuitemcheckbox`, a role valid only inside a `role=menu`,
+ * which none of the app's menus is (aria-required-parent).
+ */
+for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
+  test(`a group's Mute menu passes axe at 1280 and on a 375 phone in ${scheme}, ${language}`, { tag: ["@feature:app.accessibility", "@feature:groups.mentions.notify", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const found: Record<string, string[]> = {};
+    for (const phone of [false, true]) {
+      const { page } = await peer(`axe-mute-${language}-${phone ? "phone" : "wide"}`, phone ? { mobile: true, viewport: { width: 375, height: 667 } } : {});
+      await page.getByTestId("sidebar-new-more").click();
+      await page.getByTestId("new-group").click();
+      await page.getByTestId("new-group-name").fill("Ghosts");
+      await page.getByTestId("new-group-create").click();
+      await page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
+      await expect(page.getByTestId("group-name")).toHaveText("Ghosts");
+      await look(page, language, scheme);
+      await expect(page.getByTestId("group-name")).toHaveText("Ghosts");
+      await page.getByTestId("group-options").click();
+      await page.getByTestId("chat-mute-open").click();
+      const menu = page.getByTestId("mute-menu");
+      await expect(menu).toHaveAttribute("data-menu", phone ? "sheet" : "popover");
+      await expect(menu.getByTestId("mute-mentions")).toHaveAttribute("aria-checked", "true");
+      const f = await findings(page);
+      if (f.length) found[phone ? "mute menu, 375 phone" : "mute menu, 1280"] = f;
+    }
+    expect(found).toEqual({});
+  });
+}
+
 for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
   test(`the Apps screens pass axe in ${scheme}, ${language}`, { tag: ["@feature:app.accessibility", "@feature:apps.page", "@feature:apps.chat.card", "@feature:apps.view"] }, async ({ peer }) => {
     const store = await testStore();
