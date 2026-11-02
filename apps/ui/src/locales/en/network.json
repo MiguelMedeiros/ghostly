@@ -4,7 +4,7 @@
   "domainLookupsHint": "Checks contacts' domain proofs. The resolver sees which domain.",
   "domainLookupsInfo": "Uses {{name}}; if it fails, Quad9, Cloudflare or Google. It never sees your chats. A proof on a website shows that site your IP address.",
   "hyperdht": "HyperDHT relay",
-  "hyperdhtHint": "Optional fallback when WebRTC fails. Empty: WebRTC only.",
+  "hyperdhtHint": "Optional fallback when WebRTC fails. Empty: no HyperDHT.",
   "hyperdhtInfo": "Lets chats use HyperDHT from this browser. The relay forwards encrypted bytes: it sees your address and when you talk, never what you say.",
   "identityChecks": "Identity checks",
   "iroh": "Iroh relays",
