@@ -1714,6 +1714,8 @@ export class Groups {
   carrySignal(groupId: string, to: string, payload: Uint8Array): { taken: number; sure: boolean } {
     return this.isCommunity(groupId) ? { taken: 0, sure: false } : this.signals.carry(groupId, to, payload);
   }
+  /** Whether `carrySignal` would hand my packet for the edge to `to` to any link now. */
+  canCarrySignal(groupId: string, to: string): boolean { return !this.isCommunity(groupId) && this.signals.canCarry(groupId, to); }
   /** My packet for the edge to `to`, over that edge itself while it is up (`MeshSignals.direct`). */
   directSignal(groupId: string, to: string, linkId: string, payload: Uint8Array): boolean {
     return !this.isCommunity(groupId) && this.signals.direct(groupId, to, linkId, payload);
