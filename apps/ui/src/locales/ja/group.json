@@ -72,6 +72,8 @@
     "created": "グループを作成しました。",
     "forked": "メンバー履歴が分岐しました",
     "gone": "{{name}} はメンバーではなくなりました",
+    "goneBy": "{{by}} が {{name}} をグループから削除しました",
+    "goneByYou": "{{name}} をグループから削除しました",
     "joined": "{{name}} が参加しました",
     "left": "{{name}} が退出しました",
     "pictureChanged": "{{name}} がグループの写真を変更しました",

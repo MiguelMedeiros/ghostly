@@ -103,6 +103,27 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     expect(lines.join(" ")).not.toMatch(/joined|no longer| left/);
   });
 
+  it("a private group's removal names the admin who removed the member, and says mine in my words", async () => {
+    const BIA = "bia".padEnd(52, "y"), CAIO = "caio".padEnd(52, "y");
+    openGroup(language, groupView({
+      status: "active", myKey: ME, formerNames: { [BIA]: "Bia", [CAIO]: "Caio" },
+      members: [member({ key: ME, me: true, online: true }), member({ key: ANA, nick: "Ana", online: true, role: "admin" })],
+    }), [
+      // As the engine stores them: the removed member's key, and the admin's who signed the remove commit (`by`).
+      stored({ id: "e1", event: "gone", member: BIA, by: ME, text: "You removed Bia" }),
+      stored({ id: "e2", event: "gone", member: CAIO, by: ANA, text: "Ana removed Caio" }),
+      // One with no remover known (written before, or by a community): as it was.
+      stored({ id: "e3", event: "gone", member: CAIO, text: "Caio is no longer a member" }),
+    ]);
+    const lines = (await screen.findAllByTestId("group-event")).map(e => e.textContent);
+    expect(lines).toEqual([
+      t(language, "group.event.goneByYou", { name: "Bia" }),
+      t(language, "group.event.goneBy", { by: "Ana", name: "Caio" }),
+      t(language, "group.event.gone", { name: "Caio" }),
+    ]);
+    expect(lines.join(" ")).not.toMatch(/removed|no longer/);
+  });
+
   it("a line about a member who never said a name, and has left, names it in the interface's words", async () => {
     const GONE = "46ishssi".padEnd(52, "y");
     // As the engine stores them: "Member" and the start of the key, in English.
