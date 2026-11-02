@@ -561,7 +561,7 @@
   "relays": {
     "atLeastOne": "Saisissez au moins une adresse de relais",
     "enterAddress": "Saisissez une adresse de relais ({{example}}…)",
-    "irohAtMost": "Utilisez au plus quatre relais Iroh",
+    "irohAtMost": "Utilisez au plus cinq relais Iroh",
     "noLogin": "Retirez l'identifiant et le mot de passe de l'adresse",
     "noneAnswered": "Les relais n'ont pas répondu",
     "noneAnsweredNext": "Vérifiez votre connexion, puis réessayez.",

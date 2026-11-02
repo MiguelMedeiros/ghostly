@@ -582,15 +582,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_endpoint_takes_one_to_four_relays_of_its_own() {
+    async fn an_endpoint_takes_one_to_five_relays_of_its_own() {
         let app = app();
         let (events, _) = channel();
-        let five: Vec<String> = (0..5).map(|i| format!("https://r{i}.test/")).collect();
+        // Five is the browser build's limit too: n0's four plus Ghostly's own fit.
+        let six: Vec<String> = (0..6).map(|i| format!("https://r{i}.test/")).collect();
         let refused = app
             .state::<TransportState>()
-            .start([21; 32], events.clone(), false, &five)
+            .start([21; 32], events.clone(), false, &six)
             .await;
-        assert!(refused.is_err(), "more than four relays are refused");
+        assert!(refused.is_err(), "more than five relays are refused");
         // One relay that nobody runs: the endpoint binds all the same, and homes there when it answers.
         app.state::<TransportState>()
             .start(
