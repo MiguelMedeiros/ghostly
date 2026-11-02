@@ -4,7 +4,7 @@
   "domainLookupsHint": "يتحقق من إثباتات النطاقات لجهات الاتصال. يرى المحلّل أي نطاق.",
   "domainLookupsInfo": "يستخدم {{name}}، وإن تعذّر فـQuad9 أو Cloudflare أو Google. لا يرى محادثاتك أبدًا. الإثبات المنشور على موقع يُظهر لذلك الموقع عنوان IP الخاص بك.",
   "hyperdht": "مرحّل HyperDHT",
-  "hyperdhtHint": "بديل اختياري عند فشل WebRTC. فارغ: WebRTC فقط.",
+  "hyperdhtHint": "بديل اختياري عند فشل WebRTC. فارغ: بلا HyperDHT.",
   "hyperdhtInfo": "يتيح للمحادثات استخدام HyperDHT من هذا المتصفح. يمرّر المرحّل بايتات مشفّرة: يرى عنوانك ومتى تتحدث، ولا يرى أبدًا ما تقوله.",
   "identityChecks": "التحقق من الهوية",
   "iroh": "مرحّلات Iroh",

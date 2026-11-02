@@ -41,6 +41,35 @@ describe("Settings, Network: Pkarr relays", () => {
     expect(screen.queryByTestId("network-read-relays")).toBeNull();
     expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/Browsers cannot reach the Mainline DHT/);
   });
+
+  // The engine keeps the relays it can read and drops the rest unsaid: next to working ones, a typo looked saved.
+  it("names a line that is not a relay next to working ones, in the app's language, and saves nothing", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />, { language: "pt" });
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
+    // As the engine takes it: at least one line is a relay.
+    engine.on("updateSettings", () => undefined);
+    const field = screen.getByTestId("network-relays");
+    await user.clear(field);
+    await user.type(field, `${RELAYS.join("\n")}\nwss://relay.example.org`);
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Use https:// no endereço do relay: wss://relay.example.org");
+    // Said under the relay list, which is marked refused and gets the focus.
+    expect(field).toHaveAttribute("aria-invalid", "true");
+    expect(field).toHaveAttribute("aria-describedby", "network-relays-error");
+    expect(field).toHaveFocus();
+    await user.clear(field);
+    await user.type(field, `${RELAYS.join("\n")}\nnot a url`);
+    await user.click(screen.getByTestId("network-save"));
+    expect(screen.getByTestId("network-error").textContent).toBe("Não é um endereço de relay: not a url");
+    expect(screen.queryByTestId("network-saved")).toBeNull();
+    expect(engine.callsTo("updateSettings")).toEqual([]);
+    // Fixed, it saves.
+    await user.clear(field);
+    await user.type(field, `${RELAYS.join("\n")}\nhttps://relay.example.org`);
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { relays: [...RELAYS, "https://relay.example.org"] } });
+    expect(screen.getByTestId("network-saved")).toBeInTheDocument();
+  });
 });
 
 describe("Settings, Network: the transport line", () => {
@@ -160,6 +189,14 @@ describe("Settings, Network: HyperDHT relay", () => {
     // Saving the rest leaves the relay as it is (a web app standing by for this profile may still use it).
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).not.toHaveProperty("settings.hyperdhtRelay");
+  });
+
+  it("left empty, says only that there is no HyperDHT: the Iroh relays above it are a fallback too", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS, iroh: { relays: [], defaults: ["https://relay.example.org/"] } }, settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-iroh-relays")).toBeInTheDocument();
+    expect(screen.getByText("Optional fallback when WebRTC fails. Empty: no HyperDHT.")).toBeInTheDocument();
+    expect(screen.queryByText(/WebRTC only/)).toBeNull();
   });
 });
 

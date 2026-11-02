@@ -22,6 +22,8 @@ export interface StoredIdentityProof {
   seed: SealedProofKey;
   verified: VerifiedIdentity;
   createdAt: number;
+  /** Shared in a chat at least once: removing it then revokes it, even once that chat (and its ledger) is deleted. */
+  shared?: true;
 }
 
 /** A removed proof whose revocation is republished, under its proof key, until the proof would have expired. */
@@ -75,6 +77,8 @@ export class IdentityProofs {
   private proofs: StoredIdentityProof[] = [];
   private revocations: Revocation[] = [];
   private revocationsCheckedAt = 0;
+  /** "Clear all data" (`revokeAll`): a revocation lookup still on its way notes nothing. */
+  private ended = false;
   /** Unsealed proof-key seeds, by proof id, for this run only. */
   private seeds = new Map<string, Uint8Array>();
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -212,7 +216,7 @@ export class IdentityProofs {
       if (shared && shared.status !== "withdrawn") await this.exchange(linkId)?.withdraw(id, !!this.host.channel(linkId));
     }
     const revocation: Revocation = { id, key: proof.binding.key, seed: proof.seed, revokedAt: now(), expiresAt: Math.min(proof.binding.expiresAt, proof.verified.expiresAt ?? Infinity) };
-    const wasShared = this.host.linkIds().some(l => this.host.ledger(l)?.shared.some(s => s.id === id));
+    const wasShared = this.everShared(proof);
     const revoke = wasShared && revocation.expiresAt > now();
     await this.save((proofs, revocations) => proofs.some(p => identityStatement(p.binding).id === id)
       ? [proofs.filter(p => identityStatement(p.binding).id !== id), revoke ? [...revocations, revocation] : revocations]
@@ -227,17 +231,23 @@ export class IdentityProofs {
    * contacts who check; proofs posted elsewhere (a Bluesky record, a Pubky file, a DNS record) are the person's to delete.
    */
   async revokeAll(): Promise<void> {
+    this.ended = true;
     this.stop();
-    const shared = new Set(this.host.linkIds().flatMap(l => this.host.ledger(l)?.shared.map(s => s.id) ?? []));
     const at = now();
     const last: Revocation[] = [
       ...this.revocations.filter(r => r.expiresAt > at),
-      ...this.proofs.filter(p => shared.has(identityStatement(p.binding).id)).map(p => ({
+      ...this.proofs.filter(p => this.everShared(p)).map(p => ({
         id: identityStatement(p.binding).id, key: p.binding.key, seed: p.seed, revokedAt: at, expiresAt: Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity),
       })),
     ];
     await Promise.allSettled(last.map(r => this.publishRevocation(r)));
     this.stop();
+  }
+
+  /** Marked when shared; the chats' ledgers still count for a proof shared before the mark was kept. */
+  private everShared(p: StoredIdentityProof): boolean {
+    const id = identityStatement(p.binding).id;
+    return !!p.shared || this.host.linkIds().some(l => this.host.ledger(l)?.shared.some(s => s.id === id));
   }
 
   private async publishRevocation(r: Revocation): Promise<void> {
@@ -261,9 +271,12 @@ export class IdentityProofs {
     if (!this.host.online()) return;
     for (const linkId of this.host.linkIds()) {
       for (const r of this.host.ledger(linkId)?.received ?? []) {
+        if (this.ended) return;
         if (this.revocable(r)) await this.exchange(linkId)?.recheck(r.id, { revocationOnly: true }).catch(() => {});
       }
     }
+    // "Clear all data" came meanwhile: the profile it was for is gone, and its time must not land in the cleared one.
+    if (this.ended) return;
     this.revocationsCheckedAt = Date.now();
     await transact([STORES.settings], stores => { stores[STORES.settings].put(this.revocationsCheckedAt, REVOCATIONS_CHECKED_AT); });
   }
@@ -342,6 +355,8 @@ export class IdentityProofs {
     if (Math.min(p.binding.expiresAt, p.verified.expiresAt ?? Infinity) <= now())
       throw new Error("This identity has expired. Make a new proof in your profile.");
     this.errors.delete(linkId);
+    // Noted before it can leave the device: the chat's ledger goes if the chat is deleted, the contact's copy does not.
+    if (!p.shared) await this.save((proofs, revocations) => [proofs.map(q => identityStatement(q.binding).id === id ? { ...q, shared: true as const } : q), revocations]);
     await x.share(id, !!this.host.channel(linkId));
   }
   async withdraw({ linkId, id }: { linkId: string; id: string }): Promise<void> {

@@ -106,6 +106,7 @@ import { useForwarding } from "../hooks/useForwarding";
 import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
+import { OfflineBanner } from "../components/OfflineBanner";
 import { TasksButton } from "../components/chat/TasksButton";
 import { cardEntries, goingCardCount } from "../lib/statusCards";
 import { useIsMobile } from "../hooks/useIsMobile";
@@ -1020,6 +1021,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         </div>
       </div>
 
+      {/* On a phone the chat list's offline notice is on another screen: what is written here waits too. */}
+      <OfflineBanner inChat />
       <ChatSearchBar search={search} />
       {appHere && <ChatAppResume linkId={appHere} />}
       <PinnedBar pin={pin} index={quoteIndex} onUnpin={() => pinMessage(undefined, true)} returnFocus={optionsRef} />

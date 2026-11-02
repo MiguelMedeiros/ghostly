@@ -408,6 +408,11 @@ export interface HeldEntry {
   expires: number;
   state: "queued" | "held" | "failed";
   error?: string;
+  /**
+   * The chat's ratchet session it was last sealed in (WISP 4xx), when ratcheted: once the ratchet seals in another one (the
+   * contact moved to another device or restored), it is sealed again there. Absent: plain, or sealed by an older build.
+   */
+  sid?: string;
 }
 
 /** Everything store-and-forward keeps per chat: the switch, what the contact said, sequences and the outbox. */

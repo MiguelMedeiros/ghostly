@@ -4,7 +4,7 @@
   "domainLookupsHint": "Verifica le prove di dominio dei contatti. Il resolver vede quale dominio.",
   "domainLookupsInfo": "Usa {{name}}; se non risponde, Quad9, Cloudflare o Google. Non vede mai le tue chat. Una prova su un sito mostra a quel sito il tuo indirizzo IP.",
   "hyperdht": "Relay HyperDHT",
-  "hyperdhtHint": "Riserva facoltativa quando WebRTC fallisce. Vuoto: solo WebRTC.",
+  "hyperdhtHint": "Riserva facoltativa quando WebRTC fallisce. Vuoto: niente HyperDHT.",
   "hyperdhtInfo": "Permette alle chat di usare HyperDHT da questo browser. Il relay inoltra byte cifrati: vede il tuo indirizzo e quando parli, mai cosa dici.",
   "identityChecks": "Verifica dell'identità",
   "iroh": "Relay Iroh",

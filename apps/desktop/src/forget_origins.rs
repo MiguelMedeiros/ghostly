@@ -5,17 +5,19 @@
 //! land in folders named after that origin, so after the chat went they still held what the app kept, and their names
 //! said which contact's app this device opened. The page asks for the origins it noted (`forget_service_origins`).
 //!
-//! On Linux each origin is cleared in two steps, as WebKitGTK allows: its website-data API lists nothing for a
-//! `ghostly-svc` origin, and its network process keeps the origin's files open while the app runs, so removing them
-//! erases nothing until the next launch.
+//! On Linux and macOS each origin is cleared in two steps, as WebKit allows: its website-data API lists nothing for a
+//! `ghostly-svc` origin (WebKitGTK's `WebsiteDataManager`, and macOS's `WKWebsiteDataStore`, whose
+//! `fetchDataRecordsOfTypes` answered no record at all with a contact's app's storage on the disk), and its network
+//! process keeps the origin's files open while the app runs, so removing them erases nothing until the next launch.
 //! - Now: a hidden window on the origin, served a cleaning page of the app's own (`serve`): the contact's app is never
 //!   asked and none of its code runs there. The page empties every kind of storage the origin has and says so.
-//! - At the next launch, before any window: the files still named after the origin are removed (`clean_at_launch`).
+//! - At the next launch, before any window: the files still named after the origin are removed (`clean_at_launch`),
+//!   and on macOS its row in WebKit's tracking prevention database, which names it too.
 //!   Until then the origin is on a list in the app's data folder; it leaves the list once its files are gone, and the
 //!   list goes once empty, since it too names contacts.
 //!
-//! macOS (`WKWebsiteDataStore`) and Windows (WebView2) clear nothing yet: every origin is answered as not cleared,
-//! so the page keeps it on its list for when they do.
+//! Windows (WebView2) clears nothing yet: every origin is answered as not cleared, so the page keeps it on its list
+//! for when it does.
 
 use serde::Deserialize;
 use tauri::{AppHandle, Runtime};
@@ -38,7 +40,7 @@ impl ServiceOrigin {
     }
 }
 
-/// Forgets what the apps on `origins` kept: their windows close, then each origin is cleared (Linux). Answers, for
+/// Forgets what the apps on `origins` kept: their windows close, then each origin is cleared (Linux, macOS). Answers, for
 /// each, whether it was cleared; one that was not stays on the page's list, for its next clear.
 #[tauri::command]
 pub async fn forget_service_origins<R: Runtime>(
@@ -52,34 +54,34 @@ pub async fn forget_service_origins<R: Runtime>(
         .ok_or("Invalid service")?;
     // A window still showing the app would go on writing there.
     viewer::close_showing(&app, &hosts);
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         use tauri::Manager;
         let list = app
             .path()
             .app_data_dir()
             .map_err(|e| e.to_string())?
-            .join(linux::LIST_FILE);
+            .join(webkit::LIST_FILE);
         let mut cleared = Vec::with_capacity(hosts.len());
         for host in &hosts {
-            cleared.push(linux::clear_in_window(&app, &list, host).await);
+            cleared.push(webkit::clear_in_window(&app, &list, host).await);
         }
         Ok(cleared)
     }
-    // Follow-ups: macOS removes the origin's records from `WKWebsiteDataStore`, Windows through WebView2. Until then
-    // nothing is cleared, and the page keeps each origin for later.
-    #[cfg(not(target_os = "linux"))]
+    // Follow-up: Windows, through WebView2. Until then nothing is cleared, and the page keeps each origin for later.
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = app;
         Ok(vec![false; hosts.len()])
     }
 }
 
-#[cfg(target_os = "linux")]
-pub use linux::{clean_at_launch, serve, ForgetState};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use webkit::{clean_at_launch, serve, ForgetState};
 
-#[cfg(target_os = "linux")]
-mod linux {
+/// WebKitGTK's and WKWebView's own: the hidden window, the list, and the files each keeps per origin.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod webkit {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -201,12 +203,7 @@ mod linux {
         }
         let cleared = match open_hidden(app, &label, host) {
             Ok(window) => {
-                // Where this webview keeps each kind: WebKitGTK names them, the app sets none of its own.
-                let (sender, folders) = oneshot::channel();
-                let _ = window.with_webview(move |webview| {
-                    let _ = sender.send(folders_of(&webview.inner()));
-                });
-                if let Ok(Ok(folders)) = tokio::time::timeout(CLEAR_TIMEOUT, folders).await {
+                if let Some(folders) = folders(&window).await {
                     if let Ok(_one) = state.list.lock() {
                         note(list, folders, host);
                     }
@@ -251,18 +248,65 @@ mod linux {
             .map_err(|e| format!("Window: {e}"))
     }
 
-    /// Where the webview keeps each kind of storage, as WebKitGTK said when the origins were forgotten.
+    /// Where the webview keeps each kind of storage, as WebKit said (or, on macOS, as it names them) when the origins
+    /// were forgotten.
     #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
     pub struct Folders {
         local_storage: Option<PathBuf>,
         indexeddb: Option<PathBuf>,
         cache_storage: Option<PathBuf>,
-        /// Beside `localstorage`: one folder per origin, its `origin` file naming it.
+        /// `<top origin>/<origin>` folders, each with an `origin` file naming it: on Linux beside `localstorage`, on
+        /// macOS every kind of an origin's storage inside.
         storage: Option<PathBuf>,
+        /// macOS: WebKit's tracking prevention notes every site a window showed, by name, in this database
+        /// (`ObservedDomains`), the contact's app's host among them.
+        #[serde(default)]
+        observed: Option<PathBuf>,
+    }
+
+    /// Where this webview keeps each kind: WebKitGTK names them, the app sets none of its own.
+    #[cfg(target_os = "linux")]
+    async fn folders<R: Runtime>(window: &WebviewWindow<R>) -> Option<Folders> {
+        let (sender, folders) = oneshot::channel();
+        let _ = window.with_webview(move |webview| {
+            let _ = sender.send(folders_of(&webview.inner()));
+        });
+        tokio::time::timeout(CLEAR_TIMEOUT, folders)
+            .await
+            .ok()?
+            .ok()
+    }
+
+    /// WKWebView's default store, the one every window of the app shares, has no public call that names its folder:
+    /// WebKit puts it under the app's bundle id (the process's name without one), with each origin's localStorage,
+    /// IndexedDB and Cache Storage in a folder of its own (`WebsiteData/Default/<top origin>/<origin>`, both salted
+    /// hashes), its `origin` file naming it.
+    #[cfg(target_os = "macos")]
+    async fn folders<R: Runtime>(_window: &WebviewWindow<R>) -> Option<Folders> {
+        use objc2_foundation::{NSBundle, NSHomeDirectory, NSProcessInfo};
+        let id = NSBundle::mainBundle()
+            .bundleIdentifier()
+            .unwrap_or_else(|| NSProcessInfo::processInfo().processName())
+            .to_string();
+        mac_folders(Path::new(&NSHomeDirectory().to_string()), &id)
+    }
+
+    /// Where WKWebView's default store keeps each origin's folder, for an app with bundle id `id`.
+    #[cfg(any(target_os = "macos", test))]
+    pub(super) fn mac_folders(home: &Path, id: &str) -> Option<Folders> {
+        // Never a folder above the app's own (an id is a file name).
+        let id = (!id.is_empty() && id != "." && id != ".." && !id.contains('/')).then_some(id)?;
+        let data = home.join("Library/WebKit").join(id).join("WebsiteData");
+        Some(Folders {
+            storage: Some(data.join("Default")),
+            observed: Some(data.join("ResourceLoadStatistics/observations.db")),
+            ..Folders::default()
+        })
     }
 
     /// The webview's own folders. Its base folders read back as none when the app set none (WebKitGTK's defaults,
     /// named after the program): each kind's folder is asked for.
+    #[cfg(target_os = "linux")]
     #[allow(deprecated)]
     fn folders_of(webview: &webkit2gtk::WebView) -> Folders {
         use webkit2gtk::{WebViewExt, WebsiteDataManagerExt};
@@ -279,6 +323,7 @@ mod linux {
             local_storage,
             indexeddb: path(manager.indexeddb_directory()),
             cache_storage: path(manager.dom_cache_directory()),
+            observed: None,
         }
     }
 
@@ -391,7 +436,8 @@ mod linux {
     }
 
     /// Removes every file and folder of `host`'s origin: its localStorage file (and its journal), its IndexedDB
-    /// folder, its Cache Storage folder and its storage folder. True once none is left.
+    /// folder, its Cache Storage folder and its storage folder, and on macOS its tracking prevention row. True once
+    /// none is left.
     fn remove_files_of(folders: &Folders, host: &str) -> bool {
         let named = format!("{SCHEME}_{host}_0").to_ascii_lowercase();
         let mut gone = true;
@@ -431,7 +477,121 @@ mod linux {
                 }
             }
         }
+        #[cfg(target_os = "macos")]
+        if let Some(db) = &folders.observed {
+            gone &= observed::forget(db, host);
+        }
         gone
+    }
+
+    /// WebKit's tracking prevention database on macOS (`ResourceLoadStatistics/observations.db`, SQLite): one row per
+    /// site a window showed, named by its host, so the contact's app's too. Its row goes at launch, with the rows of
+    /// other tables that point at it (`ON DELETE CASCADE`), its bytes overwritten (`secure_delete`), before WebKit opens
+    /// the database. Through the system's SQLite: no copy of it is linked in.
+    #[cfg(target_os = "macos")]
+    pub(super) mod observed {
+        use std::ffi::{c_char, c_int, c_void, CString};
+        use std::path::Path;
+
+        #[repr(C)]
+        struct Sqlite3 {
+            _private: [u8; 0],
+        }
+
+        type Callback = Option<
+            unsafe extern "C" fn(*mut c_void, c_int, *mut *mut c_char, *mut *mut c_char) -> c_int,
+        >;
+
+        #[link(name = "sqlite3")]
+        extern "C" {
+            fn sqlite3_open_v2(
+                name: *const c_char,
+                db: *mut *mut Sqlite3,
+                flags: c_int,
+                vfs: *const c_char,
+            ) -> c_int;
+            fn sqlite3_busy_timeout(db: *mut Sqlite3, ms: c_int) -> c_int;
+            fn sqlite3_exec(
+                db: *mut Sqlite3,
+                sql: *const c_char,
+                callback: Callback,
+                arg: *mut c_void,
+                error: *mut *mut c_char,
+            ) -> c_int;
+            fn sqlite3_close(db: *mut Sqlite3) -> c_int;
+        }
+
+        const SQLITE_OK: c_int = 0;
+        const SQLITE_OPEN_READWRITE: c_int = 0x2;
+
+        /// One more row in the count `arg` points at.
+        unsafe extern "C" fn count(
+            arg: *mut c_void,
+            _: c_int,
+            _: *mut *mut c_char,
+            _: *mut *mut c_char,
+        ) -> c_int {
+            *(arg as *mut usize) += 1;
+            0
+        }
+
+        /// Runs `sql` on the database at `path`, which must exist: the rows it answered, once it ran whole.
+        pub(in super::super) fn exec(path: &Path, sql: &str) -> Option<usize> {
+            let name = CString::new(path.to_str()?).ok()?;
+            let sql = CString::new(sql).ok()?;
+            let mut db = std::ptr::null_mut();
+            let mut rows = 0usize;
+            // SAFETY: both strings end in NUL and outlive the calls, `rows` too; `db` is closed whatever the answer.
+            unsafe {
+                let ran = sqlite3_open_v2(
+                    name.as_ptr(),
+                    &mut db,
+                    SQLITE_OPEN_READWRITE,
+                    std::ptr::null(),
+                ) == SQLITE_OK
+                    && sqlite3_busy_timeout(db, 2_000) == SQLITE_OK
+                    && sqlite3_exec(
+                        db,
+                        sql.as_ptr(),
+                        Some(count),
+                        (&mut rows as *mut usize).cast(),
+                        std::ptr::null_mut(),
+                    ) == SQLITE_OK;
+                sqlite3_close(db);
+                ran.then_some(rows)
+            }
+        }
+
+        /// Takes `host` out of the database at `path`. True once it is not there: removed, or no database (or no
+        /// such table) at all.
+        pub fn forget(path: &Path, host: &str) -> bool {
+            // A host `ServiceOrigin::host` made: letters, digits, `-` and `.`, nothing to quote.
+            if host.is_empty()
+                || !host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+            {
+                return false;
+            }
+            if !path.exists() {
+                return true;
+            }
+            match exec(
+                path,
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ObservedDomains'",
+            ) {
+                Some(0) => true,
+                Some(_) => exec(
+                    path,
+                    &format!(
+                        "PRAGMA foreign_keys = ON; PRAGMA secure_delete = ON; \
+                         DELETE FROM ObservedDomains WHERE registrableDomain = '{host}' COLLATE NOCASE;"
+                    ),
+                )
+                .is_some(),
+                None => false,
+            }
+        }
     }
 
     #[cfg(test)]
@@ -486,6 +646,7 @@ mod linux {
                 indexeddb: Some(data.join("databases/indexeddb")),
                 cache_storage: Some(cache.join("CacheStorage")),
                 storage: Some(data.join("storage")),
+                observed: None,
             }
         }
 
@@ -638,6 +799,147 @@ mod linux {
             clean_list(&list);
             let _ = std::fs::remove_dir_all(&dir);
         }
+
+        /// What one origin left in WKWebView's default store, as the e2e run on macOS 15 saw it: a folder of its own
+        /// under `WebsiteData/Default`, named by salted hashes, its `origin` file naming it.
+        fn mac_lay_out(default: &Path, host: &str, hash: &str) -> PathBuf {
+            let origin = default.join(hash).join(hash);
+            for (file, bytes) in [
+                ("LocalStorage/localstorage.sqlite3", &b"x"[..]),
+                ("LocalStorage/localstorage.sqlite3-wal", b"x"),
+                ("LocalStorage/localstorage.sqlite3-shm", b"x"),
+                ("IndexedDB/661432C2E1374E598DB4FF0D1C1574111A5E368FA07A90DB28E294A94A5FB6AA/IndexedDB.sqlite3", b"x"),
+                ("CacheStorage/cacheslist", b"x"),
+                ("CacheStorage/salt", b"x"),
+                ("CacheStorage/Version 16/salt", b"x"),
+            ] {
+                let path = origin.join(file);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, bytes).unwrap();
+            }
+            std::fs::write(origin.join("origin"), origin_file(host)).unwrap();
+            origin
+        }
+
+        #[test]
+        fn on_macos_the_folders_are_the_apps_own_under_its_bundle_id() {
+            let home = Path::new("/Users/someone");
+            let folders = mac_folders(home, "tools.ghostly.e2e.forget").unwrap();
+            let data = home.join("Library/WebKit/tools.ghostly.e2e.forget/WebsiteData");
+            assert_eq!(folders.storage, Some(data.join("Default")));
+            assert_eq!(
+                folders.observed,
+                Some(data.join("ResourceLoadStatistics/observations.db"))
+            );
+            assert_eq!(
+                (
+                    &folders.local_storage,
+                    &folders.indexeddb,
+                    &folders.cache_storage
+                ),
+                (&None, &None, &None),
+                "every kind is inside the origin's folder"
+            );
+            for id in ["", ".", "..", "../app.ghostly.chat", "a/b"] {
+                assert_eq!(mac_folders(home, id), None, "{id:?}");
+            }
+        }
+
+        #[test]
+        fn on_macos_the_launch_removes_the_folder_of_each_origin_on_the_list_and_no_other() {
+            // covers: services.desktop-viewer
+            let dir = scratch("mac");
+            let folders = mac_folders(&dir, "tools.ghostly.e2e.forget").unwrap();
+            let default = folders.storage.clone().unwrap();
+            let gone = format!("keeper.{PEER}.{TAG}");
+            let kept = format!("notes.{PEER}.ot1uwisza345h769");
+            let gone_folder = mac_lay_out(
+                &default,
+                &gone,
+                "LZs_mZY_vIF7PUi52K28pgxwNPx_pWne9lI9SiGkt8o",
+            );
+            let kept_folder = mac_lay_out(
+                &default,
+                &kept,
+                "BLyTQTjtc-2kYU9gOlf9szqwtMNLncmbk4vjK6cViDg",
+            );
+            std::fs::write(default.join("salt"), b"s").unwrap();
+            let kept_files = files(&kept_folder);
+            assert_eq!(named_anywhere(&dir, &gone).len(), 1, "its `origin` file");
+
+            let list = dir.join(LIST_FILE);
+            note(&list, folders, &gone);
+            clean_list(&list);
+            assert_eq!(named_anywhere(&dir, &gone), Vec::<String>::new());
+            assert!(
+                !gone_folder.parent().unwrap().exists(),
+                "its top folder went with it"
+            );
+            assert_eq!(
+                files(&kept_folder),
+                kept_files,
+                "another origin's folder stays whole"
+            );
+            assert!(default.join("salt").exists(), "the store's own files stay");
+            assert!(!list.exists());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// WebKit's tracking prevention tables, as macOS 15's `observations.db` has them (the part that names sites).
+        #[cfg(target_os = "macos")]
+        const OBSERVED_SCHEMA: &str = "PRAGMA journal_mode = WAL;
+            CREATE TABLE ObservedDomains (domainID INTEGER PRIMARY KEY, registrableDomain TEXT NOT NULL UNIQUE ON CONFLICT FAIL, lastSeen REAL NOT NULL);
+            CREATE TABLE TopLevelDomains (topLevelDomainID INTEGER PRIMARY KEY, CONSTRAINT fkDomainID FOREIGN KEY(topLevelDomainID) REFERENCES ObservedDomains(domainID) ON DELETE CASCADE);
+            CREATE TABLE SubresourceUnderTopFrameDomains (subresourceDomainID INTEGER NOT NULL, lastUpdated REAL NOT NULL, topFrameDomainID INTEGER NOT NULL, FOREIGN KEY(subresourceDomainID) REFERENCES ObservedDomains(domainID) ON DELETE CASCADE, FOREIGN KEY(topFrameDomainID) REFERENCES ObservedDomains(domainID) ON DELETE CASCADE);";
+
+        #[cfg(target_os = "macos")]
+        #[test]
+        fn on_macos_tracking_prevention_forgets_the_origins_site_and_no_other() {
+            let dir = scratch("observed");
+            let db = dir.join("observations.db");
+            let host = format!("keeper.{PEER}.{TAG}");
+            std::fs::write(&db, b"").unwrap();
+            assert!(observed::exec(&db, OBSERVED_SCHEMA).is_some());
+            assert!(observed::exec(
+                &db,
+                &format!(
+                    "INSERT INTO ObservedDomains VALUES (1, 'localhost', 1.0), (2, '{host}', 0.0), (3, 'notes.{PEER}.{TAG}', 0.0);
+                     INSERT INTO TopLevelDomains VALUES (1), (2);
+                     INSERT INTO SubresourceUnderTopFrameDomains VALUES (1, 1.0, 2), (3, 1.0, 1);"
+                )
+            )
+            .is_some());
+            let count = |sql: &str| observed::exec(&db, sql).unwrap();
+
+            assert!(observed::forget(&db, &host.to_ascii_uppercase()));
+            assert_eq!(count("SELECT registrableDomain FROM ObservedDomains"), 2);
+            assert_eq!(
+                count(&format!(
+                    "SELECT 1 FROM ObservedDomains WHERE registrableDomain = '{host}'"
+                )),
+                0
+            );
+            assert_eq!(
+                count("SELECT 1 FROM TopLevelDomains"),
+                1,
+                "its rows elsewhere went with it"
+            );
+            assert_eq!(count("SELECT 1 FROM SubresourceUnderTopFrameDomains"), 1);
+            // Closed, the database holds its name nowhere, not even in a freed page or the journal.
+            assert_eq!(named_anywhere(&dir, &host), Vec::<String>::new());
+
+            // Nothing to do: no such host, a database without the table, no database.
+            assert!(observed::forget(&db, &host));
+            let bare = dir.join("bare.db");
+            std::fs::write(&bare, b"").unwrap();
+            assert!(observed::forget(&bare, &host));
+            assert!(observed::forget(&dir.join("none.db"), &host));
+            // Never a name that would need quoting.
+            assert!(!observed::forget(&db, "x' OR '1'='1"));
+            assert!(!observed::forget(&db, ""));
+            assert_eq!(count("SELECT 1 FROM ObservedDomains"), 2);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 }
 
@@ -702,7 +1004,7 @@ mod tests {
 /// next launch's cleanup.
 #[cfg(all(test, target_os = "linux"))]
 mod display_tests {
-    use super::linux::tests::{files, named_anywhere, PEER, TAG};
+    use super::webkit::tests::{files, named_anywhere, PEER, TAG};
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration;
@@ -852,7 +1154,7 @@ r.onsuccess = () => {
             .path()
             .app_data_dir()
             .unwrap()
-            .join(super::linux::LIST_FILE);
+            .join(super::webkit::LIST_FILE);
         app.run_return(|_, _| {});
         steps.join().unwrap();
 
@@ -865,7 +1167,7 @@ r.onsuccess = () => {
         );
         assert!(list.exists(), "{:?}", files(&home));
 
-        super::linux::clean_list(&list);
+        super::webkit::clean_list(&list);
         assert_eq!(
             named_anywhere(&home, &host),
             Vec::<String>::new(),

@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeed } from "../src/identity";
 import { fromBase64Url, utf8Decode, utf8Encode } from "../src/bytes";
 import {
-  emptyRatchetState, FOLLOW_MS, isRatcheted, RatchetBox, MAX_SKIP, MAX_SKIPPED_KEYS, RATCHET_HEADER_BYTES, RATCHET_KEEP_MS, RATCHET_OVERHEAD, ratchetHeard, ratchetOn, ratchetOpen, ratchetRoot, ratchetSeal,
+  emptyRatchetState, FOLLOW_MS, isRatcheted, RatchetBox, MAX_SKIP, MAX_SKIPPED_KEYS, RATCHET_HEADER_BYTES, RATCHET_KEEP_MS, RATCHET_OVERHEAD, ratchetHeard, ratchetOn, ratchetOpen, ratchetRoot, ratchetSeal, ratchetSessionOf, ratchetUnknownSession,
   type RatchetKeys, type RatchetLane, type RatchetState,
 } from "../src/ratchet";
 
@@ -249,6 +249,30 @@ describe("ratchet/1", () => {
     const fresh = new Side(second);
     fresh.state = structuredClone(s.state);
     expect(fresh.open(old)).toBeNull();
+  });
+
+  it("tells an item of a session this side never had (its profile moved here after the turn passed) from one it has, or retired", () => {
+    const f = new Side(first), s = new Side(second);
+    expect(s.open(f.seal("one", "hold"), "hold")).toBe("one");
+    expect(f.open(s.seal("two", "hold"), "hold")).toBe("two");
+    const late = f.seal("three", "hold");
+    const sid = f.state.current!.sid;
+    expect(ratchetSessionOf(late, "hold")).toBe(sid);
+    expect(ratchetSessionOf(late, "floor")).toBeUndefined();
+    expect(ratchetUnknownSession(s.state, late, "hold")).toBe(false);
+    // The second side's profile moved to another device: no ratchet came along, and the item does not open there.
+    const moved = new Side(second);
+    expect(ratchetUnknownSession(moved.state, late, "hold")).toBe(true);
+    expect(moved.open(late, "hold")).toBeNull();
+    // A changed item of a session it has is not one: it is refused as before. Nor is one of a session it retired.
+    const changed = f.seal("four", "hold"); changed[changed.length - 1] ^= 1;
+    expect(s.open(changed, "hold")).toBeNull();
+    expect(ratchetUnknownSession(s.state, changed, "hold")).toBe(false);
+    expect(ratchetUnknownSession({ ...emptyRatchetState(), retired: [sid] }, late, "hold")).toBe(false);
+    // The session a box seals with.
+    const box = new RatchetBox(() => first, structuredClone(f.state), async () => {});
+    expect(box.session).toBe(sid);
+    expect(box.unknownSession("hold", late)).toBe(false);
   });
 
   for (const stale of [1, 2, 3]) it(`does not follow ${stale} envelope(s) of a session that lost, read after both settled`, () => {

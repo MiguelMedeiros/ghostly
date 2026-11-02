@@ -45,6 +45,9 @@ function relay(): PkarrTransport & { packets: Map<string, SignedPacket>; puts: n
 interface Side {
   box?: RatchetBox;
   engine: HoldEngine;
+  host: HoldHost;
+  /** This chat's ratchet as a device that never had its state starts it: what a Move or a restore leaves. */
+  freshBox?: () => RatchetBox;
   stored: StoredLink;
   messages: Map<string, { text?: string; file?: { name: string; size: number; mime: string }; request?: PaymentRequest; timestamp: number }>;
   received: { kind: string; id: string; text?: string; name?: string; mime?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: unknown; timestamp: number }[];
@@ -87,17 +90,29 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
     const mineHas = options.ratchet ? (mine.id === "link-a" ? options.ratchet.alice : options.ratchet.bob) : false;
     const peerHas = () => !!options.ratchet && (mine.id === "link-a" ? options.ratchet.bob : options.ratchet.alice);
     if (mineHas) {
-      side.box = new RatchetBox(() => ({ seed: fromBase64Url(mine.participationSeed!), self: identityFromSeedB64(mine.participationSeed!).pubKeyZ32, peer: mine.pairedPeerKey!,
+      side.freshBox = () => new RatchetBox(() => ({ seed: fromBase64Url(mine.participationSeed!), self: identityFromSeedB64(mine.participationSeed!).pubKeyZ32, peer: mine.pairedPeerKey!,
         rendezvous: [identityFromSeedB64(mine.seedB64).pubKeyZ32, mine.peerPubKeyZ32], secret: fromBase64Url(mine.encKeyB64) }), emptyRatchetState(), async () => {});
+      side.box = side.freshBox();
       host.ratchet = () => ({ box: side.box!, peerSupports: peerHas });
     }
+    side.host = host;
     side.engine = new HoldEngine(host);
     return side as Side;
   };
   const enabled: HoldState = { ...emptyHoldState(), enabled: true, peerAllows: true, peerPaymentMethods: ["cashu", "lightning"] };
   const a = make({ id: "link-a", ...link.mine, profile: "paired-chat/1", participationSeed: alice.seedB64, pairedPeerKey: bob.pubKeyZ32, createdAt: 0, hold: structuredClone(enabled) }, options.aliceStorage ?? true, buckets.alice, buckets.bob, options.aliceNow ?? options.now);
   const b = make({ id: "link-b", ...link.invite, profile: "paired-chat/1", participationSeed: bob.seedB64, pairedPeerKey: alice.pubKeyZ32, createdAt: 0, hold: structuredClone(enabled) }, options.bobStorage ?? false, buckets.bob, buckets.alice);
-  return { a, b, transport, buckets, keys: { bob: new HoldKeys(link.invite, bob.seedB64, alice.pubKeyZ32) } };
+  /**
+   * The profile moves to another device (Use here / Move to): the chat's row goes along, its hold state with it, but not
+   * its ratchet (WISP 4xx § Several devices), and nothing the engine kept in memory.
+   */
+  const move = async (side: Side) => {
+    await side.engine.stop();
+    side.box = side.freshBox!();
+    side.engine = new HoldEngine(side.host);
+    engines.push(side.engine);
+  };
+  return { a, b, transport, buckets, move, keys: { bob: new HoldKeys(link.invite, bob.seedB64, alice.pubKeyZ32) } };
 }
 
 const engines: HoldEngine[] = [];
@@ -296,6 +311,88 @@ describe("store-and-forward engine", () => {
     // Alice's app goes back to one without it: her record no longer lists ratchet/1.
     ratchet.alice = false;
     expect(b.engine.canHold("link-b")).toBe(false);
+  });
+
+  // agents#2395. A Move (or a restore) leaves the account's new device without the chat's ratchet, which no handoff
+  // carries. What the contact held in the session it shared with the old device, before the Move and after it, was
+  // taken there as refused, so the contact failed it as "could not be verified as yours", and a Retry failed the same way.
+  it("after a Move, what the contact held in the old device's ratchet session waits, is sealed again once the contact follows the new device, and is delivered; a changed item is still refused", async () => {
+    let itemReads = 0;
+    const { a, b, buckets, move } = setup({ ratchet: { alice: true, bob: true }, bobStorage: true, fetch: (inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (!String(input).includes("manifest")) itemReads++;
+      return inner(input, init);
+    }) as typeof fetch });
+    engines.push(a.engine, b.engine);
+    const say = async (side: Side, id: string, text: string) => {
+      side.messages.set(id, { text, timestamp: Date.now() });
+      await side.engine.hold(side.stored.id, { kind: "text", id: `wire-${id}-item`, messageId: id, bytes: text.length, timestamp: Date.now() });
+    };
+    // A keep-alive on the DHT floor, sealed by one side's ratchet and opened by the other's, with its floor sequence.
+    const floor = async (from: Side, to: Side, order: number) => {
+      const sealed = await from.box!.lock((tx) => tx.seal("floor", new TextEncoder().encode(`keep-alive ${order}`)));
+      await to.box!.lock(async (tx) => { await tx.open("floor", sealed)!.commit(order); });
+    };
+    const settled = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+    // The turn passes both ways in one session (a1 to Bob, b1 to Alice, a2 to Bob), and Bob's floor is heard there.
+    await say(a, "a1", "one");
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(1));
+    await say(b, "b1", "back");
+    a.engine.start();
+    await vi.waitFor(() => expect(a.received.map((r) => r.text)).toEqual(["back"]));
+    await say(a, "a2", "two");
+    b.engine.wake("link-b");
+    await vi.waitFor(() => expect(b.received).toHaveLength(2));
+    expect(a.box!.on || b.box!.on, "forward secrecy is on").toBe(true);
+    await floor(b, a, 1);
+    // a3 waits for Bob's old device; Bob moves; a4 is held after, and a5 fails to upload and is retried.
+    await say(a, "a3", "three");
+    await move(b);
+    await say(a, "a4", "four");
+    const put = buckets.alice.store.put;
+    buckets.alice.store.put = async () => { throw new Error("S3 refused (503 SlowDown)"); };
+    await expect(say(a, "a5", "five")).rejects.toThrow(/Could not store/);
+    buckets.alice.store.put = put;
+    expect(await a.engine.retry("link-a", "a5")).toBe(true);
+
+    // The new device cannot open them (sealed in a session it never had): it neither takes nor refuses them.
+    itemReads = 0;
+    b.engine.start();
+    await vi.waitFor(() => expect(b.engine.view("link-b")?.error).toBeDefined());
+    expect(b.stored.hold!.refusedSeqs ?? [], "nothing told the contact as refused").toEqual([]);
+    expect(b.stored.hold).toMatchObject({ inSeq: 2, refused: 0 });
+    expect(b.received).toHaveLength(2);
+    expect(b.engine.view("link-b")?.error).toMatch(/sealed them for the device this profile was on before/);
+    expect(itemReads, "the first item, and the pickup waits there").toBe(1);
+    // Looking again fetches that item again only once the contact rewrote its manifest.
+    b.engine.wake("link-b");
+    await settled();
+    expect(itemReads).toBe(1);
+    a.engine.wake("link-a");
+    await settled();
+    expect(["a3", "a4", "a5"].map((id) => a.delivery.get(id)?.state)).toEqual(["held", "held", "held"]);
+
+    // The new device's first floor envelope: the contact's ratchet follows its session, and seals the three again there.
+    await floor(b, a, 2);
+    expect(a.box!.session).toBe(b.box!.session);
+    a.engine.wake("link-a");
+    await vi.waitFor(() => expect(a.stored.hold!.outbox.every((e) => e.sid === a.box!.session)).toBe(true));
+    b.engine.wake("link-b");
+    await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["one", "two", "three", "four", "five"]));
+    expect(b.stored.hold).toMatchObject({ inSeq: 5, refused: 0 });
+    expect(b.engine.view("link-b")?.error).toBeUndefined();
+    a.engine.wake("link-a");
+    await vi.waitFor(() => expect(["a3", "a4", "a5"].map((id) => a.delivery.get(id)?.state)).toEqual(["delivered", "delivered", "delivered"]));
+
+    // Control: an item changed in storage, in a session the new device has, is refused as before, and fails at the contact.
+    await say(a, "a6", "six");
+    buckets.alice.store.tamper(a.stored.hold!.outbox.find((e) => e.messageId === "a6")!.name);
+    b.engine.wake("link-b");
+    await vi.waitFor(() => expect(b.stored.hold).toMatchObject({ inSeq: 6, refused: 1, refusedSeqs: [6] }));
+    expect(b.received).toHaveLength(5);
+    a.engine.wake("link-a");
+    await vi.waitFor(() => expect(a.delivery.get("a6")).toMatchObject({ state: "failed", error: expect.stringContaining("refused") }));
   });
 
   it("holds a voice message with its length and waveform, and drops a description that is not one", async () => {

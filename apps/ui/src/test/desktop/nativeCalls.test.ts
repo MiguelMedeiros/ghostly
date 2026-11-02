@@ -391,6 +391,47 @@ describe("the RTCPeerConnection stand-in", () => {
     expect(tauri.invoke).toHaveBeenCalledWith("native_call_mute", { id: pc.id, muted: true });
   });
 
+  it("ends the microphone's stand-in when Rust says the microphone failed mid-call: the call's device check falls back from it", async () => {
+    const pc = new NativePeerConnection({});
+    const ice = vi.fn();
+    pc.oniceconnectionstatechange = ice;
+    const [microphone] = (await nativeCallMedia().getUserMedia({ audio: true })).getAudioTracks();
+    pc.addTrack(microphone);
+    await pc.createOffer();
+    const ended = vi.fn();
+    microphone.addEventListener("ended", ended);
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(microphone.readyState).toBe("ended");
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(contexts[0].calls).toEqual(["suspend", "close"]);
+    // Told once, as a browser ends a track once; and no ICE state.
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(ice).not.toHaveBeenCalled();
+  });
+
+  it("ends the camera's track when Rust says the camera failed, and closes it in Rust", async () => {
+    tauri.invoke.mockImplementation(async (command) => (command === "native_camera_open" ? { camera: 7, device: "Webcam" } : undefined));
+    const decoded = vi.fn(async () => ({ width: 640, height: 480, close() {} }));
+    vi.stubGlobal("createImageBitmap", decoded);
+    const [camera] = (await nativeCallMedia().getUserMedia({ video: { deviceId: "Webcam" } })).getVideoTracks();
+    const ended = vi.fn();
+    camera.addEventListener("ended", ended);
+    const frames = tauri.channels[0];
+    frames.onmessage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer);
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(1));
+    expect(camera.readyState).toBe("live");
+    frames.onmessage(json({ ended: "camera" }));
+    expect(camera.readyState).toBe("ended");
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(tauri.invoke).toHaveBeenCalledWith("native_camera_close", { camera: 7 });
+    // Not a picture to decode, and told once.
+    frames.onmessage(json({ ended: "camera" }));
+    await new Promise((done) => setTimeout(done, 10));
+    expect(decoded).toHaveBeenCalledTimes(1);
+    expect(ended).toHaveBeenCalledTimes(1);
+  });
+
   it("closes the call in Rust, once, and relays nothing after", async () => {
     const pc = new NativePeerConnection({});
     const ice = vi.fn();
