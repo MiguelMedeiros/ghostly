@@ -69,6 +69,8 @@ const SWAP_SLOW_POLL_MS = 600_000;
 const SWAP_WATCH_MS = 3_600_000;
 /** How many proofs of tokens refused as spent are remembered. */
 const SPENT_KEPT = 1_000;
+/** The most coins `sendCoins` makes for one token. */
+const MAX_SEND_COINS = 64;
 /** `abandoned`: the mint proved the swap never happened (`reviewedCashuNeverSwapped`); it is never sent again. */
 /**
  * `attemptEndedAt`: when the approval's swap failed with no answer. `abandoned`: the mint proved the swap never
@@ -156,6 +158,36 @@ const sats = (proofs: Proof[]) => total(proofs.map((p) => ({ amount: p.amount.to
 const inOneFrame = (encode: typeof import("@cashu/cashu-ts").getEncodedToken, mint: string) => (send: Proof[]) =>
   encode({ mint, proofs: send, unit: UNIT }).length <= LIMITS.maxPaymentEndpointChars;
 
+/**
+ * The coins a swap makes to send `amount` with the fee their receiver pays to redeem them: the fewest sats whose coins,
+ * less that fee, are exactly `amount`. cashu-ts' includeFees adds coins for the fee that can be worth more than it, and
+ * the contact is credited more than was sent. Undefined at a mint that charges nothing for coins, or when no such
+ * coins are found up to what cashu-ts would make: its own choice is used then.
+ */
+function sendCoins(wallet: Wallet, amount: number): number[] | undefined {
+  const included = wallet.getFeesToInclude(amount).toNumber();
+  if (included === 0) return undefined;
+  const keyset = wallet.getKeyset();
+  const fee = (coins: number) => wallet.getFeesForKeyset(coins, keyset.id).toNumber();
+  const sizes = Object.keys(keyset.keys).map(Number).filter((size) => size > 0).sort((a, b) => b - a);
+  const coinsOf = (value: number, among = sizes) => {
+    const coins: number[] = [];
+    for (const size of among) while (value >= size) { coins.push(size); value -= size; }
+    return value === 0 ? coins : undefined;
+  };
+  for (let value = amount; value <= amount + included; value++) {
+    let coins = coinsOf(value);
+    // Fewer coins than the sats over `amount` pay for: the largest coin split in smaller ones until they do, if ever.
+    while (coins && coins.length <= MAX_SEND_COINS && fee(coins.length) < value - amount) {
+      const [largest, ...rest] = coins;
+      const parts = coinsOf(largest, sizes.filter((size) => size < largest));
+      coins = parts && [...parts, ...rest].sort((a, b) => b - a);
+    }
+    if (coins && coins.length <= MAX_SEND_COINS && fee(coins.length) === value - amount) return coins;
+  }
+  return undefined;
+}
+
 function fitsAt(wallet: Wallet, proofs: StoredProof[], amount: number): boolean {
   return outlayAt(wallet, proofs, amount) !== undefined;
 }
@@ -172,7 +204,8 @@ function outlayAt(wallet: Wallet, proofs: StoredProof[], amount: number, inOneFr
     // no exact coins: a swap makes them
   }
   try {
-    const outputs = amount + wallet.getFeesToInclude(amount).toNumber();
+    const coins = sendCoins(wallet, amount);
+    const outputs = coins ? coins.reduce((sum, coin) => sum + coin, 0) : amount + wallet.getFeesToInclude(amount).toNumber();
     const { send } = wallet.selectProofsToSend(asProofLike(proofs), outputs, true);
     const taken = outputs + wallet.getFeesForProofs(send).toNumber();
     return send.length > 0 && sats(send) >= taken ? taken : undefined;
@@ -1036,7 +1069,10 @@ export class CashuWallet {
     } catch {
       // no exact coins: the mint makes them
     }
-    const preview = await wallet.prepareSwapToSend(amount, asProofLike(proofs), { includeFees: true });
+    const coins = sendCoins(wallet, amount);
+    const preview = coins
+      ? await wallet.prepareSwapToSend(coins.reduce((sum, coin) => sum + coin, 0), asProofLike(proofs), {}, { send: { type: "random", denominations: coins } })
+      : await wallet.prepareSwapToSend(amount, asProofLike(proofs), { includeFees: true });
     const swap: PendingSwap = { id: swapId(), mint, kind: "send", swap: serializeSwapPreview(preview), createdAt: Date.now() };
     const inputs = among(preview.inputs);
     // Written down before the mint sees the proofs: from here on they may be spent, and only these outputs replace them.

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createNewMintKeys, deriveKeysetId } from "@cashu/cashu-ts";
+import { createBlindSignature, createNewMintKeys, deriveKeysetId, getDecodedToken, pointFromHex } from "@cashu/cashu-ts";
 import { CashuWallet } from "../src/engine/wallet";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
-import { resetDb, seed } from "./fakes";
-// covers: wallet.cashu.pay-invoice
+import type { WalletTx } from "../src/shared/types";
+import { resetDb, rows, seed } from "./fakes";
+// covers: wallet.cashu.pay-invoice, payments.cashu.send
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 
@@ -15,8 +16,9 @@ const INVOICE = fakeInvoice(30, new Uint8Array(32).fill(7));
 
 /** A keyset of coins from 1 to 64 sats, its id derived with its fee as a mint's /v1/keysets checks it. */
 const keyset = (seed: number, fee: number) => {
-  const pubKeys = Object.fromEntries(Object.entries(createNewMintKeys(7, new Uint8Array(32).fill(seed)).pubKeys).map(([amount, key]) => [amount, Buffer.from(key).toString("hex")]));
-  return { keysetId: deriveKeysetId(pubKeys, { input_fee_ppk: fee, unit: "sat", versionByte: 1 }), pubKeys, fee };
+  const { pubKeys: keys, privKeys } = createNewMintKeys(7, new Uint8Array(32).fill(seed));
+  const pubKeys = Object.fromEntries(Object.entries(keys).map(([amount, key]) => [amount, Buffer.from(key).toString("hex")]));
+  return { keysetId: deriveKeysetId(pubKeys, { input_fee_ppk: fee, unit: "sat", versionByte: 1 }), pubKeys, privKeys, fee };
 };
 const MINTS: Record<string, ReturnType<typeof keyset>> = { [FEE_MINT]: keyset(1, 1000), [FREE_MINT]: keyset(2, 0) };
 const keysetOf = (mint: string) => MINTS[mint].keysetId;
@@ -24,7 +26,7 @@ const keysetOf = (mint: string) => MINTS[mint].keysetId;
 /** Real cashu-ts wallets in front of the two mints, as their /v1 endpoints would answer; a melt quote is for 30 + 2 sats. */
 function mintsAnswering() {
   const answer = (body: object) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     const mint = MINTS[url.origin];
     if (!mint) return new Response("not found", { status: 404 });
@@ -34,6 +36,13 @@ function mintsAnswering() {
     if (url.pathname === "/v1/keysets") return answer({ keysets: [{ id, unit: "sat", active: true, input_fee_ppk: mint.fee }] });
     if (url.pathname === "/v1/keys" || url.pathname === `/v1/keys/${id}`) return answer({ keysets: [{ id, unit: "sat", active: true, input_fee_ppk: mint.fee, keys: mint.pubKeys }] });
     if (url.pathname === "/v1/melt/quote/bolt11" || url.pathname === "/v1/melt/quote/bolt11/m1") return answer({ quote: "m1", amount: 30, unit: "sat", request: INVOICE, fee_reserve: 2, state: "UNPAID", expiry: 4_000_000_000 });
+    if (url.pathname === "/v1/swap") {
+      // Signs the outputs when they are worth the inputs less the mint's fee for taking them in, as a mint checks.
+      const { inputs, outputs } = JSON.parse(String(init?.body)) as { inputs: { amount: number }[]; outputs: { id: string; amount: number; B_: string }[] };
+      const sum = (items: { amount: number }[]) => items.reduce((s, item) => s + Number(item.amount), 0);
+      if (sum(outputs) !== sum(inputs) - Math.ceil(inputs.length * mint.fee / 1000)) return new Response(JSON.stringify({ code: 11002, detail: "unbalanced" }), { status: 400 });
+      return answer({ signatures: outputs.map((o) => ({ id: o.id, amount: o.amount, C_: createBlindSignature(pointFromHex(o.B_), mint.privKeys[o.amount], o.id).C_.toHex(true) })) });
+    }
     return new Response("not found", { status: 404 });
   }));
 }
@@ -64,6 +73,26 @@ describe("a send at a mint that charges for each coin it takes in", () => {
     await expect(cashu.createToken(99)).rejects.toThrow("Not enough sats in your wallet: 97 sats leave room for the fee");
     await expect(cashu.createToken(97)).resolves.toMatchObject({ mint: FEE_MINT });
     expect(await cashu.balanceAt(FEE_MINT)).toBe(0);
+  });
+
+  // The coins a swap makes for each amount: worth the amount and the 1 sat each costs its receiver to redeem, no more.
+  it.each([
+    [1, [2]],
+    [2, [2, 2]],
+    [3, [4]],
+    [5, [4, 2, 2]],
+    [10, [8, 4]],
+    [21, [8, 8, 8]],
+  ])("sends %i sats as coins the contact redeems for exactly that, and books only the mint's fees", async (amount, made) => {
+    seed("proofs", coins(FEE_MINT, [64]));
+    const cashu = wallet([FEE_MINT]);
+    const { token } = await cashu.createToken(amount);
+    const sent = getDecodedToken(token, [keysetOf(FEE_MINT)]).proofs.map((p) => Number(p.amount)).sort((a, b) => b - a);
+    expect(sent).toEqual(made);
+    expect(sent.reduce((sum, coin) => sum + coin, 0) - sent.length, "what the contact is credited").toBe(amount);
+    // The swap takes the 64 sat coin in for 1 sat; redeeming costs the contact's mint 1 sat per coin, prepaid.
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "ecash-out", amount, fee: 1 + sent.length }]);
+    expect(await cashu.balanceAt(FEE_MINT)).toBe(64 - amount - 1 - sent.length);
   });
 });
 
