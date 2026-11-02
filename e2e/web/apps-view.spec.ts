@@ -193,8 +193,8 @@ test("on a phone the browser's Back with the app over the chat goes back to the 
   await expect(resume).toHaveText("Back to Chess");
   expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
 
-  // "Back to Chess": the same game. The app's own Back still goes back to the chat, and takes its history entry with
-  // it (lib/layerHistory.ts marks it), so the browser's Back from the chat is the chat list.
+  // "Back to Chess": the same game. The app's own Back still goes back to the chat, and the browser's Back from the chat
+  // is the chat list at once (the entry the app leaves is passed over, lib/layerHistory.ts).
   await resume.click();
   await expect(app).toBeVisible();
   expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
@@ -202,7 +202,6 @@ test("on a phone the browser's Back with the app over the chat goes back to the 
   await expect(app).toBeHidden();
   await expect(resume).toBeVisible();
   await expect(ana.page).toHaveURL(inChat);
-  await expect.poll(() => ana.page.evaluate(() => (history.state as { ghostlyLayer?: number } | null)?.ghostlyLayer ?? 0)).toBe(0);
   await ana.page.goBack();
   await expect(chatList).toBeVisible();
   await expect(ana.page).not.toHaveURL(/#\/chat\//);
