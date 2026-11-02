@@ -89,6 +89,7 @@
     "renamedNoName": "أصبح اسم المجموعة «{{group}}»",
     "renamedYou": "غيّرت اسم المجموعة إلى «{{group}}»",
     "rotated": "جُدّدت المفاتيح: حقبة جديدة",
+    "withNote": "{{event}} {{note}}",
     "youJoined": "انضممت.",
     "youJoinedAgain": "انضممت من جديد."
   },
