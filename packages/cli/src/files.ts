@@ -6,7 +6,7 @@ import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
+import type { FileTransferView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
 import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
@@ -66,6 +66,22 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
 
 /** A file's size as a person reads it: "40 MB", "26.2 MB". */
 const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
+
+/**
+ * Where an unfinished transfer stands, in words, for a person reading a timeout: the stage's id ("asking", "waiting")
+ * stays in `details.stage` for a bot. A group's file says why it waits (`note`), as the app does.
+ */
+function stageWords(transfer: FileTransferView): string {
+  switch (transfer.stage) {
+    case "preparing": return "getting it ready to send";
+    case "waiting": return transfer.note ?? "waiting for a connection to the contact";
+    case "asking": return transfer.direction === "in" ? "waiting for you to take it (file accept)" : "waiting for the contact to take it";
+    case "queued": return "waiting its turn";
+    case "paused": return transfer.pausedBy === "peer" ? "paused by the contact" : "paused here (file resume)";
+    case "verifying": return "every byte here, checking it";
+    default: return String(transfer.stage);
+  }
+}
 
 /** The chat or the group a file command names (`findChatOrGroup`). */
 const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
@@ -328,7 +344,7 @@ export const FILE_METHODS: Record<string, Method> = {
       return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
     }, ms, `file ${fileId} to arrive`).catch((error: unknown) => {
       const now = state(ctx).transfers[fileId];
-      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${now.stage}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
+      if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${stageWords(now)}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
       throw error;
     });
     if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
