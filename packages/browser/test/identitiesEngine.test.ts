@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, emptyIdentityLedger, identityFromSeed, identityStatement, type IdentityDisplay, type IdentityLedger } from "@ghostly/core";
-import { STORES, store, transact, wrap } from "../src/shared/idb";
+import { STORES, clearProfileStores, store, transact, wrap } from "../src/shared/idb";
 import { IdentityProofs, type IdentityLinkHost } from "../src/engine/identities";
 import { fakeKey, fakeKeySign, fakeKeySubject } from "../src/proofs/testing";
 import type { IdentityProofProvider } from "../src/proofs/contract";
@@ -242,6 +242,22 @@ describe("removing a proof and its revocation", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     await vi.waitFor(() => expect(resolved).toHaveLength(3));
     third.stop();
+  });
+
+  it("a revocation lookup still on its way when the profile's data is cleared does not note its time in the cleared profile", async () => {
+    const { engines, pkarr, resolved } = await shared();
+    let release: (() => void) | undefined;
+    const get = pkarr.get.bind(pkarr);
+    // The relays answer the lookup only once the clear is over.
+    (pkarr as unknown as { get: (key: string) => unknown }).get = (key: string) => new Promise(resolve => { release = () => resolve(get(key)); });
+    resolved.length = 0;
+    const check = engines.b.checkRevocations();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    await engines.b.revokeAll();
+    await clearProfileStores();
+    release!();
+    await check;
+    expect(await stored("identityRevocationsCheckedAt"), "the cleared profile has no lookup time").toBeUndefined();
   });
 
   it("a proof removed while the contact is live: the contact sees it withdrawn at once, then revoked, as a recheck says", async () => {
