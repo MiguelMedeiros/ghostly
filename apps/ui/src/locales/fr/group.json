@@ -120,6 +120,8 @@
     "knockingCommunity": "Dépôt d'une demande là où les apps du groupe les cherchent…",
     "queueCount": "{{count}} autres personnes attendent d'entrer.",
     "queueOne": "1 autre personne attend d'entrer.",
+    "replaced": "Ce lien a été remplacé ou désactivé",
+    "replacedBody": "Demandez le lien actuel à quelqu'un du groupe, puis ouvrez-le.",
     "stale": "Toujours pas de réponse. Si le lien a changé, demandez le nouveau.",
     "staleBusy": "Toujours en attente : le groupe fait entrer peu de gens à la fois.",
     "step": {
