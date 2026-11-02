@@ -1,6 +1,9 @@
 {
   "copied": "Copié",
   "copy": "Copier les détails",
+  "linkHint": "Fermez-le et cet onglet ouvre votre lien.",
+  "linkTaken": "Votre lien s'est ouvert dans Ghostly dans votre autre onglet.",
+  "linkTakenHint": "Continuez là-bas. Vous pouvez fermer celui-ci.",
   "lockdown": "Le mode Isolement semble activé, et il coupe ce dont Ghostly a besoin. Désactivez-le pour ce site, puis rechargez.",
   "lockdownHow": "Comment le désactiver pour ce site",
   "lockdownOtherBrowser": "Autres navigateurs sur iPhone ou iPad : Réglages › Confidentialité et sécurité › Mode Isolement › Configurer la navigation web, et désactivez-le pour ce navigateur.",
