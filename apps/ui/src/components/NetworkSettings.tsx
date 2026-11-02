@@ -11,6 +11,10 @@ import { problemLine } from "../lib/problemText";
 import { errorText } from "../lib/errorText";
 import { clockOffTexts } from "../lib/clockOff";
 import { exactText } from "../lib/exactText";
+import { fillNames } from "../lib/fillNodes";
+
+/** Protocol names the transport line keeps as they are, each its own `<bdi>` (Latin inside an Arabic sentence). */
+const PROTOCOL_NAMES = { dht: "Mainline DHT (BEP44)", pkarr: "Pkarr" };
 
 /**
  * Settings section for how this client reaches Pkarr and its peers: the Pkarr relays, an optional TURN server,
@@ -136,7 +140,7 @@ export function NetworkSettings() {
           </button>
           {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">{t("network.saved")}</span>}
           {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
-          <span data-testid="network-protocol" className="text-text-muted text-xs ms-auto min-w-0">{network.protocol}</span>
+          <span data-testid="network-protocol" data-kind={network.kind} className="text-text-muted text-xs ms-auto min-w-0">{fillNames(t(network.kind === "direct" ? "network.protocolDirect" : "network.protocolRelays"), PROTOCOL_NAMES)}</span>
         </div>
       </Block>
     </Section>
