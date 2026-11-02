@@ -84,6 +84,7 @@ export function NetworkSettings() {
     finally { setSwitching(false); }
   };
 
+  // Addresses read left to right in every language (in Arabic a wrapped relay's trailing "/" would start the next line); labels and hints follow the page.
   const field =
     "w-full min-w-0 px-3 py-2 min-h-10 bg-input-bg border border-border rounded-lg text-text-primary placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent transition-colors";
   const reset = "min-h-8 text-xs text-text-muted hover:text-accent transition-colors cursor-pointer";
@@ -97,33 +98,33 @@ export function NetworkSettings() {
       </Row>}
       <Field testId="network-relays-field" label={t("network.relays")} htmlFor="network-relays" hint={t("network.relaysHint")} info={t(direct ? "network.relaysInfoDirect" : "network.relaysInfoWeb")}
         trailing={<button onClick={() => setRelays(network.defaultRelays.join("\n"))} aria-label={t("network.resetRelays")} className={reset}>{t("network.reset")}</button>}>
-        <textarea id="network-relays" value={relays} onChange={(e) => setRelays(e.target.value)} rows={2} {...exactText} data-testid="network-relays"
+        <textarea id="network-relays" value={relays} onChange={(e) => setRelays(e.target.value)} rows={2} {...exactText} dir="ltr" data-testid="network-relays"
           className={`${field} font-mono text-sm resize-y`} />
       </Field>
 
       {network.iroh && <Field testId="network-iroh-field" label={t("network.iroh")} htmlFor="network-iroh-relays" hint={t("network.irohHint")} info={t(direct ? "network.irohInfoDirect" : "network.irohInfo")}
         trailing={<button onClick={() => setIroh(network.iroh!.defaultRelays.join("\n"))} aria-label={t("network.resetIroh")} className={reset}>{t("network.reset")}</button>}>
-        <textarea id="network-iroh-relays" value={iroh} onChange={(e) => setIroh(e.target.value)} rows={2} {...exactText} data-testid="network-iroh-relays"
+        <textarea id="network-iroh-relays" value={iroh} onChange={(e) => setIroh(e.target.value)} rows={2} {...exactText} dir="ltr" data-testid="network-iroh-relays"
           className={`${field} font-mono text-sm resize-y`} />
       </Field>}
 
       {/* The Desktop (the DHT reached directly) runs HyperDHT itself and ignores the relay: not offered, and left as saved. */}
       {!direct && <Field label={t("network.hyperdht")} htmlFor="network-hyperdht-relay" hint={t("network.hyperdhtHint")} info={t("network.hyperdhtInfo")}>
         <input id="network-hyperdht-relay" value={hyperdhtRelay} onChange={(e) => setHyperdhtRelay(e.target.value)} placeholder="wss://relay.example.org"
-          {...exactText} data-testid="network-hyperdht-relay" className={`${field} font-mono text-sm`} />
+          {...exactText} dir="ltr" data-testid="network-hyperdht-relay" className={`${field} font-mono text-sm`} />
       </Field>}
 
       <Field label={t("network.pushRelay")} htmlFor="network-push-relay" hint={t("network.pushRelayHint")} info={t("network.pushRelayInfo")}>
         <input id="network-push-relay" value={pushRelay} onChange={(e) => setPushRelay(e.target.value)} placeholder="https://push-relay.example.org"
-          {...exactText} data-testid="network-push-relay" className={`${field} font-mono text-sm`} />
+          {...exactText} dir="ltr" data-testid="network-push-relay" className={`${field} font-mono text-sm`} />
       </Field>
 
       <Field testId="network-turn-field" label={t("network.turn")} htmlFor="network-turn-url" hint={t(credentialGone ? "network.turnCredentialAgain" : "network.turnHint")} info={t("network.turnInfo")}>
         <input id="network-turn-url" aria-label={t("network.turnUrl")} value={turn.urls} onChange={(e) => setTurn({ ...turn, urls: e.target.value })}
-          placeholder="turn:turn.example.org:3478" {...exactText} className={`${field} font-mono text-sm`} />
+          placeholder="turn:turn.example.org:3478" {...exactText} dir="ltr" className={`${field} font-mono text-sm`} />
         <FieldGrid>
           <input aria-label={t("network.turnUsername")} value={turn.username} onChange={(e) => setTurn({ ...turn, username: e.target.value })}
-            placeholder={t("network.username")} {...exactText} className={field} />
+            placeholder={t("network.username")} {...exactText} dir="ltr" className={field} />
           <input aria-label={t("network.turnCredential")} type="password" value={turn.credential} onChange={(e) => setTurn({ ...turn, credential: e.target.value })}
             placeholder={t("network.credential")} className={field} />
         </FieldGrid>
