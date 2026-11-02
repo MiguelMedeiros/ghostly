@@ -39,7 +39,10 @@ export default defineConfig({
   // Two peers find each other by polling every few seconds: messages take seconds, not milliseconds.
   timeout: 3 * 60_000,
   expect: { timeout: 60_000 },
-  reporter: process.env.CI ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }], ["github"]] : [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }]],
+  // On CI also a blob report: e2e.yml runs the suite in shards and merges their blobs into one HTML report.
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }], ["github"], ["blob", { outputDir: "../blob-report" }]]
+    : [["list"], ["html", { open: "never", outputFolder: "../playwright-report" }]],
   use: {
     baseURL: deployed ?? `http://localhost:${port}`,
     trace: "retain-on-failure",
