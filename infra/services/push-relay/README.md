@@ -24,6 +24,10 @@ client's address from `X-Forwarded-For` rather than the proxy's; without it the 
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
 
+A forward the push service did not answer is logged as `failed` with its cause, never the endpoint: `timeout` (10
+seconds), `ENOTFOUND` (no DNS), `ECONNREFUSED` or `ETIMEDOUT` (no way out to port 443), a TLS code such as
+`CERT_HAS_EXPIRED`, or `redirect`.
+
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`) stops the start with one
 line that names it; leave a setting out for its default. The start line says how many proxies it counts and where it
 listens.
