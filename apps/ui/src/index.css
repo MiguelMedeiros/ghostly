@@ -1001,6 +1001,28 @@ html[data-standalone="true"] {
   }
 }
 
+/* Send files (components/composer/AttachmentSheet.tsx): a layer over the whole screen with its panel centred, which
+   opens with the focus in its caption, so on a phone the keyboard comes up at once. As the rule above, but on a phone
+   held upright too: centred on the whole screen, the caption and Cancel/Send were under the keyboard. The layer ends
+   where the keyboard starts, below the notch, and the picture is never taller than what is left once the caption and
+   the buttons (about 12rem with the panel's edges) have their room. `--keyboard-room` passes the visible height down
+   to the picture: `--app-height` itself is not inherited. */
+.keyboard-layer {
+  --keyboard-room: var(--app-height, 100dvh);
+}
+
+.keyboard-layer-picture {
+  max-height: min(55vh, max(4rem, calc(var(--keyboard-room, 100dvh) - env(safe-area-inset-top) - 12rem)));
+}
+
+@media (pointer: coarse) {
+  html[data-keyboard="true"] .keyboard-layer {
+    bottom: calc(100% - var(--app-height, 100%));
+    padding-top: max(0.5rem, env(safe-area-inset-top));
+    padding-bottom: 0.5rem;
+  }
+}
+
 /* Where the card would cover the field it is about (a short screen with the keyboard up: a phone on its side shows
    about 200px), it goes to the top instead (Toast.tsx measures both). After the rules above, as specific as they are. */
 html .toast-place[data-at="top"] {
