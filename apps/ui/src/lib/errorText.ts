@@ -619,7 +619,7 @@ const RULES: readonly Rule[] = [
   { match: /^Enter a relay address \((?<example>(?:https|wss):\/\/)…\)$/, key: "errors.relays.enterAddress" },
   exact("Use a wss:// relay address", "errors.relays.useWss"),
   exact("Leave the user and password out of the address", "errors.relays.noLogin"),
-  exact("Use at most four Iroh relays", "errors.relays.irohAtMost"),
+  exact("Use at most five Iroh relays", "errors.relays.irohAtMost"),
   exact("Enter the TURN server address", "errors.turn.enterAddress"),
   { match: /^“(?<address>\S+)” is not a TURN or STUN address \(turn:host:port\)$/, key: "errors.turn.notAddress" },
   exact("A TURN server needs its username and credential", "errors.turn.needsLogin"),

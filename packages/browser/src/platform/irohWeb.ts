@@ -11,16 +11,23 @@ import { fromBase64Url, irohDescriptor, irohRelayUrl, type BoundChannel, type Fr
  */
 
 /**
- * n0's public relays, the same ones the Desktop's Iroh homes on by default. Iroh itself names them with the trailing
- * dot of a full domain name (`use1-1.relay.n0.iroh.link.`), and compares relay URLs as text; here they have none,
- * because WebKit opens no host name that ends in a dot. `BROWSER_SPELLING` is what keeps the two one relay.
+ * n0's public relays, the same ones the Desktop's Iroh homes on by default, then Ghostly's own (`iroh-relay` behind a
+ * Cloudflare tunnel) as one more fallback. Iroh homes on the one with the lowest latency it measures, not the first.
+ * Iroh itself names n0's with the trailing dot of a full domain name (`use1-1.relay.n0.iroh.link.`), and compares relay
+ * URLs as text; here they have none, because WebKit opens no host name that ends in a dot. `BROWSER_SPELLING` is what
+ * keeps the two one relay. Ghostly's stays plain everywhere: the tunnel in front of it answers the dotted name with 404.
+ * At most `MAX_IROH_RELAYS`, the wasm's own limit.
  */
 export const DEFAULT_IROH_RELAYS = [
   "https://use1-1.relay.n0.iroh.link/",
   "https://euc1-1.relay.n0.iroh.link/",
   "https://aps1-1.relay.n0.iroh.link/",
   "https://usw1-1.relay.n0.iroh.link/",
+  "https://iroh.miguelmedeiros.dev/",
 ] as const;
+
+/** The most relays an endpoint homes on: the wasm refuses more (`native/transports/iroh-web`), as does the Desktop. */
+export const MAX_IROH_RELAYS = 5;
 
 /**
  * The spelling of every relay URL handed to the wasm Iroh (`irohRelayUrl`): the relays it homes on and a contact's

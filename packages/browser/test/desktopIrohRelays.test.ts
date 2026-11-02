@@ -82,3 +82,14 @@ it("calls a host's Iroh with the seed alone where the host does not take relays"
   expect(iroh).toHaveBeenCalledTimes(1);
   expect(iroh.mock.calls[0]).toHaveLength(1);
 });
+
+it("keeps the five default Iroh relays as a setting, so a person can edit the list without dropping one, and refuses a sixth", async () => {
+  const node = engine({ nativeTransports: { "iroh/1": vi.fn(async () => fakeEndpoint()) }, nativeIrohRelays: true });
+  // Settings, Network shows the five defaults before any edit; saved as they are, then with one swapped for the person's own.
+  const edited = [...DEFAULT_IROH_RELAYS.slice(0, 4), "https://relay.example.com/"];
+  await node.updateSettings({ settings: { irohRelays: [...DEFAULT_IROH_RELAYS] } });
+  await node.updateSettings({ settings: { irohRelays: edited } });
+  expect(node.getState().transport.iroh?.relays).toEqual(edited);
+  await expect(node.updateSettings({ settings: { irohRelays: [...edited, "https://relay.example.org/"] } })).rejects.toThrow("Use at most five Iroh relays");
+  expect(node.getState().transport.iroh?.relays).toEqual(edited);
+});

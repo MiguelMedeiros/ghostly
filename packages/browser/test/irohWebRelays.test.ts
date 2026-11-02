@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { expect, it } from "vitest";
-import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, type IrohWasm } from "../src/platform/irohWeb";
+import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, type IrohWasm } from "../src/platform/irohWeb";
 
 // covers: transport.iroh-web, settings.network.iroh-relays
 
@@ -30,12 +32,30 @@ const seed = Buffer.alloc(32, 7).toString("base64url");
 
 const noDottedHost = (urls: (string | null | undefined)[]) => { for (const url of urls) expect(new URL(url!).hostname, url!).not.toMatch(/\.$/); };
 
-it("lists the default relays in the spelling every browser opens: no trailing dot", () => {
-  expect(DEFAULT_IROH_RELAYS).toHaveLength(4);
-  for (const relay of DEFAULT_IROH_RELAYS) {
-    expect(relay).toMatch(/^https:\/\/[a-z0-9-]+\.relay\.n0\.iroh\.link\/$/);
-    expect(irohRelayProblem(relay)).toBeNull();
-  }
+it("lists the default relays in the spelling every browser opens: n0's four, then Ghostly's own, no trailing dot", () => {
+  expect(DEFAULT_IROH_RELAYS).toHaveLength(5);
+  expect(DEFAULT_IROH_RELAYS.length).toBeLessThanOrEqual(MAX_IROH_RELAYS);
+  for (const relay of DEFAULT_IROH_RELAYS.slice(0, 4)) expect(relay).toMatch(/^https:\/\/[a-z0-9-]+\.relay\.n0\.iroh\.link\/$/);
+  // Plain: the Cloudflare tunnel in front of it answers the dotted name with 404.
+  expect(DEFAULT_IROH_RELAYS[4]).toBe("https://iroh.miguelmedeiros.dev/");
+  for (const relay of DEFAULT_IROH_RELAYS) expect(irohRelayProblem(relay)).toBeNull();
+  noDottedHost([...DEFAULT_IROH_RELAYS]);
+});
+
+/**
+ * The relay count is checked inside the committed wasm (`native/transports/iroh-web`), so a default list longer than
+ * it takes would leave the browser build with no Iroh at all. The real wasm, on closed loopback ports (no network):
+ * as many relays as the defaults get past the count and fail only for want of an answer; one more is refused.
+ */
+it("starts the real wasm on as many relays as the defaults, and refuses one more", async () => {
+  const load = async (): Promise<IrohWasm> => {
+    const module = await import("@ghostly/iroh-web");
+    module.initSync({ module: readFileSync(createRequire(import.meta.url).resolve("@ghostly/iroh-web/wasm")) });
+    return module as unknown as IrohWasm;
+  };
+  const closed = (n: number) => Array.from({ length: n }, (_, i) => `http://127.0.0.1:${9 + i}/`);
+  await expect(createIrohWebEndpoint(seed, { load, relays: closed(DEFAULT_IROH_RELAYS.length), onlineMs: 300 })).rejects.toThrow("Iroh relay unreachable");
+  await expect(createIrohWebEndpoint(seed, { load, relays: closed(MAX_IROH_RELAYS + 1), onlineMs: 300 })).rejects.toThrow("Between one and five relays are needed");
 });
 
 it("homes on the same relays whichever way they are spelled, never under a dotted host, and publishes that spelling", async () => {
