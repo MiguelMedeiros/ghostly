@@ -168,6 +168,18 @@ function leaveViewEntry(): void {
 }
 
 /**
+ * A view's entry with no view open (Forward after a close, or Back onto it from a step past it) is not a place to stop:
+ * nothing is shown there, and the next Back would only leave it. The page goes on to the entry under it, where the
+ * chat was: Forward shows the chat it was on, and a Back carries on past it.
+ */
+let watchingDeadEntries = false;
+function watchDeadEntries(): void {
+  if (watchingDeadEntries) return;
+  watchingDeadEntries = true;
+  addEventListener("popstate", () => { if (isViewEntry(history.state) && !document.getElementById(VIEW_ID)) leaveViewEntry(); });
+}
+
+/**
  * Shows a contact's app full screen over the app, on its own origin under `host`, with a bar to close it. One at a
  * time: opening another closes the one before.
  */
@@ -275,6 +287,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   };
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
   const onPop = () => { if (!isViewEntry(history.state)) end(); };
+  watchDeadEntries();
   if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
   addEventListener("keydown", onKey);
