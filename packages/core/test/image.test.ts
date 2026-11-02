@@ -10,7 +10,11 @@ const be32 = (n: number) => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0
 const le24 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff];
 
 const png = (width: number, height: number) => bytes([0x89], "PNG\r\n\x1a\n", be32(13), "IHDR", be32(width), be32(height), [8, 6, 0, 0, 0]);
-const gif = (width: number, height: number, version = "GIF89a") => bytes(version, le16(width), le16(height), [0, 0, 0]);
+/** A GIF frame: its image descriptor (left, top, width, height, no local colour table), then 1×1 of LZW data. */
+const frame = (width: number, height: number, left = 0, top = 0) => [0x2c, ...le16(left), ...le16(top), ...le16(width), ...le16(height), 0, 2, 2, 0x4c, 0x01, 0];
+/** A GIF: its logical screen, a two-colour global table, a graphic control extension, then frames (one of the screen's size). */
+const gif = (width: number, height: number, version = "GIF89a", ...frames: number[][]) => bytes(version, le16(width), le16(height),
+  [0x80, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff], [0x21, 0xf9, 4, 0, 0, 0, 0, 0], ...(frames.length ? frames : [frame(width, height)]), [0x3b]);
 
 /** A segment: marker, then its length (which counts itself) and body. */
 const segment = (marker: number, body: number[]) => [0xff, marker, ...be16(body.length + 2), ...body];
@@ -56,6 +60,34 @@ describe("reading a picture's size from its first bytes", () => {
     expect(imageSize(png(640, 480))).toEqual({ width: 640, height: 480 });
     expect(imageSize(gif(88, 31))).toEqual({ width: 88, height: 31 });
     expect(imageSize(gif(300, 200, "GIF87a"))).toEqual({ width: 300, height: 200 });
+    // A frame inside the screen leaves it as it is.
+    expect(imageSize(gif(300, 200, "GIF89a", frame(100, 50, 20, 30)))).toEqual({ width: 300, height: 200 });
+  });
+
+  it("a GIF whose first frame reaches past its screen, at the frame's size", () => {
+    // A browser decodes the first frame at its own size: a 1×1 screen does not make 12000×12000 of it small.
+    expect(imageSize(gif(1, 1, "GIF89a", frame(12_000, 12_000)))).toEqual({ width: 12_000, height: 12_000 });
+    expect(previewable(imageSize(gif(1, 1, "GIF89a", frame(12_000, 12_000))))).toBe(false);
+    expect(previewable(imageSize(gif(1, 1, "GIF89a", frame(16_384, 16_384))))).toBe(false);
+    // Or where it sits: its offset counts.
+    expect(imageSize(gif(10, 10, "GIF89a", frame(10, 10, 9_000, 5)))).toEqual({ width: 9_010, height: 15 });
+    // Past what the format can say: no size.
+    expect(imageSize(gif(1, 1, "GIF89a", frame(65_535, 1, 65_535, 0)))).toBeUndefined();
+    // A comment before the frame is stepped over, sub-block by sub-block.
+    expect(imageSize(bytes("GIF89a", le16(1), le16(1), [0, 0, 0], [0x21, 0xfe, 3, 1, 2, 3, 2, 4, 5, 0], frame(5_000, 20_000), [0x3b])))
+      .toEqual({ width: 5_000, height: 20_000 });
+    // No frame at all: the screen.
+    expect(imageSize(bytes("GIF89a", le16(40), le16(30), [0, 0, 0], [0x3b]))).toEqual({ width: 40, height: 30 });
+  });
+
+  it("a GIF whose first frame is not in what was read, without a size", () => {
+    const big = gif(1, 1, "GIF89a", frame(12_000, 12_000));
+    for (const cut of [10, 13, 16, 22, 30]) expect(imageSize(big.slice(0, cut))).toBeUndefined();
+    // Comments past the head push the frame out of it: not drawn.
+    const comment = Array.from({ length: Math.ceil(IMAGE_LIMITS.headBytes / 255) + 1 }, () => [255, ...new Array(255).fill(0x41)]).flat();
+    const pushed = bytes("GIF89a", le16(1), le16(1), [0, 0, 0], [0x21, 0xfe], comment, [0], frame(12_000, 12_000), [0x3b]);
+    expect(imageSize(pushed.subarray(0, IMAGE_LIMITS.headBytes))).toBeUndefined();
+    expect(previewable(imageSize(pushed.subarray(0, IMAGE_LIMITS.headBytes)))).toBe(false);
   });
 
   it("JPEG: baseline and progressive, past other segments", () => {
