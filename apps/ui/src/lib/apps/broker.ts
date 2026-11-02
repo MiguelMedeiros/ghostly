@@ -279,8 +279,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
   /** Linked files: only for an app granted `files`, in a client that keeps them. Not a version's: the outer platform's. */
   const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
-  /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. */
-  const ranges = () => (chatAllowed ? platform.ranges ?? null : null);
+  /** The read lane: only in a chat, for an app granted `chat`, where the engine has it. The version's, as the chat's. */
+  const ranges = () => (chatAllowed ? host.ranges ?? null : null);
   /**
    * What this app serves on its chat's session now: serve id to the linked file, its size as listed and the serves not
    * unserved yet. The engine answers the same id for a file served again, so each serve needs its own unserve.
