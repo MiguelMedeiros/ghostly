@@ -268,7 +268,7 @@ Two things to know:
 - Build with `tauri build`, not `cargo build`. A plain cargo debug build points the WebView at `devUrl`, and with no dev server running the window only says "Connection refused". `--debug --no-bundle` keeps the compile short and skips the installers; the test runs the binary from `target/`, newest of `debug` and `release`.
 - The app runs under `GHOSTLY_PROFILE=e2e`, so a test never opens your own chats.
 
-The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
+The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network says it reaches Mainline DHT (BEP44) directly over UDP (`data-testid="network-protocol"` with `data-kind="direct"`: Rust reaching the DHT, where a browser has `relays`, Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
 
 ### On macOS
 
