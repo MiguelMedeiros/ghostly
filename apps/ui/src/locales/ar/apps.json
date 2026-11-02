@@ -143,7 +143,11 @@
   },
   "store": {
     "count": "{{count}} تطبيقات",
-    "countOne": "تطبيق واحد",
+    "count_many": "{{count}} تطبيقًا",
+    "count_one": "تطبيق واحد",
+    "count_other": "{{count}} تطبيق",
+    "count_two": "تطبيقان",
+    "count_zero": "لا تطبيقات",
     "curated": "منتقى",
     "empty": "لا يعرض هذا المتجر أي تطبيقات.",
     "filter": "ابحث في هذا المتجر",
