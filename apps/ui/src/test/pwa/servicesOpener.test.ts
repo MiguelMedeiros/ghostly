@@ -291,6 +291,25 @@ describe("a contact's app shown over the app", () => {
       expect(history.length).toBe(length + 1); // the view's entry is only ahead now, as after any Back
     });
 
+    it("leaves no dead step ahead once ✕ closed it: Forward lands back on the chat, and the next Back leaves it", async () => {
+      history.pushState({ usr: null, key: "k0", idx: 2 }, "", "#/chats");
+      history.pushState(ROUTER, "", CHAT);
+      await open("one");
+      const pop = settled();
+      (document.querySelector('[data-testid="service-view-close"]') as HTMLButtonElement).click();
+      await pop;
+      // Forward onto the closed view's entry: nothing to show there, so the page is the chat again, unmarked.
+      const forward = settled();
+      history.forward();
+      await forward;
+      await settled();
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(history.state).toEqual(ROUTER);
+      // The next Back is the app's own: off the chat, not a press spent leaving a dead entry.
+      await back();
+      expect(location.hash).toBe("#/chats");
+    });
+
     it("is one step for one view, however many were opened in turn", async () => {
       history.pushState(ROUTER, "", CHAT);
       await open("one");
