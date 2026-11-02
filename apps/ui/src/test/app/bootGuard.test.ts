@@ -340,6 +340,87 @@ describe("the boot guard", () => {
   });
 });
 
+describe("the boot guard's theme", () => {
+  /*
+   * The page's first frames are drawn before React sets the theme (ThemeContext): without the person's scheme and
+   * colour theme on <html> by then, index.css's bare :root (Classic dark) styled them, and a light theme flashed dark.
+   */
+  const html = document.documentElement;
+  const themeColor = () => document.head.querySelector('meta[name="theme-color"]')!.getAttribute("content");
+
+  function open({ saved = {} as Record<string, string | undefined>, osDark = false } = {}) {
+    document.head.innerHTML = '<meta name="theme-color" content="#202c33">';
+    for (const [key, value] of Object.entries(saved)) if (value !== undefined) localStorage.setItem(key, value);
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(prefers-color-scheme: dark)" && osDark }));
+    start({ loaded: false });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+    document.head.innerHTML = "";
+    html.removeAttribute("data-theme");
+    html.removeAttribute("data-color-theme");
+    html.style.colorScheme = "";
+  });
+
+  it("puts the saved scheme and colour theme on <html>, and the browser's bar in its header colour, before the app runs", () => {
+    open({ saved: { ghostly_app_settings: JSON.stringify({ colorScheme: "light", colorTheme: "cyan" }) } });
+    expect(html).toHaveAttribute("data-theme", "light");
+    expect(html).toHaveAttribute("data-color-theme", "cyan");
+    expect(html.style.colorScheme).toBe("light");
+    expect(themeColor()).toBe("#ecfeff");
+  });
+
+  it("follows the system's scheme for System, and an old profile's `theme`", () => {
+    open({ saved: { ghostly_app_settings: JSON.stringify({ colorScheme: "system", colorTheme: "purple" }) } });
+    expect(html).toHaveAttribute("data-theme", "light");
+    expect(themeColor()).toBe("#faf5ff");
+    open({ saved: { ghostly_app_settings: JSON.stringify({ colorScheme: "system", colorTheme: "purple" }) }, osDark: true });
+    expect(html).toHaveAttribute("data-theme", "dark");
+    expect(themeColor()).toBe("#1a1625");
+    open({ saved: { ghostly_app_settings: JSON.stringify({ theme: "light" }) } });
+    expect(html).toHaveAttribute("data-theme", "light");
+    expect(html).toHaveAttribute("data-color-theme", "cyan");
+  });
+
+  it("gives a new profile, or settings it cannot read, the app's defaults: dark and cyan", () => {
+    open();
+    expect(html).toHaveAttribute("data-theme", "dark");
+    expect(html).toHaveAttribute("data-color-theme", "cyan");
+    expect(themeColor()).toBe("#0c1929");
+    open({ saved: { ghostly_app_settings: "{not json" } });
+    expect(html).toHaveAttribute("data-theme", "dark");
+    open({ saved: { ghostly_app_settings: JSON.stringify({ colorScheme: "sepia", colorTheme: "orange" }) } });
+    expect(html).toHaveAttribute("data-theme", "dark");
+    expect(html).toHaveAttribute("data-color-theme", "cyan");
+  });
+
+  it("reads the settings of the profile the page will start as, and of the space a handoff moved it to", () => {
+    const light = JSON.stringify({ colorScheme: "light", colorTheme: "monochrome" });
+    const registry = (active: string, space?: string) => JSON.stringify({ version: 1, active, profiles: [{ id: "", name: "Personal" }, { id: "abcdefghij", name: "Work", space }] });
+    open({ saved: { ghostly_profiles: registry("abcdefghij"), ghostly_abcdefghij_app_settings: light } });
+    expect(html).toHaveAttribute("data-theme", "light");
+    expect(html).toHaveAttribute("data-color-theme", "monochrome");
+    open({ saved: { ghostly_profiles: registry("abcdefghij", "moved-1"), ghostly_abcdefghij_app_settings: undefined, "ghostly_moved-1_app_settings": light } });
+    expect(html).toHaveAttribute("data-theme", "light");
+    // A choice the registry does not list is the default profile, as the app reads it.
+    open({ saved: { ghostly_profiles: registry("zzzzzzzzzz"), ghostly_app_settings: JSON.stringify({ colorScheme: "light", colorTheme: "classic" }) } });
+    expect(html).toHaveAttribute("data-color-theme", "classic");
+  });
+
+  it("names each theme's header colour as index.css does", () => {
+    const css = readFileSync(join(REPO, "apps/ui/src/index.css"), "utf8");
+    for (const scheme of ["dark", "light"]) {
+      for (const theme of ["classic", "monochrome", "cyan", "purple"]) {
+        const header = new RegExp(`\\[data-theme="${scheme}"\\]\\[data-color-theme="${theme}"\\][^{]*\\{[^}]*--theme-panel-header: (#[0-9a-f]+);`).exec(css)![1];
+        open({ saved: { ghostly_app_settings: JSON.stringify({ colorScheme: scheme, colorTheme: theme }) } });
+        expect(themeColor(), `${scheme} ${theme}`).toBe(header);
+      }
+    }
+  });
+});
+
 describe("the boot guard's language file", () => {
   // As the build names them in the page (apps/web/localePreload.ts): every language but English, which is in the entry.
   const FILES = { ar: "/assets/ar-abc.js", ja: "/assets/ja-def.js", pt: "/assets/pt-ghi.js" };
