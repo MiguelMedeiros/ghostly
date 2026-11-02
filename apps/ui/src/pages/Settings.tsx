@@ -34,6 +34,7 @@ import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
 import { Toast } from "../components/ui/Toast";
 import { useToast } from "../hooks/useToast";
+import { useOwnNameField } from "../hooks/useOwnNameField";
 import { FieldError } from "../components/ui/FieldError";
 import { focusLost, focusToRetype } from "../lib/focus";
 import { CATEGORY_PREVIEW, categoryOn } from "../lib/cues";
@@ -104,9 +105,10 @@ function SettingsGroup({ id, view, children }: { id: SettingsSection; view: Sect
 
 export function Settings() {
   const nav = useAppNavigation();
-  const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
+  const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications,
     updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
     useSettings();
+  const nickname = useOwnNameField();
   const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
@@ -516,8 +518,8 @@ export function Settings() {
         )}
         <Field label={t("settings.defaultNickname")} hint={t("settings.defaultNicknameHint")} htmlFor="settings-nickname">
           <InputGroup>
-            <input id="settings-nickname" type="text" value={settings.defaultNickname} onChange={(e) => updateDefaultNickname(e.target.value)}
-              placeholder={t("settings.nicknamePlaceholder")} maxLength={20} className={field} />
+            <input id="settings-nickname" type="text" {...nickname}
+              placeholder={t("settings.nicknamePlaceholder")} className={field} />
             <button onClick={randomizeNickname} title={t("settings.randomizeName")} aria-label={t("settings.randomizeName")}
               className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt transition-colors cursor-pointer">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">

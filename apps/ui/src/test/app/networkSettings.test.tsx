@@ -4,6 +4,7 @@ import { irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import { NetworkSettings } from "../../components/NetworkSettings";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
+import { LANGUAGES, lookup } from "../i18n/locales";
 
 // covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays, settings.network.turn
 
@@ -39,6 +40,30 @@ describe("Settings, Network: Pkarr relays", () => {
     expect(screen.queryByTestId("network-read-relays")).toBeNull();
     expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/Browsers cannot reach the Mainline DHT/);
   });
+});
+
+describe("Settings, Network: the transport line", () => {
+  const transports = {
+    relays: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS },
+    direct: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true },
+  };
+  for (const language of LANGUAGES) {
+    for (const [kind, transport] of Object.entries(transports)) {
+      it(`${language}, ${kind}: says how this client reaches the DHT in the page's language, the protocol names kept as names`, () => {
+        const { engine } = renderApp(<NetworkSettings />, { language });
+        act(() => engine.update({ transport, settings: { relays: RELAYS } }));
+        const line = screen.getByTestId("network-protocol");
+        // Not the engine's English (kept for logs and the CLI), whatever the language.
+        expect(line).not.toHaveTextContent(transport.protocol);
+        const key = kind === "direct" ? "network.protocolDirect" : "network.protocolRelays";
+        const expected = lookup(language, key)!.replace("{{dht}}", "Mainline DHT (BEP44)").replace("{{pkarr}}", "Pkarr");
+        expect(line.textContent).toBe(expected);
+        // Each name its own isolate, so its brackets stay on their side in an Arabic sentence.
+        expect([...line.querySelectorAll("bdi")].map((bdi) => bdi.textContent).sort()).toEqual(["Mainline DHT (BEP44)", "Pkarr"]);
+        expect(line).toHaveAttribute("data-kind", kind);
+      });
+    }
+  }
 });
 
 describe("Settings, Network: Iroh relays", () => {

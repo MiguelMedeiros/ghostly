@@ -120,6 +120,21 @@ describe("links", () => {
     ["https://x.example/a||", "https://x.example/a"],
   ])("linkEnd(%s)", (url, end) => expect(linkEnd(url)).toBe(end));
 
+  // The link took the sentence's punctuation in ("https://x.example/a。", "…/a，好") and opened another address.
+  it.each([
+    ["見て https://x.example/a。", "見て [link:https://x.example/a]。"],
+    ["看 https://x.example/a，好", "看 [link:https://x.example/a]，好"],
+    ["https://x.example/a、b", "[link:https://x.example/a]、b"],
+    ["「https://x.example/a」", "「[link:https://x.example/a]」"],
+    ["（https://x.example/a）", "（[link:https://x.example/a]）"],
+    ["انظر https://x.example/a، ثم", "انظر [link:https://x.example/a]، ثم"],
+    ["هل رأيت https://x.example/a؟", "هل رأيت [link:https://x.example/a]؟"],
+    ["«https://x.example/a»", "«[link:https://x.example/a]»"],
+    ["“https://x.example/a”", "“[link:https://x.example/a]”"],
+    ["see https://x.example/a…", "see [link:https://x.example/a]…"],
+    ["https://ja.wikipedia.org/wiki/東京", "[link:https://ja.wikipedia.org/wiki/東京]"],
+  ])("ends a link before the sentence's punctuation in any language: %s", (text, shown) => expect(inline(text)).toBe(shown));
+
   it("never links anything but http(s)", () => {
     expect(inline("javascript:alert(1) data:text/html,x ftp://x.example")).toBe("javascript:alert(1) data:text/html,x ftp://x.example");
     expect(inline("https://")).toBe("https://");

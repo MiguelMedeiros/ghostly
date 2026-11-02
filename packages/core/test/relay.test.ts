@@ -762,10 +762,30 @@ describe("relay transport: a chat before its groups", () => {
   it("leaves the groups part of the minute however many chats need the rest", async () => {
     const { relay, log, group } = counting();
     // Thirty chats looked fast for their contacts within the minute (their reads went elsewhere: the need is what counts).
-    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) relay["chatNeed"](createIdentity().pubKeyZ32).urgentAt = Date.now();
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) relay["chatNeed"](createIdentity().pubKeyZ32, Date.now());
     for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
     expect(log).toHaveLength(REQUESTS_PER_MINUTE - Math.floor(REQUESTS_PER_MINUTE * CHAT_RESERVE_MOST_SHARE));
     expect(log.length).toBeGreaterThan(0);
+  });
+
+  it("weighs a group's or a background request without walking every chat that needs the relay", () => {
+    // Contacts away by the thousand: each chat the budget refused needs the relay for a minute, and every group's or
+    // background request asked walked all those needs, twice (bug hunt, 2026-11-01: 2.7 s per 10 idle minutes at 500).
+    const url = "https://a.test";
+    const relay = new RelayTransport({ freshReadMs: 0, relays: [url], fetch: (async () => new Response(null, { status: 404 })) as typeof fetch });
+    const who = (options: { urgent?: boolean; write?: boolean; group?: boolean; background?: boolean }) =>
+      ({ background: false, group: false, urgent: false, door: false, write: false, signal: false, watch: false, watchWrite: false, departed: false, resume: false, back: false, ...options });
+    const chats = 5_000;
+    for (let i = 0; i < chats; i++) relay["take"](url, who({ urgent: true, write: true }), `chat-${i}`);
+    const start = performance.now();
+    let held = 0;
+    for (let i = 0; i < chats; i++) {
+      if (relay["heldFor"](url, who({ group: true }), Date.now(), `group-${i}`) > 0) held++;
+      if (relay["heldFor"](url, who({ background: true }), Date.now(), `look-${i}`) > 0) held++;
+    }
+    expect(held).toBe(2 * chats);
+    // Dev: 4.5 s, the work growing with the square of the chats.
+    expect(performance.now() - start).toBeLessThan(1_000);
   });
 
   it("does not keep a reserve for a chat that is not waiting for anything", async () => {

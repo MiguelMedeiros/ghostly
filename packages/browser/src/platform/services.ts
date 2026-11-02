@@ -546,6 +546,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (!state) return null;
     return {
       protocol: state.transport.protocol,
+      kind: state.transport.direct ? "direct" as const : "relays" as const,
       relays: state.settings.relays,
       defaultRelays: DEFAULT_RELAYS,
       turn: state.settings.iceServers[0] ?? null,

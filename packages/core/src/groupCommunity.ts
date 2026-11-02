@@ -1061,12 +1061,32 @@ export class CommunitySession {
       this.state.chain.push(c);
       this.takeDerived(h);
     }
+    this.holdDroppedLeaves(dropped);
     const lostMine = !rosterHas(this.roster, this.myKey);
     if (lostMine && this.state.status === "active") {
       const out = [...path].reverse().map(h => this.known.get(h)!).find(c => (c.k === "remove" || c.k === "leave") && c.s === this.myKey);
       if (out) this.out(out.k === "remove" ? "removed" : "left", out.k === "remove" ? "You were removed from this group" : "You left this group");
       else { this.state.status = "lost"; this.state.statusReason = "Two members let people in at the same moment and yours did not count. Asking to be let in again…"; }
     }
+  }
+
+  /**
+   * A leave the branch I left behind had committed, whose member the main branch still lists (an admin-only commit
+   * signed on a stale view won the fork): its request is held again, so the next hub commits it on top. The hub that
+   * committed it kept no copy and the leaver's app forgot the group, so nobody would say it again (agents#2285).
+   */
+  private holdDroppedLeaves(dropped: CommunityCommit[]): void {
+    let held = this.state.pendingLeaves;
+    for (const c of dropped) {
+      if (c.k !== "leave" || !c.s || !c.ls || c.s === this.myKey || !rosterHas(this.roster, c.s)) continue;
+      const request = { s: c.s, ls: c.ls, ...(c.ls3 ? { ls3: c.ls3 } : {}) };
+      // Not one the main branch committed already (this admission's), and the one naming the admission takes the place.
+      if (!leaveStands({ g: this.id, ...request }, this.ancestry(this.topHash))) continue;
+      const other = held.find(r => r.s === c.s && leaveStands({ g: this.id, ...r }, this.ancestry(this.topHash)));
+      if (other && (other.ls3 || !request.ls3)) continue;
+      held = [...held.filter(r => r.s !== c.s), request].slice(-COMMUNITY_LIMITS.pendingLeaves);
+    }
+    this.state.pendingLeaves = held;
   }
 
   /** The entry key is the one the main branch names; its seed comes with a `group-entry` from whoever holds it. */
@@ -1254,6 +1274,8 @@ export class CommunitySession {
     return this.serialize(async () => {
       this.requireAdmin();
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
+      // A member whose signed leave I hold has gone: the role would stay with nobody (a leave never names the admin).
+      if (this.state.pendingLeaves.some(r => r.s === memberKey && leaveStands({ g: this.id, ...r }, this.ancestry(this.topHash)))) throw new Error("This member has left the group. Make someone else the admin.");
       await this.commit("role", { s: memberKey }, now);
     });
   }
