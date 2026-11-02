@@ -69,6 +69,8 @@
     "created": "Group created.",
     "forked": "The membership history forked",
     "gone": "{{name}} is no longer a member",
+    "goneBy": "{{by}} removed {{name}}",
+    "goneByYou": "You removed {{name}}",
     "joined": "{{name}} joined",
     "left": "{{name}} left",
     "pictureChanged": "{{name}} changed the group's picture",

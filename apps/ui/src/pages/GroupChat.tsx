@@ -194,6 +194,13 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   const text = message.text;
   // My own key is me whatever the roster says: once removed, it no longer lists me, and my lines still read "You …".
   const me = !!member?.me || (!!message.member && message.member === group.myKey);
+  // A private group's removal names the admin who signed it (`by`), as the roster or the group's former names know
+  // them now; my own removal of someone in my words. Mine, the line of a member back in the group, stays "You were removed".
+  if (message.event === "gone" && message.member && message.by && !me) {
+    const name = authorName(group, message.member, t);
+    const byMe = message.by === group.myKey || !!group.members.find(m => m.key === message.by)?.me;
+    return byMe ? t("group.event.goneByYou", { name }) : t("group.event.goneBy", { by: authorName(group, message.by, t), name });
+  }
   // A member who has left since: the group still knows the name they had (`formerNames`), so their lines are said in
   // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
   const former = !member && !!message.member && FORMER_EVENTS.has(message.event) && (me || group.profile !== "community" || !!group.formerNames?.[message.member]);

@@ -73,6 +73,8 @@
     "created": "أُنشئت المجموعة.",
     "forked": "تشعّب سجل العضوية",
     "gone": "لم يعد {{name}} عضوًا",
+    "goneBy": "أزال {{by}} {{name}} من المجموعة",
+    "goneByYou": "أزلت {{name}} من المجموعة",
     "joined": "انضم {{name}}",
     "left": "غادر {{name}}",
     "pictureChanged": "غيّر {{name}} صورة المجموعة",

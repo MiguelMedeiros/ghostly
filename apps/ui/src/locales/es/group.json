@@ -69,6 +69,8 @@
     "created": "Grupo creado.",
     "forked": "El historial de miembros se bifurcó",
     "gone": "{{name}} ya no es miembro",
+    "goneBy": "{{by}} eliminó a {{name}} del grupo",
+    "goneByYou": "Eliminaste a {{name}} del grupo",
     "joined": "{{name}} se unió",
     "left": "{{name}} salió",
     "pictureChanged": "{{name}} cambió la foto del grupo",

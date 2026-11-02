@@ -915,6 +915,8 @@ export interface StoredMessage {
   member?: string;
   /** Group history lines that are not messages. */
   event?: GroupEvent;
+  /** A private group's removal line (`gone`): the member key of the admin who removed `member`. */
+  by?: string;
   /** Group history: a payment between members, as the group knows it (WISP 902 § Payments). */
   groupPay?: GroupPayNote;
   /** Group messages: the places of the text that name members, by member key (WISP 902 § Mentions). */
