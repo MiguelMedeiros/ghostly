@@ -4,7 +4,7 @@ import {
   HOME, anchorTarget, conversationTarget, hasParent, homeTarget, openTarget, openUnderTarget, placeTarget, plan, readNav, stackOf, upTarget, userState,
   type NavEntry, type NavPlan,
 } from "../lib/navigation";
-import { afterLayers, traversing } from "../lib/layerHistory";
+import { afterLayers, pagesUnder, traversing } from "../lib/layerHistory";
 
 /**
  * What is left of a plan once the history has gone back: going back is asynchronous (the browser answers
@@ -27,7 +27,8 @@ function run(navigate: NavigateFunction, fromKey: string, steps: NavPlan) {
   if (steps.back > 0) {
     pending = { from: fromKey, at: Date.now(), run: rest };
     traversing();
-    void navigate(-steps.back);
+    // Over this page's entries from before a reload too (lib/layerHistory.ts).
+    void navigate(-steps.back - pagesUnder());
   } else rest(navigate);
 }
 
