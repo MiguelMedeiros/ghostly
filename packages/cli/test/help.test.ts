@@ -105,7 +105,35 @@ describe("help", () => {
     }
     const chat = await ghostly(["help", "chat", "histroy"]);
     expect(chat.code).toBe(2);
-    expect((chat.json.error as { message: string }).message).toMatch(/^Unknown command: chat histroy: ghostly chat takes .*\bhistory\b.* \(ghostly help chat\)$/);
+    expect((chat.json.error as { message: string }).message).toBe("Unknown command: chat histroy (did you mean chat history? ghostly help chat history)");
+  });
+
+  it("a typo in a command or an option names what was meant, the command and its help", async () => {
+    // Before: "Unknown command: sned hi (ghostly help)" (the text read as a command word), "Unknown option --wiat" (no
+    // command, no help), and "put -- before text" from commands that take no text.
+    const dir = home("typos");
+    for (const [args, message] of [
+      [["sned", "hi"], "Unknown command: sned (did you mean send? ghostly help send)"],
+      [["chta", "list"], "Unknown command: chta list (did you mean chat list? ghostly help chat list)"],
+      [["grup", "list"], "Unknown command: grup list (did you mean group list? ghostly help group list)"],
+      [["chat", "lst"], "Unknown command: chat lst (did you mean chat list? ghostly help chat list)"],
+      [["help", "sned"], "Unknown command: sned (did you mean send? ghostly help send)"],
+      [["send", "ecp", "hi", "--wiat", "sent"], "Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)"],
+      [["chat", "history", "ecp", "--limt", "5"], "Unknown option --limt for ghostly chat history (did you mean --limit? ghostly help chat history)"],
+      [["chat", "list", "--show-secrets"], "Unknown option --show-secrets for ghostly chat list (did you mean --show-secret? ghostly help chat list)"],
+      [["send", "bob", "-1", "degrees"], "Unknown option -1 for ghostly send (put -- before text that starts with a dash; ghostly help send)"],
+      [["chat", "rename", "bob", "-x"], "Unknown option -x for ghostly chat rename (put -- before text that starts with a dash; ghostly help chat rename)"],
+      [["version", "-x"], "Unknown option -x for ghostly version (ghostly help version)"],
+      [["status", "-x"], "Unknown option -x for ghostly status (ghostly help status)"],
+      [["chat", "list", "-x"], "Unknown option -x for ghostly chat list (ghostly help chat list)"],
+      [["profile", "list", "-x"], "Unknown option -x for ghostly profile list (ghostly help profile list)"],
+      [["daemon", "status", "-x"], "Unknown option -x for ghostly daemon status (ghostly help daemon status)"],
+    ] as const) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
   });
 
   it("--help=false is the command, and a global boolean's --no- form may come before the command", async () => {
@@ -125,7 +153,7 @@ describe("help", () => {
     for (const args of [["constructor"], ["constructor", "bob", "hi"], ["toString", "bob"], ["__proto__", "bob", "hi"]]) {
       const result = await ghostly(["--home", dir, ...args]);
       expect(result.code, args.join(" ")).toBe(2);
-      expect(result.json, args.join(" ")).toMatchObject({ error: { code: "usage", message: `Unknown command: ${args.slice(0, 2).join(" ")} (ghostly help)` } });
+      expect(result.json, args.join(" ")).toMatchObject({ error: { code: "usage", message: `Unknown command: ${args[0]} (ghostly help)` } });
     }
     expect(existsSync(join(dir, "profiles"))).toBe(false);
   });
@@ -160,8 +188,8 @@ describe("help", () => {
     for (const [args, message] of [
       [["version", "now", "foo"], "Too many arguments: ghostly version"],
       [["--version", "extra"], "Too many arguments: ghostly version"],
-      [["version", "--nope"], "Unknown option --nope"],
-      [["--version", "--json"], "Unknown option --json"],
+      [["version", "--nope"], "Unknown option --nope for ghostly version (ghostly help version)"],
+      [["--version", "--json"], "Unknown option --json for ghostly version (ghostly help version)"],
     ] as const) {
       const result = await ghostly([...args]);
       expect(result.code, args.join(" ")).toBe(2);
