@@ -180,6 +180,41 @@ export async function supersededBy({ sha, api, settle = () => new Promise((r) =>
   return ask();
 }
 
+/**
+ * The run that leaving draft started behind this one, or null. A run whose event saw a draft (its payload) while the
+ * pull request is ready now left draft after that event: "open as draft, `gh pr ready` seconds later", or a draft run
+ * still going when its owner marks it ready. Leaving draft's run does not cancel the one in progress (ci.yml's
+ * concurrency): it waits behind it in the pull request's group and plans everything. So this run plans the fast tier,
+ * and its green "CI Success (draft)" lets the pull request board the merge train while the full run is still to come
+ * (the train cancels that one). It counts only when CI has a run on this head for this pull request that is newer
+ * than this one and not finished, and none older: a run created before this one (leaving draft's, when GitHub created
+ * the push's run later) was cancelled by this one, which then plans everything as before. Asked again once after
+ * `settle`, for a run whose plan starts before leaving draft's run exists.
+ * @param {{ sha: string, run: number, pull: number, repo: string, api: (path: string) => Promise<any>, settle?: () => Promise<void> }} pr
+ *   `run` is this run's id, `pull` the pull request's number
+ * @returns {Promise<string | null>} the newer run's address
+ */
+export async function draftBehind({ sha, run, pull, repo, api, settle = () => new Promise((r) => setTimeout(r, SETTLE_MS)) }) {
+  const ask = async () => {
+    const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=pull_request&head_sha=${sha}&per_page=100`);
+    const others = runs.filter(
+      (r) =>
+        r.id !== run &&
+        r.head_sha === sha &&
+        r.path === ".github/workflows/ci.yml" &&
+        r.head_repository?.full_name === repo &&
+        r.pull_requests?.some((p) => p.number === pull),
+    );
+    if (others.some((r) => r.id < run)) return { done: true, url: null };
+    const behind = others.find((r) => r.id > run && r.status !== "completed");
+    return { done: Boolean(behind), url: behind?.html_url ?? null };
+  };
+  const first = await ask();
+  if (first.done) return first.url;
+  await settle();
+  return (await ask()).url;
+}
+
 // A writer's base change, and GitHub's own when the old base branch was deleted (it tried: failed counts too).
 const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
 
@@ -247,16 +282,28 @@ export function plan(files, { draft, tested = false, superseded = false }) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const draft = process.argv.includes("--draft=true");
   const tree = process.argv.find((a) => a.startsWith("--tree="))?.slice("--tree=".length);
+  const base = `${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${process.env.GITHUB_REPOSITORY}/`;
+  const api = async (path) => {
+    const res = await fetch(base + path, { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: "application/vnd.github+json" } });
+    if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+    return res.json();
+  };
+  // A pull request that left draft after this run's event: exits 0 when leaving draft's run waits behind this one (see
+  // draftBehind), else 1. Any doubt is a 1: the run plans everything, as before.
+  if (process.argv.includes("--draft-behind")) {
+    const { PR_HEAD_SHA: sha, GITHUB_RUN_ID: run, PR_NUMBER: pull, GITHUB_REPOSITORY: repo } = process.env;
+    const behind = await draftBehind({ sha, run: Number(run), pull: Number(pull), repo, api }).catch((e) => {
+      console.log(`::notice::Could not read whether leaving draft's run waits behind this one (${e.message}): everything runs`);
+      return null;
+    });
+    if (behind) console.log(`::notice::This pull request left draft after this run's event, and ${behind} waits behind this run and runs everything: this one runs the fast tier`);
+    else console.log("This pull request left draft after this run's event, and no run of leaving draft waits behind this one: everything runs");
+    process.exit(behind ? 0 : 1);
+  }
   let files = null;
   let tested = false;
   let superseded = false;
   if (tree) {
-    const base = `${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${process.env.GITHUB_REPOSITORY}/`;
-    const api = async (path) => {
-      const res = await fetch(base + path, { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: "application/vnd.github+json" } });
-      if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
-      return res.json();
-    };
     // Any doubt (the API failed, no run found) runs everything, as before.
     const run = await testedAs({ sha: process.env.GITHUB_SHA, tree, repo: process.env.GITHUB_REPOSITORY, api }).catch((e) => {
       console.log(`::notice::Could not look for a green run of this tree (${e.message}): everything runs`);
