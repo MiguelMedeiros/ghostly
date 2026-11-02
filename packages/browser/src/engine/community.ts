@@ -1088,9 +1088,12 @@ export class Communities {
     // me, whose edge came up as a hub's. Not counted, I looked idle and stepped down in turn, leaving it on a member.
     // And whoever is listed is a hub, not a member of mine (a member that became one). Only on a beacon read lately.
     if (now - live.beaconAt <= 2 * this.timings.beaconReadMs) {
-      const hubs = new Set(freshHubs(this.hubs(live), now).map(h => h.key));
-      for (const [key, id] of edges) if (!hubs.has(key) && !live.members.has(key) && this.host.linkReady(id, 2) && rosterHas(live.session.roster, key) && !this.gone(live, key)) live.members.set(key, now);
-      for (const key of [...live.members.keys()]) if (hubs.has(key)) live.members.delete(key);
+      const listed = new Map(freshHubs(this.hubs(live), now).map(h => [h.key, h]));
+      for (const [key, id] of edges) if (!listed.has(key) && !live.members.has(key) && this.host.linkReady(id, 2) && rosterHas(live.session.roster, key) && !this.gone(live, key)) live.members.set(key, now);
+      // Not a listed hub I take for dead (`hubDead`): its edge is no hub's I want, and one back from away that asked in my
+      // lobby, still listed, had the edge its request opened closed at the next tick and opened again at the next read of
+      // the lobby, each time before it could come up (a web phone and CLI daemons, 2026-11-02).
+      for (const key of [...live.members.keys()]) { const hub = listed.get(key); if (hub && !this.hubDead(groupId, live, hub, now)) live.members.delete(key); }
     }
     for (const [key, since] of live.members) {
       const id = edges.get(key);
