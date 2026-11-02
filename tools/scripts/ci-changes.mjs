@@ -19,10 +19,29 @@ import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 /**
- * The Rust job (Tauri Backend). Only a draft skips it without one of these: `ready_for_review` runs
- * everything again. ci.yml is not among them: a draft that changes the workflow gets the fast tier too.
+ * Everything the Rust job (Tauri Backend) reads: a directory ends in `/`. The crates, and the files their tests name by
+ * include_str! or CARGO_MANIFEST_DIR (tools/scripts/test/ci-changes.test.ts holds this list to those paths). The job
+ * builds no frontend, so the crates read no other app code.
  */
-export const RUST = /^(apps\/desktop\/|native\/transports\/|Cargo\.(toml|lock)$)/;
+export const RUST_INPUTS = [
+  "apps/desktop/",
+  "native/transports/",
+  "Cargo.toml",
+  "Cargo.lock",
+  // app_sandbox.rs: the mini-app frame's copies of the web app's frame and core's bridge.
+  "apps/web/public/app-frame.html",
+  "packages/core/src/miniApp.ts",
+  // turn_record.rs: the vectors the TypeScript suite checks too.
+  "packages/core/test/vectors/turn-record.json",
+  // translate.rs: the runtime's package, protocol and built archive.
+  "native/translation/",
+];
+
+/**
+ * The Rust job's own definition. Only a ready pull request runs it for these: a draft that changes the workflow gets
+ * the fast tier.
+ */
+export const RUST_JOB = [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"];
 
 /**
  * Everything the Website jobs (checks and browser checks) read: a directory ends in `/`. The site builds from
@@ -259,12 +278,11 @@ export function plan(files, { draft, tested = false, superseded = false }) {
   if (!desktop) why.push("Only apps/website/ and docs/ changed: the Desktop jobs on macOS skipped");
   const shards = any((f) => !NOT_APP.test(f) || covers(PACKAGES_READ_FROM_SITE, f));
   if (!shards) why.push("Nothing the packages' tests read changed: the packages shards skipped");
+  // No file list runs Tauri Backend unless it is a draft.
+  const rust = all ? !draft : files.some((f) => covers(RUST_INPUTS, f) || (!draft && covers(RUST_JOB, f)));
+  if (!all && !rust) why.push("Nothing the Rust job reads changed: Tauri Backend skipped");
   // Then the tier: a draft keeps only the fast jobs.
-  const rust = !draft || (!all && files.some((f) => RUST.test(f)));
-  if (draft) {
-    why.push("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
-    if (!rust) why.push("Draft without Rust changes: Tauri Backend skipped");
-  }
+  if (draft) why.push("Draft: the fast tier only (lint and types, the affected unit tests). Leaving draft runs everything");
   return {
     lint: true,
     rust,

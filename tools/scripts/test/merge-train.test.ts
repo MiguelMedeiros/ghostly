@@ -2244,8 +2244,9 @@ describe("a green CI run planned for other files", () => {
   });
 
   it("plans as ci.yml does for a ready pull request", async () => {
-    expect(await ciPlan(["docs/NOTES.md"])).toMatchObject({ packages: false, app: false, website: false, full: true, rust: true });
+    expect(await ciPlan(["docs/NOTES.md"])).toMatchObject({ packages: false, app: false, website: false, full: true, rust: false });
     expect(await ciPlan(["packages/core/src/x.ts", "docs/NOTES.md"])).toMatchObject({ packages: true, app: true });
+    expect(await ciPlan(["apps/desktop/src/lib.rs"])).toMatchObject({ rust: true });
     expect(await ciPlan(null)).toMatchObject({ packages: true, app: true, website: true, website_e2e: true });
   });
 
