@@ -117,6 +117,25 @@ describe("switching the microphone during a call", () => {
     expect(call.result.current.isMuted).toBe(true);
   });
 
+  it.each([["unmuted", false], ["muted", true]])("%s, mute pressed while the microphone is swapped in: the new one is as the button says", async (_, mutedFirst) => {
+    const { call, audio } = await connectedCall();
+    if (mutedFirst) act(() => call.result.current.toggleMute());
+    // The swap takes a moment (the Linux Desktop opens the device in Rust): the press lands in it.
+    let swapped!: () => void;
+    audio.replaceTrack.mockImplementationOnce((track) => new Promise<void>((resolve) => { swapped = () => { audio.track = track; resolve(); }; }));
+
+    act(() => { void call.result.current.switchMicrophone("mic-headset"); });
+    const headset = devices.userMedia[1].grant().getAudioTracks()[0];
+    await settle();
+    act(() => call.result.current.toggleMute());
+    swapped();
+    await settle();
+
+    expect(audio.track).toBe(headset);
+    expect(call.result.current.isMuted).toBe(!mutedFirst);
+    expect(headset.enabled, "what the contact hears").toBe(mutedFirst);
+  });
+
   it("back to the default asks for no device", async () => {
     const { call } = await connectedCall();
     act(() => { void call.result.current.switchMicrophone(null); });
