@@ -61,6 +61,10 @@ export class ProfileDid {
   private unlisten: (() => void) | undefined;
   /** The last `samePacket` answer. */
   private compared: { payload: string; uris: string; same: boolean } | undefined;
+  /** "Clear all data" ended the DID: a publish still on its way saves nothing, or the cleared record comes back. */
+  private ended = false;
+  /** The newest sequence number signed here, so the `deactivated` packet goes past one still on its way. */
+  private signedSeq = 0;
 
   constructor(private host: ProfileDidHost) {}
 
@@ -171,7 +175,7 @@ export class ProfileDid {
   }
 
   private async publish(): Promise<void> {
-    if (!this.stored || !this.host.online()) return;
+    if (!this.stored || this.ended || !this.host.online()) return;
     const previous = this.stored.published;
     try {
       const packet = encodeDidDhtPacket(this.document());
@@ -185,7 +189,9 @@ export class ProfileDid {
         seq = Math.max(Math.floor(Date.now() / 1000), (previous?.seq ?? 0) + 1);
         payload = signDidDhtPacket(identityFromSeed(await this.unsealed()), packet, seq);
       }
+      this.signedSeq = Math.max(this.signedSeq, seq);
       await this.host.publish(toZ32(this.publicKey()), payload);
+      if (this.ended) return;
       this.error = undefined;
       await this.save({ ...this.stored, published: { payload: toBase64Url(payload), seq, at: Date.now() } });
     } catch (error) {
@@ -195,14 +201,16 @@ export class ProfileDid {
   }
 
   /**
-   * "Clear all data": the DID ends. When a document was ever published, a newer packet reading `deactivated` replaces
+   * "Clear all data": the DID ends. When a document was ever published (or is on its way), a newer packet reading `deactivated` replaces
    * it, so resolvers say the DID is gone instead of showing the old document until it expires. Stops publishing first.
    */
   async deactivate(): Promise<void> {
+    this.ended = true;
     this.stop();
     const previous = this.stored?.published;
-    if (!this.stored || !previous) return;
-    const seq = Math.max(Math.floor(Date.now() / 1000), previous.seq + 1);
+    // Ever published: saved, or signed and still on its way (its save never comes now).
+    if (!this.stored || (!previous && this.signedSeq === 0)) return;
+    const seq = Math.max(Math.floor(Date.now() / 1000), (previous?.seq ?? 0) + 1, this.signedSeq + 1);
     const identity = identityFromSeed(fromBase64Url(await openSecret(this.stored.seed, SEED_AT)));
     await this.host.publish(toZ32(this.publicKey()), signDidDhtPacket(identity, encodeDidDhtDeactivated(this.publicKey()), seq));
   }
@@ -252,6 +260,8 @@ export class ProfileDid {
   }
 
   private async save(next: StoredProfileDid): Promise<void> {
+    // Ended by "Clear all data": nothing writes the cleared record back (a late publish, `changed()`, `setListed`).
+    if (this.ended) return;
     await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
     this.stored = next;
   }
