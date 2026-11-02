@@ -279,6 +279,16 @@ describe("GroupMembersDialog", () => {
     expect(within(screen.getByTestId("group-invite-contact")).getByText("Carol")).toHaveAttribute("dir", "auto");
   });
 
+  // On a phone the panel is the group's only info screen, and a member has no Rename field to read the name in: cut with
+  // "…" there, a long name was never read whole.
+  it("wraps a long group name in its title instead of cutting it, for a member too", () => {
+    members_(groupView({ status: "active", name: "Ghostly design reviewers of the northern hemisphere", members }));
+    const title = screen.getByTestId("group-members-name");
+    expect(title).toHaveTextContent("Ghostly design reviewers of the northern hemisphere");
+    expect(title).toHaveClass("break-words");
+    expect(title).not.toHaveClass("truncate");
+  });
+
   it("Invite from the keyboard keeps the focus: on the button while it runs, then on the contact's row, which says Invited", async () => {
     const group = groupView({ status: "active", isAdmin: true, members });
     const { user, engine } = members_(group, [paired({ id: "link-carol", label: "Carol" })]);

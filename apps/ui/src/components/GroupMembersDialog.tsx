@@ -140,8 +140,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
         </AvatarOpener>
         <div className="min-w-0">
           {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
-              wide as the name, the title stays beside the picture whichever way the name runs. */}
-          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full truncate text-base font-semibold">{live.name}</h2>
+              wide as the name, the title stays beside the picture whichever way the name runs. A long name wraps rather
+              than ends in "…": on a phone this panel is the group's only info screen, and a member has no Rename field. */}
+          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full break-words text-base font-semibold">{live.name}</h2>
             : <form className="flex items-center gap-2 max-md:gap-3" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
