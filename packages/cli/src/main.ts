@@ -2,9 +2,9 @@ import { spawn } from "node:child_process";
 import { connect } from "node:net";
 import { closeSync, fstatSync, openSync, readFileSync, readSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
-import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
+import { GLOBAL_OPTIONS, globalOption, liftGlobals, nearest, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, DaemonClient, isNotTheDaemon } from "./client";
-import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
+import { COMMANDS, idSlot, noMoreThan, positionals, takesText, TEXT_COMMANDS } from "./commands";
 import { here, inRange, since as sinceOf, timeout, translate } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
@@ -464,7 +464,7 @@ export function commandHelp(words: readonly string[]): string {
   let rows = named(words);
   while (!rows.length && words.length > 1) rows = named(words = words.slice(0, -1));
   const asked = words.join(" ");
-  if (!rows.length) throw new CliError("usage", `Unknown command: ${asked || '""'} (ghostly help)`);
+  if (!rows.length) throw unknownCommand(given[0], given[1], given[2]);
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
   // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
   // says, not the group's list with exit 0.
@@ -508,7 +508,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     restore: { "passphrase-file": { type: "string", description: "" }, use: { type: "boolean", description: "" } },
     set: { name: { type: "string", description: "" }, "share-profile": { type: "boolean", description: "", eitherWay: true } },
   };
-  const parsed = parseArgs(argv, specs[sub ?? ""] ?? {});
+  const parsed = parseArgs(argv, specs[sub ?? ""] ?? {}, undefined, { command: commandOf("profile", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
   switch (sub) {
@@ -673,7 +673,7 @@ async function runDaemon(g: Globals, seconds: number): Promise<void> {
 
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
-  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
+  const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } }, undefined, { command: commandOf("daemon", sub) });
   const g = globals(parsed);
   pretty = g.pretty;
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
@@ -919,7 +919,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     exec: { type: "string", description: "" }, webhook: { type: "string", description: "" }, print: { type: "boolean", description: "" },
     from: { type: "list", description: "" }, group: { type: "list", description: "" }, turns: { type: "boolean", description: "" },
     translate: { type: "string", description: "" },
-  });
+  }, undefined, { command: "listen" });
   // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
   noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
   // Before the profile opens: a unit file's `--webhook "$URL"` with URL unset ran a plain listen, no hook and no word.
@@ -1041,7 +1041,7 @@ async function listenCommand(argv: string[]): Promise<void> {
 }
 
 async function engineCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } });
+  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } }, undefined, { command: "engine" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (parsed.options.list) {
@@ -1074,7 +1074,8 @@ async function engineCommand(argv: string[]): Promise<void> {
 }
 
 async function settingsCommand(sub: string | undefined, argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } });
+  // A JSON value may start with a dash (`settings set k -- -1`).
+  const parsed = parseArgs(argv, { "show-secret": { type: "boolean", description: "" } }, undefined, { command: commandOf("settings", sub), text: sub === "set" });
   const g = globals(parsed);
   pretty = g.pretty;
   if (sub === "get") { noMoreThan(0, parsed.positionals, "settings get [--show-secret]"); print(await withSession(g, (s) => s.call("settings.get", { showSecret: parsed.options["show-secret"] === true }), { offline: true })); return; }
@@ -1094,7 +1095,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
 
 async function textCommand(name: string, argv: string[]): Promise<void> {
   const spec = TEXT_COMMANDS[name];
-  const parsed = parseArgs(argv, spec.options, idSlot(spec));
+  const parsed = parseArgs(argv, spec.options, idSlot(spec), { command: name, text: true });
   const g = globals(parsed);
   pretty = g.pretty;
   const [target, ...rest] = parsed.positionals;
@@ -1141,7 +1142,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
 async function identityAddCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {
     signer: { type: "string", description: "" }, field: { type: "list", description: "" }, stdin: { type: "boolean", description: "" }, days: { type: "number", description: "" }, timeout: { type: "number", description: "" },
-  });
+  }, undefined, { command: "identity add" });
   const g = globals(parsed);
   pretty = g.pretty;
   const [provider, ...subject] = parsed.positionals;
@@ -1187,7 +1188,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
 
 async function tableCommand(name: string, argv: string[]): Promise<void> {
   const command = COMMANDS[name];
-  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+  const parsed = parseArgs(argv, command.options ?? {}, idSlot(command), { command: name, text: takesText(command) });
   const g = globals(parsed);
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
@@ -1252,7 +1253,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
  * contact's, raw PCM); what the command says goes to stderr. It ends when the call does.
  */
 async function callPipeCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }));
+  const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }), { command: "call pipe" });
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
   const client = await connectDaemon(g.paths);
@@ -1295,7 +1296,7 @@ export async function main(input: string[]): Promise<number> {
   if (argv[0] === "--version" || argv[0] === "version") {
     // Global options come after the command once lifted: `--pretty` indents this answer too. Anything else is refused,
     // as every command refuses it: `version --json` (a typo) answered the version.
-    const parsed = parseArgs(argv.slice(1), {});
+    const parsed = parseArgs(argv.slice(1), {}, undefined, { command: "version" });
     noMoreThan(0, parsed.positionals, "version");
     pretty = parsed.options.pretty === true;
     print({ version: VERSION });
@@ -1325,18 +1326,32 @@ export async function main(input: string[]): Promise<number> {
  * A command line that names no command. The words of a group (`ghostly chat`, `ghostly wallet frob`, `ghostly x401
  * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
  * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
+ * A word near one of them is a typo: `chat lst` and `sned hi` say the command meant (`chat list`, `send`) and its help.
  */
 export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
   const asked = [first, second, third].filter((word): word is string => !!word);
   const all = helpRows().map((row) => commandWords(row.usage));
+  const takes = (group: readonly string[]) => [...new Set(all.filter((words) => words.length > group.length && group.every((word, i) => words[i] === word)).map((words) => words[group.length]))];
+  const meant = (typed: readonly string[], words: readonly string[]) => new CliError("usage", `Unknown command: ${typed.join(" ")} (did you mean ${words.join(" ")}? ghostly help ${words.join(" ")})`);
   for (let depth = Math.min(asked.length, 2); depth >= 1; depth--) {
     const group = asked.slice(0, depth), name = group.join(" "), extra = asked[depth];
-    const subs = [...new Set(all.filter((words) => words.length > depth && group.every((word, i) => words[i] === word)).map((words) => words[depth]))];
+    const subs = takes(group);
     if (!subs.length) continue;
+    const near = extra === undefined ? undefined : nearest(extra, subs);
+    if (near) return meant([...group, extra!], [...group, near]);
     const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
     return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
   }
-  return new CliError("usage", `Unknown command: ${asked.slice(0, 2).join(" ") || '""'} (ghostly help)`);
+  // A first word that names no command: the words after it are its arguments (`sned hi`), unless they are a command
+  // word of the one it meant (`chta list`).
+  const near = asked[0] === undefined ? undefined : nearest(asked[0], takes([]));
+  if (!near) return new CliError("usage", `Unknown command: ${asked[0] ?? '""'} (ghostly help)`);
+  return asked[1] !== undefined && takes([near]).includes(asked[1]) ? meant(asked.slice(0, 2), [near, asked[1]]) : meant([asked[0]], [near]);
+}
+
+/** The command a group's word names (`profile set`), for its usage errors; the group itself for a word it does not take. */
+function commandOf(group: string, sub: string | undefined): string {
+  return sub !== undefined && helpRows().some((row) => commandWords(row.usage).join(" ") === `${group} ${sub}`) ? `${group} ${sub}` : group;
 }
 
 /** Leaves once what was printed reached stdout (a pipe drains asynchronously). */
