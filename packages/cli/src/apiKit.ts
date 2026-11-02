@@ -118,7 +118,7 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
     const byKey = links.filter((link) => link.peerPubKeyZ32 === ref);
     if (byKey.length === 1) return { link: byKey[0], theirName: false };
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
-    throw new CliError("not_found", `No chat with ${JSON.stringify(ref)}`);
+    throw new CliError("not_found", `No chat with ${JSON.stringify(ref)} (ghostly chat list)`);
   }
   const lower = ref.toLowerCase();
   const named = (name: string | null | undefined) => name?.trim().toLowerCase() === lower;
@@ -126,7 +126,7 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
-  throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);
+  throw new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
 }
 
 /**
@@ -165,7 +165,7 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
-  throw new CliError("not_found", `No group ${JSON.stringify(ref)}`);
+  throw new CliError("not_found", `No group ${JSON.stringify(ref)} (ghostly group list)`);
 }
 
 /**

@@ -58,10 +58,10 @@ describe("file save to a folder", () => {
   it("is a bad_request that points at --dir, with or without --force", async () => {
     const folder = join(dir, "folder");
     mkdirSync(folder);
-    const message = `${folder} is a folder: name a file, or use dir (--dir ${folder})`;
+    const message = `${folder} is a folder: name a file, or use --dir ${folder} (dir over the socket)`;
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder })).rejects.toMatchObject({ code: "bad_request", message });
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: folder, force: true })).rejects.toMatchObject({ code: "bad_request", message });
-    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: "/" })).rejects.toMatchObject({ code: "bad_request", message: "/ is a folder: name a file, or use dir (--dir /)" });
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: "/" })).rejects.toMatchObject({ code: "bad_request", message: "/ is a folder: name a file, or use --dir / (dir over the socket)" });
     // --dir saves into it; a file there is still a confirm.
     expect(await callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).toMatchObject({ path: join(folder, "report.txt"), size: 6 });
     expect(readFileSync(join(folder, "report.txt"), "utf8")).toBe("report");
