@@ -561,7 +561,7 @@
   "relays": {
     "atLeastOne": "Escribe al menos una dirección de relay",
     "enterAddress": "Escribe una dirección de relay ({{example}}…)",
-    "irohAtMost": "Usa como máximo cuatro relays Iroh",
+    "irohAtMost": "Usa como máximo cinco relays Iroh",
     "noLogin": "Quita el usuario y la contraseña de la dirección",
     "noneAnswered": "Los relays no respondieron",
     "noneAnsweredNext": "Revisa tu conexión y vuelve a intentarlo.",

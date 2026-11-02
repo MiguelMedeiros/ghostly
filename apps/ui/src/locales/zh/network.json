@@ -8,7 +8,7 @@
   "hyperdhtInfo": "让聊天可以在此浏览器中使用 HyperDHT。中继转发加密字节:它能看到你的地址和通信时间,看不到你说了什么。",
   "identityChecks": "身份验证",
   "iroh": "Iroh 中继",
-  "irohHint": "WebRTC 无法连接时使用。每行一个,最多四个。",
+  "irohHint": "WebRTC 无法连接时使用。每行一个,最多五个。",
   "irohInfo": "浏览器无法发送 Iroh 的 UDP 数据包，因此这里的 Iroh 聊天会经过中继。中继能看到哪些设备在何时通信，但看不到内容。",
   "irohInfoDirect": "Iroh 能直连时直接连接，不能时经由中继。中继能看到哪些设备在何时通信，但看不到内容。",
   "protocolDirect": "直接连接 {{dht}}（UDP），并连接 {{pkarr}} 中继（HTTP）",
