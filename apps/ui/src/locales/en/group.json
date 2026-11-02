@@ -120,6 +120,8 @@
     "knockingCommunity": "Leaving a knock where the group's apps look for one…",
     "queueCount": "{{count}} more people are waiting to be let in.",
     "queueOne": "1 more person is waiting to be let in.",
+    "replaced": "This link was replaced or turned off",
+    "replacedBody": "Ask someone in the group for the current link, then open it.",
     "stale": "Still no answer. If the link was replaced, ask for the new one.",
     "staleBusy": "Still waiting: the group lets people in a few at a time.",
     "step": {

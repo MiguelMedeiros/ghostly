@@ -103,6 +103,8 @@ export const COMMUNITY_TIMINGS: CommunityTimings = {
  */
 export const KNOCK_SHARDS = 4;
 const KNOCK_BELL = 0;
+/** What `CommunitySession.join` says of a welcome whose entry is not the link's: the link was replaced since. */
+const LINK_REPLACED = "This link was replaced or turned off";
 const knockRecord = (link: GroupEntryLink, n: number): GroupEntryLink => ({ g: `${link.g}.${n}`, host: link.host });
 const ownKnockRecord = (key: string): number => 1 + publicKeyFromZ32(key)[0] % (KNOCK_SHARDS - 1);
 /** Knocks in the bell that make it full: the next joiner goes to its own record. */
@@ -458,6 +460,7 @@ export class Communities {
   /** How far a join through the link got, as the joiner's app knows it. */
   private joinStage(group: StoredGroup): GroupJoinStage {
     const joining = group.joining!;
+    if (joining.replaced) return "replaced";
     if (joining.inviter) return "admitted";
     if (this.host.linkReady(joining.linkId, 2) || this.host.linkSeen?.(joining.linkId)) return "answered";
     return this.knocked.has(group.id) ? "knocked" : "knocking";
@@ -742,7 +745,7 @@ export class Communities {
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
-      if (group.joining && (this.knocking(group, live) || group.joining.check) && !this.gaveUp.has(group.id)) {
+      if (group.joining && (this.knocking(group, live) || group.joining.check) && !this.gaveUp.has(group.id) && !group.joining.replaced) {
         const knocking = this.knocking(group, live), waited = now - group.joining.since;
         // Knocking stops as soon as a member's side of the entry session is seen, before it is up: that one is answering.
         const answered = this.host.linkReady(group.joining.linkId, 2) || !!this.host.linkSeen?.(group.joining.linkId);
@@ -1754,6 +1757,22 @@ export class Communities {
         const joining = group.joining;
         if (!joining || joining.linkId !== linkId || !joining.inviter) return;
         const joined = CommunitySession.join({ g, host: joining.host }, joining.pieces, frame, joining.seedB64);
+        // The link was replaced (or turned off) while this entry was open: knocking at it again lets nobody in, so the
+        // joiner is told and stops, until it opens the current link. A member checking it still is waits as before.
+        if ("error" in joined && joined.error === LINK_REPLACED && !joining.check) {
+          joining.replaced = true;
+          joining.inviter = "";
+          joining.pieces = [];
+          if (this.knocked.has(g)) void this.unknock({ g, host: joining.host }, this.knockAt.get(g) ?? KNOCK_BELL, joining.seedB64).catch(() => {});
+          this.knocked.delete(g);
+          this.knockAt.delete(g);
+          countWaitingJoin(this.host, g, this.now(), false);
+          traceJoin(g, "join.replaced");
+          await this.store.putGroup(group);
+          await this.host.closeEdge(linkId);
+          this.host.emit();
+          return;
+        }
         if ("error" in joined) { joining.pieces = []; return; }
         traceJoin(g, "welcome.received");
         const before = this.live.get(g)?.session, again = !!before;

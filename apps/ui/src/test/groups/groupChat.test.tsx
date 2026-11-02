@@ -319,6 +319,15 @@ describe("GroupChat: joining through a link", () => {
     expect(steps()).toEqual(states);
   });
 
+  it("says the link was replaced or turned off, with no steps left to wait on", () => {
+    openGroup({ ...staged("replaced"), profile: "community" });
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("This link was replaced or turned off");
+    expect(screen.getByTestId("group-joining")).toHaveTextContent("Ask someone in the group for the current link, then open it.");
+    expect(screen.queryByTestId("group-joining-steps")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-joining").querySelector(".animate-spin")).toBeNull();
+    expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+  });
+
   it("in a community, says a member (any) is answering, then that it connects to the group", () => {
     const labels = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.textContent);
     openGroup({ ...staged("answered"), profile: "community" });
