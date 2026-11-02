@@ -20,6 +20,8 @@ export interface NativeEndpoint {
   onConnection: ((connection: BoundChannel) => void) | null;
   onDescriptor: (() => void) | null;
   onUnavailable?: (() => void) | null;
+  /** The endpoint is connected to its relay again after it lost it (the native Iroh's home relay; nothing else says it). */
+  onRelayBack?: (() => void) | null;
 }
 export type TransportDescriptors = Partial<Record<NativeTransport, unknown>>;
 
