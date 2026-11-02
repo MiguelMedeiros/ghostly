@@ -58,6 +58,7 @@ describe("the relays on SIGTERM", () => {
 
   it("the HyperDHT relay closes each WebSocket as going away (1001), and says so", async () => {
     const { run, lines, exited } = await start("hyperdht-relay", { PORT: "5541", GHOSTLY_HYPERDHT_TESTNET: "3" });
+    expect(lines.find((line) => / on port /.test(line))).toMatch(/ Ghostly HyperDHT relay on port 5541 \(own testnet of 3 nodes\) on 127\.0\.0\.1, /);
     const ws = new WebSocket("ws://127.0.0.1:5541");
     await new Promise((done, fail) => { ws.onopen = done; ws.onerror = fail; });
     const closed = new Promise<{ code: number; reason: string }>((done) => { ws.onclose = (event) => done({ code: event.code, reason: event.reason }); });
