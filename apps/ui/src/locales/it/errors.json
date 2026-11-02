@@ -83,6 +83,8 @@
     "fedimintNotInvite": "Questo non è un codice di invito Fedimint: inizia con fed1",
     "fedimintRealOnTestnet": "Questa federazione detiene bitcoin reali",
     "fedimintRealOnTestnetNext": "Aggiungila a un portafoglio Fedimint Mainnet.",
+    "fedimintRedeemUnheard": "La federazione non ha risposto su queste note",
+    "fedimintRedeemUnheardNext": "Se non compaiono presto nel tuo saldo, incollale di nuovo.",
     "fedimintTestOnMainnet": "Questa federazione è su {{chain}}, una rete di test",
     "fedimintTestOnMainnetNext": "Aggiungila a un portafoglio Fedimint Testnet.",
     "feeAboveLimit": "La commissione supera il tuo limite",

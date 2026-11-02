@@ -1609,7 +1609,8 @@ export class PaymentDesk {
       if (payment.fedimintOp) state = await fedimint.redeemState(payment.federation, payment.fedimintOp, 60_000);
       else {
         const redeemed = await fedimint.redeemNotes(payment.federation, payment.token, payment.id);
-        await this.save({ ...this.current(payment), fedimintOp: redeemed.operationId });
+        // Asked, and the client could not say how it stands: the operation is kept, to ask it again (never a second redeem).
+        await this.save({ ...this.current(payment), fedimintOp: redeemed.operationId, ...(redeemed.error !== undefined ? { error: redeemed.error } : {}) });
         state = redeemed.state;
       }
     } catch (error) {

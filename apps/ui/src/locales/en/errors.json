@@ -83,6 +83,8 @@
     "fedimintNotInvite": "That is not a Fedimint invite code: it starts with fed1",
     "fedimintRealOnTestnet": "This federation holds real bitcoin",
     "fedimintRealOnTestnetNext": "Add it to a Mainnet Fedimint wallet.",
+    "fedimintRedeemUnheard": "Can't hear from the federation about these notes",
+    "fedimintRedeemUnheardNext": "If they don't show in your balance soon, paste them again.",
     "fedimintTestOnMainnet": "This federation is on {{chain}}, a test network",
     "fedimintTestOnMainnetNext": "Add it to a Testnet Fedimint wallet.",
     "feeAboveLimit": "The fee exceeds your limit",
