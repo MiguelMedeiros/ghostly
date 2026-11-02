@@ -115,11 +115,12 @@ const addRecord = (list: DomainRecord[], r: DomainRecord) => {
   if (!list.some(x => x.key === r.key && x.proof === r.proof)) list.push(r);
 };
 
-/** All records among the TXT strings of `_ghostly.<domain>`; other strings are skipped. */
+/** All records among the first 32 TXT strings of `_ghostly.<domain>`; other strings are skipped. A TXT set has
+ * no order, so every record is kept: the one a proof needs may come in any position. */
 export function recordsFromTxt(values: string[]): DomainRecord[] {
   const out: DomainRecord[] = [];
   for (const value of values.slice(0, 32)) { const r = parseDomainTxt(value); if (r) addRecord(out, r); }
-  return out.slice(0, DOMAIN_MAX_RECORDS);
+  return out;
 }
 
 /** The body of `/.well-known/ghostly.json`. */
@@ -133,7 +134,7 @@ function parseJson(text: string): unknown {
   return JSON.parse(text);
 }
 
-/** Records from `ghostly.json`. Throws on a malformed file; [] when it names none. */
+/** Records from the first 32 entries of `ghostly.json`. Throws on a malformed file; [] when it names none. */
 export function recordsFromWellKnown(text: string): DomainRecord[] {
   const body = parseJson(text) as { ghostly?: unknown; proofs?: unknown };
   if (!body || typeof body !== 'object' || Array.isArray(body) || body.ghostly !== 1 || !Array.isArray(body.proofs))
@@ -144,7 +145,7 @@ export function recordsFromWellKnown(text: string): DomainRecord[] {
     const r = { key: entry.key, proof: entry.proof } as DomainRecord;
     if (validDomainRecord(r)) addRecord(out, r);
   }
-  return out.slice(0, DOMAIN_MAX_RECORDS);
+  return out;
 }
 
 /** NIP-05: only the root name `_` speaks for the domain itself. Undefined when absent. */
