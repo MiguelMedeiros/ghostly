@@ -32,10 +32,6 @@ describe("a hub back after 40 s away", { timeout: 120_000 }, () => {
     expect(hub, "one member is the second hub").toBeDefined();
     const key = world.view(hub!, id)!.members.find(m => m.me)!.key;
     const adminKey = world.view(admin, id)!.members.find(m => m.me)!.key;
-    // As the engine's `linkBack` (node.ts): only a link that was up once in this run is "back". The world's says so of
-    // any link whose other app runs, and the edge the lobby had just opened again counted the hub as back at once.
-    const back = admin.host.linkBack!;
-    admin.host.linkBack = linkId => !!(admin.links.get(linkId) as { wasUp?: boolean } | undefined)?.wasUp && back(linkId);
     // The edges the admin's app opens toward the hub.
     let opened = 0;
     const open = admin.host.openEdge;

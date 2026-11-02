@@ -257,8 +257,9 @@ export class CommunityWorld {
         // under way counts as seen (`otherEndSeen`), whether or not the other app is there.
         return !!there && ((there.peer.online && this.sameSide(peer, there.peer) && (!this.network || edge!.polls > 0)) || (this.redialSeen && !!edge!.wasUp));
       },
-      // Its other end's app runs again (a restart): its link published, whether or not it is up yet.
-      linkBack: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && there.peer.online; },
+      // As the engine's (`node.ts`): its link was up once in this run, and its other end's app runs again (a restart). A link
+      // opened again after the old one closed was never up: it is not back, though the other app runs, until it comes up.
+      linkBack: linkId => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && !!edge!.wasUp && there.peer.online; },
       contactName: () => undefined,
       edges: g => new Map([...links].filter(([, e]) => e.g === g && e.kind === "edge").map(([id, e]) => [e.peer, id])),
       entries: g => new Map([...links].filter(([, e]) => e.g === g && e.kind !== "edge").map(([id, e]) => [e.peer, id])),
@@ -402,9 +403,10 @@ export class CommunityWorld {
   private up(peer: Peer, edge: Edge, there: Peer): boolean {
     if (!peer.online || !there.online || !this.sameSide(peer, there)) return false;
     if (edge.kind === "edge" && this.holdEdge?.(peer, there)) return false;
-    if (!this.network) return true;
-    if (edge.upAt !== undefined) return true;
     const other = this.counterpart(edge);
+    // Up at once with no model: it was up, for `linkBack`, as when its signaling is done.
+    if (!this.network) { edge.wasUp = true; if (other) there.links.get(other.linkId)!.wasUp = true; return true; }
+    if (edge.upAt !== undefined) return true;
     if (!other) return false;
     const theirs = there.links.get(other.linkId)!;
     if (edge.polls < this.network.signalPolls || theirs.polls < this.network.signalPolls) return false;
