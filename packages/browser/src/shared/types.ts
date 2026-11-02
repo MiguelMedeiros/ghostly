@@ -298,6 +298,15 @@ export interface GroupEdgeView {
    * again); `other`, anything else (a refused key, no common transport...).
    */
   cause?: GroupEdgeCause;
+  /**
+   * Down after it was live (in this run, or when the app last ran), for nothing the app can't get past: the app dials it
+   * again by itself, at WISP 100's background pace, while the member is seen.
+   */
+  reconnecting?: true;
+  /** When this side dials again by itself, in ms: set while it is the side that dials and its wait between attempts runs. */
+  retryAt?: number;
+  /** Automatic dials since the edge was last live or its wait started over, the one under way included. */
+  attempt?: number;
 }
 
 export type GroupEdgeCause = "relays" | "session" | "other";
@@ -969,7 +978,28 @@ export interface StoredMessage {
   cardRestore?: "due" | "sent";
   /** What `cardRestore` was named before it covered every kind of card (buttons only): read for rows kept since. */
   buttonsRestore?: "due" | "sent";
+  /**
+   * A line this app wrote in the chat itself, never the contact's words: the app says it in its own language from these
+   * values (`paymentRefusal` in `shared/refusals.ts`), and `text` keeps its English for the CLI and older apps.
+   */
+  notice?: ChatNotice;
 }
+
+/**
+ * A payment of the contact's this app refused, or could not take in: how much they said they sent, on which
+ * network when it is known (`testnet`: test sats), `fedimint` for Fedimint notes (Cashu otherwise), and the reason in
+ * the English the contact was told, which the app reads back into its own language.
+ */
+export interface PaymentRefusedNotice {
+  type: "paymentRefused";
+  amount?: number;
+  network?: WalletNetwork;
+  method?: "fedimint";
+  reason: string;
+}
+
+/** The lines an app writes in a chat on its own (`StoredMessage.notice`). */
+export type ChatNotice = PaymentRefusedNotice;
 
 /**
  * A message that carries a task, a routine or a usage card, as the Tasks board and the chat list read it across every

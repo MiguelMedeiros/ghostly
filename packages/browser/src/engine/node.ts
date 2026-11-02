@@ -36,7 +36,7 @@ import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';
 import { PublicActivity } from './publicActivity';
 import { normalizeNostrRelays } from '../nostr/relay';
-import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from '../nostr/types';
+import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from '../nostr/types';
 import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { APPS_CAPABILITY, BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, STATUS_CARD_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
@@ -228,7 +228,11 @@ import { traceJoin } from "./joinTrace";
 import { SETUP_NETWORK, WalletSetup } from "./walletSetup";
 import { DEFAULT_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
 
-/** How long a chat waits before listening again after its HyperDHT relay went away. */
+/**
+ * How long a chat waits, on average, before listening again after its HyperDHT relay went away. Each app draws its own
+ * wait within half of it either side: a relay that restarts closes every app's socket at once, and with one fixed wait
+ * they all came back in the same instant, more listens than its one HyperDHT node sends out in time.
+ */
 const RELAY_RETRY_MS = 30_000;
 /** Native listeners an app may hold per transport (the Desktop's Rust Iroh allows eight, `paired_transport.rs`). */
 const NATIVE_SLOTS = 8;
@@ -3030,6 +3034,8 @@ export class GhostlyNode implements EngineImplementation {
   nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): Promise<void> { return this.nostrSocial.loadContact(params); }
   nostrForgetContact(params: { linkId: string; subject: string }): Promise<void> { return this.nostrSocial.forgetContact(params); }
   nostrLoadOwn(params: { subject: string }): Promise<void> { return this.nostrSocial.loadOwn(params); }
+  nostrOwnFollows(params: { subject: string }): string[] { return this.nostrSocial.ownFollowList({ subject: String(params?.subject) }); }
+  nostrContactNotes(params: { linkId: string; subject: string }): NostrNoteView[] { return this.nostrSocial.contactNotes({ linkId: String(params?.linkId), subject: String(params?.subject) }); }
   nostrLookup(params: NostrLookupRequest): Promise<NostrLookupResult> { return this.nostrSocial.lookup(params); }
   nostrDraft(params: NostrDraftRequest): Promise<NostrDraft> { return this.nostrSocial.draft(params); }
   nostrPublish(params: { draftId: string; event: unknown }): Promise<NostrPublishResult> { return this.nostrSocial.publish(params); }
@@ -6108,8 +6114,8 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   async walletReceiveToken({ token }: { token: string }) {
-    const { amount } = await this.wallet.receiveToken(token.trim());
-    return { amount };
+    const { amount, fee } = await this.wallet.receiveToken(token.trim());
+    return { amount, fee };
   }
 
   /** `network`: only that network's Cashu wallet (its mints). */
@@ -8437,7 +8443,7 @@ export class GhostlyNode implements EngineImplementation {
         if (live.link && live.stored.profile && (!live.stored.group || this.keepsGroupNative(live.stored)) && live.stored.deliveryMode !== "dht" && !live.link.availableTransports.includes("hyperdht/1")
           && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
       }
-    }, RELAY_RETRY_MS);
+    }, RELAY_RETRY_MS / 2 + Math.random() * RELAY_RETRY_MS);
   }
 
   /** A new relay (or none): chats give up their endpoints on the old one, as soon as none of them carries a session. */

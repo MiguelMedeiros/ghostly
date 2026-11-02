@@ -31,7 +31,7 @@ function FeeCapInput({ label, value, onChange, decimals }: { label: string; valu
   const { t } = useI18n();
   const field = useAmountText(value, onChange, t.language ?? "en", decimals, t);
   return <>
-    <input aria-label={label} aria-invalid={field.hint ? true : undefined} className="block w-20 bg-input-bg rounded p-1" inputMode={decimals ? "decimal" : "numeric"} value={field.text} onChange={(e) => field.change(e.target.value)} />
+    <input aria-label={label} aria-invalid={field.hint ? true : undefined} className="block w-20 bg-input-bg rounded p-1 max-md:min-h-11" inputMode={decimals ? "decimal" : "numeric"} value={field.text} onChange={(e) => field.change(e.target.value)} />
     {field.hint && <span role="alert" className="block text-danger-ink" data-testid="amount-unclear">{field.hint}</span>}
   </>;
 }
@@ -162,9 +162,10 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     } catch { /* not something another wallet can open */ }
     return null;
   })();
+  // A thumb's height on a phone, as the app's other buttons there.
   const button =
-    "px-3 py-1.5 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress";
-  const quiet = "px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer data-[loading]:opacity-80 data-[loading]:cursor-progress";
+    "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress";
+  const quiet = "px-3 py-1.5 max-md:min-h-11 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer data-[loading]:opacity-80 data-[loading]:cursor-progress";
 
   return (
     <div
@@ -181,7 +182,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
 
           {tokenPayment?formatTokenAmount(payment.amount,payment.target?.decimals,t.language):formatAmount(celebrate ? amountShown : payment.amount, t.language)}
         </span>
-        {" "}<span className="text-xs ms-1 text-text-primary/75">{tokenPayment?payment.target?.asset:sats}</span>
+        {" "}<span className="text-xs ms-1 text-text-primary/75">{tokenPayment?payment.target?.asset:satsIn(t, network, payment.amount)}</span>
       </p>
       {payment.target && <p className="text-xs text-text-primary/65" data-testid="payment-rail">{railLine(t, payment.target.method, payment.target.network)}</p>}
       {!payment.target && fedimint && <p className="text-xs text-text-primary/65" data-testid="payment-fedimint">{isRequest && !outgoing && payment.state === "pending" ? t("payments.bubble.fedimintNoFederation") : "Fedimint"}</p>}

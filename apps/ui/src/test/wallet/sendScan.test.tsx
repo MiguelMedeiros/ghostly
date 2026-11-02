@@ -375,7 +375,7 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
   });
 
   it("a token's Redeemed goes once the field is typed in again, so it never stands beside the next payment's result", async () => {
-    const { user } = show({ receiveToken: async () => 1_000 });
+    const { user } = show({ receiveToken: async () => ({ amount: 1_000, fee: 0 }) });
     await user.click(screen.getByRole("tab", { name: "Send" }));
     await user.type(screen.getByTestId("wallet-pay-input"), "cashuBo2F0gaJhaUgA");
     await user.click(screen.getByRole("button", { name: /^Redeem/ }));
@@ -383,6 +383,21 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
 
     await user.type(screen.getByTestId("wallet-pay-input"), "l");
     expect(screen.queryByTestId("wallet-notice")).not.toBeInTheDocument();
+  });
+
+  // agents#2255: at a mint that charges to take ecash in, a 3-sat token said only "Redeemed 1 test sats.": the 2 the mint
+  // kept showed only later, in History.
+  it.each([
+    ["testnet", { amount: 1, fee: 2 }, "Redeemed 1 test sat (the mint kept 2 as its fee)."],
+    ["testnet", { amount: 1_000, fee: 3 }, "Redeemed 1,000 test sats (the mint kept 3 as its fee)."],
+    ["mainnet", { amount: 1, fee: 1 }, "Redeemed 1 sat (the mint kept 1 as its fee)."],
+    ["mainnet", { amount: 62, fee: 2 }, "Redeemed 62 sats (the mint kept 2 as its fee)."],
+  ] as const)("a token redeemed on %s at a mint that kept a fee says what arrived and what the mint kept: %j", async (network, received, notice) => {
+    const { user } = show({ receiveToken: async () => received }, network);
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    await user.type(screen.getByTestId("wallet-pay-input"), "cashuBo2F0gaJhaUgA");
+    await user.click(screen.getByRole("button", { name: /^Redeem/ }));
+    expect(await screen.findByTestId("wallet-notice")).toHaveTextContent(notice);
   });
 
   it("a QR that is no payment, or no QR at all, is said plainly", async () => {

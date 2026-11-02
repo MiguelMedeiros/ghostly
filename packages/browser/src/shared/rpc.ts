@@ -13,7 +13,7 @@ import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
 import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SavedMessage, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
-import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
+import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrNoteView, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
 /** UI → engine calls. The extension carries them over a runtime port, the web app calls the peer in the same page. */
@@ -119,6 +119,10 @@ export interface EngineApi {
   nostrForgetContact(params: { linkId: string; subject: string }): void;
   /** The person's own profile, follows and mute list for one of their proven keys. */
   nostrLoadOwn(params: { subject: string }): void;
+  /** The keys one of the person's own Nostr follow lists names, as last loaded; the engine state carries only their count. Empty for a key not theirs or a list not loaded. */
+  nostrOwnFollows(params: { subject: string }): string[];
+  /** The posts a contact's Nostr card shows, newest first, past the person's mute lists; the chat's view carries only their count. Empty for a key the contact has not proved there or before any are loaded. */
+  nostrContactNotes(params: { linkId: string; subject: string }): NostrNoteView[];
   /** A key's profile or a note that a message names, on the person's tap, from the person's relays. Not stored. */
   nostrLookup(params: NostrLookupRequest): NostrLookupResult;
   /** Publication, step 1: the unsigned event and the notice to confirm. Refused unless publication is on. */
@@ -297,8 +301,11 @@ export interface EngineApi {
   bitcoinReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
   bitcoinReceiveAddress(params?: { network?:WalletNetwork }): string;
   bitcoinRefresh(params?: { network?:WalletNetwork }): void;
-  /** Redeems a token pasted by the user. Only mints the user added are accepted. */
-  walletReceiveToken(params: { token: string }): { amount: number };
+  /**
+   * Redeems a token pasted by the user. Only mints the user added are accepted. `amount`: what arrived; `fee`: what the
+   * mint kept of the token's face value to take it in (absent from an engine older than agents#2255: none said).
+   */
+  walletReceiveToken(params: { token: string }): { amount: number; fee?: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];

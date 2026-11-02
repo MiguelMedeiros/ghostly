@@ -350,6 +350,32 @@ function markBuiltIns(settings: IDBObjectStore, change: (marks: BuiltInAppMarks)
   };
 }
 
+/**
+ * The key, in `STORES.settings`, of the digests of the bundles this profile may hold in file storage (one of
+ * `PROFILE_SETTINGS_KEYS`): each one is noted before its bytes are written. File storage lists no files, and a bundle is
+ * written or removed in a step of its own beside its app's record: a page gone between the two leaves one no record
+ * names, which the next start finds here and removes.
+ */
+export const APP_BUNDLES_KEY = "appBundles";
+
+/** The digests as kept, read with nothing taken on trust. */
+function bundleDigests(kept: unknown): string[] {
+  return Array.isArray(kept) ? kept.filter((d): d is string => typeof d === "string" && isAppHash(d)) : [];
+}
+
+/** Changes the digests noted (`APP_BUNDLES_KEY`), read and written in one transaction. */
+async function noteBundles(change: (noted: Set<string>) => void): Promise<void> {
+  const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+  const settings = tx.objectStore(STORES.settings);
+  const read = settings.get(APP_BUNDLES_KEY);
+  read.onsuccess = () => {
+    const noted = new Set(bundleDigests(read.result));
+    change(noted);
+    settings.put([...noted], APP_BUNDLES_KEY);
+  };
+  await done(tx);
+}
+
 const builtInRef = (app: BuiltInApp) => appRef(app.publisher, app.name);
 
 /**
@@ -511,6 +537,10 @@ export class Apps {
     },
   };
   private stopped = false;
+  /** Bundles written by this engine (`writeBundle`), by digest: one whose record is not written yet is not swept (`sweepBundles`). */
+  private readonly written = new Set<string>();
+  /** The sweep of `start` while it runs: a bundle written meanwhile waits for it. */
+  private sweeping: Promise<void> | null = null;
 
   constructor(private readonly host: AppsHost) {}
 
@@ -519,10 +549,14 @@ export class Apps {
 
   // ---------- life ----------
 
-  /** Preloads the default stores (no request), then checks for updates soon after start and every 24 hours. */
+  /**
+   * Preloads the default stores (no request) and removes the bundles no record names (`sweepBundles`), then checks for
+   * updates soon after start and every 24 hours.
+   */
   async start(): Promise<void> {
     this.stopped = false;
     await this.seedDefaults();
+    await (this.sweeping = this.sweepBundles().catch(() => {}));
     this.schedule(APP_CHECK_TIMINGS.afterStartMs, true);
   }
 
@@ -753,11 +787,14 @@ export class Apps {
    * failure is `storage`, with the browser's own words after it for the logs, and leaves no piece behind.
    */
   private async writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
+    this.written.add(digest);
     const id = bundleId(digest);
     const expected = toBase64Url(await sha256Paced(bytes));
     let files: FileBytes | undefined;
     let stored: string | null;
     try {
+      await this.sweeping;
+      await noteBundles((noted) => noted.add(digest));
       files = await fileBytes();
       const size = await files.size(id);
       if (size === bytes.length && (await files.digest(id)) === expected) return files.kind;
@@ -811,6 +848,31 @@ export class Apps {
   private async removeUnusedBundle(ref: string, kind: FileBytesKind, digest: string): Promise<void> {
     const app = await this.app(ref);
     if (app?.digest !== digest && app?.pending?.digest !== digest) await this.removeBundle(kind, digest);
+  }
+
+  /**
+   * Removes the bundles noted (`APP_BUNDLES_KEY`) that no record names, as its version or the one waiting: what an
+   * install, update, accept or uninstall cut short left. One written by this engine is left (its record may be on its
+   * way); the next start sees it. The digests the records name are noted too, for the day they stop naming them.
+   */
+  private async sweepBundles(): Promise<void> {
+    const tx = (await openDb()).transaction([STORES.apps, STORES.settings], "readonly");
+    const [apps, kept] = await Promise.all([wrap<InstalledApp[]>(tx.objectStore(STORES.apps).getAll()), wrap(tx.objectStore(STORES.settings).get(APP_BUNDLES_KEY))]);
+    const named = new Set(apps.flatMap((a) => (a.pending ? [a.digest, a.pending.digest] : [a.digest])));
+    // Wherever it may be: where new files go, and where each record's are.
+    const kinds = new Set(apps.flatMap((a) => (a.pending ? [a.bytes, a.pending.bytes] : [a.bytes])));
+    const current = await fileBytes().catch(() => null);
+    if (current) kinds.add(current.kind);
+    const gone = new Set<string>();
+    for (const digest of bundleDigests(kept)) {
+      if (named.has(digest) || this.written.has(digest)) continue;
+      for (const kind of kinds) await this.removeBundle(kind, digest);
+      gone.add(digest);
+    }
+    await noteBundles((noted) => {
+      for (const digest of named) noted.add(digest);
+      for (const digest of gone) noted.delete(digest);
+    });
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
@@ -1270,7 +1332,14 @@ export class Apps {
     if (plan.action === "refuse") fail(plan.decision, "This update can no longer be installed");
     const { pending: _p, ...without } = installed;
     const next = this.versionRecord(without, read.bundle, pending.bytes, pending.from, installed.store);
-    await this.putApp(next);
+    // Only over the record read above: an app uninstalled meanwhile (another tab, Uninstall while Update was busy) is
+    // not put back on the new version with its data gone, and one changed meanwhile is left as it is.
+    if (!(await this.putAppIfUnchanged(next, installed))) {
+      const now = await this.app(ref);
+      if (!now) fail("not-installed", "This app is not installed");
+      if (now.digest === pending.digest) return this.view(now, await this.stores());
+      fail("no-update", "This update can no longer be installed");
+    }
     await this.removeBundle(installed.bytes, installed.digest);
     return this.view(next, stores);
   }
@@ -1328,8 +1397,8 @@ export class Apps {
       // listing URL that moved on (a repository's HEAD), waits until the store lists it.
       const pinned = app.store;
       // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept;
-      // `holds`: what a source's peek showed it holds.
-      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
+      // `holds`: what a source's peek showed it holds; `sequence`: the number its listing or its peek names.
+      const candidates = new Map<string, { sequence: number; digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
       const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
       for (const s of stores) {
         if (pinned !== undefined && s.key !== pinned) continue;
@@ -1339,7 +1408,7 @@ export class Apps {
         for (const url of listingUrls(listing.urls)) {
           const missed = `${s.key} ${app.ref} ${url}`;
           if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
-          candidates.set(url, { ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
+          candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
         }
       }
       if (pinned === undefined) {
@@ -1347,7 +1416,7 @@ export class Apps {
           if (candidates.has(url)) continue;
           try {
             const peek = await this.peekAt(url);
-            if (peek && newer(peek)) candidates.set(url, { holds: peek });
+            if (peek && newer(peek)) candidates.set(url, { sequence: peek.sequence, holds: peek });
           } catch { /* this source does not answer now */ }
         }
       }
@@ -1355,7 +1424,9 @@ export class Apps {
       const revokeRead = new Set<string>();
       const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
       app = withRevocations(app, before ?? []);
-      for (const [url, want] of candidates) {
+      // The newest first, whichever store or source names it (then in the order found): the next is tried only when it
+      // cannot be taken.
+      for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
         // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
         // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
         // index lists the same.

@@ -296,8 +296,9 @@ records a run as the last one (the card keeps 10); `--next` takes a date or mill
 
 - **No daemon, and `listen` takes the profile.** With no daemon running, `listen` opens the profile itself and serves
   its socket, so it becomes the daemon: `daemon --detach` then fails ("A daemon already runs profile …"), and when
-  that listener stops, the profile goes offline with it. Start `ghostly daemon --detach` first, so `listen` only
-  subscribes. Any other command with no daemon runs the profile for that one command and exits.
+  that listener stops, the profile goes offline with it. `daemon stop` and `daemon restart` (the advice after an
+  upgrade) end such a listener: it exits 1 with a line on stderr, and the restarted daemon has no reader. Start
+  `ghostly daemon --detach` first, so `listen` only subscribes and follows a restart. Any other command with no daemon runs the profile for that one command and exits.
 - **A headless session is not woken later.** An agent whose session ends (a `-p` run, a closed chat) hears nothing
   when a message arrives. Keep a listener process running (`ghostly listen --turns … --exec`) under something that
   outlives the session, and let it start the agent once per turn.

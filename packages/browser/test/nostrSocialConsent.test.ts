@@ -120,7 +120,8 @@ describe("Nostr social: consent and failures", () => {
     const { engine } = bobsEngine(relay, { verified: [C] });
     await engine.loadOwn({ subject: B });
     await engine.loadContact({ linkId: "chat", subject: C, what: "notes" });
-    expect(engine.linkView("chat")![0].notes).toMatchObject({ notes: [], hidden: 3, authorMuted: true, more: false });
+    expect(engine.linkView("chat")![0].notes).toMatchObject({ count: 0, hidden: 3, authorMuted: true, more: false });
+    expect(engine.contactNotes({ linkId: "chat", subject: C })).toEqual([]);
   });
 
   it("forgetting what was never loaded writes nothing", async () => {

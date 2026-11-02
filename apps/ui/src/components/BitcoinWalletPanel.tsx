@@ -12,7 +12,7 @@ import { SourcePicker } from "./wallet/providers/SourcePicker";
 import { changeableFields } from "./wallet/providers/sourceStatus";
 import { useI18n } from "../contexts/I18nContext";
 import { formatAt } from "../lib/time";
-import { satsIn } from "./NetworkTag";
+import { satsIn, unitFor } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
@@ -65,7 +65,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           <p className="text-text-primary">{bt.status === "error" ? (bt.label ? t("wallet.bitcoin.notConnected", { label: bt.label }) : t("wallet.bitcoin.notConnectedDefault")) : bt.label ? t("wallet.bitcoin.connectingTo", { label: bt.label }) : t("wallet.bitcoin.connectingDefault")}</p>
           {bt.balance !== undefined && (
             <p className="text-text-secondary text-sm" data-testid="bitcoin-last-balance">
-              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit, date: formatAt(bt.balanceAt, { dateStyle: "medium", timeStyle: "short" }, t.language) }) : t("wallet.bitcoin.lastBalance", { unit }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
+              {fillNodes(bt.balanceAt ? t("wallet.bitcoin.lastBalanceAt", { unit: unitFor(t, unit, bt.balance ?? 0), date: formatAt(bt.balanceAt, { dateStyle: "medium", timeStyle: "short" }, t.language) }) : t("wallet.bitcoin.lastBalance", { unit: unitFor(t, unit, bt.balance ?? 0) }), { balance: <span className="tabular-nums">{formatAmount(bt.balance, t.language)}</span> })}
             </p>
           )}
           {bt.error && (() => {
@@ -85,7 +85,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
         <div className="space-y-4">
           <p className="text-text-primary" data-testid="bitcoin-balance">
             <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(bt.balance ?? 0, t.language)}</bdi>
-            <span className="text-text-muted text-sm ms-2">{unit}</span>
+            <span className="text-text-muted text-sm ms-2">{unitFor(t, unit, bt.balance ?? 0)}</span>
             {!!bt.unconfirmed && <span className="block text-xs text-warn-ink mt-1">{t("wallet.bitcoin.unconfirmed", { amount: formatAmount(bt.unconfirmed, t.language), unit })}</span>}
             {bt.network !== "bitcoin" && <span className="block text-xs text-warn-ink mt-1">{t("wallet.panel.testCoins", { network: bt.network ?? "" })}</span>}
           </p>

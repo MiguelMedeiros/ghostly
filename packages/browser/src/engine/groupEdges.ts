@@ -1,10 +1,11 @@
-import { presenceSeenAt, type DataLinkState, type PairingState, type PeerPresence } from "@ghostly/core";
+import { PRESENCE_WINDOW, presenceSeenAt, type DataLinkState, type PairingState, type PeerPresence } from "@ghostly/core";
 import type { GroupEdgeCause, GroupEdgeView } from "../shared/types";
 
 /** What the engine knows of one edge's link, enough to say how it is doing. */
 export interface EdgeLive {
-  stored: { id: string };
-  link: { groupsSupport: boolean } | null;
+  /** `edgeLive`: the edge was live when the app last ran. */
+  stored: { id: string; edgeLive?: boolean };
+  link: { groupsSupport: boolean; liveAttempt?: { retryAt?: number }; dialAttempts?: number } | null;
   pairing?: PairingState;
   discoveryError?: string;
   dataLink: DataLinkState;
@@ -25,11 +26,25 @@ export function edgeView(live: EdgeLive, now = Date.now(), noSlot = false): Grou
   const error = open ? undefined : pairingError ?? live.discoveryError;
   // Presence stays "online" for minutes after an app closes: only a channel being set up counts as connecting.
   const state = open ? "open" : error ? "error" : live.dataLink !== "idle" ? "connecting" : "waiting";
+  const cause = error ? (pairingError ? edgeErrorCause(pairingError) : "relays") : undefined;
+  // Live before, in this run or when the app last ran, and down for nothing the app can't get past: it dials again by
+  // itself (WISP 100 § Background retry), and the page says so rather than asking for a tap.
+  // Only while the member is seen (its packet, or the drop, within presence's window): one not seen is not dialled, and
+  // a member whose app closed days ago is last seen then, not "Reconnecting…" for good. Back after a restart, before
+  // anything of the member is read, the resume dial is under way (WISP 100 § Back after a restart).
+  const heardAt = Math.max(presenceSeenAt(live.presence), live.lastSyncAt);
+  const seen = heardAt > 0 ? now - heardAt < PRESENCE_WINDOW : !!live.stored.edgeLive;
+  const reconnecting = !open && seen && (live.lastSyncAt > 0 || !!live.stored.edgeLive) && cause !== "other";
+  const retryAt = reconnecting ? live.link?.liveAttempt?.retryAt : undefined;
+  const attempt = reconnecting ? live.link?.dialAttempts ?? 0 : 0;
   return {
     linkId: live.stored.id, state,
     ...(open && live.pairing?.transport ? { transport: live.pairing.transport } : {}),
-    lastSeenAt: open ? now : Math.max(presenceSeenAt(live.presence), live.lastSyncAt),
-    ...(error ? { error, cause: pairingError ? edgeErrorCause(pairingError) : "relays" } : {}),
+    lastSeenAt: open ? now : heardAt,
+    ...(error ? { error, cause } : {}),
+    ...(reconnecting ? { reconnecting: true as const } : {}),
+    ...(retryAt && retryAt > now ? { retryAt } : {}),
+    ...(attempt > 0 ? { attempt } : {}),
   };
 }
 

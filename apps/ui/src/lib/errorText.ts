@@ -573,6 +573,34 @@ const RULES: readonly Rule[] = [
   { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },
   { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
+  // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
+  // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
+  exact("Enter a domain name, like example.com", "errors.proof.domainEnter"),
+  exact("Enter only the domain name, without a path or port", "errors.proof.domainOnly"),
+  exact("That is not a valid domain name", "errors.proof.domainInvalid"),
+  exact("That domain name is too long", "errors.proof.domainTooLong"),
+  exact("Use a full domain name, like example.com", "errors.proof.domainFull"),
+  exact("Use a domain name, not an IP address", "errors.proof.domainNotIp"),
+  exact("That name only works on private networks", "errors.proof.domainPrivate"),
+  exact("Enter a Bitcoin address", "errors.proof.btcEnterAddress"),
+  { match: /^Ghostly can check proofs for single-key addresses only \(.+\), not multisig or script addresses$/, key: "errors.proof.btcSingleKey" },
+  exact("Paste the signature your wallet made", "errors.proof.btcPaste"),
+  exact("That is not a Bitcoin message signature: paste the whole signature, as the wallet shows it", "errors.proof.btcNotSignature", "errors.proof.btcNotSignatureNext"),
+  exact("That is not a Bitcoin message signature", "errors.proof.btcNotSignature"),
+  exact("The signature is not valid base64", "errors.proof.btcBase64"),
+  exact("Enter a DID, like did:key:z6Mk… or did:web:example.com", "errors.proof.didEnter"),
+  { match: /^That DID is too long \(at most (?<max>\d+) characters\)$/, key: "errors.proof.didTooLong" },
+  exact("Enter the DID alone, without a #fragment, ?query or /path", "errors.proof.didAlone"),
+  exact("That is not a DID: it looks like did:<method>:<identifier>", "errors.proof.didNotDid"),
+  { match: /^Write the method in lowercase: (?<example>did:[a-z0-9]+:…)$/, key: "errors.proof.didLowercase" },
+  { match: /^did:(?<method>\S+) is not supported yet\. Ghostly checks (?<list>[^.]+)\.$/, key: "errors.proof.didUnsupported" },
+  exact("A DID has no spaces or other special characters", "errors.proof.didSpecial"),
+  exact("A did:dht identifier is 52 z-base-32 characters", "errors.proof.didDhtLength"),
+  exact("That did:key is not an Ed25519, secp256k1 or P-256 key Ghostly can read", "errors.proof.didKeyUnknown"),
+  exact("That did:key is an X25519 encryption key: it cannot sign", "errors.proof.didKeyX25519"),
+  exact("That did:jwk does not hold a JSON Web Key", "errors.proof.didJwkNone"),
+  exact("That did:jwk contains a private key. Never share it: make a new key", "errors.proof.didJwkPrivate", "errors.proof.didJwkPrivateNext"),
+  exact("That did:jwk is not an Ed25519, secp256k1 or P-256 key", "errors.proof.didJwkUnknown"),
   { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
   // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
   { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
@@ -581,6 +609,8 @@ const RULES: readonly Rule[] = [
   // the address typed stays in the line, which has no ⓘ.
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },
   { match: /^Not a relay address: (?<address>\S+)$/, key: "errors.relays.notAddress" },
+  // A read that no Nostr relay answered: offline, or the relays blocked (engine/nostrSocial.ts, profiles/activity.ts, readers.ts).
+  exact("No relay answered", "errors.relays.noneAnswered", "errors.relays.noneAnsweredNext"),
   exact("Choose a picture", "errors.picture.choose"),
   exact("That picture is too large (max 20 MB)", "errors.picture.tooLarge"),
   exact("This picture cannot be read here. Try a JPEG or PNG.", "errors.picture.unreadableTryJpeg"),
@@ -627,6 +657,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
   ecashBeingReceived: "errors.engine.ecashBeingReceived",
   ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
+  lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
@@ -656,6 +687,7 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",
+  lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
@@ -664,6 +696,8 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   sentAfterReview: "errors.engine.sentAfterReviewNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
+/** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 
@@ -744,7 +778,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const amount = (value: string) => { const digits = value.replace(/\D/g, ""); return digits ? formatAmount(Number(digits), t.language ?? "en") : value; };
     const values = Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value]));
     const next = ENGINE_NEXT[known.code];
-    return { title: t(key, values), ...(next && { next: t(next, values) }) };
+    return { title: t(key, values), ...(next && { next: t(next, values) }), ...(ENGINE_DETAIL.has(known.code) && { detail: raw }) };
   }
   return null;
 }

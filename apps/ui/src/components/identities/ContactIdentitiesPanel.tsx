@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import type { NostrContactView } from "@ghostly/browser/nostr/types";
@@ -37,7 +37,8 @@ type Received = Extract<Entry, { r: ReceivedIdentityView }>;
  * and their key in this chat, then what they shared; a click turns a card over to how it was proven, when this app
  * checked it, until when it holds, and Check again. Under the deck, the chosen card's public profile, the people the
  * reader knows that it follows, and its recent posts (IdentityActivity.tsx), when its network has them. The reader's
- * own identities are shared from the composer (+ → Identity).
+ * own identities are shared from the composer (+ → Identity). Keys: beside the chat it is a region of the page (Tab
+ * goes on to the chat, F6 between them, Escape from inside closes it); over the chat, a dialog that keeps Tab inside.
  */
 export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   peerKey: string; name: string;
@@ -48,9 +49,11 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   const state = useEngineState();
   const { t, language } = useI18n();
   const link = state?.links.find(l => l.peerPubKeyZ32 === peerKey);
-  const ref = useRef<HTMLElement>(null);
+  const ref = useRef<HTMLElement>(null), backdrop = useRef<HTMLDivElement>(null);
   const titleId = useId();
-  useDialogFocus(ref, onClose);
+  const beside = useBeside(backdrop);
+  const besideNow = useRef(beside); besideNow.current = beside;
+  useDialogFocus(ref, onClose, undefined, undefined, () => besideNow.current);
   const face = useContactFace(peerKey), sent = usePeerAvatar(peerKey);
   const photo = face?.photo ?? sent;
   const now = Math.floor(Date.now() / 1000);
@@ -64,8 +67,9 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
   ];
 
   return (<>
-    <div className="contact-panel-backdrop" aria-hidden="true" onClick={onClose} />
-    <aside ref={ref} tabIndex={-1} role="dialog" aria-labelledby={titleId} data-testid="chat-identities" className="contact-panel focus:outline-none">
+    <div ref={backdrop} className="contact-panel-backdrop" aria-hidden="true" onClick={onClose} />
+    {/* Beside the chat, a region of the page beside it (Tab goes on to the chat, F6 between them); over it, a dialog. */}
+    <aside ref={ref} tabIndex={-1} role={beside ? undefined : "dialog"} aria-modal={beside ? undefined : true} aria-labelledby={titleId} data-testid="chat-identities" className="contact-panel focus:outline-none">
       <div className="contact-panel-head">
         <div className="flex min-w-0 items-start gap-3">
           {/* Their picture as the chat shows it; with one, a click opens it large (AvatarViewer.tsx). */}
@@ -95,6 +99,25 @@ export function ContactIdentitiesPanel({ peerKey, name, card, onClose }: {
       </div>
     </aside>
   </>);
+}
+
+/**
+ * Whether the panel sits beside the chat rather than over it: its backdrop is shown only over it (contact-panel.css,
+ * by the chat's column width and the screen's), so this follows the column as it is resized.
+ */
+function useBeside(backdrop: RefObject<HTMLElement | null>) {
+  const [beside, setBeside] = useState(false);
+  useLayoutEffect(() => {
+    const element = backdrop.current, pane = element?.parentElement;
+    if (!element || !pane) return;
+    const check = () => setBeside(getComputedStyle(element).display === "none");
+    check();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(check);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [backdrop]);
+  return beside;
 }
 
 /** The contact's ID cards: a deck, then the chosen card turned over. */
@@ -200,7 +223,10 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <ProviderMark provider={r.provider} subject={card.bound} />
           <span className="id-card-back-who">
             <span className="id-card-back-name">{card.label}{card.name ? ` · ${card.name}` : ""}</span>
-            <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>
+            {/* A domain whole, wrapped: its end names who owns it, and the face shows only that end. */}
+            {r.provider === "domain"
+              ? <span className="id-card-back-subject id-card-back-subject-whole" data-testid="chat-identity-received-subject"><bdi dir="ltr">{card.subject}</bdi></span>
+              : <span className="id-card-back-subject" title={card.subject} data-testid="chat-identity-received-subject">{card.short}</span>}
             <span className="id-card-back-meta">{card.category}</span>
             {/* A name the evidence or a lookup carried, and who wrote it: a holder's own words are not a proof. */}
             {card.name && <span className="id-card-back-meta" data-testid="chat-identity-received-name-source">{fillNames(t("identities.contact.nameFrom"), { source: card.profile?.found && card.profile.name ? t("identities.contact.theirProfile") : r.display?.source ?? r.verified.display?.source ?? "" })}</span>}
@@ -217,7 +243,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>
-          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? t("identities.contact.unconfirmedWhy", { status: card.statusLabel, error: problemLine(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
+          <dd data-testid="chat-identity-received-status" data-status={card.status}>{r.status === "unconfirmed" ? (r.error ? fillNames(t("identities.contact.unconfirmedWhy", { status: card.statusLabel }), { error: problemLine(r.error, t) }) : t("identities.contact.unconfirmed", { status: card.statusLabel }))
             : r.status === "revoked" ? t("identities.contact.revoked", { status: card.statusLabel }) : card.statusLabel}</dd>
         </dl>
         <div className="flex flex-wrap gap-2">

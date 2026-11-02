@@ -6,7 +6,7 @@ import { cardOn, rememberNetwork, rememberRail, rememberedRail, startNetwork, ty
 import type { WalletNetwork, WalletPlatform } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { PaymentReview as Review } from "@ghostly/core";
-import { NetworkTag, satsIn } from "./NetworkTag";
+import { NetworkTag, satsIn, unitFor } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { WalletMark, type ChatRail } from "./WalletCards";
 import { CardDeck, WalletCardFace } from "./WalletDeck";
@@ -332,7 +332,7 @@ export function PaymentComposer({ balance, onSend, onRequest, onClose, onDone = 
           </label>
           <input className="payment-back-memo" placeholder={t("payments.composer.memo")} aria-label={t("payments.composer.memo")} maxLength={140} value={memo} onChange={(e) => setMemo(e.target.value)} />
           <p className="payment-back-hint" data-testid={amountField.hint && !blocked ? "amount-unclear" : undefined}>{blocked ?? amountField.hint ?? (tooMuch ? t("payments.composer.tooMuch", { amount: formatAmount(holds!, t.language), unit }) : how(rail))}</p>
-          {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unit}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
+          {confirmSend ? <ConfirmRealMoney what={`${formatAmount(value, t.language)} ${unitFor(t, unit, value)}`} busy={busy !== null} onSend={() => void send(true)} onBack={() => setConfirmSend(false)} /> : <div className="payment-back-actions" data-turning={turning || undefined}>
             <button data-testid="payment-request" disabled={turning || !value || busy !== null || !!asking || !!blocked} onClick={() => void request()} className="payment-back-secondary">
               {busy === "request" ? t("payments.composer.requesting") : t("payments.composer.request")}
             </button>
