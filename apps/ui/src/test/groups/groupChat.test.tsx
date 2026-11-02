@@ -500,7 +500,7 @@ describe("GroupChat: out of the group", () => {
   });
 
   it.each([
-    ["removed", "You were removed from this group", "Você foi removido deste grupo"],
+    ["removed", "You were removed from this group", "Removeram você deste grupo"],
     ["forked", "Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.",
       "As mudanças no grupo estão pausadas. O admin precisa recriar o grupo."],
     ["lost", "Two members let people in at the same moment and yours did not count. Asking to be let in again…",
@@ -1046,7 +1046,7 @@ describe("GroupChat: history and sending", () => {
     fakeEngine.update({ groups: [active({ profile: "community" })] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
-      "Carol entrou", "Carol agora é o admin", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
+      "Carol entrou", "Carol agora administra o grupo", "Carol renomeou o grupo para “Town”", "Carol alterou a foto do grupo", "Carol removeu a foto do grupo",
     ]));
   });
 
@@ -1063,7 +1063,7 @@ describe("GroupChat: history and sending", () => {
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     const lines = await screen.findAllByTestId("group-event");
     expect(lines.map(l => l.textContent)).toEqual([
-      "Agora você é o admin", "Você renomeou o grupo para “Ghost Club”", "Você alterou a foto do grupo", "Você removeu a foto do grupo", "Você foi removido deste grupo",
+      "Agora você administra o grupo", "Você renomeou o grupo para “Ghost Club”", "Você alterou a foto do grupo", "Você removeu a foto do grupo", "Removeram você deste grupo",
     ]);
   });
 
@@ -1076,7 +1076,7 @@ describe("GroupChat: history and sending", () => {
     fakeEngine.update({ groups: [active()] });
     renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
     return screen.findAllByTestId("group-event").then(lines => expect(lines.map(l => l.textContent)).toEqual([
-      "O histórico de membros se bifurcou", "O histórico de membros se bifurcou", "Você foi removido deste grupo",
+      "O histórico de membros se bifurcou", "O histórico de membros se bifurcou", "Removeram você deste grupo",
     ]));
   });
 

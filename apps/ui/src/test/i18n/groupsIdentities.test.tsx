@@ -156,6 +156,24 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
   });
 });
 
+describe("the lines a group writes about a member", () => {
+  // The app knows no one's gender: a masculine form reads wrong for every woman it names, or who reads it about herself.
+  const GENDERED: Partial<Record<Language, RegExp>> = {
+    pt: /\bvocê foi removid| é [oa] admin\b/i,
+    fr: /\bvous avez été retiré|\bvous a retiré/i,
+    it: /\bsei stat[oa]\b| è entrat| è uscit/i,
+    es: /\b(el|la) admin\b/i,
+    // A verb before the name takes the man's form: "انضم Carol".
+    ar: /^(انضم|غادر|أصبح|لم يعد|غيّر|أزال) \{\{name\}\}|المشرف/,
+  };
+  const keys = [...flatten(LOCALES.en).keys()].filter(key => key.startsWith("group.event.") || ["group.chat.removedCommunity", "errors.group.removed"].includes(key));
+
+  it.each(Object.keys(GENDERED) as Language[])("in %s, say it without a gender", (language) => {
+    const gendered = keys.map(key => [key, lookup(language, key)] as const).filter(([, text]) => text && GENDERED[language]!.test(text));
+    expect(gendered).toEqual([]);
+  });
+});
+
 describe("the English words stay what they were", () => {
   it("the read notes are the engine's own, word for word", () => {
     expect(english("group.readNote", { count: GROUP_LIMITS.relay })).toBe(GROUP_READ_NOTE);
