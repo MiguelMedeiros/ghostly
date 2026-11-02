@@ -148,6 +148,9 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
   const [limit, setLimit] = useState(LISTING_PAGE);
   const [filter, setFilter] = useState("");
+  // The search box shows only past one page: a store read again with fewer listings takes the search away with it.
+  const searchable = store.apps.length > LISTING_PAGE;
+  if (!searchable && filter) setFilter("");
   // Show more goes under the listings it adds, and away after the last ones: the focus goes to the first listing it
   // added (its Install, or the row when it has none), so Tab goes on from there and not from the top of the page.
   const [added, setAdded] = useState<number | null>(null);
@@ -216,7 +219,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
           </div>
         )}
       </div>
-      {open && store.apps.length > LISTING_PAGE && (
+      {open && searchable && (
         <div className="border-t border-border px-4 py-2">
           <input type="search" data-testid="app-store-filter" value={filter} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
             placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}

@@ -940,6 +940,28 @@ describe("with the apps flag on", () => {
     expect(document.body).not.toHaveFocus();
   });
 
+  it("a search goes away with its box: a store read again with 50 listings or fewer shows them all, and comes back with an empty box", async () => {
+    let n = 60;
+    const stores = (): AppStoreSummary[] => [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Big", kind: "indexed", sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1,
+      apps: Array.from({ length: n }, (_, i) => ({ ref: `${KEY}/app${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `App ${i}`, tagline: `Tagline ${i}` })), removed: [] }];
+    fakeEngine.on("appList", () => []).on("appCheckUpdates", () => []).on("appStoreList", stores)
+      .on("appStoreRefresh", () => { n = n === 60 ? 40 : 60; return stores(); });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await screen.findByTestId("app-store-listing");
+    const rows = () => within(screen.getByTestId("app-store-listing")).queryAllByTestId("app-listing");
+    await user.type(screen.getByTestId("app-store-filter"), "App 5");
+    expect(rows()).toHaveLength(11);
+
+    await user.click(screen.getByTestId("app-store-refresh"));
+    await waitFor(() => expect(screen.queryByTestId("app-store-filter")).not.toBeInTheDocument());
+    expect(rows()).toHaveLength(40);
+
+    await user.click(screen.getByTestId("app-store-refresh"));
+    expect(await screen.findByTestId("app-store-filter")).toHaveValue("");
+    expect(rows()).toHaveLength(50);
+  });
+
   it("gives the card's title its own direction", async () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
