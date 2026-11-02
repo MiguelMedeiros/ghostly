@@ -312,8 +312,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     if (callState === "offering") return startRinging("ringback");
     if (callState === "idle" && before !== "idle") playSound("hangup");
   }, [callState, sessionId]);
-  // Out of sight, a ringing call is a system notification too.
-  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"));
+  // Out of sight, a ringing call is a system notification too: one for every tab that rings it (its offer's time).
+  const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
+  useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
 
   useEffect(() => () => onCallChange(sessionId, false), [onCallChange, sessionId]);
 
