@@ -102,7 +102,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const pinned = !!link?.peerParticipationKey, canCompare = !!pair?.code && !!pair.peerKey && (pair.status === "ready" || pair.status === "waiting");
   const awaitingJoin = !pinned && !pair?.peerKey && link?.dataLink === "idle";
   const clock = (at: number) => clockTime(at, language);
-  const contact = link?.peerNick || t("pairing.contact");
+  // The contact's name; none when they shared none, and the Details text then says "your contact" in sentences of its
+  // own: a fallback name dropped into a sentence read "No attempt of Your contact's", "L'app di Il tuo contatto".
+  const contact = link?.peerNick || undefined;
   // A chosen transport not reached yet (WISP 100): waited for, never a connection issue. `waitOff`: nothing else may
   // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
   const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
