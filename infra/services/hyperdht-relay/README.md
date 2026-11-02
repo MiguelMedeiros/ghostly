@@ -59,7 +59,8 @@ Other settings:
 - `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
 - `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
   counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
-  Without either, the headers are ignored. A client that reaches the port past the proxy could write them itself,
+  Without either, the headers are ignored, and the first request that carries one logs which setting is missing
+  (`requests carry CF-Connecting-IP but GHOSTLY_RELAY_CLOUDFLARE is not set`). A client that reaches the port past the proxy could write them itself,
   so publish it only where the proxy is (`HYPERDHT_RELAY_BIND`, loopback by default).
 
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
