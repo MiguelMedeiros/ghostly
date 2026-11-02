@@ -115,6 +115,9 @@ export class Outbox {
   private writes = 0;
   private stamp = 0;
   private seen = -1;
+  /** How many looks at the chat (`held`) began, and how many are over: a row marked waiting meanwhile may not be in one. */
+  private looks = 0;
+  private looked = 0;
   private stopped = false;
   private readonly resender: Resender;
   private readonly policy: ResendPolicy;
@@ -131,6 +134,8 @@ export class Outbox {
 
   /** `messages`: the chat's history as the caller just read it (a start has), so it is not read a second time. */
   async recover(messages?: StoredMessage[]): Promise<void> {
+    // A row stored by someone else while this read was on its way may not be in it.
+    const at = this.writes ? undefined : this.stamp;
     for (const message of messages ?? await this.store.read()) {
       // Held items have their own durable queue and are picked up by the store-and-forward engine.
       if (message.via === "hold" || message.sender !== "me") continue;
@@ -144,6 +149,9 @@ export class Outbox {
       } else if (until !== undefined) await this.expired(message);
       else await this.queue(message, "Not confirmed before the app closed. It is sent again, under the same ID, once your contact is reachable.");
     }
+    // Everything of mine still to go is held now (queued, waiting or awaiting a receipt): a session that opens, and the
+    // first text sent, read those rows by id, not the chat's history again (agents#2468).
+    if (at !== undefined && !this.stopped) this.seen = at;
   }
 
   /**
@@ -240,14 +248,32 @@ export class Outbox {
    * history on the page's thread (20,000 rows per send at 20,000 messages), and so did each of the texts a bot asked
    * for at the same time. Past `KNOWN_ROWS`, the history costs less.
    */
-  private async look(id: string): Promise<StoredMessage[]> {
+  private async look(id?: string): Promise<StoredMessage[]> {
     if (!this.store.get || !this.known || this.waiting.size + this.receipts.size + this.onTheirWay.size > KNOWN_ROWS) return this.store.read();
-    const rows = await Promise.all([...new Set([id, ...this.waiting.keys(), ...this.receipts.keys(), ...this.onTheirWay.keys()])].map(known => this.store.get!(known)));
+    const ids = new Set([...(id === undefined ? [] : [id]), ...this.waiting.keys(), ...this.receipts.keys(), ...this.onTheirWay.keys()]);
+    const rows = await Promise.all([...ids].map(known => this.store.get!(known)));
     return rows.filter((row): row is StoredMessage => !!row);
   }
 
+  /**
+   * What a look at the chat takes up comes from: the rows this outbox holds, by id, where it knows them all (`look`);
+   * else the chat's whole history, which, when it shows nothing of mine to go that this outbox did not know of, says
+   * so until the next row stored by someone else. A session that opened with nothing queued, nothing awaiting a
+   * receipt and nothing waiting read the chat's whole history for nothing, twice (the link says it is open in two
+   * ways): 600 ms of a daemon's time per reconnect at 10,000 messages (agents#2468).
+   */
+  private async held(): Promise<StoredMessage[]> {
+    this.looks++;
+    const at = this.writes ? undefined : this.stamp;
+    try {
+      const messages = await this.look();
+      if (at !== undefined && !messages.some(m => this.unknown(m))) this.seen = at;
+      return messages;
+    } finally { this.looked++; }
+  }
+
   /** A row of mine still to go that this outbox holds nothing of: only a look at the chat finds it. */
-  private unknown(m: StoredMessage, id: string): boolean {
+  private unknown(m: StoredMessage, id?: string): boolean {
     if (m.sender !== "me" || m.via === "hold" || m.id === id || this.busy.has(m.id) || this.receipts.has(m.id) || this.waiting.has(m.id)) return false;
     return toGo(m) || this.file(m) || (m.delivery === "sending" && !!m.wireId);
   }
@@ -385,10 +411,14 @@ export class Outbox {
    * nothing about it is unconfirmed; it counts no attempt until it goes.
    */
   async wait(id: string, reason: string): Promise<void> {
+    const looked = this.looked;
     const message = await this.one(id);
     if (!message || this.stopped) return;
     await this.store.update(id, "waiting", reason, { resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
     this.schedule(id);
+    // A look at the chat was in progress, or began, while its row was being marked (the chat reopened): it read the
+    // rows this outbox held, without this one. It is looked at now, as that look would have, not at its first check.
+    if (this.looks !== looked) void this.flush().catch(() => {});
   }
 
   async received(wireId: string): Promise<void> {
@@ -425,7 +455,7 @@ export class Outbox {
       // A send still on its way goes again in this look, in its place: the look waits its turn behind it. One that
       // outlived its turn (`TURN_MS`) is not `sent` yet and this look passes it by: it goes again once it returns.
       if (reopened) for (const id of this.busy) this.reopenedWhileBusy.add(id);
-      await this.inOrder(this.due(await this.store.read(), opened));
+      await this.inOrder(this.due(await this.held(), opened));
     });
     if (reopened) return look;
     this.lookAhead = look;

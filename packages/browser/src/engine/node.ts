@@ -3944,7 +3944,7 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * `restoreCards`, then what waits goes. One look at a time per chat, at most once per `CARD_RESTORE_EVERY_MS`: asked
    * again while one runs or within the gap, one more look goes once it is over, and what waits still goes at once (the
-   * edit queue reads the history once a session).
+   * edit queue reads the history once a run).
    */
   private restoreCardsSoon(linkId: string): void {
     const flush = () => this.editsFor(linkId).flush().catch(() => {});
