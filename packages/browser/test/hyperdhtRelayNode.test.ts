@@ -123,6 +123,35 @@ it("leaves a chat's session on the old relay alone until it can let go", async (
   expect(link.registerEndpoint).toHaveBeenCalledTimes(1);
 });
 
+it("while the relay stays out of reach, queues one start per chat at a time, not another every 15 s", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+  // Out of reach, a start takes its whole wait to fail (10 s: the relay's open wait, Iroh's online wait), and a
+  // transport's starts go one after another. Each failed chat was queued again once its own wait was over, whether
+  // or not its last start had even begun: with 20 chats, 700 starts waited after 30 minutes, and still more with 40.
+  const chats = 20;
+  relayed.create.mockImplementation(() => new Promise((_, reject) => setTimeout(() => reject(new Error("The HyperDHT relay did not answer")), 10_000)));
+  const node = engine();
+  node["settings"] = { ...node["settings"], hyperdhtRelay: "wss://relay.example" };
+  const ids: string[] = [];
+  for (let i = 0; i < chats; i++) ids.push((await addChat(node, stubLink())).id);
+  const pending = new Map<string, number>();
+  let most = 0;
+  const ensure = node["ensureNativeEndpoints"].bind(node);
+  vi.spyOn(node as never, "ensureNativeEndpoints").mockImplementation(((id: string, inUse?: boolean) => {
+    pending.set(id, (pending.get(id) ?? 0) + 1);
+    most = Math.max(most, pending.get(id)!);
+    return ensure(id, inUse).finally(() => pending.set(id, pending.get(id)! - 1));
+  }) as never);
+  node["startGroupEntries"]();
+  for (const id of ids) void node["ensureNativeEndpoints"](id);
+  for (let second = 0; second < 10 * 60; second++) {
+    await vi.advanceTimersByTimeAsync(1_000);
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  expect(relayed.create.mock.calls.length).toBeGreaterThan(chats);
+  expect(most).toBe(1);
+}, 60_000);
+
 it("listens again a while after the relay went away, each app at a time of its own", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   // A relay that restarts closes every app's socket at once: with one fixed wait they all came back in the same

@@ -8920,6 +8920,8 @@ export class GhostlyNode implements EngineImplementation {
   private groupNativeRetryAt = 0;
   /** Chats and group links whose native listener failed to start, by link id: when each tries again, and how long it waited last. */
   private readonly nativeFailed = new Map<string, { at: number; wait: number }>();
+  /** Of those, the ones whose start is queued or under way: a transport's starts go one after another. */
+  private readonly nativeRetrying = new Set<string>();
   /**
    * Now and then, the group links that found no free native slot try again: a chat or another group may have let one go.
    * Chats and group links whose listener failed to start try again once their wait is over.
@@ -8928,11 +8930,14 @@ export class GhostlyNode implements EngineImplementation {
     this.groupAnchorsAnswered();
     const now = Date.now();
     for (const [linkId, failed] of this.nativeFailed) {
-      if (now < failed.at) continue;
+      if (now < failed.at || this.nativeRetrying.has(linkId)) continue;
       if (!this.links.get(linkId)?.link) { this.nativeFailed.delete(linkId); continue; }
-      // Not again while this start is under way (Iroh waits up to 10 s for its relay).
+      // Not again while this start waits or is under way: with its relay out of reach each start takes 10 s to fail
+      // (Iroh's online wait, the HyperDHT relay's open wait), and with 20 chats a start queued again every 15 s kept
+      // the queue growing for as long as the relay stayed away.
       failed.at = now + failed.wait;
-      void this.ensureNativeEndpoints(linkId);
+      this.nativeRetrying.add(linkId);
+      void this.ensureNativeEndpoints(linkId).finally(() => this.nativeRetrying.delete(linkId));
     }
     if (!this.groupNativeWaiting.size || Date.now() < this.groupNativeRetryAt) return;
     this.groupNativeRetryAt = Date.now() + NATIVE_RETRY_MS;
