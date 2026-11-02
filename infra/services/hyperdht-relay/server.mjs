@@ -1,4 +1,4 @@
-import { DEFAULT_LIMITS, limitVariable, readSettings, startRelay } from './relay.mjs'
+import { DEFAULT_LIMITS, limitVariable, listenProblem, readSettings, startRelay } from './relay.mjs'
 
 // Configuration, all optional:
 //   PORT (49443), HOST (0.0.0.0)
@@ -15,7 +15,14 @@ try { settings = readSettings(process.env) } catch (error) {
   console.error(new Date().toISOString(), `Ghostly HyperDHT relay not started: ${error.message}`)
   process.exit(1)
 }
-const relay = await startRelay({
+// A port in use or below 1024, a HOST that is no address here: one line naming the setting, not Node's stack.
+const start = options => startRelay(options).catch(error => {
+  const problem = listenProblem(error, settings)
+  if (!problem) throw error
+  console.error(new Date().toISOString(), `Ghostly HyperDHT relay not started: ${problem}`)
+  process.exit(1)
+})
+const relay = await start({
   ...settings,
   // Counts and reasons only: never a key, an address or a byte of anyone's traffic.
   log: (...words) => console.log(new Date().toISOString(), ...words),

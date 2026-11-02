@@ -74,6 +74,11 @@ GHOSTLY_HYPERDHT_TESTNET=3 node server.mjs       # its own HyperDHT network (tes
 docker compose up -d --build                     # the container, limits and all (docker-compose.yml)
 ```
 
+`GHOSTLY_HYPERDHT_BOOTSTRAP` (`host:port` nodes, comma-separated) points it at bootstrap nodes of your own instead of
+the public ones; an entry without a port or with a port outside 1 to 65535, or an empty value, stops the start. So does
+a port another program holds or one below 1024 this user may not take (`PORT`), and a `HOST` that is no address of this
+machine or no name at all: one line names the setting instead of a stack trace, and nothing is left running.
+
 `GET /healthz` answers with the counts (clients, accepted, refused, dropped) and the HyperDHT node's state: `nodes`
 in its routing table, `firewalled`, and `sinceAnswerMs` since another node last answered it (`null`: never). It is
 `ok: false` with HTTP 503 while `nodes` is 0: the node reaches no other one (no outgoing UDP, as behind a tunnel, a

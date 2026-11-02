@@ -18,6 +18,9 @@ node server.mjs                                   # port 49480
 PORT=8443 GHOSTLY_RELAY_ORIGINS=https://app.ghostly.tools node server.mjs
 ```
 
+A port another program holds or one below 1024 this user may not take (`PORT`), and a `HOST` that is no address of
+this machine or no name at all, stop the start with one line that names the setting instead of a stack trace.
+
 Put it behind HTTPS (a tunnel or a reverse proxy) and enter its address in Settings. Behind a proxy, set
 `GHOSTLY_RELAY_PROXIES` to the number of proxies in front of it (`1` for one tunnel), so the limit counts each
 client's address from `X-Forwarded-For` rather than the proxy's; without it the header is ignored. With proxies set,

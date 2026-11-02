@@ -132,11 +132,15 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     })
   })
 
-  return new Promise(resolve => server.listen(port, host, () => resolve({
-    port: server.address().port,
-    tracked: () => recent.size,
-    close: () => new Promise(done => { clearInterval(pruning); server.close(() => done()) }),
-  })))
+  return new Promise((resolve, reject) => {
+    // A port in use, a port it may not take, a host it cannot listen on: the caller says which (listenProblem).
+    server.once('error', error => { clearInterval(pruning); reject(error) })
+    server.listen(port, host, () => resolve({
+      port: server.address().port,
+      tracked: () => recent.size,
+      close: () => new Promise(done => { clearInterval(pruning); server.close(() => done()) }),
+    }))
+  })
 }
 
 /**
@@ -169,5 +173,20 @@ export function readSettings (env) {
     host: setting(env, 'HOST', proxies ? '127.0.0.1' : '0.0.0.0', 'text'),
     origins: list(env.GHOSTLY_RELAY_ORIGINS),
     proxies,
+  }
+}
+
+/**
+ * Why the relay could not listen, as one line naming the setting to change, for server.mjs to print instead of Node's
+ * stack: a port another program holds, a port below 1024 for a user without the right, a HOST that is no address of
+ * this machine or no name at all. Null for any other error, which keeps its stack.
+ */
+export function listenProblem (error, { port, host }) {
+  switch (error?.code) {
+    case 'EADDRINUSE': return `port ${port} on ${host} is already in use (PORT)`
+    case 'EACCES': return `port ${port} on ${host} needs more rights than this user has (PORT): below 1024, root or the cap_net_bind_service capability`
+    case 'EADDRNOTAVAIL': return `cannot listen on ${host}: it is no address of this machine (HOST)`
+    case 'ENOTFOUND': case 'EAI_AGAIN': case 'EAI_FAIL': case 'EAI_NONAME': return `cannot listen on ${JSON.stringify(host)}: no such host (HOST)`
+    default: return null
   }
 }

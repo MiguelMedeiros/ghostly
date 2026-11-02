@@ -379,6 +379,11 @@ export async function startRelay(options = {}) {
   await new Promise((resolve, reject) => {
     server.once('error', reject)
     server.listen(options.port ?? 0, options.host ?? '127.0.0.1', resolve)
+  }).catch(async error => {
+    // The node (and a testnet) are up by now: a relay that cannot listen leaves none of them running.
+    if (!options.dht) await dht.destroy()
+    if (testnet) await testnet.destroy()
+    throw error
   })
   const { port } = server.address()
   const host = options.host && options.host !== '0.0.0.0' ? options.host : '127.0.0.1'
@@ -437,11 +442,43 @@ export function readSettings (env) {
   return {
     port: setting(env, 'PORT', 49443, 'port'),
     host: setting(env, 'HOST', '0.0.0.0', 'text'),
-    bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
+    bootstrap: bootstrapSetting(env),
     testnet: setting(env, 'GHOSTLY_HYPERDHT_TESTNET', 0, 'count') || undefined,
     origins: list(env.GHOSTLY_RELAY_ORIGINS),
     proxies: setting(env, 'GHOSTLY_RELAY_PROXIES', 0, 'count'),
     cloudflare: setting(env, 'GHOSTLY_RELAY_CLOUDFLARE', false, 'flag'),
     limits,
+  }
+}
+
+/**
+ * GHOSTLY_HYPERDHT_BOOTSTRAP: `host:port` entries (`ip@host:port` too, as HyperDHT's own list), comma-separated, each
+ * port from 1 to 65535. Left out, the public HyperDHT. One without a port (`127.0.0.1`) or with a word for one stops the
+ * start here, by name, rather than as a stack out of dht-rpc; an empty one too, which would quietly be the public one.
+ */
+function bootstrapSetting (env) {
+  const raw = env.GHOSTLY_HYPERDHT_BOOTSTRAP
+  if (raw === undefined) return []
+  const entries = list(raw)
+  const wrong = entries.find(entry => {
+    const match = /^[^\s:]+:(\d+)$/.exec(entry)
+    return !match || Number(match[1]) < 1 || Number(match[1]) > 65535
+  })
+  if (entries.length && wrong === undefined) return entries
+  throw new Error(`GHOSTLY_HYPERDHT_BOOTSTRAP=${JSON.stringify(raw)}: expected host:port nodes, comma-separated, each port from 1 to 65535 (leave it out for the public HyperDHT)${wrong === undefined ? '' : `; ${JSON.stringify(wrong)} is not one`}`)
+}
+
+/**
+ * Why the relay could not listen, as one line naming the setting to change, for server.mjs to print instead of Node's
+ * stack: a port another program holds, a port below 1024 for a user without the right, a HOST that is no address of
+ * this machine or no name at all. Null for any other error, which keeps its stack.
+ */
+export function listenProblem (error, { port, host }) {
+  switch (error?.code) {
+    case 'EADDRINUSE': return `port ${port} on ${host} is already in use (PORT)`
+    case 'EACCES': return `port ${port} on ${host} needs more rights than this user has (PORT): below 1024, root or the cap_net_bind_service capability`
+    case 'EADDRNOTAVAIL': return `cannot listen on ${host}: it is no address of this machine (HOST)`
+    case 'ENOTFOUND': case 'EAI_AGAIN': case 'EAI_FAIL': case 'EAI_NONAME': return `cannot listen on ${JSON.stringify(host)}: no such host (HOST)`
+    default: return null
   }
 }
