@@ -657,6 +657,7 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   ecashAlreadySpent: "errors.engine.ecashAlreadySpent",
   ecashBeingReceived: "errors.engine.ecashBeingReceived",
   ecashFeeTakesAll: "errors.engine.ecashFeeTakesAll",
+  lightningRefused: "errors.engine.lightningRefused",
   ecashOtherUnit: "errors.engine.ecashOtherUnit",
   reviewedEcashSpent: "errors.engine.reviewedEcashSpent",
   lnurlExactly: "errors.engine.lnurlExactly",
@@ -686,6 +687,7 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   fedimintTestOnMainnet: "errors.engine.fedimintTestOnMainnetNext",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmedNext",
   lastMint: "errors.engine.lastMintNext",
+  lightningRefused: "errors.engine.lightningRefusedNext",
   lnurlUnreachable: "errors.engine.lnurlUnreachableNext",
   parkedSigned: "errors.engine.parkedSignedNext",
   requestNotAwaiting: "errors.engine.requestNotAwaitingNext",
@@ -694,6 +696,8 @@ const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
   sentAfterReview: "errors.engine.sentAfterReviewNext",
   testMintOnMainnet: "errors.engine.testMintOnMainnetNext",
 };
+/** The engine errors whose English goes behind the ⓘ too: a server's own reason in it is not said in the line. */
+const ENGINE_DETAIL: ReadonlySet<EngineErrorCode> = new Set(["lightningRefused"]);
 /** The values that are amounts: written again the app's way (the engine wrote them its own way). */
 const AMOUNTS = new Set(["amount", "fee", "min", "max"]);
 
@@ -774,7 +778,7 @@ export function knownErrorParts(cause: unknown, t: Translate = english): ErrorPa
     const amount = (value: string) => { const digits = value.replace(/\D/g, ""); return digits ? formatAmount(Number(digits), t.language ?? "en") : value; };
     const values = Object.fromEntries(Object.entries(known.values).map(([name, value]) => [name, AMOUNTS.has(name) ? amount(value) : value]));
     const next = ENGINE_NEXT[known.code];
-    return { title: t(key, values), ...(next && { next: t(next, values) }) };
+    return { title: t(key, values), ...(next && { next: t(next, values) }), ...(ENGINE_DETAIL.has(known.code) && { detail: raw }) };
   }
   return null;
 }

@@ -7,7 +7,7 @@ import { useRun, downloadJson } from "./wallet/run";
 import { Select } from "./ui/Select";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { satsIn } from "./NetworkTag";
+import { satsIn, unitFor } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
 import { fillNodes } from "../lib/fillNodes";
 import { problemText } from "../lib/problemText";
@@ -137,9 +137,9 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
     {!federations.length ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="fedimint-empty"><p className="text-text-primary">{t("wallet.fedimint.empty")}</p><Notice>{t("wallet.fedimint.emptyNote")}</Notice></div>
     : <div className="space-y-4">
       {federations.length > 1 && <Select aria-label={t("wallet.fedimint.federation")} value={current?.id ?? ""} onChange={(id) => { setSelected(id); setInvoice(""); setTookBack(""); }}
-        options={federations.map((f) => ({ value: f.id, label: f.name ?? short(f.id), description: `${formatAmount(f.balance, t.language)} ${unit}` }))} />}
+        options={federations.map((f) => ({ value: f.id, label: f.name ?? short(f.id), description: `${formatAmount(f.balance, t.language)} ${unitFor(t, unit, f.balance)}` }))} />}
       {current && <>
-        <p className="text-text-primary" data-testid="fedimint-balance"><bdi className="text-4xl font-semibold tabular-nums">{formatAmount(current.balance, t.language)}</bdi><span className="text-text-muted text-sm ms-2">{unit}</span>
+        <p className="text-text-primary" data-testid="fedimint-balance"><bdi className="text-4xl font-semibold tabular-nums">{formatAmount(current.balance, t.language)}</bdi><span className="text-text-muted text-sm ms-2">{unitFor(t, unit, current.balance)}</span>
           <span className={`block text-xs mt-1 ${test ? "text-warn-ink" : "text-text-muted"}`}>{t(test ? "wallet.fedimint.lineTest" : "wallet.fedimint.line", { name: current.name ?? short(current.id), network: current.network ?? t("wallet.fedimint.unknownNetwork") })}</span></p>
         {current.status !== "ready" && <Notice tone={current.status === "error" ? "warning" : "muted"} testId="fedimint-status" details={current.status === "error" && current.error ? problemText(current.error, t).detail : undefined}>{current.status === "error" ? t("wallet.fedimint.notAnswering", { error: current.error ? problemText(current.error, t).title : t("wallet.fedimint.unknownError") }) : t("wallet.fedimint.connecting")}</Notice>}
         {federations.length > 1 && <Notice>{t("wallet.fedimint.across", { amount: formatAmount(fm!.balance, t.language), unit, count: federations.length })}</Notice>}

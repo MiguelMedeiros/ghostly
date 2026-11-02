@@ -25,6 +25,7 @@ import type { ChatMessage } from "../lib/types";
 import { servicesPlatform } from "../lib/platform";
 import { paymentLine } from "./paymentWords";
 import { callEventText } from "../lib/callLines";
+import { refusedRowText } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
 import type { Translate } from "../locales/translate";
 import type { UsageEntry } from "../lib/usage";
@@ -276,6 +277,8 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
   const pinLabel = p.pinned ? t("chat.menu.unpin") : t("chat.menu.pin");
   const typing = usePeerTypingActivity(p.peerPubKey);
   const payment = usePaymentLine(p.lastMessage?.paymentId, t);
+  // A payment of the contact's this app refused: the app's line, in the app's language (not the stored English).
+  const refused = p.lastMessage && refusedRowText(p.lastMessage, t);
   // An app card names an app installed here as its bubble does (appCardLine): the list read, and the row drawn again.
   const installed = useInstalledApps(p.lastMessage?.card?.kind === "app");
   // A file of mine waiting in a DHT-only chat waits for a live connection, as its bubble says.
@@ -348,6 +351,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
           ? <span className={p.unread > 0 ? "text-text-secondary font-medium" : "text-text-muted"}>
               {p.lastMessage.sender === "me" && <DeliveryMark delivery={p.lastMessage.delivery} live={live} />}
               {p.lastMessage.systemEvent?.type === "join" ? joinPreview(p, p.lastMessage.systemEvent.pubKey, t)
+                : refused !== undefined ? refused
                 : p.lastMessage.callEvent ? callEventText(t, p.lastMessage.callEvent.type, p.lastMessage.callEvent.hasVideo, callLineCount(p.lastMessage.callEvent)) ?? p.lastMessage.text
                 : showsCard(p.lastMessage.card) ? cardLine(p.lastMessage.card)
                 : payment ?? appCardLine(p.lastMessage.card, t, installed) ?? filePreview(p.lastMessage.file, t) ?? previewText(p.lastMessage.text, t)}
