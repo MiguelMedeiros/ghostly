@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forget-service-origins"
+description = "Enables the forget_service_origins command without any pre-configured scope."
+commands.allow = ["forget_service_origins"]
+
+[[permission]]
+identifier = "deny-forget-service-origins"
+description = "Denies the forget_service_origins command without any pre-configured scope."
+commands.deny = ["forget_service_origins"]
