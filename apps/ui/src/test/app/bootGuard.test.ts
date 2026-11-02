@@ -23,7 +23,7 @@ interface Guard { details(): string; clean(text: string): string }
 const guard = () => (window as unknown as { __ghostlyBoot: Guard }).__ghostlyBoot;
 const panel = () => document.getElementById("boot-fallback");
 
-function start({ agent = NEW_ANDROID, language = "en-US", languages = [language], loaded = true, root = "" } = {}) {
+function start({ agent = NEW_ANDROID, language = "en-US", languages = [language], loaded = true, root = "" }: { agent?: string; language?: string; languages?: string[]; loaded?: boolean; root?: string } = {}) {
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent);
   vi.spyOn(navigator, "language", "get").mockReturnValue(language);
   vi.spyOn(navigator, "languages", "get").mockReturnValue(languages);
