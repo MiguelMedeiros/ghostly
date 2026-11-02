@@ -419,13 +419,20 @@ export class CapsExchange {
       const soon = changed && !dialable && peerKey === this.state.sealedFor && !!this.state.publishedAt && now - this.state.publishedAt < CAPS_PUBLISH_SPACING_MS;
       if (due && soon) { this.schedule(this.state.publishedAt! + CAPS_PUBLISH_SPACING_MS - now); return; }
       if (due) {
+        const options = changed || unpublished ? undefined : { background: true };
+        // No relay takes it now: refused before it is sealed and saved (`LinkSession.publishOnce`). With 500 contacts
+        // away, about 380 records a minute were sealed, and their rows saved, for none that went.
+        const held = this.options.transport.publishHeld?.(this.keys.identity.pubKeyZ32, options);
+        if (held) { this.schedule(budgetRetryMs(held, 1_000, 60_000)); throw held; }
         const rev = changed ? this.state.rev + 1 : this.state.rev;
         const { records, dropped } = this.keys.seal(content, rev, peerKey, now);
         this.dropped = dropped;
         // The revision is saved before it is published, so a crash never reuses it for other content; until it is
         // out, it has no `publishedAt`, so a publication that fails (or a crash) does not lose it until the hourly one.
-        await this.persist({ rev, digest, sealedFor: peerKey, publishedAt: undefined });
-        try { await this.options.transport.publish(this.keys.identity, records, changed || unpublished ? undefined : { background: true }); }
+        // Saved already as it is (a publication that failed before): not again.
+        const saved = rev === this.state.rev && digest === this.state.digest && peerKey === this.state.sealedFor && this.state.publishedAt === undefined;
+        if (!saved) await this.persist({ rev, digest, sealedFor: peerKey, publishedAt: undefined });
+        try { await this.options.transport.publish(this.keys.identity, records, options); }
         catch (error) {
           // Held back by the relays' request budget: again when the budget frees a request; any other failure, in a minute.
           this.schedule(isDiscoveryBudgetError(error) ? budgetRetryMs(error, 1_000, 60_000) : 60_000);
