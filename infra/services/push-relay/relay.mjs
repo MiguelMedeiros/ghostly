@@ -135,7 +135,15 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   return new Promise(resolve => server.listen(port, host, () => resolve({
     port: server.address().port,
     tracked: () => recent.size,
-    close: () => new Promise(done => { clearInterval(pruning); server.close(() => done()) }),
+    /** Open connections, a request in them or not. */
+    clients: () => new Promise(done => server.getConnections((_, count) => done(count ?? 0))),
+    // `server.close` stops the check that ends a slow request, so a client holding half a request would hold the
+    // close for as long as it stays: a request still open after `stopMs` (a forward in flight, a slow client) is cut.
+    close: ({ stopMs = 3000 } = {}) => new Promise(done => {
+      clearInterval(pruning)
+      const cut = setTimeout(() => server.closeAllConnections(), stopMs)
+      server.close(() => { clearTimeout(cut); done() })
+    }),
   })))
 }
 

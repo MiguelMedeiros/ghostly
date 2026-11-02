@@ -32,6 +32,12 @@ let closing = false
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   if (closing) return
   closing = true
-  setTimeout(() => process.exit(0), 3000).unref()
-  void relay.close().finally(() => process.exit(0))
+  const { clients } = relay.stats()
+  console.log(new Date().toISOString(), `Ghostly HyperDHT relay stopping (${clients} ${clients === 1 ? 'client' : 'clients'})`)
+  const stopped = () => {
+    console.log(new Date().toISOString(), 'Ghostly HyperDHT relay stopped')
+    process.exit(0)
+  }
+  setTimeout(stopped, 3000).unref()
+  void relay.close().finally(stopped)
 })
