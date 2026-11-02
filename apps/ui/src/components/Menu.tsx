@@ -226,13 +226,18 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
   className?: string;
   /** `data-*` attributes for the row. */
   data?: Record<`data-${string}`, string | number | undefined>;
-  /** A row that turns something on or off (a menu checkbox): whether it is on. */
+  /**
+   * A row that turns something on or off: whether it is on. A checkbox (`role="checkbox"`, `aria-checked`), not a
+   * `menuitemcheckbox`: that role is only valid inside a `role="menu"`, and these menus are groups of buttons (no
+   * `menuitem` rows, a note or a field among them), so a screen reader heard a menu item checkbox with no menu around
+   * it (axe's aria-required-parent). The keys stay the menu's: arrows, Home and End move to it; Space or Enter toggle.
+   */
   checked?: boolean;
 }) {
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
     <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
-      {...(checked === undefined ? {} : { role: "menuitemcheckbox", "aria-checked": checked })}
+      {...(checked === undefined ? {} : { role: "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
       className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
