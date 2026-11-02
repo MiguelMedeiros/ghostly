@@ -43,8 +43,8 @@ export const threat = {
       { id: "pay", text: "Make it pay. A CLI profile has no wallet until you create one, a payment request waits until you pay it, and Mainnet needs --confirm-real.", cmd: "ghostly wallet list" },
       // packages/browser/src/shared/buttons.ts (a press only from the chat's contact, on an open question).
       { id: "press", text: "Press a button in a chat they are not in. In a 1:1 chat only you can answer, and the event says who pressed.", cmd: "ghostly listen --type button.pressed --from owner" },
-      // packages/cli/src/commands/files.ts (file save); packages/cli/src/files.ts (saveName).
-      { id: "files", text: "Write a file to disk. Only file save does, never over a file without --force, and a name that starts with a dash gets a _ first.", cmd: "ghostly file save <file> --dir ./inbox" },
+      // packages/cli/src/commands/files.ts (file save); packages/cli/src/files.ts (saveName); packages/cli/src/runtime/fileBytes.ts (a received file is files/<space>/<id> in the profile folder).
+      { id: "files", text: "Save a file under its own name in a folder you use. Only file save does, never over a file without --force, and a name that starts with a dash gets a _ first. A file a contact sends is kept in the profile's own folder, under an id.", cmd: "ghostly file save <file> --dir ./inbox" },
       // packages/cli/src/commands/services.ts (service share, per chat).
       { id: "services", text: "Open a local web app you serve, unless you shared it with their chat.", cmd: "ghostly service share <service> <chat> --off" },
       // packages/cli/src/calls/manager.ts (autoFor: on, and the chat on --from when given).
@@ -59,8 +59,8 @@ export const threat = {
       { id: "owner", title: "Owner-only orders", stops: "A stranger giving the agent work.", how: "Allowlist only your chat with --from owner." },
       // packages/cli/src/listen.ts (toTurn, AgentTurn.untrusted).
       { id: "data", title: "Data, not instructions", stops: "Shell injection from a message, and a hook mistaking a name or an id for an order.", how: "The sender's words, name and ids sit under untrusted, and reach your hook on stdin." },
-      // packages/cli/src/buttons.ts (--once); packages/cli/src/events.ts (button.pressed, by); packages/cli/src/listen.ts (press on the turn).
-      { id: "approve", title: "Approvals with buttons", stops: "A risky step that runs before you agree.", how: "The agent asks with buttons and waits for button.pressed from you. --once takes one answer." },
+      // packages/cli/src/buttons.ts (--once); packages/browser/src/shared/buttons.ts (answered: once counts per member); packages/cli/src/events.ts (button.pressed, by); packages/cli/src/listen.ts (press on the turn).
+      { id: "approve", title: "Approvals with buttons", stops: "A risky step that runs before you agree.", how: "The agent asks with buttons and waits for button.pressed from you. --once takes one answer from each person: in a group every member can answer once, so the hook checks that by is your key." },
       // packages/cli/examples/claude-code-agent.sh.
       { id: "tools", title: "A model with no tools for others", stops: "A persuaded model reading files or running commands for someone who is not you.", how: 'The Claude Code example runs claude -p --tools "" with no MCP servers and none of your settings.' },
       // packages/cli/src/runtime/engine.ts (automaticWallets: false); packages/cli/src/wallets.ts (--confirm-real).
@@ -92,7 +92,8 @@ export const threat = {
       "A read-only mode for an agent. What it can do is what its own tools allow.",
       "Approvals Ghostly enforces. Today the agent's own code waits for the tap.",
       "An allowlist of members inside a group. A group is allowed whole.",
-      "An invite that expires or can be withdrawn. Removing the chat is the way to stop one.",
+      // packages/cli/src/commands/chats.ts (chat remove, no invite withdraw); packages/cli/src/commands/groups.ts (group link --off, --reset).
+      "A chat invite that expires or can be withdrawn. Removing the chat is the way to stop one. A group's link can be turned off or replaced already, with group link --off or --reset.",
       "A switch that turns payments off for a profile. It has no wallet unless you create one, and wallet remove takes one away.",
       "A forward mark on agent.turn.",
     ],
