@@ -192,6 +192,43 @@ describe("help", () => {
     expect(JSON.parse((await ghostly(["--pretty", "--version"])).stdout)).toHaveProperty("version");
   });
 
+  // At a fixed 58-column usage, 170 of the 195 lines of `ghostly help` passed 80 columns: every summary broke mid-word.
+  it("is laid out to the terminal's width, and piped keeps each row on one line", async () => {
+    const at = (columns: number, args: string[]) => ghostly(args, { env: { COLUMNS: String(columns) } }).then((r) => r.stdout);
+    const flat = (text: string) => text.replace(/\s+/g, " ");
+    for (const args of [["help"], ["help", "chat"], ["send", "--help"], ["help", "identity", "add"], ["help", "help"]]) {
+      const text = await at(80, args);
+      expect(text.split("\n").filter((line) => line.length > 80), args.join(" ")).toEqual([]);
+    }
+    const narrow = await at(80, ["help"]);
+    // Under 100 columns or so, a summary goes under its usage, 4 in, and wraps between words there.
+    expect(narrow).toMatch(/^ {2}profile list\n {4}Profiles, and which one is current$/m);
+    expect(narrow).toMatch(/^ {2}chat history <chat> .*\n {6}\S.*\n {4}Messages, oldest first/m);
+    expect(flat(narrow)).toContain("Make a profile (its own keys, chats and wallets)");
+    expect(flat(narrow)).toContain("Exit codes: 0 done, 1 failed, 2 usage, 3 not found");
+    const options = await at(80, ["send", "--help"]);
+    expect(options).toMatch(/^ {2}--reply <value> +\S/m);
+    const wide = await at(160, ["help"]);
+    expect(wide.split("\n").filter((line) => line.length > 160)).toEqual([]);
+    expect(wide).toMatch(/^ {2}profile list {2,}Profiles, and which one is current$/m);
+    // Piped, as grep reads it: no wrapping.
+    const piped = (await ghostly(["help"], { env: { COLUMNS: "" } })).stdout;
+    expect(piped).toMatch(/^ {2}profile create <name> \[--use\] \[--name <shown name>\] {2,}Make a profile \(its own keys, chats and wallets\)$/m);
+    expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
+  });
+
+  it("bare ghostly in a new Ghostly folder starts with the first steps", async () => {
+    const dir = home("first-steps");
+    const first = await ghostly(["--home", dir]);
+    expect(first.code).toBe(0);
+    expect(first.stdout).toMatch(/^First steps:\n {2}\$ ghostly invite create/m);
+    expect(first.stdout).toContain("$ ghostly daemon --detach");
+    expect(first.stdout).toContain("Usage: ghostly <command>");
+    expect((await ghostly(["help", "--home", dir])).stdout).not.toContain("First steps");
+    expect((await ghostly(["--home", dir, "profile", "create", "bot"])).code).toBe(0);
+    expect((await ghostly(["--home", dir])).stdout).not.toContain("First steps");
+  });
+
   it("shows an option only in the form the command takes, its text apart from it however long it is", async () => {
     const backup = (await ghostly(["help", "profile", "backup"])).stdout;
     // The command refuses a passphrase on the line: only --no-passphrase works.

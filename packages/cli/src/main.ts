@@ -397,7 +397,65 @@ function beside(rows: [string, string][], more: [string, string][]): [string, st
   return out;
 }
 
-function help(): string {
+/**
+ * The width the help is laid out to: $COLUMNS, else the terminal's when stdout is one (80 when it says nothing), else
+ * none: piped, each row stays one line for grep. At a fixed 58-column usage, 170 of the 195 lines of `ghostly help` passed
+ * 80 columns, and an 80-column terminal broke every summary mid-word into column 0.
+ */
+function helpColumns(): number | undefined {
+  const given = Number(process.env.COLUMNS);
+  if (Number.isInteger(given) && given > 0) return given;
+  return process.stdout.isTTY ? process.stdout.columns || 80 : undefined;
+}
+
+/** `prefix`, then `text`'s words in lines of at most `columns` (a longer word alone), each after the first `indent` in. */
+function wrap(prefix: string, text: string, columns: number, indent: number): string[] {
+  const lines: string[] = [];
+  let line = prefix, started = false;
+  for (const word of text.trim().match(/\S+ */g) ?? []) {
+    if (started && (line + word.trimEnd()).length > columns) { lines.push(line.trimEnd()); line = " ".repeat(indent); }
+    line += word;
+    started = true;
+  }
+  return [...lines, line.trimEnd()];
+}
+
+/** Lines of text as written, or, laid out to `columns` and one of them wider, as one paragraph wrapped at their indent. */
+function paragraph(lines: string[], columns: number | undefined): string[] {
+  if (columns === undefined || lines.every((line) => line.length <= columns)) return lines;
+  const indent = lines[0].length - lines[0].trimStart().length;
+  return wrap(" ".repeat(indent), lines.join(" "), columns, indent);
+}
+
+/**
+ * A help row: `label` (a usage or an option, with its indent), its `text` from column `at`, or under the label when the
+ * label takes that room. Laid out to `columns`, the text wraps at its column; with under 40 columns left for it (an
+ * 80-column terminal beside the 58 of a usage), it goes under its label, 2 further in.
+ */
+function helpRow(label: string, text: string, at: number, columns: number | undefined): string[] {
+  const long = label.length > at - 2;
+  if (columns === undefined) return [long ? `${label}\n${" ".repeat(at)}${text}` : label.padEnd(at) + text];
+  const indent = label.length - label.trimStart().length;
+  const labelLines = wrap(" ".repeat(indent), label, columns, indent + 4);
+  if (columns - at < 40) return [...labelLines, ...wrap(" ".repeat(indent + 2), text, columns, indent + 2)];
+  if (long) return [...labelLines, ...wrap(" ".repeat(at), text, columns, at)];
+  return wrap(label.padEnd(at), text, columns, at);
+}
+
+/**
+ * What `ghostly` says first in a Ghostly folder with no profile yet: where to start, as the README's "Five minutes"
+ * does, before the whole list. `$ ` keeps the lines apart from the list's commands.
+ */
+const FIRST_STEPS = [
+  "First steps:",
+  "  $ ghostly invite create --label alice   make an invite for a contact",
+  "  $ ghostly invite join -                 join one (pasted on stdin)",
+  "  $ ghostly daemon --detach               keep the profile online",
+  "  $ ghostly help <command>                one command and its options",
+];
+
+function help(firstSteps = false): string {
+  const columns = helpColumns();
   const rows: [string, string][] = [
     ...beside([
       ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
@@ -410,26 +468,31 @@ function help(): string {
   ];
   const width = 58;
   return [
-    `ghostly ${VERSION}: Ghostly for bots and terminals, the app's own engine without a screen.`,
+    ...paragraph([`ghostly ${VERSION}: Ghostly for bots and terminals, the app's own engine without a screen.`], columns),
     "",
-    "Usage: ghostly <command> [options]   (JSON on stdout; errors as {\"error\":{code,message}} with an exit code)",
+    ...(firstSteps ? [...FIRST_STEPS, ""] : []),
+    ...paragraph(["Usage: ghostly <command> [options]   (JSON on stdout; errors as {\"error\":{code,message}} with an exit code)"], columns),
     "",
-    ...rows.map(([usage, summary]) => `  ${usage.length > width ? usage + "\n  " + " ".repeat(width) : usage.padEnd(width)}  ${summary}`),
+    ...rows.flatMap(([usage, summary]) => helpRow(`  ${usage}`, summary, width + 4, columns)),
     "",
     "Options for every command:",
-    ...Object.entries(GLOBAL_OPTIONS).map(([name, o]) => `  --${name}${o.short ? `, -${o.short}` : ""}`.padEnd(24) + o.description),
+    ...Object.entries(GLOBAL_OPTIONS).flatMap(([name, o]) => helpRow(`  --${name}${o.short ? `, -${o.short}` : ""}`, o.description, 24, columns)),
     "",
-    "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
-    "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real.",
-    "More: https://ghostly.tools/cli, or the README.md beside this CLI.",
+    ...paragraph([
+      "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
+      "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real.",
+    ], columns),
+    ...paragraph(["More: https://ghostly.tools/cli, or the README.md beside this CLI."], columns),
   ].join("\n");
 }
 
+const EVERY_COMMAND = "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h";
+
 /** What `ghostly help help` answers. */
-const HELP_USAGE = [
+const helpUsage = (columns: number | undefined) => [
   "Usage: ghostly help [<command>...]", "",
-  "  Help for every command, or for one command or a group of them (also ghostly <command> --help)", "",
-  "Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h",
+  ...paragraph(["  Help for every command, or for one command or a group of them (also ghostly <command> --help)"], columns), "",
+  ...paragraph([EVERY_COMMAND], columns),
 ].join("\n");
 
 /** Every command's help row: usage, summary and, for the table and text commands, their options. */
@@ -457,7 +520,8 @@ function commandWords(usage: string): string[] {
  */
 export function commandHelp(words: readonly string[]): string {
   // `help` is no command of the tables: its own usage, rather than "Unknown command: help".
-  if (words[0] === "help") return HELP_USAGE;
+  const columns = helpColumns();
+  if (words[0] === "help") return helpUsage(columns);
   const named = (list: readonly string[]) => helpRows().filter((row) => { const own = commandWords(row.usage); return list.every((word, i) => own[i] === word); });
   // Arguments after the command's words (`ghostly send bob hi --help`) are not part of its name.
   const given = words;
@@ -473,29 +537,29 @@ export function commandHelp(words: readonly string[]): string {
   // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
   // own options were shown nowhere.
   for (const row of exact) {
-    lines.push(`Usage: ghostly ${row.usage}`, "", `  ${row.summary}`);
+    lines.push(...(columns === undefined ? [`Usage: ghostly ${row.usage}`] : wrap("Usage: ghostly ", row.usage, columns, 4)), "", ...paragraph([`  ${row.summary}`], columns));
     const options = Object.entries(row.options ?? {}).filter(([, o]) => o.description);
     if (options.length) {
       lines.push("", "Options:");
       const labels = options.map(([name, o]) => `  --${o.negatedOnly ? "no-" : ""}${name}${o.type === "boolean" ? "" : ` <${o.type === "number" ? "n" : "value"}>`}`);
       // At least two spaces between an option and its text, however long the option.
       const width = Math.max(26, ...labels.map((label) => label.length + 2));
-      options.forEach(([, o], i) => lines.push(labels[i].padEnd(width) + o.description));
+      options.forEach(([, o], i) => lines.push(...helpRow(labels[i], o.description, width, columns)));
     }
     // A text that starts with a dash goes after `--`, and so does everything else on the line.
     if (Object.values(TEXT_COMMANDS).includes(row as (typeof TEXT_COMMANDS)[string]))
-      lines.push("", "  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --.");
+      lines.push("", ...paragraph(["  -- ends the options: everything after it is the text, options included (\"-- -1 --wait sent\" sends", "  all of it). Put options before --."], columns));
     lines.push("");
   }
   const rest = rows.filter((row) => !exact.includes(row));
   if (rest.length) {
     const width = Math.min(58, Math.max(...rest.map((row) => row.usage.length)));
     const count = `${rest.length}${exact.length ? " more" : ""} command${rest.length === 1 ? "" : "s"}`;
-    lines.push(`ghostly ${asked}: ${count} (ghostly help ${asked} <command> for one)`, "");
-    for (const row of rest) lines.push(`  ${row.usage.length > width ? row.usage + "\n  " + " ".repeat(width) : row.usage.padEnd(width)}  ${row.summary}`);
+    lines.push(...paragraph([`ghostly ${asked}: ${count} (ghostly help ${asked} <command> for one)`], columns), "");
+    for (const row of rest) lines.push(...helpRow(`  ${row.usage}`, row.summary, width + 4, columns));
     lines.push("");
   }
-  lines.push("Options for every command: --profile, -p <name>  --home <dir>  --pretty  --help, -h");
+  lines.push(...paragraph([EVERY_COMMAND], columns));
   return lines.join("\n");
 }
 
@@ -1287,11 +1351,20 @@ function helpAsked(argv: readonly string[]): string[] | null {
   return null;
 }
 
+/** No profile yet in the Ghostly folder these global options name: `ghostly`'s first run there. */
+function newHome(argv: readonly string[]): boolean {
+  try {
+    return listProfiles(ghostlyHome(parseArgs([...argv], {}).options.home as string | undefined)).length === 0;
+  } catch {
+    return false;
+  }
+}
+
 export async function main(input: string[]): Promise<number> {
   const argv = liftGlobals(input);
   // Global options alone (`ghostly --pretty`, `ghostly -p bot`) name no command: lifted, one of them comes first.
   const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
-  if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
+  if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help(argv[0] !== "help" && newHome(argv))) + "\n"); return 0; }
   if (argv[0] === "--version" || argv[0] === "version") {
     // Global options come after the command once lifted: `--pretty` indents this answer too. Anything else is refused,
     // as every command refuses it: `version --json` (a typo) answered the version.
