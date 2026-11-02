@@ -1418,6 +1418,12 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
     padding-bottom: calc((var(--conversation-footer-height) - var(--conversation-control-height) - 1px) / 2);
     min-height: var(--conversation-footer-height);
   }
+  html[data-keyboard="true"] .account-footer { padding-bottom: 0; }
+}
+/* A phone on its side: the keyboard leaves about 150px, and the list pane's header, its search field and the account bar
+   took all of it (a search showed no chat). The bar goes behind the keyboard, as the tab bar does upright. */
+@media (min-width: 768px) and (pointer: coarse) and (max-height: 500px) {
+  html[data-keyboard="true"] .account-footer { display: none; }
 }
 
 .conversation-pin { transform-origin: center; transition: transform 180ms ease-out; }

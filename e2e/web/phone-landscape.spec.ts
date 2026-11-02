@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
 import { chat, expect, say, test } from "../support/fixtures";
+import { iosKeyboard, keyboard } from "../support/keyboard";
 import { pair } from "../support/paired";
 
 /**
@@ -56,6 +57,32 @@ test("a phone on its side: nothing sits under the notch or the home indicator", 
   await page.setViewportSize({ width: LANDSCAPE.width, height: LANDSCAPE.height - 200 });
   await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
   await expect.poll(composerPadding).toBe(resting - HOME);
+});
+
+test("a phone on its side with the keyboard up: the account bar goes behind it and the chat list keeps the room", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
+  // Safari's keyboard (only the visual viewport gets shorter) leaves 162px of 402: the list pane's header, the search
+  // field and the account bar with its home-indicator band took all of it, and a search showed a list 0px tall.
+  const { page } = await peer("side-search", { mobile: true, viewport: LANDSCAPE });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { left: SIDE, right: SIDE, top: 0, bottom: HOME } });
+  await iosKeyboard(page);
+  await page.getByTitle("New Chat").first().click();
+  await expect(page.getByPlaceholder("Message…")).toBeVisible();
+  const bar = page.getByTestId("account-bar");
+  await expect(bar).toBeVisible();
+
+  for (const field of [page.getByPlaceholder("Search chats..."), page.getByPlaceholder("Message…")]) {
+    await field.focus();
+    await keyboard(page, 240);
+    await expect(page.locator("html")).toHaveAttribute("data-keyboard", "true");
+    await expect(bar).toBeHidden();
+    const list = (await page.getByTestId("chat-list").boundingBox())!;
+    expect(list.height).toBeGreaterThan(40);
+    expect(list.y + list.height).toBeLessThanOrEqual(LANDSCAPE.height - 240);
+    await keyboard(page, 0);
+    await expect(page.locator("html")).toHaveAttribute("data-keyboard", "false");
+    await expect(bar).toBeVisible();
+  }
 });
 
 test("a phone on its side: the chat beside the list uses its width, and a video keeps its shape", { tag: ["@feature:app.mobile-layout", "@feature:files.video.play"] }, async ({ peer }) => {
