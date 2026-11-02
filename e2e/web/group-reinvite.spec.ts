@@ -83,7 +83,7 @@ test("a member removed and invited again: the history kept on removal, the names
   await alice.page.getByTestId("group-remove-confirm").click();
   await alice.page.keyboard.press("Escape");
   await expect(groupChat(carol)).toHaveAttribute("data-status", "removed", { timeout: 60_000 });
-  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Carol is no longer a member" })).toBeVisible({ timeout: 60_000 });
+  await expect(bob.page.getByTestId("group-event").filter({ hasText: "Alice removed Carol" })).toBeVisible({ timeout: 60_000 });
   for (const text of ["carol before", "bob before"]) await sees(carol, text);
   for (const p of [alice, bob]) await namedBy(p, "carol before", "Carol");
   await say(alice, "while carol is out");
