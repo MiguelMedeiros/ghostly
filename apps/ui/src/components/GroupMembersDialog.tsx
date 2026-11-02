@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
-import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
+import { useBackdropDismiss } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto } from "../lib/groups";
 import { useGroupNameField } from "../hooks/useGroupNameField";
@@ -42,7 +42,6 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const state = useSyncExternalStore(subscribe, snapshot);
   const dialog = useRef<HTMLDialogElement>(null);
   const backdrop = useBackdropDismiss(onClose);
-  useBackCloses(onClose);
   const faces = useContactFaces();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<Problem | null>(null);

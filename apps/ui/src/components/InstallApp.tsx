@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../contexts/I18nContext";
-import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
+import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
 import {
   canInstall, closeInstallSteps, dismissInstallHint, startInstall, useInstallHint, useInstallState, useInstallStepsOpen,
@@ -96,7 +96,6 @@ function StepsDialog({ kind }: { kind: "ios" | "dock" }) {
   const phone = useIsMobile();
   const dialog = useRef<HTMLDialogElement>(null), done = useRef<HTMLButtonElement>(null);
   const backdrop = useBackdropDismiss(closeInstallSteps);
-  useBackCloses(closeInstallSteps);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;

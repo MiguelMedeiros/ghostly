@@ -1,5 +1,4 @@
-import {useEffect, useRef, useState, type RefObject, type PointerEvent as ReactPointerEvent} from "react";
-import { openLayer } from "../lib/layerHistory";
+import {useEffect, useRef, type RefObject, type PointerEvent as ReactPointerEvent} from "react";
 
 const layers: RefObject<HTMLElement | null>[] = [];
 
@@ -48,20 +47,8 @@ function tapDismissed(e: PointerEvent) {
   const timer = setTimeout(stop, TRAILING_CLICK_MS);
 }
 
-/**
- * While `open`, the browser's Back (Android's back gesture) closes this layer with `onClose`, and only it: the page
- * under it stays where it was (lib/layerHistory.ts). Every dialog, sheet and menu has it: `useOutsideDismiss` and
- * `useDialogFocus` do it for theirs. One that stays open all the same (busy sending) takes an entry again.
- */
-export function useBackCloses(onClose: () => void, open = true) {
-  const callback = useRef(onClose); callback.current = onClose;
-  const [round, setRound] = useState(0);
-  useEffect(() => (open ? openLayer(() => { callback.current(); setRound((n) => n + 1); }) : undefined), [open, round]);
-}
-
 export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: boolean, onClose: () => void, anchorRef?: RefObject<HTMLElement | null>) {
   const callback = useRef(onClose); callback.current = onClose;
-  useBackCloses(onClose, open);
   useEffect(() => {
     if (!open) return;
     layers.push(ref);
@@ -117,7 +104,6 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
   // modal by the time the effect runs, and that field is gone once the modal closes.
   const opener = useRef<Element | null | undefined>(undefined);
   if (opener.current === undefined) opener.current = document.activeElement;
-  useBackCloses(onClose);
   useEffect(() => {
     // A menu's row that opened it is gone by now, and the menu gave the focus back to its button as it left (Menu.tsx):
     // that button is where it goes back to.
