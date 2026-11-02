@@ -299,6 +299,35 @@ describe("capability record: publishing and reading", () => {
     await caps.stop();
   });
 
+  it("seals and saves no record the relays' budget would refuse, and saves a revision not out yet only once however often it is tried", async () => {
+    vi.useFakeTimers();
+    const { link } = pair(), { transport } = exchange();
+    // As `RelayTransport`: `publish` refuses what `publishHeld` says it would, after the record was sealed for it.
+    let spent = true;
+    const publish = transport.publish.getMockImplementation()!;
+    transport.publish.mockImplementation(async (identity, records) => { if (spent) throw new DiscoveryBudgetError(30_000); await publish(identity, records); });
+    const publishHeld = vi.fn(() => (spent ? new DiscoveryBudgetError(30_000) : null));
+    const saves: CapsState[] = [];
+    const caps = new CapsExchange({ params: link.mine, credentials: { seedB64: createIdentity().seedB64 }, transport: { ...transport, publishHeld },
+      local: () => content(), save: async s => { saves.push(s); } });
+    caps.start(); await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect.soft(transport.publish.mock.calls.length, "a record sealed for each refusal").toBe(0);
+    expect.soft(saves.length, "the row saved for each refusal").toBe(0);
+
+    // Where the check before cannot tell (a relay that refused it all the same): the row as it is, not again.
+    publishHeld.mockReturnValue(null);
+    const tried = transport.publish.mock.calls.length, saved = saves.length;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(transport.publish.mock.calls.length - tried).toBeGreaterThanOrEqual(9);
+    expect.soft(saves.length - saved, "the same row saved again for each try").toBeLessThanOrEqual(1);
+
+    spent = false;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(saves.at(-1)).toMatchObject({ rev: 1, publishedAt: expect.any(Number) });
+    expect(saves.slice(0, -1).every(s => s.rev === 1 && s.publishedAt === undefined)).toBe(true);
+    await caps.stop();
+  });
+
   it("a first publication that fails at start is tried again a minute later", async () => {
     vi.useFakeTimers();
     const { link } = pair(), { transport } = exchange();

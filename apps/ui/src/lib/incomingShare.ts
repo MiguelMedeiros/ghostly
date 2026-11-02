@@ -130,6 +130,17 @@ export function shareText(share: Pick<IncomingShare, "title" | "text" | "url">):
   return parts.join("\n");
 }
 
+/** How much of a share's text the picker lays out: it shows three lines of it, and a share's text may be megabytes. */
+const PREVIEW_UNITS = 2048;
+
+/** The start of a share's text, for the picker: never ending on half a character (a surrogate pair kept whole). */
+export function sharePreview(share: Pick<IncomingShare, "title" | "text" | "url">): string {
+  const text = shareText(share);
+  if (text.length <= PREVIEW_UNITS) return text;
+  const end = /[\uD800-\uDBFF]/.test(text[PREVIEW_UNITS - 1]!) ? PREVIEW_UNITS - 1 : PREVIEW_UNITS;
+  return `${text.slice(0, end)}…`;
+}
+
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);

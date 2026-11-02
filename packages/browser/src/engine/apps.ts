@@ -1152,16 +1152,17 @@ export class Apps {
     if (key !== undefined && !stores.length) fail("no-store", "No such store");
     const out: AppStoreSummary[] = [];
     for (const s of stores) {
-      let next: AddedAppStore;
+      let read: AppStoreRead | { ok: false; reason: string };
       try {
-        const read = await this.readStoreAt(s.url, s.key, s);
-        next = read.ok ? this.withIndex(s, read.store.index, read.store.digest) : { ...s, problem: read.reason };
+        read = await this.readStoreAt(s.url, s.key, s);
       } catch (error) {
-        next = { ...s, problem: error instanceof AppFetchError ? error.code : "network" };
+        read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
       }
       // Removed meanwhile: not put back.
       const now = await this.storeRecord(s.key);
       if (!now || now.removed) continue;
+      // Judged against the record held now: an index taken meanwhile (Add, at another URL) is not replaced by an older one.
+      const next: AddedAppStore = read.ok ? this.withIndex(now, read.store.index, read.store.digest) : { ...now, problem: read.reason };
       // Nothing to keep but when it was read: held here, not written (the whole index would be written with it).
       const unchanged = now === s && next.index === s.index && next.digest === s.digest && next.problem === s.problem && next.equivocation === s.equivocation;
       if (unchanged) (await this.records()).set(s.key, next);
@@ -1408,11 +1409,14 @@ export class Apps {
       let app = first;
       let outcome: AppCheckOutcome = "none";
       let wrote: { bytes: FileBytesKind; digest: string } | undefined;
+      // A waiting update this check drops or replaces: its files go once the record without it is written, not before
+      // (accepted meanwhile, it is the version installed and runs from them).
+      const dropped: { bytes: FileBytesKind; digest: string }[] = [];
       // A store the person removed pins nothing any more (as `removeStore` does).
       if (app.store !== undefined && !stores.some((s) => s.key === app.store)) { const { store: _s, ...unpinned } = app; app = unpinned; }
       // A waiting update its store no longer lists goes, so the version the store lists now is looked at instead.
       if (app.store !== undefined && app.pending && stores.find((s) => s.key === app.store)?.index && this.pinnedListing(app, stores)?.digest !== app.pending.digest) {
-        await this.removeBundle(app.pending.bytes, app.pending.digest);
+        dropped.push(app.pending);
         const { pending: _p, ...rest } = app;
         app = rest;
       }
@@ -1502,7 +1506,7 @@ export class Apps {
           await this.removeBundle(old.bytes, old.digest);
           outcome = "updated";
         } else {
-          if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);
+          if (app.pending) dropped.push(app.pending);
           app = { ...app, pending: { sequence: version.sequence, digest: version.digest, manifest: bundle.manifest, added: plan.added as AppPermission[], bytes: kind, from: url, at: this.now() } };
           outcome = "ask";
         }
@@ -1523,10 +1527,9 @@ export class Apps {
       const current = await this.app(app.ref);
       if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
       app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
-      if (!(await this.putAppIfUnchanged(app, stored))) {
-        if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
-        continue;
-      }
+      const put = await this.putAppIfUnchanged(app, stored);
+      for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
+      if (!put) continue;
       out.push({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores) });
     }
     return out;

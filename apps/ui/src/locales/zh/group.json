@@ -120,6 +120,8 @@
     "knockingCommunity": "正在群组应用会查看的地方留下敲门请求…",
     "queueCount": "还有 {{count}} 人在等待加入。",
     "queueOne": "还有 1 人在等待加入。",
+    "replaced": "此链接已被替换或关闭",
+    "replacedBody": "请向群组中的人索取当前链接，然后打开它。",
     "stale": "仍未收到回复。如果链接已更换，请索取新链接。",
     "staleBusy": "仍在等待：群组每次只让少数人加入。",
     "step": {

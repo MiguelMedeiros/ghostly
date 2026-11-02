@@ -87,6 +87,22 @@ export function lockPath(dir: string): string {
   return join(dir, "daemon.lock");
 }
 
+/** The file in which a daemon says it is starting: its pid, from the lock it took until its socket listens. */
+export function startingPath(dir: string): string {
+  return join(dir, "daemon.starting");
+}
+
+/**
+ * The pid of the profile's daemon while it starts (its engine, before its socket listens): the lock's holder, when it
+ * marked its start. Null otherwise: nobody holds the profile, a one-shot command does, or the mark is a dead daemon's.
+ */
+export function startingDaemon(paths: ProfilePaths): number | null {
+  let pid: number;
+  try { pid = Number(readFileSync(startingPath(paths.dir), "utf8").trim()); } catch { return null; }
+  // Alive, and this profile's: the lock's holder is.
+  return Number.isInteger(pid) && pid > 0 && pid === lockOwner(paths) ? pid : null;
+}
+
 /**
  * The daemon's socket: in the profile's folder, unless that path is longer than a Unix socket may be (104 bytes on
  * macOS); then in a folder of the user's runtime folder named after the profile's (`runtimePath`), which the daemon

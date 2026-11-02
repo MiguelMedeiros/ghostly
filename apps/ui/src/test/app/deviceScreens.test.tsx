@@ -15,6 +15,8 @@ import { Settings } from "../../pages/Settings";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { createProfile, namespaceOf } from "../../lib/profiles";
+import { defaultDeviceName } from "../../lib/devices";
+import { loadLocale, translatorFor } from "../../locales";
 import { setPushPlatform, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -226,6 +228,26 @@ describe("Profile, Devices", () => {
     expect(screen.queryByTestId("device-move")).toBeNull();
   });
 
+  it("a move under way: no row offers Remove, which the engine refuses as busy, until the move is cancelled", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = { role: "giver", device: "iPhone", key: PHONE, step: "connecting", bytes: 0, total: 0 };
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffCancel", () => { handoff = null; });
+    const running = await screen.findByTestId("handoff-running");
+    const [, phone, tablet] = screen.getAllByTestId("device-row");
+    // Check connection stays on the connected device; the one not connected has nothing left in its menu.
+    await user.click(within(phone).getByTestId("device-menu"));
+    expect(screen.getByTestId("device-check")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-remove-open")).toBeNull();
+    await user.keyboard("{Escape}");
+    expect(within(tablet).queryByTestId("device-menu")).toBeNull();
+    await user.click(within(running).getByTestId("handoff-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    await user.click(within(tablet).getByTestId("device-menu"));
+    expect(screen.getByTestId("device-remove-open")).toBeInTheDocument();
+  });
+
   it("on a standby the section shows no move: its screen does", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
@@ -238,6 +260,22 @@ describe("Profile, Devices", () => {
   it("draws each device's kind from its name", () => {
     expect(["iPhone", "Phone", "Pixel 8", "iPad", "Tablet", "Chrome on Mac", "Firefox", "Mac app", "Desktop", "Linux"].map(deviceLook))
       .toEqual(["phone", "phone", "phone", "tablet", "tablet", "browser", "browser", "computer", "computer", "computer"]);
+  });
+
+  it("draws the kind of a name in any app language, and of the name each language suggests", async () => {
+    expect(["هاتف (2)", "جوال أحمد", "手机", "スマホ", "Celular", "Téléphone", "Teléfono de Ana", "Telefono", "Tablette", "平板", "タブレット", "Navegador", "متصفح"].map(deviceLook))
+      .toEqual(["phone", "phone", "phone", "phone", "phone", "phone", "phone", "phone", "tablet", "tablet", "tablet", "browser", "browser"]);
+    const agents = {
+      phone: { userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36 Chrome/131.0" },
+      tablet: { userAgent: "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 Chrome/131.0 Safari/537.36" },
+      browser: { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" },
+      computer: { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", desktop: true },
+    } as const;
+    for (const language of ["ar", "en", "es", "fr", "it", "ja", "pt", "zh"] as const) {
+      await loadLocale(language);
+      const t = translatorFor(language);
+      for (const [look, env] of Object.entries(agents)) expect([language, deviceLook(defaultDeviceName(env, t))]).toEqual([language, look]);
+    }
   });
 });
 

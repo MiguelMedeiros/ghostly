@@ -92,6 +92,12 @@ export function closeServiceView(): void {
 /** The bridge says it loaded; the app answers with the port. */
 export const BRIDGE_READY = "ghostly-svc-ready";
 export const BRIDGE_PORT = "ghostly-svc-port";
+/**
+ * The app answers with this in place of the port when it only wants the origin cleared (the chat deleted, Clear all
+ * data, the profile deleted): the bridge erases what the contact's app kept there, then says `BRIDGE_CLEARED`.
+ */
+export const BRIDGE_CLEAR = "ghostly-svc-clear";
+export const BRIDGE_CLEARED = "ghostly-svc-cleared";
 
 /** A request the app takes from a port: anything else (a page of the contact's posting to it) is dropped. */
 export function readRequest(data: unknown): ServiceRequestMessage | null {

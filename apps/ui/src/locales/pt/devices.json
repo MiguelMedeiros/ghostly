@@ -18,6 +18,15 @@
     "tryAgain": "Tentar de novo",
     "waiting": "Aguardando seu outro dispositivo…"
   },
+  "defaultName": {
+    "app": "App para {{os}}",
+    "browser": "Navegador",
+    "desktop": "Computador",
+    "on": "{{browser}} no {{os}}",
+    "phone": "Celular",
+    "short": "{{browser}}, {{os}}",
+    "tablet": "Tablet"
+  },
   "fail": {
     "cancelled": "Parado. Nada foi adicionado.",
     "chat": "Este é um convite de conversa. Use Entrar na lista de conversas.",
