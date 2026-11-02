@@ -5,7 +5,7 @@ import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { Notice } from "../components/ui/Notice";
-import { MAX_SHARE_FILES, dropIncomingShare, isEmptyShare, sendShareTo, shareText, useIncomingShare } from "../lib/incomingShare";
+import { MAX_SHARE_FILES, dropIncomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
 const WAIT_MS = 5000;
@@ -34,7 +34,7 @@ export function SharePicker() {
   const noRoom = share?.noRoom ?? [];
   const pastLimit = share?.pastLimit ?? [];
   const targets = useChatTargets();
-  const preview = share ? shareText(share) : "";
+  const preview = share ? sharePreview(share) : "";
 
   const pick = (chat: string, path: string) => {
     sendShareTo(chat);
