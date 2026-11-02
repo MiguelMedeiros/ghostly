@@ -29,11 +29,13 @@ export interface WebOpenerOptions {
 }
 
 /**
- * An app the person did not close (its frame navigated, broke the protocol, or never started) says why in the console:
- * the only trace of it, since the app's own frame is gone.
+ * An app the person did not close (its frame navigated, broke the protocol, or never started) says why in the console,
+ * and its place says it stopped (WISP 1200 § the runner, step 7): it is not told apart from Close otherwise.
  */
-function warnStop(title: string, reason: AppStopReason): void {
-  if (reason !== "closed" && reason !== "stopped") console.warn(`[apps] ${title} stopped: ${reason}`);
+function warnStop(title: string, reason: AppStopReason): AppTakedown | null {
+  if (reason === "closed" || reason === "stopped") return null;
+  console.warn(`[apps] ${title} stopped: ${reason}`);
+  return { why: "failed" };
 }
 
 export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, nameIn, onStop, linkedFiles }: WebOpenerOptions): AppOpener {
@@ -73,10 +75,10 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
         onStop: (reason) => {
           unregister();
           const mine = !running || chatApp(linkId)?.running === running;
-          // Taken down: the panel stays, shown, and says why until the person closes it.
-          if (mine && takenDown) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, view: entry.view ?? "chat", running: running!, stopped: takenDown });
+          const why = takenDown ?? warnStop(entry.title, reason);
+          // Taken down, or stopped on its own: the panel stays, shown, and says why until the person closes it.
+          if (mine && why) setChatApp(linkId, { ref, title: entry.title, shown: true, wide: chatApp(linkId)?.wide ?? false, view: entry.view ?? "chat", running: running!, stopped: why });
           else if (mine) setChatApp(linkId, null);
-          warnStop(entry.title, reason);
           onStop?.(ref, reason);
         },
         onServing: (on) => { if (chatApp(linkId)?.running === running) updateChatApp(linkId, { serving: on }); },
@@ -139,16 +141,18 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
       container: box, host, launch, view,
       onStop: (reason) => {
         unregister();
-        warnStop(entry.title, reason);
+        const stopped = takenDown ?? warnStop(entry.title, reason);
         onStop?.(ref, reason);
-        if (!takenDown) { dismiss(); return; }
-        // Taken down: its place says why, under the same bar, until Close.
+        if (!stopped) { dismiss(); return; }
+        // Taken down, or stopped on its own: its place says why, under the same bar, until Close.
         const why = document.createElement("p");
         why.setAttribute("role", "status");
         why.setAttribute("data-testid", "mini-app-stopped");
         why.className = "m-0 p-6 text-center text-sm text-text-secondary";
-        why.textContent = stoppedLabel(entry.title, takenDown);
+        why.textContent = stoppedLabel(entry.title, stopped);
         box.replaceWith(why);
+        // The focus was in the app's frame, gone with it: Close has it, so Escape still closes.
+        if (overlay.isConnected && !overlay.contains(document.activeElement)) close.focus({ preventScroll: true });
       },
     });
     const end = () => { if (overlay.isConnected && !running.frame.isConnected) dismiss(); else running.stop(); };
