@@ -17,9 +17,9 @@ export function appsBlock(peer: PeerLinkState | null | undefined): AppsBlock | n
   return "contact-cannot";
 }
 
-/** "Chess needs you both online", or why the contact's app cannot play, or null when it can. */
-export function appsUnavailable(peer: PeerLinkState | null | undefined, title: string, name: string, t: Translate): string | null {
-  switch (appsBlock(peer)) {
+/** "Chess needs you both online", or why the contact's app cannot play, or null when it can (`appsBlock` of the contact). */
+export function appsUnavailable(block: AppsBlock | null, title: string, name: string, t: Translate): string | null {
+  switch (block) {
     case "not-live": return t("apps.card.needsOnline", { title });
     case "contact-older":
     case "contact-cannot": return t("apps.card.contactCannot", { name });
