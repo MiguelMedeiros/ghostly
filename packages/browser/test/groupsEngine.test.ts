@@ -224,6 +224,19 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     expect(back.members.find(m => m.key === aliceKey)?.nick).toBe("contact:chat-ab");
   });
 
+  it("a member removed and invited again reads that it joined again, not the read note a second time", async () => {
+    // Bug hunt 1102: back over the same chat, the private group wrote "You joined. <read note>" again, where a community
+    // writes "You joined again".
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    const joined = () => world.peers.get("bob")!.messages.filter(m => m.event === "joined").map(m => m.text);
+    expect(joined()).toEqual([expect.stringMatching(/^You joined\. /)]);
+    await alice.remove(groupId, key(bob)); await world.settle();
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle(); await world.meet();
+    expect(view(bob, groupId).status).toBe("active");
+    expect(joined()).toEqual([expect.stringMatching(/^You joined\. /), "You joined again"]);
+  });
+
   it("a member removed and invited again who declines keeps the removed group and its history", async () => {
     const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
     expect((await bob.send(groupId, "mine, before")).error).toBeNull();
