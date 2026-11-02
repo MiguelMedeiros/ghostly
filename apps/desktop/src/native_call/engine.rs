@@ -138,6 +138,54 @@ fn start(pipeline: &gst::Pipeline, what: &str) -> Result<(), String> {
     })
 }
 
+/// How long a device just started has to give its first buffer before it counts as working all the same.
+const FIRST_BUFFER: Duration = Duration::from_secs(2);
+
+/// [`start`] for a device that captures: it has started once its first buffer reaches a sink. GStreamer says yes
+/// to `set_state` and only then opens a live source and agrees on a format, so a camera that cannot ("not-
+/// negotiated") or a device that fails right away says so on the bus a moment later: that start failed too. One
+/// that has given nothing by FIRST_BUFFER and said nothing is taken as started.
+fn start_capturing(pipeline: &gst::Pipeline, what: &str) -> Result<(), String> {
+    let bus = pipeline.bus().ok_or("No bus")?;
+    let flowing = || gst::message::Application::new(gst::Structure::new_empty("ghostly-flowing"));
+    let mut sinks = pipeline.iterate_sinks();
+    while let Ok(Some(sink)) = sinks.next() {
+        let Some(pad) = sink.static_pad("sink") else {
+            continue;
+        };
+        let to = sink.clone();
+        pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+            let _ = to.post_message(flowing());
+            gst::PadProbeReturn::Remove
+        });
+    }
+    start(pipeline, what)?;
+    let deadline = Instant::now() + FIRST_BUFFER;
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let Some(message) = bus.timed_pop_filtered(
+            gst::ClockTime::from_nseconds(left.as_nanos() as u64),
+            &[gst::MessageType::Error, gst::MessageType::Application],
+        ) else {
+            return Ok(());
+        };
+        match message.view() {
+            gst::MessageView::Error(error) => {
+                let _ = pipeline.set_state(gst::State::Null);
+                return Err(format!("{what}: {}", error.error()));
+            }
+            gst::MessageView::Application(said)
+                if said
+                    .structure()
+                    .is_some_and(|s| s.name() == "ghostly-flowing") =>
+            {
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+}
+
 fn launch(description: &str) -> Result<gst::Pipeline, String> {
     gst::init().map_err(|e| e.to_string())?;
     gst::parse::launch(description)
@@ -184,8 +232,8 @@ const SAID_AT_MOST: u64 = 8;
 
 /// Logs a playing pipeline's errors and warnings. Nothing else reads its bus once it plays, so a decoder that
 /// cannot negotiate or a camera that fails a moment later stopped without a word. Everything stays on the bus
-/// (`start` reads the error that kept a pipeline from starting). `heard` gets what a `level` in it reads
-/// ([`loudness`]); those messages leave the bus, or it would fill with twelve a second.
+/// (`start` and `start_capturing` read the error that kept a pipeline from starting). `heard` gets what a `level`
+/// in it reads ([`loudness`]); those messages leave the bus, or it would fill with twelve a second.
 fn watch(pipeline: &gst::Pipeline, what: &'static str, heard: Option<Heard>) {
     let Some(bus) = pipeline.bus() else { return };
     let said = AtomicU64::new(0);
@@ -233,7 +281,8 @@ fn with_device(description: &str, kind: Kind, name: &str) -> Result<gst::Pipelin
 }
 
 /// Plays `description` with the `kind` named `wanted` where `{device}` is, or with `default` when there is no
-/// such device or it will not start (said in the log; the page sees it in what is used). `ready` sets the
+/// such device or it will not start, a camera or microphone failing in its first moments included
+/// ([`start_capturing`]; said in the log; the page sees it in what is used). `ready` sets the
 /// pipeline up before it plays. Returns it and the name of the device it uses, None for the default.
 fn start_with(
     what: &str,
@@ -246,7 +295,12 @@ fn start_with(
     if let Some(name) = wanted {
         let chosen = with_device(description, kind, name).and_then(|pipeline| {
             ready(&pipeline)?;
-            start(&pipeline, what)?;
+            // A speaker's sound comes with the peer's: nothing flows to wait for.
+            if kind == Kind::Speaker {
+                start(&pipeline, what)?;
+            } else {
+                start_capturing(&pipeline, what)?;
+            }
             Ok(pipeline)
         });
         match chosen {
@@ -1779,6 +1833,54 @@ mod tests {
             "the tone lasted {:?}",
             started.elapsed()
         );
+    }
+
+    /// A device that opens and then cannot agree on a format (an IPU6 camera through a bare `v4l2src`) or fails a
+    /// moment later: GStreamer says so on the bus, after `set_state` said yes. That start failed, so the default
+    /// is tried; a device whose pictures come starts at once.
+    #[test]
+    fn a_device_that_fails_once_playing_did_not_start() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let not_negotiated = launch(
+            "videotestsrc is-live=true ! capsfilter name=device \
+             ! appsink name=out caps=video/x-raw,format=I420 sync=false async=false",
+        )
+        .unwrap();
+        // Set after linking, as a device's own formats are found only once it opens.
+        element::<gst::Element>(&not_negotiated, "device")
+            .unwrap()
+            .set_property(
+                "caps",
+                gst::Caps::builder("video/x-raw")
+                    .field("format", "RGB")
+                    .build(),
+            );
+        let failed = start_capturing(&not_negotiated, "The camera");
+        assert!(
+            failed
+                .as_ref()
+                .is_err_and(|e| e.starts_with("The camera: ")),
+            "{failed:?}"
+        );
+        assert_eq!(not_negotiated.current_state(), gst::State::Null);
+
+        let working = launch(
+            "videotestsrc is-live=true ! video/x-raw,format=I420 ! queue name=device \
+             ! appsink name=out sync=false async=false",
+        )
+        .unwrap();
+        let started = Instant::now();
+        assert_eq!(start_capturing(&working, "The camera"), Ok(()));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(working.current_state(), gst::State::Playing);
+        stop(working);
     }
 
     /// A peer's pictures faster than the page is shown them (a browser sends 30 a second): the ones left out are
