@@ -1139,7 +1139,10 @@ export class ChatFiles {
       return;
     }
     if (!outgoing || transferEnded(outgoing.record)) {
-      if (outgoing?.record.state === "cancelled" && frame.t !== "pf-refuse") this.send({ t: "pf-abort", id });
+      // Asked about a file this side does not send any more (deleted with its message, expired or failed while the
+      // receiver was away): it hears so, and ends it. Unanswered, it stayed under way there for good, its bytes kept.
+      const asked = frame.t === "pf-accept" || frame.t === "pf-wait";
+      if (outgoing?.record.state === "cancelled" ? frame.t !== "pf-refuse" : asked && outgoing?.record.state !== "done") this.send({ t: "pf-abort", id });
       return;
     }
     const { record } = outgoing, out = outgoing.out!;
