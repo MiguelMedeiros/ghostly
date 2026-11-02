@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  closeInstallSteps, dismissInstallHint, installHintShown, installState, installVisits, isAppleMobile, isMacSafari, promptInstall,
+  closeInstallSteps, countInstallVisit, dismissInstallHint, installHintShown, installState, installVisits, isAppleMobile, isMacSafari, promptInstall,
   resetInstallPrompt, startInstall, installStepsOpen, useInstallHint, watchInstallPrompt,
 } from "../../lib/installPrompt";
 
@@ -116,20 +116,52 @@ describe("installing the web app", () => {
   });
 });
 
+/**
+ * A page of the web app as apps/web/src/main.tsx starts it: the watch at once, the visit once the tab is the app
+ * (`peer`); a tab that shows "already open in another tab" never is. `reload` keeps the tab's sessionStorage.
+ */
+function openPage({ peer = true, reload = false } = {}) {
+  resetInstallPrompt();
+  if (!reload) sessionStorage.clear();
+  watchInstallPrompt();
+  if (peer) countInstallVisit();
+  offer("accepted");
+}
+
 describe("the hint above the chat list", () => {
+  afterEach(() => sessionStorage.clear());
+
   it("waits until the app has been used a little: a chat of its own, or a second visit", () => {
-    watchInstallPrompt();
-    offer("accepted");
+    openPage();
     expect(installVisits()).toBe(1);
     expect(installHintShown(installState(), false)).toBe(false);
     expect(installHintShown(installState(), true)).toBe(true);
 
-    // The next time the web app opens (a new page: the watch starts over).
-    resetInstallPrompt();
-    watchInstallPrompt();
-    offer("accepted");
+    // The next time the web app opens (a new tab: the watch starts over).
+    openPage();
     expect(installVisits()).toBe(2);
     expect(installHintShown(installState(), false)).toBe(true);
+  });
+
+  it("a reload is the same visit: no hint on a newcomer's empty first screen", () => {
+    openPage();
+    openPage({ reload: true });
+    expect(installVisits()).toBe(1);
+    expect(installHintShown(installState(), false)).toBe(false);
+    // Nor the app's own reloads after it (a new version, Back): still the first visit.
+    openPage({ reload: true });
+    expect(installHintShown(installState(), false)).toBe(false);
+  });
+
+  it("a tab that only waits for the open one is no visit, and other tabs never move this page's", () => {
+    openPage({ peer: false });
+    expect(installVisits()).toBe(0);
+
+    openPage();
+    expect(installVisits()).toBe(1);
+    // Another tab counts its own visit while this one stays open on its first.
+    localStorage.setItem("ghostly-install-visits", "2");
+    expect(installHintShown(installState(), false)).toBe(false);
   });
 
   it("Not now puts it away for good, and Install stays where it was", () => {

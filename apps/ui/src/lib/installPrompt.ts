@@ -29,18 +29,23 @@ let justInstalled = false;
 let stepsOpen = false;
 /** The hint put away on this page, kept here too for a browser that remembers nothing. */
 let hintAway = false;
+/** Which visit this page belongs to (`countInstallVisit`): 0 until counted, and not moved by other tabs. */
+let thisVisit = 0;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((listener) => listener());
 
 /** localStorage, which may be missing or refuse (a private window, blocked site data): then nothing is remembered. */
 const HINT_KEY = "ghostly-install-hint";
 const VISITS_KEY = "ghostly-install-visits";
-function read(key: string): string | null {
-  try { return localStorage.getItem(key); } catch { return null; }
+/** sessionStorage: the visit this tab counted, which a reload of it keeps. */
+const VISIT_KEY = "ghostly-install-visit";
+function read(key: string, storage = () => localStorage): string | null {
+  try { return storage().getItem(key); } catch { return null; }
 }
-function write(key: string, value: string): void {
-  try { localStorage.setItem(key, value); } catch { /* not remembered */ }
+function write(key: string, value: string, storage = () => localStorage): void {
+  try { storage().setItem(key, value); } catch { /* not remembered */ }
 }
+const session = () => sessionStorage;
 
 /** Running as the installed app: its own window, or opened from the iPhone or iPad home screen. */
 export function isStandalone(): boolean {
@@ -73,8 +78,6 @@ export function isMacSafari(userAgent = navigator.userAgent, touchPoints = navig
 export function watchInstallPrompt(target: Window = window): void {
   if (watching) return;
   watching = true;
-  // One more visit: the hint above the chat list waits for the second.
-  write(VISITS_KEY, String(installVisits() + 1));
   target.addEventListener("beforeinstallprompt", (event) => {
     // No banner of the browser's own: Settings has the button.
     event.preventDefault();
@@ -123,7 +126,24 @@ export function closeInstallSteps(): void {
   emit();
 }
 
-/** How many times this browser opened the web app (counted from `watchInstallPrompt`). */
+/**
+ * One more visit, from the tab that became the app (apps/web/src/main.tsx): the hint above the chat list waits for
+ * the second. Once a tab: its reloads (the person's, or the app's own after an update or Back) are the same visit,
+ * and a tab that only waited for another never counts.
+ */
+export function countInstallVisit(): void {
+  if (thisVisit) return;
+  const counted = Number(read(VISIT_KEY, session));
+  if (Number.isFinite(counted) && counted > 0) {
+    thisVisit = counted;
+    return;
+  }
+  thisVisit = installVisits() + 1;
+  write(VISITS_KEY, String(thisVisit));
+  write(VISIT_KEY, String(thisVisit), session);
+}
+
+/** How many times this browser opened the web app (counted by `countInstallVisit`). */
 export function installVisits(): number {
   const count = Number(read(VISITS_KEY));
   return Number.isFinite(count) && count > 0 ? count : 0;
@@ -140,11 +160,11 @@ const hintPutAway = () => hintAway || read(HINT_KEY) !== null;
 
 /**
  * The hint above the chat list: something to install, never put away or used, and the app used a little first
- * (a chat or a group of its own, or a second visit), so it is never the first thing a newcomer sees.
+ * (a chat or a group of its own, or this page on a second visit), so it is never the first thing a newcomer sees.
  */
 export function installHintShown(state: InstallState, hasChats: boolean): boolean {
   if (!canInstall(state) || hintPutAway()) return false;
-  return hasChats || installVisits() >= 2;
+  return hasChats || thisVisit >= 2;
 }
 
 /** Asks the browser to install the app. Resolves whether the person said yes. The offer can be used once. */
@@ -196,5 +216,6 @@ export function resetInstallPrompt(): void {
   justInstalled = false;
   stepsOpen = false;
   hintAway = false;
+  thisVisit = 0;
   emit();
 }
