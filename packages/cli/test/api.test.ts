@@ -126,9 +126,9 @@ describe("chats", () => {
     // An ambiguous name stays what it is, from either side; group:<id> is a group only.
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
-    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
+    expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed" (ghostly group list)' });
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
-    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
+    expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}" (ghostly chat list)` });
     // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
     const respelled = KEY.slice(0, 51) + "t";
     expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
@@ -498,6 +498,14 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.remove", { chat: "Alice", yes: true })).toEqual({ removed: "chat-one" });
     expect(ctx.calls.forgetChat).toHaveBeenCalledWith("chat-one");
   });
+
+  // "pass yes (--yes)" put the socket's name first: a person at a terminal types the flag.
+  it("each confirm refusal names the flag first, the socket's name after it", async () => {
+    const { ctx } = fake();
+    for (const [method, params] of [["chat.remove", { chat: "Alice" }], ["group.leave", { group: "g1" }], ["group.forget", { group: "g1" }]] as const) {
+      await expect(callApi(ctx, method, params)).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/; pass --yes \(yes: true over the socket\) to go on$/) });
+    }
+  });
 });
 
 describe("group leave", () => {
@@ -506,7 +514,7 @@ describe("group leave", () => {
     const { ctx, node } = fake();
     const leaveGroup = vi.fn(async () => ({}));
     Object.assign(node, { leaveGroup });
-    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass yes \(--yes\)/) });
+    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass --yes \(yes: true over the socket\) to go on/) });
     expect(leaveGroup).not.toHaveBeenCalled();
     expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1" });
     expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
