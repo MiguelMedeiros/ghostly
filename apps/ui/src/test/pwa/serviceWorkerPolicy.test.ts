@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
+import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
@@ -107,6 +107,71 @@ describe("what the build precaches", () => {
 
   it("not the language detector's worker either: an asset, so not one of those chunks", () => {
     expect(precacheList(["assets/main-abc.js", "assets/translateDetector.worker-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
+  });
+
+  // What a build of the web app is made of, in the shape Rollup hands the plugin: the online-only flows and the languages
+  // are dynamic imports, each a chunk (or two) of its own.
+  const app = "/home/me/ghostly/apps/ui/src";
+  const lib = "/home/me/ghostly/node_modules";
+  const adapters = "/home/me/ghostly/packages/browser/src/engine/paymentAdapters";
+  const chunk = (fileName: string, facade: string | null, imports: string[] = [], dynamicImports: string[] = [], isEntry = false) =>
+    ({ type: "chunk", fileName, facadeModuleId: facade, moduleIds: facade ? [facade] : [], imports, dynamicImports, isEntry });
+  const BUNDLE = [
+    chunk("assets/index-abc.js", `${app}/main.tsx`, ["assets/vendor-abc.js"],
+      ["assets/Wallet-abc.js", "assets/Chat-abc.js", "assets/pubky-abc.js", "assets/handoff-abc.js", "assets/keet-identity-key-abc.js", "assets/fr-abc.js", "assets/ja-abc.js"], true),
+    chunk("assets/vendor-abc.js", null),
+    chunk("assets/Chat-abc.js", `${app}/pages/Chat.tsx`, ["assets/vendor-abc.js"], ["assets/sodium-abc.js"]),
+    chunk("assets/Wallet-abc.js", `${app}/pages/Wallet.tsx`, ["assets/cashu-ts-abc.js"], ["assets/usdt-abc.js", "assets/arkade-abc.js", "assets/dist-abc.js"]),
+    chunk("assets/cashu-ts-abc.js", `${lib}/@cashu/cashu-ts/lib/index.js`),
+    chunk("assets/usdt-abc.js", `${adapters}/usdt.ts`, ["assets/ethers-abc.js", "assets/vendor-abc.js"]),
+    chunk("assets/ethers-abc.js", null),
+    chunk("assets/arkade-abc.js", `${adapters}/arkade.ts`, ["assets/dist-abc.js"]),
+    chunk("assets/dist-abc.js", `${lib}/@arkade-os/sdk/dist/esm/index.js`, ["assets/zod-abc.js"]),
+    chunk("assets/zod-abc.js", null),
+    chunk("assets/pubky-abc.js", `${lib}/@synonymdev/pubky/index.js`),
+    chunk("assets/handoff-abc.js", `${app}/components/DeviceHandoff.tsx`, ["assets/vendor-abc.js"], ["assets/esm-abc.js"]),
+    chunk("assets/esm-abc.js", `${lib}/@serenity-kit/opaque/esm/index.js`),
+    chunk("assets/keet-identity-key-abc.js", `${lib}/keet-identity-key/index.js`, ["assets/sodium-abc.js"]),
+    // The sodium build Keet's key needs, which the chat also loads: kept, since the chat is needed offline.
+    chunk("assets/sodium-abc.js", null),
+    chunk("assets/fr-abc.js", `${app}/locales/fr/index.ts`),
+    chunk("assets/ja-abc.js", `${app}/locales/ja/index.ts`),
+    { type: "asset", fileName: "assets/index-abc.css" },
+  ];
+
+  // covers: app.pwa.offline
+  it("not what only an online flow loads (Pubky, a Keet proof, a device handoff, the USDT and Ark wallets), nor the languages", () => {
+    const { precache, languages } = serviceWorkerFiles(["manifest.json", "version.json"], BUNDLE);
+    expect(precache).toEqual(["/", "/assets/cashu-ts-abc.js", "/assets/Chat-abc.js", "/assets/handoff-abc.js", "/assets/index-abc.css", "/assets/index-abc.js",
+      "/assets/sodium-abc.js", "/assets/vendor-abc.js", "/assets/Wallet-abc.js", "/manifest.json"]);
+    expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
+  });
+
+  it("an online-only module another screen imports as it loads stays: the path to it is not the online flow's", () => {
+    const bundle = BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, imports: ["assets/vendor-abc.js", "assets/pubky-abc.js"] } : file);
+    expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/pubky-abc.js");
+    expect(serviceWorkerFiles([], bundle).precache).toContain("/assets/pubky-abc.js");
+  });
+
+  const LANGUAGES = { fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js", "/assets/ja-extra-abc.js"], pt: ["/assets/pt-abc.js"] };
+  const PRECACHE = ["/", "/assets/index-abc.js"];
+
+  it("the install takes the browser's language, the first of its languages the app speaks", () => {
+    expect(installList(PRECACHE, LANGUAGES, ["ja-JP", "fr"])).toEqual([...PRECACHE, "/assets/ja-abc.js", "/assets/ja-extra-abc.js"]);
+    expect(installList(PRECACHE, LANGUAGES, ["de-DE", "pt-BR"])).toEqual([...PRECACHE, "/assets/pt-abc.js"]);
+    // English is in the entry: a browser in English, or in nothing the app speaks, takes no language file.
+    expect(installList(PRECACHE, LANGUAGES, ["en-US", "fr"])).toEqual(PRECACHE);
+    expect(installList(PRECACHE, LANGUAGES, ["de", "constructor"])).toEqual(PRECACHE);
+    expect(installList(PRECACHE, LANGUAGES, [])).toEqual(PRECACHE);
+  });
+
+  it("and after a deploy, the languages a page fetched into the previous build's cache, whatever the browser's", () => {
+    const held = ["/", "/assets/index-old.js", "/assets/fr-old.js"];
+    expect(installList(PRECACHE, LANGUAGES, ["en-US"], held)).toEqual([...PRECACHE, "/assets/fr-abc.js"]);
+    // A cache with every language is a build's that precached them all: it says nothing of the person's.
+    const everyLanguage = [...held, "/assets/ja-old.js", "/assets/pt-old.js"];
+    expect(installList(PRECACHE, LANGUAGES, ["en-US"], everyLanguage)).toEqual(PRECACHE);
+    expect(installList(PRECACHE, LANGUAGES, ["pt"], everyLanguage)).toEqual([...PRECACHE, "/assets/pt-abc.js"]);
   });
 });
 
