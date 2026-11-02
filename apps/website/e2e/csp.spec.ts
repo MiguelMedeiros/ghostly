@@ -76,6 +76,23 @@ for (const path of ANSWERS) {
   });
 }
 
+// A page, a page that is not there, a file of public/ and a script of the build: none may be changed on its way.
+test("every answer tells the proxy in front of the site to change nothing in it, and keeps how long it may be kept", async ({ page, request }) => {
+  await page.goto("/");
+  const script = await page.locator('script[src^="/_next/static/"]').first().getAttribute("src");
+  const cache = async (path: string) => (await request.get(path, { maxRedirects: 0 })).headers()["cache-control"] ?? "";
+  const seen: Record<string, string> = {};
+  for (const path of [...ANSWERS, script!]) {
+    seen[path] = await cache(path);
+    expect(seen[path].split(",").map((directive) => directive.trim()), path).toContain("no-transform");
+  }
+  // Next's own: how long a prerendered page is kept (a year, or an hour and then stale while it is made again when the
+  // build fetched the latest release for it), none for one rendered per request, its build's files for good.
+  expect(seen["/"]).toMatch(/^s-maxage=\d+(, stale-while-revalidate=\d+)?, no-transform$/);
+  expect(seen["/privacy"]).toBe("private, no-cache, no-store, max-age=0, must-revalidate, no-transform");
+  expect(seen[script!]).toBe("public, max-age=31536000, immutable, no-transform");
+});
+
 test("a script of the build is answered with them too", async ({ page, request }) => {
   await page.goto("/");
   const script = await page.locator('script[src^="/_next/static/"]').first().getAttribute("src");
