@@ -795,10 +795,10 @@ export class Communities {
       if (!live) continue;
       if (live.session.status === "lost" && !group.joining) {
         // My admission lost a race: I am nobody's hub and nobody's door any more; I knock again with
-        // the same key, and whoever is there lets me in.
+        // the same key, at the link I was let in by, and whoever is there lets me in.
         if (live.hub) { live.hub = false; live.leaving = 0; await this.publishBeacon(group.id, live, now, false).catch(() => {}); }
         await this.closeEntries(group.id);
-        await this.startJoining({ g: group.id, host: live.session.entryKey }, live.session.state.seedB64, now);
+        await this.startJoining({ g: group.id, host: live.session.lostEntryKey }, live.session.state.seedB64, now);
         continue;
       }
       if (live.session.status !== "active") {
@@ -1911,8 +1911,10 @@ export class Communities {
     // where it is does not know it is out (it was away): it is told so, with the commit that did it, and nothing more.
     if (live.session.wasRemoved(peerKey)) { if (f.t === "group-sync" && live.session.isMember) this.sayFarewell(groupId, live, peerKey, f); return; }
     // A key no commit I hold names (asking in my lobby, or listed as a hub) may be a member ahead of me: what brings
-    // me up to date is taken (commits and secrets; a message waits for them), and nothing else it says is heard.
+    // me up to date is taken (commits and secrets; a message waits for them), and nothing else it says is heard. One let
+    // in only on a branch that lost says where it is: the session hands it the commits that make it lose, and no more.
     const named = live.session.isRecentMember(peerKey);
+    if (!named && f.t === "group-sync") { await live.session.handle(peerKey, frame); return; }
     if (!named && f.t !== "group-commit" && f.t !== "group-msg" && f.t !== "group-secrets" && !(f.t === "group-secret" && f.to === live.session.myKey)) return;
     // Addressed to someone else: a hub routes it, whoever it is for.
     if ((f.t === "group-secret" || f.t === "group-entry") && typeof f.to === "string" && f.to !== live.session.myKey) {
