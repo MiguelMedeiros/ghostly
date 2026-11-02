@@ -386,7 +386,7 @@ needs a person who holds the key: leave that to the owner.
 ## Rules the CLI enforces
 
 - Output is JSON. A failure is `{"error":{"code","message"}}` with exit 1 (failed), 2 (usage), 3 (not found),
-  4 (timed out) or 5 (needs `--force`, `--yes` or `--confirm-real`).
+  4 (timed out), 5 (needs `--force`, `--yes` or `--confirm-real`) or 130 (stopped with Ctrl-C, `interrupted`).
 - `send` (and `ghostly engine sendMessage` and the other sends through `engine`) refuses text that looks like a recovery
   phrase, a private key or a Cashu token unless `--force`.
 - Spending real money (Mainnet) needs `--confirm-real`.

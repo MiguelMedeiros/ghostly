@@ -11,6 +11,7 @@ import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import { jsonOut } from "./jsonOut";
+import { waitNotice, waitsFor, type WaitNotice } from "./waitNotice";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
@@ -81,8 +82,11 @@ function knownProfile(g: Globals): void {
   if (g.profile !== DEFAULT_PROFILE && !profileExists(g.home, g.profile)) throw noProfile(g);
 }
 
-/** A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. */
-interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void> }
+/**
+ * A way to call the API: the daemon's socket when one runs the profile, else the profile in this process. `abort` is
+ * Ctrl-C's way out: the daemon's connection dropped at once, a one-shot's profile closed (its lock released).
+ */
+interface Session { mode: "daemon" | "one-shot"; call(method: string, params?: unknown): Promise<unknown>; close(): Promise<void>; abort(): Promise<void> }
 
 /** `1.2.3`, with an optional `v`, an optional `-beta.1` prerelease and an optional `+build` that never orders. */
 const RELEASE = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -229,19 +233,6 @@ export function answerWithin(method: string, params: Record<string, unknown>): n
   return undefined;
 }
 
-/**
- * The seconds a call without `--timeout` waits for the contact: the daemon's defaults (`num(params, "timeout", …)` in
- * api.ts, files.ts, buttons.ts and statusCards.ts), so that a bot's `chat wait` or `send --wait sent` on a daemon that
- * stopped answering ends when the wait would have. A call that does not wait is none.
- */
-function waitsFor(method: string, params: Record<string, unknown>): number | undefined {
-  if (method === "chat.wait") return 60;
-  if (method === "file.wait" || (method === "file.save" && params.wait === true)) return 300;
-  // send, edit, forward, a button, a task or routine card: `--wait sent|confirmed|delivered`, 30 s each.
-  if (typeof params.wait === "string" && params.wait !== "none") return 30;
-  return undefined;
-}
-
 async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths);
@@ -249,7 +240,7 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   const [, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openOneShot(g, options);
   if (host instanceof DaemonClient) return throughDaemon(host);
-  return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
+  return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close(), abort: () => host.close() };
 }
 
 function throughDaemon(client: DaemonClient): Session {
@@ -269,7 +260,7 @@ function throughDaemon(client: DaemonClient): Session {
     }
     return client.call(m, p, { timeoutMs });
   };
-  return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
+  return { mode: "daemon", call, close: async () => { await warned; client.close(); }, abort: async () => { client.destroy(); } };
 }
 
 /** How long a one-shot waits for another process to let go of the profile: a one-shot leaves in well under a second. */
@@ -315,7 +306,58 @@ async function openOneShot(g: Globals, options: RuntimeOptions = {}, mode: Host[
  */
 async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, options: RuntimeOptions = {}): Promise<T> {
   const s = await session(g, options);
-  try { return await work(s); } finally { await s.close(); }
+  const stops = interruptible(s);
+  try { return await stops.run(work); } finally { await s.close(); stops.off(); }
+}
+
+/** How long a wait goes on before a terminal is told what it waits for: a command done by then says nothing. */
+export const WAIT_NOTICE_MS = 1_000;
+/** How long Ctrl-C gives the profile to close before the command leaves anyway (a second Ctrl-C leaves at once). */
+const INTERRUPT_CLOSE_MS = 10_000;
+
+/**
+ * Ctrl-C while a session's command runs (agents#2354): the command stops where it is, a one-shot's profile closes (its
+ * lock released, as `daemon` does in `stopper`), one line on stderr says what became of what it waited on, stdout has
+ * the `interrupted` error, and the exit is 130. Killed by SIGINT, it said nothing, left `daemon.lock` behind, and the
+ * person did not learn that the message still goes (and sent it again). Ctrl-C once the work is done (the profile
+ * closing) only lets the answer out. A wait that goes on past WAIT_NOTICE_MS says what it waits for, on a terminal only:
+ * stderr of a bot's pipe stays clean.
+ */
+function interruptible(s: Session): { run<T>(work: (s: Session) => Promise<T>): Promise<T>; off(): void } {
+  let interrupted = false, done = false, left = false;
+  const pending = new Set<{ method: string; notice: WaitNotice | null }>();
+  const onSignal = () => {
+    if (interrupted) process.exit(EXIT.interrupted);
+    interrupted = true;
+    if (done) return;
+    const [first] = pending, waiting = [...pending].find((call) => call.notice)?.notice;
+    const words = waiting ? `stopped waiting (Ctrl-C): ${waiting.stopped}` : "stopped (Ctrl-C) before the command answered";
+    const leave = () => {
+      if (left) return;
+      left = true;
+      process.stderr.write(`ghostly: ${words}\n`);
+      print({ error: new CliError("interrupted", words[0].toUpperCase() + words.slice(1), first ? { method: first.method } : undefined).toJSON() });
+      exit(EXIT.interrupted);
+    };
+    setTimeout(leave, INTERRUPT_CLOSE_MS).unref();
+    void s.abort().catch(() => {}).then(leave);
+  };
+  process.on("SIGINT", onSignal);
+  // Once interrupted, what the work answers late is nobody's: the command leaves with its own answer.
+  const held = <T>(promise: Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
+    promise.then((value) => { if (!interrupted || done) resolve(value); }, (error: unknown) => { if (!interrupted || done) reject(error); });
+  });
+  const call = (method: string, params?: unknown): Promise<unknown> => {
+    const entry = { method, notice: waitNotice(method, (params ?? {}) as Record<string, unknown>, s.mode) };
+    pending.add(entry);
+    const notice = entry.notice;
+    const timer = notice && process.stderr.isTTY ? setTimeout(() => process.stderr.write(`ghostly: ${notice.waiting}\n`), WAIT_NOTICE_MS) : undefined;
+    return held(s.call(method, params).finally(() => { clearTimeout(timer); pending.delete(entry); }));
+  };
+  return {
+    run: (work) => held(work({ ...s, call }).finally(() => { if (!interrupted) done = true; })),
+    off: () => { process.off("SIGINT", onSignal); },
+  };
 }
 
 /**
@@ -420,7 +462,7 @@ function help(): string {
     ...Object.entries(GLOBAL_OPTIONS).map(([name, o]) => `  --${name}${o.short ? `, -${o.short}` : ""}`.padEnd(24) + o.description),
     "",
     "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
-    "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real.",
+    "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real, 130 stopped with Ctrl-C.",
     "More: https://ghostly.tools/cli, or the README.md beside this CLI.",
   ].join("\n");
 }
