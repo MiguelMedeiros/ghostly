@@ -96,8 +96,10 @@ export function startingPath(dir: string): string {
  * marked its start. Null otherwise: nobody holds the profile, a one-shot command does, or the mark is a dead daemon's.
  */
 export function startingDaemon(paths: ProfilePaths): number | null {
-  const pid = holder(startingPath(paths.dir));
-  return pid !== null && pid === lockOwner(paths) ? pid : null;
+  let pid: number;
+  try { pid = Number(readFileSync(startingPath(paths.dir), "utf8").trim()); } catch { return null; }
+  // Alive, and this profile's: the lock's holder is.
+  return Number.isInteger(pid) && pid > 0 && pid === lockOwner(paths) ? pid : null;
 }
 
 /**
