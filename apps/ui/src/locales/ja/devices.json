@@ -18,6 +18,15 @@
     "tryAgain": "もう一度試す",
     "waiting": "もう一方のデバイスを待っています…"
   },
+  "defaultName": {
+    "app": "{{os}} アプリ",
+    "browser": "ブラウザ",
+    "desktop": "パソコン",
+    "on": "{{os}} の {{browser}}",
+    "phone": "スマホ",
+    "short": "{{browser}}、{{os}}",
+    "tablet": "タブレット"
+  },
   "fail": {
     "cancelled": "中止しました。何も追加されていません。",
     "chat": "これはチャットの招待です。チャット一覧の「参加」を使ってください。",
