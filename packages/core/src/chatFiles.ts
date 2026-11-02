@@ -634,6 +634,9 @@ export class ChatFiles {
       // Paused there: a sender that cancelled it meanwhile no longer offers it, and asked, ends it (`pf-abort`). One
       // that still has it paused answers with its paused offer, and nothing moves.
       else if (entry.record.state === "paused" && entry.record.pausedBy === "peer") this.send({ t: "pf-accept", id: entry.record.id, offset: entry.in!.written });
+      // Still asked about here: a sender that cancelled, deleted or let it expire meanwhile no longer offers it, and asked,
+      // ends it (`pf-abort`), so Accept is not shown for a file that will never come. One that still offers it waits.
+      else if (entry.record.state === "asking") this.send({ t: "pf-wait", id: entry.record.id, why: "consent" });
     }
   }
 
@@ -659,7 +662,8 @@ export class ChatFiles {
       if (!["queued", "offered", "asking"].includes(record.state) || record.since + FILE_LIMITS.offerTtlMs > now) continue;
       if (record.direction === "in" && record.state === "queued") continue;
       this.end(entry, "failed", record.direction === "in" ? "The offer expired" : record.state === "queued" ? "Not delivered in time" : "Not accepted in time");
-      if (record.direction === "in") this.send({ t: "pf-refuse", id: record.id, why: "expired" });
+      // Ended here, it ends there too: the receiver's week began when the offer arrived, later, and it still showed Accept.
+      this.send(record.direction === "in" ? { t: "pf-refuse", id: record.id, why: "expired" } : { t: "pf-abort", id: record.id });
     }
   }
 
