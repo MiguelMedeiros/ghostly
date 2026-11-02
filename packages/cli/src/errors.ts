@@ -5,11 +5,12 @@
  */
 export type ErrorCode =
   | "bad_request" | "usage" | "not_found" | "refused" | "unavailable" | "confirm" | "timeout"
-  | "engine" | "busy" | "internal";
+  | "engine" | "busy" | "internal" | "interrupted";
 
+/** `interrupted`: Ctrl-C (SIGINT) ended the command, 128 + 2 as a shell says of a command its signal ended. */
 export const EXIT: Record<ErrorCode, number> = {
   engine: 1, refused: 1, unavailable: 1, bad_request: 1, busy: 1, internal: 1,
-  usage: 2, not_found: 3, timeout: 4, confirm: 5,
+  usage: 2, not_found: 3, timeout: 4, confirm: 5, interrupted: 130,
 };
 
 export class CliError extends Error {
