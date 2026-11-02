@@ -59,6 +59,15 @@ export function DevicesSection() {
   // Cancel pressed in those steps: once they go, the keyboard focus goes to that device's row, not to the page.
   const [refocus, setRefocus] = useState<string | null>(null);
   const cancelRunning = async (key: string) => { await engine.call("deviceHandoffCancel"); setRefocus(key); };
+  // The Move dialog closed while its move goes on: the focus it gives back to Move to is dropped to the page when Move to
+  // goes (no second move is offered while one runs). It goes to the move's steps here instead.
+  const [moveClosed, setMoveClosed] = useState(false);
+  const runningBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moveClosed || !running) return;
+    setMoveClosed(false);
+    if (!document.activeElement || document.activeElement === document.body) runningBox.current?.focus();
+  }, [moveClosed, running]);
   const devices = view?.devices ?? [];
   const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
@@ -80,14 +89,14 @@ export function DevicesSection() {
       )}
       {/* Where that move stands, with Cancel while nothing has changed yet: the dialog is not the only place that says it. */}
       {running && (
-        <div data-testid="handoff-running" className="px-4 py-3.5 text-sm">
+        <div ref={runningBox} tabIndex={-1} data-testid="handoff-running" className="px-4 py-3.5 text-sm focus:outline-none">
           <HandoffProgress view={running} onCancel={() => cancelRunning(running.key)} />
         </div>
       )}
       {devices.map((device) => (
         <DeviceRow key={device.key} device={device} thisActive={thisActive} busy={!!running} checked={checked[device.key]}
           focus={refocus === device.key} onFocused={() => setRefocus(null)}
-          onMove={() => setMoving({ key: device.key, name: device.name })} onCheck={() => void check(device.key)}
+          onMove={() => { setMoveClosed(false); setMoving({ key: device.key, name: device.name }); }} onCheck={() => void check(device.key)}
           onRemove={() => { setRemoved(null); setRemoving({ key: device.key, name: device.name }); }} />
       ))}
       {view?.unfinishedGrants?.map((grant) => (
@@ -148,7 +157,7 @@ export function DevicesSection() {
           hint={handoff.expiresAt !== undefined ? t("devices.handoff.staysExpires", { wallet: walletNameOf(handoff.wallet), date: dayText(handoff.expiresAt, language) }) : undefined} />
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
-      {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => setMoving(null)} />}
+      {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => { setMoving(null); setMoveClosed(true); }} />}
       {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => setRemoved(removing.name)} />}
       {lost && <LostChecklist device={stopped?.name} onClose={() => setLost(false)} onRemove={stopped ? () => { setLost(false); setRemoving({ key: stopped.key, name: stopped.name }); } : undefined} />}
     </Section>
