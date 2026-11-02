@@ -161,6 +161,62 @@ describe("opening the lock password form", () => {
   });
 });
 
+describe("Enter in the lock password form", () => {
+  it("Enter in New password or in Confirm password sets it, as the button does", async () => {
+    for (const which of ["new", "confirm"]) {
+      localStorage.clear();
+      const { user, unmount } = await renderSettings();
+      await user.click(screen.getByTestId("settings-lock"));
+      await user.type(screen.getByTestId("settings-password-new"), "spooky");
+      await user.type(screen.getByTestId("settings-password-confirm"), "spooky");
+      await user.type(screen.getByTestId(`settings-password-${which}`), "{Enter}");
+      await waitFor(() => expect(stored()).not.toBeNull());
+      expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password set successfully");
+      expect(screen.queryByTestId("settings-password-form")).not.toBeInTheDocument();
+      unmount();
+    }
+  }, 30_000);
+
+  it("Enter with the two not the same: the button's refusal, under Confirm, and nothing set", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "spooky");
+    await user.type(screen.getByTestId("settings-password-confirm"), "spookier{Enter}");
+    await waitFor(() => expect(screen.getByTestId("settings-notice-text")).toHaveTextContent("Passwords do not match"));
+    expect(screen.getByTestId("settings-notice-title")).toHaveTextContent("Password not set");
+    expectRefused(screen.getByTestId("settings-password-confirm"), "settings-password-confirm-error", "Passwords do not match");
+    expect(stored()).toBeNull();
+    expect(screen.getByTestId("settings-password-form")).toBeInTheDocument();
+  }, 30_000);
+
+  it("Enter too short in New password: refused under it, as the button does", async () => {
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-lock"));
+    await user.type(screen.getByTestId("settings-password-new"), "boo{Enter}");
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not set");
+    expectRefused(screen.getByTestId("settings-password-new"), "settings-password-new-error", "Password must be at least 4 characters");
+    expect(stored()).toBeNull();
+  }, 30_000);
+
+  it("Change password: Enter in Current refuses a wrong one, then changes it, and never removes it", async () => {
+    const hash = await lockWith("first secret");
+    const { user } = await renderSettings();
+    await user.click(screen.getByTestId("settings-password-edit"));
+    await user.type(screen.getByTestId("settings-password-current"), "not it");
+    await user.type(screen.getByTestId("settings-password-new"), "second secret");
+    await user.type(screen.getByTestId("settings-password-confirm"), "second secret");
+    await user.type(screen.getByTestId("settings-password-current"), "{Enter}");
+    expect(await screen.findByTestId("settings-notice-title")).toHaveTextContent("Password not changed");
+    expectRefused(screen.getByTestId("settings-password-current"), "settings-password-current-error", "Incorrect password");
+    expect(stored()).toBe(hash);
+
+    await user.keyboard("first secret{Enter}");
+    await waitFor(() => expect(stored()).not.toBe(hash));
+    expect(stored()).not.toBeNull();
+    expect(await screen.findByTestId("settings-notice-text")).toHaveTextContent("Password changed successfully");
+  }, 30_000);
+});
+
 describe("a refused lock password in Add a device", () => {
   it("a wrong password: under the field and in a card inside the dialog, and nothing starts", async () => {
     await lockWith("a long password");
