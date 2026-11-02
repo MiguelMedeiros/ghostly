@@ -194,6 +194,9 @@ function load(name: SoundName): Promise<AudioBuffer> | undefined {
   return decoded.get(name);
 }
 
+/** The sounds the first gesture fetches ahead: a chat's own, which may come right after it. */
+const WARMED: readonly SoundName[] = ["message", "sent"];
+
 /** Autoplay unlock is attempted only on an actual user gesture. */
 export function installAudioGestures(): () => void {
   if (listening) return () => {};
@@ -209,7 +212,9 @@ export function installAudioGestures(): () => void {
         if (ctx.state === "running") started();
         else void ctx.resume().then(started).catch(()=>{});
       }
-      for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
+      // Only what a chat plays first is warmed: every other sound is fetched and decoded the first time it plays, not
+      // on a newcomer's first keystroke (all of them were 27 files and several MiB of decoded audio kept for the session).
+      for (const name of WARMED) void load(name)?.catch(()=>{});
     } catch { /* no audio device */ }
   };
   const mute = () => { if (!loadSettings().notifications.soundEnabled) for (const stop of [...playing]) stop(); };
