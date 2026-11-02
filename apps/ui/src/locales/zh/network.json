@@ -4,7 +4,7 @@
   "domainLookupsHint": "验证联系人的域名证明。解析器能看到是哪个域名。",
   "domainLookupsInfo": "使用 {{name}}；失败时改用 Quad9、Cloudflare 或 Google。它看不到你的聊天。读取发布在网站上的证明时，该网站能看到你的 IP 地址。",
   "hyperdht": "HyperDHT 中继",
-  "hyperdhtHint": "WebRTC 失败时的可选备用方案。留空:仅 WebRTC。",
+  "hyperdhtHint": "WebRTC 失败时的可选备用方案。留空:不用 HyperDHT。",
   "hyperdhtInfo": "让聊天可以在此浏览器中使用 HyperDHT。中继转发加密字节:它能看到你的地址和通信时间,看不到你说了什么。",
   "identityChecks": "身份验证",
   "iroh": "Iroh 中继",

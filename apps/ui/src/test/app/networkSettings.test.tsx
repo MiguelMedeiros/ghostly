@@ -157,6 +157,14 @@ describe("Settings, Network: HyperDHT relay", () => {
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).not.toHaveProperty("settings.hyperdhtRelay");
   });
+
+  it("left empty, says only that there is no HyperDHT: the Iroh relays above it are a fallback too", () => {
+    const { engine } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS, iroh: { relays: [], defaults: ["https://relay.example.org/"] } }, settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-iroh-relays")).toBeInTheDocument();
+    expect(screen.getByText("Optional fallback when WebRTC fails. Empty: no HyperDHT.")).toBeInTheDocument();
+    expect(screen.queryByText(/WebRTC only/)).toBeNull();
+  });
 });
 
 describe("Settings, Network: TURN server", () => {
