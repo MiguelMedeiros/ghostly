@@ -437,6 +437,39 @@ describe("the standby screen", () => {
     expect(screen.getByTestId("handoff-use-here-dialog")).toBeInTheDocument();
   });
 
+  it("Use here started: its button leaves the screen while the move runs, and the keyboard focus goes to the move's Cancel, not to the page", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
+    let handoff: HandoffView | null = null;
+    fakeEngine.on("deviceHandoffView", () => handoff);
+    fakeEngine.on("deviceHandoffPull", () => (handoff = { role: "taker", device: "MacBook", key: DESKTOP, step: "connecting", bytes: 0, total: 0 }));
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    await user.click(await screen.findByTestId("handoff-use-here"));
+    await user.type(await screen.findByTestId("handoff-password"), "hunter22{Enter}");
+    const progress = await screen.findByTestId("handoff-progress", {}, { timeout: 3_000 });
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
+    await waitFor(() => expect(within(progress).getByTestId("handoff-cancel")).toHaveFocus());
+  });
+
+  it("Use here that stops at once with a wrong password: the keyboard focus is on the move's words, which say so", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
+    let handoff: HandoffView | null = null;
+    fakeEngine.on("deviceHandoffView", () => {
+      const now = handoff;
+      // The other device turns the password down right after the first read of the move.
+      if (handoff?.step === "authorizing") handoff = { ...handoff, step: "failed", failure: "password" };
+      return now;
+    });
+    fakeEngine.on("deviceHandoffPull", () => (handoff = { role: "taker", device: "MacBook", key: DESKTOP, step: "authorizing", bytes: 0, total: 0 }));
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    await user.click(await screen.findByTestId("handoff-use-here"));
+    await user.type(await screen.findByTestId("handoff-password"), "wrong{Enter}");
+    await waitFor(() => expect(screen.getByTestId("handoff-progress")).toHaveAttribute("data-failure", "password"), { timeout: 3_000 });
+    await waitFor(() => expect(screen.getByTestId("handoff-progress")).toHaveFocus());
+    expect(await screen.findByTestId("handoff-use-here")).toHaveTextContent("Try again");
+  });
+
   it("a device that took the profile and could not check which device is active: the line read out, and Try again checks again", async () => {
     fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
     fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "failed", bytes: 0, total: 0, failure: "settle" }) satisfies HandoffView);

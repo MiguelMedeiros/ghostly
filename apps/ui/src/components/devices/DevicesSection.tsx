@@ -59,6 +59,14 @@ export function DevicesSection() {
   // Cancel pressed in those steps: once they go, the keyboard focus goes to that device's row, not to the page.
   const [refocus, setRefocus] = useState<string | null>(null);
   const cancelRunning = async (key: string) => { await engine.call("deviceHandoffCancel"); setRefocus(key); };
+  // Remove done: the device's row goes, and the ⋮ that opened the dialog with it. The keyboard focus goes to its Removed row.
+  const removedBox = useRef<HTMLDivElement>(null);
+  const [focusRemoved, setFocusRemoved] = useState(false);
+  useEffect(() => {
+    if (!focusRemoved || !removed) return;
+    setFocusRemoved(false);
+    removedBox.current?.focus();
+  }, [focusRemoved, removed]);
   const devices = view?.devices ?? [];
   const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
@@ -95,8 +103,9 @@ export function DevicesSection() {
           hint={t("devices.section.unfinished")} info={t("devices.section.unfinishedInfo")} />
       ))}
       {removed && (
-        <Row testId="device-removed" leading={<DeviceGlyph name={removed} />} label={removed}
-          hint={t("devices.section.removed")} info={t("devices.remove.doneInfo")} />
+        <div ref={removedBox} tabIndex={-1} data-testid="device-removed" className="focus:outline-none">
+          <Row leading={<DeviceGlyph name={removed} />} label={removed} hint={t("devices.section.removed")} info={t("devices.remove.doneInfo")} />
+        </div>
       )}
       {view?.waiting?.length ? <Row testId="device-waiting" label={fillNames(t("devices.section.waiting", { devices: waiting[0] }), waiting[1])} /> : null}
       {view?.foreignSet && <Row testId="device-foreign-set" label={t("devices.section.foreign")} />}
@@ -149,7 +158,7 @@ export function DevicesSection() {
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => setMoving(null)} />}
-      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => setRemoved(removing.name)} />}
+      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => { setRemoved(removing.name); setFocusRemoved(true); }} />}
       {lost && <LostChecklist device={stopped?.name} onClose={() => setLost(false)} onRemove={stopped ? () => { setLost(false); setRemoving({ key: stopped.key, name: stopped.name }); } : undefined} />}
     </Section>
   );

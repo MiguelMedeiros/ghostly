@@ -44,6 +44,21 @@ describe("Remove, on the active device", () => {
     expect(removed).toHaveTextContent("Removed");
   });
 
+  it("once the device is removed, the keyboard focus is on its Removed row, not on the page", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    let devices = activeSet().devices;
+    engine.on("deviceSet", () => activeSet({ devices }));
+    engine.on("deviceRemove", () => { devices = devices.slice(0, 2); return activeSet({ devices }); });
+    await user.click((await screen.findAllByTestId("device-menu"))[1]);
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    const removed = await screen.findByTestId("device-removed");
+    // The ⋮ that opened the dialog went with the Tablet's row.
+    await waitFor(() => expect(screen.getAllByTestId("device-row")).toHaveLength(2), { timeout: 3_000 });
+    await waitFor(() => expect(removed).toHaveFocus());
+    expect(removed).toHaveTextContent("Tablet");
+  });
+
   it("says why it could not, and changes nothing", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => activeSet());
