@@ -94,11 +94,12 @@ export async function completeWithPipedEvidence(call: (params: Record<string, un
  * `credential`) given on the command line still goes, with the ps/history warning: `settings get` hides it as a secret.
  */
 export async function settingValue(key: string, value: string | undefined, read: StdinRead, tty = false, note: (text: string) => void = () => {}): Promise<{ value: string; warning?: string }> {
-  const usage = `ghostly settings set <key> <json-value>, or on stdin: … | ghostly settings set ${key} -`;
+  // No value at all: the usage error every command gives (reason, then the usage line); an empty stdin after `-` says how.
+  const usage = "Missing <json-value>: ghostly settings set <key> <json-value>";
   if (value !== undefined && value !== "-") return { value, ...(key === "iceServers" && hasCredential(value) && { warning: `A TURN password on the command line shows in ps and the shell's history: give it on stdin instead (… | ghostly settings set ${key} -)` }) };
-  if (value === undefined && tty) throw new CliError("usage", `Missing <json-value>: ${usage}`);
+  if (value === undefined && tty) throw new CliError("usage", usage);
   const text = (value === "-" ? await read() : await readUnasked(read, note, { what: "the value", missing: "Missing <json-value>", command: `settings set ${key}`, as: "an argument" })).replace(/\r?\n$/, "");
-  if (!text.trim()) throw new CliError("usage", `Missing <json-value>: ${usage}`);
+  if (!text.trim()) throw new CliError("usage", value === "-" ? `Missing <json-value> on stdin: … | ghostly settings set ${key} -` : usage);
   return { value: text };
 }
 
