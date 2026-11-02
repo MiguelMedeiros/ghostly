@@ -167,6 +167,7 @@
     "roomDevice": "{{size}} liberi su questo dispositivo",
     "stalled": "Fermo · {{progress}}",
     "verifying": "Verifica del file… {{size}}",
+    "verifyingThere": "Arrivato, {{name}} lo sta verificando… {{size}}",
     "viewPicture": "Vedi {{name}}",
     "waitingDone": "In attesa di connessione · {{done}} completato",
     "waitingSize": "In attesa di connessione · {{size}}",

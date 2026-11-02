@@ -179,6 +179,16 @@ const FINAL: ReadonlySet<TransferState> = new Set(["done", "failed", "declined",
 export const transferEnded = (record: FileTransferRecord): boolean => FINAL.has(record.state);
 
 /**
+ * Whether a file sent from here arrived whole (the receiver confirmed every byte, and may be checking it): too late
+ * for its person to cancel. The receiver's check comes before a `pf-abort` behind it, so it would keep the file while
+ * the sender said it was cancelled. Not once the receiver asks about it again (`asking`), nor paused here.
+ */
+export function sentWhole(record: FileTransferRecord): boolean {
+  if (record.direction !== "out" || transferEnded(record)) return false;
+  return record.state === "verifying" || (record.file.size > 0 && record.confirmed === record.file.size && record.state !== "asking" && record.state !== "paused");
+}
+
+/**
  * Whether an unfinished transfer is stuck, so its person is offered to push it: "Send again" (sending) or "Ask again"
  * (receiving). `movedAt` is when its bytes last moved, `restored` that it has not moved since the app started. What
  * waits for a person (an answer, a pause) is not stuck, and a failed one has its own "Retry".

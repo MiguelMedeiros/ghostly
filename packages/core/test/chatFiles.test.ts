@@ -3,7 +3,7 @@ import { appendFileSync } from "node:fs";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, FILE_LIMITS, refusalText, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
+import { ChatFiles, FILE_LIMITS, refusalText, sentWhole, transferStalled, type ChatFilesHost, type FileTransferRecord, type IncomingTarget, type OfferDecision, type OutgoingSource } from "../src/chatFiles";
 import type { FileInfo } from "../src/files";
 // covers: files.video.meta, files.image.meta, files.large.offer, files.large.resume, files.large.integrity, files.large.limits, files.large.resend, files.large.request, apps.offer.wire
 
@@ -493,6 +493,34 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(disk.length).toBe(0);
   });
+
+  for (const when of ["checking there", "away", "offered again"] as const) {
+    it(`a file whose every byte arrived counts as sent whole (${when}): its person's cancel is refused, it ends done on both sides`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const w = wire({ drop: (frame) => when === "offered again" && frame.t === "pf-sum" && w.a.sent.filter((f) => f.t === "pf-sum").length === 1 });
+      const disk = new Disk(false);
+      let release!: () => void;
+      // A large file's digest takes a while to check: the cancel comes meanwhile.
+      disk.checking = new Promise<void>((resolve) => { release = resolve; });
+      w.b.disks.set("whole-01", disk);
+      w.attach();
+      send(w, file("whole-01", 3_000_000));
+      if (when === "offered again") {
+        await until(() => state(w.a, "out", "whole-01") === "verifying");
+        await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
+        expect(state(w.a, "out", "whole-01")).toBe("offered");
+      } else await until(() => state(w.b, "in", "whole-01") === "verifying");
+      if (when === "away") w.drop();
+      // The person's Cancel, as the app takes it.
+      if (!sentWhole(w.a.files.get("out", "whole-01")!)) w.a.files.cancel("out", "whole-01");
+      expect(state(w.a, "out", "whole-01")).not.toBe("cancelled");
+      if (when === "away") w.attach();
+      release();
+      await until(() => state(w.a, "out", "whole-01") === "done" && state(w.b, "in", "whole-01") === "done");
+      expect(disk.discarded).toBe(false);
+      expect(w.a.sent.some((f) => f.t === "pf-abort")).toBe(false);
+    });
+  }
 
   it("a drop mid-way resumes from the receiver's last byte, and nothing is sent twice that arrived", async () => {
     const w = wire();
@@ -1018,6 +1046,24 @@ describe("when a transfer counts as stuck", () => {
   });
   it("waits longer than the automatic offer again, so that goes first", () => {
     expect(FILE_LIMITS.stallMs).toBeGreaterThan(FILE_LIMITS.idleMs);
+  });
+});
+
+describe("when a sent file is too late to cancel", () => {
+  const record = (over: Partial<FileTransferRecord>): FileTransferRecord => ({ id: "whole-02", direction: "out", file: file("whole-02", 1000), state: "active", confirmed: 1000, since: 0, ...over });
+  it.each<[string, Partial<FileTransferRecord>, boolean]>([
+    ["the receiver checks it", { state: "verifying" }, true],
+    ["every byte confirmed, offered again", { state: "offered" }, true],
+    ["every byte confirmed, waiting for a session", { state: "queued" }, true],
+    ["an empty file checked there", { state: "verifying", file: file("whole-02", 0), confirmed: 0 }, true],
+    ["bytes still to go", { confirmed: 999 }, false],
+    ["an empty file not answered yet", { state: "offered", file: file("whole-02", 0), confirmed: 0 }, false],
+    ["the receiver asks about it again", { state: "asking", waitingFor: "consent" }, false],
+    ["paused here", { state: "paused", pausedBy: "me" }, false],
+    ["received", { state: "verifying", direction: "in" }, false],
+    ["done", { state: "done" }, false],
+  ])("%s", (_, over, whole) => {
+    expect(sentWhole(record(over))).toBe(whole);
   });
 });
 
