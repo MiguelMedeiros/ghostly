@@ -18,6 +18,11 @@ export type SecretKind = SecretFinding["kind"];
 
 const WORD_INDEX = new Map(wordlist.map((word, index) => [word, index]));
 const MNEMONIC_LENGTHS = [12, 15, 18, 21, 24];
+/**
+ * A message that is nothing but these many seed words: BIP39's, and a Polyseed's 16 (Monero's seed in Feather and Cake
+ * Wallet, BIP39's English words with a checksum of its own, which BIP39's caught only by chance, about 3 in 10).
+ */
+const WHOLE_MESSAGE_LENGTHS = [...MNEMONIC_LENGTHS, 16];
 /** Checksums tried per message at most: a 16 KiB run of seed words stays a few milliseconds. */
 const CHECKSUM_BUDGET = 4096;
 
@@ -56,7 +61,7 @@ export function findSecret(text: string): SecretFinding | null {
 
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
- * is nothing but 12, 15, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). Prose
+ * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). Prose
  * breaks a run at once: "the", "a", "is", "to", "and", "of" and "I" are not on the list.
  *
  * One word said over and over is not a seed, though one in 16 such runs passes a 12-word checksum ("word" does): a
@@ -84,7 +89,7 @@ function hasMnemonic(text: string): boolean {
           if (seedLike(start, length)) return true;
         }
       }
-      if (run.length === tokens.length && MNEMONIC_LENGTHS.includes(run.length) && new Set(run).size > 1) return true;
+      if (run.length === tokens.length && WHOLE_MESSAGE_LENGTHS.includes(run.length) && new Set(run).size > 1) return true;
     }
     run = [];
     return false;
