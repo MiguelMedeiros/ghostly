@@ -5,6 +5,7 @@ import { NetworkSettings } from "../../components/NetworkSettings";
 import { renderApp } from "../render";
 import { fakeEngine } from "../fakeEngine";
 import { LANGUAGES, lookup } from "../i18n/locales";
+import arNetwork from "../../locales/ar/network.json";
 
 // covers: settings.network.native-dht, settings.network.relays, settings.network.iroh-relays, settings.network.turn
 
@@ -198,5 +199,18 @@ describe("Settings, Network: TURN server", () => {
     await user.type(screen.getByLabelText("TURN credential"), "x");
     expect(field).not.toHaveTextContent("Enter the credential again");
     expect(field).toHaveTextContent("Used only when a direct connection fails.");
+  });
+});
+
+describe("Settings, Network: addresses in a right-to-left language", () => {
+  it("reads every relay and server address left to right, so a wrapped Iroh relay keeps its trailing slash at the end", () => {
+    const iroh = ["https://use1-1.relay.n0.iroh.link/"];
+    const { engine } = renderApp(<NetworkSettings />, { language: "ar" });
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS, iroh: { relays: iroh, defaults: iroh } }, settings: { relays: RELAYS } }));
+    const addresses = [
+      screen.getByTestId("network-relays"), screen.getByTestId("network-iroh-relays"), screen.getByTestId("network-hyperdht-relay"),
+      screen.getByTestId("network-push-relay"), screen.getByLabelText(arNetwork.turnUrl), screen.getByLabelText(arNetwork.turnUsername),
+    ];
+    for (const field of addresses) expect(field).toHaveAttribute("dir", "ltr");
   });
 });
