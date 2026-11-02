@@ -526,6 +526,32 @@ describe("routines", () => {
     expect(() => params("routine send", ["g1", "--name", "Nightly"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--schedule is needed/) }));
   });
 
+  it("read a date with no zone as local time, a bare date as local midnight, and keep a Z or an offset (agents#2355)", () => {
+    const next = (value: string) => (params("routine update", ["g1", "nightly", "--next", value]).card as { nextRunAt: number }).nextRunAt;
+    const zone = process.env.TZ;
+    try {
+      // Midnight of 2026-11-03 where the command runs: UTC-03, UTC+05:30 and UTC.
+      for (const [tz, midnight] of [["America/Sao_Paulo", Date.UTC(2026, 10, 3, 3)], ["Asia/Kolkata", Date.UTC(2026, 10, 2, 18, 30)], ["UTC", Date.UTC(2026, 10, 3)]] as const) {
+        process.env.TZ = tz;
+        // Before, a bare date was UTC midnight (21:00 the day before in UTC-03) while a date with a time was local.
+        expect(next("2026-11-03"), tz).toBe(midnight);
+        expect(next("2026-11-03T00:00"), tz).toBe(midnight);
+        expect(next("2026-11-03 09:00"), tz).toBe(midnight + 9 * 3_600_000);
+        expect(next("Nov 3 2026"), tz).toBe(midnight);
+        expect(next("2026-11"), tz).toBe(midnight - 2 * 86_400_000);
+        // A zone given is kept as given.
+        expect(next("2026-11-03T09:00:00Z"), tz).toBe(Date.UTC(2026, 10, 3, 9));
+        expect(next("2026-11-03Z"), tz).toBe(Date.UTC(2026, 10, 3));
+        expect(next("2026-11-03T09:00+02:00"), tz).toBe(Date.UTC(2026, 10, 3, 7));
+      }
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+    expect(next("1793707200000")).toBe(1793707200000);
+    expect(() => next("tomorrow 09:00")).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--next takes a time in milliseconds or a date: 2026-09-30 or 2026-09-30 01:00 \(no zone: local time; a date alone is its midnight\)/) }));
+    expect(COMMANDS["routine send"]!.options!.next.description).toMatch(/2026-09-30 01:00.*no zone: local time/);
+  });
+
   it("refuse a wrong state or a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     const send = (...flags: string[]) => ["g1", "--name", "Nightly", "--schedule", "every day", ...flags];

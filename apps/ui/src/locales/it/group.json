@@ -72,6 +72,8 @@
     "created": "Gruppo creato.",
     "forked": "La cronologia dei membri si è biforcata",
     "gone": "{{name}} non è più un membro",
+    "goneBy": "{{by}} ha rimosso {{name}} dal gruppo",
+    "goneByYou": "Hai rimosso {{name}} dal gruppo",
     "joined": "{{name}} fa ora parte del gruppo",
     "left": "{{name}} ha lasciato il gruppo",
     "pictureChanged": "{{name}} ha cambiato la foto del gruppo",
@@ -85,6 +87,7 @@
     "renamedNoName": "Il gruppo ora si chiama “{{group}}”",
     "renamedYou": "Hai rinominato il gruppo in “{{group}}”",
     "rotated": "Chiavi rinnovate: una nuova epoca",
+    "withNote": "{{event}} {{note}}",
     "youJoined": "Sei entrato.",
     "youJoinedAgain": "Sei entrato di nuovo."
   },

@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Amount, HttpResponseError, MintOperationError, OutputData, getEncodedToken, getTokenMetadata, type Proof, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
+import { Amount, HttpResponseError, MintOperationError, OutputData, PaymentRequest, getEncodedToken, getTokenMetadata, type Proof, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
 import { CashuWallet, SwapUnsettledError } from "../src/engine/wallet";
+import { isTestMint } from "../src/shared/mints";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { removalRisksFunds, walletRemoval } from "../src/shared/walletRemoval";
@@ -152,6 +153,25 @@ describe("redeeming a token", () => {
     expect(await all<WalletTx>(STORES.walletTx)).toEqual([]);
     expect(await all<StoredPayment>(STORES.payments)).toEqual([]);
     expect(await balance()).toBe(72);
+  });
+
+  it("ecash or a request that names one of this wallet's mints in another spelling is for that mint", async () => {
+    // Another Cashu wallet writes the mint as its user typed it. Before, these were refused as "Ecash from mint.example
+    // is not accepted" and "You share no mint with this contact".
+    mintApi.completeSwap.mockImplementation(async () => receiveAnswer());
+    const { wallet } = setup();
+    for (const spelling of ["HTTPS://Mint.Example", "https://mint.example:443/"]) {
+      const token = getEncodedToken({ mint: spelling, unit: "sat", proofs: [proof(64, `t-${spelling}`)] });
+      await expect(wallet.inspect(token)).resolves.toMatchObject({ kind: "token", mint: MINT, accepted: true });
+      const request = new PaymentRequest(undefined, "r1", 5, "sat", [spelling]).toEncodedRequest();
+      await expect(wallet.inspect(request)).resolves.toMatchObject({ kind: "request", mints: [MINT] });
+    }
+    const token = getEncodedToken({ mint: "HTTPS://Mint.Example:443/", unit: "sat", proofs: [proof(64, "t1")] });
+    await expect(wallet.receiveToken(token, "ecash-in", undefined, { payment: incoming })).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
+    expect(mintApi.prepareReceive.mock.calls[0][0], "the token is redeemed as it was sent").toBe(token);
+    mintApi.completeSwap.mockImplementation(async () => sendAnswer());
+    await expect(wallet.createToken(40, ["HTTPS://MINT.example:443"])).resolves.toMatchObject({ mint: MINT });
+    expect(isTestMint("HTTPS://TestNut.Cashu.Space:443/")).toBe(true);
   });
 
   it("an answer that never arrives is asked for again on the spot, and the ecash is in the wallet", async () => {

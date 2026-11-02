@@ -19,6 +19,8 @@ playwright-report
 playwright-report-desktop
 playwright-report-desktop-macos
 playwright-report-compat
+blob-report
+all-blob-reports
 dist-e2e
 
 # Generated native HyperDHT runtime

@@ -145,6 +145,18 @@ describe("paying a contact's request, never twice", () => {
     expect(lightning.quote).not.toHaveBeenCalled();
   });
 
+  // A host (the CLI's error codes, the app's errorText) reads why by `engineCode`: no ecash made keeps the wallet's.
+  it("keeps the wallet's engineCode when no ecash could be made", async () => {
+    const { desk, wallet } = setup([record({ id: "r1", mints: [MINT] })]);
+    await desk.start();
+    wallet.createToken.mockRejectedValueOnce(engineError("notEnoughSats"));
+    await expect(desk.send({ linkId: "l", amount: 5, timestamp: 2, network: "testnet" })).rejects.toMatchObject({ engineCode: "notEnoughSats", message: engineText("notEnoughSats") });
+    wallet.createToken.mockRejectedValueOnce(engineError("notEnoughForFee", { amount: 3 }));
+    await expect(desk.send({ linkId: "l", amount: 5, timestamp: 3, network: "testnet" })).rejects.toMatchObject({ engineCode: "notEnoughForFee", values: { amount: 3 } });
+    wallet.createToken.mockRejectedValueOnce(engineError("noSharedMint"));
+    await expect(desk.payRequest({ linkId: "l", paymentId: "r1", confirmedReal: true })).rejects.toMatchObject({ engineCode: "noSharedMint" });
+  });
+
   it("pays an invoice only for the amount asked, and for at most 3% in fees (10 sats at least)", async () => {
     const { desk, lightning, allowed, state } = setup([record({ id: "r1", amount: 1_000, invoice: INVOICE })]);
     await desk.start();

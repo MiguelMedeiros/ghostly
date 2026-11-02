@@ -24,6 +24,7 @@
     "show": "Ver",
     "title": "Te espera"
   },
+  "notCopied": "No se copió",
   "save": "Guardar",
   "size": {
     "b": "{{n}} B",

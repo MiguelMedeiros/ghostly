@@ -1050,6 +1050,24 @@ describe("GroupChat: history and sending", () => {
     ]));
   });
 
+  it.each([
+    ["ja", "グループを作成しました。グループの全員が", "参加しました。グループの全員が"],
+    ["zh", "群组已创建。", "你已加入。"],
+    ["pt", "Grupo criado. ", "Você entrou. "],
+  ] as const)("in %s, the first line joins its sentence and the read note as the language does", async (language, created, joined) => {
+    // Bug hunt 1102-groups-ux: "参加しました。 グループの全員が…", a Latin space after 。 in Japanese and Chinese.
+    fakeEngine.on("groupMessages", () => [
+      stored({ id: "e1", event: "created", text: "Group created. Everyone in the group can read…" }),
+      stored({ id: "e2", event: "joined", text: "You joined. Everyone in the group can read…", timestamp: 1_700_000_000_001 }),
+    ]).on("updateSettings", () => undefined);
+    fakeEngine.update({ groups: [active()] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language });
+    const [first, second] = (await screen.findAllByTestId("group-event")).map(l => l.textContent ?? "");
+    expect(first.startsWith(created)).toBe(true);
+    expect(second.startsWith(joined)).toBe(true);
+    if (language !== "pt") expect(`${first}${second}`).not.toMatch(/。 /);
+  });
+
   for (const profile of ["mesh", "community"] as const) it(`after being removed (${profile}), my own lines still read as mine, in the app's language`, async () => {
     // Bug hunt 1008-1246: once removed the roster no longer has me, so "You are now the admin" read "Membro meyyyyyy agora é o admin".
     fakeEngine.on("groupMessages", () => [

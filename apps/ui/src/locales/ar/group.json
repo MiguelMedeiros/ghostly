@@ -76,6 +76,8 @@
     "created": "أُنشئت المجموعة.",
     "forked": "تشعّب سجل العضوية",
     "gone": "انتهت عضوية {{name}}",
+    "goneBy": "إزالة {{by}} {{name}} من المجموعة",
+    "goneByYou": "أزلت {{name}} من المجموعة",
     "joined": "انضمام {{name}} إلى المجموعة",
     "left": "مغادرة {{name}} المجموعة",
     "pictureChanged": "تغيير {{name}} صورة المجموعة",
@@ -89,6 +91,7 @@
     "renamedNoName": "أصبح اسم المجموعة «{{group}}»",
     "renamedYou": "غيّرت اسم المجموعة إلى «{{group}}»",
     "rotated": "جُدّدت المفاتيح: حقبة جديدة",
+    "withNote": "{{event}} {{note}}",
     "youJoined": "انضممت.",
     "youJoinedAgain": "انضممت من جديد."
   },

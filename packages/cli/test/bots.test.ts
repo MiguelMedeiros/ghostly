@@ -97,6 +97,7 @@ describe("file wait", () => {
     expect(await callApi(ctx, "file.action", { file: "chat-two-in-d", action: "accept" })).toMatchObject({ chat: "chat-two", action: "accept" });
     expect(node.fileAction).toHaveBeenLastCalledWith({ linkId: "chat-two", fileId: "chat-two-in-d", action: "accept" });
     await expect(callApi(ctx, "file.action", { chat: "Alice", file: "chat-two-in-d", action: "cancel" })).rejects.toMatchObject({ code: "not_found" });
+    transfer("chat-two-in-d", { state: "transferring", transferred: 0, size: 5, direction: "in", stage: "queued" });
     // The bytes are not in this fake's store: saving fails after the wait, not before it.
     const saving = callApi(ctx, "file.save", { file: "chat-two-in-d", wait: true, timeout: 5 });
     let settled = false;
@@ -106,6 +107,24 @@ describe("file wait", () => {
     transfer("chat-two-in-d", { state: "done", transferred: 5, size: 5, direction: "in" });
     await expect(saving).rejects.toMatchObject({ code: "not_found", message: "No file chat-two-in-d" });
   });
+
+  it("a received file that waits for file accept says so at once, whether it waited so from the start or came to", async () => {
+    const { ctx, transfer } = fake();
+    const confirm = { code: "confirm", message: "The file (40 MB) waits for you to take it: ghostly file accept chat-one-in-e (or file decline)", details: { file: "chat-one-in-e", chat: "chat-one", size: 40_000_000, stage: "asking" } };
+    transfer("chat-one-in-e", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
+    const started = Date.now();
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-in-e", timeout: 30 })).rejects.toMatchObject(confirm);
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-e", wait: true, timeout: 30 })).rejects.toMatchObject(confirm);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    // Not there yet when the wait began: the offer reaches this side during it.
+    transfer("chat-one-in-f", { state: "transferring", transferred: 0, size: 26_214_401, direction: "in", stage: "waiting" });
+    const waiting = callApi(ctx, "file.wait", { file: "chat-one-in-f", timeout: 30 });
+    transfer("chat-one-in-f", { state: "transferring", transferred: 0, size: 26_214_401, direction: "in", stage: "asking" });
+    await expect(waiting).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("(26.2 MB) waits for you to take it: ghostly file accept chat-one-in-f") });
+    // A file sent from here that waits for the contact's person goes on waiting: only they can take it.
+    transfer("chat-one-out-g", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
+    await expect(callApi(ctx, "file.wait", { file: "chat-one-out-g", timeout: 1 })).rejects.toMatchObject({ code: "timeout" });
+  }, 10_000);
 });
 
 describe("typing --for", () => {
