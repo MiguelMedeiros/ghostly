@@ -683,17 +683,23 @@ export class CashuWallet {
       .filter((m) => !network || mintNetwork(m) === network);
     /** The most a mint that holds the amount could send with its fees on top. */
     let room = 0;
-    for (const mint of candidates) {
-      if ((await this.balanceAt(mint)) < amount) continue;
+    /** The coins held at `mint` when they send the amount. */
+    const fitting = async (mint: string): Promise<StoredProof[] | undefined> => {
+      const proofs = await this.proofsAt(mint);
+      if (total(proofs) < amount) return undefined;
       // At a mint that charges for each coin it takes in, the amount held may not cover its fees: the next mint may.
       const wallet = await this.wallet(mint);
-      const proofs = await this.proofsAt(mint);
-      if (!fitsAt(wallet, proofs, amount)) {
-        room = Math.max(room, roomAt(wallet, proofs));
-        continue;
-      }
-      return this.locked(mint, async () => {
-        const { inputs, keep, send, swap } = await this.split(mint, amount, await this.proofsAt(mint));
+      if (fitsAt(wallet, proofs, amount)) return proofs;
+      room = Math.max(room, roomAt(wallet, proofs));
+      return undefined;
+    };
+    for (const mint of candidates) {
+      if (!(await fitting(mint))) continue;
+      const sent = await this.locked(mint, async () => {
+        // Asked again in the mint's turn: another payment may have taken these coins since.
+        const proofs = await fitting(mint);
+        if (!proofs) return undefined;
+        const { inputs, keep, send, swap } = await this.split(mint, amount, proofs);
         const token = (await loadCashu()).getEncodedToken({ mint, proofs: send, unit: UNIT });
         // Everything that left the balance beyond the amount: the swap's fee and the redeem fee prepaid for the receiver.
         const spent = total(inputs) - sats(keep);
@@ -708,6 +714,7 @@ export class CashuWallet {
         this.events.onChange();
         return { token, mint };
       });
+      if (sent) return sent;
     }
     if (room > 0) throw engineError("notEnoughForFee", { amount: room });
     throw engineError(candidates.length === 0 && preferred ? "noSharedMint" : "notEnoughSats");
@@ -1427,6 +1434,11 @@ export class CashuWallet {
     const outlay = outlayAt(wallet, proofs, needed, inOneFrame(getEncodedToken, mint));
     if (!shown || quote.quote !== quoteId || quoteMismatch(quote, shown.request, shown.amount) || (outlay ?? needed) > shown.amount + shown.feeReserve) {
       throw new Error(MINT_QUOTE_MISMATCH);
+    }
+    // Coins another payment took since the quote was shown: said as the quote would have said it.
+    if (outlay === undefined) {
+      const room = roomAt(wallet, proofs, quote.fee_reserve.toNumber());
+      throw room > 0 ? engineError("notEnoughForFee", { amount: room }) : engineError("notEnoughSats");
     }
     const { inputs, keep, send, swap } = await this.split(mint, needed, proofs);
     let preview: MeltPreview<MeltQuoteBolt11Response>;

@@ -11,6 +11,8 @@ vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
 const FEE_MINT = "https://fee.example";
 /** Charges nothing. */
 const FREE_MINT = "https://free.example";
+/** Charges nothing either. */
+const OTHER_FREE_MINT = "https://free2.example";
 const INVOICE = fakeInvoice(30, new Uint8Array(32).fill(7));
 
 /** A keyset of coins from 1 to 64 sats, its id derived with its fee as a mint's /v1/keysets checks it. */
@@ -18,7 +20,7 @@ const keyset = (seed: number, fee: number) => {
   const pubKeys = Object.fromEntries(Object.entries(createNewMintKeys(7, new Uint8Array(32).fill(seed)).pubKeys).map(([amount, key]) => [amount, Buffer.from(key).toString("hex")]));
   return { keysetId: deriveKeysetId(pubKeys, { input_fee_ppk: fee, unit: "sat", versionByte: 1 }), pubKeys, fee };
 };
-const MINTS: Record<string, ReturnType<typeof keyset>> = { [FEE_MINT]: keyset(1, 1000), [FREE_MINT]: keyset(2, 0) };
+const MINTS: Record<string, ReturnType<typeof keyset>> = { [FEE_MINT]: keyset(1, 1000), [FREE_MINT]: keyset(2, 0), [OTHER_FREE_MINT]: keyset(3, 0) };
 const keysetOf = (mint: string) => MINTS[mint].keysetId;
 
 /** Real cashu-ts wallets in front of the two mints, as their /v1 endpoints would answer; a melt quote is for 30 + 2 sats. */
@@ -64,6 +66,37 @@ describe("a send at a mint that charges for each coin it takes in", () => {
     await expect(cashu.createToken(99)).rejects.toThrow("Not enough sats in your wallet: 97 sats leave room for the fee");
     await expect(cashu.createToken(97)).resolves.toMatchObject({ mint: FEE_MINT });
     expect(await cashu.balanceAt(FEE_MINT)).toBe(0);
+  });
+});
+
+describe("two payments at once from coins only one of them can have", () => {
+  it("sends the second from the next mint once the first took the coins it picked", async () => {
+    seed("proofs", [...coins(FREE_MINT, [32, 16]), ...coins(OTHER_FREE_MINT, [32, 16])]);
+    const cashu = wallet([FREE_MINT, OTHER_FREE_MINT]);
+    const sent = await Promise.all([cashu.createToken(48), cashu.createToken(48)]);
+    expect(sent.map((s) => s.mint)).toEqual([FREE_MINT, OTHER_FREE_MINT]);
+    expect(await cashu.balanceAt(FREE_MINT)).toBe(0);
+    expect(await cashu.balanceAt(OTHER_FREE_MINT)).toBe(0);
+  });
+
+  it("says there are not enough sats when no other mint holds them", async () => {
+    seed("proofs", coins(FREE_MINT, [32, 16]));
+    const cashu = wallet([FREE_MINT]);
+    const sent = await Promise.allSettled([cashu.createToken(48), cashu.createToken(48)]);
+    expect(sent[0]).toMatchObject({ status: "fulfilled", value: { mint: FREE_MINT } });
+    expect(sent[1]).toMatchObject({ status: "rejected", reason: { message: expect.stringMatching(/^Not enough sats in your wallet/) } });
+  });
+
+  it("stops a Lightning payment whose coins a send took after its quote, in the wallet's words", async () => {
+    seed("proofs", coins(FREE_MINT, [32, 4]));
+    const cashu = wallet([FREE_MINT]);
+    await expect(cashu.quoteInvoice(INVOICE)).resolves.toMatchObject({ mint: FREE_MINT, amount: 30, feeReserve: 2 });
+    await expect(cashu.createToken(32)).resolves.toMatchObject({ mint: FREE_MINT });
+    // The 4 sats left cover the 2 sat reserve and 2 of the 30.
+    await expect(cashu.payQuote("m1", FREE_MINT)).rejects.toThrow("Not enough sats in your wallet: 2 sats leave room for the fee");
+    const asked = vi.mocked(fetch).mock.calls.map(([input]) => new URL(String(input)).pathname);
+    expect(asked).not.toContain("/v1/melt/bolt11");
+    expect(await cashu.balanceAt(FREE_MINT)).toBe(4);
   });
 });
 
