@@ -190,6 +190,17 @@ describe("mentions in the bubbles", () => {
     const chips = await screen.findAllByTestId("mention");
     expect(chips.map(c => [c.textContent, c.dataset.me])).toEqual([["@everyone", "true"], ["@everyone", undefined]]);
   });
+
+  it("keeps the @ before a name that starts in Arabic in an English message: only the name is isolated", async () => {
+    const arabic = [members[0], members[1], member({ key: BOB, nick: "بوب Bob" })];
+    openGroup(active({ members: arabic }), [stored({ member: ALICE, text: "@بوب Bob are you there?", mentions: [{ k: BOB, o: 0, l: 8 }] })]);
+    const chip = await screen.findByTestId("mention");
+    expect(chip).toHaveTextContent("@بوب Bob");
+    // A <bdi> around "@بوب Bob" takes its direction from the Arabic, and the @ is drawn at its right: "Bob بوب@ are…".
+    expect(chip.closest("bdi")).toBeNull();
+    expect(chip.firstChild?.textContent).toBe("@");
+    expect(chip.querySelector("bdi")).toHaveTextContent("بوب Bob");
+  });
 });
 
 describe("an unread mention in the chat list", () => {
