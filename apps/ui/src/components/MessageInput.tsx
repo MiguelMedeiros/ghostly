@@ -24,7 +24,8 @@ import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
-import { fitFieldHeight } from "./composer/fieldHeight";
+import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
+import { useKeptOnScreen } from "./composer/keptOnScreen";
 import { useComposition } from "../hooks/useComposition";
 import { draftLanguage } from "../lib/translateDraft";
 import { useTranslatesWhatISend } from "../lib/chatTranslateSend";
@@ -190,6 +191,8 @@ export function MessageInput({
   const [showCamera, setShowCamera] = useState(false);
   const plusRef = useRef<HTMLButtonElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  /** What stands above the composer: its refusal card, a paste being read, a file being prepared. */
+  const aboveRef = useRef<HTMLDivElement>(null);
   const fieldRef = useRef<HTMLDivElement>(null);
   const panelButtonRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -961,10 +964,16 @@ export function MessageInput({
     </div>
   );
 
+  // On a phone on its side with the keyboard up: the field no taller than a third of what is visible, and the cards
+  // above the composer cut at the top of the screen rather than off it (composer/fieldHeight.ts, composer/keptOnScreen.ts).
+  useFieldFitsView(textareaRef);
+  const aboveShown = (toastBox || readingLine || preparingLine) && !sheetOpen;
+  useKeptOnScreen(aboveRef, aboveShown ? `${toast ?? ""}|${reading}|${shown?.name ?? ""}|${shownProgress !== undefined}` : null);
+
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
-      {(toastBox || readingLine || preparingLine) && !sheetOpen && (
-        <div className="absolute bottom-full left-4 right-4 mb-2 z-50 flex flex-col gap-2">
+      {aboveShown && (
+        <div ref={aboveRef} className="absolute bottom-full left-4 right-4 mb-2 z-50 flex flex-col gap-2">
           {readingLine && <div className="self-start bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{readingLine}</div>}
           {preparingLine && <div className="self-start max-w-full bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{preparingLine}</div>}
           {toastBox && <div role="alert" className="animate-fade-in">{toastBox}</div>}
