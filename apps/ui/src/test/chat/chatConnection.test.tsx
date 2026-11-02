@@ -261,6 +261,15 @@ describe("ChatConnection: what the header says", () => {
     }
   });
 
+  it("says the Iroh WASM's relay error in the app's language, pointing to Settings, Network", () => {
+    const view = renderApp(<ChatConnection peerKey="peer" />, { language: "ar" });
+    act(() => view.engine.update({ links: [linkView({ availableTransports: ["webrtc/1"], pairing: ready(), transportErrors: { "iroh/1": "Iroh relay unreachable" } })] }));
+    const notice = screen.getByTestId("connection-transport-error");
+    expect(within(notice).getByTestId("connection-transport-error-title")).toHaveTextContent("Iroh: تعذّر الوصول إلى مُرحِّل Iroh");
+    expect(within(notice).getByTestId("connection-transport-error-next")).toHaveTextContent("تحقّق من مرحّلات Iroh في الإعدادات، الشبكة، أو استخدم وسيلة نقل أخرى.");
+    expect(notice).not.toHaveTextContent("Iroh relay unreachable");
+  });
+
   it.each<[string, Partial<LinkView>, string]>([
     ["WebRTC", { pairing: ready() }, "webrtc/1"],
     ["Iroh", { pairing: ready({ transport: "iroh/1" }) }, "iroh/1"],

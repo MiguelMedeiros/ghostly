@@ -625,6 +625,8 @@
     "hyperdhtUnreachable": "Relais HyperDHT injoignable",
     "hyperdhtUnreachableNext": "Vérifiez son adresse dans Réglages → Réseau. Il peut aussi refuser cette app : demandez à qui le gère.",
     "irohStopped": "Point d'accès Iroh arrêté",
+    "irohUnreachable": "Relais Iroh injoignable",
+    "irohUnreachableNext": "Vérifiez les relais Iroh dans Réglages, Réseau, ou utilisez un autre transport.",
     "listenerGiven": "En pause pour une discussion plus active. Ouvrez celle-ci pour reprendre.",
     "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre.",
     "noAddress": "L'adresse de votre contact pour ce transport n'est pas encore connue",
