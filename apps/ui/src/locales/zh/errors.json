@@ -252,6 +252,8 @@
     "growMore": "另外 {{count}} 人",
     "growNeedsUpdates": "超过 {{max}} 人需要所有人先更新",
     "growNeedsUpdatesNext": "尚未更新：{{names}}。",
+    "heirLeft": "该成员已退出群组",
+    "heirLeftNext": "请让其他人成为管理员。",
     "hubSetting": "此中继设置无法使用",
     "hubsNeedUpdate": "对方的应用需要先更新",
     "hubsNeedUpdateNext": "此群组通过中继节点运行。",
