@@ -5,7 +5,7 @@ import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { asCliError, CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, dhtOnly, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, transportOffered, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -537,6 +537,7 @@ const METHODS: Record<string, Method> = {
     const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
     if (transport === "dht") noCallOn(ctx, link.id, "put the chat on DHT only");
+    else if (transport !== "auto") transportOffered(link, transport);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     // A choice made during a hold (`chat disconnect --hold`) ends it: its time running out takes nothing back.
     await releaseHold(ctx, link.id, "lifted", true);
