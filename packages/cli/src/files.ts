@@ -83,6 +83,15 @@ function stageWords(transfer: FileTransferView): string {
   }
 }
 
+/**
+ * A transfer that waits for a person's decision (`asking`), with whose: `me` (`file accept` takes it here) or `contact`
+ * (theirs). A received file's `transferring` alone read as if it were moving.
+ */
+function withWaitingFor(transfer: FileTransferView | undefined): (FileTransferView & { waitingFor?: "me" | "contact" }) | undefined {
+  if (transfer?.state !== "transferring" || transfer.stage !== "asking") return transfer;
+  return { ...transfer, waitingFor: transfer.direction === "in" ? "me" : "contact" };
+}
+
 /** The chat or the group a file command names (`findChatOrGroup`). */
 const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
 
@@ -282,10 +291,10 @@ export const FILE_METHODS: Record<string, Method> = {
     }));
     if ("group" in target) {
       const kept = await keptOf(`group:${target.group.id}`);
-      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => views[id] ?? kept.get(id)) };
+      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => withWaitingFor(views[id] ?? kept.get(id))) };
     }
     const kept = await keptOf(target.link.id);
-    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id] ?? kept.get(id)) };
+    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => withWaitingFor(views[id] ?? kept.get(id))) };
   },
 
   /**

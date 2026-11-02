@@ -139,6 +139,20 @@ describe("file wait", () => {
   }, 10_000);
 });
 
+describe("file list", () => {
+  it("says whose decision a file waits for: mine for one received, the contact's for one sent", async () => {
+    const { ctx, node, transfer } = fake();
+    const message = (id: string, file: string) => ({ id, sender: id.startsWith("me_") ? "me" : "peer", timestamp: 1, file: { id: file, name: "big.bin", size: 40_000_000, mime: "application/octet-stream" } });
+    node.getMessages.mockResolvedValueOnce([message("peer_1", "chat-one-in-i"), message("me_2", "chat-one-out-j"), message("peer_3", "chat-one-in-k")] as never);
+    transfer("chat-one-in-i", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "asking" });
+    transfer("chat-one-out-j", { state: "transferring", transferred: 0, size: 40_000_000, direction: "out", stage: "asking" });
+    transfer("chat-one-in-k", { state: "transferring", transferred: 0, size: 40_000_000, direction: "in", stage: "queued" });
+    const { files } = await callApi(ctx, "file.list", { chat: "Alice" }) as { files: { transfer: Record<string, unknown> }[] };
+    expect(files.map((f) => f.transfer.waitingFor)).toEqual(["me", "contact", undefined]);
+    expect(files[0].transfer).toMatchObject({ state: "transferring", stage: "asking", direction: "in" });
+  });
+});
+
 describe("typing --for", () => {
   it("says it again until the time is up, then says it stopped", async () => {
     vi.useFakeTimers();
