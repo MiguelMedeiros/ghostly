@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, supersededBy, testedAs } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -70,12 +70,57 @@ describe("the packages gate", () => {
   });
 });
 
+describe("the Rust gate", () => {
+  it("covers every repository file and folder the crates' code names by include_str!, include_bytes! or CARGO_MANIFEST_DIR", () => {
+    // include_str!/include_bytes! name a path from the file's own folder; env!("CARGO_MANIFEST_DIR") one from the
+    // crate's, joined (`.join("…")`), concatenated (`concat!(env!(…), "/…")`) or formatted (`format!("{}/…", env!(…))`).
+    const named: { file: string; path: string }[] = [];
+    for (const crate of ["apps/desktop", "native/transports"]) {
+      const walk = (dir: string) => {
+        for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+          if (["target", "node_modules", "native-runtime", "gen"].includes(entry.name)) continue;
+          const path = `${dir}/${entry.name}`;
+          if (entry.isDirectory()) walk(path);
+          else if (entry.name.endsWith(".rs")) {
+            const source = readFileSync(join(root, path), "utf8");
+            for (const m of source.matchAll(/include_(?:str|bytes)!\(\s*"([^"]+)"/g)) named.push({ file: path, path: posix.join(posix.dirname(path), m[1]) });
+            for (const m of source.matchAll(/env!\("CARGO_MANIFEST_DIR"\)(?:\s*\)\s*\.join\(\s*"([^"]*)"|\s*,\s*"([^"]*)")?/g)) named.push({ file: path, path: posix.join(crate, m[1] ?? m[2] ?? "") });
+            for (const m of source.matchAll(/"\{\}([^"]*)",\s*env!\("CARGO_MANIFEST_DIR"\)/g)) named.push({ file: path, path: posix.join(crate, m[1].replace(/\{.*$/, "")) });
+          }
+        }
+      };
+      walk(crate);
+    }
+    expect(named.map((n) => n.path)).toEqual(
+      expect.arrayContaining(["apps/web/public/app-frame.html", "packages/core/src/miniApp.ts", "native/translation/package.json", "native/translation/dist", "native/transports/hyperdht", "Cargo.lock", "packages/core/test/vectors/turn-record.json"]),
+    );
+    for (const { file, path } of named) {
+      const isFile = (() => { try { return statSync(join(root, path)).isFile(); } catch { return false; } })();
+      expect(covers(RUST_INPUTS, isFile ? path : `${path}/any`), `${file} names ${path}`).toBe(true);
+    }
+  });
+
+  it("a ready pull request runs Tauri Backend only when it changes something the job reads", () => {
+    const ready = { draft: false };
+    for (const file of ["apps/ui/src/App.tsx", "packages/core/src/invite.ts", "docs/TESTING.md", "native/README.md", "tools/scripts/merge-train.mjs"]) expect(plan([file], ready).rust, file).toBe(false);
+    for (const file of ["apps/desktop/src/clipboard.rs", "native/transports/src/lib.rs", "Cargo.lock", "Cargo.toml", "apps/web/public/app-frame.html", "packages/core/src/miniApp.ts", "native/translation/protocol.mjs", "packages/core/test/vectors/turn-record.json", ".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]) {
+      expect(plan(["apps/ui/src/App.tsx", file], ready).rust, file).toBe(true);
+    }
+    expect(plan(["apps/ui/src/App.tsx"], ready).why).toContain("Nothing the Rust job reads changed: Tauri Backend skipped");
+  });
+
+  it("a draft runs it for what the crates read, but not for a change to the workflow alone", () => {
+    expect(plan(["packages/core/src/miniApp.ts"], { draft: true }).rust).toBe(true);
+    expect(plan([".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"], { draft: true }).rust).toBe(false);
+  });
+});
+
 describe("plan", () => {
   const ready = { draft: false };
   const draft = { draft: true };
 
-  it("an app change skips the website and runs the Desktop jobs", () => {
-    expect(plan(["apps/ui/src/components/ChatRow.tsx", "packages/browser/src/engine.ts"], ready)).toMatchObject({ rust: true, website: false, app: true });
+  it("an app change skips the website and Tauri Backend, and runs the Desktop jobs", () => {
+    expect(plan(["apps/ui/src/components/ChatRow.tsx", "packages/browser/src/engine.ts"], ready)).toMatchObject({ rust: false, website: false, app: true });
   });
 
   it("a site change runs the website and skips the Desktop jobs", () => {
@@ -93,7 +138,7 @@ describe("plan", () => {
   });
 
   it("a ready pull request runs the full tier, whatever it changes", () => {
-    expect(plan(["apps/ui/src/App.tsx"], ready)).toMatchObject({ rust: true, full: true, affected: false, packages: true, app: true });
+    expect(plan(["apps/ui/src/App.tsx"], ready)).toMatchObject({ rust: false, full: true, affected: false, packages: true, app: true });
     expect(plan([".github/workflows/ci.yml"], ready)).toMatchObject({ rust: true, website: true, website_e2e: true, app: true, packages: true, full: true, affected: false });
   });
 
@@ -104,9 +149,10 @@ describe("plan", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft)).toMatchObject({ ...fast, rust: false, website: false });
   });
 
-  it("only a draft skips the Rust jobs, unless it changed Rust", () => {
+  it("draft or ready, the Rust jobs run only when Rust changed", () => {
     expect(plan(["apps/ui/src/App.tsx"], draft).rust).toBe(false);
-    expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(true);
+    expect(plan(["apps/ui/src/App.tsx"], ready).rust).toBe(false);
+    expect(plan(["apps/desktop/src/lib.rs"], ready).rust).toBe(true);
     expect(plan(["apps/desktop/src/lib.rs"], draft).rust).toBe(true);
     expect(plan(["Cargo.lock"], draft).rust).toBe(true);
   });
