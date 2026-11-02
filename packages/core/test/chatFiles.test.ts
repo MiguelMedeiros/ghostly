@@ -483,6 +483,61 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(state(w.a, "out", "week-003")).toBe("failed");
   });
 
+  it("an offer still asked about that the sender cancelled or deleted while the receiver was away: back, Accept goes", async () => {
+    const w = wire();
+    w.b.decide = async () => "ask";
+    w.attach();
+    for (const id of ["askgone-1", "askgone-2", "askkeep-1"]) send(w, file(id, 40 * 1024 * 1024));
+    await until(() => ["askgone-1", "askgone-2", "askkeep-1"].every((id) => state(w.b, "in", id) === "asking"));
+    w.drop();
+    w.restart("b");
+    w.a.files.cancel("out", "askgone-1");
+    w.a.files.forget("out", "askgone-2");
+    w.attach();
+    await until(() => state(w.b, "in", "askgone-1") === "cancelled" && state(w.b, "in", "askgone-2") === "cancelled");
+    expect(w.b.records.get("in:askgone-2")?.error).toBe("Cancelled by the sender");
+    // One the sender still offers is still asked about, on both sides.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(w.b.files.get("in", "askkeep-1")?.state).toBe("asking");
+    expect(w.a.files.get("out", "askkeep-1")?.state).toBe("asking");
+  });
+
+  it("an offer that expires on the sender's side first, while the session is open, ends on the receiver's too", async () => {
+    let now = 1_000;
+    const w = wire();
+    w.b.decide = async () => "ask";
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    // Offered while the receiver was away: its week begins when the offer arrives, a day after the sender's.
+    w.drop();
+    send(w, file("week-004", 40 * 1024 * 1024));
+    now += 24 * 60 * 60 * 1000;
+    w.attach();
+    await until(() => state(w.b, "in", "week-004") === "asking");
+    now += FILE_LIMITS.offerTtlMs - 24 * 60 * 60 * 1000 + 1;
+    // While the session is open, the sender's sweep says it.
+    w.a.files.sweep();
+    expect(state(w.a, "out", "week-004")).toBe("failed");
+    await until(() => state(w.b, "in", "week-004") === "cancelled");
+  });
+
+  it("an offer that expired on the sender's side while the receiver was away: back, Accept goes", async () => {
+    let now = 1_000;
+    const w = wire();
+    w.b.decide = async () => "ask";
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    w.drop();
+    send(w, file("week-006", 40 * 1024 * 1024));
+    now += 24 * 60 * 60 * 1000;
+    w.attach();
+    await until(() => state(w.b, "in", "week-006") === "asking");
+    w.drop();
+    now += FILE_LIMITS.offerTtlMs - 24 * 60 * 60 * 1000 + 1;
+    w.a.files.sweep();
+    expect(state(w.a, "out", "week-006")).toBe("failed");
+    w.attach();
+    await until(() => state(w.b, "in", "week-006") === "cancelled");
+  });
+
   it("the sender pauses, then cancels while the receiver is away: back, the receiver hears it ended and drops what it had", async () => {
     const w = wire();
     w.attach();
