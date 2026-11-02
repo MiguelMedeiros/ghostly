@@ -62,7 +62,9 @@ test("a mint that is not a mint is refused with a reason, and nothing is added",
     await expect(page.getByTestId("wallet-error")).toHaveText(reason);
     await expect(rows).toHaveCount(before);
     await expect(field, "what was typed stays, to be corrected").toHaveValue(url);
-    await expect(page.getByTestId("wallet-mints")).not.toContainText(url.replace(/^https?:\/\//, ""));
+    // The reason is said by the field, in the Mints section, and may name the mint: no row does.
+    await expect(page.getByTestId("wallet-mints").getByTestId("wallet-error")).toBeVisible();
+    await expect(rows.filter({ hasText: url.replace(/^https?:\/\//, "") })).toHaveCount(0);
   };
   await refused("not a url", /not a valid mint URL/);
   await refused("http://mint.example.com", /Mints must use https/);
