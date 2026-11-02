@@ -1,7 +1,7 @@
 import { DiscoveryBudgetError, identityFromSeedB64, type GhostRecord } from "@ghostly/core";
 import { Groups, meshEdgeScale, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { COMMUNITY_TIMINGS, type CommunityTimings } from "../src/engine/community";
-import type { StoredGroup, StoredMessage } from "../src/shared/types";
+import type { GroupLive, StoredGroup, StoredMessage } from "../src/shared/types";
 
 /**
  * Headless peers running the real group engine (`Groups` → `Communities` → `CommunitySession`),
@@ -129,13 +129,19 @@ export function sameRun(world: CommunityWorld, seed: number, start = Date.UTC(20
   };
 }
 
+/** With the private groups' small rows (`GroupLive`), as the engine's database keeps them. */
 function memoryStore(messages: StoredMessage[]): GroupStore {
-  const groups = new Map<string, StoredGroup>();
+  const groups = new Map<string, StoredGroup>(), live = new Map<string, GroupLive>();
   return {
     getGroups: async () => [...groups.values()].map(g => structuredClone(g)),
-    putGroup: async g => { groups.set(g.id, structuredClone(g)); },
-    deleteGroup: async id => { groups.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
+    putGroup: async (g, row) => {
+      groups.set(g.id, structuredClone(g));
+      if (row) live.set(g.id, structuredClone(row)); else if (row === null) live.delete(g.id);
+    },
+    deleteGroup: async id => { groups.delete(id); live.delete(id); for (let i = messages.length - 1; i >= 0; i--) if (messages[i].linkId === `group:${id}`) messages.splice(i, 1); },
     getMessages: async linkId => messages.filter(m => m.linkId === linkId).sort((a, b) => a.timestamp - b.timestamp),
+    getGroupLive: async () => structuredClone(live),
+    putGroupLive: async (id, row) => { live.set(id, structuredClone(row)); },
   };
 }
 

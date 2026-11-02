@@ -1,7 +1,7 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, STORES, fileStore, store, wrap, committed, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, GROUP_LIVE_RANGE, STORES, fileStore, groupLiveKey, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
-import type { MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
+import type { GroupLive, MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
 /**
  * The newest `count` rows of an index range, newest first: one descending read where IndexedDB has it (the options
@@ -320,12 +320,29 @@ export const db = {
   async getGroups(): Promise<StoredGroup[]> {
     return wrap((await store(STORES.groups, "readonly")).getAll());
   },
-  async putGroup(group: StoredGroup): Promise<void> {
-    await committed((await store(STORES.groups, "readwrite")).put(group));
+  /** `live`: the group's small row (`GroupLive`) in the same transaction, or `null` to delete it. */
+  async putGroup(group: StoredGroup, live?: GroupLive | null): Promise<void> {
+    if (live === undefined) { await committed((await store(STORES.groups, "readwrite")).put(group)); return; }
+    const tx = (await openDb()).transaction([STORES.groups, STORES.settings], "readwrite");
+    tx.objectStore(STORES.groups).put(group);
+    const settings = tx.objectStore(STORES.settings);
+    if (live) await committed(settings.put(live, groupLiveKey(group.id)));
+    else await committed(settings.delete(groupLiveKey(group.id)));
+  },
+  /** Every private group's small row, by group id. */
+  async getGroupLive(): Promise<Map<string, GroupLive>> {
+    const settings = await store(STORES.settings, "readonly");
+    const [keys, rows] = await Promise.all([wrap(settings.getAllKeys(GROUP_LIVE_RANGE())), wrap(settings.getAll(GROUP_LIVE_RANGE()))]);
+    return new Map(keys.map((key, i) => [String(key).slice(groupLiveKey("").length), rows[i] as GroupLive]));
+  },
+  async putGroupLive(groupId: string, live: GroupLive): Promise<void> {
+    await committed((await store(STORES.settings, "readwrite")).put(live, groupLiveKey(groupId)));
   },
   /** The group and its history. */
   async deleteGroup(groupId: string): Promise<void> {
-    await committed((await store(STORES.groups, "readwrite")).delete(groupId));
+    const tx = (await openDb()).transaction([STORES.groups, STORES.settings], "readwrite");
+    tx.objectStore(STORES.groups).delete(groupId);
+    await committed(tx.objectStore(STORES.settings).delete(groupLiveKey(groupId)));
     // By key range, as a chat's (`deleteLink`): one request, not one per message of a long group.
     const link = `group:${groupId}`;
     await committed((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([link], [link, []])));
