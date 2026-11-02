@@ -419,8 +419,11 @@ export class EventHub {
         const key = `${link.id}:${identity.id}`, shape = identity.status, before = this.received.get(key);
         this.received.set(key, shape);
         if (quiet || before === shape) continue;
-        this.emit(before === undefined ? "identity.received" : "identity.status", `identity.${before === undefined ? "received" : "status"}:${key}:${shape}`, {
-          chat: link.id, identity: { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified },
+        // A proof can come back to a status it had (a record removed and restored, a re-share after a withdraw): each
+        // change is a new fact, so its id carries the time and the sequence, as a typing change does.
+        const id = before === undefined ? `identity.received:${key}:${shape}` : `identity.status:${key}:${shape}:${this.now()}:${this.seq + 1}`;
+        this.emit(before === undefined ? "identity.received" : "identity.status", id, {
+          chat: link.id, identity: { id: identity.id, provider: identity.provider, subject: identity.subject, status: identity.status, verified: identity.verified, error: identity.error ?? null },
         });
       }
     }
