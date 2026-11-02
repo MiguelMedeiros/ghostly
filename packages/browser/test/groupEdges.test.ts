@@ -70,6 +70,11 @@ describe("edgeView: how a group's edge to one member is doing", () => {
     // Live, then the member's app closed three days ago: last seen then, not "Reconnecting…" (and a pulsing icon) for good.
     expect(edgeView(live({ link, lastSyncAt: at - days, presence: { lastPacketAt: at - days } }), at)).toEqual({ linkId: "edge-1", state: "waiting", lastSeenAt: at - days });
     expect(edgeView(live({ link, stored: { id: "edge-1", edgeLive: true }, lastSyncAt: 0, presence: { lastPacketAt: at - days } }), at)).not.toHaveProperty("reconnecting");
+    // Back after a restart and no packet read since (the relays keep none of an app closed that long): the resume's
+    // window, then not dialled, so not reconnecting either.
+    const restarted = { link, stored: { id: "edge-1", edgeLive: true }, lastSyncAt: 0, edgeStartedAt: at };
+    expect(edgeView(live(restarted), at + 5_000)).toMatchObject({ reconnecting: true });
+    expect(edgeView(live(restarted), at + 11 * 60_000)).toEqual({ linkId: "edge-1", state: "waiting", lastSeenAt: 0 });
     // Within the window (10 minutes) it still is: a member who dropped a minute ago, or whose packet is fresh.
     expect(edgeView(live({ link, lastSyncAt: at - 60_000 }), at)).toMatchObject({ reconnecting: true, attempt: 4 });
     expect(edgeView(live({ link, lastSyncAt: at - days, presence: { lastPacketAt: at - 5_000 } }), at)).toMatchObject({ reconnecting: true });

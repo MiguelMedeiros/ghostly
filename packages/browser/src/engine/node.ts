@@ -368,6 +368,8 @@ interface LiveLink {
   entryDone?: boolean;
   /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
   edgeSessionNoted?: boolean;
+  /** A group's edge: when its link started in this run (`startEdge`), which a resume's "Reconnecting…" is bounded by (`edgeView`). */
+  edgeStartedAt?: number;
   /** A private group's edge: its Pkarr transport, which members carry packets for (WISP 902 § Signaling through members). */
   carried?: CarriedTransport;
   /**
@@ -7603,6 +7605,7 @@ export class GhostlyNode implements EngineImplementation {
     const resumeOn: PairedTransport | undefined = native
       ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
+    live.edgeStartedAt = Date.now();
     // A private group's edge signals through members that reach both ends, beside the relays (WISP 902 § Signaling through members).
     live.carried?.stop();
     live.carried = entry || this.groups.isCommunityGroup(group) ? undefined : new CarriedTransport(this.groupTransport, live.myPubKeyZ32, stored.peerPubKeyZ32, {
