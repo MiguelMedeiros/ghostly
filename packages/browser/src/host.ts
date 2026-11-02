@@ -81,8 +81,9 @@ export interface BrowserHost {
   openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
   /**
    * Erases what the contacts' apps opened from one chat (`tag`, as `openService` was given it) or by one profile
-   * (`profile`, its id) kept on this device: their origins' storage, caches and worker. Left out where the host keeps
-   * none of it in the page's browser (the web app's origins are its own; Desktop and the extension name theirs apart).
+   * (`profile`, its id) kept on this device: their origins' storage, caches and worker. The web app clears its own
+   * origins, Desktop has Rust clear its viewers' (`forget_service_origins`); left out by the extension, which names
+   * theirs apart.
    */
   forgetServices?(which: { tag: string } | { profile: string }): Promise<void>;
   /**
