@@ -155,10 +155,14 @@ export interface TransportOption {
   relayed?: boolean;
 }
 
-/** Why this app lacks a transport, and how to get it where there is a way. */
-function missing(transport: PairedTransport, tr: Translate): string {
+/**
+ * Why this app lacks a transport, and how to get it where there is a way. Iroh this app runs (the web on its Iroh
+ * relays) that did not start is not lacking: its relays in Settings, Network are where to look.
+ */
+function missing(transport: PairedTransport, link: OwnTransports, tr: Translate): string {
   if (transport === "webrtc/1") return tr("connection.option.noWebrtc");
   if (transport === "hyperdht/1") return tr("connection.option.hyperdhtNeeds");
+  if (link.runnableTransports?.includes(transport)) return tr("connection.option.relayUnreached", { transport: name(transport) });
   return tr("connection.option.needsDesktop", { transport: name(transport) });
 }
 
@@ -181,7 +185,7 @@ export function transportOptions(link: OwnTransports & Pick<LinkView, "peerTrans
   return MENU_ORDER.map(transport => {
     const error = link.transportErrors?.[transport];
     // The engine's error in a few words of the app's language, as the line below the choices says it; its next step stays there.
-    if (!mine.includes(transport)) return { transport, available: false, reason: error ? shortReason(error, tr) : missing(transport, tr) };
+    if (!mine.includes(transport)) return { transport, available: false, reason: error ? shortReason(error, tr) : missing(transport, link, tr) };
     if (theirs && !theirs.includes(transport)) return { transport, available: false, reason: tr("connection.option.contactLacks", { transport: name(transport) }) };
     return { transport, available: true, ...(link.relayedTransports?.includes(transport) ? { relayed: true } : {}) };
   });
