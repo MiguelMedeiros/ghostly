@@ -9,6 +9,8 @@ import {
   sanitizeMime,
   parseVideoMeta,
   readImageMeta,
+  NO_PICTURE_METADATA,
+  withoutPictureMetadata,
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
@@ -90,6 +92,21 @@ async function copying<T>(copy: Promise<T>): Promise<T> {
   try { return await copy; } catch (error) {
     throw new Error(noRoom(error) ? "Not enough space on this device to send it" : `Could not read the file: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
+}
+/**
+ * A file as it is sent: a picture without its metadata (where it was taken, the device, the time), under the name and
+ * type it was picked with, before its size is read and its digest computed. A picture whose metadata cannot be removed
+ * is refused (`NO_PICTURE_METADATA`), never sent as it was.
+ */
+async function sendable(source: File): Promise<File> {
+  let stripped: Blob | undefined;
+  try {
+    stripped = await withoutPictureMetadata(source, sanitizeMime(source.type));
+  } catch (error) {
+    if (error instanceof Error && error.message === NO_PICTURE_METADATA) throw error;
+    return copying(Promise.reject(error));
+  }
+  return stripped ? new File([stripped], source.name, { type: source.type, lastModified: source.lastModified }) : source;
 }
 
 /**
@@ -361,13 +378,14 @@ export const servicesPlatform: ServicesPlatform | null = {
     return null;
   },
 
-  async sendFile(peerPubKeyZ32, source, options) {
+  async sendFile(peerPubKeyZ32, picked, options) {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
     // Refused only by a live contact that takes no files: while not live, the peer keeps it and sends it when live.
     if (link.profile && !link.capabilities?.files && link.dataLink === "open") throw new Error("Connect to an updated peer to send files");
-    const tooLarge = servicesPlatform!.fileTooLarge!(peerPubKeyZ32, source.size);
+    const tooLarge = servicesPlatform!.fileTooLarge!(peerPubKeyZ32, picked.size);
     if (tooLarge) throw new Error(tooLarge);
+    const source = options?.voice || options?.video ? picked : await sendable(picked);
 
     const wireId = toBase64Url(randomBytes(12));
     // A reply (WISP 400 § Replies) goes with the file as it goes with a text: the engine keeps it and sends it along.
@@ -436,14 +454,15 @@ export const servicesPlatform: ServicesPlatform | null = {
     });
     return { timestamp, file };
   },
-  async sendGroupFile(groupId, source, options) {
-    if (source.size > GROUP_FILE_LIMITS.maxBytes) throw new Error(`A group takes files of up to ${formatFileSize(GROUP_FILE_LIMITS.maxBytes)}`);
-    if (!source.size) throw new Error("An empty file cannot go to a group");
+  async sendGroupFile(groupId, picked, options) {
+    if (picked.size > GROUP_FILE_LIMITS.maxBytes) throw new Error(`A group takes files of up to ${formatFileSize(GROUP_FILE_LIMITS.maxBytes)}`);
+    if (!picked.size) throw new Error("An empty file cannot go to a group");
     // A file the group would refuse anyway (its files of the minute are taken, or this profile is not in it) is refused
     // before any of it is read or kept: up to 100 MiB would be copied in and hashed, then deleted. The announcement
     // checks again.
     const check = await engine.call("groupFileCheck", { groupId });
     if (check.error) throw new Error(check.error);
+    const source = options?.voice || options?.video ? picked : await sendable(picked);
     const mime = sanitizeMime(source.type);
     const image = options?.voice || options?.video ? undefined : await readImageMeta(source, mime);
     const file = {

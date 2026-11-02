@@ -135,6 +135,8 @@ const RULES: readonly Rule[] = [
   exact("Connect to an updated peer to send files", "errors.files.updatedPeerToSend"),
   exact("Connect to an updated peer first", "errors.files.updatedPeerFirst"),
   exact("That recording cannot be sent as a voice message", "errors.files.notVoice"),
+  // A picture whose metadata could not be removed, refused before it is sent (packages/core pictureMetadata.ts).
+  exact("This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", "errors.files.pictureMetadata", "errors.files.pictureMetadataNext"),
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },

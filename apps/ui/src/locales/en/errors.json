@@ -185,6 +185,8 @@
     "pasteLate": "What you pasted could not be added just now. Paste it again when you are done here.",
     "pasteTooLarge": "That is too large to paste. Send it with + → Document.",
     "pasteUnreadable": "Could not paste those files. Send them with + → Document.",
+    "pictureMetadata": "This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken",
+    "pictureMetadataNext": "Send a screenshot of it, or save a copy in a photo editor and send that.",
     "refused": {
       "damaged": "The file arrived damaged",
       "expired": "Not accepted in time",

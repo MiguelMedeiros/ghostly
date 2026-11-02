@@ -185,6 +185,8 @@
     "pasteLate": "Não foi possível adicionar agora o que você colou. Cole de novo quando terminar.",
     "pasteTooLarge": "Isso é grande demais para colar. Envie com + → Documento.",
     "pasteUnreadable": "Não foi possível colar esses arquivos. Envie-os com + → Documento.",
+    "pictureMetadata": "Esta imagem não pode ser enviada: o Ghostly não conseguiu remover os dados guardados nela, como o lugar onde foi tirada",
+    "pictureMetadataNext": "Envie uma captura de tela dela, ou salve uma cópia num editor de fotos e envie essa.",
     "refused": {
       "damaged": "O arquivo chegou danificado",
       "expired": "Não foi aceito a tempo",

@@ -1,0 +1,312 @@
+/**
+ * What a picture leaves with. A photo's file says more than its pixels: its Exif and XMP hold where it was taken, the
+ * device, the time, often a thumbnail of the uncropped original. The sender removes them before the file is stored and
+ * its digest computed, so what the contact (or anyone in a community) receives is the picture alone: JPEG, PNG, WebP
+ * and HEIF (HEIC, AVIF), without decoding or re-encoding a pixel.
+ *
+ * Fail-closed: a file that is one of these pictures, by its bytes or by its type, and whose metadata cannot be removed
+ * (truncated, malformed, a part this does not know) is refused with `NO_PICTURE_METADATA`, never sent as it was. Any
+ * other file goes as it is.
+ */
+import { exifOrientation } from "./image";
+
+export const PICTURE_METADATA_LIMITS = {
+  /** The largest picture read whole to remove its metadata: past this it is refused. */
+  maxBytes: 256 * 1024 * 1024,
+  /** Bytes read first to tell a picture from another file. */
+  headBytes: 64,
+} as const;
+
+/** Why a picture is refused: its metadata could not be removed, so it does not go at all. */
+export const NO_PICTURE_METADATA = "This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken";
+
+/** The types of the pictures stripped here: a file of one of them whose bytes are not that picture is refused. */
+const STRIPPED_TYPES = new Set([
+  "image/jpeg", "image/jpg", "image/pjpeg", "image/png", "image/apng", "image/webp",
+  "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "image/avif",
+]);
+
+/** HEIF brands (HEIC, AVIF, the generic `mif1`): an MP4 video's `ftyp` names none of them. */
+const HEIF_BRANDS = new Set(["heic", "heix", "heim", "heis", "hevc", "hevx", "mif1", "mif2", "msf1", "avif", "avis"]);
+
+type Kind = "jpeg" | "png" | "webp" | "heif";
+
+const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
+const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
+const u32le = (b: Uint8Array, at: number) => (b[at]! | (b[at + 1]! << 8) | (b[at + 2]! << 16) | (b[at + 3]! << 24)) >>> 0;
+const text = (b: Uint8Array, at: number, length: number) => String.fromCharCode(...b.subarray(at, at + length));
+const starts = (b: Uint8Array, at: number, prefix: string) => at + prefix.length <= b.length && text(b, at, prefix.length) === prefix;
+
+/** A picture this strips, by its first bytes. */
+function kindOf(b: Uint8Array): Kind | undefined {
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpeg";
+  if (b.length >= 8 && b[0] === 0x89 && starts(b, 1, "PNG\r\n\x1a\n")) return "png";
+  if (b.length >= 12 && starts(b, 0, "RIFF") && starts(b, 8, "WEBP")) return "webp";
+  if (b.length >= 16 && starts(b, 4, "ftyp")) {
+    const end = Math.min(b.length, u32be(b, 0));
+    for (let at = 8; at + 4 <= end; at += 4) if (at !== 12 && HEIF_BRANDS.has(text(b, at, 4))) return "heif";
+  }
+  return undefined;
+}
+
+/** Refuses the picture where its bytes are not what this expects. */
+function check(ok: boolean): asserts ok {
+  if (!ok) throw new Error(NO_PICTURE_METADATA);
+}
+
+// JPEG: the segments that draw the picture stay (frames, tables, scans, restart intervals, JFIF, the ICC profile,
+// Adobe's colour transform) and the camera's Orientation, alone in an Exif of its own; every other APPn (Exif, XMP,
+// IPTC, MPF), comments, and whatever follows the image's end (a gain map, a motion photo's video) go. As Android's
+// Camera strips its photos (CameraPhoto.kt).
+
+/** SOFn markers: every frame type but DHT (C4), JPG (C8) and DAC (CC). */
+const JPEG_FRAME = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+
+function jpegKeeps(marker: number, b: Uint8Array, payload: number): boolean {
+  if ((marker >= 0xc0 && marker <= 0xcf) || (marker >= 0xda && marker <= 0xdf)) return true;
+  if (marker === 0xe0) return starts(b, payload, "JFIF\0");
+  if (marker === 0xe2) return starts(b, payload, "ICC_PROFILE\0");
+  if (marker === 0xee) return starts(b, payload, "Adobe");
+  return false;
+}
+
+/** An APP1 Exif, big-endian, whose IFD0 holds `orientation` alone. */
+const orientationOnly = (orientation: number) => Uint8Array.of(
+  0xff, 0xe1, 0, 34, 0x45, 0x78, 0x69, 0x66, 0, 0, 0x4d, 0x4d, 0, 42, 0, 0, 0, 8,
+  0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, orientation, 0, 0, 0, 0, 0, 0,
+);
+
+function stripJpeg(b: Uint8Array): Uint8Array[] {
+  const parts = [b.subarray(0, 2)];
+  let at = 2, framed = false, scanned = false, exif = false;
+  for (;;) {
+    check(at < b.length && b[at] === 0xff);
+    while (at < b.length && b[at] === 0xff) at++;
+    check(at < b.length);
+    const marker = b[at++]!;
+    if (marker === 0xd9) {
+      check(framed && scanned);
+      parts.push(Uint8Array.of(0xff, 0xd9));
+      return parts;
+    }
+    // TEM and restarts stand alone.
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { parts.push(Uint8Array.of(0xff, marker)); continue; }
+    check(marker !== 0x00 && marker !== 0xd8 && at + 2 <= b.length);
+    const length = u16be(b, at);
+    check(length >= 2 && at + length <= b.length);
+    if (jpegKeeps(marker, b, at + 2)) {
+      parts.push(Uint8Array.of(0xff, marker), b.subarray(at, at + length));
+      if (JPEG_FRAME.has(marker)) framed = true;
+    } else if (marker === 0xe1 && !scanned && !exif && starts(b, at + 2, "Exif\0\0")) {
+      exif = true;
+      const orientation = exifOrientation(b, at + 8, at + length);
+      if (orientation >= 2) parts.push(orientationOnly(orientation));
+    }
+    at += length;
+    if (marker !== 0xda) continue;
+    check(framed);
+    scanned = true;
+    // The scan's image data, where FF 00 is a data byte and FF D0 to D7 a restart, up to the marker that ends it.
+    let end = at;
+    for (;;) {
+      end = b.indexOf(0xff, end);
+      check(end >= 0);
+      let next = end + 1;
+      while (next < b.length && b[next] === 0xff) next++;
+      check(next < b.length);
+      if (b[next] !== 0x00 && !(b[next]! >= 0xd0 && b[next]! <= 0xd7)) break;
+      end = next + 1;
+    }
+    parts.push(b.subarray(at, end));
+    at = end;
+  }
+}
+
+// PNG: the critical chunks and the ancillary ones that change how it is drawn (transparency, colour, animation)
+// stay; text (tEXt, iTXt, zTXt), eXIf, tIME and every other chunk go, and anything after IEND.
+
+const PNG_CRITICAL = new Set(["IHDR", "PLTE", "IDAT", "IEND"]);
+const PNG_DRAWS = new Set(["tRNS", "gAMA", "cHRM", "sRGB", "iCCP", "sBIT", "bKGD", "pHYs", "cICP", "mDCV", "cLLI", "acTL", "fcTL", "fdAT"]);
+
+function stripPng(b: Uint8Array): Uint8Array[] {
+  const parts = [b.subarray(0, 8)];
+  let at = 8;
+  for (;;) {
+    check(at + 12 <= b.length);
+    const length = u32be(b, at), type = text(b, at + 4, 4);
+    check(at + 12 + length <= b.length && (at > 8 || type === "IHDR"));
+    // A critical chunk this does not know (its first letter upper case) may hold anything a decoder needs.
+    const critical = (b[at + 4]! & 0x20) === 0;
+    check(!critical || PNG_CRITICAL.has(type));
+    if (critical || PNG_DRAWS.has(type)) parts.push(b.subarray(at, at + 12 + length));
+    at += 12 + length;
+    if (type === "IEND") return parts;
+  }
+}
+
+// WebP: the image, its alpha, animation and ICC profile stay; EXIF, XMP and unknown chunks go, and VP8X no longer
+// says it has them.
+
+const WEBP_KEEPS = new Set(["VP8 ", "VP8L", "VP8X", "ALPH", "ANIM", "ANMF", "ICCP"]);
+
+function stripWebp(b: Uint8Array): Uint8Array[] {
+  check(b.length >= 20);
+  const riffEnd = 8 + u32le(b, 4);
+  check(riffEnd <= b.length && riffEnd % 2 === 0);
+  const parts: Uint8Array[] = [];
+  let at = 12, size = 4, drawn = false;
+  while (at < riffEnd) {
+    check(at + 8 <= riffEnd);
+    const type = text(b, at, 4), length = u32le(b, at + 4), end = at + 8 + length + (length & 1);
+    check(end <= riffEnd && (at > 12 || type === "VP8 " || type === "VP8L" || type === "VP8X"));
+    if (WEBP_KEEPS.has(type)) {
+      let chunk = b.subarray(at, end);
+      if (type === "VP8X") {
+        check(length >= 10);
+        // Its flags: EXIF (0x08) and XMP (0x04) are gone.
+        chunk = chunk.slice();
+        chunk[8] = chunk[8]! & ~0x0c;
+      }
+      if (type === "VP8 " || type === "VP8L" || type === "ANMF") drawn = true;
+      parts.push(chunk);
+      size += chunk.length;
+    }
+    at = end;
+  }
+  check(drawn);
+  const header = new Uint8Array(12);
+  header.set(b.subarray(0, 12));
+  new DataView(header.buffer).setUint32(4, size, true);
+  return [header, ...parts];
+}
+
+// HEIF (HEIC, AVIF): its Exif and XMP are items of the `meta` box whose bytes sit elsewhere in the file. They are
+// overwritten with zeros where they are, so no offset in the file moves. A part this does not know, at the top or in
+// `meta` (a video track, an XML box, a `uuid` box), refuses the picture.
+
+const HEIF_TOP = new Set(["ftyp", "meta", "mdat", "free", "skip"]);
+const HEIF_META = new Set(["hdlr", "dinf", "pitm", "iloc", "iinf", "iref", "iprp", "idat", "grpl", "free", "skip"]);
+/** Items that hold metadata: Exif, and XMP (or any other document) as a MIME item. */
+const HEIF_METADATA_ITEMS = new Set(["Exif", "mime", "uri "]);
+
+interface Box { type: string; start: number; body: number; end: number }
+
+function boxes(b: Uint8Array, start: number, end: number): Box[] {
+  const found: Box[] = [];
+  for (let at = start; at < end;) {
+    check(at + 8 <= end);
+    let size = u32be(b, at), body = at + 8;
+    const type = text(b, at + 4, 4);
+    if (size === 1) {
+      check(at + 16 <= end);
+      size = u32be(b, at + 8) * 2 ** 32 + u32be(b, at + 12);
+      body = at + 16;
+    } else if (size === 0) size = end - at;
+    if (type === "uuid") body += 16;
+    check(size >= body - at && at + size <= end);
+    found.push({ type, start: at, body, end: at + size });
+    at += size;
+  }
+  return found;
+}
+
+function stripHeif(b: Uint8Array): Uint8Array[] {
+  const top = boxes(b, 0, b.length);
+  check(top[0]?.type === "ftyp" && top.every((box) => HEIF_TOP.has(box.type)));
+  const metas = top.filter((box) => box.type === "meta");
+  check(metas.length === 1);
+  const meta = metas[0]!;
+  // A FullBox: version and flags first.
+  const children = boxes(b, meta.body + 4, meta.end);
+  check(children.every((box) => HEIF_META.has(box.type)));
+  const one = (type: string) => {
+    const of = children.filter((box) => box.type === type);
+    check(of.length <= 1);
+    return of[0];
+  };
+  const iinf = one("iinf"), iloc = one("iloc"), idat = one("idat");
+  check(!!iinf && !!iloc);
+
+  // The metadata items, by id.
+  const metadata = new Set<number>();
+  const infeVersion = b[iinf.body]!;
+  const entries = boxes(b, iinf.body + 4 + (infeVersion === 0 ? 2 : 4), iinf.end);
+  for (const infe of entries) {
+    check(infe.type === "infe" && infe.body + 4 <= infe.end);
+    const version = b[infe.body]!;
+    // Versions 0 and 1 have no item type: this cannot tell what they hold.
+    check(version === 2 || version === 3);
+    let at = infe.body + 4;
+    const id = version === 2 ? u16be(b, at) : u32be(b, at);
+    at += version === 2 ? 2 : 4;
+    check(at + 6 <= infe.end);
+    if (HEIF_METADATA_ITEMS.has(text(b, at + 2, 4))) metadata.add(id);
+  }
+
+  // Where their bytes are (iloc), overwritten in a copy.
+  const out = b.slice();
+  const version = b[iloc.body]!;
+  check(version <= 2);
+  let at = iloc.body + 4;
+  /** The next field of `size` bytes (0, 2, 4 or 8), big-endian. */
+  const read = (size: number): number => {
+    check(at + size <= iloc.end);
+    const value = size === 0 ? 0 : size === 2 ? u16be(b, at) : size === 4 ? u32be(b, at) : size === 8 ? u32be(b, at) * 2 ** 32 + u32be(b, at + 4) : NaN;
+    check(Number.isSafeInteger(value));
+    at += size;
+    return value;
+  };
+  const read2 = () => read(2);
+  check(at + 2 <= iloc.end);
+  const offsetSize = b[at]! >> 4, lengthSize = b[at]! & 15, baseSize = b[at + 1]! >> 4, indexSize = version > 0 ? b[at + 1]! & 15 : 0;
+  check([offsetSize, lengthSize, baseSize, indexSize].every((size) => size === 0 || size === 4 || size === 8));
+  at += 2;
+  const count = read(version < 2 ? 2 : 4);
+  for (let i = 0; i < count; i++) {
+    const id = version < 2 ? read2() : read(4);
+    const method = version > 0 ? read2() & 15 : 0;
+    const reference = read2();
+    const base = read(baseSize);
+    const extents = read2();
+    for (let e = 0; e < extents; e++) {
+      if (indexSize) read(indexSize);
+      const offset = read(offsetSize), length = read(lengthSize);
+      if (!metadata.has(id)) continue;
+      // Its bytes in this file (0) or in `idat` (1): a length of 0 (to the end) or another file, refused.
+      check(reference === 0 && length > 0 && (method === 0 || (method === 1 && !!idat)));
+      const start = (method === 1 ? idat!.body : 0) + base + offset, limit = method === 1 ? idat!.end : b.length;
+      check(start + length <= limit);
+      out.fill(0, start, start + length);
+    }
+  }
+  return [out];
+}
+
+const STRIP: Record<Kind, (b: Uint8Array) => Uint8Array[]> = { jpeg: stripJpeg, png: stripPng, webp: stripWebp, heif: stripHeif };
+
+/**
+ * A picture's bytes without its metadata, as parts to put in a Blob; undefined when the file is not a picture this
+ * strips (by its bytes and its type), so it goes as it is. Throws `NO_PICTURE_METADATA` when it is one but its
+ * metadata cannot be removed.
+ */
+export function stripPictureMetadata(bytes: Uint8Array, mime: string): Uint8Array[] | undefined {
+  const kind = kindOf(bytes);
+  if (!kind) {
+    if (STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase())) throw new Error(NO_PICTURE_METADATA);
+    return undefined;
+  }
+  return STRIP[kind](bytes);
+}
+
+/**
+ * `source` as it is sent: without its metadata when it is a picture (`stripPictureMetadata`), or undefined when it is
+ * not one and goes as it is. Only its first bytes are read for any other file. Throws `NO_PICTURE_METADATA` for a
+ * picture that cannot be stripped or is past `PICTURE_METADATA_LIMITS.maxBytes`; an error reading `source` as it is.
+ */
+export async function withoutPictureMetadata(source: Blob, mime: string): Promise<Blob | undefined> {
+  const head = new Uint8Array(await source.slice(0, PICTURE_METADATA_LIMITS.headBytes).arrayBuffer());
+  if (!kindOf(head) && !STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase())) return undefined;
+  if (source.size > PICTURE_METADATA_LIMITS.maxBytes) throw new Error(NO_PICTURE_METADATA);
+  const parts = stripPictureMetadata(new Uint8Array(await source.arrayBuffer()), mime);
+  return parts && new Blob(parts as BlobPart[], { type: mime });
+}
