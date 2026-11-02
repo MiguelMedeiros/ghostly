@@ -67,8 +67,8 @@
     "generic": "No funcionó"
   },
   "event": {
-    "admin": "{{name}} es ahora el admin",
-    "adminYou": "Ahora eres el admin",
+    "admin": "{{name}} ahora administra el grupo",
+    "adminYou": "Ahora administras el grupo",
     "created": "Grupo creado.",
     "forked": "El historial de miembros se bifurcó",
     "gone": "{{name}} ya no es miembro",
