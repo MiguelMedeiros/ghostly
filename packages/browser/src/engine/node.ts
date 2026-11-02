@@ -5532,6 +5532,25 @@ export class GhostlyNode implements EngineImplementation {
     await db.patchLink(linkId, { pinOut: undefined });
   }
 
+  /**
+   * A 1:1 chat's pin that came before its message (pinned while I was away: the pin goes as the session opens, ahead of
+   * what waited) names its row once the row is here. Only the rows that changed are read, and only while such a pin stands.
+   */
+  private async pinnedRowCame(linkId: string, ids: readonly string[]): Promise<void> {
+    const live = this.links.get(linkId), pin = live?.stored.pin;
+    if (!live || live.stored.group || !pin?.id || pin.messageId) return;
+    for (const id of new Set(ids)) {
+      const row = await db.getMessage(linkId, id);
+      if (!row || replyRef(row) !== pin.id) continue;
+      // A newer pin (or unpin) taken meanwhile is left as it is.
+      if (live.stored.pin !== pin) return;
+      live.stored = { ...live.stored, pin: { ...pin, messageId: row.id } };
+      await db.patchLink(linkId, { pin: live.stored.pin });
+      this.emitState();
+      return;
+    }
+  }
+
   /** A pin that came, as it is kept: who pinned, and its row when it is here. */
   private async pinCame(chat: string, by: string, pin: WirePin): Promise<StoredPin> {
     const row = await pinnedRow(this.pinsHost, chat, pin.id);
@@ -8866,6 +8885,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
     this.chatSearch.changed(linkId);
+    await this.pinnedRowCame(linkId, ids);
     // The chat list's reaction line quotes its message: an edit of that message changes the quote too, and a delete (here
     // or for everyone) takes the line back to the reaction before it that still stands.
     const reacted = this.reactionNotes.get(linkId);
