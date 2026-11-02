@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -129,12 +129,22 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   // shows), and reads the turn first. That word can be lost, and this screen would otherwise wait for it for good.
   const released = view?.role === "giver" && view.step === "switching";
   const running = !!view && view.step !== "failed" && view.step !== "offer" && !released;
+  // Use here started a move: its button, which the dialog gives the focus back to, leaves while the move runs. The keyboard
+  // focus goes to the move (its Cancel, else its steps), not to the page; a move that stops there says why in those steps.
+  const box = useRef<HTMLDivElement>(null);
+  const [follow, setFollow] = useState(false);
+  useEffect(() => {
+    if (!follow || !running) return;
+    setFollow(false);
+    if (document.activeElement && document.activeElement !== document.body) return;
+    (box.current?.querySelector<HTMLElement>('[data-testid="handoff-cancel"]') ?? box.current?.querySelector<HTMLElement>('[data-testid="handoff-progress"]'))?.focus();
+  }, [follow, running]);
   if (!view && gate.state === "releasing") return null;
   // Not while the new device list waits for an answer: "If this list looks wrong, do not use this device". A replaced
   // device takes the profile back the same way (WISP 06 § User experience): what only it holds stays, in Data and storage.
   const useHere = (gate.state === "standby" || gate.state === "superseded") && !gate.notice && !running && view?.step !== "offer";
   return (
-    <div className="space-y-3" data-testid="handoff-standby">
+    <div ref={box} className="space-y-3" data-testid="handoff-standby">
       {view?.step === "offer" && <div className={PANEL}><HandoffOffer view={view} /></div>}
       {view && view.step !== "offer" && <div className={PANEL}><HandoffProgress view={view} onCancel={() => engine.call("deviceHandoffCancel")} /></div>}
       {!view && gate.state === "taking" && <p data-testid="handoff-line" className="text-sm text-text-secondary">{t("devices.handoff.step.settling")}</p>}
@@ -143,8 +153,8 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
         <Actions><button type="button" data-testid="handoff-settle-retry" onClick={() => void engine.call("deviceHandoffSettle").catch(() => {})} className={SCREEN_BUTTON}>{t("devices.handoff.tryAgain")}</button></Actions>
       )}
       {/* After a move that failed, the same button starts it again: the files already copied are not sent twice. */}
-      {useHere && <Actions><button type="button" data-testid="handoff-use-here" onClick={() => setAsking(true)} className={SCREEN_BUTTON}>{view?.step === "failed" ? t("devices.handoff.tryAgain") : t("devices.handoff.useHere")}</button></Actions>}
-      {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => {}} />}
+      {useHere && <Actions><button type="button" data-testid="handoff-use-here" onClick={() => { setFollow(false); setAsking(true); }} className={SCREEN_BUTTON}>{view?.step === "failed" ? t("devices.handoff.tryAgain") : t("devices.handoff.useHere")}</button></Actions>}
+      {asking && <UseHereDialog device={device} onClose={() => setAsking(false)} onStarted={() => setFollow(true)} />}
     </div>
   );
 }
