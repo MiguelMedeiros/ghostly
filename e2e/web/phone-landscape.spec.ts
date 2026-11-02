@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { chat, expect, say, test } from "../support/fixtures";
 import { iosKeyboard, keyboard } from "../support/keyboard";
 import { pair } from "../support/paired";
+import { optionsOf } from "../support/select";
 
 /**
  * A phone on its side (iPhone 17: 874 by 402, the Dynamic Island 62px into one end, the home indicator 20px
@@ -118,4 +119,29 @@ test("a phone on its side: a list pulled down at its top does not pull the page"
   // With a mouse, the browser keeps its own (a trackpad's bounce and swipe back).
   await expect(desktop.page.locator(".two-pane")).toBeVisible();
   expect(await overscroll(desktop.page)).toEqual(["auto", "auto"]);
+});
+
+test("a phone on its side: an open select's list stays clear of the notch", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
+  // Settings → Language sits at the right end, by the notch: its list kept only the 8px edge and ran 30px into it, the
+  // chosen option's ✓ under the Dynamic Island.
+  const { page } = await peer("select-side", { mobile: true, viewport: LANDSCAPE });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { left: SIDE, right: SIDE, top: 0, bottom: HOME } });
+  await page.goto("/#/settings/appearance");
+  const select = page.getByTestId("settings-language");
+  // Scrolled to it by hand, as a person does: the page stops bringing Appearance back to the top as it loads.
+  await expect(select).toBeVisible();
+  const pane = (await page.locator("[data-page-body]").boundingBox())!;
+  await page.mouse.move(pane.x + pane.width / 2, pane.y + pane.height / 2);
+  await page.mouse.wheel(0, 150);
+  await expect(select).toBeInViewport({ ratio: 1 });
+  const options = await optionsOf(select);
+  const list = page.locator(`[id="${await select.getAttribute("aria-controls")}"]`);
+  await expect(list).toHaveAttribute("data-placement", /.+/);
+  await expect(list).toBeVisible();
+  const box = (await list.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(SIDE);
+  expect(box.x + box.width).toBeLessThanOrEqual(LANDSCAPE.width - SIDE);
+  expect(box.y + box.height).toBeLessThanOrEqual(LANDSCAPE.height - HOME);
+  await expect(options.first()).toBeVisible();
 });

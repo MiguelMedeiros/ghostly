@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
+import { safeAreaInsets } from "../../hooks/useFloatingBox";
 
 export interface SelectOption<V extends string = string> {
   value: V;
@@ -156,11 +157,15 @@ export function Select<V extends string = string>({
       const r = button.getBoundingClientRect();
       const vw = window.visualViewport?.width ?? window.innerWidth;
       const vh = window.visualViewport?.height ?? window.innerHeight;
-      const width = Math.min(Math.max(r.width, MIN_WIDTH), vw - 2 * EDGE);
+      // Clear of a phone's notch, status bar and home indicator too (the keyboard, when up, covers the last).
+      const inset = safeAreaInsets();
+      const minX = inset.left + EDGE, maxX = vw - inset.right - EDGE;
+      const minY = inset.top + EDGE, maxY = vh - Math.max(0, inset.bottom - (window.innerHeight - vh)) - EDGE;
+      const width = Math.min(Math.max(r.width, MIN_WIDTH), maxX - minX);
       const rtl = getComputedStyle(button).direction === "rtl";
-      const left = Math.min(Math.max(rtl ? r.right - width : r.left, EDGE), vw - EDGE - width);
-      const below = vh - r.bottom - EDGE - 4;
-      const above = r.top - EDGE - 4;
+      const left = Math.min(Math.max(rtl ? r.right - width : r.left, minX), maxX - width);
+      const below = maxY - r.bottom - 4;
+      const above = r.top - minY - 4;
       const wanted = Math.min(list.current.scrollHeight, MAX_HEIGHT);
       setPlace(below >= wanted || below >= above
         ? { left, width, top: r.bottom + 4, maxHeight: Math.max(Math.min(MAX_HEIGHT, below), 0) }
