@@ -47,7 +47,7 @@ export function shownUrl(url: string): string {
 /** Web addresses, over http(s) only: `javascript:` and `data:` never become links. */
 export const link: Detector<"link", { url: string }> = {
   kind: "link",
-  pattern: /https?:\/\/\S+/g,
+  pattern: /https?:\/\/\S+/gi,
   accept(match) {
     const url = linkEnd(match[0]);
     // "https://" and nothing else is not a place.
