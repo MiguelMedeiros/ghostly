@@ -109,8 +109,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   // carry the chat meanwhile (Fallback off), so it is on the DHT; otherwise it stays live where it is.
   const wait = !dht ? link?.transportWait : undefined, waitOff = !!wait && !wait.live;
   const waitText = wait ? transportWaitText(wait, contact, clock, t) : undefined;
-  // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT only.
-  const notLive = paired && pinned && !dht && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
+  // Why a pinned chat is not live (WISP 100): what the last attempt tried, or that the contact's app dials. Not for DHT
+  // only, this side's or the contact's: no attempt comes then, and the DHT only choice says whose it is.
+  const notLive = paired && pinned && !dht && link?.dhtDelivery?.peerMode !== "dht" && !ready ? liveAttemptText(link?.liveAttempt, link?.liveDialer, contact, clock, t) : undefined;
   const words = usePairingWords();
   // A first pairing on its way: its stage names the connection until the chat is live, on the DHT or failed.
   // It reads the same view as the scene (`progress.view`): the same words, the same step, the same clock.
