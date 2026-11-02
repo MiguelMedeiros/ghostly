@@ -555,16 +555,17 @@ export class RelayTransport implements PkarrTransport {
     this.perMinuteGiven = options.requestsPerMinute !== undefined;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
     this.backgroundWhileSignaling = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_WHILE_SIGNALING : Math.ceil(this.perMinute / 6);
-    const log = options.log ?? ((line: string) => console.info(`[ghostly:relay] ${line}`));
+    // Read at a terminal too (a CLI one-shot writes it on stderr): "tripped" and "left alone" were the breaker's words.
+    const log = options.log ?? ((line: string) => console.info(`ghostly: ${line}`));
     this.breaker = new RelayBreaker({
       ...options.breaker,
       onTrip: (relay, reason, forMs) => {
-        log(`${new URL(relay).host} tripped (${reason}); left alone for ${Math.round(forMs / 1000)} s`);
+        log(`relay ${new URL(relay).host} ${reason === "no answer" ? "did not answer" : reason === "slow" ? "answered too slowly" : `failed (${reason})`}; asked again in ${Math.round(forMs / 1000)} s`);
         options.breaker?.onTrip?.(relay, reason, forMs);
         this.changed("tripped");
       },
       onRecover: (relay) => {
-        log(`${new URL(relay).host} answered again`);
+        log(`relay ${new URL(relay).host} answers again`);
         options.breaker?.onRecover?.(relay);
         this.changed("recovered");
       },
@@ -1243,10 +1244,11 @@ export class RelayTransport implements PkarrTransport {
     });
     sent?.(request.then((r) => r.ok, () => false));
     let response: Response;
-    try { response = await request; } catch (error) {
+    try { response = await request; } catch {
       this.networkCooldown.set(`PUT ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
       this.answered(relay, { kind: "error", reason: "no answer" });
-      throw error;
+      // Node's own words for it ("TypeError: fetch failed") named neither the relay nor what happened.
+      throw new Error(`${relay} did not answer`);
     }
     // 409, 412 and 428 are the relay working as it should; its rate limit and its own errors count against it.
     if (response.status === 429) this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });

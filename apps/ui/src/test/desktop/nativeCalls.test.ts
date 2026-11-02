@@ -501,6 +501,42 @@ describe("the devices, which are GStreamer's and known by name", () => {
     await vi.waitFor(() => expect(tauri.invoke).toHaveBeenCalledWith("native_call_mute", { id: pc.id, muted: false }));
   });
 
+  it.each(["native_call_offer", "native_call_answer"])("a camera, microphone or speaker picked while Rust starts the call (%s) goes to the call once it has", async (describe) => {
+    let described!: () => void;
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "native_camera_open") return { camera: 7, device: args?.device ?? null };
+      if (command === "native_call_microphone") return args?.device ?? null;
+      // Rust gathers its candidates first (up to a few seconds): the person turns the camera on meanwhile.
+      if (command === describe) { await new Promise<void>((done) => { described = done; }); return { sdp: "sdp", microphone: null }; }
+      return undefined;
+    });
+    const media = nativeCallMedia();
+    const pc = new NativePeerConnection({});
+    const [audio, video] = pc.getTransceivers();
+    pc.addTrack((await media.getUserMedia({ audio: true })).getAudioTracks()[0]);
+    if (describe === "native_call_answer") await pc.setRemoteDescription({ type: "offer", sdp: "their offer" });
+    const describing = describe === "native_call_offer" ? pc.createOffer() : pc.createAnswer();
+    await vi.waitFor(() => expect(described).toBeTypeOf("function"));
+    const spoken: string[] = [];
+    tauri.invoke.mockClear();
+
+    await video.sender.replaceTrack((await media.getUserMedia({ video: true })).getVideoTracks()[0]);
+    const headset = (await media.getUserMedia({ audio: { deviceId: { exact: "Headset" } } })).getAudioTracks()[0];
+    await audio.sender.replaceTrack(headset);
+    nativeDevices.playCallOn("Headphones");
+    await new Promise((done) => setTimeout(done, 0));
+    for (const [command, args] of tauri.invoke.mock.calls) if (args?.id === pc.id) spoken.push(command);
+    described();
+    await describing;
+
+    expect(spoken, "nothing for a call Rust does not have yet").toEqual([]);
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_camera", { id: pc.id, camera: 7 });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_microphone", { id: pc.id, device: "Headset" });
+    expect(tauri.invoke).toHaveBeenCalledWith("native_call_speaker", { id: pc.id, device: "Headphones" });
+    expect(headset.getSettings().deviceId).toBe("Headset");
+    pc.close();
+  });
+
   it("meters a microphone in Rust for Settings, by name, until stopped", async () => {
     tauri.invoke.mockImplementation(async (command) => (command === "native_microphone_meter" ? { meter: 7, device: "Mic A" } : undefined));
     const heard: number[] = [];
