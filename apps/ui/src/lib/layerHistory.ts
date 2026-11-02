@@ -21,6 +21,13 @@ let scheduled = false;
 let watching = false;
 /** The page reloads (`reloadPage`): the history is left as it is. */
 let leaving = false;
+/**
+ * The page may be on its way out (`beforeunload`: the browser's reload, a link, an address typed): no traversal starts,
+ * as one that lands after the new page's navigation has started cancels it (Chromium: `net::ERR_ABORTED`, as a reload
+ * right after Escape closed a menu). A key or a tap after it says the page stayed (a download, an external app's
+ * link): the history is put right then.
+ */
+let unloading = false;
 
 const depthOf = (state: unknown): number => {
   const depth = state && typeof state === "object" ? (state as Record<string, unknown>)[MARK] : undefined;
@@ -39,6 +46,7 @@ if (typeof window !== "undefined" && typeof history !== "undefined" && depthOf(h
 /** The history to what is open: an entry pushed for each layer opened, gone back over each one closed. */
 function settle() {
   if (leaving) return;
+  if (unloading) { scheduled = false; return; }
   // On its way somewhere: looked at again once it has landed.
   if (busy()) { setTimeout(settle, 50); return; }
   scheduled = false;
@@ -74,7 +82,14 @@ function onPop() {
 /** A layer opened: Back closes it with `close`. Returns what to call once it is closed. */
 export function openLayer(close: () => void): () => void {
   if (typeof window === "undefined") return () => {};
-  if (!watching) { watching = true; addEventListener("popstate", onPop); }
+  if (!watching) {
+    watching = true;
+    addEventListener("popstate", onPop);
+    addEventListener("beforeunload", () => { unloading = true; });
+    const stayed = () => { if (unloading) { unloading = false; schedule(); } };
+    addEventListener("keydown", stayed, true);
+    addEventListener("pointerdown", stayed, true);
+  }
   const layer = { close };
   open.push(layer);
   schedule();

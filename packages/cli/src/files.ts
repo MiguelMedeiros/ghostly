@@ -1,5 +1,6 @@
+import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
-import { access, constants, copyFile, link, open, rename, rm, stat, type FileHandle } from "node:fs/promises";
+import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
@@ -230,6 +231,23 @@ async function place(partial: string, target: string, force: boolean): Promise<v
   }
 }
 
+/**
+ * Marks a saved copy of a contact's file as downloaded, as a browser and Ghostly Desktop (`file_store.rs`
+ * `mark_downloaded`) do, so the system checks it when it is opened: Gatekeeper's "downloaded from the internet" on
+ * macOS, SmartScreen and Office's Protected View on Windows. Node has no extended attributes, so macOS's own `xattr`
+ * writes `com.apple.quarantine`; on Windows it is the file's `Zone.Identifier` stream. Best effort: a file system that
+ * cannot hold the mark still gets the file.
+ */
+async function markDownloaded(path: string): Promise<void> {
+  if (process.platform === "darwin") {
+    // Flags 0x0001 (downloaded) and 0x0080, as browsers write them; then time and agent.
+    const value = `0081;${Math.floor(Date.now() / 1000).toString(16).padStart(8, "0")};Ghostly;`;
+    await new Promise<void>((done) => execFile("/usr/bin/xattr", ["-w", "com.apple.quarantine", value, path], { timeout: 10_000 }, () => done()));
+  } else if (process.platform === "win32") {
+    await writeFile(`${path}:Zone.Identifier`, "[ZoneTransfer]\r\nZoneId=3\r\n").catch(() => {});
+  }
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -329,6 +347,8 @@ export const FILE_METHODS: Record<string, Method> = {
       await refuseAllHere();
       // One that ended (cancelled, declined, failed): the engine takes the action and does nothing, as for one all here.
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
+      // Being checked (sent: the contact checks it; received: its digest here): the engine takes no pause and it ends done.
+      if (action === "pause" && transfer?.stage === "verifying") throw new CliError("refused", "Too late to pause: it is being checked");
       if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
       // Sent whole (the engine's `sentWhole`): the engine takes no cancel and it ends done, so it is refused, not echoed.
       if (outgoing && action === "cancel" && transfer?.state === "transferring" && (transfer.stage === "verifying"
@@ -446,6 +466,8 @@ export const FILE_METHODS: Record<string, Method> = {
         if (free && refused?.code === "confirm" && n <= 1000) { target = `${stem} (${n})${ext}`; continue; }
         throw refused ?? error;
       }
+      // A contact chose its bytes and its name (`.command`, `.lnk`): marked as downloaded. One sent from here needs none.
+      if (stored.direction !== "out") await markDownloaded(target);
     } finally {
       await out?.close();
       await rm(partial, { force: true });

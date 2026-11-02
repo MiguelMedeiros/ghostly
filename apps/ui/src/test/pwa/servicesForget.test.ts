@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLEAR_ORIGIN_MS, OPENED_KEY, forgetServices, noteOpened, openedServices } from "../../../../web/src/svc/forget";
-import { clearSite } from "../../../../web/src/svc/clearSite";
+import { clearSite, dropSharedCookies } from "../../../../web/src/svc/clearSite";
 import { BRIDGE_CLEAR, BRIDGE_CLEARED, BRIDGE_PAGE, BRIDGE_READY, parseServicesHost, serviceOrigin } from "../../../../web/src/svc/protocol";
 
 // covers: services.web-open
@@ -110,6 +110,13 @@ describe("the contacts' apps this device opened", () => {
   });
 });
 
+/** The cookies `document.cookie` reads as `seen`, and every write to it, while it runs. */
+function recordCookieWrites(seen: string) {
+  const list: string[] = [];
+  Object.defineProperty(document, "cookie", { configurable: true, get: () => seen, set: (value: string) => { list.push(value); } });
+  return { list, stop: () => { delete (document as unknown as { cookie?: string }).cookie; } };
+}
+
 describe("the bridge's clear of its origin", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -136,7 +143,7 @@ describe("the bridge's clear of its origin", () => {
       serviceWorker: { getRegistrations: async () => [{ unregister: unregistered }] },
     });
 
-    await clearSite();
+    await clearSite(host.suffix);
 
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
@@ -147,13 +154,37 @@ describe("the bridge's clear of its origin", () => {
     expect(files.size).toBe(2);
   });
 
+  it("expires each cookie it sees for the whole services host too, as a frame under another site may write it", async () => {
+    vi.stubGlobal("indexedDB", undefined);
+    const writes = recordCookieWrites("probe-c=1; link=profile-a");
+    try {
+      await clearSite(host.suffix);
+    } finally { writes.stop(); }
+    for (const name of ["probe-c", "link"]) {
+      const of = (domain: string) => writes.list.filter((w) => w.startsWith(`${name}=;`) && w.includes("Expires=Thu, 01 Jan 1970") && w.includes(domain));
+      expect(of(`Domain=${host.suffix}`).find((w) => w.includes("Secure; SameSite=None") && !w.includes("Partitioned")), `${name} on the services host`).toBeTruthy();
+      expect(of(`Domain=${host.suffix}`).find((w) => w.includes("Partitioned")), `${name} on the services host, partitioned`).toBeTruthy();
+      expect(writes.list.filter((w) => w.startsWith(`${name}=;`) && !w.includes("Domain=")).find((w) => w.includes("Secure; SameSite=None")), `${name} of this origin`).toBeTruthy();
+    }
+  });
+
+  it("drops only the services host's cookies before it frames an app, never this origin's own", () => {
+    const writes = recordCookieWrites("mine=1; link=profile-a");
+    try {
+      dropSharedCookies(host.suffix);
+    } finally { writes.stop(); }
+    expect(writes.list.length).toBeGreaterThan(0);
+    expect(writes.list.every((w) => w.includes(`; Domain=${host.suffix}`)), "a host-only cookie is another one: it stays").toBe(true);
+    expect(new Set(writes.list.map((w) => w.split("=")[0]))).toEqual(new Set(["mine", "link"]));
+  });
+
   it("empties the origin-private file system", async () => {
     const files = new Set(["a", "b"]);
     vi.stubGlobal("navigator", {
       storage: { getDirectory: async () => ({ async *keys() { yield* [...files]; }, removeEntry: async (name: string) => { files.delete(name); } }) },
       serviceWorker: { getRegistrations: async () => [] },
     });
-    await clearSite();
+    await clearSite(host.suffix);
     expect([...files]).toEqual([]);
   });
 });

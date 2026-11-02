@@ -466,7 +466,8 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
   const method = money.type === "cashu" ? "cashu" : money.type === "lightning" || money.type === "lnurl" ? "lightning" : moreMoneyMethod(money);
   const network = money.type === "lightning" ? lightningNetworkFor(state, money.invoice.network) : money.type === "lnurl" ? lightningNetworkFor(state)
     : money.type === "cashu" ? tokenNetwork : money.type === "bolt12" ? money.offer.network : money.request.network;
-  const off = offHere(method, network);
+  // No way of paying in the app (Monero): nothing for the chat's switches to turn off.
+  const off = !!method && offHere(method, network);
   return (
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
@@ -474,7 +475,7 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
         {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} offOn={(network) => offHere("cashu", network)} onNetwork={setTokenNetwork} />
           : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={offHere("lightning", lightningNetworkFor(state, invoice.network))} peerPubKey={peerPubKey} />} />}
       </Fragment>
-      {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
+      {off && method && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>
   );
 }

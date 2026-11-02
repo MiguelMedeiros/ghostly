@@ -734,13 +734,68 @@ export class CommunitySession {
   get canSend(): boolean { return this.isMember && !!this.state.secrets[this.topHash]; }
   /** The entry key of the group's link, or "" when it is off. */
   get entryKey(): string { return this.state.entry.key; }
+  /**
+   * The entry key of the link my admission that lost was let in by (the one its branch named), where I ask again: a
+   * link replaced since keeps me out as it does anyone. `entryKey` once that admission is no longer held.
+   */
+  get lostEntryKey(): string {
+    const side = this.state.side;
+    for (let i = side.length - 1; i >= 0; i--) if (side[i].k === "add" && side[i].s === this.myKey) {
+      for (const c of this.ancestry(side[i].p)) if (c.x !== undefined) return c.x;
+      return "";
+    }
+    return this.entryKey;
+  }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
   get picture(): string | undefined { return groupMetaPicture(this.state.meta); }
-  /** Members of any epoch in the window: whom a frame may come from. */
+  /**
+   * Members of any epoch in the window: whom a frame may come from. A side commit's roster counts only while its branch
+   * could still win (`mayWin`): one let in only on a branch that lost is not in the roster anyone sees, and the main
+   * branch past where they part, a later link among it, is not its business (`lostAt`).
+   */
   isRecentMember(key: string): boolean {
-    for (const roster of this.rosters.values()) if (rosterHas(roster, key)) return true;
-    return false;
+    let side = false;
+    for (const [h, roster] of this.rosters) if (rosterHas(roster, key)) { if (this.mainIndex.has(h)) return true; side = true; }
+    return side && [...this.mayWin()].some(h => rosterHas(this.rosters.get(h) ?? [], key));
+  }
+  /**
+   * The side commits whose branch could still win: it does not drop an admin change the main branch holds (one that
+   * does never wins, see `better`), and it parts within the window. Kept until the tip or the side moves.
+   */
+  private mayWin(): Set<string> {
+    const side = this.state.side, at = `${this.topHash}:${side.length}:${side.length ? communityCommitHash(side[side.length - 1]) : ""}`;
+    if (this.winning?.at === at) return this.winning.set;
+    const counts = this.adminCounts(), main = this.branch(this.topHash)!, set = new Set<string>();
+    for (const c of side) {
+      const h = communityCommitHash(c), branch = this.rosters.has(h) ? this.branch(h) : null;
+      if (!branch || !branch.path.length) continue;
+      const { parent, admin } = this.parting(branch, main, counts);
+      if (!(admin[1] && !admin[0]) && parent >= this.epoch - COMMUNITY_LIMITS.window) set.add(h);
+    }
+    this.winning = { at, set };
+    return set;
+  }
+  private winning: { at: string; set: Set<string> } | undefined;
+  /**
+   * For a key that is no recent member, let in on a branch that lost: the main-branch index it parts from, and that of
+   * the commit that makes it lose (the latest over its branches). Undefined for anyone else.
+   */
+  private lostAt(key: string): { fork: number; end: number } | undefined {
+    const side = this.state.side, parents = new Set(side.map(c => c.p)), counts = this.adminCounts();
+    let lost: { fork: number; end: number } | undefined;
+    for (const c of side) {
+      const h = communityCommitHash(c);
+      if (parents.has(h)) continue;
+      const branch = this.branch(h);
+      if (!branch || !branch.path.some(x => rosterHas(this.rosters.get(x) ?? [], key))) continue;
+      for (let j = branch.fork + 1; j < this.state.chain.length; j++) {
+        if (this.better(branch, this.branch(communityCommitHash(this.state.chain[j]))!, counts)) continue;
+        lost = { fork: Math.min(lost?.fork ?? j, branch.fork), end: Math.max(lost?.end ?? j, j) };
+        break;
+      }
+    }
+    return lost;
   }
   /**
    * Whether `key` could read message `messageId` (`<s>:<e>:<h>:<n>`) and still can: a member of the roster it was sealed
@@ -1980,10 +2035,20 @@ export class CommunitySession {
 
   private async receiveSync(from: string, frame: CommunitySyncFrame): Promise<void> {
     // Nothing is sealed to a key that is not canonical (see `commit`).
-    if (!this.isRecentMember(from) || !isZ32Key(from) || !Number.isSafeInteger(frame.e) || typeof frame.h !== "string") return;
+    if (!isZ32Key(from) || !Number.isSafeInteger(frame.e) || typeof frame.h !== "string") return;
+    const recent = this.isRecentMember(from), lost = recent ? undefined : this.lostAt(from);
+    if (!recent && !lost) return;
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(COMMUNITY_LIMITS.syncAnswers, COMMUNITY_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
+    // Let in only on a branch that lost: the commits from where it parts up to the one that makes it lose, and nothing
+    // else (no secret, no frame, no later link), as `farewell` tells one taken out. Its app then knows to ask again.
+    if (lost) {
+      const at = this.mainIndex.get(frame.h);
+      const commits = this.state.chain.slice(at !== undefined ? at + 1 : lost.fork + 1, lost.end + 1);
+      if (commits.length) this.answers.handOut(from, commits.map(commit => ({ t: "group-commit" as const, v: 2 as const, g: this.id, commit })));
+      return;
+    }
     // The answer, in this order, goes out a slice at a time (`CatchUpAnswers`): a member back after the store filled
     // was handed 258 frames at once, and an app before 2026-10-07 ends a session holding 64 waiting.
     const answer: CommunityFrame[] = [];

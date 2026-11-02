@@ -476,6 +476,8 @@ export class GroupSession {
    * message written just now. Each frame of the answer keeps it open: it goes a slice at a time. In memory only.
    */
   private readonly answering = new Map<string, number>();
+  /** Per member ahead of me: the epoch its last sync said, up to which its answer to mine brings the chain. In memory only. */
+  private readonly syncedEpoch = new Map<string, number>();
   /** Catch-up answers still going out, a slice at a time (`handOut`). */
   private readonly answers: CatchUpAnswers<GroupEdgeFrame>;
   /**
@@ -514,8 +516,9 @@ export class GroupSession {
       },
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
       active: () => this.state.status === "active",
-      // A member whose app is slow asks again while my last answer still waits there: its messages are not sent twice.
-      key: frame => frame.t === "group-msg" ? frameKey(frame) : undefined,
+      // A member whose app is slow asks again while my last answer still waits there: its messages are not sent twice,
+      // nor the commits of my chain (new frames in each answer, each with a secret sealed again).
+      key: frame => frame.t === "group-msg" ? frameKey(frame) : frame.t === "group-commit" ? `commit:${frame.commit.e}` : undefined,
     });
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
     this.chainMovedAt = this.clock();
@@ -731,8 +734,9 @@ export class GroupSession {
     return this.hooks.save(structuredClone(this.state));
   }
   /**
-   * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message changes (what was seen, what is kept to hand
-   * on): the state holds the whole hand-on log, and a member back in a busy group wrote all of it once per message.
+   * A save within `GROUP_LIMITS.saveWithinMs`, for what a received message, commit or secret changes (what was seen,
+   * what is kept to hand on, the chain): the state holds the whole hand-on log and chain, and a member back in a busy
+   * group wrote all of it once per message, and once per commit.
    * The message itself is stored before (`hooks.message`). An app killed before the save takes those frames again when
    * it syncs: its store has the messages already, and the state then catches up.
    */
@@ -1555,6 +1559,13 @@ export class GroupSession {
     this.hooks.send(from, this.syncFrame([], from));
   }
 
+  /**
+   * Whether my sync to `from` (the one my edge opened with) still waits for its answer, which has the chain from the
+   * epoch it said: asking again on reading its newer sync, or a commit of that answer, had each commit I missed sent
+   * twice, each with a secret sealed again (200 missed went as 400 frames, 1,456 when answers go a slice at a time).
+   */
+  private awaitsAnswer(from: string): boolean { return (this.answering.get(from) ?? 0) > this.now(); }
+
   private async replayWaiting(): Promise<void> {
     await this.metaFollowsChain();
     const ready = this.waiting.filter(w => w.frame.e <= this.epoch && !!this.state.secrets[w.frame.e]);
@@ -1571,6 +1582,8 @@ export class GroupSession {
     const raw = frame.commit as unknown as Record<string, unknown> | undefined;
     if (!raw || typeof raw !== "object" || !Number.isSafeInteger(raw.e)) return;
     const e = raw.e as number;
+    // A commit of an answer to my sync keeps it open, as its messages do (`receiveMessage`).
+    if (this.awaitsAnswer(from)) this.answering.set(from, this.now() + ANSWER_WINDOW_MS);
     if (e <= this.epoch) {
       // Known, or a different history of the same epoch: that is a fork, and nothing here picks a winner.
       const known = this.state.chain[e];
@@ -1601,7 +1614,8 @@ export class GroupSession {
     await this.apply(result.commit, frame.secret);
     this.took({ t: "group-commit", g: this.id, commit: result.commit, ...(mark ? { left: mark } : {}) });
     // Handed on by a hub, the commit carries no secret sealed for me: whoever handed it on holds it, and seals it to me.
-    if (this.state.status === "active" && !this.state.secrets[this.epoch]) this.ask(from);
+    // In its answer to my sync, below the epoch its own sync said, it sealed every one it holds already.
+    if (this.state.status === "active" && !this.state.secrets[this.epoch] && !(this.awaitsAnswer(from) && this.epoch < (this.syncedEpoch.get(from) ?? 0))) this.ask(from);
     const next = this.pendingCommits.get(this.epoch + 1);
     if (next) { this.pendingCommits.delete(this.epoch + 1); await this.receiveCommit(from, next); }
   }
@@ -1645,7 +1659,10 @@ export class GroupSession {
     if (sealed) this.takeSecret(commit.e, sealed);
     this.pruneSecrets();
     this.pruneRelay();
-    await this.persist();
+    // Saved like the messages that come with it: a member back after many joins and leaves wrote its whole state, the
+    // chain growing each time, once per commit it caught up (39.5 MB for 200). A save lost only means the commits are
+    // asked for again at the next sync; my own commits, sends and status changes are still saved at once.
+    this.persistSoon();
     this.hooks.changed();
     await this.replayWaiting();
   }
@@ -1669,7 +1686,7 @@ export class GroupSession {
       taken = this.takeSecret(entry.e, entry.s) || taken;
     }
     if (!taken) return;
-    await this.persist();
+    this.persistSoon();
     this.hooks.changed();
     await this.replayWaiting();
   }
@@ -1683,7 +1700,8 @@ export class GroupSession {
     if (!answered.take()) return;
     this.hear(frame);
     if (frame.e > this.epoch) {
-      this.ask(from);
+      this.syncedEpoch.set(from, frame.e);
+      if (!this.awaitsAnswer(from)) this.ask(from);
       this.offerMeta(from, frame.mt);
       // Behind on the chain, I still hold what they lack: my own messages, sent before I heard of their commits (a
       // joiner's first words, sent before any edge opened, while the admin admitted the next one). Nobody asks again

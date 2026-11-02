@@ -841,6 +841,8 @@ export class GhostlyNode implements EngineImplementation {
    * Not one queue for all: a transport slow to start held every other chat's listeners of every kind behind it.
    */
   private readonly nativeQueues = new Map<NativeTransport, Promise<void>>();
+  /** Per transport, whether a start is under way, and the starts waiting their turn (`nativeTurn`). */
+  private readonly nativeTurns = new Map<NativeTransport, { busy: boolean; waiting: { linkId: string; inUse: boolean; go: () => void }[] }>();
   /** Every listener start asked for so far has ended. */
   private get nativeQueue(): Promise<void> { return Promise.all(this.nativeQueues.values()).then(() => {}); }
   private shuttingDown = false;
@@ -8715,8 +8717,9 @@ export class GhostlyNode implements EngineImplementation {
     // whose WebRTC cannot connect has nothing else to go live on.
     const starts = Object.entries(this.nativeFactories).map(([transport, factory]) => {
       const key = transport as NativeTransport;
-      const operation = (this.nativeQueues.get(key) ?? Promise.resolve()).then(() => factory ? this.startNativeEndpoint(linkId, expected, key, factory, inUse) : false);
-      this.nativeQueues.set(key, operation.then(() => {}, () => {}));
+      const operation = this.nativeTurn(key, linkId, inUse).then(() => factory ? this.startNativeEndpoint(linkId, expected, key, factory, inUse) : false)
+        .finally(() => this.nextNativeTurn(key, true));
+      this.nativeQueues.set(key, Promise.all([this.nativeQueues.get(key), operation.then(() => {}, () => {})]).then(() => {}));
       return operation;
     });
     return Promise.all(starts).then(full => {
@@ -8738,6 +8741,35 @@ export class GhostlyNode implements EngineImplementation {
       } else this.nativeFailed.delete(linkId);
       this.emitState();
     });
+  }
+
+  /**
+   * A start's turn in its transport's queue: one at a time, in the order asked, but the chat in use (on screen, a text
+   * going or coming in it, an edge of the group on screen) goes before the others waiting. With the relay out of reach
+   * each start takes 10 s to fail, and the chat opened waited for every other chat's retry before its own started or
+   * said why: 331 s with 40 chats.
+   */
+  private nativeTurn(key: NativeTransport, linkId: string, inUse: boolean): Promise<void> {
+    let lane = this.nativeTurns.get(key);
+    if (!lane) this.nativeTurns.set(key, lane = { busy: false, waiting: [] });
+    const turn = new Promise<void>(go => lane.waiting.push({ linkId, inUse, go }));
+    this.nextNativeTurn(key);
+    return turn;
+  }
+  /** `ended`: the start under way ended. The next one waiting starts: the first in use, or else the first asked. */
+  private nextNativeTurn(key: NativeTransport, ended = false): void {
+    const lane = this.nativeTurns.get(key);
+    if (!lane) return;
+    if (ended) lane.busy = false;
+    if (lane.busy || !lane.waiting.length) return;
+    const onScreen = (linkId: string) => {
+      const stored = this.links.get(linkId)?.stored;
+      return !!stored && (stored.group ? `group:${stored.group}` : stored.id) === this.activeLinkId;
+    };
+    const next = lane.waiting.findIndex(start => start.inUse || onScreen(start.linkId));
+    const [start] = lane.waiting.splice(Math.max(next, 0), 1);
+    lane.busy = true;
+    start.go();
   }
 
   /** The listeners this app may hold for a transport: sixteen for Iroh's browser build (`IROH_WEB_SLOTS`), eight for the others. */
@@ -8947,6 +8979,8 @@ export class GhostlyNode implements EngineImplementation {
   private groupNativeRetryAt = 0;
   /** Chats and group links whose native listener failed to start, by link id: when each tries again, and how long it waited last. */
   private readonly nativeFailed = new Map<string, { at: number; wait: number }>();
+  /** Of those, the ones whose start is queued or under way: a transport's starts go one after another. */
+  private readonly nativeRetrying = new Set<string>();
   /**
    * Now and then, the group links that found no free native slot try again: a chat or another group may have let one go.
    * Chats and group links whose listener failed to start try again once their wait is over.
@@ -8955,11 +8989,14 @@ export class GhostlyNode implements EngineImplementation {
     this.groupAnchorsAnswered();
     const now = Date.now();
     for (const [linkId, failed] of this.nativeFailed) {
-      if (now < failed.at) continue;
+      if (now < failed.at || this.nativeRetrying.has(linkId)) continue;
       if (!this.links.get(linkId)?.link) { this.nativeFailed.delete(linkId); continue; }
-      // Not again while this start is under way (Iroh waits up to 10 s for its relay).
+      // Not again while this start waits or is under way: with its relay out of reach each start takes 10 s to fail
+      // (Iroh's online wait, the HyperDHT relay's open wait), and with 20 chats a start queued again every 15 s kept
+      // the queue growing for as long as the relay stayed away.
       failed.at = now + failed.wait;
-      void this.ensureNativeEndpoints(linkId);
+      this.nativeRetrying.add(linkId);
+      void this.ensureNativeEndpoints(linkId).finally(() => this.nativeRetrying.delete(linkId));
     }
     if (!this.groupNativeWaiting.size || Date.now() < this.groupNativeRetryAt) return;
     this.groupNativeRetryAt = Date.now() + NATIVE_RETRY_MS;
