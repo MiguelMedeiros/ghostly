@@ -290,6 +290,7 @@ const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "
 
 function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
   const waiting = t("group.join.waiting");
+  if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
     body: community ? t("group.join.admittedCommunity") : t("group.join.admitted") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
@@ -615,6 +616,8 @@ export function GroupChat() {
   const stage: GroupJoinStage = group.invitation?.stage ?? (group.invitation?.admin ? "admitted" : "knocked");
   // Nobody answered the link for an hour: the app stopped knocking, and Try again knocks again.
   const linkUnanswered = !!group.invitation?.viaLink && !!group.invitation.unanswered;
+  // The link was replaced since it was shared: nothing more happens here, only the current link gets in.
+  const linkReplaced = stage === "replaced";
   // Getting in takes a group link: an app with no transport for one (no WebRTC, no native transport) is never let in,
   // so it says so rather than "you are in in a moment" (as the group's connection does, GroupConnection).
   const noLinks = state?.transport.groupLinks === false;
@@ -745,11 +748,11 @@ export function GroupChat() {
       : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
-            <svg className={noLinks || linkUnanswered ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
+            <svg className={noLinks || linkUnanswered || linkReplaced ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
           </div>
           <h2 className="mt-4 text-base font-semibold text-text-primary">{joining.title}</h2>
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
-          <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
+          {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
             {joinSteps(group.profile === "community", t).map(step => {
               const done = JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step.stage);
               const current = !done && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stage;
@@ -758,7 +761,7 @@ export function GroupChat() {
                 {step.label}
               </li>;
             })}
-          </ol>
+          </ol>}
           {/* Others knocking too: a wait behind them, said as soon as it is known (a community lets people in a few at a time). */}
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
