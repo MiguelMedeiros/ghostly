@@ -1,0 +1,1 @@
+The money formats a text shows as a card take Monero addresses (standard, subaddress, integrated; mainnet, stagenet, testnet, each checked by its Keccak-256 checksum) and `monero:` links. The app has no Monero wallet: the card's Pay opens the link in the person's own. Read from the text alone; nothing on the wire changed.

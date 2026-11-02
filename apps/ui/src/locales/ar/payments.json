@@ -184,6 +184,9 @@
     "maxFee": "أقصى رسوم تقبلها ({{unit}})",
     "maxFeeAria": "الحد الأقصى للرسوم بـ {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "لا توجد محفظة Monero في Ghostly. يفتح «ادفع» هذا الرابط في محفظة Monero على هذا الجهاز، حيث تراجعه وترسله.",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "يفتح محفظة Monero على هذا الجهاز",
     "networkNotStated": "الشبكة غير مذكورة",
     "noWallet": {
       "mainnet": "ليست لديك محفظة {{wallet}} على Mainnet لدفع هذه الأموال الحقيقية.",

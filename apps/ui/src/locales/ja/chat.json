@@ -310,6 +310,7 @@
     "invoice": "⚡ Lightning 請求書",
     "lightningAddress": "Lightning アドレス",
     "lightningOffer": "⚡ Lightning オファー",
+    "moneroAddress": "Monero アドレス",
     "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "本物のお金",
     "sats": "{{amount}} sats",

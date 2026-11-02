@@ -310,6 +310,7 @@
     "invoice": "⚡ Lightning 发票",
     "lightningAddress": "Lightning 地址",
     "lightningOffer": "⚡ Lightning 报价",
+    "moneroAddress": "Monero 地址",
     "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "真实资金",
     "sats": "{{amount}} sats",
