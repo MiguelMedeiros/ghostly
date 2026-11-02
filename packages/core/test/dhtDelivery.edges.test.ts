@@ -6,6 +6,7 @@ import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "../src/byte
 import { decrypt, encrypt } from "../src/crypto";
 import { createIdentity, identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign } from "../src/identity";
 import { createLink } from "../src/invite";
+import { PRESENCE_WINDOW } from "../src/link";
 import { DhtDelivery, DHT_EXPIRY_SKEW_MS, DHT_ISSUED_BACK_MS, DHT_MESSAGE_TTL, DHT_TEXT_REFUSED, LEAVING_DHT_FAST_MS, LIVE_POLL_MS, emptyDhtDeliveryState, type DhtDeliveryState, type DhtDeliveryView } from "../src/dhtDelivery";
 import { setLinkTraceSink } from "../src/linkTrace";
 import type { PairingCredentials } from "../src/pairedSession";
@@ -772,10 +773,17 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
-  it("keeps its mailbox alive in the background while live; a text, or the keep-alive once layer 1 is lost, is no background write", async () => {
+  it("keeps its mailbox alive in the background while live or while the contact is away; a text, or the keep-alive once layer 1 is lost with the contact there, is no background write", async () => {
     // A profile's live chats must not take the relays' requests its groups need (a daemon with 30 live chats, 2026-10-08).
-    const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "stream" }, bobCredentials: pinned() });
+    const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "stream" } });
     await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    // The contact's envelope pins it.
+    let seq = 1;
+    const contactWrites = async () => { await h.put(h.invitePacket(h.body({ 5: "stream", 6: null }, seq++))); h.bob.refresh(); await vi.advanceTimersByTimeAsync(0); };
+    await contactWrites();
+    expect(h.pins).toHaveLength(1);
+    // This side's envelope sealed to it replaces the one sealed with the invite key alone (`resealDue`).
+    await vi.advanceTimersByTimeAsync(4_000); h.bob.refresh(); await vi.advanceTimersByTimeAsync(0);
     h.bob.setLive(true); await vi.advanceTimersByTimeAsync(0);
     const lastOptions = () => (h.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
     const live = h.transport.publish.mock.calls.length;
@@ -786,9 +794,22 @@ describe("DHT delivery: sending and lifecycle", () => {
     expect(lastOptions(), "a text is what the contact waits for").toBeUndefined();
     await h.bob.acknowledge(ID);
     h.bob.setLive(false); await vi.advanceTimersByTimeAsync(0);
+    // The contact is there: its keep-alives come every few minutes.
     const dropped = h.transport.publish.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    for (let minute = 0; minute < 5; minute++) { await contactWrites(); await vi.advanceTimersByTimeAsync(60_000); }
     expect(h.transport.publish.mock.calls.length - dropped, "the keep-alive went").toBeGreaterThan(0);
+    expect(lastOptions()).toBeUndefined();
+    // The contact went away: nothing new from it in its presence window, and nobody waits on this side's keep-alive.
+    await vi.advanceTimersByTimeAsync(PRESENCE_WINDOW);
+    const away = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(h.transport.publish.mock.calls.length - away, "the keep-alive went").toBeGreaterThan(0);
+    expect(lastOptions(), "upkeep of a chat whose contact is away").toEqual({ background: true });
+    // Back: its keep-alive is a chat's write again.
+    await contactWrites();
+    const back = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(h.transport.publish.mock.calls.length - back, "the keep-alive went").toBeGreaterThan(0);
     expect(lastOptions()).toBeUndefined();
     await h.bob.stop();
   });

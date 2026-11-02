@@ -83,6 +83,14 @@ export const REQUESTS_PER_MINUTE = 30;
  */
 export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
 /**
+ * Of the background share, what background writes may spend in a minute on a relay (10 of the 20): the rest is kept
+ * for background reads. Those writes are mostly the upkeep of chats whose contacts are away (the link's heartbeat, the
+ * DHT floor's keep-alive, the capability record), about one a minute for every two chats. A profile with 200 such chats
+ * spent the share on them, and on one relay 147 of its 200 contacts were not read once in 25 minutes: a contact back
+ * then went unnoticed (bug hunt, 2026-11-01). Upkeep held back goes when a request of this share frees.
+ */
+export const BACKGROUND_WRITES_SHARE = 1 / 2;
+/**
  * A link's write the budget refused (its presence, its offer, its answer) goes first when the minute
  * frees a request: reads on that relay wait this long after the refusal. A link that polls fast for a
  * peer while its offer waits would otherwise take every request the minute frees, and the offer (the
@@ -401,6 +409,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly lastReadFrom = new Map<string, string>();
   private readonly spent = new Map<string, number[]>();
   private readonly spentBackground = new Map<string, number[]>();
+  /** Background writes on each relay in the last minute (`BACKGROUND_WRITES_SHARE`). */
+  private readonly spentBackgroundWrites = new Map<string, number[]>();
   /** Groups' urgent reads on each relay in the last `GROUP_BURST_MS`. */
   private readonly spentGroupUrgent = new Map<string, number[]>();
   /** Watch reads on each relay in the last `GROUP_RATION_WINDOW_MS` (`WATCH_SHARE`). */
@@ -1213,6 +1223,7 @@ export class RelayTransport implements PkarrTransport {
     if (departedOver) this.departedOverAdd(key, now);
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
+    if (who.background && who.write) this.spentBackgroundWrites.get(relay)!.push(now);
     if (isGroupUrgentRead(who)) this.spentGroupUrgent.get(relay)!.push(now);
     if (isWatch(who)) this.spentWatch.get(relay)!.push(now);
     if (isChatWatch(who) && !departedOver) this.spentChatWatch.get(relay)!.push(now);
@@ -1236,6 +1247,8 @@ export class RelayTransport implements PkarrTransport {
     const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
     this.spent.set(relay, recent);
     this.spentBackground.set(relay, recentBackground);
+    const recentBackgroundWrites = (this.spentBackgroundWrites.get(relay) ?? []).filter((at) => now - at < 60_000);
+    this.spentBackgroundWrites.set(relay, recentBackgroundWrites);
     // Until the `limit`-th newest request of the minute ages out; 0 while fewer than `limit` were made.
     const over = (list: number[], limit: number) => (list.length >= limit ? list[list.length - limit] + 60_000 - now : 0);
     const limit = this.limitOf(relay);
@@ -1257,7 +1270,10 @@ export class RelayTransport implements PkarrTransport {
     if (who.background && !starved) {
       // On a relay with a small share of its own (5), background requests keep to two thirds of it, as on a smaller
       // budget: they would otherwise take the whole minute there, and leave nothing for a link's write.
-      wait = Math.max(wait, over(recentBackground, Math.min(this.backgroundPerMinute, Math.ceil(limit * 2 / 3))));
+      const backgroundShare = Math.min(this.backgroundPerMinute, Math.ceil(limit * 2 / 3));
+      wait = Math.max(wait, over(recentBackground, backgroundShare));
+      // Background writes leave the rest of that share to background reads (`BACKGROUND_WRITES_SHARE`).
+      if (who.write) wait = Math.max(wait, over(recentBackgroundWrites, Math.max(1, Math.floor(backgroundShare * BACKGROUND_WRITES_SHARE))));
       // A link signaling: background takes a smaller share until it stops, or until enough of its own age out. A
       // community door's bell does not: the links it signals for are often the ones its last admission opened.
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
