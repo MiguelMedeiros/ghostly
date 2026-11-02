@@ -211,8 +211,8 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   // the interface's language too. A community knows only the names it heard: for anyone else its stored line stays.
   const former = !member && !!message.member && FORMER_EVENTS.has(message.event) && (me || group.profile !== "community" || !!group.formerNames?.[message.member]);
   if (!member && !former) {
-    if (message.event === "created" && text.startsWith("Group created. ")) return `${t("group.event.created")} ${readNote(group, t)}`;
-    if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return `${t("group.event.youJoined")} ${readNote(group, t)}`;
+    if (message.event === "created" && text.startsWith("Group created. ")) return t("group.event.withNote", { event: t("group.event.created"), note: readNote(group, t) });
+    if (message.event === "joined" && !message.member && text.startsWith("You joined. ")) return t("group.event.withNote", { event: t("group.event.youJoined"), note: readNote(group, t) });
     if (message.event === "joined" && !message.member && text === "You joined again") return t("group.event.youJoinedAgain");
     const gone = " is no longer a member";
     if (message.event === "gone" && text.endsWith(gone)) return t("group.event.gone", { name: writtenName(text.slice(0, -gone.length), t) });
