@@ -19,16 +19,28 @@ const JOIN_BOUND_MS = [12_000, 12_000];
 const REACH_BOUND_MS = [16_000, 20_000];
 const groupChat = (page: import("@playwright/test").Page) => page.getByTestId("group-chat");
 
-/** Every step the joining card shows, in order, however quickly they go by. */
+/**
+ * Every step the joining card shows, in order, however quickly they go by, and what its live regions say meanwhile
+ * (the text of each outermost one, recorded whenever it changes): what a screen reader is told.
+ */
 function watchSteps(): void {
-  const w = window as unknown as { __stages?: string[] };
+  const w = window as unknown as { __stages?: string[]; __spoken?: string[] };
   if (w.__stages) return;
   w.__stages = [];
+  w.__spoken = [];
+  const LIVE = "[role=status], [role=alert], [aria-live]:not([aria-live=off])";
+  let last = new Map<Element, string>();
   new MutationObserver(() => {
     const stage = document.querySelector("[data-testid=group-joining-steps]")?.getAttribute("data-stage");
     if (stage && w.__stages!.at(-1) !== stage) w.__stages!.push(stage);
-  }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-stage"] });
+    if (!document.querySelector("[data-testid=group-joining]")) return;
+    const now = new Map([...document.querySelectorAll(LIVE)].filter(el => !el.parentElement?.closest(LIVE)).map(el => [el, el.textContent!.trim()] as const));
+    for (const [el, text] of now) if (text && last.get(el) !== text) w.__spoken!.push(text);
+    last = now;
+  }).observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["data-stage"] });
 }
+/** All the joining card may say aloud: its title before the first step, then the step just reached, once each. */
+const JOIN_SAID = new Set(["Waiting to be let in", "Knock sent to the group", "A member's app is answering", "Let in: getting the group's keys"]);
 
 test("with a member's app open a while, joining a community through its link takes seconds and shows each step", { tag: ["@feature:groups.community.join"] }, async ({ peer }) => {
   test.setTimeout(4 * 60_000);
@@ -62,6 +74,11 @@ test("with a member's app open a while, joining a community through its link tak
     const order = ["knocking", "knocked", "answered", "admitted"];
     expect(stages.length).toBeGreaterThan(0);
     expect(stages.map(s => order.indexOf(s))).toEqual(stages.map(s => order.indexOf(s)).sort((a, b) => a - b));
+    // A screen reader was told each step reached in a few words, once: never the whole card with Cancel joining again.
+    const spoken = await joiner.page.evaluate(() => (window as unknown as { __spoken: string[] }).__spoken);
+    console.log(`  ${joiner.name} was told, while joining: ${JSON.stringify(spoken)}`);
+    expect(spoken.filter(text => !JOIN_SAID.has(text))).toEqual([]);
+    expect(spoken).toEqual([...new Set(spoken)]);
     await expect(alice.page.getByTestId("group-members")).toContainText(`${members} members`);
     // The connection control speaks for the group, through its hub: connected with three members as with two (counted
     // per member, the third person read "1 of 2 reachable" with a warning dot).
