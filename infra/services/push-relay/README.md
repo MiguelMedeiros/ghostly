@@ -27,3 +27,8 @@ write that header. Ghostly runs none for you: no relay is set by default.
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`) stops the start with one
 line that names it; leave a setting out for its default. The start line says how many proxies it counts and where it
 listens.
+
+The log holds counts and reasons only, never an endpoint or an address: `forwarded <status>`, `failed`, and each
+refusal by kind (`refused origin`, `refused method`, `refused rate`, `refused size`, or what was wrong with the
+request, such as `refused Not a push service`). The first refusal of a kind is logged at once and the rest as one count
+a minute (`refused rate 41 more`), so a flood stays a line a minute.
