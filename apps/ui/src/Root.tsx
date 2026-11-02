@@ -34,6 +34,7 @@ import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
 import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
+import { watchAppInSight } from "./lib/appInSight";
 import { guardContextMenu } from "./lib/contextMenu";
 import { isDesktopApp } from "./lib/externalLink";
 import "./index.css";
@@ -313,6 +314,8 @@ export function Root() {
   useState(takeDeviceLinkFromAddress);
   // The loops rest while the window is hidden or behind others (index.css `:root[data-away]`).
   useEffect(watchWindowAway, []);
+  // Another page of the app in sight (an extension tab in front) keeps this one's notifications back (lib/appInSight.ts).
+  useEffect(watchAppInSight, []);
   // A right-click opens the item's own ⋮ menu where it has one; the desktop app never shows the webview's Back/Reload.
   useEffect(() => guardContextMenu({ suppress: isDesktopApp() }), []);
   // Not the active device for this profile (WISP 06 § The gate): the standby screen, and nothing of the profile. No

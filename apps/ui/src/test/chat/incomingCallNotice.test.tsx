@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useIncomingCallNotice } from "../../hooks/useIncomingCallNotice";
 import { loadSettings, saveSettings } from "../../lib/settings";
@@ -26,14 +26,14 @@ afterEach(() => vi.restoreAllMocks());
 const shown = () => notices.show.mock.calls.map(([, body, chat]) => ({ body, chat }));
 
 describe("a call that rings while the app is out of sight", () => {
-  it("is a system notification that opens its chat, when the tab is in the background", () => {
+  it("is a system notification that opens its chat, when the tab is in the background", async () => {
     hidden = true;
     focused = false;
     renderHook(() => useIncomingCallNotice(true, "chat-a", "Incoming call"));
-    expect(shown()).toEqual([{ body: "Incoming call", chat: "chat-a" }]);
+    await waitFor(() => expect(shown()).toEqual([{ body: "Incoming call", chat: "chat-a" }]));
   });
 
-  it("is one when the app goes out of sight while it still rings, and only once", () => {
+  it("is one when the app goes out of sight while it still rings, and only once", async () => {
     const { rerender } = renderHook(({ ringing }) => useIncomingCallNotice(ringing, "chat-a", "Incoming call"), { initialProps: { ringing: true } });
     expect(shown()).toEqual([]);
     focused = false;
@@ -41,10 +41,12 @@ describe("a call that rings while the app is out of sight", () => {
     hidden = true;
     document.dispatchEvent(new Event("visibilitychange"));
     rerender({ ringing: true });
-    expect(shown()).toEqual([{ body: "Incoming call", chat: "chat-a" }]);
+    await waitFor(() => expect(shown()).toEqual([{ body: "Incoming call", chat: "chat-a" }]));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(shown()).toHaveLength(1);
   });
 
-  it("is none while the app is in front, once the ringing stopped, or with notifications off", () => {
+  it("is none while the app is in front, once the ringing stopped, or with notifications off", async () => {
     const { rerender } = renderHook(({ ringing }) => useIncomingCallNotice(ringing, "chat-a", "Incoming call"), { initialProps: { ringing: true } });
     rerender({ ringing: false });
     hidden = true;
@@ -55,6 +57,7 @@ describe("a call that rings while the app is out of sight", () => {
     const settings = loadSettings();
     saveSettings({ ...settings, notifications: { ...settings.notifications, systemEnabled: false } });
     renderHook(() => useIncomingCallNotice(true, "chat-b", "Incoming call"));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(shown()).toEqual([]);
   });
 });
