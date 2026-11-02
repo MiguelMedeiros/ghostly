@@ -165,6 +165,8 @@
     "restoring": "正在加载… · {{size}}",
     "resume": "继续",
     "roomDevice": "此设备剩余 {{size}}",
+    "senderOnly": "你的连接中还没有这个文件",
+    "senderOnlyHint": "在这么大的群组中，你的应用通过少数几位成员连接，而不是直接连接发送者。其中有人下载后它会自动送达，你也可以请发送者在聊天中直接发给你。",
     "stalled": "未在传输 · {{progress}}",
     "verifying": "正在检查文件… {{size}}",
     "verifyingThere": "已送达，{{name}} 正在检查… {{size}}",
