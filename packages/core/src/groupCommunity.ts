@@ -1254,6 +1254,8 @@ export class CommunitySession {
     return this.serialize(async () => {
       this.requireAdmin();
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
+      // A member whose signed leave I hold has gone: the role would stay with nobody (a leave never names the admin).
+      if (this.state.pendingLeaves.some(r => r.s === memberKey && leaveStands({ g: this.id, ...r }, this.ancestry(this.topHash)))) throw new Error("This member has left the group. Make someone else the admin.");
       await this.commit("role", { s: memberKey }, now);
     });
   }
