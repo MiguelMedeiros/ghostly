@@ -189,7 +189,8 @@ while sleep 900; do
 done
 ```
 
-`--resets` takes milliseconds or a date, so the seconds get three zeros. Set `CLAUDE_ACCOUNT` to a short name
+`--resets` takes milliseconds or a date, so the seconds get three zeros. A date with no zone (`2026-10-07` or
+`2026-10-07 18:00`) is local time, a date alone local midnight; `Z` or `+02:00` keep theirs. Set `CLAUDE_ACCOUNT` to a short name
 for the account in use, so the card says which one is running low.
 
 ## The older skill
