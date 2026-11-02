@@ -561,7 +561,7 @@
   "relays": {
     "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",
     "enterAddress": "リレーのアドレスを入力してください（{{example}}…）",
-    "irohAtMost": "Irohリレーは4つまでにしてください",
+    "irohAtMost": "Irohリレーは5つまでにしてください",
     "noLogin": "アドレスからユーザー名とパスワードを外してください",
     "noneAnswered": "リレーが応答しませんでした",
     "noneAnsweredNext": "接続を確認して、もう一度お試しください。",

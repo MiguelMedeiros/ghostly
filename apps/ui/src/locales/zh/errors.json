@@ -561,7 +561,7 @@
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",
     "enterAddress": "请输入中继地址（{{example}}…）",
-    "irohAtMost": "最多使用四个 Iroh 中继",
+    "irohAtMost": "最多使用五个 Iroh 中继",
     "noLogin": "请从地址中去掉用户名和密码",
     "noneAnswered": "中继没有响应",
     "noneAnsweredNext": "请检查网络连接，然后重试。",

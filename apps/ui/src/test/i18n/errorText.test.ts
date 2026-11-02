@@ -503,7 +503,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
   ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
-  ["Use at most four Iroh relays", `${BROWSER}/engine/node.ts`],
+  ["Use at most five Iroh relays", `${BROWSER}/engine/node.ts`],
   ["Enter the TURN server address", `${BROWSER}/shared/ice.ts`],
   ["“https://turn.example.org” is not a TURN or STUN address (turn:host:port)", `${BROWSER}/shared/ice.ts`, "” is not a TURN or STUN address (turn:host:port)"],
   ["A TURN server needs its username and credential", `${BROWSER}/shared/ice.ts`],

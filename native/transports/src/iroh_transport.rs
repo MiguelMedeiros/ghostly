@@ -84,14 +84,7 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
 /// self-hosted `iroh-relay`, or the e2e one. Direct paths are kept, so two
 /// native peers still hole-punch; a browser peer reaches it through the relay.
 pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<Endpoint, String> {
-    if relays.is_empty() || relays.len() > 4 {
-        return Err("Between one and four relays are needed".into());
-    }
-    let urls = relays
-        .iter()
-        .map(|url| url.parse::<RelayUrl>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| "Invalid Iroh relay URL")?;
+    let urls = relay_urls(relays)?;
     Endpoint::builder(presets::Minimal)
         .relay_mode(RelayMode::Custom(RelayMap::from_iter(
             urls.into_iter().map(RelayConfig::from),
@@ -102,6 +95,19 @@ pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<E
         .bind()
         .await
         .map_err(|e| e.to_string())
+}
+
+/// The relays an endpoint is given, parsed: one to five, as many as the browser build (`iroh-web`) takes, so the
+/// Desktop homes on any list Settings, Network accepts.
+fn relay_urls(relays: &[String]) -> Result<Vec<RelayUrl>, String> {
+    if relays.is_empty() || relays.len() > 5 {
+        return Err("Between one and five relays are needed".into());
+    }
+    relays
+        .iter()
+        .map(|url| url.parse::<RelayUrl>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "Invalid Iroh relay URL".into())
 }
 
 pub fn address(endpoint: &Endpoint) -> Address {
@@ -174,6 +180,25 @@ pub async fn read_frame(recv: &mut iroh::endpoint::RecvStream) -> Result<Vec<u8>
 mod tests {
     // covers: transport.iroh
     use super::*;
+    #[test]
+    fn takes_one_to_five_relays() {
+        let relays: Vec<String> = (0..6)
+            .map(|i| format!("http://127.0.0.1:{}/", 3340 + i))
+            .collect();
+        // n0's four plus Ghostly's own: the browser build's defaults, which Settings can hand the Desktop.
+        assert_eq!(relay_urls(&relays[..5]).map(|urls| urls.len()), Ok(5));
+        assert_eq!(relay_urls(&relays[..1]).map(|urls| urls.len()), Ok(1));
+        for wrong in [&relays[..0], &relays[..]] {
+            assert_eq!(
+                relay_urls(wrong),
+                Err("Between one and five relays are needed".to_string())
+            );
+        }
+        assert_eq!(
+            relay_urls(&["not a relay".to_string()]),
+            Err("Invalid Iroh relay URL".to_string())
+        );
+    }
     #[tokio::test]
     async fn real_quic_frames_exporter_and_reconnect() {
         let a = endpoint([1; 32], true).await.unwrap();

@@ -9,7 +9,7 @@
 | Implementation | Experimental: native adapter of the chat session (desktop); relay-only browser build in the web app, the extension and the headless CLI; endpoint id and home relay in the layer-0 capability record |
 | Summary | Use an Iroh QUIC endpoint, with Ghostly authentication bound to the connection. |
 | Availability | Available |
-| Notes | Experimental. Direct between desktop apps, tried from the first contact. The web app, the extension and the CLI use it through relays (n0's public ones unless you set others), so a web chat can reach a desktop. |
+| Notes | Experimental. Direct between desktop apps, tried from the first contact. The web app, the extension and the CLI use it through relays (n0's public ones and Ghostly's own unless you set others), so a web chat can reach a desktop. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
