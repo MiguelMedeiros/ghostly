@@ -143,7 +143,7 @@ pub struct OpenCamera {
 }
 
 /// Opens the camera named `device`, or the default one when there is none by that name (or `device` is null);
-/// its preview frames (JPEG) arrive on `frames`.
+/// its preview frames (JPEG) arrive on `frames`, and `{"ended":"camera"}` if it stops (unplugged, failing).
 #[tauri::command]
 pub async fn native_camera_open(
     frames: Channel<InvokeResponseBody>,
@@ -281,7 +281,8 @@ pub async fn native_speaker_test(device: Option<String>) -> Result<Option<String
     }
 }
 
-/// A call with this id, its events (JSON: `{"ice": state}`) and the peer's picture (JPEG) on `events`.
+/// A call with this id, its events (JSON: `{"ice": state}`, `{"ended":"microphone"}`) and the peer's picture
+/// (JPEG) on `events`.
 /// `ice_servers`: the profile's own ICE servers (Settings, Network), used after the built-in STUN server; one
 /// that is not usable is left out ([`ice::usable`]).
 #[tauri::command]

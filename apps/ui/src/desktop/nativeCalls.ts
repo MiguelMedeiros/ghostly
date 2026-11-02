@@ -238,10 +238,33 @@ function reporting(track: MediaStreamTrack, wanted: string | null): void {
   track.getSettings = () => ({ ...(settings?.() ?? {}), deviceId: usedOf.get(track) ?? "default" });
 }
 
+/**
+ * Ends a track as a browser ends one whose device stopped (unplugged, failing mid-call): stopped, with an `ended`
+ * event, once. The call's device check (`useCallDevices`) then says so and goes on with the default.
+ */
+function lost(track: MediaStreamTrack): void {
+  if (track.readyState === "ended") return;
+  track.stop();
+  track.dispatchEvent(new Event("ended"));
+}
+
+/** Whether Rust said this device stopped: `{"ended":"camera"}` or `{"ended":"microphone"}`. */
+function endedOf(bytes: Uint8Array, device: "camera" | "microphone"): boolean {
+  try {
+    return (JSON.parse(new TextDecoder().decode(bytes)) as { ended?: unknown } | null)?.ended === device;
+  } catch {
+    return false;
+  }
+}
+
 async function openCamera(device: string | null = null): Promise<MediaStreamTrack> {
   const picture = new Picture();
   const frames = new CallChannel();
-  frames.onmessage = (message) => picture.show(bytesOf(message));
+  frames.onmessage = (message) => {
+    const bytes = bytesOf(message);
+    if (isJpeg(bytes)) picture.show(bytes);
+    else if (endedOf(bytes, "camera")) lost(picture.track);
+  };
   let camera: number;
   let used: string | null;
   try {
@@ -581,6 +604,11 @@ export class NativePeerConnection extends EventTarget {
     if (this.closed) return;
     if (isJpeg(bytes)) {
       this.remote.show(bytes);
+      return;
+    }
+    if (endedOf(bytes, "microphone")) {
+      const track = this.audio.sender.track;
+      if (track) lost(track);
       return;
     }
     let said: { ice?: unknown; levels?: unknown };
