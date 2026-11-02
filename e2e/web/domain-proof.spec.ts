@@ -55,7 +55,11 @@ test("a domain proven by a DNS TXT record is verified by the one contact it is s
   await expect(add).toHaveCount(0);
   const proof = alice.page.getByTestId("identity-proof");
   await expect(proof).toHaveCount(1);
-  await expect(proof).toContainText(site.domain);
+  // The test domain is (almost always) longer than a card face holds: the face shows its end, the part that names
+  // who owns it, and the whole name is its title.
+  const subject = proof.getByTestId("identity-proof-subject");
+  await expect(subject).toHaveAttribute("title", site.domain);
+  await expect(subject).toHaveText(new RegExp(`^(…ghostly\\.tools|${site.domain.replaceAll(".", "\\.")})$`));
 
   // Shared with Bob only.
   await go(alice, withBob);
@@ -67,7 +71,8 @@ test("a domain proven by a DNS TXT record is verified by the one contact it is s
   await expect(theirCards(bob)).toHaveCount(1);
   await expect(theirFace(bob)).toHaveAttribute("data-status", "verified");
   let back = await turnTheirs(bob);
-  await expect(back.getByTestId("chat-identity-received-subject")).toHaveAttribute("title", site.domain);
+  // The back shows the domain whole.
+  await expect(back.getByTestId("chat-identity-received-subject")).toHaveText(site.domain);
   await expect(back).toContainText(`DNS TXT record at _ghostly.${site.domain}, via Quad9`);
 
   // The DNS method asks the resolver about the record only: the domain's web server never hears of it.
