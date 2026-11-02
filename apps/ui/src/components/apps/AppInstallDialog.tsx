@@ -259,7 +259,9 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
         </>
       )}
       {error && <ErrorLine error={error} testId="app-install-error" />}
-      <div className="flex justify-end gap-2">
+      {/* Too wide for one line (a phone at a large text size), the buttons wrap: unwrapped, "Install and open" pushed
+          Cancel off the screen's start, where nothing scrolls to it. */}
+      <div className="flex flex-wrap justify-end gap-2">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
           <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
