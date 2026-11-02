@@ -644,8 +644,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(answer!.replyTo!.from).toBe("me");
     // Sound this side cannot measure (no ffmpeg for it): sent flat with a warning on stderr when the length is given,
     // refused when not. Bytes ffmpeg reads as no sound are not audio, length or not: sent, they would not play.
+    // Its first byte is no sound's: random bytes that start FF Ex are an MP3 frame's to the sniffer (1 run in 2048), and
+    // the MP3 decoder then measured a length and bars from them (310 times in 400), so no warning came.
     const noise = join(alice, "noise.m4a");
-    writeFileSync(noise, randomBytes(4000));
+    const junk = randomBytes(4000);
+    junk[0] = 0;
+    writeFileSync(noise, junk);
     if (hasFfmpeg) {
       for (const length of [["1200"], []]) expect(error(await as(alice, "file", "send", "bob", noise, "--voice", ...length), "bad_request", 1).message).toMatch(/^noise\.m4a is not audio \(ffmpeg could not read it/);
     } else {
