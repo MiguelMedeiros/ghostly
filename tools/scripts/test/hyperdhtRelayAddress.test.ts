@@ -52,3 +52,27 @@ describe("the HyperDHT relay's count of a client's address (infra/services/hyper
     }
   }, 30_000);
 });
+
+describe("the HyperDHT relay's allowed origins (infra/services/hyperdht-relay)", () => {
+  it("lets in the origin set with a trailing slash or in upper case, refuses others with 403, and logs each refused one once", async () => {
+    const lines: string[] = [];
+    const relay = await startRelay({ testnet: 3, origins: ["HTTPS://App.Ghostly.Tools/"], log: (...words: unknown[]) => { lines.push(words.join(" ")); } });
+    const sockets: WebSocket[] = [];
+    const open = (origin?: string) => new Promise<number>((resolve) => {
+      const ws = new WebSocket(relay.url, origin ? { origin } : {});
+      sockets.push(ws);
+      ws.once("open", () => resolve(101));
+      ws.once("unexpected-response", (_request, response) => resolve(response.statusCode ?? 0));
+      ws.once("error", () => resolve(0));
+    });
+    try {
+      expect(await open("https://app.ghostly.tools")).toBe(101);
+      expect([await open("https://evil.example"), await open("https://evil.example"), await open("https://evil.example"), await open()]).toEqual([403, 403, 403, 403]);
+      expect(relay.stats().refused).toBe(4);
+      expect(lines.filter((line) => line.startsWith("refused"))).toEqual(['refused origin "https://evil.example"', "refused origin (none)"]);
+    } finally {
+      for (const ws of sockets) ws.terminate();
+      await relay.close();
+    }
+  }, 30_000);
+});

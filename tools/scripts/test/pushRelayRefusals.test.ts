@@ -20,12 +20,13 @@ describe("the push relay's log of refusals (infra/services/push-relay)", () => {
     const post = (init: RequestInit = {}) => fetch(url, { method: "POST", headers: { Origin: "https://app.ghostly.tools" }, body: request(), ...init });
     expect((await fetch(url)).status).toBe(405);
     expect((await post({ headers: { Origin: "https://evil.example" } })).status).toBe(403);
-    expect((await fetch(url, { method: "OPTIONS", headers: { Origin: "https://evil.example" } })).status).toBe(403);
+    // The preflight of a refused page is answered (so its POST gets a 403 it can read): no refusal of its own.
+    expect((await fetch(url, { method: "OPTIONS", headers: { Origin: "https://evil.example" } })).status).toBe(204);
     expect((await post({ body: request({ memo: "x".repeat(20_000) }) })).status).toBe(413);
     expect((await post()).status).toBe(400);
     expect((await post()).status).toBe(400);
     expect((await post()).status).toBe(429);
-    expect(lines).toEqual(["refused method", "refused origin", "refused size", "refused Not a push service", "refused rate"]);
+    expect(lines).toEqual(["refused method", 'refused origin "https://evil.example"', "refused size", "refused Not a push service", "refused rate"]);
   });
 
   it("names no header the client chose", async () => {
@@ -54,6 +55,19 @@ describe("the push relay's log of refusals (infra/services/push-relay)", () => {
     refusals.flush();
     refusals.refuse("rate");
     expect(lines.slice(4)).toEqual(["refused rate"]);
+  });
+
+  it("puts a refusal's detail on the first line of its kind only: the count covers the rest", () => {
+    const lines: string[] = [];
+    const refusals = refusalLog((...words: unknown[]) => lines.push(words.join(" ")));
+    refusals.refuse("origin", '"https://a.example"');
+    refusals.refuse("origin", '"https://b.example"');
+    refusals.refuse("origin", "(none)");
+    refusals.flush();
+    refusals.flush();
+    refusals.refuse("origin", '"https://b.example"');
+    expect(lines).toEqual(['refused origin "https://a.example"', "refused origin 2 more", 'refused origin "https://b.example"']);
+    expect(refusals.total()).toBe(4);
   });
 
   it("logs what is still uncounted when it stops", async () => {
