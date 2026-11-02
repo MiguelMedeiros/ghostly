@@ -288,7 +288,11 @@ export interface GroupEdgeView {
    * device's native listeners held by chats and other group links): it is tried again as one frees up.
    */
   noSlot?: true;
-  /** When this device last heard from the member on this edge, in ms (0: never). */
+  /**
+   * When this device last heard from the member on this edge, in ms (0: never). While the edge is open, as of when it
+   * opened (or of the member's latest packet read): the member is heard all along, and it stays the same from one state
+   * to the next.
+   */
   lastSeenAt: number;
   /** The engine's own words for why the last attempt failed (English, for logs and details); `cause` sums it up. */
   error?: string;
