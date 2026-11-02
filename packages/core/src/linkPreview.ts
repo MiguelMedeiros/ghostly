@@ -47,11 +47,28 @@ const isTracking = (name: string) => /^utm_/i.test(name) || TRACKING_PARAMS.has(
 const LINK_CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
 
 /**
- * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.") and a
- * closing bracket or quote the link did not open ("(https://x.example/a)") are left as text. The same rule as the
- * message bubble's links.
+ * Punctuation a sentence in Chinese, Japanese or Arabic puts right after a link, with no space: the ideographic comma
+ * and full stop, the full-width ! , : ; ? and brackets, the corner quotes, the Arabic comma, semicolon and question
+ * mark, the Urdu full stop. No address holds one as typed, so a link stops at the first.
  */
-export function linkEnd(url: string): string {
+const LINK_STOP = /[、。〈-】！（），：；？،؛؟۔]/;
+
+/** What a link leaves out at its end: a sentence's punctuation ("…", "»", "”" too), never a path's "/". */
+export const LINK_TRAILING = /[.,;:!?'"*_>…»’”]/;
+
+/** A link up to the first `LINK_STOP`: "https://x.example/a。" opens /a, not /a%E3%80%82. */
+export function linkStop(url: string): string {
+  const at = url.search(LINK_STOP);
+  return at < 0 ? url : url.slice(0, at);
+}
+
+/**
+ * A link ends where the sentence around it takes over: trailing punctuation ("see https://x.example/a.", in any of
+ * the app's languages) and a closing bracket or quote the link did not open ("(https://x.example/a)") are left as
+ * text. The same rule as the message bubble's links.
+ */
+export function linkEnd(whole: string): string {
+  const url = linkStop(whole);
   // Brackets counted once, then taken off as they go: linear in the link, however many ")" a peer puts at its end.
   const count: Record<string, number> = { "(": 0, ")": 0, "[": 0, "]": 0, "{": 0, "}": 0 };
   for (const c of url) if (c in count) count[c]++;
@@ -59,7 +76,7 @@ export function linkEnd(url: string): string {
   while (end > 0) {
     const last = url[end - 1];
     const opener = LINK_CLOSERS[last];
-    if (!/[.,;:!?'"*_>]/.test(last) && !(opener && count[last] > count[opener])) break;
+    if (!LINK_TRAILING.test(last) && !(opener && count[last] > count[opener])) break;
     if (opener) count[last]--;
     end--;
   }
