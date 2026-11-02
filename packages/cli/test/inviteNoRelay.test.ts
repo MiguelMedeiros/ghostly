@@ -21,6 +21,9 @@ describe("invite create with no relay reachable", { timeout: 180_000 }, () => {
     const first = ok(await ghostly(["--home", dir, "invite", "create", "--label", "first"], { env }));
     expect(first).toMatchObject({ published: false, note: expect.stringContaining("once a relay answers") });
     expect(first.reason).toEqual(expect.stringContaining("Publish failed on every relay"));
+    // Node's "TypeError: fetch failed" named no relay.
+    expect(first.reason).toContain(`${relay.url} did not answer`);
+    expect(first.reason).not.toContain("fetch failed");
 
     // The relay refused already: the next answer is the one that said it was cooling down.
     const second = ok(await ghostly(["--home", dir, "invite", "create", "--label", "second"], { env }));
