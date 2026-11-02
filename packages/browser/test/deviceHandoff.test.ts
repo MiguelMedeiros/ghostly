@@ -1536,4 +1536,14 @@ describe("Use here on a replaced device (WISP 06 § States and events, supersede
     expect(w.takerRecords.record.forks).toEqual(["ghostly"]);
     expect(w.takerRecords.record.handoff).toBeUndefined();
   });
+
+  it("lists the old namespace as one more fork when the device already keeps 8: none is left on disk unlisted", async () => {
+    const w = world();
+    const earlier = Array.from({ length: 8 }, (_, i) => `ghostly_fork${i}`);
+    w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen", forks: earlier };
+    await fullPull(w);
+    expect(w.storage.dropped).toEqual([]);
+    expect(w.takerRecords.record.forks).toEqual([...earlier, "ghostly"]);
+    expect(w.takerRecords.record.handoff).toBeUndefined();
+  });
 });
