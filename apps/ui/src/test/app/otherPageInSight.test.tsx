@@ -143,3 +143,24 @@ describe("a page behind the one in sight", () => {
     await waitFor(() => expect(created).toHaveBeenCalledTimes(1));
   });
 });
+
+describe("no page in sight", () => {
+  it("posts one notification for a call ringing in two, and one for its next ring", async () => {
+    installLocks();
+    page(true);
+    // Two tabs out of sight, ringing for the same offer: each runs its own hook.
+    const ring = (offer: number) => renderHook(() => useIncomingCallNotice(true, "chat-a", "Incoming call", offer));
+    const tabs = [ring(1_000), ring(1_000)];
+    await waitFor(() => expect(created).toHaveBeenCalledTimes(1));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(created).toHaveBeenCalledTimes(1);
+    for (const tab of tabs) tab.unmount();
+
+    // The caller calls again: a ring of its own, told once more.
+    ring(2_000);
+    ring(2_000);
+    await waitFor(() => expect(created).toHaveBeenCalledTimes(2));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(created).toHaveBeenCalledTimes(2);
+  });
+});
