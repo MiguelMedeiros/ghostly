@@ -1226,7 +1226,10 @@ pub struct Call {
     send: gst::Pipeline,
     video_in: gst_app::AppSrc,
     voice: Voice,
+    /// Held while another microphone opens.
     microphone: Mutex<Microphone>,
+    /// The volume of the microphone sent, apart: mute never waits for a microphone opening.
+    volume: Mutex<gst::Element>,
     ssrcs: (u32, u32),
     /// The profile has a TURN server: gathering waits for a relay candidate.
     uses_turn: bool,
@@ -1375,6 +1378,7 @@ impl Call {
             video_in: element(&send, "video")?,
             send,
             voice,
+            volume: Mutex::new(microphone.volume.clone()),
             microphone: Mutex::new(microphone),
             ssrcs,
             uses_turn,
@@ -1390,13 +1394,23 @@ impl Call {
             return Err("The call was closed".into());
         }
         let next = self.voice.open(wanted)?;
-        let previous = std::mem::replace(&mut *microphone, next);
-        stop(previous.pipeline);
+        self.switch_to(&mut microphone, next);
         crate::diagnostics::log(&format!(
             "native call: microphone {}",
             microphone.device.as_deref().unwrap_or("(default)")
         ));
         Ok(microphone.device.clone())
+    }
+
+    /// Makes `next`, just opened, the microphone muted or not: mute may have been pressed while it opened.
+    fn switch_to(&self, microphone: &mut Microphone, next: Microphone) {
+        {
+            let mut volume = self.volume.lock().unwrap();
+            *volume = next.volume.clone();
+            volume.set_property("mute", self.voice.muted.load(Ordering::Relaxed));
+        }
+        let previous = std::mem::replace(microphone, next);
+        stop(previous.pipeline);
     }
 
     /// Plays the peer's sound on the speaker named `wanted` (None: the default), from now on. Blocking.
@@ -1555,13 +1569,11 @@ impl Call {
         }
     }
 
+    /// Not blocking: the window's thread calls it, while another microphone may be opening.
     pub fn set_muted(&self, muted: bool) {
+        let volume = self.volume.lock().unwrap();
         self.voice.muted.store(muted, Ordering::Relaxed);
-        self.microphone
-            .lock()
-            .unwrap()
-            .volume
-            .set_property("mute", muted);
+        volume.set_property("mute", muted);
     }
 
     pub fn video_input(&self) -> gst_app::AppSrc {
@@ -2238,6 +2250,50 @@ mod tests {
         assert_eq!(b.stats().video_received, 0, "{}", stats());
         a.close().await;
         b.close().await;
+    }
+
+    /// Mute pressed while another microphone opens: it does not wait for the open (the window's thread calls it,
+    /// and the window froze until GStreamer had opened the device), and the microphone switched in is muted all
+    /// the same, though it opened before the press.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn mute_does_not_wait_for_a_microphone_opening() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let a = Arc::new(
+            Call::new(
+                OPUS_PT,
+                VP8_PT,
+                true,
+                Devices::default(),
+                &[],
+                Arc::new(|_| {}),
+            )
+            .await
+            .unwrap(),
+        );
+        let muted = {
+            // As `set_microphone` has it while GStreamer opens the device: the lock held, the new one opened
+            // unmuted.
+            let mut opening = a.microphone.lock().unwrap();
+            let next = a.voice.open(None).unwrap();
+            let (pressed, done) = std::sync::mpsc::channel();
+            let pressing = a.clone();
+            std::thread::spawn(move || {
+                pressing.set_muted(true);
+                let _ = pressed.send(());
+            });
+            if done.recv_timeout(Duration::from_secs(5)).is_err() {
+                drop(opening);
+                panic!("mute waited for the microphone opening");
+            }
+            a.switch_to(&mut opening, next);
+            opening.volume.property::<bool>("mute")
+        };
+        assert!(muted, "the microphone switched in is sent unmuted");
+        assert!(a.stats().muted);
+        a.close().await;
     }
 
     #[test]
