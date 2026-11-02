@@ -99,6 +99,18 @@ describe("the Desktop's Iroh endpoints while idle", () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
+  it("tell their holder each time Rust says the endpoint is back on its relay, until they are closed", async () => {
+    const endpoint = await createIrohEndpoint("c2VlZA");
+    const back = vi.fn();
+    endpoint.onRelayBack = back;
+    tauri.channels[0].onmessage!({ type: "relayBack" });
+    tauri.channels[0].onmessage!({ type: "relayBack" });
+    expect(back).toHaveBeenCalledTimes(2);
+    await endpoint.close();
+    tauri.channels[0].onmessage!({ type: "relayBack" });
+    expect(back).toHaveBeenCalledTimes(2);
+  });
+
   it("start with an address Rust sent before its answer to the start arrived", async () => {
     tauri.invoke.mockImplementation(async (command: string) => {
       if (!command.endsWith("_start")) return null;
