@@ -1,7 +1,7 @@
 import {
   HANDOFF_ACK, HANDOFF_BUSY, HANDOFF_CANCEL, HANDOFF_DATA, HANDOFF_DONE, HANDOFF_HAVE, HANDOFF_HELLO, HANDOFF_MANIFEST, HANDOFF_OFFER, HANDOFF_PAKE,
   HANDOFF_PIECE_BYTES, HANDOFF_RELEASE, HANDOFF_REQUEST, HANDOFF_TIMINGS, HANDOFF_VERIFIED, HANDOFF_WINDOW,
-  filePartDigest, filePartName, fromBase64Url, handoffAckFrame, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffBusyFrame,
+  filePartDigest, filePartName, fromBase64Url, handoffAckFrame, handoffAttemptAllowed, handoffAttemptFailed, handoffBusyFrame,
   handoffCancelFrame, handoffContext, handoffDataFrame, handoffDigest, handoffDoneFrame, handoffEphemeral, handoffHaveFrames, handoffHelloFrame,
   handoffManifestFrames, handoffOfferFrame, handoffPakeFrame, handoffReleaseFrame, handoffRequestFrame, handoffRetryAfter, handoffStreamKey,
   handoffVerifiedFrame, handoffVersions, newHandoffId, openHandoffPiece, readHandoffAck, readHandoffBusy, readHandoffCancel, readHandoffData,
@@ -240,6 +240,13 @@ export interface TakerPorts extends Common {
 
 const name = (record: DeviceRecord, key: string): string => record.deviceSet.find((slot) => slot?.key === key)?.name ?? "";
 const slotOf = (record: DeviceRecord, key: string): number => record.deviceSet.findIndex((slot) => slot?.key === key);
+/**
+ * The counts of the devices still in the set: a removed device cannot pull (`onRequest` refuses it), and one added again
+ * has a new key, so the list stays within the set's size instead of growing to the record's cap of 16 and refusing every
+ * write after it.
+ */
+const setAttempts = (record: DeviceRecord, attempts: Record<string, DeviceAttempts> | undefined): Record<string, DeviceAttempts> =>
+  Object.fromEntries(Object.entries(attempts ?? {}).filter(([key]) => slotOf(record, key) >= 0));
 
 /**
  * The wrong passwords the giver counted, carried with its release (`a`), kept with this device's own: for each device,
@@ -247,10 +254,10 @@ const slotOf = (record: DeviceRecord, key: string): number => record.deviceSet.f
  */
 function mergedAttempts(record: DeviceRecord, carried: unknown): DevicePatch {
   if (!carried || typeof carried !== "object" || Array.isArray(carried)) return {};
-  const merged: Record<string, DeviceAttempts> = { ...record.handoffAttempts };
+  const merged = setAttempts(record, record.handoffAttempts);
   for (const [key, value] of Object.entries(carried as Record<string, unknown>).slice(0, 16)) {
     const a = value as Partial<DeviceAttempts> | null;
-    if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !a || !Number.isSafeInteger(a.total) || (a.total as number) < 0 || !Array.isArray(a.recent) || !a.recent.every((at) => Number.isSafeInteger(at) && at >= 0)) continue;
+    if (!/^[A-Za-z0-9_-]{43}$/.test(key) || slotOf(record, key) < 0 || !a || !Number.isSafeInteger(a.total) || (a.total as number) < 0 || !Array.isArray(a.recent) || !a.recent.every((at) => Number.isSafeInteger(at) && at >= 0)) continue;
     const mine = merged[key];
     const until = Math.max(mine?.until ?? 0, Number.isSafeInteger(a.until) ? a.until as number : 0);
     merged[key] = { recent: [...new Set([...(mine?.recent ?? []), ...a.recent])].sort((x, y) => x - y).slice(-16), total: Math.min(1_000_000, Math.max(mine?.total ?? 0, a.total as number)), ...(until ? { until } : {}) };
@@ -728,7 +735,7 @@ export class HandoffGiver {
       if (allowed !== "ok") return busy(allowed, allowed === "refused" ? 0 : handoffRetryAfter(record.handoffAttempts?.[from], this.now()));
       // A pull is counted as a try when it is asked for, before anything is answered, and taken back only when its
       // proof holds: a device that asks and never proves (holding this device in `authorizing`) spends its tries.
-      await this.ports.records.amend({ handoffAttempts: { ...record.handoffAttempts, [from]: handoffAttemptFailed(record.handoffAttempts?.[from], this.now()) } });
+      await this.ports.records.amend({ handoffAttempts: { ...setAttempts(record, record.handoffAttempts), [from]: handoffAttemptFailed(record.handoffAttempts?.[from], this.now()) } });
       this.begin(from, request.id, record);
       this.stays = await this.ports.staying?.(this.takerFacts(from)).catch(() => []) ?? [];
       this.newer = versions.newerTaker;
@@ -764,8 +771,11 @@ export class HandoffGiver {
     let key: Uint8Array;
     try { key = await giver.finish(pake.m!, pake.c!, handoffContext(this.ports.turnAddress, this.ports.ownKey, fromBase64Url(from), session.transcript)); }
     catch (error) { if (error instanceof HandoffPasswordError) { this.wrongPassword(from); return; } throw error; }
+    // The proof held: this device's count goes (no count is a fresh start).
     const record = await this.ports.records.read();
-    await this.ports.records.amend({ handoffAttempts: { ...record?.handoffAttempts, [from]: handoffAttemptSucceeded() } });
+    const attempts = record ? setAttempts(record, record.handoffAttempts) : {};
+    delete attempts[from];
+    await this.ports.records.amend({ handoffAttempts: attempts });
     this.authorized(session, key);
   }
 
