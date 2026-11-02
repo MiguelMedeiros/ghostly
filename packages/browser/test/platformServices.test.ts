@@ -405,7 +405,10 @@ describe("wallet and settings", () => {
     expect(services.wallet.getPayment("p")).toBeNull();
     withLinks(chat({ peerOnline: true }));
     expect(services.isOnline()).toBe(true);
-    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", relays: ["wss://r"], turn: null });
+    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", kind: "relays", relays: ["wss://r"], turn: null });
+    // The Desktop's transport reaches the DHT itself: the page words that from `kind`, not from the English line.
+    engine.state = { ...engine.state!, transport: { ...engine.state!.transport, direct: true } };
+    expect(services.getNetwork()).toMatchObject({ protocol: "pkarr", kind: "direct" });
     expect(services.getPeer("peer-1")).toMatchObject({ id: "link-1", online: true });
   });
 

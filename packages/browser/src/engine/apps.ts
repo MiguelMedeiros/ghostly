@@ -414,6 +414,11 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
 }
 
+/** Of these revocations, the ones that stop one of these versions. */
+function stopping(versions: readonly AppVersion[], revocations: readonly SignedAppRevocation[]): SignedAppRevocation[] {
+  return revocations.filter((r) => versions.some((v) => appRevocationFor(v, [r])));
+}
+
 /**
  * What installing `version` over `installed` does, for the install screen and for Install alike: the update rule, and an
  * equivocation for another bundle at the number of the update waiting (two different versions of that number exist).
@@ -688,6 +693,11 @@ export class Apps {
     return { ref: app.ref, sequence, digest: digest as string };
   }
 
+  /** The versions of an app a revocation it keeps may stop: the installed one, the one waiting, one started here before an update (it may still run). */
+  private versionsOf(app: InstalledApp): AppVersion[] {
+    return [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : []), ...this.startedBefore(app)];
+  }
+
   /** The versions started here that are not the installed one any more. */
   private startedBefore(app: InstalledApp): AppVersion[] {
     return [...this.started.get(app.ref) ?? []].filter(([digest]) => digest !== app.digest).map(([digest, sequence]) => ({ ref: app.ref, sequence, digest }));
@@ -753,8 +763,22 @@ export class Apps {
     after.catch(() => { if (this.heldStores === after) this.heldStores = null; });
     await written;
   }
-  private putStore(record: AddedAppStore): Promise<void> {
-    return this.writeStores((records) => records.put(record), (held) => held.set(record.key, record));
+  private async putStore(record: AddedAppStore): Promise<void> {
+    await this.writeStores((records) => records.put(record), (held) => held.set(record.key, record));
+    await this.keepStoreRevocations(record);
+  }
+  /**
+   * Keeps on each installed app the revocations a store's index carries of its versions: a client keeps every
+   * revocation it verified (WISP 1200 § Publisher keys), so the store's next index without it, or the store removed,
+   * does not let that version run again.
+   */
+  private async keepStoreRevocations(record: AddedAppStore): Promise<void> {
+    const revoked = record.index?.revoked ?? [];
+    if (!revoked.length) return;
+    for (const app of await this.installed()) {
+      const next = withRevocations(app, stopping(this.versionsOf(app), revoked));
+      if ((next.revocations?.length ?? 0) > (app.revocations?.length ?? 0)) await this.putAppIfUnchanged(next, app);
+    }
   }
   /** The stores' views, made once and again after a store is written here: an app's every storage call and chat frame checks them. */
   private heldViews(): Promise<AppStoreView[]> {
@@ -1108,7 +1132,9 @@ export class Apps {
   async removeStore({ key }: { key: string }): Promise<void> {
     const held = await this.storeRecord(key);
     if (!held) return;
-    const seen = held.index ? { sequence: held.index.sequence, digest: held.digest ?? "" } : held.seen;
+    // Its index's revocations stay with the apps they stop (an index held from before they were kept at each read).
+    await this.keepStoreRevocations(held);
+    const seen = held.index ?{ sequence: held.index.sequence, digest: held.digest ?? "" } : held.seen;
     await this.putStore({ key: held.key, url: held.url, addedAt: held.addedAt, ...(held.preloaded && { preloaded: true as const }), removed: true, ...(seen && { seen }) });
     // The person no longer takes this store's curation: an app installed from it updates from its sources and the other
     // stores again (WISP 1200 § Updates and rollback), so its security fixes still arrive. A newer version waiting stays:
@@ -1126,16 +1152,17 @@ export class Apps {
     if (key !== undefined && !stores.length) fail("no-store", "No such store");
     const out: AppStoreSummary[] = [];
     for (const s of stores) {
-      let next: AddedAppStore;
+      let read: AppStoreRead | { ok: false; reason: string };
       try {
-        const read = await this.readStoreAt(s.url, s.key, s);
-        next = read.ok ? this.withIndex(s, read.store.index, read.store.digest) : { ...s, problem: read.reason };
+        read = await this.readStoreAt(s.url, s.key, s);
       } catch (error) {
-        next = { ...s, problem: error instanceof AppFetchError ? error.code : "network" };
+        read = { ok: false, reason: error instanceof AppFetchError ? error.code : "network" };
       }
       // Removed meanwhile: not put back.
       const now = await this.storeRecord(s.key);
       if (!now || now.removed) continue;
+      // Judged against the record held now: an index taken meanwhile (Add, at another URL) is not replaced by an older one.
+      const next: AddedAppStore = read.ok ? this.withIndex(now, read.store.index, read.store.digest) : { ...now, problem: read.reason };
       // Nothing to keep but when it was read: held here, not written (the whole index would be written with it).
       const unchanged = now === s && next.index === s.index && next.digest === s.digest && next.problem === s.problem && next.equivocation === s.equivocation;
       if (unchanged) (await this.records()).set(s.key, next);
@@ -1382,11 +1409,14 @@ export class Apps {
       let app = first;
       let outcome: AppCheckOutcome = "none";
       let wrote: { bytes: FileBytesKind; digest: string } | undefined;
+      // A waiting update this check drops or replaces: its files go once the record without it is written, not before
+      // (accepted meanwhile, it is the version installed and runs from them).
+      const dropped: { bytes: FileBytesKind; digest: string }[] = [];
       // A store the person removed pins nothing any more (as `removeStore` does).
       if (app.store !== undefined && !stores.some((s) => s.key === app.store)) { const { store: _s, ...unpinned } = app; app = unpinned; }
       // A waiting update its store no longer lists goes, so the version the store lists now is looked at instead.
       if (app.store !== undefined && app.pending && stores.find((s) => s.key === app.store)?.index && this.pinnedListing(app, stores)?.digest !== app.pending.digest) {
-        await this.removeBundle(app.pending.bytes, app.pending.digest);
+        dropped.push(app.pending);
         const { pending: _p, ...rest } = app;
         app = rest;
       }
@@ -1476,7 +1506,7 @@ export class Apps {
           await this.removeBundle(old.bytes, old.digest);
           outcome = "updated";
         } else {
-          if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);
+          if (app.pending) dropped.push(app.pending);
           app = { ...app, pending: { sequence: version.sequence, digest: version.digest, manifest: bundle.manifest, added: plan.added as AppPermission[], bytes: kind, from: url, at: this.now() } };
           outcome = "ask";
         }
@@ -1488,17 +1518,18 @@ export class Apps {
       // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
       // version not found yet): a file that changes does not pile up.
       const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
-      const versions: AppVersion[] = [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : []), ...this.startedBefore(app)];
-      const stays = (app.revocations ?? []).filter((r) => !revocations || versions.some((v) => appRevocationFor(v, [r])));
-      const merged = new Map([...stays, ...(revocations ?? [])].map((r) => [canonicalJson(r), r]));
+      // A store's index carries some too: those that stop one of these are kept, as a store may drop them or be removed.
+      const versions = this.versionsOf(app);
+      const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
+      const carried = stopping(versions, stores.flatMap((s) => s.index?.revoked ?? []));
+      const merged = new Map([...stays, ...(revocations ?? []), ...carried].map((r) => [canonicalJson(r), r]));
       // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
       const current = await this.app(app.ref);
       if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
       app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
-      if (!(await this.putAppIfUnchanged(app, stored))) {
-        if (wrote) await this.removeUnusedBundle(app.ref, wrote.bytes, wrote.digest);
-        continue;
-      }
+      const put = await this.putAppIfUnchanged(app, stored);
+      for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
+      if (!put) continue;
       out.push({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores) });
     }
     return out;

@@ -252,7 +252,7 @@ export interface StoredGroup {
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
    * race: my member seed, the entry session, and what arrived of the welcome.
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
 }
 
 export interface GroupMemberView {
@@ -315,9 +315,10 @@ export type GroupEdgeCause = "relays" | "session" | "other";
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,
  * it is there for the admin's app to read, that app opened the entry session, it let me in. Or a member's app
  * answered that there is no room yet (`group-full`, WISP 902 § A full group): `full`, or `blocked` while the group
- * waits for every member's app to take more than eight; the joiner goes on knocking.
+ * waits for every member's app to take more than eight; the joiner goes on knocking. Or the welcome said the link was
+ * replaced or turned off since it was shared (`replaced`): the knocking stops, and only the current link gets in.
  */
-export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked";
+export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked" | "replaced";
 
 export interface GroupView {
   id: string;

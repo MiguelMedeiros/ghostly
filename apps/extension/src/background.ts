@@ -1,8 +1,9 @@
 import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } from "@ghostly/core";
-import type { EngineStatus, HttpRequestReply, RuntimeMessage } from "./messages";
+import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
 import { rememberPendingUpdate } from "./updates";
+import servicesEn from "../../ui/src/locales/en/services.json";
 
 /**
  * The service worker does what only it can: keep the peer (the offscreen
@@ -155,7 +156,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "open-service") {
-    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag).then(
+    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag, viewerPageOf(message.page)).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
@@ -206,6 +207,20 @@ interface ViewerBinding {
   peerPubKeyZ32: string;
   serviceId: string;
   tag: string;
+  /** Its error page, in the language of the page that opened it. */
+  page: ViewerPage;
+}
+
+/** The English page, for a request that came without one. */
+const ENGLISH_PAGE: ViewerPage = { lang: "en", dir: "ltr", unreachable: servicesEn.window.unreachable, failed: servicesEn.window.failed };
+
+/** What the page sent, if it is a page: short texts, a language tag and a direction; else English. */
+function viewerPageOf(page: unknown): ViewerPage {
+  const text = (value: unknown) => typeof value === "string" && value.length > 0 && value.length <= 500;
+  if (typeof page !== "object" || page === null) return ENGLISH_PAGE;
+  const { lang, dir, unreachable, failed } = page as Record<string, unknown>;
+  if (typeof lang !== "string" || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(lang) || (dir !== "ltr" && dir !== "rtl") || !text(unreachable) || !text(failed)) return ENGLISH_PAGE;
+  return { lang, dir, unreachable: unreachable as string, failed: failed as string };
 }
 
 // Session storage outlives the service worker, which the browser stops whenever it is idle.
@@ -227,7 +242,7 @@ export async function devtools(tabId: number, method: string, params?: Record<st
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
-async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void> {
+async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string, page: ViewerPage): Promise<void> {
   const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
   const parsed = parseViewerUrl(url);
   if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
@@ -236,7 +251,7 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string)
   // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
   if (tab.id === undefined) throw new Error("Could not open a tab");
-  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId, tag } satisfies ViewerBinding });
+  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId, tag, page } satisfies ViewerBinding });
   try {
     await chrome.debugger.attach({ tabId: tab.id }, PROTOCOL_VERSION);
     await devtools(tab.id, "Fetch.enable", {
@@ -250,13 +265,12 @@ async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string)
   await chrome.tabs.update(tab.id, { url });
 }
 
-function errorPage(title: string, detail: string): string {
+function errorPage(page: ViewerPage, text: string): string {
   const escape = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-  return `<!doctype html><meta charset="utf-8"><title>Ghostly</title>
+  return `<!doctype html><html lang="${escape(page.lang)}" dir="${page.dir}"><meta charset="utf-8"><title>Ghostly</title>
 <body style="font:16px system-ui;background:#0b0b12;color:#d8d8e8;display:grid;place-items:center;height:100vh;margin:0">
 <div style="max-width:32rem;padding:2rem;text-align:center">
-<div style="font-size:3rem">👻</div><h1 style="font-size:1.25rem">${escape(title)}</h1>
-<p style="color:#8a8aa3">${escape(detail)}</p></div>`;
+<div style="font-size:3rem" aria-hidden="true">👻</div><h1 style="font-size:1.25rem;font-weight:500">${escape(text)}</h1></div>`;
 }
 
 const UNREACHABLE_CODES = new Set(["unreachable", "timeout", "closed", "offline", "unknown-peer"]);
@@ -312,6 +326,9 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   }
 
   const gone = UNREACHABLE_CODES.has(reply.code);
+  // As on the Desktop: the person reads a sentence in their language, the engine's English goes to the console.
+  if (!gone) console.warn("Service request failed:", reply.code, reply.message);
+  const { page } = binding;
   await devtools(tabId, "Fetch.fulfillRequest", {
     requestId: paused.requestId,
     responseCode: gone ? 503 : 502,
@@ -320,13 +337,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
     ],
-    body: toBase64(
-      utf8Encode(
-        gone
-          ? errorPage("This service is not reachable", "Services exist while their ghost is online. The peer is gone, or stopped sharing.")
-          : errorPage("The request failed", reply.message),
-      ),
-    ),
+    body: toBase64(utf8Encode(errorPage(page, gone ? page.unreachable : page.failed))),
   });
 }
 

@@ -45,5 +45,17 @@ test("the availability map has the headless CLI", async ({ page }) => {
   await expect(cli("Bark wallets")).toHaveText("No");
   await expect(cli("Voice calls")).toHaveText("✓");
   await expect(cli("Video calls, screen sharing")).toHaveText("No");
+  // packages/cli/src/runtime/mainline.ts reads the Mainline DHT beside the relays; packages/cli/src/wallets.ts connects
+  // every Lightning source but WebLN.
+  await expect(cli("Mainline DHT read directly")).toHaveText("✓");
+  await expect(cli("Your own Lightning source")).toHaveText("✓");
   await expect(page.locator(".avail-notes")).toContainText("--confirm-real");
+});
+
+test("/cli says the CLI reads the Mainline DHT today", async ({ page }) => {
+  await page.goto("/cli", { waitUntil: "networkidle" });
+  const item = page.locator(".cl-scope li", { hasText: "Mainline DHT" });
+  await expect(item).toHaveCount(1);
+  await expect(item.locator(".level")).toHaveAttribute("data-level", "available");
+  await expect(page.locator(".cl-scope")).not.toContainText("relays for now");
 });

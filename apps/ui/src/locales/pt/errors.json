@@ -252,6 +252,8 @@
     "growMore": "mais {{count}}",
     "growNeedsUpdates": "Todos precisam atualizar para passar de {{max}}",
     "growNeedsUpdatesNext": "Ainda sem atualizar: {{names}}.",
+    "heirLeft": "Este membro saiu do grupo",
+    "heirLeftNext": "Torne outra pessoa admin.",
     "hubSetting": "Esta configuração de hub não pode ser usada",
     "hubsNeedUpdate": "O app dele precisa de uma atualização antes",
     "hubsNeedUpdateNext": "Este grupo funciona por hubs.",

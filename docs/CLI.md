@@ -85,7 +85,9 @@ Only one process opens a profile at a time.
 `ghostly daemon --detach` keeps a profile online; `ghostly daemon status` and `ghostly daemon stop` check and end it,
 and `ghostly daemon restart` starts it again on the CLI's own code (after an upgrade, commands warn on stderr that
 the daemon runs another version). Ctrl-C, a service manager's stop, or the terminal or SSH session closing all stop
-it cleanly: it tells contacts it is going and removes its socket.
+it cleanly: it tells contacts it is going and removes its socket. While a daemon is starting (its engine, before its
+socket listens: seconds on a large profile), `ghostly daemon status` says `"running": false, "starting": true` with its `pid`, and `daemon stop` and `daemon restart`
+wait up to `--timeout` for its socket, then stop it.
 While it runs, every command goes through its socket. With no daemon, a command runs the profile itself and leaves
 (a one-shot), so the contact sees it come and go. Bots should run the daemon.
 

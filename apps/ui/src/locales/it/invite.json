@@ -1,6 +1,7 @@
 {
   "copy": "Copia invito",
-  "copyFailed": "Impossibile copiare. Riprova o condividi l’invito.",
+  "copyFailed": "Impossibile copiare. Seleziona il link qui sotto e copialo.",
+  "copyFailedShare": "Impossibile copiare. Seleziona il link qui sotto o condividilo.",
   "qrTitle": "Codice QR dell'invito",
   "shareFailed": "Impossibile condividere. Copia l’invito.",
   "title": "Invita il tuo contatto"

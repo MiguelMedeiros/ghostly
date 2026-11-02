@@ -80,6 +80,12 @@ export interface BrowserHost {
   /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
   openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
   /**
+   * Erases what the contacts' apps opened from one chat (`tag`, as `openService` was given it) or by one profile
+   * (`profile`, its id) kept on this device: their origins' storage, caches and worker. Left out where the host keeps
+   * none of it in the page's browser (the web app's origins are its own; Desktop and the extension name theirs apart).
+   */
+  forgetServices?(which: { tag: string } | { profile: string }): Promise<void>;
+  /**
    * Opens a `lightning:` or `bitcoin:` link in a wallet on this device. Left out where a plain link
    * already does it (a web page); the desktop app and the extension have to hand it to the system.
    */
@@ -166,6 +172,11 @@ export function setBrowserHost(host: BrowserHost): void {
 export function getBrowserHost(): BrowserHost {
   if (!current) throw new Error("No browser host configured");
   return current;
+}
+
+/** `forgetServices` of the host, where it has one: never throws (no host, or one that failed, holds nothing up). */
+export async function forgetServicesOf(which: { tag: string } | { profile: string }): Promise<void> {
+  await current?.forgetServices?.(which).catch(() => {});
 }
 
 /**

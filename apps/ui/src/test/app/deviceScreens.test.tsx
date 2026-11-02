@@ -15,6 +15,8 @@ import { Settings } from "../../pages/Settings";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { createProfile, namespaceOf } from "../../lib/profiles";
+import { defaultDeviceName } from "../../lib/devices";
+import { loadLocale, translatorFor } from "../../locales";
 import { setPushPlatform, type PushPlatform } from "../../lib/wakePush";
 import { engineState, fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -244,6 +246,26 @@ describe("Profile, Devices", () => {
     expect(screen.queryByTestId("device-move")).toBeNull();
   });
 
+  it("a move under way: no row offers Remove, which the engine refuses as busy, until the move is cancelled", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = { role: "giver", device: "iPhone", key: PHONE, step: "connecting", bytes: 0, total: 0 };
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffCancel", () => { handoff = null; });
+    const running = await screen.findByTestId("handoff-running");
+    const [, phone, tablet] = screen.getAllByTestId("device-row");
+    // Check connection stays on the connected device; the one not connected has nothing left in its menu.
+    await user.click(within(phone).getByTestId("device-menu"));
+    expect(screen.getByTestId("device-check")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-remove-open")).toBeNull();
+    await user.keyboard("{Escape}");
+    expect(within(tablet).queryByTestId("device-menu")).toBeNull();
+    await user.click(within(running).getByTestId("handoff-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    await user.click(within(tablet).getByTestId("device-menu"));
+    expect(screen.getByTestId("device-remove-open")).toBeInTheDocument();
+  });
+
   it("on a standby the section shows no move: its screen does", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
@@ -256,6 +278,22 @@ describe("Profile, Devices", () => {
   it("draws each device's kind from its name", () => {
     expect(["iPhone", "Phone", "Pixel 8", "iPad", "Tablet", "Chrome on Mac", "Firefox", "Mac app", "Desktop", "Linux"].map(deviceLook))
       .toEqual(["phone", "phone", "phone", "tablet", "tablet", "browser", "browser", "computer", "computer", "computer"]);
+  });
+
+  it("draws the kind of a name in any app language, and of the name each language suggests", async () => {
+    expect(["هاتف (2)", "جوال أحمد", "手机", "スマホ", "Celular", "Téléphone", "Teléfono de Ana", "Telefono", "Tablette", "平板", "タブレット", "Navegador", "متصفح"].map(deviceLook))
+      .toEqual(["phone", "phone", "phone", "phone", "phone", "phone", "phone", "phone", "tablet", "tablet", "tablet", "browser", "browser"]);
+    const agents = {
+      phone: { userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36 Chrome/131.0" },
+      tablet: { userAgent: "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 Chrome/131.0 Safari/537.36" },
+      browser: { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" },
+      computer: { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", desktop: true },
+    } as const;
+    for (const language of ["ar", "en", "es", "fr", "it", "ja", "pt", "zh"] as const) {
+      await loadLocale(language);
+      const t = translatorFor(language);
+      for (const [look, env] of Object.entries(agents)) expect([language, deviceLook(defaultDeviceName(env, t))]).toEqual([language, look]);
+    }
   });
 });
 
@@ -372,6 +410,11 @@ describe("the forced takeover", () => {
     await user.click(screen.getByTestId("takeover-info"));
     expect(screen.getByTestId("takeover-info-text")).toHaveTextContent("Messages and money that reached iPhone after that are not here.");
   });
+
+  it("on a phone its × is 44 px, as the device dialogs' buttons are", () => {
+    renderApp(<TakeoverDialog device="iPhone" password onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: "Close" })).toHaveClass("max-md:h-11", "max-md:w-11");
+  });
 });
 
 describe("the standby screen", () => {
@@ -389,6 +432,14 @@ describe("the standby screen", () => {
     expect(links[0]).toHaveTextContent("Active");
     expect(screen.getByRole("navigation", { name: "Other profiles" })).toHaveTextContent("Switch to Work");
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
+  });
+
+  it("on a phone Check connection is 44 px tall, as the screen's other buttons are", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? "live" as const : undefined })) }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    expect(await screen.findByTestId("device-standby-check")).toHaveClass("max-md:min-h-11");
   });
 
   it("is a landmark, not a live region: only the state is read when it changes, and no live part sits in another", async () => {
@@ -453,6 +504,39 @@ describe("the standby screen", () => {
     expect(again).toHaveTextContent("Try again");
     await user.click(again);
     expect(screen.getByTestId("handoff-use-here-dialog")).toBeInTheDocument();
+  });
+
+  it("Use here started: its button leaves the screen while the move runs, and the keyboard focus goes to the move's Cancel, not to the page", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
+    let handoff: HandoffView | null = null;
+    fakeEngine.on("deviceHandoffView", () => handoff);
+    fakeEngine.on("deviceHandoffPull", () => (handoff = { role: "taker", device: "MacBook", key: DESKTOP, step: "connecting", bytes: 0, total: 0 }));
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    await user.click(await screen.findByTestId("handoff-use-here"));
+    await user.type(await screen.findByTestId("handoff-password"), "hunter22{Enter}");
+    const progress = await screen.findByTestId("handoff-progress", {}, { timeout: 3_000 });
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
+    await waitFor(() => expect(within(progress).getByTestId("handoff-cancel")).toHaveFocus());
+  });
+
+  it("Use here that stops at once with a wrong password: the keyboard focus is on the move's words, which say so", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP })) }));
+    let handoff: HandoffView | null = null;
+    fakeEngine.on("deviceHandoffView", () => {
+      const now = handoff;
+      // The other device turns the password down right after the first read of the move.
+      if (handoff?.step === "authorizing") handoff = { ...handoff, step: "failed", failure: "password" };
+      return now;
+    });
+    fakeEngine.on("deviceHandoffPull", () => (handoff = { role: "taker", device: "MacBook", key: DESKTOP, step: "authorizing", bytes: 0, total: 0 }));
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    await user.click(await screen.findByTestId("handoff-use-here"));
+    await user.type(await screen.findByTestId("handoff-password"), "wrong{Enter}");
+    await waitFor(() => expect(screen.getByTestId("handoff-progress")).toHaveAttribute("data-failure", "password"), { timeout: 3_000 });
+    await waitFor(() => expect(screen.getByTestId("handoff-progress")).toHaveFocus());
+    expect(await screen.findByTestId("handoff-use-here")).toHaveTextContent("Try again");
   });
 
   it("a device that took the profile and could not check which device is active: the line read out, and Try again checks again", async () => {
