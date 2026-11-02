@@ -35,6 +35,8 @@ A contact's app is the contact's code: run on the web app's origin it could read
 
 The frames around a contact's app (the view's and the bridge's) allow no `clipboard-write`: its code writes the clipboard only on the person's own tap in it (`document.execCommand("copy")`), never by itself while it has the focus, so it cannot swap what the person copied in Ghostly for text of its own.
 
+The frames around a contact's app (the view's and the bridge's) allow no `clipboard-write`: its code writes the clipboard only on the person's own tap in it (`document.execCommand("copy")`), never by itself while it has the focus, so it cannot swap what the person copied in Ghostly for text of its own.
+
 ## Evidence
 
 [HTTP core](../../packages/core/src/http.ts), [paired HTTP](../../packages/core/src/pairedHttp.ts), [session capabilities](../../packages/core/src/pairedCapabilities.ts), [service authorization](../../packages/browser/src/engine/node.ts), [native fetch](../../apps/desktop/src/local_fetch.rs), [browser boundaries](../BROWSER.md). Check traversal, header/URL injection, wrong audience, disabled sharing, redirect escape and resource cleanup; document platform differences.
