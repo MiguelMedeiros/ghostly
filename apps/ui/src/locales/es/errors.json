@@ -558,10 +558,14 @@
   },
   "relays": {
     "atLeastOne": "Escribe al menos una dirección de relay",
+    "enterAddress": "Escribe una dirección de relay ({{example}}…)",
+    "irohAtMost": "Usa como máximo cuatro relays Iroh",
+    "noLogin": "Quita el usuario y la contraseña de la dirección",
     "noneAnswered": "Los relays no respondieron",
     "noneAnsweredNext": "Revisa tu conexión y vuelve a intentarlo.",
     "notAddress": "No es una dirección de relay: {{address}}",
-    "useHttps": "Usa https:// en la dirección del relay: {{address}}"
+    "useHttps": "Usa https:// en la dirección del relay: {{address}}",
+    "useWss": "Usa wss:// en la dirección del relay"
   },
   "startAgain": "Empezar de nuevo",
   "transport": {
@@ -610,6 +614,11 @@
     "switchRetryNext": "Inténtalo de nuevo o elige otro transporte.",
     "switchSlow": "{{transport}} no se conectó a tiempo",
     "switchTimedOut": "El cambio tardó demasiado"
+  },
+  "turn": {
+    "enterAddress": "Escribe la dirección del servidor TURN",
+    "needsLogin": "Un servidor TURN necesita su usuario y su credencial",
+    "notAddress": "“{{address}}” no es una dirección TURN o STUN (turn:host:port)"
   },
   "verify": {
     "closed": "La conexión se cerró",

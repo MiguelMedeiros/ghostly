@@ -558,10 +558,14 @@
   },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",
+    "enterAddress": "请输入中继地址（{{example}}…）",
+    "irohAtMost": "最多使用四个 Iroh 中继",
+    "noLogin": "请从地址中去掉用户名和密码",
     "noneAnswered": "中继没有响应",
     "noneAnsweredNext": "请检查网络连接，然后重试。",
     "notAddress": "这不是中继地址：{{address}}",
-    "useHttps": "请使用 https:// 中继地址：{{address}}"
+    "useHttps": "请使用 https:// 中继地址：{{address}}",
+    "useWss": "请使用 wss:// 中继地址"
   },
   "startAgain": "重新开始",
   "transport": {
@@ -610,6 +614,11 @@
     "switchRetryNext": "请重试，或选择另一种传输方式。",
     "switchSlow": "{{transport}} 未能及时连接",
     "switchTimedOut": "切换耗时过长"
+  },
+  "turn": {
+    "enterAddress": "请输入 TURN 服务器地址",
+    "needsLogin": "TURN 服务器需要用户名和凭据",
+    "notAddress": "“{{address}}”不是 TURN 或 STUN 地址（turn:host:port）"
   },
   "verify": {
     "closed": "连接已关闭",

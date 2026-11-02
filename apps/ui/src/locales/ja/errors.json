@@ -558,10 +558,14 @@
   },
   "relays": {
     "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",
+    "enterAddress": "リレーのアドレスを入力してください（{{example}}…）",
+    "irohAtMost": "Irohリレーは4つまでにしてください",
+    "noLogin": "アドレスからユーザー名とパスワードを外してください",
     "noneAnswered": "リレーが応答しませんでした",
     "noneAnsweredNext": "接続を確認して、もう一度お試しください。",
     "notAddress": "リレーのアドレスではありません：{{address}}",
-    "useHttps": "https:// のリレーアドレスを使ってください：{{address}}"
+    "useHttps": "https:// のリレーアドレスを使ってください：{{address}}",
+    "useWss": "wss:// のリレーアドレスを使ってください"
   },
   "startAgain": "最初からやり直す",
   "transport": {
@@ -610,6 +614,11 @@
     "switchRetryNext": "もう一度試すか、別のトランスポートを選んでください。",
     "switchSlow": "{{transport}} が時間内に接続できませんでした",
     "switchTimedOut": "切り替えに時間がかかりすぎました"
+  },
+  "turn": {
+    "enterAddress": "TURNサーバーのアドレスを入力してください",
+    "needsLogin": "TURNサーバーにはユーザー名と認証情報が必要です",
+    "notAddress": "「{{address}}」はTURNやSTUNのアドレスではありません（turn:host:port）"
   },
   "verify": {
     "closed": "接続が閉じました",
