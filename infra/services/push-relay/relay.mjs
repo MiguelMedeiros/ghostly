@@ -95,7 +95,8 @@ export function rateKey (address) {
 
 /**
  * Refusals as counts, so a flood of them stays quiet: the first of a kind in a quiet minute is logged at once
- * (`refused rate`), the rest of that minute as one line when `flush` runs (`refused rate 41 more`).
+ * (`refused rate`), the rest of that minute as one line when `flush` runs (`refused rate 41 more`). `detail` goes on
+ * that first line only (`refused origin "https://app.example"`): it names one case, the count covers the rest.
  */
 export function refusalLog (log) {
   // Kind → refusals since its last line. Present: a line for it went out in this minute.
@@ -104,10 +105,10 @@ export function refusalLog (log) {
   return {
     /** Refusals since the start, of every kind. */
     total: () => total,
-    refuse: why => {
+    refuse: (why, detail) => {
       total++
       if (pending.has(why)) pending.set(why, pending.get(why) + 1)
-      else { pending.set(why, 0); log('refused', why) }
+      else { pending.set(why, 0); log('refused', why, ...(detail === undefined ? [] : [detail])) }
     },
     flush: () => {
       for (const [why, more] of pending) {
@@ -130,23 +131,29 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   pruning.unref?.()
   // Once per start: a proxy in front the relay was not told about makes every client count as that proxy.
   let hinted = false
-  const allowOrigin = origin => (origins.length === 0 ? '*' : origins.includes(origin) ? origin : null)
+  // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
+  const allowed = new Set(origins.map(origin => originOf(origin) ?? origin))
 
   // A slow client is closed after `requestMs`, checked every second (Node's default waits up to five minutes).
   const server = createServer({ requestTimeout: requestMs, headersTimeout: requestMs, connectionsCheckingInterval: Math.min(1000, requestMs) }, (req, res) => {
-    const origin = allowOrigin(req.headers.origin ?? '')
-    const cors = origin ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' } : {}
+    const origin = req.headers.origin
+    const refused = allowed.size > 0 && !allowed.has(origin)
+    // A refused page still gets its preflight and a readable 403 (it posts JSON, so the browser asks first): without
+    // them its fetch fails as a CORS error and says nothing. The relay refuses the POST itself, forwarding nothing.
+    const cors = origin === undefined ? {} : { 'Access-Control-Allow-Origin': allowed.size ? origin : '*', 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }
     const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
-    const refuse = (why, status, value) => { refusals.refuse(why); answer(status, value) }
+    const refuse = (why, status, value, detail) => { refusals.refuse(why, detail); answer(status, value) }
     // An operator's check (curl, a monitor): up, with counts since the start, and nothing about any client.
     if (req.method === 'GET' && req.url.split('?')[0] === '/healthz') {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
       res.end(JSON.stringify({ ok: true, ...stats, refused: refusals.total(), tracked: recent.size }))
       return
     }
-    if (req.method === 'OPTIONS') { if (!origin) refusals.refuse('origin'); res.writeHead(origin ? 204 : 403, cors); res.end(); return }
+    // The preflight is answered, not refused: the POST after it is the one refusal of that page's attempt.
+    if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return }
     if (req.method !== 'POST') return refuse('method', 405, { error: 'No' })
-    if (!origin) return refuse('origin', 403, { error: 'No' })
+    // A refusal of kind `origin`, its first line in a minute naming the origin so a misspelt GHOSTLY_RELAY_ORIGINS shows.
+    if (refused) return refuse('origin', 403, { error: 'Origin not allowed' }, originShown(origin))
 
     const ip = rateKey(clientAddress(req, proxies))
     if (!proxies && !hinted && req.headers['x-forwarded-for'] !== undefined) {
@@ -207,6 +214,26 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
 }
 
 /**
+ * An entry of GHOSTLY_RELAY_ORIGINS as a browser writes it in `Origin`: scheme and host in lower case, a default port
+ * left out, no trailing `/` (`HTTPS://App.Example:443/` is `https://app.example`). An extension's or an app's own
+ * scheme (`chrome-extension://<id>`, `tauri://localhost`) keeps its host as written. Null for an entry that is no
+ * origin (not a URL, no host, a user, a path past `/`, a query, a fragment, `file:`): a browser never sends one, so
+ * such an entry would turn every browser away.
+ */
+export function originOf (entry) {
+  let url
+  try { url = new URL(entry) } catch { return null }
+  if (url.protocol === 'file:' || !url.host || url.username || url.password || !['', '/'].includes(url.pathname) || /[?#]/.test(entry)) return null
+  return url.origin !== 'null' ? url.origin : `${url.protocol}//${url.host}`
+}
+
+/**
+ * A refused `Origin` as the log writes it: quoted and cut at 200 characters (`"https://app.example"`), so a value the
+ * client chose cannot break the line; `(none)` for a request without one.
+ */
+const originShown = origin => (origin === undefined ? '(none)' : JSON.stringify(String(origin).slice(0, 200)))
+
+/**
  * One setting from the environment: absent gives `fallback`; present, it must read as `kind` says, or the start stops
  * with one line naming it (an empty `PORT=` in an env file, `GHOSTLY_RELAY_PROXIES=one`), never a quiet default.
  */
@@ -220,6 +247,12 @@ function setting (env, name, fallback, kind) {
   if (kind === 'positive') return /^\d+$/.test(value) && Number(value) > 0 && Number.isSafeInteger(Number(value)) ? Number(value) : fail('a whole number above 0')
   if (kind === 'flag') return value === '1' ? true : value === '0' ? false : fail('1 or 0')
   if (kind === 'text') return value || fail('a value (leave it out for the default)')
+  if (kind === 'origins') {
+    const entries = list(value)
+    const wrong = entries.find(entry => !originOf(entry))
+    if (wrong !== undefined) fail(`origins like https://app.example, comma-separated: a scheme, a host and a port only (${JSON.stringify(wrong)} is not one)`)
+    return [...new Set(entries.map(originOf))]
+  }
   return value
 }
 
@@ -234,7 +267,7 @@ export function readSettings (env) {
   return {
     port: setting(env, 'PORT', 49480, 'port'),
     host: setting(env, 'HOST', proxies ? '127.0.0.1' : '0.0.0.0', 'text'),
-    origins: list(env.GHOSTLY_RELAY_ORIGINS),
+    origins: setting(env, 'GHOSTLY_RELAY_ORIGINS', [], 'origins'),
     proxies,
   }
 }

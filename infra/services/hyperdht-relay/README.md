@@ -56,8 +56,11 @@ are refused: Ghostly never makes them, and they would make the relay an open cra
 
 Other settings:
 
-- `GHOSTLY_RELAY_ORIGINS` lists the allowed `Origin` values. It keeps other websites from using the relay; it is
-  no defence against other programs.
+- `GHOSTLY_RELAY_ORIGINS` lists the allowed origins, comma-separated, each as a browser sends it: scheme, host and a
+  port only (`https://app.ghostly.tools`, `chrome-extension://<id>`). Case, a default port (`:443`) and a trailing `/`
+  do not matter; an entry with a path, a query or no scheme stops the start. Left out, any origin may connect. A
+  refused one gets 403, and the log says `refused origin "<origin>"` once an hour per origin, for at most 16 origins
+  an hour. It keeps other websites from using the relay; it is no defence against other programs.
 - `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
 - `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
   counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
@@ -66,8 +69,8 @@ Other settings:
   so publish it only where the proxy is (`HYPERDHT_RELAY_BIND`, loopback by default).
 
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`, a limit of `0`) stops the
-start with one line that names it; leave a setting out for its default. The start line says how clients are counted
-and each limit set away from its default.
+start with one line that names it; leave a setting out for its default. The start line says how clients are counted,
+each limit set away from its default, and which origins it serves (`any origin` when none is set).
 
 ## Running it
 
