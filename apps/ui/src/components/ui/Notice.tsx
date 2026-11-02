@@ -31,7 +31,7 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
   const said = problem ? { tone: problem.tone, title: problem.title, next: problem.next, details: problem.detail } : {};
   const kind: NoticeTone = tone ?? said.tone ?? "muted";
   const head = title ?? said.title ?? children, then = next ?? said.next, more = details ?? said.details;
-  const { copied, copy } = useCopyKey(more ?? "");
+  const { copied, failed, copy } = useCopyKey(more ?? "");
   return (
     <div role={kind === "error" ? "alert" : undefined} data-testid={testId} data-tone={kind} className={`${ink && kind === "error" ? "text-danger-ink" : COLOR[kind]} ${className}`}>
       <div className="flex items-start gap-1.5">
@@ -45,7 +45,7 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
         <p dir="ltr" lang="en" className="m-0 min-w-0 flex-1 break-words font-mono text-[11px] leading-4">{more}</p>
         <button type="button" onClick={copy} data-testid={testId ? `${testId}-copy` : undefined}
           className="min-h-6 shrink-0 rounded-md px-1.5 text-[11px] text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          {copied ? i18n?.t("common.copied") ?? "Copied!" : i18n?.t("common.copy") ?? "Copy"}
+          {copied ? i18n?.t("common.copied") ?? "Copied!" : failed ? i18n?.t("common.notCopied") ?? "Not copied" : i18n?.t("common.copy") ?? "Copy"}
         </button>
       </div>}
     </div>
