@@ -2,9 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import manifest from "../public/manifest.json";
+import servicesAr from "../../ui/src/locales/ar/services.json";
 import { settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine } from "./fakeEngine";
-import { bootExtension } from "./extension";
+import { PEER, SERVICE, TAG, bootExtension } from "./extension";
 
 // covers: extension.engine, services.add, app.updates.extension, proofs.oidc.callback.extension
 
@@ -75,6 +76,19 @@ describe("the host the app page runs on", () => {
     await expect(extensionHost.openService!("not-a-key", "atlas", "ybndrfg8ejkmcpqx")).rejects.toThrow("Invalid service");
     await extensionHost.openPaymentLink!("lightning:lnbc1");
     expect(world.callsTo("tabs.create")).toEqual([["lightning:lnbc1"]]);
+  });
+
+  it("hands the worker a contact's app's error page in the profile's language", async () => {
+    const { extensionHost } = await load();
+    const { loadSettings, saveSettings } = await import("../../ui/src/lib/settings");
+    const { loadLocale } = await import("../../ui/src/locales");
+    saveSettings({ ...loadSettings(), language: "ar" });
+    await loadLocale("ar");
+    await extensionHost.openService!(PEER, SERVICE, TAG);
+    const [tabId] = [...world.tabs.keys()];
+    expect(world.session.get(`viewer:${tabId}`)).toMatchObject({
+      page: { lang: "ar", dir: "rtl", unreachable: servicesAr.window.unreachable, failed: servicesAr.window.failed },
+    });
   });
 
   it("reports the manifest's version", async () => {
