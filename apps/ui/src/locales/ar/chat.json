@@ -318,6 +318,7 @@
     "invoice": "⚡ فاتورة Lightning",
     "lightningAddress": "عنوان Lightning",
     "lightningOffer": "⚡ عرض Lightning",
+    "moneroAddress": "عنوان Monero",
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "أموال حقيقية",
     "sats": "{{amount}} ساتس",

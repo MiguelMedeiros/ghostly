@@ -123,6 +123,8 @@ describe("open-payment-link", () => {
     "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
     // A label and message as the app writes them (apps/ui/src/lib/parse/money-bitcoin.ts bip21Uri).
     "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E",
+    // As apps/ui/src/lib/parse/money-monero.ts writes it.
+    "monero:4AzKEX4gXdJdNeM6dfiBFL7kqund3HYGvMBF3ttsNd9SfzgYB6L7ep1Yg1osYJzLdaKAYSLVh6e6jKnAuzj3bw1oGy9kXCb?tx_amount=0.25&tx_description=Rent%20%28May%29",
   ])("hands %s to the system's wallet", async (uri) => {
     expect(await send({ target: "background", type: "open-payment-link", uri })).toEqual({ ok: true });
     expect(world.callsTo("tabs.create")).toEqual([[uri]]);

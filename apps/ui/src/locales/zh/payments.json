@@ -184,6 +184,9 @@
     "maxFee": "可接受的最高手续费（{{unit}}）",
     "maxFeeAria": "最高手续费，单位 {{unit}}",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly 没有 Monero 钱包。“支付”会在此设备的 Monero 钱包中打开此链接，你在那里核对并发送。",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "在此设备上打开你的 Monero 钱包",
     "networkNotStated": "未注明网络",
     "noWallet": {
       "mainnet": "你没有可用于支付这笔真实资金的 Mainnet {{wallet}} 钱包。",

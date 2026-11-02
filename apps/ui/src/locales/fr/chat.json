@@ -310,6 +310,7 @@
     "invoice": "⚡ Facture Lightning",
     "lightningAddress": "Adresse Lightning",
     "lightningOffer": "⚡ Offre Lightning",
+    "moneroAddress": "Adresse Monero",
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Argent réel",
     "sats": "{{amount}} sats",

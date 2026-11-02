@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { MoneyQr } from "./MoneyQr";
 import { formatPaymentAmount, parsePaymentAmount, type Bolt11Invoice, type PaymentReview as Review, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { useWalletPlatform } from "../hooks/useServicesPlatform";
@@ -10,6 +10,8 @@ import { chainAccepts } from "../lib/parse/money-bitcoin";
 import type { Bolt12Offer } from "../lib/parse/money-bolt12";
 import type { ArkRequest } from "../lib/parse/money-ark";
 import { USDT_CHAINS, type UsdtRequest } from "../lib/parse/money-usdt";
+import type { MoneroRequest } from "../lib/parse/money-monero";
+import { InfoButton } from "./layout";
 import { useI18n } from "../contexts/I18nContext";
 import { moneyLabel, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
@@ -394,8 +396,34 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
 }
 
 /**
+ * A Monero address or `monero:` link. No Monero wallet here: Pay hands the link to the person's own wallet app (a
+ * plain link on the web, the system's opener on Desktop and Android), and the ⓘ says so.
+ */
+function MoneroCard({ request, mine }: { request: MoneroRequest; mine: boolean }) {
+  const { t } = useI18n();
+  const { copied, failed, copy } = useMoneyCopy(request.address);
+  const [info, setInfo] = useState(false);
+  const infoId = useId();
+  const amount = request.amount !== undefined
+    ? <><span className="text-[22px] font-semibold" data-testid="money-amount">{formatTokenAmount(request.amount.toString(), 12, t.language)}</span><span className="text-text-primary/65 text-xs ms-1">XMR</span></>
+    : <span className="text-[15px] font-semibold">{t("payments.invoice.anyAmount")}</span>;
+  return (
+    <Shell
+      testId="monero-bubble" label={t("payments.formats.moneroLabel")} network={request.network} chain={request.chain === "mainnet" ? undefined : request.chain}
+      amount={amount} lines={[request.recipientName, request.description]} detail={request.address} qr={request.uri}
+    >
+      {!mine && <OpenInWallet className={`${button} no-underline`} uri={request.uri} title={t("payments.formats.moneroPayTitle")} testId="monero-pay">{t("payments.invoice.pay")}</OpenInWallet>}
+      <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
+      <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="monero-info" className="self-center" />
+      {info && <p id={infoId} className="basis-full order-last text-[12px] leading-snug m-0 text-text-primary/80" data-testid="monero-info-text">{t("payments.formats.moneroInfo")}</p>}
+      {failed && <MoneyCopyRefused value={request.address} />}
+    </Shell>
+  );
+}
+
+/**
  * Money beyond invoices and ecash: a Bitcoin address or `bitcoin:` link, a BOLT 12 offer, an Ark address, a USDT
- * address. Each card says its network in words, pays only from a wallet of that network, and through the review.
+ * address, a Monero address. Each card says its network in words, pays only from a wallet of that network, and through the review.
  * `renderLightning`: the Lightning card of a `bitcoin:` link's `lightning=` fallback.
  */
 export function MoneyFormatsBubble({ money, mine, off, renderLightning }: { money: MoreMoney; mine: boolean; off: boolean; renderLightning: (invoice: Bolt11Invoice) => React.ReactNode }) {
@@ -404,5 +432,6 @@ export function MoneyFormatsBubble({ money, mine, off, renderLightning }: { mone
     case "bolt12": return <Bolt12Card offer={money.offer} />;
     case "ark": return <ArkCard request={money.request} mine={mine} off={off} />;
     case "usdt": return <UsdtCard request={money.request} mine={mine} off={off} />;
+    case "monero": return <MoneroCard request={money.request} mine={mine} />;
   }
 }
