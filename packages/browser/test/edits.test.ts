@@ -504,6 +504,19 @@ describe("the contact's edits", () => {
     expect(t.view().pin?.id).toBe("");
   });
 
+  // A pin of a message that waited for me (pinned while I was away) comes as the session opens, before the message.
+  it("a pin that came before its message names the message once it comes, after a restart too", async () => {
+    const t = await setup({ pinSupport: true });
+    expect(t.contact.sendPin({ id: WIRE("L"), n: nextPinNumber() })).toBeNull();
+    await vi.waitFor(() => expect(t.view().pin).toMatchObject({ id: WIRE("L"), by: "peer" }));
+    expect(t.view().pin?.messageId).toBeUndefined();
+    expect(await t.contact.sendMessage("pinned before it came", Date.now(), WIRE("L"))).toBeNull();
+    const row = await t.peerRow("pinned before it came");
+    await vi.waitFor(() => expect(t.view().pin).toMatchObject({ id: WIRE("L"), by: "peer", messageId: row.id }));
+    await t.restart();
+    expect(t.view().pin).toMatchObject({ id: WIRE("L"), messageId: row.id });
+  });
+
   it("an edit of a message deleted here is confirmed and brings nothing back", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage("to delete", Date.now(), WIRE("C"))).toBeNull();
