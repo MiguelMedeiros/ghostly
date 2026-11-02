@@ -25,7 +25,8 @@ export async function clearSite(): Promise<void> {
     () => {
       for (const pair of document.cookie.split(";")) {
         const name = pair.split("=")[0]?.trim();
-        if (name) document.cookie = `${name}=; Max-Age=0; Path=/`;
+        // A date in the past, not Max-Age=0: that one expires "now", and is still there within the same millisecond.
+        if (name) document.cookie = `${name}=; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/`;
       }
     },
     async () => { for (const registration of await navigator.serviceWorker.getRegistrations()) await registration.unregister(); },
