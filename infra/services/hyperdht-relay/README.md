@@ -86,6 +86,11 @@ docker compose up -d --build                     # the container, limits and all
 The start line names the network: `(public HyperDHT)`, `(bootstrap 2 nodes)` or `(own testnet of 3 nodes)`. A testnet
 with `GHOSTLY_HYPERDHT_BOOTSTRAP` set too does not start: the testnet would leave the bootstrap nodes out.
 
+`GHOSTLY_HYPERDHT_BOOTSTRAP` (`host:port` nodes, comma-separated) points it at bootstrap nodes of your own instead of
+the public ones; an entry without a port or with a port outside 1 to 65535, or an empty value, stops the start. So does
+a port another program holds or one below 1024 this user may not take (`PORT`), and a `HOST` that is no address of this
+machine or no name at all: one line names the setting instead of a stack trace, and nothing is left running.
+
 `docker-compose.yml` is set up for one server, "zero" behind the Cloudflare tunnel: it counts each client by
 `CF-Connecting-IP` and lets in only Ghostly's own app and extension. Anywhere else, set two variables (in the shell or
 an `.env` file next to it):

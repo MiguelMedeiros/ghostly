@@ -1,4 +1,4 @@
-import { readSettings, startRelay } from './relay.mjs'
+import { listenProblem, readSettings, startRelay } from './relay.mjs'
 
 // Configuration, all optional:
 //   PORT (49480), HOST (0.0.0.0; 127.0.0.1 behind proxies)
@@ -12,7 +12,14 @@ try { settings = readSettings(process.env) } catch (error) {
   console.error(new Date().toISOString(), `Ghostly push relay not started: ${error.message}`)
   process.exit(1)
 }
-const relay = await startRelay({
+// A port in use or below 1024, a HOST that is no address here: one line naming the setting, not Node's stack.
+const start = options => startRelay(options).catch(error => {
+  const problem = listenProblem(error, settings)
+  if (!problem) throw error
+  console.error(new Date().toISOString(), `Ghostly push relay not started: ${problem}`)
+  process.exit(1)
+})
+const relay = await start({
   ...settings,
   // Counts and reasons only: never an endpoint, an address or a byte of a push.
   log: (...words) => console.log(new Date().toISOString(), ...words),

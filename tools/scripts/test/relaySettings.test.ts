@@ -54,6 +54,19 @@ describe("the relays' settings", () => {
     expect(() => hyperdhtSettings({ [name]: value })).toThrow(`${name}=${JSON.stringify(value)}: expected ${expected}`);
   });
 
+  it("the HyperDHT relay takes host:port bootstrap nodes, HyperDHT's ip@host:port ones too", () => {
+    expect(hyperdhtSettings({ GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:49737, 88.99.3.86@node1.hyperdht.org:49737" }).bootstrap)
+      .toEqual(["127.0.0.1:49737", "88.99.3.86@node1.hyperdht.org:49737"]);
+  });
+
+  it.each(["127.0.0.1", "not-a-node", "127.0.0.1:0", "127.0.0.1:99999", "node.example:abc", "127.0.0.1:49737,node.example", "", " "])(
+    "the HyperDHT relay refuses GHOSTLY_HYPERDHT_BOOTSTRAP=%j",
+    (value) => {
+      expect(() => hyperdhtSettings({ GHOSTLY_HYPERDHT_BOOTSTRAP: value }))
+        .toThrow(`GHOSTLY_HYPERDHT_BOOTSTRAP=${JSON.stringify(value)}: expected host:port nodes, comma-separated, each port from 1 to 65535`);
+    },
+  );
+
   it("the HyperDHT relay refuses a testnet with bootstrap nodes, which it would drop without a word", () => {
     expect(() => hyperdhtSettings({ GHOSTLY_HYPERDHT_TESTNET: "3", GHOSTLY_HYPERDHT_BOOTSTRAP: "127.0.0.1:1" }))
       .toThrow('GHOSTLY_HYPERDHT_TESTNET="3": expected no GHOSTLY_HYPERDHT_BOOTSTRAP with it (the testnet is a network of its own)');
