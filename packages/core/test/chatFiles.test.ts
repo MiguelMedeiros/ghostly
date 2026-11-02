@@ -437,6 +437,52 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await until(() => w.b.disks.get("restart-a")!.discarded);
   });
 
+  it("a file the sender deleted while the receiver was away: asked about it, the sender says it ended, before or after its restart", async () => {
+    const w = wire();
+    w.attach();
+    send(w, file("forgot-01", 4 * 1024 * 1024));
+    send(w, file("forgot-02", 4 * 1024 * 1024));
+    await until(() => ["forgot-01", "forgot-02"].every((id) => (w.b.transferred.get(`in:${id}`) ?? 0) > 100_000));
+    w.drop();
+    // Its message deleted: the abort finds no session, and the record goes with the message.
+    w.a.files.forget("out", "forgot-01");
+    w.a.files.forget("out", "forgot-02");
+    w.a.records.delete("out:forgot-01");
+    w.a.records.delete("out:forgot-02");
+    w.attach();
+    expect(w.b.files.request("forgot-01")).toBe(true);
+    await until(() => state(w.b, "in", "forgot-01") === "cancelled");
+    expect(w.b.records.get("in:forgot-01")?.error).toBe("Cancelled by the sender");
+    await until(() => w.b.disks.get("forgot-01")!.discarded);
+    w.drop();
+    w.restart("a");
+    w.attach();
+    expect(w.b.files.request("forgot-02")).toBe(true);
+    await until(() => state(w.b, "in", "forgot-02") === "cancelled");
+    await until(() => w.b.disks.get("forgot-02")!.discarded);
+  });
+
+  it("an offer that expired on the sender's side first: accepted then, the receiver hears it ended", async () => {
+    let now = 1_000;
+    const w = wire();
+    w.b.decide = async () => "ask";
+    for (const side of [w.a, w.b]) (side.files as unknown as { host: ChatFilesHost }).host.now = () => now;
+    // Offered while the receiver was away: its week begins when the offer arrives, a day after the sender's.
+    w.drop();
+    send(w, file("week-003", 40 * 1024 * 1024));
+    now += 24 * 60 * 60 * 1000;
+    w.attach();
+    await until(() => state(w.b, "in", "week-003") === "asking");
+    w.drop();
+    now += FILE_LIMITS.offerTtlMs - 24 * 60 * 60 * 1000 + 1;
+    w.a.files.sweep();
+    expect(state(w.a, "out", "week-003")).toBe("failed");
+    w.attach();
+    w.b.files.accept("week-003");
+    await until(() => state(w.b, "in", "week-003") === "cancelled");
+    expect(state(w.a, "out", "week-003")).toBe("failed");
+  });
+
   it("the sender pauses, then cancels while the receiver is away: back, the receiver hears it ended and drops what it had", async () => {
     const w = wire();
     w.attach();

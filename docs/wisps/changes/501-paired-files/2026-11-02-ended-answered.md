@@ -1,0 +1,1 @@
+A `files/3` sender answers `pf-abort` to an `accept` or a `wait` for a file it no longer sends: one deleted with its message (no record left), or one that ended as failed or expired while the receiver was away, as it already did for one it cancelled. A file it finished is not answered. No new frame; an older receiver ends the transfer as it does on any `pf-abort`.
