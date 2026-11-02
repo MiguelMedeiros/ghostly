@@ -1282,10 +1282,20 @@ export function useWebRTC({
     setLocalStream(stream);
   }, []);
 
-  /** Shows another camera (null: the default) in place of the one on; with the camera off there is nothing to swap. */
+  /**
+   * Shows another camera (null: the default) in place of the one on; with the camera off there is nothing to swap.
+   * When it cannot be opened and the one on is gone (the only camera unplugged), the camera goes off, as its button
+   * turns it off: the button and the self-view then say what is sent, and turning it on again opens what is there.
+   */
   const switchCamera = useCallback(async (deviceId: string | null) => {
     if (pictureRef.current !== "camera") return;
-    await showPicture("camera", deviceId);
+    try {
+      await showPicture("camera", deviceId);
+    } catch (error) {
+      const showing = localStreamRef.current?.getVideoTracks()[0];
+      if (pictureRef.current === "camera" && showing?.readyState === "ended") await showPicture(null);
+      throw error;
+    }
   }, [showPicture]);
 
   useEffect(() => {
