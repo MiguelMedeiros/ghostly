@@ -392,9 +392,20 @@ export async function startRelay(options = {}) {
       ...stats,
       held: [...nodes].reduce((held, node) => ({ handshakes: held.handshakes + node._handshakes.size, signatures: held.signatures + node._signatures.size }), { handshakes: 0, signatures: 0 }),
     }),
-    async close() {
+    // Each client is told the relay is going away (1001), so it reconnects as it would after a restart, not a crash;
+    // one that has not closed within `stopMs` is cut.
+    async close({ stopMs = 1000 } = {}) {
+      for (const ws of clients) ws.close(1001, 'The relay is stopping')
+      if (clients.size) {
+        let timer
+        await Promise.race([
+          Promise.all([...clients].map(ws => new Promise(resolve => ws.once('close', resolve)))),
+          new Promise(resolve => { timer = setTimeout(resolve, stopMs) }),
+        ])
+        clearTimeout(timer)
+      }
       for (const ws of clients) ws.terminate()
-      await new Promise(resolve => { wss.close(); server.close(() => resolve()) })
+      await new Promise(resolve => { wss.close(); server.close(() => resolve()); server.closeAllConnections() })
       if (!options.dht) await dht.destroy()
       if (testnet) await testnet.destroy()
     },
