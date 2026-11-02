@@ -229,8 +229,15 @@
     "setAsideInfo": "Messi da parte per un pagamento che il mint non ha ancora confermato. Escono con il pagamento o tornano nel saldo appena il mint risponde.",
     "settings": "Opzioni",
     "testBalance": "{{amount}} sats di prova (senza valore)",
+    "testBalance_one": "{{amount}} sat di prova (senza valore)",
     "testMintInvoice": "In attesa del pagamento… I mint di prova segnano da soli ogni fattura come pagata, quindi questa conta solo quando un contatto la paga in una chat. Per avere subito sats di prova, usa Ottieni monete di prova qui sopra.",
     "tokenHint": "Hai ricevuto un token ecash? Incollalo in Invia.",
+    "tokenRedeemedFee": "{{amount}} sats riscattati (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFeeTest": "{{amount}} sats di prova riscattati (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFeeTest_one": "{{amount}} sat di prova riscattato (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFeeTest_other": "{{amount}} sats di prova riscattati (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFee_one": "{{amount}} sat riscattato (la mint ha trattenuto {{fee}} come commissione).",
+    "tokenRedeemedFee_other": "{{amount}} sats riscattati (la mint ha trattenuto {{fee}} come commissione).",
     "tx": {
       "ecashIn": "Ecash ricevuto",
       "ecashOut": "Ecash inviato",
@@ -250,6 +257,7 @@
     "alreadyRedeemed": "Già riscattato da qualcuno.",
     "amountFee": "{{amount}} (commissione {{fee}})",
     "asNotes": "{{amount}} sats in note",
+    "asNotes_one": "{{amount}} sat in nota",
     "asking": "Interrogo i suoi guardiani…",
     "backup": "Backup del portafoglio",
     "backupHint": "La frase e le federazioni; il backup del profilo contiene tutto",
@@ -587,7 +595,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "sats di prova"
+    "mainnet_one": "sat",
+    "testnet": "sats di prova",
+    "testnet_one": "sat di prova"
   },
   "send": {
     "balance": "Saldo: {{amount}} {{unit}}",
@@ -639,6 +649,7 @@
     "experimental": "Sperimentale",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "Prima unisciti a una federazione con un gateway Lightning dalla carta Fedimint.",
       "label": "Federazione",
       "unknownNetwork": "rete sconosciuta",

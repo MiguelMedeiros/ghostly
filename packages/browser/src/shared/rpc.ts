@@ -301,8 +301,11 @@ export interface EngineApi {
   bitcoinReconfigureSource(params: { values: Record<string, string>; network?:WalletNetwork }): void;
   bitcoinReceiveAddress(params?: { network?:WalletNetwork }): string;
   bitcoinRefresh(params?: { network?:WalletNetwork }): void;
-  /** Redeems a token pasted by the user. Only mints the user added are accepted. */
-  walletReceiveToken(params: { token: string }): { amount: number };
+  /**
+   * Redeems a token pasted by the user. Only mints the user added are accepted. `amount`: what arrived; `fee`: what the
+   * mint kept of the token's face value to take it in (absent from an engine older than agents#2255: none said).
+   */
+  walletReceiveToken(params: { token: string }): { amount: number; fee?: number };
   walletInspectCashu(params: { text: string }): { inspection: CashuInspection | null };
   /** Everything held, as tokens: the only backup there is for now. */
   walletExport(params?: { network?: WalletNetwork }): { mint: string; token: string; amount: number }[];

@@ -10,6 +10,7 @@ import { ChatTargetRow } from "./ChatTargets";
 import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
 import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
+import { listParts, listText } from "../../lib/listText";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -149,14 +150,15 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       </button>
     </div>
     {/* The guard's title is a string: each name isolated there by FSI…PDI. */}
-    {secret && <SecretGuardDialog finding={secret} recipient={chosen.map(c => `⁨${c.name}⁩`).join(", ")} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void send(true); }} />}
+    {secret && <SecretGuardDialog finding={secret} recipient={listText(chosen.map(c => `⁨${c.name}⁩`), t)} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void send(true); }} />}
   </dialog>, document.body);
 }
 
 /**
  * Chats' names, each in its own direction as in the rows: in one Arabic string "Ana!" read "!Ana" and the names ran in
- * English order.
+ * English order. Listed the way the app's language lists them ("Ana وBo", "Ana、Bo"), not with an English comma.
  */
 function Names({ names }: { names: readonly string[] }) {
-  return names.map((name, i) => <Fragment key={i}>{i > 0 && ", "}<bdi>{name}</bdi></Fragment>);
+  const { t } = useI18n();
+  return listParts(names, t).map((part, i) => part.item ? <bdi key={i}>{part.text}</bdi> : <Fragment key={i}>{part.text}</Fragment>);
 }

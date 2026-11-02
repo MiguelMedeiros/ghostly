@@ -26,7 +26,10 @@ import { clearChatNotification } from "../../../../apps/ui/src/lib/notifications
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
+import { forgetServicesOf } from "../host";
+import { viewerTag } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
+import { paymentRefusal } from "../shared/refusals";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -80,12 +83,15 @@ export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
   const isJoin = JOIN_PATTERN.test(message.text);
+  // A payment of the contact's this app refused: the app's own line, not the contact's (stored as theirs for the CLI).
+  const notice = paymentRefusal(message);
   return {
     id: message.id,
     delivery: message.delivery,
     deliveryError: message.deliveryError,
     text: message.text,
-    sender: isJoin ? "system" : message.sender,
+    sender: isJoin || notice ? "system" : message.sender,
+    ...(notice && { notice }),
     timestamp: message.timestamp,
     ...(message.sentAt !== undefined && { sentAt: message.sentAt }),
     nick: message.nick,
@@ -445,6 +451,8 @@ async function reconcile(): Promise<void> {
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
+    // What the contact's apps opened from this chat kept on this device goes with it (the web app's origins).
+    void forgetServicesOf({ tag: viewerTag(link.myPubKeyZ32) });
   }
   if (!later && !renamed) settled = { state, sessions };
 }

@@ -226,7 +226,7 @@ export function Select<V extends string = string>({
         onKeyDown={onKeyDown}
         // Space would click the button again on release in some browsers, reopening what Space just closed.
         onKeyUp={e => { if (e.key === " ") e.preventDefault(); }}
-        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
+        className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs max-md:min-h-11" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
       >
         {current?.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{current.icon}</span>}
         <span className="min-w-0 flex-1 truncate">

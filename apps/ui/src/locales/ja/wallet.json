@@ -229,8 +229,15 @@
     "setAsideInfo": "ミントがまだ確認していない支払いのために取り置かれています。ミントが応答すると、支払いとともに出ていくか、残高に戻ります。",
     "settings": "設定",
     "testBalance": "{{amount}} テスト sats（価値なし）",
+    "testBalance_one": "{{amount}} テスト sat（価値なし）",
     "testMintInvoice": "支払いを待っています… テスト用ミントはすべてのインボイスを自動で支払い済みにするため、このインボイスは連絡先がチャットで支払ったときだけ数えられます。今すぐテスト sats が必要なら、上の「テストコインを入手」を使ってください。",
     "tokenHint": "ecash トークンを受け取りましたか？「送金」に貼り付けてください。",
+    "tokenRedeemedFee": "{{amount}} sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFeeTest": "{{amount}} テスト sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFeeTest_one": "{{amount}} テスト sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFeeTest_other": "{{amount}} テスト sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFee_one": "{{amount}} sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
+    "tokenRedeemedFee_other": "{{amount}} sats を受け取りました（mint が手数料として {{fee}} を差し引きました）。",
     "tx": {
       "ecashIn": "ecash を受け取りました",
       "ecashOut": "ecash を送りました",
@@ -250,6 +257,7 @@
     "alreadyRedeemed": "すでに誰かが受け取りました。",
     "amountFee": "{{amount}}（手数料 {{fee}}）",
     "asNotes": "ノートで {{amount}} sats",
+    "asNotes_one": "ノートで {{amount}} sat",
     "asking": "ガーディアンに問い合わせ中…",
     "backup": "ウォレットのバックアップ",
     "backupHint": "フレーズとフェデレーション。プロフィールのバックアップにはすべて含まれます",
@@ -587,7 +595,9 @@
   },
   "sats": {
     "mainnet": "sats",
-    "testnet": "テスト sats"
+    "mainnet_one": "sat",
+    "testnet": "テスト sats",
+    "testnet_one": "テスト sat"
   },
   "send": {
     "balance": "残高: {{amount}} {{unit}}",
@@ -639,6 +649,7 @@
     "experimental": "実験的",
     "fedimint": {
       "description": "{{amount}} sats · {{network}}",
+      "description_one": "{{amount}} sat · {{network}}",
       "joinFirst": "先に Fedimint カードで、Lightning ゲートウェイのあるフェデレーションに参加してください。",
       "label": "フェデレーション",
       "unknownNetwork": "不明なネットワーク",

@@ -26,6 +26,7 @@ import {
 import { STORES, store, wrap, committed } from "../shared/idb";
 import { digestHex } from "./messageDetails";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
+import { refusedRow } from "../shared/refusals";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
 import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
 
@@ -1017,7 +1018,10 @@ export class PaymentDesk {
       // per token: the same token sent again under new ids is the same refusal.
       const sats = parseSats(payment.amount.value, payment.amount.asset);
       const spent = error instanceof EngineError && error.engineCode === "ecashAlreadySpent";
-      try { await this.host.storeMessage({ linkId, id: spent ? `peer_spent_${digestHex(token).slice(0, 32)}` : `peer_${payment.timestamp}_refused`, text: `Could not receive ${sats === null ? "a payment" : `${sats.toLocaleString()} sats`}: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+      // The mint's network says whether these were test sats; ecash that could not be read says nothing of it.
+      const network = inspected?.kind === "token" ? mintNetwork(inspected.mint) : undefined;
+      const line = refusedRow({ amount: sats ?? undefined, network, reason });
+      try { await this.host.storeMessage({ linkId, id: spent ? `peer_spent_${digestHex(token).slice(0, 32)}` : `peer_${payment.timestamp}_refused`, ...line, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
     }
   }
 
@@ -1075,7 +1079,8 @@ export class PaymentDesk {
     const reason = "The mint did not confirm the ecash";
     link?.sendPaymentResult({ id: record.id, ok: false, error: reason });
     // The chat line a refusal on the spot writes, under the same id: a redeem that ends without the ecash is never silent.
-    try { await this.host.storeMessage({ linkId: record.linkId, id: `peer_${record.createdAt}_refused`, text: `Could not receive ${record.amount.toLocaleString()} sats: ${reason}`, sender: "peer", timestamp: record.createdAt, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+    const line = refusedRow({ amount: record.amount, network: record.mint ? mintNetwork(record.mint) : undefined, reason });
+    try { await this.host.storeMessage({ linkId: record.linkId, id: `peer_${record.createdAt}_refused`, ...line, sender: "peer", timestamp: record.createdAt, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
   }
 
   async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
@@ -1556,9 +1561,11 @@ export class PaymentDesk {
       if (now.state !== "pending") link?.sendPaymentResult({ id: payment.id, ok: now.state === "settled", credited: now.state === "settled" ? String(now.amount) : undefined, error: now.error });
       return;
     }
-    const refuse = async (reason: string) => {
+    // The amount the contact said they sent; the network once the notes' federation is known.
+    const refuse = async (reason: string, network?: WalletNetwork) => {
       link?.sendPaymentResult({ id: payment.id, ok: false, error: reason });
-      try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, text: `Could not receive Fedimint ecash: ${reason}`, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
+      const line = refusedRow({ amount: parseSats(payment.amount.value, payment.amount.asset) ?? undefined, network, method: "fedimint", reason });
+      try { await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}_refused`, ...line, sender: "peer", timestamp: payment.timestamp, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
     };
     if (!link?.allowsPayment("fedimint")) { await refuse("Fedimint is off in this chat"); return; }
     if (!this.fedimint) { await refuse("This app has no Fedimint wallet"); return; }
@@ -1571,7 +1578,7 @@ export class PaymentDesk {
     const amount = fedimintSats(found.amountMsats);
     if (amount < 1) { await refuse("These notes are worth less than a sat"); return; }
     const network = this.fedimintOf(found.federation)?.federation(found.federation)?.network;
-    if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`); return; }
+    if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`, walletNetworkOf(network)); return; }
     // The same notes under another id: answered from what is known, with no new line and no new redeem.
     // Digested as the federation reads them (see fedimintNotesDigest); `bytes` and `spelled` find what earlier versions wrote down.
     const digest = fedimintNotesDigest(notes);
@@ -1614,7 +1621,8 @@ export class PaymentDesk {
     if (state === "failed") {
       await this.save({ ...this.current(payment), state: "failed", token: undefined, error: "These notes were already redeemed" });
       link?.sendPaymentResult({ id, ok: false, error: "These notes were already redeemed" });
-      try { await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}_refused`, text: "Could not receive Fedimint ecash: These notes were already redeemed", sender: "peer", timestamp: payment.createdAt, via: "datalink" }); } catch { /* the contact was told */ }
+      const line = refusedRow({ amount: payment.amount, network: payment.network, method: "fedimint", reason: "These notes were already redeemed" });
+      try { await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}_refused`, ...line, sender: "peer", timestamp: payment.createdAt, via: "datalink" }); } catch { /* the contact was told */ }
       return;
     }
     // Written once the federation took the notes (as Cashu's once the mint took the ecash); the same id on a retry.

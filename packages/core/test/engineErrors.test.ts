@@ -4,7 +4,7 @@ import { ENGINE_ERRORS, EngineError, engineError, engineText, parseEngineError, 
 // covers: wallet.cashu.mint.add
 
 /** A value of each kind a template names, as the engine writes it. */
-const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com:3338", domain: "shop.example", chain: "mutinynet", network: "Testnet", unit: "usd", amount: "1,000", fee: "12", min: "5", max: "500" };
+const SAMPLE: Record<string, string> = { wallet: "Bark", device: "Desktop", host: "mint.example.com:3338", domain: "shop.example", chain: "mutinynet", network: "Testnet", unit: "usd", amount: "1,000", fee: "12", min: "5", max: "500", reason: "Lightning payment failed: no route" };
 const CODES = Object.keys(ENGINE_ERRORS) as EngineErrorCode[];
 const valuesOf = (code: EngineErrorCode) => Object.fromEntries([...ENGINE_ERRORS[code].matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, SAMPLE[name]]));
 
@@ -32,6 +32,9 @@ describe("the engine's known errors", () => {
     expect(error.engineCode).toBe("lightningFeeTooHigh");
     // Not `code`: the CLI takes a string `code` for its own.
     expect("code" in error).toBe(false);
+    // A mint's own reason, last in its text: read back whole, its colons and periods included.
+    const reason = "Quote not paid. Error: no route: try later.";
+    expect(parseEngineError(engineText("lightningRefused", { reason }))).toEqual({ code: "lightningRefused", values: { reason } });
   });
 
   it("any other text is not one of them, and keeps its own words", () => {

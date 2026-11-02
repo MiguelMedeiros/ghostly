@@ -108,6 +108,7 @@
     "backupFirst": "نزّل نسخة احتياطية أولًا",
     "backupPassphrase": "عبارة مرور النسخة الاحتياطية",
     "cashuSats": "{{amount}} ساتوشي في Cashu",
+    "cashuSats_one": "{{amount}} ساتوشي في Cashu",
     "confirmLabel": "اكتب اسم الملف الشخصي للتأكيد",
     "confirmPlaceholder": "اكتب {{name}}",
     "deleting": "جارٍ الحذف…",
@@ -144,5 +145,6 @@
   "restoredTag": "مستعاد",
   "restoredTagHint": "أُعيد من نسخة احتياطية",
   "sats": "{{amount}} ساتوشي",
+  "sats_one": "{{amount}} ساتوشي",
   "switch": "بدّل"
 }

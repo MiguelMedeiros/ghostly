@@ -464,6 +464,8 @@ describe("errors", () => {
     for (const code of ["hostTimedOut", "networkTimedOut"] as const) expect(asCliError(engineError(code, host)).code, code).toBe("timeout");
     for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
     for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
+    // A mint that refused a Lightning payment at once: nothing left the wallet, its own words kept at the end (agents#2253).
+    expect(asCliError(engineError("lightningRefused", { reason: "Lightning payment failed: no route" })).toJSON()).toEqual({ code: "refused", message: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: Lightning payment failed: no route" });
     expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
     // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
     expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });

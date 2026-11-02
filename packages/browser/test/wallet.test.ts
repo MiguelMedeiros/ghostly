@@ -249,9 +249,29 @@ describe("Lightning out: melts", () => {
     mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
     const { wallet } = setup();
 
-    await expect(pay(wallet)).rejects.toThrow(/already paid/);
+    // In the app's words, the mint's own kept at the end: "already paid" is still read there (InvoiceBubble.tsx).
+    await expect(pay(wallet)).rejects.toMatchObject({ engineCode: "lightningRefused", message: expect.stringMatching(/The mint said: Invoice already paid$/) });
     expect(balance()).toBe(108);
     expect(rows("melts")).toHaveLength(0);
+  });
+
+  it("a refusal with nothing lost says no sats left the wallet, in the app's words, the mint's reason kept (agents#2253)", async () => {
+    mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
+    mint.completeMelt.mockRejectedValue(new MintOperationError(20000, "Lightning payment failed:\n no route"));
+    mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
+    const { wallet } = setup();
+
+    const refused = await pay(wallet).then(() => null, (error: unknown) => error);
+    expect(refused).toMatchObject({
+      engineCode: "lightningRefused",
+      values: { reason: "Lightning payment failed: no route" },
+      message: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: Lightning payment failed: no route",
+    });
+    expect((refused as Error).cause).toBeInstanceOf(MintOperationError);
+    // True of the wallet too: every sat is spendable again, and nothing is booked as a fee.
+    expect(balance()).toBe(108);
+    expect(rows("melts")).toHaveLength(0);
+    expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee")).toEqual([]);
   });
 
   it("books the fee the split before a refused payment cost, and says it", async () => {

@@ -175,13 +175,14 @@ export async function readShareBody(request: { body: ReadableStream<Uint8Array> 
 }
 
 /**
- * What a share target POST carries, bounded: strings of a sane length, files that are files, `max` bytes of them in
- * all. Files past the count cap are only named (`pastLimit`).
+ * What a share target POST carries, bounded: files that are files, `max` bytes of them in all. Files past the count
+ * cap are only named (`pastLimit`). Texts come whole: the body they came in is already bounded (`readShareBody`), and
+ * a text too long for one message goes as a text file from the composer.
  */
 export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   const text = (name: string) => {
     const value = form.get(name);
-    return typeof value === "string" ? value.slice(0, 64 * 1024) : "";
+    return typeof value === "string" ? value : "";
   };
   let room = max;
   const files: File[] = [];

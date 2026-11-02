@@ -120,10 +120,22 @@ describe("a share target's form", () => {
     for (let i = 0; i < MAX_SHARED_FILES + 3; i++) form.append("files", new File([String(i)], `f${i}.txt`));
     const item = readShare(form);
     expect(item.title).toBe("T");
-    expect(item.text).toHaveLength(64 * 1024);
+    expect(item.text.length).toBe(70_000);
     expect(item.url).toBe("https://example.com");
     expect(item.files).toHaveLength(MAX_SHARED_FILES);
     expect(item.files[0]!.name).toBe("f0.txt");
+  });
+
+  it("keeps a text longer than 64 KiB whole, the character astride 64 KiB and all", () => {
+    // The body is already bounded (`MAX_SHARE_BYTES`): a cut of its text would only lose the rest without a word.
+    const text = `${"a".repeat(65_535)}👻${"b".repeat(40_000)}`;
+    const form = new FormData();
+    form.set("text", text);
+    form.set("title", text);
+    form.set("url", text);
+    const item = readShare(form);
+    // Lengths and ends, not the texts: a failure prints 100k characters otherwise.
+    for (const field of [item.text, item.title, item.url]) expect([field.length, field.slice(65_533, 65_538), field === text]).toEqual([105_537, "aa👻b", true]);
   });
 
   it("names the files past the count cap, for the picker to say they did not come in", () => {

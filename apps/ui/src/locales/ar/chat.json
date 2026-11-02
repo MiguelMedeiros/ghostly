@@ -320,8 +320,10 @@
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "أموال حقيقية",
     "sats": "{{amount}} ساتس",
+    "sats_one": "{{amount}} سات",
     "testMoney": "أموال تجريبية",
     "testSats": "{{amount}} ساتس تجريبية",
+    "testSats_one": "{{amount}} سات تجريبي",
     "usdtAddress": "عنوان USDT",
     "video": "🎬 فيديو ({{duration}})",
     "voice": "🎤 رسالة صوتية ({{duration}})"
@@ -333,6 +335,14 @@
     "noteMine": "تفاعلت بـ {{emoji}} مع \"{{snippet}}\"",
     "notice": "تفاعل أحدهم مع رسالتك",
     "react": "تفاعل"
+  },
+  "refused": {
+    "fedimint": "تعذّر استلام الـ ecash من Fedimint: {{reason}}",
+    "payment": "تعذّر استلام دفعة: {{reason}}",
+    "sats": "تعذّر استلام {{amount}} ساتس: {{reason}}",
+    "satsFedimint": "تعذّر استلام {{amount}} ساتس عبر Fedimint: {{reason}}",
+    "testSats": "تعذّر استلام {{amount}} ساتس تجريبية: {{reason}}",
+    "testSatsFedimint": "تعذّر استلام {{amount}} ساتس تجريبية عبر Fedimint: {{reason}}"
   },
   "reply": {
     "cancel": "إلغاء الرد",

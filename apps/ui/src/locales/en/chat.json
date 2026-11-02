@@ -312,8 +312,10 @@
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Real money",
     "sats": "{{amount}} sats",
+    "sats_one": "{{amount}} sat",
     "testMoney": "Test money",
     "testSats": "{{amount}} test sats",
+    "testSats_one": "{{amount}} test sat",
     "usdtAddress": "USDT address",
     "video": "🎬 Video ({{duration}})",
     "voice": "🎤 Voice message ({{duration}})"
@@ -325,6 +327,14 @@
     "noteMine": "You reacted {{emoji}} to \"{{snippet}}\"",
     "notice": "Someone reacted to your message",
     "react": "React"
+  },
+  "refused": {
+    "fedimint": "Could not receive Fedimint ecash: {{reason}}",
+    "payment": "Could not receive a payment: {{reason}}",
+    "sats": "Could not receive {{amount}} sats: {{reason}}",
+    "satsFedimint": "Could not receive {{amount}} sats on Fedimint: {{reason}}",
+    "testSats": "Could not receive {{amount}} test sats: {{reason}}",
+    "testSatsFedimint": "Could not receive {{amount}} test sats on Fedimint: {{reason}}"
   },
   "reply": {
     "cancel": "Cancel reply",

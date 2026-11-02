@@ -252,7 +252,7 @@ export interface StoredGroup {
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
    * race: my member seed, the entry session, and what arrived of the welcome.
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
 }
 
 export interface GroupMemberView {
@@ -315,9 +315,10 @@ export type GroupEdgeCause = "relays" | "session" | "other";
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,
  * it is there for the admin's app to read, that app opened the entry session, it let me in. Or a member's app
  * answered that there is no room yet (`group-full`, WISP 902 § A full group): `full`, or `blocked` while the group
- * waits for every member's app to take more than eight; the joiner goes on knocking.
+ * waits for every member's app to take more than eight; the joiner goes on knocking. Or the welcome said the link was
+ * replaced or turned off since it was shared (`replaced`): the knocking stops, and only the current link gets in.
  */
-export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked";
+export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked" | "replaced";
 
 export interface GroupView {
   id: string;
@@ -978,7 +979,28 @@ export interface StoredMessage {
   cardRestore?: "due" | "sent";
   /** What `cardRestore` was named before it covered every kind of card (buttons only): read for rows kept since. */
   buttonsRestore?: "due" | "sent";
+  /**
+   * A line this app wrote in the chat itself, never the contact's words: the app says it in its own language from these
+   * values (`paymentRefusal` in `shared/refusals.ts`), and `text` keeps its English for the CLI and older apps.
+   */
+  notice?: ChatNotice;
 }
+
+/**
+ * A payment of the contact's this app refused, or could not take in: how much they said they sent, on which
+ * network when it is known (`testnet`: test sats), `fedimint` for Fedimint notes (Cashu otherwise), and the reason in
+ * the English the contact was told, which the app reads back into its own language.
+ */
+export interface PaymentRefusedNotice {
+  type: "paymentRefused";
+  amount?: number;
+  network?: WalletNetwork;
+  method?: "fedimint";
+  reason: string;
+}
+
+/** The lines an app writes in a chat on its own (`StoredMessage.notice`). */
+export type ChatNotice = PaymentRefusedNotice;
 
 /**
  * A message that carries a task, a routine or a usage card, as the Tasks board and the chat list read it across every
