@@ -130,6 +130,8 @@ export function nearest(typed: string, words: Iterable<string>): string | undefi
   const most = Math.min(2, Math.floor(typed.length / 3));
   let best: string | undefined, bestDistance = most + 1;
   for (const word of words) {
+    // The distance is at least the lengths' difference: a long text that starts with a dash builds no table per name.
+    if (Math.abs(typed.length - word.length) >= bestDistance) continue;
     const d = distance(typed, word);
     if (d < bestDistance) { best = word; bestDistance = d; }
   }
