@@ -1,0 +1,1 @@
+A ratcheted item sealed in a session the reader never had, after its profile moved to this device or was restored, is not refused and skipped: it waits until its sender seals it again ([4xx · Forward Secrecy](../../4xx-ratchet.md#held-items)). No wire change.
