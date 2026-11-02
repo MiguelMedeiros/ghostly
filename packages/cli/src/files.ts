@@ -329,6 +329,8 @@ export const FILE_METHODS: Record<string, Method> = {
       await refuseAllHere();
       // One that ended (cancelled, declined, failed): the engine takes the action and does nothing, as for one all here.
       const transfer = state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer;
+      // Being checked (sent: the contact checks it; received: its digest here): the engine takes no pause and it ends done.
+      if (action === "pause" && transfer?.stage === "verifying") throw new CliError("refused", "Too late to pause: it is being checked");
       if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
       // Sent whole (the engine's `sentWhole`): the engine takes no cancel and it ends done, so it is refused, not echoed.
       if (outgoing && action === "cancel" && transfer?.state === "transferring" && (transfer.stage === "verifying"
