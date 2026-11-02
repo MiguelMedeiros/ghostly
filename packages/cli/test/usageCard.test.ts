@@ -68,6 +68,21 @@ describe("usage send", () => {
     expect(() => params(["Miguel", "--left", "50", "--also", "week=80@1791849403"])).toThrow(/--also takes milliseconds, not seconds/);
   });
 
+  it("reads --resets and --also's time with no zone as local time, a bare date as local midnight (agents#2355)", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "America/Sao_Paulo";
+      // Before, 2026-11-03 was UTC midnight: the card said the window resets at 21:00 the day before.
+      expect(params(["Miguel", "--left", "50", "--resets", "2026-11-03", "--also", "week=80@2026-11-03", "--also", "opus=40@2026-11-03 09:00", "--also", "day=10@2026-11-03Z"]).card).toMatchObject({
+        resetsAt: Date.UTC(2026, 10, 3, 3),
+        windows: [{ window: "week", resetsAt: Date.UTC(2026, 10, 3, 3) }, { window: "opus", resetsAt: Date.UTC(2026, 10, 3, 12) }, { window: "day", resetsAt: Date.UTC(2026, 10, 3) }],
+      });
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+    for (const flag of ["resets", "also"] as const) expect(COMMANDS["usage send"]!.options![flag].description).toMatch(/no zone: local time/);
+  });
+
   it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
