@@ -341,6 +341,34 @@ describe("stores", () => {
     expect(net.requests).not.toContain(COPY_URL);
   });
 
+  it("a newer index added while the store is being read again stays: the read's older one does not replace it", async () => {
+    const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
+    const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
+    await store.start();
+    store.stop();
+    await net.putStore(await storeFiles({ sequence: 5 }));
+    await store.refreshStores();
+    await net.putStore(await storeFiles({ sequence: 6 }));
+    await net.putStore(await storeFiles({ sequence: 8 }), COPY_URL);
+    // The Apps page reads the store again; its own URL answers slowly while the person adds the copy's newer index.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let reading!: () => void;
+    const started = new Promise<void>((resolve) => { reading = resolve; });
+    const answer = net.fetch.getMockImplementation()!;
+    net.fetch.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === STORE_URL) { reading(); await held; }
+      return answer(input, init);
+    });
+    const refresh = store.refreshStores();
+    await started;
+    expect(await store.addStore({ url: COPY_URL })).toMatchObject({ url: STORE_URL, sequence: 8 });
+    release();
+    expect(await refresh, "the read is judged against the index held now").toMatchObject([{ url: STORE_URL, sequence: 8, problem: "rollback" }]);
+    net.fetch.mockImplementation(answer);
+    expect(await store.listStores()).toMatchObject([{ url: STORE_URL, sequence: 8 }]);
+  });
+
   it("a store removed and added back refuses an index older than the last one taken from it, a default store's too", async () => {
     const v1 = await bundle();
     const OLD_URL = `https://cdn.jsdelivr.net/gh/ghostly/store@${"0".repeat(40)}/ghostly-store.json`;
