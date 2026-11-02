@@ -19,7 +19,7 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); });
 
 /** The page goes away at this step of the engine: it never ends, and nothing after it runs. */
-const goneAt = (store: Apps, step: "putApp" | "putAppIfUnchanged" | "removeBundle") =>
+const goneAt = (store: Apps, step: "putAppIfUnchanged" | "removeBundle") =>
   vi.spyOn(store as unknown as Record<string, () => Promise<unknown>>, step).mockImplementation(() => new Promise(() => {}));
 
 async function installed(permissions = ["chat"]) {
@@ -45,7 +45,7 @@ describe("a bundle no record names is removed at the next start", () => {
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
     await store.preview({ url: BUNDLE_URL });
-    goneAt(store, "putApp");
+    goneAt(store, "putAppIfUnchanged");
     void store.install({ digest: v1.digest, grant: ["chat"] });
     await vi.waitFor(async () => expect(await bundleIds()).toEqual([`app-${v1.digest}`]));
     await reopened();
@@ -94,11 +94,11 @@ describe("a bundle no record names is removed at the next start", () => {
     net.put(BUNDLE_URL, v1.bytes);
     const store = apps(net);
     await store.preview({ url: BUNDLE_URL });
-    const engine = store as unknown as { putApp: (...args: unknown[]) => Promise<void> };
-    const put = engine.putApp.bind(store);
+    const engine = store as unknown as { putAppIfUnchanged: (...args: unknown[]) => Promise<boolean> };
+    const put = engine.putAppIfUnchanged.bind(store);
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
-    vi.spyOn(engine, "putApp").mockImplementation(async (...args: unknown[]) => { await held; return put(...args); });
+    vi.spyOn(engine, "putAppIfUnchanged").mockImplementation(async (...args: unknown[]) => { await held; return put(...args); });
     const install = store.install({ digest: v1.digest, grant: ["chat"] });
     await vi.waitFor(async () => expect(await bundleIds()).toEqual([`app-${v1.digest}`]));
     await store.start();

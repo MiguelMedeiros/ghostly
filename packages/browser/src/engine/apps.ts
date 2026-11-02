@@ -428,7 +428,8 @@ function installDecision(installed: InstalledApp | undefined, version: AppVersio
  * Whether `now` is still the record `was`: the same install, version, waiting update, files and mark. A store pinned or
  * unpinned meanwhile is not a change here: the update check unpins on its own (`removeStore`).
  */
-function sameRecord(now: InstalledApp | undefined, was: InstalledApp): boolean {
+function sameRecord(now: InstalledApp | undefined, was: InstalledApp | undefined): boolean {
+  if (!was) return !now;
   return !!now && now.installedAt === was.installedAt && now.digest === was.digest && now.pending?.digest === was.pending?.digest
     && now.bytes === was.bytes && now.equivocation?.digest === was.equivocation?.digest;
 }
@@ -714,9 +715,9 @@ export class Apps {
   /**
    * Writes an app's record back only while it is still the record `was` (`sameRecord`), read and written in one
    * transaction: an app uninstalled (or installed again) while the update check was reading is not put back, nor is the
-   * version it read over an update the person accepted meanwhile.
+   * version it read over an update the person accepted meanwhile. `was` undefined: only while the app has no record.
    */
-  private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp): Promise<boolean> {
+  private async putAppIfUnchanged(app: InstalledApp, was: InstalledApp | undefined): Promise<boolean> {
     const tx = (await openDb()).transaction(STORES.apps, "readwrite");
     let put = false;
     const read = tx.objectStore(STORES.apps).get(app.ref);
@@ -1252,40 +1253,51 @@ export class Apps {
     const { manifest } = bundle;
     if (!Array.isArray(grant) || !manifest.permissions.every((p) => grant.includes(p))) fail("permissions", "Every permission the app asks for must be granted");
     const version = versionOf(manifest, digest);
-    const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
-    const run = this.runStatus(version, this.storeViews(stores), installed?.revocations);
-    if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
-    if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
-    const decision = installDecision(installed, version);
-    if (decision === "rollback") fail("rollback", "A newer version of this app is installed");
-    if (decision === "equivocation") {
-      await this.putApp({ ...installed!, equivocation: { sequence: version.sequence, digest, at: this.now() } });
-      fail("equivocation", `Two different versions ${version.sequence} exist. Ghostly kept the one you have.`);
-    }
-    if (decision === "same" && installed) {
-      // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
-      // updates to that store (one by URL or card leaves the record as it is).
-      const files = await this.hasBundle(installed.bytes, digest) ? null : await this.writeBundle(digest, bytes);
-      const pin = fromStore !== undefined && installed.store !== fromStore;
-      if (files || pin) {
-        const { pending, ...rest } = installed;
-        // A newer version found under the other rule does not wait any more.
-        if (pin && pending) await this.removeBundle(pending.bytes, pending.digest);
-        await this.putApp({ ...(pin ? rest : installed), ...(files && { bytes: files }), ...(pin && { store: fromStore }) });
+    // The files written here: left only while a record names them (a version refused after all keeps none).
+    let wrote: FileBytesKind | undefined;
+    try {
+      // Written only over the record read (as the update check and Accept do): one changed while the files were written
+      // (the check installed a newer version, an update accepted, another tab) is read and judged again.
+      for (;;) {
+        const [installed, stores] = await Promise.all([this.app(version.ref), this.stores()]);
+        const run = this.runStatus(version, this.storeViews(stores), installed?.revocations);
+        if (run.status === "revoked") fail("revoked", "Its publisher revoked this version");
+        if (run.status === "removed") fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
+        const decision = installDecision(installed, version);
+        if (decision === "rollback") fail("rollback", "A newer version of this app is installed");
+        if (decision === "equivocation") {
+          if (!(await this.putAppIfUnchanged({ ...installed!, equivocation: { sequence: version.sequence, digest, at: this.now() } }, installed))) continue;
+          fail("equivocation", `Two different versions ${version.sequence} exist. Ghostly kept the one you have.`);
+        }
+        if (decision === "same" && installed) {
+          // A restored profile's app that needs its files gets them back. The same version from a store's listing pins its
+          // updates to that store (one by URL or card leaves the record as it is).
+          const files = await this.hasBundle(installed.bytes, digest) ? null : (wrote = await this.writeBundle(digest, bytes));
+          const pin = fromStore !== undefined && installed.store !== fromStore;
+          if (files || pin) {
+            const { pending, ...rest } = installed;
+            if (!(await this.putAppIfUnchanged({ ...(pin ? rest : installed), ...(files && { bytes: files }), ...(pin && { store: fromStore }) }, installed))) continue;
+            // A newer version found under the other rule does not wait any more.
+            if (pin && pending) await this.removeBundle(pending.bytes, pending.digest);
+          }
+          this.staged.delete(digest);
+          return this.view((await this.app(version.ref))!, stores);
+        }
+        const kind = wrote = await this.writeBundle(digest, bytes);
+        // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
+        const next = this.versionRecord(installed, bundle, kind, from, fromStore);
+        if (!(await this.putAppIfUnchanged(next, installed))) continue;
+        // The person installed a built-in app they had removed (from a store, a link or a card): it is theirs again.
+        if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
+        if (installed && installed.digest !== digest) await this.removeBundle(installed.bytes, installed.digest);
+        if (installed?.pending && next.pending?.digest !== installed.pending.digest && installed.pending.digest !== digest) await this.removeBundle(installed.pending.bytes, installed.pending.digest);
+        this.staged.delete(digest);
+        return this.view(next, stores);
       }
-      this.staged.delete(digest);
-      return this.view((await this.app(version.ref))!, stores);
+    } catch (error) {
+      if (wrote) await this.removeUnusedBundle(version.ref, wrote, digest);
+      throw error;
     }
-    const kind = await this.writeBundle(digest, bytes);
-    // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
-    const next = this.versionRecord(installed, bundle, kind, from, fromStore);
-    await this.putApp(next);
-    // The person installed a built-in app they had removed (from a store, a link or a card): it is theirs again.
-    if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
-    if (installed && installed.digest !== digest) await this.removeBundle(installed.bytes, installed.digest);
-    if (installed?.pending && next.pending?.digest !== installed.pending.digest && installed.pending.digest !== digest) await this.removeBundle(installed.pending.bytes, installed.pending.digest);
-    this.staged.delete(digest);
-    return this.view(next, stores);
   }
 
   /**
