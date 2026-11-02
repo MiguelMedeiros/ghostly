@@ -315,6 +315,8 @@
     "requestGone": "付款请求已不存在",
     "retryNext": "重试即可再次暂存。",
     "retryingNext": "Ghostly 会自动重试。",
+    "sealedBefore": "联系人留给你的内容是给你之前所用设备的",
+    "sealedBeforeNext": "联系人的应用为这台设备重新封装后就会送达。",
     "storeFailed": "无法将项目存入你的存储",
     "storeFailedNext": "请在个人资料 → 备份中检查 S3 存储，然后重试。",
     "tooLarge": "为不在线的联系人暂存的项目最大 {{mb}} MB"

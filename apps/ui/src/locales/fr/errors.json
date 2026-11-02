@@ -315,6 +315,8 @@
     "requestGone": "La demande de paiement n'existe plus",
     "retryNext": "Réessayez pour le garder à nouveau.",
     "retryingNext": "Ghostly réessaie tout seul.",
+    "sealedBefore": "Votre contact a laissé des éléments pour l'appareil que vous utilisiez avant",
+    "sealedBeforeNext": "Ils vous parviennent dès que l'app de votre contact les scelle à nouveau pour celui-ci.",
     "storeFailed": "Impossible d'enregistrer l'élément dans votre stockage",
     "storeFailedNext": "Vérifiez votre stockage S3 dans Profil → Sauvegardes, puis réessayez.",
     "tooLarge": "Un élément gardé pour un contact absent fait au plus {{mb}} Mo"
