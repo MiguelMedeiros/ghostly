@@ -555,16 +555,17 @@ export class RelayTransport implements PkarrTransport {
     this.perMinuteGiven = options.requestsPerMinute !== undefined;
     this.backgroundPerMinute = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_REQUESTS_PER_MINUTE : Math.ceil(this.perMinute * 2 / 3);
     this.backgroundWhileSignaling = this.perMinute === REQUESTS_PER_MINUTE ? BACKGROUND_WHILE_SIGNALING : Math.ceil(this.perMinute / 6);
-    const log = options.log ?? ((line: string) => console.info(`[ghostly:relay] ${line}`));
+    // Read at a terminal too (a CLI one-shot writes it on stderr): "tripped" and "left alone" were the breaker's words.
+    const log = options.log ?? ((line: string) => console.info(`ghostly: ${line}`));
     this.breaker = new RelayBreaker({
       ...options.breaker,
       onTrip: (relay, reason, forMs) => {
-        log(`${new URL(relay).host} tripped (${reason}); left alone for ${Math.round(forMs / 1000)} s`);
+        log(`relay ${new URL(relay).host} ${reason === "no answer" ? "did not answer" : reason === "slow" ? "answered too slowly" : `failed (${reason})`}; asked again in ${Math.round(forMs / 1000)} s`);
         options.breaker?.onTrip?.(relay, reason, forMs);
         this.changed("tripped");
       },
       onRecover: (relay) => {
-        log(`${new URL(relay).host} answered again`);
+        log(`relay ${new URL(relay).host} answers again`);
         options.breaker?.onRecover?.(relay);
         this.changed("recovered");
       },

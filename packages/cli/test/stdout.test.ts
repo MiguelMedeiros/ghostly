@@ -17,6 +17,7 @@ describe("stdout", () => {
     expect(error(result, "timeout", 4).message).toContain("Timed out");
     expect(result.stdout.trim().split("\n"), "one line, the answer").toHaveLength(1);
     expect(() => JSON.parse(result.stdout)).not.toThrow();
-    expect(result.stderr).toContain("[ghostly:relay]");
+    expect(result.stderr).toMatch(/ghostly: relay 127\.0\.0\.1:9 did not answer; asked again in \d+ s/);
+    expect(result.stderr).not.toContain("[ghostly:relay]");
   }, 60_000);
 });
