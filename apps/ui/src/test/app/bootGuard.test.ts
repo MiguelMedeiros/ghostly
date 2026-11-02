@@ -258,3 +258,58 @@ describe("the boot guard", () => {
     }
   });
 });
+
+describe("the boot guard's language file", () => {
+  // As the build names them in the page (apps/web/localePreload.ts): every language but English, which is in the entry.
+  const FILES = { ar: "/assets/ar-abc.js", ja: "/assets/ja-def.js", pt: "/assets/pt-ghi.js" };
+  const preloads = () => [...document.head.querySelectorAll<HTMLLinkElement>('link[rel="modulepreload"]')].map((link) => link.getAttribute("href"));
+
+  function open(languages: string[], { files = FILES as Record<string, string> | null, saved = undefined as string | undefined } = {}) {
+    if (files) {
+      const meta = document.createElement("meta");
+      meta.name = "ghostly-locales";
+      meta.content = JSON.stringify(files);
+      document.head.appendChild(meta);
+    }
+    if (saved !== undefined) localStorage.setItem("ghostly_app_settings", saved);
+    vi.spyOn(navigator, "languages", "get").mockReturnValue(languages);
+    start({ language: languages[0] });
+  }
+
+  afterEach(() => {
+    document.head.innerHTML = "";
+    localStorage.removeItem("ghostly_app_settings");
+    vi.restoreAllMocks();
+  });
+
+  it("asks for a new profile's language file as it runs, before the bundle has run, with the module's credentials", () => {
+    open(["ar-EG", "en-US"]);
+    expect(preloads()).toEqual(["/assets/ar-abc.js"]);
+    expect(document.head.querySelector("link[rel=modulepreload]")).toHaveAttribute("crossorigin", "");
+  });
+
+  it("picks the language as the app does: the first of the browser's it speaks, English included", () => {
+    open(["de-DE", "ja-JP", "ar"]);
+    expect(preloads()).toEqual(["/assets/ja-def.js"]);
+    document.head.innerHTML = "";
+    open(["en-GB", "ar"]);
+    expect(preloads()).toEqual([]);
+  });
+
+  it("follows the language the profile saved, over the browser's", () => {
+    open(["ar"], { saved: JSON.stringify({ language: "pt" }) });
+    expect(preloads()).toEqual(["/assets/pt-ghi.js"]);
+    document.head.innerHTML = "";
+    open(["ar"], { saved: JSON.stringify({ language: "en" }) });
+    expect(preloads()).toEqual([]);
+  });
+
+  it("asks for nothing where the page names no files (the dev server), or names them badly, and still guards", () => {
+    open(["ar"], { files: null });
+    expect(preloads()).toEqual([]);
+    document.head.innerHTML = '<meta name="ghostly-locales" content="{not json">';
+    open(["ar"], { files: null, saved: "{also not json" });
+    expect(preloads()).toEqual([]);
+    expect(guard().details()).toContain("Ghostly boot report");
+  });
+});
