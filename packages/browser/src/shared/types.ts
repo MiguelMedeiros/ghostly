@@ -486,10 +486,11 @@ export interface FileTransferView {
    */
   stalled?: boolean;
   /**
-   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
-   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `author`: only
+   * its author holds it, a member this device has no edge with (a private group on hubs: it comes once a hub holds it);
+   * `busy`: its holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
    */
-  wait?: "nobody" | "busy" | "day" | "damaged";
+  wait?: "nobody" | "author" | "busy" | "day" | "damaged";
   /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
