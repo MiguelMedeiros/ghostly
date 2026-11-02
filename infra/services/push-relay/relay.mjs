@@ -54,6 +54,17 @@ export function readRelayRequest (text, { hosts = PUSH_HOSTS, bodyBytes = DEFAUL
 }
 
 /**
+ * Why a forward failed, as a word an operator can act on: `timeout`, `redirect`, or the system's or TLS's code
+ * (`ECONNREFUSED`, `ENOTFOUND`, `CERT_HAS_EXPIRED`). Never the message, which can hold the endpoint.
+ */
+export function failure (error) {
+  if (error?.name === 'TimeoutError') return 'timeout'
+  const code = error?.cause?.code ?? error?.code
+  if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(code)) return code
+  return error?.cause?.message === 'unexpected redirect' ? 'redirect' : 'error'
+}
+
+/**
  * The address a request counts against. Behind `proxies` reverse proxies (a tunnel, nginx), the socket's address is the
  * last proxy's, so the client's is the entry that many from the end of `X-Forwarded-For` (the ones before it are the
  * client's to write). With none configured, the header is ignored.
@@ -82,6 +93,26 @@ export function rateKey (address) {
   return prefix.length === 4 && prefix.every(n => n >= 0 && n <= 0xffff) ? `${prefix.map(n => n.toString(16)).join(':')}::/64` : address
 }
 
+/**
+ * Refusals as counts, so a flood of them stays quiet: the first of a kind in a quiet minute is logged at once
+ * (`refused rate`), the rest of that minute as one line when `flush` runs (`refused rate 41 more`).
+ */
+export function refusalLog (log) {
+  // Kind → refusals since its last line. Present: a line for it went out in this minute.
+  const pending = new Map()
+  return {
+    refuse: why => {
+      if (pending.has(why)) pending.set(why, pending.get(why) + 1)
+      else { pending.set(why, 0); log('refused', why) }
+    },
+    flush: () => {
+      for (const [why, more] of pending) {
+        if (more) { log('refused', why, `${more} more`); pending.set(why, 0) } else pending.delete(why)
+      }
+    },
+  }
+}
+
 export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts = PUSH_HOSTS, limits = {}, proxies = 0, log = () => {} } = {}) {
   const { bodyBytes, perMinute, tracked, requestMs } = { ...DEFAULT_LIMITS, ...limits }
   // The JSON around a body of `bodyBytes`: base64url is a third longer, and the headers add a few KB.
@@ -89,7 +120,8 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
   const recent = new Map()
   let pruned = 0
   const prune = now => { pruned = now; for (const [ip, times] of recent) if (!times.some(t => now - t < 60_000)) recent.delete(ip) }
-  const pruning = setInterval(() => prune(Date.now()), 60_000)
+  const refusals = refusalLog(log)
+  const pruning = setInterval(() => { prune(Date.now()); refusals.flush() }, 60_000)
   pruning.unref?.()
   const allowOrigin = origin => (origins.length === 0 ? '*' : origins.includes(origin) ? origin : null)
 
@@ -98,8 +130,10 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     const origin = allowOrigin(req.headers.origin ?? '')
     const cors = origin ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' } : {}
     const answer = (status, value) => { res.writeHead(status, { ...cors, 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)) }
-    if (req.method === 'OPTIONS') { res.writeHead(origin ? 204 : 403, cors); res.end(); return }
-    if (req.method !== 'POST' || !origin) return answer(req.method === 'POST' ? 403 : 405, { error: 'No' })
+    const refuse = (why, status, value) => { refusals.refuse(why); answer(status, value) }
+    if (req.method === 'OPTIONS') { if (!origin) refusals.refuse('origin'); res.writeHead(origin ? 204 : 403, cors); res.end(); return }
+    if (req.method !== 'POST') return refuse('method', 405, { error: 'No' })
+    if (!origin) return refuse('origin', 403, { error: 'No' })
 
     const ip = rateKey(clientAddress(req, proxies))
     const now = Date.now()
@@ -107,26 +141,31 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     if (recent.size >= tracked && !recent.has(ip) && now - pruned >= 1000) prune(now)
     if (recent.size >= tracked && !recent.has(ip)) recent.delete(recent.keys().next().value)
     const times = (recent.get(ip) ?? []).filter(t => now - t < 60_000)
-    if (times.length >= perMinute) return answer(429, { error: 'Too many' })
+    if (times.length >= perMinute) return refuse('rate', 429, { error: 'Too many' })
     times.push(now)
     // Last in the map's order: the first entry is always the one seen longest ago.
     recent.delete(ip)
     recent.set(ip, times)
 
-    if (Number(req.headers['content-length']) > requestBytes) return answer(413, { error: 'Too large' })
+    if (Number(req.headers['content-length']) > requestBytes) return refuse('size', 413, { error: 'Too large' })
     const chunks = []
     let size = 0
     // Bytes, not characters: text of many-byte characters counts for what it weighs.
-    req.on('data', chunk => { size += chunk.length; if (size > requestBytes) req.destroy(); else chunks.push(chunk) })
+    req.on('data', chunk => {
+      size += chunk.length
+      if (size <= requestBytes) chunks.push(chunk)
+      else if (!req.destroyed) { refusals.refuse('size'); req.destroy() }
+    })
     req.on('end', async () => {
       const request = readRelayRequest(Buffer.concat(chunks).toString('utf8'), { hosts, bodyBytes })
-      if (request.error) { log('refused', request.error); return answer(400, { error: request.error }) }
+      // `<name> twice` names a header the client chose: the log says only which kind it was.
+      if (request.error) return refuse(request.error.endsWith(' twice') ? 'header twice' : request.error, 400, { error: request.error })
       try {
         const response = await fetch(request.endpoint, { method: 'POST', headers: request.headers, body: request.body, redirect: 'error', signal: AbortSignal.timeout(10_000) })
         log('forwarded', response.status)
         answer(200, { status: response.status })
-      } catch {
-        log('failed')
+      } catch (error) {
+        log('failed', failure(error))
         answer(502, { error: 'The push service did not answer' })
       }
     })
@@ -138,7 +177,16 @@ export function startRelay ({ port = 0, host = '127.0.0.1', origins = [], hosts 
     server.listen(port, host, () => resolve({
       port: server.address().port,
       tracked: () => recent.size,
-      close: () => new Promise(done => { clearInterval(pruning); server.close(() => done()) }),
+      /** Open connections, a request in them or not. */
+      clients: () => new Promise(done => server.getConnections((_, count) => done(count ?? 0))),
+      // `server.close` stops the check that ends a slow request, so a client holding half a request would hold the
+      // close for as long as it stays: a request still open after `stopMs` (a forward in flight, a slow client) is cut.
+      close: ({ stopMs = 3000 } = {}) => new Promise(done => {
+        clearInterval(pruning)
+        refusals.flush()
+        const cut = setTimeout(() => server.closeAllConnections(), stopMs)
+        server.close(() => { clearTimeout(cut); done() })
+      }),
     }))
   })
 }

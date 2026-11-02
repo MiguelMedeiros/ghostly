@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { irohRelayUrl } from "@ghostly/core";
+import { irohRelayUrl, normalizeRelayUrl, relayUrlProblem } from "@ghostly/core";
 import { iceServerProblem } from "@ghostly/browser/shared/ice";
 import { hyperdhtRelayProblem } from "@ghostly/browser/shared/hyperdhtRelay";
 import { pushRelayProblem } from "@ghostly/browser/shared/pushRelay";
@@ -63,14 +63,18 @@ export function NetworkSettings() {
     // Checked here as well as in the engine, so the person sees why before anything changes.
     const relay = direct ? "" : hyperdhtRelay.trim();
     const push = pushRelay.trim();
-    const problem = (server ? iceServerProblem(server) : null) ?? (relay ? hyperdhtRelayProblem(relay) : null) ?? (push ? pushRelayProblem(push) : null);
+    // The engine keeps only the Pkarr relays it can read and drops the rest unsaid: a typo next to working relays is
+    // named instead (with nothing usable at all, the engine's own "Enter at least one relay address" says it).
+    const relayList = relays.split(/\s+/).filter(Boolean);
+    const badRelayLine = relayList.some(normalizeRelayUrl) ? relays.split("\n").find((line) => !line.trim().split(/\s+/).filter(Boolean).every(normalizeRelayUrl)) : undefined;
+    const problem = (badRelayLine !== undefined ? relayUrlProblem(badRelayLine) : null) ?? (server ? iceServerProblem(server) : null) ?? (relay ? hyperdhtRelayProblem(relay) : null) ?? (push ? pushRelayProblem(push) : null);
     if (problem) { setError(errorText(problem, t)); return; }
     try {
       const irohRelays = iroh.split(/\s+/).filter(Boolean);
       // The defaults are stored as "none chosen", so a later change of the defaults reaches this profile.
       // Either spelling of a default (with or without the trailing dot of a full domain name) is that default.
       const defaults = network.iroh && JSON.stringify(irohRelays.map(url => irohRelayUrl(url))) === JSON.stringify(network.iroh.defaultRelays.map(url => irohRelayUrl(url)));
-      await platform.setNetwork({ relays: relays.split(/\s+/).filter(Boolean), turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), ...(direct ? {} : { hyperdhtRelay: relay }), pushRelay: push });
+      await platform.setNetwork({ relays: relayList, turn: server, ...(network.iroh ? { irohRelays: defaults ? [] : irohRelays } : {}), ...(direct ? {} : { hyperdhtRelay: relay }), pushRelay: push });
     } catch (e) { setError(problemLine(e, t)); return; }
     setSavedAs(current);
   };

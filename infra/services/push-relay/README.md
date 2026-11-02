@@ -13,6 +13,9 @@ to send its whole request; a request is weighed in bytes and one too large is re
 a header named twice. It learns that a push to an endpoint happened, when, and the sender's address; it never
 sees what the push says (only "wake up"), since that is encrypted to the contact's browser.
 
+It needs Node 18 or later (22 is what the HyperDHT relay's image runs): it posts with Node's own `fetch`, and on an
+older Node it would start and then fail every push.
+
 ```bash
 node server.mjs                                   # port 49480
 PORT=8443 GHOSTLY_RELAY_ORIGINS=https://app.ghostly.tools node server.mjs
@@ -27,6 +30,15 @@ client's address from `X-Forwarded-For` rather than the proxy's; without it the 
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
 
+A forward the push service did not answer is logged as `failed` with its cause, never the endpoint: `timeout` (10
+seconds), `ENOTFOUND` (no DNS), `ECONNREFUSED` or `ETIMEDOUT` (no way out to port 443), a TLS code such as
+`CERT_HAS_EXPIRED`, or `redirect`.
+
 A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`) stops the start with one
 line that names it; leave a setting out for its default. The start line says how many proxies it counts and where it
 listens.
+
+The log holds counts and reasons only, never an endpoint or an address: `forwarded <status>`, `failed`, and each
+refusal by kind (`refused origin`, `refused method`, `refused rate`, `refused size`, or what was wrong with the
+request, such as `refused Not a push service`). The first refusal of a kind is logged at once and the rest as one count
+a minute (`refused rate 41 more`), so a flood stays a line a minute.
