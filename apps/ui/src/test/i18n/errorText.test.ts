@@ -496,6 +496,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
   ["Not a relay address: ftp//x", `${BROWSER}/nostr/relay.ts`, "Not a relay address: ${value.slice(0, 40)}"],
+  ["Use an https:// relay address: wss://relay.example.org", `${CORE}/relay.ts`, "`Use an https:// relay address: ${line}`"],
+  ["Not a relay address: not a url", `${CORE}/relay.ts`, "`Not a relay address: ${line}`"],
   ["No relay answered", `${BROWSER}/engine/nostrSocial.ts`, "throw new Error(\"No relay answered\")"],
   ["No relay answered", `${BROWSER}/profiles/activity.ts`, "throw new Error(\"No relay answered\")"],
   ["No relay answered", `${BROWSER}/profiles/readers.ts`, "throw new Error(\"No relay answered\")"],
