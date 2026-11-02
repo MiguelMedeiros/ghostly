@@ -33,7 +33,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { groupChat } from "../lib/chatMute";
 import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { GroupInvitationCard } from "../components/GroupInvitation";
+import { GroupInvitationCard, focusPastRow, rowAfter } from "../components/GroupInvitation";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
@@ -432,6 +432,14 @@ export function GroupChat() {
   const playingChat = useMemo(() => ({ path: groupPath(groupId), name: groupName }), [groupId, groupName]);
   // Left or deleted here: what this device keeps of it goes, and so does what plays from it (no bar naming it after).
   const goneHere = () => { forgetGroupLocal(groupId); stopPlayingFrom(groupPath(groupId), true); };
+  // Cancel joining on a first join's card: the group's row goes and home shows. The focus goes to the list's next row,
+  // or New, as a Decline's does (on a phone, once the list shows); it was left on the page's body.
+  const cancelJoin = () => {
+    const next = rowAfter(groupId), pressed = document.activeElement;
+    void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {});
+    nav.home();
+    focusPastRow(next, pressed);
+  };
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const [readStacks] = useState(() => routineStacksReader<StoredMessage, StoredMessage>(m => m));
   const stacks = useMemo(() => readStacks(messages), [readStacks, messages]);
@@ -778,7 +786,7 @@ export function GroupChat() {
           {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</p>}
           {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
             className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
-          <button onClick={() => { void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {}); nav.home(); }} data-testid="group-joining-cancel"
+          <button onClick={cancelJoin} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">

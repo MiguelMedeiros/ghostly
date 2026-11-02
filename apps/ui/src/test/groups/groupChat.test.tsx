@@ -1,5 +1,5 @@
 import { act, screen, within } from "@testing-library/react";
-import { Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { Sidebar } from "../../components/Sidebar";
@@ -359,6 +359,40 @@ describe("GroupChat: joining through a link", () => {
     await user.click(screen.getByTestId("group-joining-cancel"));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
     expect(screen.getByText("Chat list")).toBeInTheDocument();
+  });
+
+  /** A phone's shell: one screen at a time, the chat list mounted but hidden until home shows (App's mobile layout). */
+  function PhoneList() {
+    return <div hidden={useLocation().pathname !== "/"}><Sidebar /></div>;
+  }
+
+  it.each([["a desktop", false], ["a phone", true]] as const)(
+    "Cancel joining from the keyboard hands the focus to the next row of the list, or to New after the last, on %s", async (_, phone) => {
+    // It was left on the page's body once home: the next Tab started again from the top, and nothing was said.
+    if (phone) {
+      // As a browser does: a hidden element (the list, while the group's page fills the screen) takes no focus.
+      const focus = HTMLElement.prototype.focus;
+      vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options?: FocusOptions) { if (!this.closest("[hidden]")) focus.call(this, options); });
+    }
+    const joiningOne = viaLink("");
+    const other = active({ id: "group-2", name: "Others" });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[joiningOne, other], "group-2"], [[joiningOne], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider>{phone ? <PhoneList /> : <Sidebar />}<Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on("forgetGroup", () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-joining-cancel").focus();
+      await user.keyboard("{Enter}");
+      expect(engine.callsTo("forgetGroup").slice(-1)).toEqual([{ groupId: "group-1" }]);
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      await vi.waitFor(() => expect(screen.queryAllByTestId("group-row").map(r => r.dataset.group)).toEqual(next ? [next] : []));
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
   });
 });
 
