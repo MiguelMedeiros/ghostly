@@ -165,7 +165,7 @@
     "restoring": "Cargando… · {{size}}",
     "resume": "Reanudar",
     "roomDevice": "{{size}} libres en este dispositivo",
-    "senderOnly": "Solo quien lo envió tiene este archivo",
+    "senderOnly": "Aún no está en tus conexiones",
     "senderOnlyHint": "En un grupo tan grande, tu app se conecta a través de unos pocos miembros, no con quien lo envió. Llega solo cuando uno de ellos lo descargue, o pide a quien lo envió que te lo mande en un chat.",
     "stalled": "Detenido · {{progress}}",
     "verifying": "Comprobando el archivo… {{size}}",

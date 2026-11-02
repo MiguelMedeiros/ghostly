@@ -283,7 +283,7 @@ const ENDED_KEPT = 8;
 /** Why a want waits, as the person reads it (the app shows its own words for each `wait`). */
 const WAITING_NOTES = {
   nobody: "Nobody you are connected to has this file yet",
-  author: "Only its sender has this file, and you are not connected to them",
+  author: "Nobody you are connected to has this file yet, and its sender is not one of them",
   busy: "Its holders are busy; asking again soon",
   day: "Its holders have shared all they can today; it comes when another member has it, or tomorrow",
   damaged: "It arrived damaged; ask again",

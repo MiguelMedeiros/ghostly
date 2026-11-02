@@ -1425,7 +1425,7 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     const { messageId, meta } = await t.send(author, id, pattern(50_000, 3));
     // Its hubs, which do not fetch it by themselves, say they do not hold it: only its author does, out of the reader's reach.
     await t.world.until(() => t.got(reader, id, messageId).transfer?.stage === "waiting", 5 * 60_000);
-    expect(t.got(reader, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "author", note: "Only its sender has this file, and you are not connected to them" });
+    expect(t.got(reader, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "author", note: "Nobody you are connected to has this file yet, and its sender is not one of them" });
     // The author is not asked: the reader has no edge with it.
     expect(t.seen.filter(s => s.from === reader.name && s.frame.t === "group-want").map(s => s.to)).not.toContain(author.name);
     // A hub's Download brings it to the hub, which says it holds it: the reader gets it from there.
