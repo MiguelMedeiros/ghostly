@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, MintOperationError, getDecodedToken, type Proof } from "@cashu/cashu-ts";
 import { LIMITS } from "@ghostly/core";
 import { CashuWallet, MINT_TIMEOUT_MS } from "../src/engine/wallet";
+import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 import { bech32 } from "@scure/base";
 import { FakeWallet, failures, mint, resetDb, rows, seed } from "./fakes";
@@ -175,6 +176,11 @@ describe("Lightning out: melts", () => {
     const { quote, mint: at } = await wallet.quoteInvoice(INVOICE);
     return wallet.payQuote(quote, at);
   };
+  /** Asks about the pending payments once no request of theirs can reach the mint any more. */
+  const pollWhenOverdue = async (wallet: CashuWallet) => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS });
+    try { await wallet["pollMelts"](); } finally { vi.useRealTimers(); }
+  };
 
   it("reserves the proofs of a pending payment, then drops them once the mint pays it", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
@@ -203,7 +209,7 @@ describe("Lightning out: melts", () => {
 
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
-    await wallet["pollMelts"]();
+    await pollWhenOverdue(wallet);
 
     expect(balance()).toBe(108);
     expect(rows("melts")).toHaveLength(0);
@@ -298,7 +304,7 @@ describe("Lightning out: melts", () => {
 
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     mint.checkProofsStates.mockResolvedValue([{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
-    await wallet["pollMelts"]();
+    await pollWhenOverdue(wallet);
 
     expect(balance()).toBe(106);
     expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "fee", amount: 0, fee: 2 }]);
