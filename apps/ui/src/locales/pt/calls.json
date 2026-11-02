@@ -13,6 +13,7 @@
   "devices": {
     "back": "{{name}} voltou",
     "failed": "Não foi possível usar {{name}}. A chamada continua com o que já usava.",
+    "gone": "{{name}} desconectado. Conecte outro para continuar.",
     "lost": "{{name}} desconectado. Usando o padrão.",
     "menu": "Dispositivos",
     "switchBack": "Voltar a usar"

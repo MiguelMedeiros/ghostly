@@ -20,6 +20,8 @@ export interface NativeEndpoint {
   onConnection: ((connection: BoundChannel) => void) | null;
   onDescriptor: (() => void) | null;
   onUnavailable?: (() => void) | null;
+  /** The endpoint is connected to its relay again after it lost it (the native Iroh's home relay; nothing else says it). */
+  onRelayBack?: (() => void) | null;
 }
 export type TransportDescriptors = Partial<Record<NativeTransport, unknown>>;
 
@@ -31,8 +33,9 @@ export type TransportDescriptors = Partial<Record<NativeTransport, unknown>>;
  *
  * So every relay URL is put in one spelling before it goes into an Iroh endpoint (the relays it homes on, a contact's
  * descriptor before a dial), and which one depends on the endpoint:
- * - `"dotted"`, the name with its trailing dot: what native Iroh homes on by default (the Desktop), and the form to
- *   compare two relays in.
+ * - `"dotted"`, n0's relays with their trailing dot: what native Iroh homes on by default (the Desktop), and the form
+ *   to compare two relays in. Any other relay keeps its plain name here too: a relay behind a proxy (a Cloudflare
+ *   tunnel) is found by its Host header, and the proxy answers the dotted name with 404.
  * - `"plain"`, the name without it: the only one every browser opens. WebKit (Safari, the iPhone app) refuses a
  *   host name that ends in a dot, for `fetch` and for a WebSocket alike, so nothing a browser's Iroh is given has one.
  *
@@ -46,7 +49,7 @@ export function irohRelayUrl(value: string, spelling: IrohRelaySpelling = "dotte
   const host = url.hostname, name = host.replace(/\.$/, "");
   if (!name.includes(".") && name !== "localhost") return value;
   if (name.startsWith("[") || /^\d+(\.\d+){3}$/.test(name)) return value;
-  const wanted = spelling === "plain" || name === "localhost" ? name : `${name}.`;
+  const wanted = spelling === "dotted" && /(^|\.)iroh\.link$/.test(name) ? `${name}.` : name;
   if (wanted === host) return value;
   url.hostname = wanted;
   return url.href;

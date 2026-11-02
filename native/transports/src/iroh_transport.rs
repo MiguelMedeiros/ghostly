@@ -62,6 +62,20 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Ghostly's own Iroh relay (`iroh-relay` 1.3 behind a Cloudflare tunnel), one more to home on after n0's. Its plain
+/// name: the tunnel finds it by the Host header and answers the dotted one with 404.
+pub const GHOSTLY_RELAY: &str = "https://iroh.miguelmedeiros.dev/";
+
+/// The relays an endpoint homes on when none are set: n0's four, then Ghostly's. Iroh homes on the one with the lowest
+/// latency it measures, so a relay out of reach is passed over. Ghostly's has no QUIC address discovery (its UDP does
+/// not cross the tunnel): it relays only.
+pub fn default_relays() -> RelayMap {
+    let relays = iroh::defaults::prod::default_relay_map();
+    let ours: RelayUrl = GHOSTLY_RELAY.parse().expect("Ghostly's relay URL");
+    relays.insert(ours.clone(), std::sync::Arc::new(RelayConfig::new(ours, None)));
+    relays
+}
+
 pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, String> {
     let builder = if local_only {
         Endpoint::builder(presets::Minimal)
@@ -69,7 +83,7 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
             .bind_addr("127.0.0.1:0")
             .map_err(|e| e.to_string())?
     } else {
-        Endpoint::builder(presets::N0)
+        Endpoint::builder(presets::N0).relay_mode(RelayMode::Custom(default_relays()))
     };
     builder
         .secret_key(SecretKey::from_bytes(&seed))
@@ -233,6 +247,25 @@ mod tests {
         assert_ne!(contexts[0], contexts[1]);
         a.close().await;
         b.close().await;
+    }
+
+    #[test]
+    fn default_relays_are_n0s_then_ghostlys_without_quic() {
+        let relays = default_relays();
+        let urls: Vec<String> = relays
+            .urls::<Vec<RelayUrl>>()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        for n0 in ["use1-1", "usw1-1", "euc1-1", "aps1-1"] {
+            let url = format!("https://{n0}.relay.n0.iroh.link./");
+            assert!(urls.contains(&url), "{url} kept in {urls:?}");
+        }
+        assert_eq!(urls.len(), 5);
+        // Plain: the tunnel in front of it answers the dotted name with 404.
+        let ours: RelayUrl = "https://iroh.miguelmedeiros.dev/".parse().unwrap();
+        let config = relays.get(&ours).expect("Ghostly's relay, plain name");
+        assert_eq!(config.quic, None, "no QUIC address discovery through the tunnel");
     }
 }
 
