@@ -14,7 +14,7 @@ import type {
 import { STORES, newestWalletTx, openDb, store, transact, wrap, committed } from "../shared/idb";
 import { LIMITS, PaymentPreflightError, decodeBolt11, engineError, engineText, type PaymentReview, type WalletNetwork } from "@ghostly/core";
 import { CASHU_REQUEST_TIMEOUT_MS, SWAP_SETTLED_MS, mintRefused } from "./paymentAdapters/cashu";
-import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, paysItsOwnInvoices } from "../shared/mints";
+import { BITCOIN_INVOICE_ON_TESTNET, fakesLightning, isTestMint, mintNetwork, mintUrlSpelling, paysItsOwnInvoices } from "../shared/mints";
 import type {
   CashuInspection,
   MintInfoView,
@@ -137,7 +137,7 @@ export function normalizeMintUrl(input: string): string {
   }
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw engineError("mintNotHttps");
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  return mintUrlSpelling(url.href);
 }
 
 export function assertAmount(amount: number): void {
@@ -714,7 +714,7 @@ export class CashuWallet {
     // A send without mints comes from this network's mints. A request names its mints, but a contact may name a
     // real mint on a Testnet request: only mints of the network asked for are ever spent from.
     const mine = preferred ? this.getKnownMints() : this.getMints(network);
-    const candidates = (preferred ? preferred.map((m) => m.replace(/\/+$/, "")).filter((m) => mine.includes(m)) : mine)
+    const candidates = (preferred ? preferred.map(mintUrlSpelling).filter((m) => mine.includes(m)) : mine)
       .filter((m) => !network || mintNetwork(m) === network);
     /** The most a mint that holds the amount could send with its fees on top. */
     let room = 0;
@@ -968,7 +968,7 @@ export class CashuWallet {
     try {
       if (/^cashu[AB]/i.test(value)) {
         const metadata = getTokenMetadata(value);
-        const mint = metadata.mint.replace(/\/+$/, "");
+        const mint = mintUrlSpelling(metadata.mint);
         return {
           kind: "token",
           amount: Number(metadata.amount),
@@ -985,7 +985,7 @@ export class CashuWallet {
           kind: "request",
           amount: request.amount === undefined ? null : Number(request.amount),
           unit: request.unit ?? UNIT,
-          mints: request.mints ?? [],
+          mints: (request.mints ?? []).map(mintUrlSpelling),
           description: request.description || undefined,
         };
       }
@@ -1012,7 +1012,8 @@ export class CashuWallet {
     try {
       const metadata = getTokenMetadata(token);
       unit = metadata.unit;
-      mint = metadata.mint.replace(/\/+$/, "");
+      // In this wallet's spelling of its mints. The library redeems the token at the same mint in any spelling.
+      mint = mintUrlSpelling(metadata.mint);
       faceValue = Number(metadata.amount);
     } catch {
       throw new Error("That is not a valid ecash token");

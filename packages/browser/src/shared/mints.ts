@@ -24,7 +24,22 @@ export const TEST_MINT = "https://testnut.cashu.space";
  * duplicated Access-Control-Allow-Origin header that every browser and WebView rejects.
  */
 export const TEST_MINTS: readonly string[] = [TEST_MINT];
-export const isTestMint = (url: string) => TEST_MINTS.includes(url.replace(/\/+$/, ""));
+export const isTestMint = (url: string) => TEST_MINTS.includes(mintUrlSpelling(url));
+
+/**
+ * A mint URL spelled as the wallet stores its mints: lower-case scheme and host, no default port, no trailing slash.
+ * Another Cashu wallet's token or request names a mint as its user typed it (`HTTPS://Mint.Example:443/`), which is
+ * still one of ours. Not a check: `normalizeMintUrl` is the one that refuses a mint.
+ */
+export function mintUrlSpelling(url: string): string {
+  try {
+    const parsed = new URL(url.trim());
+    if (parsed.origin !== "null") return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    // not a URL: compared as written
+  }
+  return url.trim().replace(/\/+$/, "");
+}
 
 /** A mint on this very machine (a local test server): whatever it issues is not money anyone else holds. */
 export function isLocalMint(url: string): boolean {
