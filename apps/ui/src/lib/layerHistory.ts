@@ -31,7 +31,7 @@ const busy = () => !!going && Date.now() - going.at < GOING_MS;
 // A page that starts on a layer's entry (reloaded with a dialog open, as a move or a takeover of the profile does) has
 // no layer open: that entry is the page's own now. Gone back off, it would leave this page for the one before the
 // reload, and the move waiting for it would never run (a chat tapped in the list stayed on Profile).
-if (typeof window !== "undefined" && depthOf(history.state)) {
+if (typeof window !== "undefined" && typeof history !== "undefined" && depthOf(history.state)) {
   const { [MARK]: _gone, ...state } = history.state as Record<string, unknown>;
   history.replaceState(state, "");
 }
@@ -93,7 +93,8 @@ export function traversing(): void {
 
 /** Runs `then` once the history is off the layers' entries, back on the page's own. */
 export function afterLayers(then: () => void): void {
-  if (typeof window === "undefined") { then(); return; }
+  // No history where the page runs without a DOM (the engine's tests stand in a `window` without one).
+  if (typeof window === "undefined" || typeof history === "undefined") { then(); return; }
   const here = depthOf(history.state);
   if (!here) { then(); return; }
   if (busy()) {
@@ -111,6 +112,6 @@ export function afterLayers(then: () => void): void {
  * started, which cancels the reload (Chromium): the device that gave its profile away stayed on "Moving to another
  * device" and never answered the other one.
  */
-export function reloadPage(reload: () => void = () => location.reload()): void {
+export function reloadPage(reload: () => void = () => window.location.reload()): void {
   afterLayers(() => { leaving = true; reload(); });
 }
