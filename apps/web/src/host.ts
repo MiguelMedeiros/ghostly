@@ -12,9 +12,10 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { testSwitch } from "@ghostly/browser/shared/features";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { hostErrorText, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { hostErrorText, serviceFraming, setServiceViewCloser, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { activeProfileId } from "../../ui/src/lib/profiles";
+import { chatNamesForPeer } from "../../ui/src/lib/storage";
 import { translatorFor } from "../../ui/src/locales";
 
 /**
@@ -150,6 +151,7 @@ export const webHost = createInPageHost({
       words: {
         unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), callOn: t("services.window.callOn", { app: title }),
         tooSlow: t("services.window.tooSlow", { app: title }), offline: t("services.window.offline", { app: title }), retry: t("services.window.retry"),
+        ...serviceFraming(title, chatNamesForPeer(peerPubKeyZ32), peerPubKeyZ32, t),
         hostError: (headers) => hostErrorText(headers, title, t),
       },
     });

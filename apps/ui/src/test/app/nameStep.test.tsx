@@ -128,6 +128,33 @@ describe("What should people call you?", () => {
     }
   });
 
+  // A narrow window that opened an invite link: the chat fills the screen, the list (and New in it) is mounted but hidden.
+  it("over a chat, the focus goes to its message field, or to its back button on a touch screen; never to a hidden New", async () => {
+    const coarse = (touch: boolean) => vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      ({ matches: touch ? query.includes("coarse") : query.includes("fine"), media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
+    for (const [touch, close, expected] of [[false, "save", "composer"], [false, "skip", "composer"], [true, "save", "chat-back"], [true, "skip", "chat-back"]] as const) {
+      localStorage.clear();
+      localStorage.setItem(NAME_STEP_TEST_KEY, "on");
+      askNameIn("");
+      coarse(touch);
+      const { user, unmount } = renderApp(<>
+        <div hidden><button data-testid="sidebar-new-chat">New</button></div>
+        <button data-testid="chat-back">Back</button>
+        <textarea data-testid="composer" className="composer-textarea" />
+        <NameStep />
+      </>);
+      await settle();
+      const input = await screen.findByTestId("name-step-input");
+      input.focus();
+      if (close === "save") { await user.type(input, "Boo"); await user.keyboard("{Enter}"); }
+      else await user.click(screen.getByTestId("name-step-skip"));
+      await waitFor(() => expect(screen.queryByTestId("name-step")).toBeNull());
+      await waitFor(() => expect(document.activeElement, `${touch ? "touch" : "mouse"} ${close}`).toBe(screen.getByTestId(expected)));
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("is never asked without the mark", async () => {
     // A profile that has run before: its settings are saved.
     localStorage.setItem(settingsKeyFor(""), JSON.stringify({ language: "en" }));

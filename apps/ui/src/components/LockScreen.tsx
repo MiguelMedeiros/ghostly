@@ -23,7 +23,7 @@ const Spinner = () => (
 );
 
 export function LockScreen() {
-  const { isLocked, unlock, retryAt, ringing } = useLockScreen();
+  const { isLocked, covered, unlock, retryAt, ringing } = useLockScreen();
   const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
@@ -104,7 +104,7 @@ export function LockScreen() {
     setIsUnlocking(false);
   };
 
-  if (!isLocked) return null;
+  if (!isLocked) return covered ? <AwayCover /> : null;
   // With several profiles, which one this password opens: each has its own lock.
   const profile = listProfiles().length > 1 ? currentProfile() : null;
 
@@ -211,6 +211,20 @@ export function LockScreen() {
           animation: shake 0.5s ease-in-out;
         }
       `}</style>
+    </div>
+  );
+}
+
+/**
+ * What the system's app switcher keeps of the app while it is away with the lock on: the lock screen's background and
+ * its icon, nothing of the content. Taken away on return, once the lock has decided whether the time away was up.
+ */
+function AwayCover() {
+  return (
+    <div className="fixed inset-0 z-[60] bg-app-bg flex items-center justify-center" aria-hidden="true" data-testid="lock-cover">
+      <div className="w-20 h-20 rounded-full bg-surface flex items-center justify-center">
+        <LockIcon className="w-10 h-10 text-accent" />
+      </div>
     </div>
   );
 }

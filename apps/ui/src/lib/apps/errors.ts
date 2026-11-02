@@ -21,6 +21,7 @@ const KEYS: Record<string, TranslationKey> = {
   removed: "apps.errors.removed",
   "not-listed": "apps.errors.notListed",
   unlisted: "apps.errors.unlistedVersion",
+  "permissions-changed": "apps.errors.permissionsChanged",
   "store-key": "apps.errors.storeKey",
   "bad-signature": "apps.errors.notSigned",
   "signature-key": "apps.errors.notSigned",

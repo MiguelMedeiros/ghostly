@@ -239,9 +239,10 @@ export function Sidebar() {
     if (activeSessionId && pageShown) markSessionAsRead(activeSessionId);
   }, [activeSessionId, pageShown, sessions]);
 
-  // The installed app's shortcuts (manifest.json): `#/new` opens the New menu, `#/scan` opens Join with the camera on.
+  // The installed app's shortcuts (manifest.json): `#/new` opens the New menu, `#/scan` opens Join with Scan focused.
   // Any site can send the browser to either address, so neither does anything without a press: a chat made at `#/new`
-  // itself was one more empty chat with a fresh invite on each load, a page sending the browser there again and again.
+  // itself was one more empty chat with a fresh invite on each load, a page sending the browser there again and again,
+  // and a camera started at `#/scan` itself joined the first QR it saw, with no one's decision and past the link limit.
   // Each address is acted on once (StrictMode runs effects twice), and leaves the history at once (an intake, Root.tsx).
   const [scanOnOpen, setScanOnOpen] = useState(false);
   const shortcutDone = useRef<string | null>(null);
@@ -481,6 +482,8 @@ export function Sidebar() {
             stroke="currentColor"
             strokeWidth="2"
             className="text-text-muted shrink-0"
+            aria-hidden="true"
+            focusable="false"
           >
             <circle cx="11" cy="11" r="8" />
             <path d="m21 21-4.35-4.35" />
@@ -540,7 +543,7 @@ export function Sidebar() {
         {filtered.length === 0 && sessions.length === 0 && groups.length === 0 && shownFolders.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full px-8 text-center">
             <div className="text-text-muted mb-4 animate-ghost-boo">
-              <svg className="w-12 h-12 mx-auto" viewBox="0 0 24 24" fill="currentColor">
+              <svg className="w-12 h-12 mx-auto" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
                 <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z"/>
                 <circle cx="9" cy="9" r="1.5" fill="#111b21"/>
                 <circle cx="15" cy="9" r="1.5" fill="#111b21"/>
@@ -572,7 +575,7 @@ export function Sidebar() {
       {/* Out of the list's branches: the installed app's #/new and #/scan open them on the rail too. */}
       {showNewGroup && <NewGroupDialog returnFocus={newMoreRef} onClose={() => setShowNewGroup(false)} onCreated={id => { setShowNewGroup(false); nav.conversation(groupPath(id), { share: "created" }); }} />}
       {showNewFolder && <FolderNameDialog returnFocus={newMoreRef} onClose={() => setShowNewFolder(false)} onSave={name => { createFolder(name); setShowNewFolder(false); setSearch(""); }} />}
-      {showNewChat && <JoinDialog autoScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {const id = ensureSession(keys); setShowNewChat(false); nav.conversation(chatPath(id)); refreshSessions();}}
+      {showNewChat && <JoinDialog focusScan={scanOnOpen} onClose={() => setShowNewChat(false)} onJoin={keys => {const id = ensureSession(keys); setShowNewChat(false); nav.conversation(chatPath(id)); refreshSessions();}}
         onOpenChat={id => { setShowNewChat(false); nav.conversation(chatPath(id)); }}
         onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setShowNewChat(false); nav.conversation(groupPath(groupId)); }} />}
       {confirmDeleteId && <DeleteChatDialog

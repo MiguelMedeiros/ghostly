@@ -385,6 +385,21 @@ describe("the contact's edits", () => {
     expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
   });
 
+  it("a removal after a refusal line is here leaves it: the line has no paymentId, its id says what it is", async () => {
+    const t = await setup();
+    const ids = ["1790000000001_refused", `spent_${"ab".repeat(16)}`];
+    const store = (t.node as unknown as { storeMessage(m: object): Promise<unknown> }).storeMessage.bind(t.node);
+    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `Could not receive ${i + 1} sats: refused`, sender: "peer", timestamp: 1_790_000_000_001 + i, via: "datalink" });
+    expect(await t.contact.sendMessage("a text", Date.now(), WIRE("T"))).toBeNull();
+    await t.peerRow("a text");
+    for (const id of [...ids, WIRE("T")]) expect(await t.contact.sendEdit({ id, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts.map(([id]) => id)).toEqual([...ids, WIRE("T")]));
+    // The control: the text the same removal names goes.
+    await vi.waitFor(async () => expect((await t.messages()).map(m => m.text)).not.toContain("a text"));
+    expect((await t.messages()).filter(m => m.text.startsWith("Could not receive")).map(m => m.id)).toEqual(ids.map(id => `peer_${id}`));
+    expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
+  });
+
   it("a removal leaves no line of its message in the replies here that quote it: each keeps its quote's id", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage("quote me", Date.now(), WIRE("Q"))).toBeNull();
@@ -448,6 +463,28 @@ describe("the contact's edits", () => {
     expect(await t.contact.sendEdit({ id: mine.wireId!, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
     await vi.waitFor(() => expect(t.contactReceipts).toEqual([[mine.wireId, 1]]));
     expect(await t.row(sent.messageId!)).toMatchObject({ text: "mine to keep" });
+  });
+
+  it("a removal naming my message's wire id never says it deleted: its quotes keep their line, its pin stays", async () => {
+    const t = await setup({ pinSupport: true });
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "my original" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    const wireId = (await t.row(sent.messageId!)).wireId!;
+    const reply = await t.node.sendMessage({ linkId: t.id, text: "my follow-up", replyTo: sent.messageId! });
+    expect(await t.contact.sendMessage("their answer", Date.now(), WIRE("R"), undefined, { i: wireId, s: "my original", f: "recipient" })).toBeNull();
+    const theirs = await t.peerRow("their answer");
+    expect((await t.node.pinMessage({ linkId: t.id, messageId: sent.messageId! })).error).toBeNull();
+    await vi.waitFor(() => expect(t.view().pin).toMatchObject({ id: wireId, by: "me" }));
+    // Twice: the second finds the first's id among those deleted here.
+    for (const e of [1, 2]) expect(await t.contact.sendEdit({ id: wireId, e, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[wireId, 1], [wireId, 2]]));
+    await (t.node as unknown as { quoteSweeps: { stop(): Promise<void> } }).quoteSweeps.stop();
+    for (const id of [reply.messageId!, theirs.id]) expect((await t.row(id)).replyTo).toMatchObject({ id: wireId, snippet: "my original", from: "me", messageId: sent.messageId });
+    expect(t.view().pin).toMatchObject({ id: wireId, by: "me" });
+    expect(await t.contact.sendMessage("late answer", Date.now(), WIRE("S"), undefined, { i: wireId, s: "my original", f: "recipient" })).toBeNull();
+    expect((await t.peerRow("late answer")).replyTo).toMatchObject({ id: wireId, snippet: "my original", messageId: sent.messageId });
+    await t.restart();
+    expect(t.view().pin).toMatchObject({ id: wireId, by: "me" });
   });
 
   // agents#2129: the pin of a message deleted for everyone stayed, "Not on this device" on both sides, after a restart too.
@@ -639,7 +676,7 @@ describe("EditQueue", () => {
       return { q, sent, reads };
     }
 
-    it("reads the history once, then only the rows it was told of; a new session reads it again", async () => {
+    it("reads the history once, then only the rows it was told of, in a new session too; a new run learns them again", async () => {
       rows.set("me_1", row(1));
       const { q, sent, reads } = byId();
       await q.flush();
@@ -652,12 +689,31 @@ describe("EditQueue", () => {
       await q.received("W".repeat(22), 1);
       await q.receivedOnDht("nothing");
       expect([sent.map(e => e.m), reads.n, rows.get("me_2")!.edit!.pending]).toEqual([["t1", "t2"], 1, undefined]);
-      // An edit it was not told of waits for the next session, which reads the history again.
+      // A new session (agents#2468): what it was told of still goes, and the history is not read again for it.
       rows.set("me_3", row(3));
+      q.edited("me_3");
+      q.reopened();
       await q.flush();
-      expect(sent).toHaveLength(2);
+      expect([sent.map(e => e.m), reads.n]).toEqual([["t1", "t2", "t3"], 1]);
+      // An edit it was not told of (none in a run: each edit says so) is found by the next run, which learns once.
+      rows.set("me_4", row(4));
       await q.flush({ reopened: true });
-      expect([sent.map(e => e.m), reads.n]).toEqual([["t1", "t2", "t3"], 2]);
+      expect([sent.map(e => e.m).includes("t4"), reads.n]).toEqual([false, 1]);
+      const next = byId();
+      await next.q.flush();
+      // The one still unconfirmed goes again too.
+      expect([next.sent.map(e => e.m), next.reads.n]).toEqual([["t3", "t4"], 1]);
+    });
+
+    it("a new session sends again what the last one sent without a confirmation, reading those rows alone", async () => {
+      rows.set("me_1", row(1));
+      const asked: string[][] = [];
+      const { q, sent, reads } = byId(undefined, asked);
+      await q.flush();
+      asked.length = 0;
+      // The session opens twice over (the link is open, then the transport it settled on), with no confirmation yet.
+      for (let i = 0; i < 2; i++) { q.reopened(); await q.flush(); }
+      expect([sent.map(e => e.m), reads.n, asked]).toEqual([["t1", "t1", "t1"], 1, [["me_1"], ["me_1"]]]);
     });
 
     it("a confirmation, live or on the DHT floor, reads the one row it is for", async () => {

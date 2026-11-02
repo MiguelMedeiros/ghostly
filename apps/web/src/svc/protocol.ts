@@ -17,6 +17,13 @@ export const BRIDGE_SCRIPT = `${BRIDGE_DIR}bridge.js`;
 /** At the root, so its scope can be the whole origin without a `Service-Worker-Allowed` header. */
 export const WORKER_SCRIPT = "/ghostly-services-sw.js";
 
+/**
+ * What the view's frame and the bridge's frame of the contact's app allow. No `fullscreen`: in full screen the app
+ * would cover the view's bar, the one thing that says it is the contact's app and not Ghostly (as a mini-app's frame,
+ * WISP 1200).
+ */
+export const SERVICE_FRAME_ALLOW = "clipboard-write";
+
 /** A request body above this is refused before it leaves the device: the data link carries 8 MiB at most (LIMITS). */
 export const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 /** What one answer may weigh, as on Desktop and the CLI. */

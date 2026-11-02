@@ -2914,6 +2914,27 @@ describe("GitHub over REST", () => {
     expect(sent.some((p) => p.includes("check-runs"))).toBe(false);
   });
 
+  it("finds CI's own run behind pages of runs pull requests from forks made on the same commit", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", head_repository: { full_name: "o/r" }, status: "completed", ...extra });
+    // Newest first: 150 runs of fork pull requests at the batch's head, then the batch's own green run 1000.
+    const runs = [...Array.from({ length: 150 }, (_, i) => wf(2150 - i, { head_repository: { full_name: "fork/r" }, status: "in_progress" })), wf(1000)];
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(`${init.method} ${path}`);
+      if (init.method === "POST") return reply(202, {});
+      if (path.startsWith("/actions/runs/1000/jobs")) return reply(200, { jobs: [{ id: 7, name: "CI Success", status: "completed", conclusion: "success" }] });
+      const page = Number(/&page=(\d+)/.exec(path)?.[1] ?? 1);
+      return reply(200, { workflow_runs: runs.slice((page - 1) * 100, page * 100) });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await gh.ciJobs("abc"))).toBe("success");
+    expect(sent.filter((s) => s.includes("ci.yml/runs"))).toEqual(["GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100", "GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100&page=2"]);
+    // The cancel never touches a fork's runs, however many pages they take.
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [] });
+    expect(sent.filter((s) => s.startsWith("POST"))).toEqual([]);
+  });
+
   it("falls back to GitHub Actions' check runs, with one warning, when the token may not read Actions", async () => {
     const warnings: string[] = [];
     const checks = [

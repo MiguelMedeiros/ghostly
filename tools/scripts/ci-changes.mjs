@@ -35,6 +35,8 @@ export const RUST_INPUTS = [
   "packages/core/test/vectors/turn-record.json",
   // translate.rs: the runtime's package, protocol and built archive.
   "native/translation/",
+  // viewer.rs: a test keeps its connection policy the same as `service open`'s.
+  "packages/cli/src/services.ts",
 ];
 
 /**

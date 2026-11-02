@@ -24,14 +24,15 @@ import { QR_IMAGE_MAX as IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrFrameReader, 
  * is refused here, with the way to that chat (`onOpenChat`); one it already joined by opens that chat.
  */
 /**
- * `autoScan`: the camera starts at once (the installed app's "Scan invite" shortcut). `onDevice`: the dialog reads the
+ * `focusScan`: Scan has the focus, not Paste (the installed app's "Scan invite" shortcut); the camera still starts only on
+ * a press, since any site can open the shortcut's address. `onDevice`: the dialog reads the
  * code that adds this device to a profile (WISP 06) instead of a chat invite, and waits for it to be taken.
  */
-export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose, autoScan = false }: { onJoin?(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onDevice?(code: string): Promise<void>; onClose(): void; autoScan?: boolean }) {
+export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose, focusScan = false }: { onJoin?(keys: SessionKeys): void; onOpenChat?(sessionId: string): void; onJoinGroup?(link: string): Promise<void>; onDevice?(code: string): Promise<void>; onClose(): void; focusScan?: boolean }) {
   const { t } = useI18n();
   const closed = useRef(false);
   const busyRef = useRef(false);
-  const primary = useRef<HTMLButtonElement>(null);
+  const primary = useRef<HTMLButtonElement>(null), scanButton = useRef<HTMLButtonElement>(null);
   const manualInput = useRef<HTMLTextAreaElement>(null);
   const [manual, setManual] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -66,7 +67,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     closed.current = false;
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.showModal();
-    primary.current?.focus();
+    (focusScan ? scanButton : primary).current?.focus();
     return () => {
       closed.current = true;
       // This counter deliberately tracks work begun after mounting.
@@ -75,6 +76,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       stream.current?.getTracks().forEach(track => track.stop());
       if (previous?.isConnected) previous.focus();
     };
+    // Once, on opening: the focus a press would move from is not taken back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { if (manual) manualInput.current?.focus(); }, [manual]);
   const accept = (value: string) => {
@@ -155,9 +158,6 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       setError(cause instanceof QrReaderNotLoaded ? readerFailed() : { tone: "error", title: t(onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable") }); setManual(true);
     } finally { decode.close(); }
   };
-  // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (autoScan) void scan(); }, []);
   // `weighed`: a picture the app read from the clipboard, already checked there (`platformPastedImage`).
   const readImage = async (file?: File, weighed = false) => {
     if (!file || busyRef.current || joined.current || closed.current) return;
@@ -229,7 +229,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
         {t("join.paste")}
       </button>
       <div className="mt-3 grid grid-cols-2 gap-3">
-        <button disabled={busy} onClick={() => void scan()} className={`${button} border border-border text-text-secondary`}>
+        <button ref={scanButton} disabled={busy} onClick={() => void scan()} className={`${button} border border-border text-text-secondary`}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
           {t("join.scan")}
         </button>
@@ -241,7 +241,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       <p className="mt-2 text-center text-xs text-text-secondary">{t("join.pasteScreenshot")}</p>
     </>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
-    {/* A chat's Join comes back open, the camera on (`#/scan`, the "Scan invite" shortcut); a device's code where it was. */}
+    {/* A chat's Join comes back open, Scan focused (`#/scan`, the "Scan invite" shortcut); a device's code where it was. */}
     {error && error === reloadProblem && <ReloadButton testId="join-reload" to={onDevice ? undefined : "#/scan"} className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} noteClassName="mt-2 text-center text-sm text-text-secondary" />}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
       <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>

@@ -37,6 +37,8 @@ async function startEngine(): Promise<void> {
 }
 
 async function replaceEngine(): Promise<void> {
+  // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
+  await closeViewers();
   await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
   await chrome.offscreen.closeDocument().catch(() => {});
   await createEngineDocument();
@@ -162,6 +164,10 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     );
     return true;
   }
+  if (message.type === "close-services") {
+    void closeViewers().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: true }));
+    return true;
+  }
   return false;
 });
 
@@ -234,6 +240,22 @@ async function bindingOf(tabId: number): Promise<ViewerBinding | null> {
 const forget = (tabId: number) => chrome.storage.session.remove(bindingKey(tabId));
 
 chrome.tabs.onRemoved.addListener((tabId) => void forget(tabId));
+
+/**
+ * Closes every viewer tab, as Desktop closes a contact's app windows (`close_service_windows`): on a profile switch,
+ * a new peer, or the lock screen. Its binding goes first, so nothing it still asks for is served.
+ */
+async function closeViewers(): Promise<void> {
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(
+    tabs.map(async ({ id }) => {
+      if (id === undefined || !(await bindingOf(id))) return;
+      await forget(id);
+      await chrome.debugger.detach({ tabId: id }).catch(() => {});
+      await chrome.tabs.remove(id).catch(() => {});
+    }),
+  );
+}
 
 /** Sends one allowed command to a viewer tab; refuses any other command, and any tab without a binding. */
 export async function devtools(tabId: number, method: string, params?: Record<string, unknown>): Promise<void> {
@@ -309,6 +331,8 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
   let reply: HttpRequestReply;
   try {
     await ensureEngine();
+    // The peer may be another profile's now, or a new one: that closed this tab (`closeViewers`) and nothing goes to it.
+    if (!(await bindingOf(tabId))) return;
     reply = await chrome.runtime.sendMessage(message);
     if (!reply) reply = { ok: false, code: "error", message: "The Ghostly peer did not answer" };
   } catch (error) {
