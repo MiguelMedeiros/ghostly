@@ -44,23 +44,26 @@ describe("reads nobody waits for", () => {
   it("a second preview of the same URL joins the read under way instead of starting another", async () => {
     const app = await bundle();
     const bodies: ReturnType<typeof heldBody>[] = [];
-    const fetcher = vi.fn(async () => {
+    // Only the bundle is held; the publisher's ghostly-revoke.json beside it is not published.
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) !== BUNDLE_URL) return new Response(null, { status: 404 });
       const held = heldBody(app.bytes);
       bodies.push(held);
       return new Response(held.body, { status: 200 });
     });
+    const bundleReads = () => fetcher.mock.calls.filter(([url]) => String(url) === BUNDLE_URL).length;
     const a = apps(new FakeNet(), { fetch: boundedAppFetch({ fetcher }) });
     const first = a.preview({ url: BUNDLE_URL }); // the screen closed: nobody looks at it
-    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(1); });
+    await vi.waitFor(() => { expect(bundleReads()).toBe(1); });
     const second = a.preview({ url: BUNDLE_URL });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(bundleReads()).toBe(1);
     for (const held of bodies) held.state.release();
     expect((await second).digest).toBe(app.digest);
     expect((await first).digest).toBe(app.digest);
     // Once it is over, a later preview reads the URL again.
     const third = a.preview({ url: BUNDLE_URL });
-    await vi.waitFor(() => { expect(fetcher).toHaveBeenCalledTimes(2); });
+    await vi.waitFor(() => { expect(bundleReads()).toBe(2); });
     bodies[1]!.state.release();
     expect((await third).digest).toBe(app.digest);
   });
