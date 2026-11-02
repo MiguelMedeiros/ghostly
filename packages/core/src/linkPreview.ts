@@ -71,7 +71,7 @@ export const LINK_MAX_CHARS = 4 * 1024;
 
 /** The http(s) links of a text, in order, each ending as the bubble ends it. */
 export function linksIn(text: string): string[] {
-  return [...text.matchAll(/https?:\/\/\S+/g)].filter(match => match[0].length <= LINK_MAX_CHARS).map(match => linkEnd(match[0])).filter(url => url.length > 8);
+  return [...text.matchAll(/https?:\/\/\S+/gi)].filter(match => match[0].length <= LINK_MAX_CHARS).map(match => linkEnd(match[0])).filter(url => url.length > 8);
 }
 
 /**
