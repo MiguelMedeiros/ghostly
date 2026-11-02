@@ -59,7 +59,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   // The code, and the profile its link names: from the request, or from the scanner.
   const [code, setCode] = useState(request.code);
   const [profile, setProfile] = useState(request.profile);
-  const [name, setName] = useState(() => request.name ?? defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined));
+  const [name, setName] = useState(() => request.name ?? defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t));
   // What the set keeps of a name, 16 bytes, not 16 characters: the name typed is the name every device shows.
   const nameField = useFittedNameField(name, setName, fitsDeviceName);
   const [place, setPlace] = useState<Place | null>(null);

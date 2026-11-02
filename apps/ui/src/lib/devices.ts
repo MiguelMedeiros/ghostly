@@ -4,7 +4,8 @@ import { getBrowserHost } from "@ghostly/browser/host";
 import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
-import { useI18n, type TranslationKey } from "../contexts/I18nContext";
+import { useI18n, type Translate, type TranslationKey } from "../contexts/I18nContext";
+import { englishT } from "../locales/translate";
 import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
 import { utf8Bytes } from "./fitText";
 import { handOverUnlock } from "./lockHandover";
@@ -32,19 +33,23 @@ export function lockPasswordProblem(password: string, again: string, deviceSet: 
   return null;
 }
 
-/** A first guess at this device's name, for the person to change: the kind of device, in its 16 bytes (`fitsDeviceName`). */
-export function defaultDeviceName(env: { userAgent: string; platform?: string; maxTouchPoints?: number; desktop?: boolean } = typeof navigator === "undefined" ? { userAgent: "" } : { userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints }): string {
+/**
+ * A first guess at this device's name, for the person to change: the kind of device, in its 16 bytes (`fitsDeviceName`),
+ * in the words of `t`'s language. The system's and the browser's own names stay as they are ("iPhone", "Chrome").
+ */
+export function defaultDeviceName(env: { userAgent: string; platform?: string; maxTouchPoints?: number; desktop?: boolean } = typeof navigator === "undefined" ? { userAgent: "" } : { userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints }, t: Translate = englishT): string {
   const ua = env.userAgent;
+  const fallback = t("devices.defaultName.browser");
   if (/iPhone/.test(ua)) return "iPhone";
   if (/iPad/.test(ua) || (env.platform === "MacIntel" && (env.maxTouchPoints ?? 0) > 1)) return "iPad";
-  if (/Android/.test(ua)) return /Mobile/.test(ua) ? "Phone" : "Tablet";
+  if (/Android/.test(ua)) return t(/Mobile/.test(ua) ? "devices.defaultName.phone" : "devices.defaultName.tablet");
   const os = /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux|X11|CrOS/.test(ua) ? "Linux" : "";
-  if (env.desktop) return os ? `${os} app` : "Desktop";
+  if (env.desktop) return [os && t("devices.defaultName.app", { os }), os].find((name) => name && fitsDeviceName(name)) || t("devices.defaultName.desktop");
   const browser = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
   // The longest of these that fits the 16 bytes a name has, never one cut in the middle of a word:
   // "Chrome on Mac", "Chrome, Windows", then the system alone.
-  const names = browser && os ? [`${browser} on ${os}`, `${browser}, ${os}`, os, browser] : [browser || os || "Browser"];
-  return names.find(fitsDeviceName) ?? "Browser";
+  const names = browser && os ? [t("devices.defaultName.on", { browser, os }), t("devices.defaultName.short", { browser, os }), os, browser] : [browser || os || fallback];
+  return names.find(fitsDeviceName) ?? fallback;
 }
 
 /**
