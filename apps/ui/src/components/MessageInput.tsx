@@ -919,7 +919,7 @@ export function MessageInput({
         type="button"
         onClick={hideToast}
         aria-label={t("common.close")}
-        className="text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none shrink-0"
+        className="-me-2 -my-1.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg text-text-muted hover:text-text-primary transition-colors cursor-pointer bg-transparent border-none p-0 text-lg leading-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         &times;
       </button>
