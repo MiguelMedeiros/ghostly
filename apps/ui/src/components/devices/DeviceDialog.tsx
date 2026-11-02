@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
+import { useBackCloses } from "../../hooks/useDismiss";
 import { InfoButton } from "../layout/Section";
 
 /**
@@ -12,6 +13,7 @@ export function DeviceDialog({ title, onClose, testId, children }: { title: Reac
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
+  useBackCloses(onClose);
   // The body mounts once the dialog is open. Before that it is hidden, so a field's autoFocus finds nothing to focus, and
   // showModal() puts the focus on the first button, Close: a password typed with a space then closed the dialog. A layout
   // effect, so the body is there before the first paint.
