@@ -360,6 +360,19 @@ describe("GroupMembersDialog", () => {
     expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
   });
 
+  it("promises no connection to the members of a group I am out of", () => {
+    const { unmount } = members_(groupView({ status: "active", members }));
+    expect(screen.getAllByTestId("group-member-status").map(s => s.textContent)).toEqual(["No connection yet", "No connection yet"]);
+    unmount();
+    for (const status of ["removed", "left", "forked"] as const) {
+      const { unmount } = members_(groupView({ status, members: [...members, member({ key: "c".repeat(52), nick: "Carol", edge: { linkId: "e1", state: "connecting", lastSeenAt: 1 } })] }));
+      expect(screen.getAllByTestId("group-member")).toHaveLength(4);
+      expect(screen.queryAllByTestId("group-member-status")).toEqual([]);
+      expect(within(screen.getByTestId("group-member-list")).queryAllByRole("img", { name: /reachable/i })).toEqual([]);
+      unmount();
+    }
+  });
+
   it("closes from its button", async () => {
     const { user, onClose } = members_(groupView({ status: "active", members }));
     await user.click(screen.getByRole("button", { name: "Close" }));
