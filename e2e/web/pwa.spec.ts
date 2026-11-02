@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { copyInvite } from "../support/clipboard";
-import { expect, link, test } from "../support/fixtures";
+import { expect, link, type Peer, test } from "../support/fixtures";
 import { choose } from "../support/select";
 
 /**
@@ -235,6 +235,17 @@ async function menuOffersInstall(page: Page): Promise<boolean> {
   return offered;
 }
 
+/**
+ * The person opens the web app again later: the tab closed, a new one. A reload is the same visit, so it never makes
+ * the second one the hint waits for (installPrompt.ts `countInstallVisit`).
+ */
+async function openAgain(peer: Peer): Promise<void> {
+  await peer.page.close();
+  peer.page = await peer.context.newPage();
+  await peer.page.goto("/");
+  await expect(peer.page.getByTitle("New Chat")).toBeVisible();
+}
+
 const IPHONE_SAFARI = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 const MAC_SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
 const MAC_FIREFOX = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0";
@@ -280,17 +291,23 @@ test.describe("installing the app", () => {
 
   test("Not now puts the hint away for good; Install stays in Settings", { tag: ["@feature:app.pwa.install-entry"] }, async ({ peer }) => {
     const ana = await peer("Ana");
-    const page = ana.page;
+    // A reload of the first visit, no chat yet: still no hint.
+    await ana.page.reload();
+    await expect(ana.page.getByTitle("New Chat")).toBeVisible();
+    await offerInstall(ana.page);
+    expect(await menuOffersInstall(ana.page)).toBe(true);
+    await expect(ana.page.getByTestId("install-hint")).toBeHidden();
+
     // The second visit, no chat yet: the hint may show.
-    await page.reload();
-    await expect(page.getByTitle("New Chat")).toBeVisible();
+    await openAgain(ana);
+    let page = ana.page;
     await offerInstall(page);
     await expect(page.getByTestId("install-hint")).toBeVisible();
     await page.getByTestId("install-hint-later").click();
     await expect(page.getByTestId("install-hint")).toBeHidden();
 
-    await page.reload();
-    await expect(page.getByTitle("New Chat")).toBeVisible();
+    await openAgain(ana);
+    page = ana.page;
     await offerInstall(page);
     expect(await menuOffersInstall(page)).toBe(true);
     await expect(page.getByTestId("install-hint")).toBeHidden();
@@ -302,9 +319,8 @@ test.describe("installing the app", () => {
   // CI has Chromium only: these say they are Safari and Firefox, which is all the app goes by.
   test("iPhone Safari: Install shows where Add to Home Screen is", { tag: ["@feature:app.pwa.install-entry", "@feature:app.pwa.install"] }, async ({ peer }) => {
     const ana = await peer("Ana", { mobile: true, userAgent: IPHONE_SAFARI });
+    await openAgain(ana);
     const page = ana.page;
-    await page.reload();
-    await expect(page.getByTitle("New Chat")).toBeVisible();
     await expect(page.getByTestId("install-hint")).toBeVisible();
     await page.getByTestId("install-hint-install").click();
     const steps = page.getByTestId("install-steps");
@@ -339,8 +355,7 @@ test.describe("installing the app", () => {
     await expect(steps).toBeHidden();
 
     const bo = await peer("Bo", { userAgent: MAC_FIREFOX });
-    await bo.page.reload();
-    await expect(bo.page.getByTitle("New Chat")).toBeVisible();
+    await openAgain(bo);
     await expect(bo.page.getByTestId("install-hint")).toBeHidden();
     expect(await menuOffersInstall(bo.page)).toBe(false);
     await bo.page.goto("/#/settings");
