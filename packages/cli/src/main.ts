@@ -18,6 +18,7 @@ import { completeWithPipedEvidence, identityFields, identitySecretFields, secret
 import type { Translator } from "./translate";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
+  startingDaemon,
   type ProfilePaths,
 } from "./profiles";
 
@@ -676,7 +677,12 @@ async function daemonCommand(argv: string[]): Promise<void> {
     const client = await connectDaemon(g.paths);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
-    if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
+    // A daemon still starting (its engine, before its socket listens) holds the profile already: it is no one-shot's.
+    if (!client) {
+      const starting = startingDaemon(g.paths);
+      print({ running: false, ...(starting === null ? {} : { starting: true, pid: starting }), profile: g.profile, socket: g.paths.socket });
+      return;
+    }
     try { print({ running: true, ...(await client.call("status", {}, { timeoutMs: seconds(parsed, 15) * 1000 }) as object), socket: g.paths.socket }); } finally { client.close(); }
     return;
   }
