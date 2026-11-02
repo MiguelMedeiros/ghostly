@@ -82,6 +82,7 @@
     "renamedNoName": "The group is now called “{{group}}”",
     "renamedYou": "You renamed the group to “{{group}}”",
     "rotated": "Keys rotated: a fresh epoch",
+    "withNote": "{{event}} {{note}}",
     "youJoined": "You joined.",
     "youJoinedAgain": "You joined again."
   },

@@ -82,6 +82,7 @@
     "renamedNoName": "Il gruppo ora si chiama “{{group}}”",
     "renamedYou": "Hai rinominato il gruppo in “{{group}}”",
     "rotated": "Chiavi rinnovate: una nuova epoca",
+    "withNote": "{{event}} {{note}}",
     "youJoined": "Sei entrato.",
     "youJoinedAgain": "Sei entrato di nuovo."
   },
