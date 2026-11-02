@@ -12,6 +12,7 @@ import { loadSettings, saveSettings } from "../../lib/settings";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { windowIs } from "../viewport";
 
 // covers: groups.mentions, groups.mentions.notify
 
@@ -281,7 +282,7 @@ describe("Still notify me when I'm mentioned", () => {
     const { user } = openGroup(active());
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("chat-mute-open"));
-    const toggle = within(screen.getByTestId("mute-menu")).getByRole("menuitemcheckbox", { name: "Still notify me when I'm mentioned" });
+    const toggle = within(screen.getByTestId("mute-menu")).getByRole("checkbox", { name: "Still notify me when I'm mentioned" });
     expect(toggle).toHaveAttribute("aria-checked", "true");
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "false");
@@ -291,5 +292,39 @@ describe("Still notify me when I'm mentioned", () => {
     expect(within(screen.getByTestId("mute-menu")).getAllByTestId(/^mute-(15m|1h|1d|forever)$/)).toHaveLength(4);
     await user.click(screen.getByTestId("mute-1h"));
     expect(mentionsNotify(groupChat("group-1"))).toBe(false);
+  });
+  // A menu item role (menuitem, menuitemcheckbox, menuitemradio) is only valid inside a role=menu or menubar
+  // (axe's aria-required-parent). The app's menus are groups of buttons: none may claim one outside a menu.
+  const strayMenuItems = () => [...document.querySelectorAll('[role^="menuitem"]')]
+    .filter(el => !el.parentElement?.closest('[role="menu"], [role="menubar"]')).map(el => el.getAttribute("data-testid"));
+
+  for (const phone of [false, true]) it(`on ${phone ? "a phone's sheet" : "a wide screen's popover"} the mentions row is a checkbox the menu's keys reach and Space toggles`, async () => {
+    windowIs(phone);
+    const { user } = openGroup(active());
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("chat-mute-open"));
+    const menu = screen.getByTestId("mute-menu");
+    expect(menu).toHaveAttribute("data-menu", phone ? "sheet" : "popover");
+    const toggle = within(menu).getByTestId("mute-mentions");
+    expect(strayMenuItems()).toEqual([]);
+    expect(toggle).toHaveAttribute("role", "checkbox");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    // Its container is the labelled group of the menu's rows, as in every other menu of the app.
+    expect(menu).toHaveAttribute("role", "group");
+    expect(menu).toHaveAccessibleName("Mute notifications");
+    // The first duration has the focus; End goes to the last row, the checkbox, and ArrowDown wraps to the first.
+    await waitFor(() => expect(within(menu).getByTestId("mute-15m")).toHaveFocus());
+    await user.keyboard("{End}");
+    expect(toggle).toHaveFocus();
+    await user.keyboard(" ");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(mentionsNotify(groupChat("group-1"))).toBe(false);
+    expect(screen.getByTestId("mute-menu")).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await user.keyboard("{ArrowDown}");
+    expect(within(menu).getByTestId("mute-15m")).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(toggle).toHaveFocus();
   });
 });
