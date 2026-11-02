@@ -128,7 +128,7 @@ describe("the chat's Translate what I send switch", () => {
   it("is this device's key, translate_send_<chat>, off unless turned on, and forgotten with the group", async () => {
     const chat = "group:g1";
     const { user } = renderApp(<TranslateSendMenuItem chat={chat} />);
-    const toggle = screen.getByRole("menuitemcheckbox", { name: /Translate what I send/ });
+    const toggle = screen.getByRole("checkbox", { name: /Translate what I send/ });
     expect(toggle).toHaveAttribute("aria-checked", "false");
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
