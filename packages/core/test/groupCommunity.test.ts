@@ -336,6 +336,21 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(net.texts(bob)).toContain("just us");
   });
 
+  it("the admin role does not go to a member whose leave the admin holds, and the leave is then committed", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol");
+    await net.meet(alice, bob); await net.meet(alice, carol);
+    await bob.session.leave();
+    await net.settle();
+    expect(alice.session.state.pendingLeaves.map(r => r.s)).toEqual([bob.session.myKey]);
+    await expect(alice.session.transferAdmin(bob.session.myKey)).rejects.toThrow("This member has left the group. Make someone else the admin.");
+    expect(alice.session.isAdmin).toBe(true);
+    expect(await alice.session.commitPendingLeaves()).toBe(1);
+    expect(alice.session.roster.map(([k]) => k)).not.toContain(bob.session.myKey);
+    await expect(alice.session.transferAdmin(carol.session.myKey)).resolves.toBeUndefined();
+  });
+
   it("what a member said before it left reaches a member who was away; what a removed one said does not", async () => {
     for (const how of ["leave", "remove"] as const) {
       const net = new Net();

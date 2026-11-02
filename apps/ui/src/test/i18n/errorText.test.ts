@@ -283,6 +283,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Only the admin can renew the group's secret", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
+  ["This member has left the group. Make someone else the admin.", `${CORE}/groupCommunity.ts`],
   ["Only the admin can change the group's picture", `${CORE}/groupSession.ts`],
   ["Only the admin can rename the group", `${CORE}/groupSession.ts`],
   ["Only the admin can choose the group's hubs", `${CORE}/groupSession.ts`],
