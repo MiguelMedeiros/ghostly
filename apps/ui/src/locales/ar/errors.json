@@ -256,6 +256,8 @@
     "growMore": "{{count}} آخرين",
     "growNeedsUpdates": "يحتاج الجميع إلى تحديث لتجاوز {{max}}",
     "growNeedsUpdatesNext": "لم يُحدَّث بعد: {{names}}.",
+    "heirLeft": "غادر هذا العضو المجموعة",
+    "heirLeftNext": "عيّن مشرفًا آخر.",
     "hubSetting": "لا يمكن استخدام إعداد المحاور هذا",
     "hubsNeedUpdate": "يحتاج تطبيقه إلى تحديث أولًا",
     "hubsNeedUpdateNext": "تعمل هذه المجموعة عبر المحاور.",

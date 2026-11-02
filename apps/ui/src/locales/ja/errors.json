@@ -252,6 +252,8 @@
     "growMore": "他 {{count}} 人",
     "growNeedsUpdates": "{{max}} 人を超えるには全員の更新が必要です",
     "growNeedsUpdatesNext": "未更新: {{names}}。",
+    "heirLeft": "このメンバーはグループを退出しました",
+    "heirLeftNext": "ほかの人を管理者にしてください。",
     "hubSetting": "このハブの設定は使えません",
     "hubsNeedUpdate": "相手のアプリは先に更新が必要です",
     "hubsNeedUpdateNext": "このグループはハブ経由で動きます。",

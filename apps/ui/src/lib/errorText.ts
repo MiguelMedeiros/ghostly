@@ -467,6 +467,7 @@ const RULES: readonly Rule[] = [
   exact("Only the admin can renew the group's secret", "errors.group.adminRotate"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
+  exact("This member has left the group. Make someone else the admin.", "errors.group.heirLeft", "errors.group.heirLeftNext"),
   exact("Only the admin can change the group's picture", "errors.group.adminPicture"),
   exact("Only the admin can rename the group", "errors.group.adminRename"),
   exact("Only the admin can choose the group's hubs", "errors.group.adminHubs"),
