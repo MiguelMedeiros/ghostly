@@ -635,7 +635,7 @@ describe("a run of the train", () => {
     }
     // A wait whose way out needs no push still keeps its place.
     expect(positionText("dev", pr({ draft: true }), 2, null)).toMatch(/Waiting: it is a draft\. It keeps its place\.$/);
-    expect(positionText("dev", pr({ misplanned: true }), 2, null)).toMatch(/run CI on it again\. It keeps its place\.$/);
+    expect(positionText("dev", pr({ misplanned: true }), 2, null)).toMatch(/close and reopen it for a new run \(re-running that run plans it the same way again\)\. It keeps its place\.$/);
   });
 
   it("rebuilds a batch on the new tip when the base moved under it", async () => {
@@ -2241,6 +2241,17 @@ describe("a green CI run planned for other files", () => {
     expect(r.merged).toEqual([]);
     expect(repo.landed).toEqual([]);
     expect(repo.comments.get(21)![0].body).toMatch(/Waiting: the green CI run on its last commit skipped jobs that its changes need/);
+  });
+
+  it("asks for a new run, not a re-run: a re-run plans from the same merge commit and skips the same jobs", async () => {
+    // A run planned by the ci-changes.mjs of its merge commit, older than the base's (a file added to a gate since),
+    // skipped what the base's plan now turns on. GitHub re-runs a run at its own sha, so the same jobs skip again.
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    await repo.run();
+    const said = repo.comments.get(21)![0].body;
+    expect(said).toMatch(/close and reopen it for a new run \(re-running that run plans it the same way again\)\. It keeps its place\.$/);
+    expect(said).not.toMatch(/run CI on it again/);
   });
 
   it("passes over it for the pull request's own green run before it", async () => {
