@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { profilePaths, startingPath } from "../src/profiles";
-import { ghostly, home, localRelay, ok, Running } from "./support/cli";
+import { error, ghostly, home, localRelay, ok, Running } from "./support/cli";
 // covers: headless.cli
 
 /**
@@ -74,5 +74,39 @@ describe.skipIf(process.platform === "win32")("a command run while the profile's
     const status = ok(await ghostly(["--home", dir, "daemon", "status"], { env }));
     expect(status).toMatchObject({ running: false });
     expect(status).not.toHaveProperty("starting");
+  });
+
+  it("daemon stop waits for its socket and stops it, instead of saying no daemon runs", async () => {
+    const { dir, daemon, resume } = await daemonStopped("stop-daemon-starting");
+    const stop = ghostly(["--home", dir, "daemon", "stop"], { env });
+    await new Promise((r) => setTimeout(r, 1_500));
+    resume();
+    expect(ok(await stop)).toEqual({ stopped: true, pid: daemon.child.pid });
+    expect(await daemon.exited()).toBe(0);
+  });
+
+  it("daemon stop still starting at --timeout is answered timeout with its pid, and the daemon is left as it is", async () => {
+    const { dir, daemon, resume } = await daemonStopped("stop-daemon-still-starting");
+    const run = await ghostly(["--home", dir, "daemon", "stop", "--timeout", "1"], { env });
+    expect(error(run, "timeout", 4).message).toBe(`The daemon (process ${daemon.child.pid}) is still starting after 1 s; ghostly daemon status shows when it is up`);
+    resume();
+    await daemon.waitFor((line) => line.daemon === "ready", 30_000);
+    expect(ok(await ghostly(["--home", dir, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: daemon.child.pid });
+  });
+
+  it("daemon restart stops it once its socket answers and starts a fresh one, instead of failing busy", async () => {
+    const { dir, daemon, resume } = await daemonStopped("restart-daemon-starting");
+    const restart = ghostly(["--home", dir, "daemon", "restart"], { env });
+    await new Promise((r) => setTimeout(r, 1_500));
+    resume();
+    const restarted = ok(await restart);
+    try {
+      expect(restarted).toMatchObject({ restarted: true, stopped: daemon.child.pid, daemon: "started" });
+      expect(restarted.pid).not.toBe(daemon.child.pid);
+      expect(await daemon.exited()).toBe(0);
+      expect(ok(await ghostly(["--home", dir, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: restarted.pid });
+    } finally {
+      await ghostly(["--home", dir, "daemon", "stop"], { env });
+    }
   });
 });
