@@ -40,6 +40,7 @@
   "joinChat": "Rejoindre une conversation",
   "new": "Nouveau",
   "newChat": "Nouvelle conversation",
+  "newChatShort": "Nouvelle",
   "newMenu": {
     "chat": "Discussion",
     "chatHint": "Une personne, avec une invitation",
