@@ -18,6 +18,58 @@ async function captureSharing(peer: Peer, webShare: boolean): Promise<void> {
 }
 const sharing = (peer: Peer) => peer.page.evaluate(() => (window as unknown as { qaSharing: { copied: string[]; shared: { title?: string; url?: string }[] } }).qaSharing);
 
+test("on a short window the new group's focused Share, and each button Tab reaches, stay clear of the sticky footer", { tag: ["@feature:groups.link.share"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  // The extension's tab is 400x600; any window that short makes the dialog scroll under its sticky way out.
+  await alice.page.setViewportSize({ width: 400, height: 600 });
+  await alice.page.getByTestId("sidebar-new-more").click();
+  await alice.page.getByTestId("new-group").click();
+  // A name that wraps the title to two lines puts Share where the footer covers it unscrolled, as in the report.
+  await alice.page.getByTestId("new-group-name").fill("Saturday morning hiking and coffee crew");
+  await alice.page.getByTestId("new-group-kind-mesh").click();
+  await alice.page.getByTestId("new-group-create").click();
+  const dialog = alice.page.getByTestId("group-share-dialog");
+  await expect(dialog).toContainText("Saturday morning hiking and coffee crew is ready");
+  // The case this is about: the dialog scrolls, and unscrolled Share's bottom would be under the footer.
+  expect(await dialog.evaluate(d => {
+    const share = d.querySelector('[data-testid="group-link-share"]')!, foot = d.querySelector('[data-testid="group-share-done"]')!.parentElement!;
+    const bottomUnscrolled = share.getBoundingClientRect().bottom - d.getBoundingClientRect().top + d.scrollTop;
+    return d.scrollHeight > d.clientHeight && bottomUnscrolled > d.clientHeight - foot.offsetHeight;
+  })).toBe(true);
+
+  /** Where the focused control sits against the dialog's top and the sticky footer's top (the Done button's row). */
+  const placeOfFocus = () => dialog.evaluate(d => {
+    const focused = document.activeElement as HTMLElement, foot = d.querySelector('[data-testid="group-share-done"]')!.parentElement!;
+    const box = focused.getBoundingClientRect();
+    return { id: focused.dataset.testid ?? focused.tagName, inFoot: foot.contains(focused), top: box.top, bottom: box.bottom, dialogTop: d.getBoundingClientRect().top, footTop: foot.getBoundingClientRect().top };
+  });
+  /** Whole, between the dialog's top and the footer: not a half button with its label cut across. */
+  const expectClear = async () => {
+    const at = await placeOfFocus();
+    if (!at.inFoot) {
+      expect(at.bottom, `${at.id} under the footer`).toBeLessThanOrEqual(at.footTop);
+      expect(at.top, `${at.id} above the dialog`).toBeGreaterThanOrEqual(at.dialogTop);
+    }
+    return at;
+  };
+  await expect(dialog.getByTestId("group-link-share")).toBeFocused();
+  await expectClear();
+  // Scrolled back up by hand, Share sits under the footer again: Tab brings Copy, on the same row, out whole.
+  await dialog.evaluate(d => { d.scrollTop = 0; });
+  await alice.page.keyboard.press("Tab");
+  await expect(dialog.getByTestId("group-link-copy")).toBeFocused();
+  await expectClear();
+  // And every button after it, down to the footer's own.
+  const seen: string[] = [];
+  for (let step = 0; step < 8; step++) {
+    await alice.page.keyboard.press("Tab");
+    const at = await expectClear();
+    if (at.inFoot) break;
+    seen.push(at.id);
+  }
+  expect(seen).toEqual(["group-link-reset", "group-link-disable"]);
+});
+
 test("a new group opens on its link; Copy, Share and the header's Share link; joining waits with nothing to decide", { tag: ["@feature:groups.link.share", "@feature:groups.link.join", "@feature:groups.link.enable"] }, async ({ peer }) => {
   test.setTimeout(6 * 60_000);
   const alice = await peer("alice");
