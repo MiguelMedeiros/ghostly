@@ -23,3 +23,6 @@ export const VIEWS: Record<string, AtomView> = {
   time: TimeView,
   "member-mention": MentionChip,
 };
+
+/** Kinds whose view isolates its own parts, so the rich text does not wrap it in one `<bdi>`: a mention's "@" follows the message's direction, only its name is isolated. */
+export const ISOLATES_ITSELF: ReadonlySet<string> = new Set(["member-mention"]);
