@@ -125,6 +125,13 @@ describe("links", () => {
     expect(inline("https://")).toBe("https://");
   });
 
+  // A phone's keyboard capitalizes a message's first letter: "Https://…" stayed text, while "[x](Https://…)" linked.
+  it("links an address whatever the case of its scheme, as typed", () => {
+    expect(inline("Https://x.example/a")).toBe("[link:Https://x.example/a]");
+    expect(inline("see HTTPS://X.EXAMPLE/A and Http://x.example.")).toBe("see [link:HTTPS://X.EXAMPLE/A] and [link:Http://x.example].");
+    expect(inline("Https://")).toBe("Https://");
+  });
+
   it("keeps an encoded query whole", () => {
     const url = "https://github.com/MiguelMedeiros/ghostly/pulls?q=is%3Apr+is%3Aopen+base%3Adev";
     expect(inline(`${url} and ${url}.`)).toBe(`[link:${url}] and [link:${url}].`);
