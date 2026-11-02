@@ -326,6 +326,7 @@ describe("what a member hands on cannot take a message's place", { timeout: 60_0
 
   it("loads a state saved before copies waiting were remembered", async () => {
     const { mesh, alice, bob, carol } = await three();
+    await bob.flush();
     const old = clone(mesh.saved.get(bob.myKey)!);
     delete old.provisional;
     const bob2 = mesh.add(old);
