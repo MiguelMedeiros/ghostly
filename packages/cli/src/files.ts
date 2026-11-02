@@ -64,6 +64,9 @@ export function filesOf(messages: { id: string; file?: MessageFile; sender: stri
   }));
 }
 
+/** A file's size as a person reads it: "40 MB", "26.2 MB". */
+const megabytes = (size: number) => `${Math.round(size / 100_000) / 10} MB`;
+
 /** The chat or the group a file command names (`findChatOrGroup`). */
 const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
 
@@ -317,15 +320,22 @@ export const FILE_METHODS: Record<string, Method> = {
     const stored = await fileStore.get(fileId);
     if (!stored && !state(ctx).transfers[fileId]) throw new CliError("not_found", `No file ${fileId}`);
     const ms = num(params, "timeout", 300, { min: 1, max: 86_400 }) * 1000;
+    // A received file that waits for this person's `file accept` (over 25 MiB, or a group's file that did not come by
+    // itself) does not move however long this waits: said at once, naming the command. Before, it waited out its
+    // timeout and answered "0 of 40000000 bytes, asking", as if the contact were slow.
     const transfer = await waitForState(ctx, (s) => {
       const now = s.transfers[fileId] ?? stored?.transfer;
-      return now && (now.state === "done" || now.state === "failed") ? now : undefined;
+      return now && (now.state === "done" || now.state === "failed" || (now.stage === "asking" && now.direction === "in")) ? now : undefined;
     }, ms, `file ${fileId} to arrive`).catch((error: unknown) => {
       const now = state(ctx).transfers[fileId];
       if (error instanceof CliError && error.code === "timeout" && now) throw new CliError("timeout", `${error.message} (${now.transferred} of ${now.size} bytes${now.stage ? `, ${now.stage}` : ""})`, { file: fileId, transferred: now.transferred, size: now.size, stage: now.stage ?? null });
       throw error;
     });
     if (transfer.state === "failed") throw new CliError("engine", transfer.error ?? "The transfer failed", { file: fileId, ...where, retry: !!transfer.retry });
+    if (transfer.state !== "done") {
+      const name = (stored ?? await fileStore.get(fileId).catch(() => undefined))?.metadata?.name ?? "The file";
+      throw new CliError("confirm", `${name} (${megabytes(transfer.size)}) waits for you to take it: ghostly file accept ${fileId} (or file decline)`, { file: fileId, ...where, size: transfer.size, stage: "asking" });
+    }
     return { ...where, file: fileId, state: "done", size: transfer.size };
   },
 

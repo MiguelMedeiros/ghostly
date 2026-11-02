@@ -141,7 +141,7 @@ A typing `start` holds 6 s on the contact's side ([401](401-paired-chat.md#typin
 | 2 | Usage: unknown command or bad arguments |
 | 3 | Not found (profile, chat, message) |
 | 4 | Timed out waiting (`--wait`, `chat wait`, `file wait`) |
-| 5 | Needs confirmation (`--confirm-real`, `--force`) |
+| 5 | Needs confirmation (`--confirm-real`, `--force`, a received file that waits for `file accept`) |
 
 ## Parity with the app
 
