@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, PING_EVERY_MS, STOP_REQUESTS_PER_SECOND, UNRESPONSIVE_AFTER_MS, isJsonValue, jsonValueOf, runnerFor, watchApp, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -13,7 +13,7 @@ import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false, serving }: { byReference?: boolean; serving?: (on: boolean) => void } = {}) {
+function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false, serving, pong }: { byReference?: boolean; serving?: (on: boolean) => void; pong?: (n: number) => void } = {}) {
   const host = memoryHost();
   const posted: { message: Record<string, unknown>; transfer?: Transferable[] }[] = [];
   const stops: AppStopReason[] = [];
@@ -25,6 +25,7 @@ function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byRefere
     stopped: (reason) => stops.push(reason),
     byReference,
     serving,
+    pong,
     now: () => clock.t,
   });
   let next = 1;
@@ -105,6 +106,104 @@ describe("the start, and the loads of the frame", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(stops).toEqual(["stopped"]);
     expect(posted.length).toBe(before);
+  });
+});
+
+describe("the watchdog: an app that holds its thread past the bound is stopped", () => {
+  /** A watch on a clock the test moves, ticking as `startApp`'s interval would. */
+  function watching({ boundMs = UNRESPONSIVE_AFTER_MS }: { boundMs?: number } = {}) {
+    const clock = { t: 0, shown: true };
+    const pings: number[] = [];
+    let hung = 0;
+    const watch = watchApp({ ping: (n) => pings.push(n), hung: () => { hung++; }, boundMs, now: () => clock.t, shown: () => clock.shown });
+    /** One tick, `ms` after the last. */
+    const tick = (ms = PING_EVERY_MS) => { clock.t += ms; watch.tick(); };
+    return { clock, pings, watch, tick, hung: () => hung };
+  }
+
+  it("an app that answers each ping is never stopped, and is asked again only once it answered", () => {
+    const { pings, watch, tick, hung } = watching();
+    for (let i = 0; i < 60; i++) {
+      tick();
+      watch.pong(pings[pings.length - 1]!);
+    }
+    expect(pings).toHaveLength(60);
+    expect(hung()).toBe(0);
+  });
+
+  it("a ping unanswered for the bound, on time-keeping ticks (the frame has a thread of its own), stops it at the bound and not before", () => {
+    const { pings, tick, hung } = watching();
+    tick();
+    expect(pings).toEqual([1]);
+    for (let i = 1; i < UNRESPONSIVE_AFTER_MS / PING_EVERY_MS; i++) tick();
+    expect(hung()).toBe(0);
+    // Still the one ping: an app that answers nothing is not asked again.
+    expect(pings).toEqual([1]);
+    tick();
+    expect(hung()).toBe(1);
+  });
+
+  it("a tick that comes the bound late (the page's own thread held, as where frames share it) stops the app, though its ping was answered", () => {
+    const { pings, watch, tick, hung } = watching();
+    tick();
+    watch.pong(pings[0]!);
+    tick(UNRESPONSIVE_AFTER_MS - 1);
+    expect(hung()).toBe(0);
+    watch.pong(pings[pings.length - 1]!);
+    tick(UNRESPONSIVE_AFTER_MS);
+    expect(hung()).toBe(1);
+  });
+
+  it("an answer to an older ping is not an answer", () => {
+    const { clock, pings, watch, tick, hung } = watching();
+    tick();
+    clock.shown = false;
+    tick();
+    clock.shown = true;
+    tick();
+    expect(pings).toEqual([1, 2]);
+    watch.pong(1);
+    for (let i = 0; i < UNRESPONSIVE_AFTER_MS / PING_EVERY_MS; i++) tick();
+    expect(hung()).toBe(1);
+  });
+
+  it("what the page waited through while hidden (a frozen tab, a phone asleep) is not the app's: it is asked again once shown", () => {
+    const { clock, pings, watch, tick, hung } = watching();
+    tick();
+    // Hidden with the ping out; the page frozen for a minute; its timers come back late.
+    watch.hidden();
+    clock.shown = false;
+    tick(60_000);
+    clock.shown = true;
+    tick(30_000);
+    expect(hung()).toBe(0);
+    expect(pings).toEqual([1, 2]);
+    // The `visibilitychange` came, but no tick saw the page hidden: still excused.
+    watch.pong(2);
+    watch.hidden();
+    tick(60_000);
+    expect(hung()).toBe(0);
+    // Then judged as ever.
+    watch.pong(3);
+    tick(UNRESPONSIVE_AFTER_MS);
+    expect(hung()).toBe(1);
+  });
+
+  it("the broker hands the runner's `{pong}` to the watch, answers nothing, and counts it with the requests", () => {
+    const pongs: number[] = [];
+    const { broker, run, posted, stops } = setup({}, { t: 1_000 }, { pong: (n) => pongs.push(n) });
+    run();
+    const before = posted.length;
+    broker.message({ pong: 7 });
+    expect(pongs).toEqual([7]);
+    expect(posted.length).toBe(before);
+    // Not a pong: one with an id is a request (and not JSON a request takes), one that is not a whole number is nothing.
+    broker.message({ pong: 8, id: 3 });
+    broker.message({ pong: 1.5 });
+    expect(pongs).toEqual([7]);
+    // A flood of pongs is a flood: stopped as any other far past the rate.
+    for (let i = 0; i <= STOP_REQUESTS_PER_SECOND; i++) broker.message({ pong: i });
+    expect(stops).toEqual(["protocol"]);
   });
 });
 
