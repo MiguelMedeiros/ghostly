@@ -106,6 +106,8 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
 
 7. Publishing it also starts `Web image latest` (`.github/workflows/web-latest.yml`), which points the web image's `latest` (what `infra/docker-compose.yml` pulls by default) at the release's image. It moves only to GitHub's Latest release and never back: a release with a newer one published leaves it where it is, and the run's summary says why. A draft, or a tag built again, never touches it, and it moves only to the digest whose provenance checks out (`tools/scripts/web-image.mjs`, as in step 5). If the release was published before the Release workflow's web image was pushed, run it again: `gh workflow run web-latest.yml -f tag=v1.0.0`.
 
+8. Publishing it also starts `Chrome Web Store` (`.github/workflows/chrome-web-store.yml`), which uploads the release's `ghostly-browser-extension-<version>.zip` to the store item and submits it for review (`tools/scripts/chrome-web-store.mjs`). Store installs get it from Chrome once Google approves it. It does nothing until the store's credentials are set up ([below](#chrome-web-store)). It skips, with a notice in the run's summary, a draft, a pre-release, a version the store already publishes or a newer one, and a release that comes while the store is still reviewing an earlier upload (a new package cannot go in during a review): run it again once that one is out, `gh workflow run chrome-web-store.yml -f tag=v1.0.0`. It refuses a zip whose `manifest.json` is not the tag's version. A refusal from the store fails that run only, never the release.
+
 ### npm trusted publishing
 
 The workflow publishes with npm trusted publishing (OIDC) only: there is no npm token, in the repository or anywhere else. What makes that hold, for `@ghostlytools/cli` and `@ghostlytools/sdk` alike:
@@ -122,6 +124,24 @@ A new package needs one publish by hand from the owner's npm account (`npm publi
 
 The website's download panel asks GitHub for the latest published release (at most once an hour) and uses it once every installer it links to is attached; until then it keeps the version in `apps/website/lib/release.ts`.
 
+### Chrome Web Store
+
+The workflow signs in as a Google Cloud service account that the store's publisher account trusts (the Chrome Web Store API V2; Google turned V1 off on 15 October 2026). Until the two secrets below exist, every run writes "Chrome Web Store upload not set up" and stops there, before it calls GitHub or the store. Once, from the Google account that owns the item `nbedaagicniejlmfcncndfjcejaidbcf` (it needs two-step verification on):
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), pick or create a project and enable the **Chrome Web Store API** for it.
+2. IAM & Admin → Service accounts → create one (say `chrome-web-store-upload`). It needs no role in the project. On it, Keys → Add key → JSON: the browser downloads its key file. A project under a Google Workspace organization may refuse keys (the policy `iam.disableServiceAccountKeyCreation`); a project of a personal account does not.
+3. In the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/devconsole), Account: add the service account's email (`...@<project>.iam.gserviceaccount.com`; a publisher can have one). Copy the **publisher ID** from the publisher's settings.
+4. Add both as repository secrets, then delete the downloaded key file:
+
+   ```bash
+   gh secret set CWS_SERVICE_ACCOUNT_JSON -R MiguelMedeiros/ghostly < ~/Downloads/<key file>.json
+   gh secret set CWS_PUBLISHER_ID -R MiguelMedeiros/ghostly   # paste the publisher ID
+   ```
+
+5. Try it on the newest published release: `gh workflow run chrome-web-store.yml -f tag=v1.0.0`. Its summary says what it did: submitted for review, or why not (the store already has that version, or is reviewing an earlier one).
+
+The key can manage every item of the publisher, and nothing else. To revoke it, delete the key on the service account (or remove the service account from the dashboard) and the secret. The store publishes with the visibility the dashboard has: after changing visibility there, publish once by hand before the workflow can.
+
 ## 5. Deploy
 
 Only after publishing.
@@ -133,7 +153,7 @@ How each client picks it up:
 
 - **Desktop** offers it by itself, downloads it, checks the signature and restarts into it. On Linux that is the AppImage; a `.deb` belongs to the package manager that installed it, so those are sent to the download.
 - **app.ghostly.tools** offers a reload as soon as the new image is up: a tab compares what it is running against `/version.json`.
-- **The extension** reads `ghostly.tools/latest.json`, so the website has to be rebuilt. Chrome never updates an unpacked extension, so people replace the folder with the new zip and press reload on the extension's card.
+- **The extension** from the Chrome Web Store updates through Chrome once the store has approved the version step 4.8 submitted. An unpacked one reads `ghostly.tools/latest.json`, so the website has to be rebuilt. Chrome never updates an unpacked extension, so people replace the folder with the new zip and press reload on the extension's card.
 
 ## The translation runtime
 
