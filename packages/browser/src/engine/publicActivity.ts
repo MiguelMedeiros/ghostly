@@ -2,7 +2,7 @@ import { boundedIdentityFetch } from "../proofs/verify";
 import type { IdentityFetch } from "../proofs/contract";
 import { ACTIVITY_READERS, readPostImage, type ActivityReader, type PublicGraph, type PublicPost } from "../profiles/activity";
 import type { PublicGraphView, PublicPostImageView, PublicPostsView } from "../shared/types";
-import type { ProfileSubject } from "./publicProfiles";
+import { profileFetch, type ProfileSubject } from "./publicProfiles";
 
 /** What the engine gives the posts-and-follows cache. */
 export interface PublicActivityHost {
@@ -14,6 +14,8 @@ export interface PublicActivityHost {
   nostrRelays(): readonly string[];
   /** The reader's own identities with a current proof. */
   own(): ProfileSubject[];
+  /** Settings → Hide my IP from contacts: a contact's posts and pictures are then read only from hosts this app names. */
+  relayOnly?(): boolean;
   /** What contacts shared that verifies now, with the chat it came in. */
   contacts(): (ProfileSubject & { linkId: string })[];
   /** The reader's own Nostr follow lists, when the Nostr social layer already read them. */
@@ -72,8 +74,9 @@ export class PublicActivity {
   private allowed(s: ProfileSubject): boolean {
     return this.host.enabled() && !!this.reader(s) && this.host.eligible().some(e => e.provider === s.provider && e.subject === s.subject);
   }
-  private ctx(signal = AbortSignal.timeout(ASK_TIMEOUT_MS)) {
-    return { fetch: this.fetch, signal, relays: this.host.nostrRelays(), makeSocket: this.host.makeSocket, avatarFetch: this.host.avatarFetch };
+  /** A contact's identity, while Hide my IP from contacts is on, is read only from hosts this app names (`profileFetch`). */
+  private ctx(s: ProfileSubject, signal = AbortSignal.timeout(ASK_TIMEOUT_MS)) {
+    return { fetch: profileFetch(this.host, s, this.fetch), signal, relays: this.host.nostrRelays(), makeSocket: this.host.makeSocket, avatarFetch: this.host.avatarFetch };
   }
   /** Shares one ask per key; a failure is kept to space out the next one. */
   private once<T>(key: string, work: () => Promise<T>): Promise<T> {
@@ -136,7 +139,7 @@ export class PublicActivity {
     if (failed && !s.more) { if (kept) return this.postsView(s, kept); throw new Error(failed.message); }
     const reader = this.reader(s)!;
     await this.once(`posts\n${key}${s.more ? "\nmore" : ""}`, async () => {
-      const page = await reader.posts(s.subject, this.ctx(), s.more ? kept?.cursor : undefined);
+      const page = await reader.posts(s.subject, this.ctx(s), s.more ? kept?.cursor : undefined);
       // The proof may have gone, or the setting been turned off, while the host answered.
       if (!this.allowed(s)) return;
       const before = s.more ? this.posts.get(key)?.posts ?? [] : [];
@@ -207,7 +210,7 @@ export class PublicActivity {
     if (failed) { if (kept) return this.graphView(s, kept); throw new Error(failed.message); }
     const reader = this.reader(s)!;
     await this.once(`graph\n${key}`, async () => {
-      const g = await reader.graph(s.subject, this.ctx());
+      const g = await reader.graph(s.subject, this.ctx(s));
       if (!this.allowed(s)) return;
       this.graphs.set(key, { ...g, fetchedAt: this.now, used: Date.now() });
       this.trim(this.graphs, MAX_ACTIVITY_ENTRIES);
@@ -228,7 +231,7 @@ export class PublicActivity {
     if (kept) { kept.used = Date.now(); return kept.view; }
     if (!this.host.online()) throw new Error("Offline: turn the network on first");
     return this.once(`image\n${key}`, async () => {
-      const r = await readPostImage(image.source, this.ctx());
+      const r = await readPostImage(image.source, this.ctx(s));
       const view: PublicPostImageView = { hosts: r.hosts, ...(r.avatar ? { src: r.avatar } : {}), ...(r.miss ? { miss: r.miss } : {}) };
       const size = r as { width?: number; height?: number };
       if (size.width && size.height) { view.width = size.width; view.height = size.height; }
