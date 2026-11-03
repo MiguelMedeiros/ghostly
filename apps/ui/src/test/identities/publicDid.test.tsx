@@ -25,6 +25,7 @@ describe("Public DID", () => {
     act(() => engine.update({ did: didView() }));
     const section = screen.getByTestId("did-section");
     expect(within(section).getByTestId("did-id")).toHaveTextContent(DID);
+    expect(within(section).getByTestId("did-id")).toHaveAttribute("dir", "ltr");
     expect(section).toHaveTextContent("Public DID");
     expect(section).toHaveTextContent("no chat uses it");
     expect(screen.getByTestId("did-published")).toHaveTextContent("Not published");
