@@ -68,7 +68,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         } catch (e) {
           if (!current()) return;
           // No app there (a 404, or not a bundle): it may be a store. A link to a host off the list stops here.
-          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || appErrorCode(e) === "host" || appErrorCode(e) === "github-link") { setError(appErrorView(e, t)); return; }
+          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || ["host", "github-link", "private-link"].includes(appErrorCode(e) ?? "")) { setError(appErrorView(e, t)); return; }
         }
       }
       // Read as a store from here: one refused is a link that holds no valid store, not an app refused.

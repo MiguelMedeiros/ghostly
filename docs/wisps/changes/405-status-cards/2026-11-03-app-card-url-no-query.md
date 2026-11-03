@@ -1,0 +1,1 @@
+An app card: its url never carries a query or a fragment. The sender writes it, and the text's url line, without them, and a reader drops them from what it keeps, since a private file's link carries its read token there.

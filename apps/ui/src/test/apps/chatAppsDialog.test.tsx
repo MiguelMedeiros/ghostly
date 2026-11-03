@@ -206,3 +206,21 @@ describe("the chat's Apps with an app that comes with Ghostly, never opened here
     lists.mockImplementation(() => [installed()]);
   });
 });
+
+describe("the card an app sends when it is opened in a chat", () => {
+  it("never names the query of the link it was installed from (an app installed from a private file's link before such links were refused)", async () => {
+    const token = "GHSAT0AAAAAACPRIVATEREADTOKEN";
+    const from = "https://raw.githubusercontent.com/a/chess/main/app.ghostlyapp";
+    lists.mockImplementation(() => [{ ...installed(), from: `${from}?token=${token}`, run: { status: "ok" } }]);
+    setAppOpener(vi.fn(async () => {}));
+    const { user, onClose } = await dialog();
+    await user.click(screen.getByTestId("chat-app-open"));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(sent).toHaveBeenCalledTimes(1);
+    const params = (sent.mock.calls[0] as unknown as [{ text: string; card: { url?: string } }])[0];
+    expect(params.card.url).toBe(from);
+    expect(params.text).toBe(`🧩 Opened Chess 1.2.0 in this chat (Ghostly app)\n${from}`);
+    expect(JSON.stringify(params)).not.toContain(token);
+    lists.mockImplementation(() => [installed()]);
+  });
+});
