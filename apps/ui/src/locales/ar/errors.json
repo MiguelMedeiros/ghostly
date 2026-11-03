@@ -155,6 +155,7 @@
     "cannotRetry": "لا يمكن إعادة محاولة هذا الملف",
     "clipboardUnavailable": "تعذّرت قراءة الحافظة",
     "clipboardUnavailableNext": "أرفقه عبر +.",
+    "dropUnreadable": "تعذّرت إضافة هذه الملفات. أرسلها عبر + ← مستند.",
     "floor": {
       "noRoomNext": "أفرغ بعض المساحة، ثم اطلب من جهة الاتصال إرساله مرة أخرى.",
       "notInAWeek": "لم يصل خلال أسبوع",

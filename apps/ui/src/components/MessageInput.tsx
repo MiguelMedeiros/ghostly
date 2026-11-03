@@ -22,7 +22,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
+import { dragCarriesFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformDroppedFiles, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight, useFieldFitsView } from "./composer/fieldHeight";
 import { useKeptOnScreen } from "./composer/keptOnScreen";
@@ -709,6 +709,12 @@ export function MessageInput({
     shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
   };
   const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
+  /** A drop's files the platform read (another app's, on Linux), as a paste's are: what could not be read is said. */
+  const offerHeld = (held: Promise<File[]>) => {
+    held.then((files) => { if (!files.length) showToast(t("errors.files.dropUnreadable")); else offerRef.current(files); },
+      (error: unknown) => showToast(problemLine(error, t)));
+  };
+  const offerHeldRef = useRef(offerHeld); offerHeldRef.current = offerHeld;
 
   /**
    * A paste's files to the sheet. True when the paste was taken; false leaves it to the field: no files, or a rich
@@ -816,16 +822,18 @@ export function MessageInput({
     if (!hearsFiles || !zone) return;
     let depth = 0;
     const enter = (e: DragEvent) => {
-      if (!dragHasFiles(e.dataTransfer)) return;
+      if (!dragCarriesFiles(e.dataTransfer)) return;
       e.preventDefault();
       depth += 1;
       // The veil invites a drop: only where one can be sent. Elsewhere the drop is taken, and answered with the reason.
       if (canAttach) setDragging(zone);
     };
     const over = (e: DragEvent) => {
-      if (!dragHasFiles(e.dataTransfer)) return;
+      if (!dragCarriesFiles(e.dataTransfer)) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      // The platform may say a drag carries files after the page heard it enter (another app's, on Linux).
+      if (!depth) { depth = 1; if (canAttach) setDragging(zone); }
     };
     const done = () => { depth = 0; setDragging(null); };
     const leave = (e: DragEvent) => {
@@ -836,9 +844,12 @@ export function MessageInput({
     };
     const drop = (e: DragEvent) => {
       done();
-      if (!dragHasFiles(e.dataTransfer)) return;
+      if (!dragCarriesFiles(e.dataTransfer)) return;
+      // Never the files' addresses in the draft, nor the page leaving for them.
       e.preventDefault();
-      offerRef.current(droppedFiles(e.dataTransfer));
+      const held = platformDroppedFiles(e.dataTransfer);
+      if (held) offerHeldRef.current(held);
+      else offerRef.current(droppedFiles(e.dataTransfer));
     };
     zone.addEventListener("dragenter", enter);
     zone.addEventListener("dragover", over);

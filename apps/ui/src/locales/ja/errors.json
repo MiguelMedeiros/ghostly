@@ -155,6 +155,7 @@
     "cannotRetry": "このファイルは再試行できません",
     "clipboardUnavailable": "クリップボードを読み取れません",
     "clipboardUnavailableNext": "+ から添付してください。",
+    "dropUnreadable": "これらのファイルを追加できませんでした。+ → 書類 から送ってください。",
     "floor": {
       "noRoomNext": "空き容量を作ってから、相手にもう一度送ってもらってください。",
       "notInAWeek": "1週間以内に届きませんでした",
