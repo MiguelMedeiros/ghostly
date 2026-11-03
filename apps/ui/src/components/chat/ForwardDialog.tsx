@@ -6,7 +6,8 @@ import { FORWARD_MAX_TARGETS, forwardMessages, forwardSecret, type ForwardOutcom
 import type { SecretFinding } from "../../lib/parse/secrets";
 import type { ChatMessage } from "../../lib/types";
 import { SecretGuardDialog } from "../SecretGuardDialog";
-import { ChatTargetRow } from "./ChatTargets";
+import { ChatTargetRow, ChatTargetSearch } from "./ChatTargets";
+import { chatTargetKeys, findChatTargets } from "../../lib/chatTargets";
 import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
 import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
@@ -29,7 +30,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const { t } = useI18n();
   const nav = useAppNavigation();
   const id = useId();
-  const dialog = useRef<HTMLDialogElement>(null), search = useRef<HTMLInputElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null), search = useRef<HTMLInputElement>(null), list = useRef<HTMLUListElement>(null);
   const targets = useChatTargets().filter(target => !!target.target);
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState<ChatTarget[]>([]);
@@ -52,10 +53,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     return () => { element.close(); if (previous?.isConnected) previous.focus(); };
   }, []);
 
-  const shown = useMemo(() => {
-    const words = query.trim().toLocaleLowerCase();
-    return words ? targets.filter(target => target.name.toLocaleLowerCase().includes(words)) : targets;
-  }, [targets, query]);
+  const shown = useMemo(() => findChatTargets(targets, query), [targets, query]);
   const isChosen = (target: ChatTarget) => chosen.some(c => c.target === target.target);
   const toggle = (target: ChatTarget) => setChosen(now => isChosen(target) ? now.filter(c => c.target !== target.target) : now.length >= FORWARD_MAX_TARGETS ? now : [...now, target]);
 
@@ -112,8 +110,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     <div className="px-4 pt-4 pb-2 space-y-2">
       <h2 id={`${id}-title`} className="text-base font-semibold">{t("chat.forward.title")}</h2>
       {messages.length > 1 && <p className="m-0 text-xs text-text-muted" data-testid="forward-count">{t("chat.forward.messages", { count: String(messages.length) })}</p>}
-      <input ref={search} type="search" data-testid="forward-search" value={query} onChange={e => setQuery(e.target.value)} placeholder={t("chat.forward.search")} aria-label={t("chat.forward.search")}
-        className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
+      <ChatTargetSearch inputRef={search} list={list} testId="forward-search" value={query} onChange={setQuery} />
     </div>
     {/* As tall as its rows, shrinking and scrolling within the dialog's max height: `flex-1` (a basis of 0) in a
         dialog as tall as its content leaves WebKit a list of no height at all, with no chat to pick. */}
@@ -121,7 +118,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       {shown.length === 0 ? (
         <p className="px-2 py-3 text-sm text-text-muted" data-testid="forward-none">{t(targets.length ? "chat.forward.noMatch" : "chat.forward.noChats")}</p>
       ) : (
-        <ul className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("chat.forward.title")}>
+        <ul ref={list} onKeyDown={chatTargetKeys(search)} className="rounded-xl bg-surface divide-y divide-border overflow-hidden m-0 p-0 list-none" aria-label={t("chat.forward.title")}>
           {shown.map(target => (
             <li key={target.chat}>
               <ChatTargetRow target={target} testId="forward-target" checked={isChosen(target)} onClick={() => toggle(target)}
