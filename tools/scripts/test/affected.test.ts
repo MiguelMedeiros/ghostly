@@ -381,6 +381,24 @@ describe("the rest", () => {
     expect(mode("apps/desktop/src/lib.rs")).toBe("skip");
   });
 
+  it("a file the scripts' tests read from disk runs them, as no import graph shows it", () => {
+    const mode = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles }).unit).scripts.mode;
+    for (const file of [
+      ".github/workflows/e2e.yml",
+      ".github/dependabot.yml",
+      "apps/web/nginx.conf",
+      "apps/web/nginx-services.conf",
+      "apps/web/Dockerfile",
+      "apps/desktop/tauri.conf.json",
+      "e2e/features.json",
+      "apps/desktop/gen/android/gradle/wrapper/gradle-wrapper.jar",
+      "apps/desktop/gen/android/gradle/wrapper/gradle-wrapper.properties",
+    ]) {
+      expect(mode(file), file).toBe("whole");
+    }
+    expect(mode("tools/scripts/ci-changes.mjs")).toBe("related");
+  });
+
   it("a file whose named paths CI's gates must cover runs the check of them, which reads it from disk", () => {
     // ci-changes.test.ts reads the website's scripts, the packages' code and the crates' Rust for the paths they name:
     // no import graph shows it. A draft's tier is all the train waits for, so a website script naming an uncovered
