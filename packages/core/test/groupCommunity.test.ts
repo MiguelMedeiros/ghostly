@@ -1299,3 +1299,87 @@ describe("a leave ends one admission", { timeout: 60_000 }, () => {
     expect(verifyCommunityCommit(clone(chain[4]), chain[3], verified.rosters[3], g, chain.slice(0, 4).reverse())).toHaveProperty("error", "This leave is not for the member's current admission");
   });
 });
+
+describe("admissions by members while the admin is away", { timeout: 120_000 }, () => {
+  /** `COMMUNITY_LIMITS.memberAdmissions`. */
+  const bound = 32;
+  const keys = (m: Member) => m.session.roster.map(([k]) => k);
+  const madeUp = () => createIdentity().pubKeyZ32;
+
+  it("are bounded: one past it is refused by its signer and by every member; the admin's admission opens the door again", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), mallory = await net.admit(alice, "mallory");
+    await net.meet(bob, mallory);
+    alice.online = false;
+    for (let i = 0; i < bound; i++) await mallory.session.admit(madeUp());
+    await net.settle();
+    expect(bob.session.roster).toHaveLength(3 + bound);
+    await expect(mallory.session.admit(madeUp())).rejects.toThrow(/admin/);
+    await expect(bob.session.admit(madeUp())).rejects.toThrow(/admin/);
+    // Signed by hand past the bound: no member takes it.
+    const past = forge(mallory, mallory.session.top, mallory.session.roster, { k: "add", s: madeUp() }).commit;
+    expect(await bob.session.handle(mallory.session.myKey, commitFrame(past))).toBe(false);
+    expect(bob.session.roster).toHaveLength(3 + bound);
+    // The admin back lets someone in; the members' door is open again.
+    alice.online = true;
+    await net.meet(alice, bob);
+    await net.admit(alice, "dave");
+    const erin = await net.admit(bob, "erin");
+    expect(keys(alice)).toContain(erin.session.myKey);
+    expect(COMMUNITY_LIMITS.memberAdmissions).toBe(bound);
+  });
+
+  it("the admin removing a member takes out everyone that member let in, and whom those let in, and no one else", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), mallory = await net.admit(alice, "mallory");
+    for (const [a, b] of [[alice, bob], [alice, mallory], [bob, mallory]] as const) await net.meet(a, b);
+    alice.online = false;
+    const carol = await net.admit(bob, "carol");
+    for (let i = 0; i < 5; i++) await mallory.session.admit(madeUp());
+    const sock = await net.admit(mallory, "sock");
+    for (let i = 0; i < 3; i++) await sock.session.admit(madeUp());
+    await net.settle();
+    expect(bob.session.roster).toHaveLength(4 + 5 + 1 + 3);
+    alice.online = true;
+    await net.meet(alice, bob);
+    const before = alice.session.epoch;
+    await alice.session.remove(mallory.session.myKey);
+    await net.settle();
+    const honest = [alice, bob, carol].map(m => m.session.myKey).sort();
+    expect([...keys(alice)].sort()).toEqual(honest);
+    expect([...keys(bob)].sort()).toEqual(honest);
+    expect(alice.session.epoch - before).toBe(1 + 5 + 1 + 3);
+    await say(net, bob, "still here");
+    expect(net.texts(carol)).toContain("still here");
+    // A removal is no admission: the members' door stays as it was, and the admin can still clear what is left of a member already out.
+    await expect(alice.session.remove(mallory.session.myKey)).rejects.toThrow("Not a member");
+  });
+
+  it("keys let in while the admin clears them are bounded and taken out in the same removal", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), mallory = await net.admit(alice, "mallory");
+    for (const [a, b] of [[alice, bob], [alice, mallory], [bob, mallory]] as const) await net.meet(a, b);
+    const sock = await net.admit(mallory, "sock");
+    // Each removal the admin commits, the sock answers with more admissions while it is still in.
+    const removals: Promise<void>[] = [];
+    let answered = 0;
+    const onCommit = sock.session.handle.bind(sock.session);
+    sock.session.handle = async (from, frame) => {
+      const taken = await onCommit(from, frame);
+      const f = frame as { t?: string; commit?: { k?: string } };
+      if (f.t === "group-commit" && f.commit?.k === "remove" && sock.session.isMember) {
+        for (let i = 0; i < 4; i++) removals.push(sock.session.admit(madeUp()).then(() => { answered++; }, () => {}));
+      }
+      return taken;
+    };
+    await alice.session.remove(mallory.session.myKey);
+    await net.settle(); await Promise.all(removals); await net.settle();
+    // How many it gets in before its own removal reaches it depends on the order frames arrive in: never past the bound.
+    expect(answered).toBeLessThanOrEqual(bound);
+    expect([...keys(alice)].sort()).toEqual([alice, bob].map(m => m.session.myKey).sort());
+    expect([...keys(bob)].sort()).toEqual([alice, bob].map(m => m.session.myKey).sort());
+  });
+});

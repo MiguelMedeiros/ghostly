@@ -82,6 +82,8 @@ export const COMMUNITY_LIMITS = {
   replay: 256,
   /** Commits in one welcome or chain piece. */
   chainPiece: 100,
+  /** Admissions members other than the admin may commit in a row while the admin is away (`memberAdmissions`). */
+  memberAdmissions: 32,
   pendingLeaves: 64,
   /** Leaves whose mark (`group-left`) is kept, and the epochs one names. */
   leftMarks: 64,
@@ -160,6 +162,24 @@ const keepsRoom = (epoch: number, roster: Roster) => epoch + 1 + 2 * (roster.len
  * by outgrowing it with admissions.
  */
 const ADMIN_ONLY: ReadonlySet<CommunityKind> = new Set(["remove", "role", "rotate", "link"]);
+
+/**
+ * The admissions signed by members other than `admin` on a branch (`before`: its commits, newest first) since the admin
+ * last let someone in, rotated, changed the link or handed the role on, or since the group began. A removal or a leave
+ * the admin commits does not count as the admin being there: its app commits leaves by itself, and a removal while
+ * the admin clears keys let in would otherwise make room for as many more each time. An admission is a member's
+ * right, and costs nothing: a key nobody holds is as good as anyone's, so without a bound one member could fill the
+ * group to its cap in seconds. `COMMUNITY_LIMITS.memberAdmissions` in a row, then the admin's turn.
+ */
+function memberAdmissions(admin: string | undefined, before: Iterable<CommunityCommit>): number {
+  let n = 0;
+  for (const c of before) {
+    if (c.k === "create" || c.k === "role" || (c.by === admin && c.k !== "remove" && c.k !== "leave")) break;
+    if (c.k === "add") n++;
+  }
+  return n;
+}
+const MEMBER_ADMISSIONS_ERROR = "Members can let no one else in until the admin does";
 
 export interface CommunityCommit {
   v: 2;
@@ -1189,6 +1209,9 @@ export class CommunitySession {
       if (!confirmationMatches(epochKeys(derivedSecret(fromBase64Url(previous), untagged), this.id, result.commit.e).confirm, untagged, result.commit.c)) return false;
     }
     if (GROWS.has(result.commit.k) && !keepsRoom(result.commit.e, result.roster)) return false;
+    // As the room above: a member that takes in admissions past the bound would let any one member fill the group.
+    const parentAdmin = rosterAdmin(parentRoster);
+    if (result.commit.k === "add" && result.commit.by !== parentAdmin && memberAdmissions(parentAdmin, this.ancestry(p)) >= COMMUNITY_LIMITS.memberAdmissions) return false;
     const commit = result.commit, h = communityCommitHash(commit);
     // Two commits by the admin after the same commit: equivocation. By one my branch moved past (it handed the role
     // on, then maybe left or was removed), its other commit is a branch that drops that hand-over and never wins: it
@@ -1434,6 +1457,7 @@ export class CommunitySession {
     const roster = communityRoster(this.roster, draftBase);
     if (!roster || (kind === "leave" && !leaveStands(draftBase, this.ancestry(parentHash)))) throw new Error("This change is not allowed");
     if (GROWS.has(kind) && !keepsRoom(draftBase.e, roster)) throw new Error("This group has reached its membership history limit. Create a new group.");
+    if (kind === "add" && !this.isAdmin && memberAdmissions(this.admin, this.ancestry(parentHash)) >= COMMUNITY_LIMITS.memberAdmissions) throw new Error(MEMBER_ADMISSIONS_ERROR);
     const draft: Omit<CommunityCommit, "sig" | "c"> = { ...draftBase, m: rosterHash(roster) };
     const untagged = communityUntaggedHash(draft);
     let secret: Uint8Array;
@@ -1517,12 +1541,46 @@ export class CommunitySession {
     return frames;
   }
 
-  remove(memberKey: string, now = Date.now()): Promise<void> {
-    return this.serialize(async () => {
-      this.requireAdmin();
-      if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
-      await this.commit("remove", { s: memberKey }, now);
-    });
+  /**
+   * Takes a member out, and with it everyone it let in who is still in, and whom those let in in turn
+   * (`admittedThrough`): keys a member let in cost it nothing, and one by one they were the admin's to clear. A
+   * `remove` commit each, as before (an app from before follows them), one at a time, so what arrives meanwhile is
+   * heard, and an admission signed meanwhile by one of them is taken out too (`memberAdmissions` bounds them, as a
+   * removal is not the admin letting anyone in). A member already out still has those it let in cleared.
+   */
+  async remove(memberKey: string, now = Date.now()): Promise<void> {
+    for (let first = true; ; first = false) {
+      const done = await this.serialize(async () => {
+        this.requireAdmin();
+        if (memberKey === this.myKey) throw new Error("Not a member");
+        const next = rosterHas(this.roster, memberKey) ? memberKey : this.admittedThrough(memberKey)[0];
+        if (next === undefined) { if (first) throw new Error("Not a member"); return true; }
+        await this.commit("remove", { s: next }, now);
+        return false;
+      });
+      if (done) return;
+    }
+  }
+
+  /**
+   * The members still in whose admission, on the main branch, `root` signed, or one of them did, and so on: in the
+   * order they were let in. An admission signed by whoever was the admin then is the admin's, not counted: removing
+   * a former admin does not take out everyone it let in. Never the admin nor me.
+   */
+  private admittedThrough(root: string): string[] {
+    const by = new Map<string, string>();
+    let admin = "";
+    for (const c of this.state.chain) {
+      if (c.k === "create") admin = c.by;
+      else if (c.k === "role" && c.s) admin = c.s;
+      else if (c.k === "add" && c.s) { by.delete(c.s); if (c.by !== admin) by.set(c.s, c.by); }
+    }
+    const through = new Set([root]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const [key, signer] of by) if (!through.has(key) && through.has(signer)) { through.add(key); grew = true; }
+    }
+    return [...by.keys()].filter(key => key !== root && through.has(key) && key !== this.myKey && key !== this.admin && rosterHas(this.roster, key));
   }
   transferAdmin(memberKey: string, now = Date.now()): Promise<void> {
     return this.serialize(async () => {
