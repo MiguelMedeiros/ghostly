@@ -65,6 +65,15 @@ it("accepts only wss:// relays, and ws:// to this machine", () => {
   expect(relayUrlProblem("ws://relay.example")).toMatch(/wss/);
   expect(relayUrlProblem("https://relay.example")).toMatch(/wss/);
   expect(relayUrlProblem("not a url")).toMatch(/relay address/);
+  // Only the server's address: the endpoint tells it to every contact as its relay.
+  for (const bad of ["wss://alice:hunter2@relay.example", "wss://alice@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/?",
+    "wss://relay.example/#s3cr3t", "ws://alice:hunter2@127.0.0.1:49443/", `wss://relay.example/${"a".repeat(256)}`])
+    expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+});
+
+it("never names a relay with a login or a token in its descriptor, saved before that was refused", async () => {
+  const url = relay.url.replace("ws://", "ws://alice:hunter2@") + "/?token=s3cr3t";
+  await expect(createRelayedHyperEndpoint(seed(), url)).rejects.toThrow("Not a relay address");
 });
 
 it("gives the Desktop's key for the same seed, and says it is relayed", async () => {
