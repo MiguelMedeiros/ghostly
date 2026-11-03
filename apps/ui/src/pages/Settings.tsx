@@ -28,7 +28,7 @@ import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitc
 import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
 import type { NeedsYou } from "../lib/needsYou";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { Button, Switch } from "../components/wallet/ui";
+import { Button, Switch, chosenInForcedColors } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
@@ -558,7 +558,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.colorScheme")} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {COLOR_SCHEME_OPTIONS.map((option) => (
               <button key={option.value} onClick={() => handleColorSchemeChange(option.value)} aria-pressed={settings.colorScheme === option.value}
-                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {option.value === "light" && (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <circle cx="12" cy="12" r="5" strokeWidth="2" />
@@ -584,7 +584,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {(["compact", "comfortable"] as const).map((density) => (
               <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
-                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {t(`settings.chatListDensities.${density}` as const)}
               </button>
             ))}
