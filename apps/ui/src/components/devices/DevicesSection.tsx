@@ -17,6 +17,7 @@ import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/hando
 import { nextOf, said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { problemText, type Problem } from "../../lib/problemText";
+import { useFocusKept } from "../../hooks/useFocusKept";
 
 /** The refusals that come from this device's wallets (WISP 06 § Wallets). */
 const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry", "call"]);
@@ -198,6 +199,11 @@ function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove
   const anchor = useRef<HTMLDivElement>(null);
   const move = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLButtonElement>(null);
+  // The link drops while Move to, or a ⋮ that holds only Check connection, has the keyboard focus: they go, and the
+  // focus goes to what is left on the row (its ⋮, else the row), not to the page. Not for a move that starts: the
+  // section gives that focus to the move's steps. The Row takes no ref: its box is found from the link's state in it.
+  const rowBox = useRef<HTMLElement | null>(null);
+  useFocusKept(rowBox, () => !busy && menu.current);
   const live = device.status === "live";
   const state = device.self ? (device.active ? t("devices.section.thisActive") : t("devices.section.thisStandby"))
     : device.active ? t("devices.section.active") : t("devices.section.standby");
@@ -216,7 +222,7 @@ function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove
         <span data-testid="device-state">{state}</span>
         {!device.self && <>
           <span aria-hidden="true"> · </span>
-          <span data-testid="device-link-status" data-status={device.status ?? "none"} className="inline-flex items-center gap-1">
+          <span ref={(node) => { rowBox.current = node?.closest<HTMLElement>("[data-testid=device-row]") ?? null; }} data-testid="device-link-status" data-status={device.status ?? "none"} className="inline-flex items-center gap-1">
             <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-accent" : "bg-text-muted"}`} />
             {live ? t("devices.section.live") : t("devices.section.connecting")}
           </span>
