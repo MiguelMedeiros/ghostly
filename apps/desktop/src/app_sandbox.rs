@@ -94,6 +94,7 @@ const RUNNER: &str = r#"<!doctype html>
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
 
   const invoke = internals.invoke.bind(internals);
+  const clockNow = Date.now;
   // Every answer and event comes as its JSON text, parsed here (`json_response`, `event_script`): evaluated as a
   // JavaScript literal, a `__proto__` member would set the object's prototype instead of staying a key, as the web
   // broker keeps it (jsonValueOf).
@@ -182,6 +183,19 @@ const RUNNER: &str = r#"<!doctype html>
   // On Linux the window's filter goes in just after it is made: until then the broker says "Not ready".
   const begin = (tries) => broker({ type: "start" }).then((entry) => send("writing", []).then(() => {
     document.open();
+    // The person's taps and keys in this window never reach the Ghostly window, whose lock screen would lock them out
+    // of a game longer than its time: the runner says `activity` for a trusted one, at most every 5 seconds, which the
+    // broker counts while this window has the focus. Added before the app's code, which cannot name it to remove it.
+    let said = -Infinity;
+    const heard = (event) => {
+      if (event.isTrusted !== true) return;
+      const at = clockNow();
+      if (at - said < 5000 && at >= said) return;
+      said = at;
+      try { send("activity", []).catch(() => {}); } catch (error) {}
+    };
+    addEventListener("pointerdown", heard, true);
+    addEventListener("keydown", heard, true);
     document.write(entry);
     document.close();
   }, () => stop("broker")), (error) => {
@@ -2207,6 +2221,22 @@ mod tests {
             assert!(web.contains(call), "web: {call}");
         }
         assert!(RUNNER.contains("delete window[name]"));
+    }
+
+    /// Both runners say `activity` for the person's trusted taps and keys, so the lock screen counts input in an app,
+    /// and listen before the app's code runs (after `document.open`, which drops a window's listeners).
+    #[test]
+    fn the_runners_say_activity_for_trusted_taps_and_keys() {
+        let web = include_str!("../../web/public/app-frame.html");
+        for (name, runner) in [("desktop", RUNNER), ("web", web)] {
+            assert!(runner.contains("if (event.isTrusted !== true) return;"), "{name}");
+            assert!(runner.contains("send(\"activity\", [])"), "{name}");
+            for event in ["\"pointerdown\", heard, true", "\"keydown\", heard, true"] {
+                let at = runner.find(event).unwrap_or_else(|| panic!("{name}: {event}"));
+                assert!(runner.find("document.open()").unwrap() < at, "{name}: {event}");
+            }
+        }
+        assert!(RUNNER.find("\"keydown\", heard, true").unwrap() < RUNNER.find("document.write(entry)").unwrap());
     }
 
     #[test]

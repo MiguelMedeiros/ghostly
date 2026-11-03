@@ -21,6 +21,7 @@
 import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
+import { appInput } from "./open";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
 export interface AppLaunch {
@@ -106,6 +107,14 @@ interface BrokerOptions {
    * whose own window does not have the focus would pull that window over what the person is doing.
    */
   shown?: () => boolean | Promise<boolean>;
+  /**
+   * Whether the person is in the app now: its frame has the focus in a page that has it (web), its window has it
+   * (Desktop). Only then is the runner's `activity` their input (`onInput`): an app on screen beside a chat, or one
+   * left behind another window, keeps nothing unlocked.
+   */
+  inUse?: () => boolean | Promise<boolean>;
+  /** The person tapped or typed in the app (`activity`, while `inUse`): the lock screen counts it. */
+  onInput?: () => void;
   /** The app serves a file to its contact now (true), or no longer (false): the panel's header says so. */
   serving?: (on: boolean) => void;
   /** The runner answered the watchdog's ping `n` (`{pong: n}` on the port, counted with the requests). */
@@ -272,7 +281,7 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, serving: onServing, pong, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, inUse = () => false, onInput, serving: onServing, pong, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -621,6 +630,14 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       post({ id, ok: true });
       return stop("closed");
     }
+    // The runner's word that the person tapped or typed in the app (a trusted pointerdown or keydown, at most one every
+    // few seconds). The app runs in the runner's realm and can send it too, so it counts only while the person is in
+    // the app; the answer is the same either way.
+    if (type === "activity") {
+      post({ id, ok: true });
+      void Promise.resolve().then(inUse).then((yes) => { if (yes && phase !== "stopped") onInput?.(); }, () => {});
+      return;
+    }
 
     answer(type, args).then(({ value, transfer, file }) => {
       if (phase === "stopped") return;
@@ -745,6 +762,8 @@ export function startApp({ container, host, launch, view, onStop, onServing, sta
   const broker = createBroker({
     host, launch, view,
     shown: () => onScreen(frame),
+    inUse: () => onScreen(frame) && document.hasFocus() && document.activeElement === frame,
+    onInput: appInput,
     serving: onServing,
     pong: (n) => watch?.pong(n),
     post:(message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },

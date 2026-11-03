@@ -1,6 +1,7 @@
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
+import { choose } from "../support/select";
 import { STORE_URL, serveStore, testStore, type TestStore } from "../support/appStore";
 import type { AppViewMode } from "@ghostly/core";
 
@@ -324,4 +325,45 @@ test("a full-screen app opened from a chat on a phone covers the screen, with Ba
   await app.getByTestId("mini-app-back").click();
   await expect(app).toBeHidden();
   await expect(ana.page.getByTestId("mini-app-resume")).toHaveText("Back to Browser");
+});
+
+test("taps and keys in an app keep the lock away while the person plays it; left alone, it locks", { tag: ["@feature:apps.view", "@feature:settings.lock.idle"] }, async ({ peer }) => {
+  const store = await testStore({ view: "full", title: "Notes", tagline: "A page to write on", entry: "<!doctype html><meta charset=utf-8><title>Notes</title><body><textarea data-testid=notes></textarea>" });
+  const ana = await peer("ana");
+  await serveStore(ana.context, store);
+  await install(ana, store);
+  // Lock after 1 minute.
+  await ana.page.goto("/#/settings");
+  await ana.page.getByRole("switch", { name: "Lock Screen" }).click();
+  const passwords = ana.page.getByTestId("settings-password-form").locator("input[type=password]");
+  await passwords.nth(0).fill("spooky");
+  await passwords.nth(1).fill("spooky");
+  await ana.page.getByRole("button", { name: "Set password" }).click();
+  await expect(ana.page.getByText("Password set successfully")).toBeVisible();
+  await choose(ana.page.getByTestId("settings-timeout"), "1");
+
+  await ana.page.getByTestId("account-apps").click();
+  await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toHaveAttribute("data-place", "alone");
+  const notes = app.frameLocator("iframe").getByTestId("notes");
+  await expect(notes).toBeVisible();
+  // From here the test drives the page's clock: the person plays for longer than the lock time.
+  await ana.page.clock.install();
+
+  // Two minutes of play, twice the lock time, in the app alone: the Ghostly page around it hears none of it. The runner
+  // says so at most every 5 seconds of its own time, which each step waits out.
+  for (const move of ["e4", "Nf3", "Bc4"]) {
+    await notes.click();
+    await notes.pressSequentially(move);
+    await ana.page.waitForTimeout(5_100);
+    await ana.page.clock.runFor(40_000);
+  }
+  await expect(ana.page.getByText("Ghostly is locked")).toHaveCount(0);
+  await expect(notes).toHaveValue("e4Nf3Bc4");
+
+  // Left alone, the lock comes, and the app stops with it.
+  await ana.page.clock.runFor(65_000);
+  await expect(ana.page.getByText("Ghostly is locked")).toBeVisible();
+  await expect(app).toHaveCount(0);
 });
