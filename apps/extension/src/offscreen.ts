@@ -7,6 +7,7 @@ import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage } from "./messages";
 import { activeNamespace, databaseFor, peerLockFor } from "./profile";
+import { activeProfileId } from "../../ui/src/lib/profiles";
 import { fromOwnPage } from "./shared/sender";
 
 /**
@@ -119,7 +120,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     // Which profile runs, and which one the registry names now: they differ once a page switched.
     // Answered too when the peer did not start (its database did not open): the pages connect and are told why
     // (`start-failed`). Before, no answer came and the page got "The Ghostly peer did not start" after five seconds.
-    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace() } satisfies EngineStatus));
+    void server.then((s) => s.ready.catch(() => {}), () => {}).then(() => sendResponse({ profile, active: activeNamespace(), activeId: activeProfileId() } satisfies EngineStatus));
     return true;
   }
   if (message.type === "stop") {
