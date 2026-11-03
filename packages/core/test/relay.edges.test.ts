@@ -25,6 +25,15 @@ describe("relay URLs", () => {
     expect(relayUrlProblem(" https://relay.test/pkarr ")).toBeNull();
     for (const meant of ["wss://relay.example.org", "relay.example.org", "ftp://relay.example.org"]) expect(relayUrlProblem(meant)).toBe(`Use an https:// relay address: ${meant}`);
     for (const bad of ["not a url", "https://relay .example.org", "javascript:alert(1)"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+    for (const meant of [".relay.example.org", "a.b://", "wss://.relay.example"]) expect(relayUrlProblem(meant)).toBe(`Use an https:// relay address: ${meant}`);
+    for (const bad of [".relay", "relay.", "a/b.c", "a:b.c"]) expect(relayUrlProblem(bad)).toBe(`Not a relay address: ${bad}`);
+  });
+
+  it("answers a long pasted line at once", () => {
+    const line = "a.".repeat(60_000) + " x";
+    const start = performance.now();
+    expect(relayUrlProblem(line)).toBe(`Not a relay address: ${line}`);
+    expect(performance.now() - start).toBeLessThan(100);
   });
 
   it("defaults to the public relays, drops invalid and duplicate ones, and describes itself", () => {
