@@ -97,6 +97,27 @@ describe("a profile with no wallet yet", () => {
     expect(screen.getByTestId("wallet-first-error-usdt")).toBeInTheDocument();
   });
 
+  it("both failed and Try again makes one: the other's failure and its Try again stay, and the keys go to that Try again", async () => {
+    const { user, engine } = renderApp(<Wallet />);
+    engine.update({ wallet: empty() });
+    let cashuDown = true;
+    engine.on("walletCreate", (params) => {
+      if (params.type === "usdt" || cashuDown) throw new Error(`Could not create the Mainnet ${params.type} wallet: unreachable. Nothing was saved; try again.`);
+      const wallets = [...(engine.state.wallet.wallets ?? []), made(params.type, params.network)];
+      engine.update({ wallet: walletView({ mints: [mint(REAL_MINT, 0)], offers: offers(), wallets }) });
+      return made(params.type, params.network);
+    });
+    await user.click(await screen.findByTestId("wallet-first-mainnet"));
+    expect(await screen.findByTestId("wallet-first-error-usdt")).toBeInTheDocument();
+    expect(screen.getByTestId("wallet-first-error-cashu")).toBeInTheDocument();
+    cashuDown = false;
+    screen.getByTestId("wallet-first-retry-cashu").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("wallet-first-error-cashu")).not.toBeInTheDocument());
+    expect(screen.getByTestId("wallet-first-error-usdt")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("wallet-first-retry-usdt")).toHaveFocus());
+  });
+
   it("a first setup that made nothing gives way to a wallet made with New: its card shows, not the setup", async () => {
     const { user, engine } = renderApp(<Wallet />);
     engine.update({ wallet: empty() });
