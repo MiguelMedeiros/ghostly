@@ -455,6 +455,7 @@ describe("MessageInput: the + menu's Identity row", () => {
       expect(back()).toHaveTextContent("What Alice sees");
       expect(within(back()).getByTestId("composer-identity-sees")).toHaveTextContent("Ghostly · Ghost");
       expect(within(back()).getByTestId("composer-identity-key")).toHaveTextContent(KEY);
+      expect(within(back()).getByTestId("composer-identity-key")).toHaveAttribute("dir", "ltr");
       expect(status()).toBe("Alice sees only this identity");
       // Nothing to take back: no Share only this.
       expect(screen.queryByTestId("composer-identity-share")).not.toBeInTheDocument();
