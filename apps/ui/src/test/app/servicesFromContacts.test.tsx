@@ -1,5 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
+import { ChatServicesDialog } from "../../components/ChatServicesDialog";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { Services } from "../../pages/Services";
@@ -30,5 +31,42 @@ describe("Services → From your contacts", () => {
     // The verb stays whole beside the cut name, and the whole label is in the title.
     expect(open.textContent!.replace(name, "").trim()).not.toBe("");
     expect(open.getAttribute("title")).toBe(open.textContent);
+  });
+});
+
+// The same for an app this device shares: in Arabic its Latin name, its address and the contacts in its People list
+// lost their start where they were cut ("…ery long local web application").
+describe("Services → Your apps, in Arabic", () => {
+  it("cuts the app's name, its address and each contact's name and key in their own direction", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    try {
+      fakeEngine.update({ services: [{ id: "mine", name: "My very long local web application name", target: "http://localhost:3400/a/long/path", enabled: true, requests: 0, createdAt: 1 }] });
+      const { user } = renderApp(<Services />, { language: "ar" });
+      const card = await screen.findByTestId("service-item");
+      expect(within(card).getByText("My very long local web application name")).toHaveAttribute("dir", "auto");
+      expect(within(card).getByText("localhost:3400/a/long/path")).toHaveAttribute("dir", "auto");
+
+      await user.click(within(card).getByTestId("service-people"));
+      const grant = within(card).getByTestId("service-grant");
+      const lines = [...grant.querySelectorAll(".truncate")];
+      expect(lines.map((line) => line.textContent)).toContain("Ana");
+      for (const line of lines) expect(line).toHaveAttribute("dir", "auto");
+    } finally {
+      fakeEngine.features = { ...fakeEngine.features, shareLocalServices: false };
+    }
+  });
+
+  it("a chat's Services dialog: this device's apps (name and address) and the contact's", async () => {
+    fakeEngine.features = { ...fakeEngine.features, shareLocalServices: true };
+    try {
+      fakeEngine.update({ services: [{ id: "mine", name: "My very long local web application name", target: "http://localhost:3400/a/long/path", enabled: true, requests: 0, createdAt: 1 }] });
+      renderApp(<ChatServicesDialog peerPubKey="peer" name="Ana" onClose={() => {}} />, { language: "ar" });
+      const grant = await screen.findByTestId("chat-service-grant");
+      expect(within(grant).getByText("My very long local web application name")).toHaveAttribute("dir", "auto");
+      expect(within(grant).getByText("localhost:3400/a/long/path")).toHaveAttribute("dir", "auto");
+      expect(within(screen.getByTestId("chat-service-from")).getByText(name)).toHaveAttribute("dir", "auto");
+    } finally {
+      fakeEngine.features = { ...fakeEngine.features, shareLocalServices: false };
+    }
   });
 });
