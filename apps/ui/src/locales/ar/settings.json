@@ -55,6 +55,7 @@
   "dataCleared": "تم مسح جميع البيانات",
   "defaultNickname": "الاسم في المحادثات",
   "defaultNicknameHint": "يُستخدم عند بدء محادثة جديدة",
+  "deleteAllChatsCallOn": "هناك مكالمة جارية في إحدى المحادثات. أنهِها أولاً، ثم احذف جميع المحادثات.",
   "deleteAllChatsConfirm": "حذف جميع المحادثات ({{count}})؟",
   "deleteAllChatsHint": "تُحذف الرسائل والملفات. تبقى الإعدادات والمحافظ.",
   "groupDownloads": {
