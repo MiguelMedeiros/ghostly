@@ -1426,6 +1426,8 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => this.emitState(),
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
+    relayOnly: () => this.settings.relayOnly === true,
+    own: () => this.ownProfileSubjects(),
   });
 
   /** A contact's verified identity's posts and follows, asked when its card is chosen (PUBLIC-PROFILES.md, "Posts and follows"). */
@@ -1434,11 +1436,18 @@ export class GhostlyNode implements EngineImplementation {
     online: () => this.networkOn,
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
-    own: () => { const t = Math.floor(Date.now() / 1000); return this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject })); },
+    own: () => this.ownProfileSubjects(),
+    relayOnly: () => this.settings.relayOnly === true,
     contacts: () => this.contactSubjects(),
     ownNostrFollows: () => this.nostrSocial.ownFollows(),
     nostrMuted: (note, author) => this.nostrSocial.hides(note, author),
   });
+
+  /** The profile's own identities with a current proof. */
+  private ownProfileSubjects(): ProfileSubject[] {
+    const t = Math.floor(Date.now() / 1000);
+    return this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject }));
+  }
 
   /** What contacts shared that verifies now, with the chat it came in (paired chats only). */
   private contactSubjects(): (ProfileSubject & { linkId: string })[] {
