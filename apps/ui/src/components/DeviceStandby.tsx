@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { DeviceGateView } from "@ghostly/browser/devices/gate";
+import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { getBrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n } from "../contexts/I18nContext";
@@ -14,6 +15,7 @@ import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
 import { useComputerAwake } from "../lib/keepAwake";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { said } from "../lib/notices";
 import { fillNames } from "../lib/fillNodes";
 import { problemText, type Problem } from "../lib/problemText";
@@ -278,28 +280,37 @@ function Links() {
     <section aria-label={t("devices.standby.links")} className="space-y-2 text-start">
       <p className="text-center text-xs font-semibold uppercase tracking-wide text-text-muted">{t("devices.standby.links")}</p>
       <ul className="divide-y divide-border rounded-xl bg-surface text-sm" data-testid="device-standby-links">
-        {others.map((device) => {
-          const live = device.status === "live";
-          return (
-            <li key={device.key} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
-              <DeviceGlyph name={device.name} active={device.active} />
-              <div className="min-w-0 flex-1">
-                <p dir="auto" className="truncate text-text-primary">{device.name}</p>
-                <p className="text-xs text-text-muted">
-                  {device.active ? `${t("devices.section.active")} · ` : ""}
-                  <span className="inline-flex items-center gap-1">
-                    <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-accent" : "bg-text-muted"}`} />
-                    {live ? t("devices.section.live") : t("devices.section.connecting")}
-                  </span>
-                  {answer[device.key] && <span data-testid="device-standby-check-result" role="status" className="block">{answer[device.key]}</span>}
-                </p>
-              </div>
-              {live && <button type="button" data-testid="device-standby-check" onClick={() => void check(device.key)} className="min-h-10 max-md:min-h-11 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
-            </li>
-          );
-        })}
+        {others.map((device) => <LinkRow key={device.key} device={device} answer={answer[device.key]} onCheck={() => void check(device.key)} />)}
       </ul>
     </section>
+  );
+}
+
+/**
+ * One of those devices. Check connection is there only while its link is connected: when the link drops under the
+ * keyboard focus, the focus goes to this line, which now says Not connected, not to the page.
+ */
+function LinkRow({ device, answer, onCheck }: { device: DeviceSetView["devices"][number]; answer?: string; onCheck(): void }) {
+  const { t } = useI18n();
+  const row = useRef<HTMLLIElement>(null);
+  useFocusKept(row);
+  const live = device.status === "live";
+  return (
+    <li ref={row} data-testid="device-standby-link" data-status={device.status ?? "none"} className="flex flex-wrap items-center gap-3 px-4 py-3">
+      <DeviceGlyph name={device.name} active={device.active} />
+      <div className="min-w-0 flex-1">
+        <p dir="auto" className="truncate text-text-primary">{device.name}</p>
+        <p className="text-xs text-text-muted">
+          {device.active ? `${t("devices.section.active")} · ` : ""}
+          <span className="inline-flex items-center gap-1">
+            <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-accent" : "bg-text-muted"}`} />
+            {live ? t("devices.section.live") : t("devices.section.connecting")}
+          </span>
+          {answer && <span data-testid="device-standby-check-result" role="status" className="block">{answer}</span>}
+        </p>
+      </div>
+      {live && <button type="button" data-testid="device-standby-check" onClick={onCheck} className="min-h-10 max-md:min-h-11 rounded-lg border border-border px-3 text-xs text-text-secondary hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">{t("devices.section.check")}</button>}
+    </li>
   );
 }
 
