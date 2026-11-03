@@ -151,6 +151,45 @@ describe("what the guard asks about", () => {
     expect(findSecret(`my monero seed: ${seed} (keep it safe)`)).toEqual({ kind: "mnemonic" });
   });
 
+  /**
+   * Monero's lists in the app's other languages, as Monero GUI and monero-wallet-cli show a seed in them. Each is 32
+   * bytes (i * 37 + 11) and MyMonero's 16 (i * 53 + 7) as electrum-words.cpp writes them, with its checksum over
+   * the list's own prefix of each word (4 letters, Japanese 3, Chinese 1); never a key.
+   */
+  const MONERO_LISTS: [string, string, string][] = [
+    ["Spanish",
+      "lado pijama edición curar puré riqueza niño perfil grave engaño gimnasio miga pronto pegar lonja choque bicho guitarra arpa parte oferta cinco rendir grasa niño",
+      "agua causa perico opinar mensaje breve mozo digno llegar fijo arco causa agua"],
+    ["Portuguese",
+      "motriz teosofico fucsia eventualidade utilizar zefiro ragu tanzaniano jingle generoso jambo paciente unheiro sugestoes oblongo ducto caquizeiro jururu baforada software roer echarpe vulva jihad unheiro",
+      "airoso dioxido taoista rumoroso otite cisto pizzaria fiasco nublar iansa avizinhar dioxido pizzaria"],
+    ["French",
+      "occasion suite fuir facette trotter zeste religion soutenir magot gicler lors pour tour solo peigne dieu carie masque barbe sinus ronce distance visuel magie solo",
+      "aise cure souvent rumeur pompier chemin quitter flan partir ivre balle cure souvent"],
+    ["Italian",
+      "noleggio svuotare famiglia donna uragano zoccolo riunione stoffa lanterna filmato invito privacy tulipano spugna patogeno condotto brontolo levitare auspicio sparire scimmia corleone virtuoso lampone levitare",
+      "alfabeto circuito storia segreto porzione cammello recitare epilogo panorama gioiello atropina circuito circuito"],
+    ["Japanese",
+      "せんさい にわとり げんそう くふう のれん ひさしぶり つまらない にしき しふく こうない しちりん たれんと のがす なめらか たいうん ききて えんとつ しゃけん うがい なおす てほどき ぎしき はんきょう しはん にしき",
+      "あんがい かゆい にせもの てんてき たぼう おこる ちたい けつえき そよかぜ さうな いわかん かゆい ちたい"],
+    ["Chinese (simplified)",
+      "苗 苯 兵 首 妻 祝 亿 丽 械 船 唱 捕 灌 拍 户 布 区 贵 比 枝 峰 难 愤 血 愤",
+      "种 传 跨 童 纤 七 坦 远 纳 盐 正 传 种"],
+  ];
+
+  it.each(MONERO_LISTS)("a 25-word or 13-word Monero seed in %s", (_, seed, short) => {
+    for (const text of [seed, `my monero seed: ${seed} (keep it safe)`, seed.toUpperCase().split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"),
+      seed.normalize("NFD").replace(/\p{M}/gu, ""), `seed: ${short}`]) {
+      expect(findSecret(text)).toEqual({ kind: "mnemonic" });
+    }
+  });
+
+  it("Monero's own Portuguese test seed, each of whose words starts as an English one does", () => {
+    // tests/unit_tests/mnemonics.cpp: only Portuguese's 4-letter prefixes make "gnostico" its checksum word.
+    const seed = "cinzento luxuriante leonardo gnostico digressao cupula fifa broxar iniquo louvor ovario dorsal ideologo besuntar decurso rosto susto lemure unheiro pagodeiro nitroglicerina eclusa mazurca bigorna gnostico";
+    expect(findSecret(`seed: ${seed}`)).toEqual({ kind: "mnemonic" });
+  });
+
   it("an ordinary 25-word sentence, or one whose last word repeats an earlier one, is not a Monero seed", () => {
     expect(findSecret("we should meet at the cafe near the old bridge after work on friday so we can talk about the trip and the plan today")).toBeNull();
     expect(findSecret("tuesday dinner was lovely thanks again for cooking the pasta and the salad we should do it soon maybe at home next week on tuesday")).toBeNull();
@@ -366,6 +405,7 @@ describe("how long it takes", () => {
     ["seed words only", `${MNEMONICS[4].replace("title", "zoo")} `.repeat(200).slice(0, MAX)],
     ["Spanish seed words only", `${spanish.slice(0, 23).join(" ")} `.repeat(200).slice(0, MAX)],
     ["Japanese seed words only", `${japanese.slice(0, 23).join(IDEOGRAPHIC_SPACE)}${IDEOGRAPHIC_SPACE}`.repeat(200).slice(0, MAX)],
+    ["Monero's Chinese seed words only", "苗 苯 兵 首 妻 祝 亿 丽 械 船 唱 捕 灌 拍 户 布 区 贵 比 枝 峰 难 愤 血 ".repeat(400).slice(0, MAX)],
     ["hex", "ab".repeat(MAX / 2)],
     ["hex words with context", `secret ${HEX} `.repeat(200).slice(0, MAX)],
     ["base58", "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2 ".repeat(500).slice(0, MAX)],

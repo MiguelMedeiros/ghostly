@@ -63,22 +63,29 @@ const MONERO: SeedWords = {
   words: englishWords,
   lengths: [25, 13],
   wholeMessage: [25, 13],
-  checksumHolds: moneroChecksumHolds,
+  checksumHolds: moneroChecksum(MONERO_WORDS, 3),
 };
 let seeds = [BIP39, MONERO];
 
 /**
  * BIP39's own lists in the app's other languages, which a wallet set to one of them shows its seed in: the same
- * lengths and checksum as the English list. Handed in by `seedLists.ts`, which the composer loads as it opens (47 KB
- * gzipped, kept out of the app's first download) and the CLI with the guard.
+ * lengths and checksum as the English list. Monero's lists in them too, each with the prefix length its checksum
+ * reads. Handed in by `seedLists.ts`, which the composer loads as it opens (83 KB gzipped, kept out of the app's
+ * first download) and the CLI with the guard.
  */
-export function addSeedLists(lists: readonly (readonly string[])[]): void {
+export function addSeedLists(lists: readonly (readonly string[])[], moneroLists: readonly [list: readonly string[], prefix: number][] = []): void {
   seeds = [BIP39, MONERO, ...lists.map((list): SeedWords => ({
     index: lazyIndex(list, fold),
     words: foldedWords,
     lengths: MNEMONIC_LENGTHS,
     wholeMessage: MNEMONIC_LENGTHS,
     checksumHolds: bip39ChecksumHolds,
+  })), ...moneroLists.map(([list, prefix]): SeedWords => ({
+    index: lazyIndex(list, fold),
+    words: foldedWords,
+    lengths: MONERO.lengths,
+    wholeMessage: MONERO.wholeMessage,
+    checksumHolds: moneroChecksum(list, prefix),
   }))];
 }
 /** Checksums tried per message and word list at most: a 16 KiB run of seed words stays a few milliseconds. */
@@ -124,9 +131,9 @@ export function findSecret(text: string): SecretFinding | null {
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
  * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). The
- * same for Monero's English list, 25 or 13 words, and for BIP39's lists in the app's other languages. Prose breaks a
- * run at once: "the", "a", "is", "to", "and", "of" and "I" are on neither English list, nor "de", "la", "a", "e" on
- * the others.
+ * same for Monero's English list, 25 or 13 words, and for BIP39's and Monero's lists in the app's other languages.
+ * Prose breaks a run at once: "the", "a", "is", "to", "and", "of" and "I" are on neither English list, nor "de",
+ * "la", "a", "e" on the others.
  *
  * One word said over and over is not a seed, though one in 16 such runs passes a 12-word checksum ("word" does), and
  * every one passes Monero's: a window of a single word never counts, and a window mostly of one word ("abandon …
@@ -181,13 +188,17 @@ function bip39ChecksumHolds(indices: number[]): boolean {
 }
 
 /**
- * Monero (src/mnemonics/electrum-words.cpp): the last word repeats the one at CRC-32 of the other words' first three
- * letters, run together, modulo how many they are.
+ * Monero (src/mnemonics/electrum-words.cpp): the last word repeats the one at CRC-32 of the other words' first
+ * `prefix` letters as the list spells them (English 3, Japanese 3, Chinese 1, the others 4), run together in UTF-8,
+ * modulo how many they are.
  */
-function moneroChecksumHolds(indices: number[]): boolean {
-  const words = indices.slice(0, -1);
-  const prefixes = words.map((index) => MONERO_WORDS[index].slice(0, 3)).join("");
-  return words[crc32(prefixes) % words.length] === indices[indices.length - 1];
+function moneroChecksum(list: readonly string[], prefix: number): (indices: number[]) => boolean {
+  let prefixes: string[] | undefined;
+  return (indices) => {
+    prefixes ??= list.map((word) => Array.from(word).slice(0, prefix).join(""));
+    const words = indices.slice(0, -1);
+    return words[crc32(words.map((index) => prefixes![index]).join("")) % words.length] === indices[indices.length - 1];
+  };
 }
 
 const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
@@ -196,10 +207,12 @@ const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
   return c;
 });
 
-/** CRC-32 (the zlib one) of ASCII text. */
+const utf8 = new TextEncoder();
+
+/** CRC-32 (the zlib one) of text in UTF-8. */
 function crc32(text: string): number {
   let crc = 0xffffffff;
-  for (let i = 0; i < text.length; i++) crc = CRC32_TABLE[(crc ^ text.charCodeAt(i)) & 0xff] ^ (crc >>> 8);
+  for (const byte of utf8.encode(text)) crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
   return (crc ^ 0xffffffff) >>> 0;
 }
 
