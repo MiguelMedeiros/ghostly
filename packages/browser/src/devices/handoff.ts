@@ -12,7 +12,7 @@ import {
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
-import { MAX_EARLIER_SETS, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
+import { MAX_EARLIER_SETS, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
 import type { HandoffTakerFacts } from "./handoffWallets";
 
@@ -1704,7 +1704,11 @@ export class HandoffTaker {
       await this.ports.forget(handoff.old!).catch(() => {});
       // A replaced device's old namespace is the fork: what only it held stays, as "Only on this device", until the
       // person discards it (WISP 06 § Installing the staged state). Any other old namespace goes.
-      if (handoff.fork) await this.ports.records.amend({ handoff: undefined, forks: [...new Set([...(record.forks ?? []), handoff.old!])] }).catch(() => {});
+      // The time it was kept goes beside it (`forkKeptAt`): two of them are told apart by it.
+      if (handoff.fork) {
+        const forks = [...new Set([...(record.forks ?? []), handoff.old!])];
+        await this.ports.records.amend({ handoff: undefined, forks, forkKeptAt: { ...forkTimes({ ...record, forks }), [handoff.old!]: this.now() } }).catch(() => {});
+      }
       else {
         await this.ports.staging.drop(handoff.old!).catch(() => {});
         await this.ports.records.amend({ handoff: undefined }).catch(() => {});

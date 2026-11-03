@@ -137,7 +137,7 @@ import { createDeviceSigningKey } from "../devices/signingKey";
 import { afterStop, money, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
 import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
-import { MAX_ALLOWED_TOKENS } from "../devices/state";
+import { MAX_ALLOWED_TOKENS, forkTimes } from "../devices/state";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
@@ -7528,7 +7528,10 @@ export class GhostlyNode implements EngineImplementation {
     const host = handoffProfileHost();
     if (!host) throw new Error("This app cannot discard it");
     await host.staging.drop(database);
-    await amendDevice(databaseName(), { forks: record.forks.filter((name) => name !== database) });
+    // Its time goes with it (`forkKeptAt`), and any an older build left behind of a fork it discarded.
+    const forks = record.forks.filter((name) => name !== database);
+    const kept = forkTimes({ forks, forkKeptAt: record.forkKeptAt });
+    await amendDevice(databaseName(), { forks, forkKeptAt: Object.keys(kept).length ? kept : undefined });
     this.emitState();
   }
 

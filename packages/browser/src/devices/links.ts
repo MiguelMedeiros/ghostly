@@ -10,7 +10,7 @@ import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import type { DevicePatch, DeviceRecord, DeviceState } from "./state";
+import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceState } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
 import { acknowledged, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
@@ -100,6 +100,8 @@ export interface DeviceSetView {
   reenroll?: true;
   /** Forks kept here ("Only on this device", WISP 06 § Installing the staged state), by peer database name: Discard removes one. */
   forks?: string[];
+  /** When each of `forks` was kept (ms), by name; a fork an older build kept has none. */
+  forkKeptAt?: Record<string, number>;
 }
 
 /** The view of a device record and the links this device holds. A profile with no record is `single`, with no devices. */
@@ -124,7 +126,7 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
     ...(record.state === "active" && record.earlierSets.some((set) => set.foreign) ? { foreignSet: true as const } : {}),
     ...(record.setNotice && !record.setNotice.seen ? { notice: record.setNotice.names } : {}),
     ...(record.reenroll ? { reenroll: true as const } : {}),
-    ...(record.state === "active" && record.forks?.length ? { forks: [...record.forks] } : {}) };
+    ...(record.state === "active" && record.forks?.length ? { forks: [...record.forks], forkKeptAt: forkTimes(record) } : {}) };
 }
 
 export interface DeviceLinksOptions {
