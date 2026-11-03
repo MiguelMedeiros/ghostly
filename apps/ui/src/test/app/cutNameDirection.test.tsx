@@ -4,11 +4,13 @@ import type { GroupMemberView } from "@ghostly/browser/shared/types";
 import { GroupPaymentComposer } from "../../components/GroupPaymentComposer";
 import { MessageBubble } from "../../components/MessageBubble";
 import { ReplyBar, ReplyQuote } from "../../components/chat/ReplyQuote";
+import { Select } from "../../components/ui/Select";
+import { listOf } from "../select";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { everyWallet } from "../payments/fixtures";
 import { renderApp } from "../render";
 
-// covers: groups.payments.member, chat.location.card, chat.replies, app.i18n
+// covers: groups.payments.member, chat.location.card, chat.replies, app.select, app.i18n
 
 /*
  * A member's name and a place's name are someone's own words, in any script, and long enough to be cut. In Arabic a
@@ -47,6 +49,22 @@ describe("a person's own words in Arabic keep their own direction where they are
       expect(name).toHaveTextContent(NAME);
       expect(name).toHaveAttribute("dir", "auto");
       expect(name).toHaveClass("truncate", "max-w-full", "self-start");
+    }
+  });
+
+  it("a dropdown's label and second line, in its list and on its button", async () => {
+    const DEVICE = "Default - Built-in Audio Analog Stereo";
+    const { user } = renderApp(<Select aria-label="Microphone" value="mic" onChange={() => {}} options={[{ value: "mic", label: DEVICE, description: NAME }]} />, { language: "ar" });
+    const button = screen.getByRole("combobox", { name: "Microphone" });
+    const chosen = within(button).getByText(DEVICE, { exact: false });
+    expect(chosen).toHaveAttribute("dir", "auto");
+    expect(chosen).toHaveClass("min-w-0", "truncate");
+    await user.click(button);
+    const option = within(listOf(button)).getByRole("option");
+    for (const line of [within(option).getByText(DEVICE, { exact: true }), within(option).getByText(NAME, { exact: true })]) {
+      expect(line).toHaveAttribute("dir", "auto");
+      expect(line).toHaveClass("max-w-full", "truncate");
+      expect(line.parentElement).toHaveClass("items-start");
     }
   });
 });
