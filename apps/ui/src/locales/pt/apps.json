@@ -31,7 +31,9 @@
     "hint": "Vem com o Ghostly",
     "openNamed": "Abrir {{title}}",
     "remove": "Remover",
-    "removeNamed": "Remover {{title}}"
+    "removeNamed": "Remover {{title}}",
+    "removeText": "Ele não será oferecido de novo. Para tê-lo de volta, instale-o de uma loja.",
+    "removeTitle": "Remover {{title}}?"
   },
   "card": {
     "ask": "Peça a {{name}} um link para ele",

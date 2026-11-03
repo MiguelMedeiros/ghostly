@@ -31,7 +31,9 @@
     "hint": "随 Ghostly 提供",
     "openNamed": "打开 {{title}}",
     "remove": "移除",
-    "removeNamed": "移除 {{title}}"
+    "removeNamed": "移除 {{title}}",
+    "removeText": "它将不再出现。要找回它，请从商店安装。",
+    "removeTitle": "移除 {{title}}？"
   },
   "card": {
     "ask": "向 {{name}} 要一个链接",
