@@ -7,6 +7,7 @@ import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/err
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemText } from "../../lib/problemText";
+import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
 
@@ -460,6 +461,17 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["https://example.com/.well-known/ghostly.json was not found", `${BROWSER}/proofs/domain.ts`, " was not found`"],
   ["https://example.com/.well-known/ghostly/ab12.json was not found: it was deleted, or not uploaded yet", `${BROWSER}/proofs/providers/did.ts`, " was not found: it was deleted, or not uploaded yet"],
   ["https://example.com/.well-known/ghostly.json names no Ghostly proof", `${BROWSER}/proofs/domain.ts`, " names no Ghostly proof`"],
+  // A domain proof the record, file, resolver or host refused (agents#2541).
+  ["The TXT record at _ghostly.example.com is for another proof of this key", `${BROWSER}/proofs/domain.ts`, "`${where} is for another proof of this key`"],
+  ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", `${BROWSER}/proofs/domain.ts`, "`${where} names another Ghostly key: this proof was replaced or removed`"],
+  ["https://example.com/.well-known/ghostly.json is for another proof of this key", `${BROWSER}/proofs/domain.ts`, "`${where} is for another proof of this key`"],
+  ["https://example.com/.well-known/ghostly.json names another Ghostly key: this proof was replaced or removed", `${BROWSER}/proofs/domain.ts`, "`${where} names another Ghostly key: this proof was replaced or removed`"],
+  ["https://example.com/.well-known/ghostly.json is not a valid Ghostly file", `${BROWSER}/proofs/domain.ts`, " is not a valid ${method === 'nip05' ? 'NIP-05' : 'Ghostly'} file`"],
+  ["example.com could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *", `${BROWSER}/proofs/domain.ts`, "`${domain} could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *`"],
+  ["Quad9 could not be reached", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} could not be reached`"],
+  ["Quad9 refused the lookup", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} refused the lookup`"],
+  ["example.com has no address", `${BROWSER}/proofs/domain.ts`, "`${domain} has no address`"],
+  ["example.com points to a private network address, so it was not contacted", `${BROWSER}/proofs/domain.ts`, "`${domain} points to a private network address, so it was not contacted`"],
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
   // What the Add dialog's field refuses (agents#2222).
   ["Enter a domain name, like example.com", `${CORE}/domainProofs.ts`],
@@ -697,6 +709,33 @@ describe("errors in the app's language", () => {
     expect(problemText(new Error("That did:jwk contains a private key. Never share it: make a new key"), translators.pt)).toMatchObject({ title: "Esse did:jwk contém uma chave privada", next: "Nunca a compartilhe: crie uma chave nova." });
     // In English, the same words as before.
     expect(errorText("That is not a valid domain name", english)).toBe("That is not a valid domain name");
+  });
+
+  // agents#2541: these were "Something went wrong", or the English title, in every language.
+  it.each(LANGUAGES)("a domain proof the record, file, resolver or host refused says why and what to do in %s, the English behind the ⓘ", (language) => {
+    const t = translators[language];
+    const cases: [string, TranslationKey, TranslationKey, Record<string, string>?][] = [
+      ["The TXT record at _ghostly.example.com is for another proof of this key", "errors.proof.dnsOtherProof", "errors.proof.dnsValueNext"],
+      ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", "errors.proof.dnsOtherKey", "errors.proof.dnsValueNext"],
+      ["https://example.com/.well-known/ghostly.json is for another proof of this key", "errors.proof.fileOtherProof", "errors.proof.fileValueNext"],
+      ["https://example.com/.well-known/ghostly.json names another Ghostly key: this proof was replaced or removed", "errors.proof.fileOtherKey", "errors.proof.fileValueNext"],
+      ["https://example.com/.well-known/ghostly.json is not a valid Ghostly file", "errors.proof.fileInvalid", "errors.proof.fileInvalidNext", { kind: "Ghostly" }],
+      ["https://example.com/.well-known/nostr.json is not a valid NIP-05 file", "errors.proof.fileInvalid", "errors.proof.fileInvalidNext", { kind: "NIP-05" }],
+      ["example.com could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *", "errors.proof.hostUnreachable", "errors.proof.hostUnreachableNext", { domain: "example.com" }],
+      ["Quad9 could not be reached", "errors.proof.resolverUnreachable", "errors.proof.resolverNext"],
+      ["Quad9 refused the lookup", "errors.proof.resolverRefused", "errors.proof.resolverNext"],
+      ["example.com has no address", "errors.proof.noAddress", "errors.proof.noAddressNext", { domain: "example.com" }],
+      ["example.com points to a private network address, so it was not contacted", "errors.proof.privateAddress", "errors.proof.privateAddressNext", { domain: "example.com" }],
+    ];
+    for (const [raw, key, next, values] of cases) {
+      expect(problemText(new Error(raw), t), raw).toEqual({ tone: "error", title: t(key, values), next: t(next, values), detail: raw });
+    }
+    // The lookup that ran out of time on the last resolver tried says that none answered, not that one's name.
+    for (const resolver of ["Quad9", "Cloudflare", "Google"]) {
+      const said = problemText(new Error(`${resolver} could not be reached`), t);
+      expect(said.title).toBe(t("errors.proof.resolverUnreachable"));
+      expect(`${said.title} ${said.next}`).not.toContain(resolver);
+    }
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
