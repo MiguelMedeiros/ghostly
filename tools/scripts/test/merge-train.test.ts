@@ -792,6 +792,51 @@ describe("a run of the train", () => {
     }
   });
 
+  it("brings pull requests whose files GitHub does not list back one at a time, so following their comments ends", async () => {
+    // Each was told to add `queue` again "once the others are out of the line", which they were at once: all of them
+    // came back together, boarded together and left together again, with the same comment, run after run.
+    const repo = fakeRepo();
+    for (const n of [11, 14, 12, 13]) repo.add(n);
+    for (const n of [12, 13, 14]) repo.files.set(n, null);
+    const refused = "! [remote rejected] (refusing to allow a GitHub App to create or update workflow `.github/workflows/big.yml` without `workflows` permission)";
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if ((sha.split(":")[1]?.split(",") ?? []).includes("13")) throw new Error(refused);
+      return push(branch, sha);
+    };
+    // Alone, the train rebases it and pushes its branch: GitHub refuses that push too.
+    const pushHead = repo.git.pushHead;
+    repo.git.pushHead = async (branch: string, sha: string, expected: string) => (branch === "fix-13" ? { ok: false, message: refused } : pushHead(branch, sha, expected));
+    expect((await repo.run()).dropped).toEqual([14, 12, 13]);
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11"]);
+    const told = (n: number) => repo.comments.get(n)!.at(-1)!.body;
+    expect(told(12)).toMatch(/GitHub lists no files for this pull request \(it changes 3000 files or more, or none\)/);
+    expect(told(12)).toMatch(/one at a time, in number order[^.]*: add `queue` again now, before the others,/);
+    expect(told(13)).toMatch(/: once #12 has landed, left the line again or is not coming back, add `queue` again,/);
+    expect(told(14)).toMatch(/: once #13 has landed, left the line again or is not coming back, add `queue` again,/);
+    // Each does what its comment says, in turn: the two that change no workflow land, and the one that does leaves alone.
+    let at = 0;
+    const requeue = (n: number) => {
+      repo.pulls.get(n)!.labels.push(LABEL.queue);
+      repo.events.get(n)!.push({ event: "labeled", label: { name: LABEL.queue }, created_at: `2026-10-09T00:00:0${at++}Z` });
+    };
+    for (const n of [12, 13, 14]) {
+      requeue(n);
+      const r = await repo.run();
+      if (n === 13) {
+        expect(r.dropped).toEqual([13]);
+        expect(told(13)).toMatch(/this pull request changes a workflow \(\.github\/workflows\/big\.yml\)/);
+        continue;
+      }
+      expect(r.dropped).toEqual([]);
+      repo.settle();
+      await repo.run();
+    }
+    expect(repo.landed).toEqual(["#11", "#12", "#14"]);
+  });
+
   it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
     // A file name can hold the train's marks: quoted as is in the drop comment, the train's own comment then read as
     // #12's position comment, naming a head pushed later, and one still in line (queue:priority added during that run)
