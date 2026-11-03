@@ -162,7 +162,8 @@ export function Profile() {
         {all.map((entry) => (
           <div key={entry.id || "default"} className="flex items-center gap-3 px-4 py-2.5 min-h-14" data-testid="profile-row">
             <ProfileBadge entry={entry} size={30} avatar={entry.id === current.id ? myAvatar : undefined} />
-            <p className="flex-1 min-w-0 text-sm text-text-primary truncate">{entry.name}</p>
+            {/* In its own direction, on the box that cuts it, as wide as the name: see ProfileSwitcher. */}
+            <p className="flex-1 min-w-0 flex"><span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{entry.name}</span></p>
             {entry.id === current.id ? <span className="text-xs text-accent shrink-0">{t("profile.inUse")}</span> : <>
               <Button data-testid="profile-switch" disabled={!canSwitch} onClick={() => attempt(() => switchProfile(entry.id))}>{t("profile.switch")}</Button>
               {entry.id && (
