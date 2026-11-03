@@ -23,13 +23,13 @@ export const NO_PICTURE_METADATA = "This picture cannot be sent: Ghostly could n
 /** The types of the pictures stripped here: a file of one of them whose bytes are not that picture is refused. */
 const STRIPPED_TYPES = new Set([
   "image/jpeg", "image/jpg", "image/pjpeg", "image/png", "image/apng", "image/webp",
-  "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "image/avif",
+  "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence", "image/avif", "image/gif", "image/tiff", "image/tiff-fx",
 ]);
 
 /** HEIF brands (HEIC, AVIF, the generic `mif1`): an MP4 video's `ftyp` names none of them. */
 const HEIF_BRANDS = new Set(["heic", "heix", "heim", "heis", "hevc", "hevx", "mif1", "mif2", "msf1", "avif", "avis"]);
 
-type Kind = "jpeg" | "png" | "webp" | "heif";
+type Kind = "jpeg" | "png" | "webp" | "heif" | "gif" | "tiff";
 
 const u16be = (b: Uint8Array, at: number) => (b[at]! << 8) | b[at + 1]!;
 const u32be = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
@@ -42,6 +42,9 @@ function kindOf(b: Uint8Array): Kind | undefined {
   if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpeg";
   if (b.length >= 8 && b[0] === 0x89 && starts(b, 1, "PNG\r\n\x1a\n")) return "png";
   if (b.length >= 12 && starts(b, 0, "RIFF") && starts(b, 8, "WEBP")) return "webp";
+  if (starts(b, 0, "GIF87a") || starts(b, 0, "GIF89a")) return "gif";
+  // TIFF, and BigTIFF (refused): camera raw files (DNG, CR2, NEF, ARW) are TIFF too.
+  if (starts(b, 0, "II*\0") || starts(b, 0, "MM\0*") || starts(b, 0, "II+\0") || starts(b, 0, "MM\0+")) return "tiff";
   if (b.length >= 16 && starts(b, 4, "ftyp")) {
     const end = Math.min(b.length, u32be(b, 0));
     for (let at = 8; at + 4 <= end; at += 4) if (at !== 12 && HEIF_BRANDS.has(text(b, at, 4))) return "heif";
@@ -282,7 +285,124 @@ function stripHeif(b: Uint8Array): Uint8Array[] {
   return [out];
 }
 
-const STRIP: Record<Kind, (b: Uint8Array) => Uint8Array[]> = { jpeg: stripJpeg, png: stripPng, webp: stripWebp, heif: stripHeif };
+// GIF: the frames, their colour tables and timing (graphic control, plain text), the animation's loop (NETSCAPE2.0,
+// ANIMEXTS1.0) and its ICC profile stay byte for byte; comments, XMP and every other application extension go, and
+// whatever follows its end.
+
+const GIF_APPS_KEPT = new Set(["NETSCAPE2.0", "ANIMEXTS1.0", "ICCRGBG1012"]);
+
+function stripGif(b: Uint8Array): Uint8Array[] {
+  check(b.length >= 13);
+  /** A colour table's bytes, from the flags that say it is there and its size. */
+  const table = (flags: number) => (flags & 0x80 ? 3 << ((flags & 7) + 1) : 0);
+  /** The end of the data sub-blocks at `at`, past their empty block. */
+  const blocks = (at: number) => {
+    for (;;) {
+      check(at < b.length);
+      const length = b[at]!;
+      at += 1 + length;
+      if (!length) return at;
+    }
+  };
+  let at = 13 + table(b[10]!), framed = false;
+  check(at <= b.length);
+  const parts = [b.subarray(0, at)];
+  for (;;) {
+    check(at < b.length);
+    const introducer = b[at]!;
+    if (introducer === 0x3b) {
+      check(framed);
+      parts.push(Uint8Array.of(0x3b));
+      return parts;
+    }
+    if (introducer === 0x2c) {
+      // Image descriptor, its local colour table, the LZW code size, the image data.
+      check(at + 10 <= b.length);
+      const data = at + 10 + table(b[at + 9]!);
+      check(data < b.length);
+      const end = blocks(data + 1);
+      parts.push(b.subarray(at, end));
+      framed = true;
+      at = end;
+      continue;
+    }
+    check(introducer === 0x21 && at + 2 < b.length);
+    const label = b[at + 1]!, end = blocks(at + 2);
+    const app = label === 0xff && b[at + 2] === 11 && GIF_APPS_KEPT.has(text(b, at + 3, 11));
+    if (label === 0xf9 || label === 0x01 || app) parts.push(b.subarray(at, end));
+    else check(label === 0xfe || label === 0xff);
+    at = end;
+  }
+}
+
+// TIFF: what draws it stays where it is (size, strips or tiles, colour, Orientation, ICC profile); its text tags (Make,
+// Model, DateTime, Artist, Software, its description), XMP, IPTC and Photoshop's resources are overwritten with zeros
+// where they are, and the Exif and GPS IFDs left without an entry, so no offset in the file moves. A tag this does not
+// know, sub-images, JPEG-compressed data (whose own segments could hold an Exif) or a maker note refuses the picture:
+// so camera raw files (DNG, CR2, NEF, ARW), and BigTIFF, are refused.
+
+const TIFF_DRAWS = new Set([
+  254, 255, 256, 257, 258, 259, 262, 263, 264, 265, 266, 273, 274, 277, 278, 279, 280, 281, 282, 283, 284, 286, 287, 290,
+  291, 292, 293, 296, 297, 301, 317, 318, 319, 320, 321, 322, 323, 324, 325, 332, 334, 336, 338, 339, 340, 341, 529, 530,
+  531, 532, 0x8773,
+]);
+/** Text and documents about the picture: DocumentName to HostComputer, InkNames, XMP, Copyright, IPTC, Photoshop, Windows' XP tags, PrintIM. */
+const TIFF_METADATA = new Set([269, 270, 271, 272, 285, 305, 306, 315, 316, 333, 700, 0x8298, 0x83bb, 0x8649, 0x4746, 0x4749, 0x9c9b, 0x9c9c, 0x9c9d, 0x9c9e, 0x9c9f, 0xc4a5]);
+/** The IFDs of Exif, GPS and interoperability, emptied whole. */
+const TIFF_METADATA_IFDS = new Set([0x8769, 0x8825, 0xa005]);
+/** Compression without JPEG: none, CCITT, LZW, Deflate, PackBits. */
+const TIFF_COMPRESSION = new Set([1, 2, 3, 4, 5, 8, 32773, 32946]);
+/** Bytes per value of each field type. */
+const TIFF_TYPE_BYTES = [0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4];
+
+function stripTiff(b: Uint8Array): Uint8Array[] {
+  const little = b[0] === 0x49;
+  const u16 = (at: number) => { check(at + 2 <= b.length); return little ? b[at]! | (b[at + 1]! << 8) : u16be(b, at); };
+  const u32 = (at: number) => { check(at + 4 <= b.length); return little ? u32le(b, at) : u32be(b, at); };
+  check(b.length >= 8 && u16(2) === 42);
+  const out = b.slice(), seen = new Set<number>();
+  /** An IFD's entries: tag, type, the value's first byte (in the entry or where it points) and its bytes. */
+  const entries = (ifd: number) => {
+    check(ifd >= 8 && !seen.has(ifd) && seen.size < 1024);
+    seen.add(ifd);
+    const count = u16(ifd), next = ifd + 2 + count * 12;
+    u32(next);
+    return {
+      next,
+      list: Array.from({ length: count }, (_, i) => {
+        const at = ifd + 2 + i * 12, tag = u16(at), type = u16(at + 2);
+        check(type >= 1 && type < TIFF_TYPE_BYTES.length);
+        const bytes = TIFF_TYPE_BYTES[type]! * u32(at + 4);
+        const value = bytes <= 4 ? at + 8 : u32(at + 8);
+        check(Number.isSafeInteger(bytes) && value + bytes <= b.length);
+        return { at, tag, type, value, bytes };
+      }),
+    };
+  };
+  /** An Exif, GPS or interoperability IFD: every value zeroed, then the IFD itself, so it holds no entry. */
+  const empty = (ifd: number) => {
+    const { next, list } = entries(ifd);
+    for (const entry of list) {
+      check(entry.tag !== 0x927c);
+      if (TIFF_METADATA_IFDS.has(entry.tag)) empty(u32(entry.value));
+      out.fill(0, entry.value, entry.value + entry.bytes);
+    }
+    out.fill(0, ifd, next + 4);
+  };
+  for (let ifd = u32(4); ifd;) {
+    const { next, list } = entries(ifd);
+    for (const { tag, value, bytes } of list) {
+      if (tag === 259) check(TIFF_COMPRESSION.has(u16(value)));
+      if (TIFF_METADATA_IFDS.has(tag)) empty(u32(value));
+      else if (TIFF_METADATA.has(tag)) out.fill(0, value, value + bytes);
+      else check(TIFF_DRAWS.has(tag));
+    }
+    ifd = u32(next);
+  }
+  return [out];
+}
+
+const STRIP: Record<Kind, (b: Uint8Array) => Uint8Array[]> = { jpeg: stripJpeg, png: stripPng, webp: stripWebp, heif: stripHeif, gif: stripGif, tiff: stripTiff };
 
 /**
  * A picture's bytes without its metadata, as parts to put in a Blob; undefined when the file is not a picture this
@@ -299,13 +419,21 @@ export function stripPictureMetadata(bytes: Uint8Array, mime: string): Uint8Arra
 }
 
 /**
+ * Whether a file is a picture whose metadata goes before it is sent, by its first `PICTURE_METADATA_LIMITS.headBytes`
+ * bytes or by its type: then it is read whole and stripped (`stripPictureMetadata`), else it goes as it is.
+ */
+export function isStrippedPicture(head: Uint8Array, mime: string): boolean {
+  return !!kindOf(head) || STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase());
+}
+
+/**
  * `source` as it is sent: without its metadata when it is a picture (`stripPictureMetadata`), or undefined when it is
  * not one and goes as it is. Only its first bytes are read for any other file. Throws `NO_PICTURE_METADATA` for a
  * picture that cannot be stripped or is past `PICTURE_METADATA_LIMITS.maxBytes`; an error reading `source` as it is.
  */
 export async function withoutPictureMetadata(source: Blob, mime: string): Promise<Blob | undefined> {
   const head = new Uint8Array(await source.slice(0, PICTURE_METADATA_LIMITS.headBytes).arrayBuffer());
-  if (!kindOf(head) && !STRIPPED_TYPES.has(mime.split(";")[0]!.trim().toLowerCase())) return undefined;
+  if (!isStrippedPicture(head, mime)) return undefined;
   if (source.size > PICTURE_METADATA_LIMITS.maxBytes) throw new Error(NO_PICTURE_METADATA);
   const parts = stripPictureMetadata(new Uint8Array(await source.arrayBuffer()), mime);
   return parts && new Blob(parts as BlobPart[], { type: mime });

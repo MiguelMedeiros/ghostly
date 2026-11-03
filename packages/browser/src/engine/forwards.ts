@@ -1,5 +1,6 @@
+import { NO_PICTURE_METADATA, PICTURE_METADATA_LIMITS, isStrippedPicture, stripPictureMetadata } from "@ghostly/core";
 import { FileAppender, storedSize } from "../shared/storedFiles";
-import { SMALL_FILE_BYTES, fileBytes, fileBytesOf } from "../shared/fileBytes";
+import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { errorLine, fileStore, type StoredFile } from "../shared/idb";
 import type { MessageFile, StoredMessage } from "../shared/types";
 
@@ -55,42 +56,69 @@ async function bytesHere(file: StoredFile): Promise<number> {
 }
 
 /**
- * A copy of a file on this device, for sending in another chat under `file.id`: a small one whole, a larger one a
- * step at a time, never whole in memory. Refused while it is still arriving, or when its bytes are gone.
+ * A received picture as it goes on: without its metadata (one from an app that sent it with them keeps where its author
+ * took it, the device, the time), read whole; undefined for any other file, copied as it is. Refused with
+ * `NO_PICTURE_METADATA` when its metadata cannot be removed, as a picture sent from here is.
  */
-export async function copyForForward(sourceId: string, target: { linkId: string; wireId: string; timestamp: number; file: MessageFile }): Promise<void> {
+async function withoutMetadata(source: StoredFile, size: number, file: MessageFile, read: (offset: number, length: number) => Promise<Uint8Array>): Promise<Blob | undefined> {
+  if (file.voice || file.video || !size) return undefined;
+  if (!isStrippedPicture(await read(0, Math.min(PICTURE_METADATA_LIMITS.headBytes, size)), file.mime)) return undefined;
+  if (size > PICTURE_METADATA_LIMITS.maxBytes) throw new Error(NO_PICTURE_METADATA);
+  const whole = new Uint8Array(size);
+  for (let offset = 0; offset < size;) {
+    const part = await read(offset, Math.min(1024 * 1024, size - offset));
+    if (!part.length) throw new Error("The file is shorter than it says");
+    whole.set(part, offset);
+    offset += part.length;
+  }
+  return new Blob(stripPictureMetadata(whole, file.mime) as BlobPart[], { type: source.blob?.type ?? file.mime });
+}
+
+/**
+ * A copy of a file on this device, for sending in another chat under `file.id`: a small one whole, a larger one a
+ * step at a time, never whole in memory; a picture without its metadata, read whole. Refused while it is still
+ * arriving, or when its bytes are gone. Resolves to `file` as it goes: a stripped picture's size is its copy's.
+ */
+export async function copyForForward(sourceId: string, target: { linkId: string; wireId: string; timestamp: number; file: MessageFile }): Promise<MessageFile> {
   const source = await fileStore.get(sourceId);
   if (!source?.metadata) throw new Error("The file is not on this device any more");
-  const size = storedSize(source);
+  const stored = storedSize(source);
   // One arriving with files/3, or a group's, is whole only once its digest checked out (a group's desk says so once it
   // did: a holder can leave bytes of the whole size that are not the author's); any other is whole when all its bytes are here.
   const checked = source.wire3 ? source.wire3.state === "done" : !source.group || source.transfer?.state === "done";
-  if (source.direction === "in" && !checked || await bytesHere(source) !== size)
+  if (source.direction === "in" && !checked || await bytesHere(source) !== stored)
     throw new Error("The file has not arrived yet");
-  const { file, linkId, wireId, timestamp } = target;
+  const from = source.bytes ? await fileBytesOf(source.bytes) : null;
+  const read = async (offset: number, length: number) => source.blob ? new Uint8Array(await source.blob.slice(offset, offset + length).arrayBuffer()) : from!.read(source.id, offset, length);
+  // The bytes it is copied from, and their digest: the stripped copy's, computed on what is sent, never the original's.
+  const stripped = await withoutMetadata(source, stored, target.file, read);
+  const blob = stripped ?? source.blob, size = stripped?.size ?? stored;
+  const known = stripped ? undefined : source.digest;
+  const { linkId, wireId, timestamp } = target, file = stripped ? { ...target.file, size } : target.file;
   const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };
   const record = { id: file.id, linkId, createdAt: timestamp, direction: "out" as const, wireId, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
-  if (size <= SMALL_FILE_BYTES && source.blob) {
+  if (size <= SMALL_FILE_BYTES && blob) {
     // Its bytes in a Blob of its own: WebKit keeps a stored Blob as one file, and a slice of the original would share it,
     // gone for both once either record is deleted (see `fileStore`).
-    const copy = new Blob([await source.blob.slice(0, size).arrayBuffer()], { type: source.blob.type });
-    await fileStore.put({ ...record, blob: copy, ...(source.digest && { digest: source.digest }) });
-    return;
+    const copy = new Blob([await blob.slice(0, size).arrayBuffer()], { type: blob.type });
+    const digest = known ?? (stripped ? await blobDigest(copy) : undefined);
+    await fileStore.put({ ...record, blob: copy, ...(digest && { digest }) });
+    return file;
   }
   const bytes = await fileBytes();
-  const from = source.bytes ? await fileBytesOf(source.bytes) : null;
   try {
     const appender = new FileAppender(bytes, file.id);
     for (let offset = 0; offset < size;) {
-      const part = source.blob ? new Uint8Array(await source.blob.slice(offset, offset + 1024 * 1024).arrayBuffer()) : await from!.read(source.id, offset, Math.min(1024 * 1024, size - offset));
+      const part = blob ? new Uint8Array(await blob.slice(offset, offset + 1024 * 1024).arrayBuffer()) : await read(offset, Math.min(1024 * 1024, size - offset));
       if (!part.length) throw new Error("The file is shorter than it says");
       await appender.append(part);
       offset += part.length;
     }
     await appender.close();
-    // The same bytes, so the same digest: read back only when the original never had one written down.
-    const digest = source.digest ?? await bytes.digest(file.id);
+    // The same bytes, so the same digest: read back only when the original never had one written down (or was stripped).
+    const digest = known ?? await bytes.digest(file.id);
     await fileStore.put({ ...record, bytes: bytes.kind, digest });
+    return file;
   } catch (error) {
     await bytes.remove(file.id).catch(() => {});
     throw error;
