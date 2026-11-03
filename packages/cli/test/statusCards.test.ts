@@ -374,6 +374,27 @@ describe("task update", () => {
     expect(card).not.toHaveProperty("step");
   });
 
+  it("says how far a task is one way: a percent given replaces the card's steps, steps given replace its percent", async () => {
+    const { ctx, rows } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix", done: 2, total: 5 } });
+    vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 90 } });
+    expect(rows("chat-one")[0]!.card).toMatchObject({ progress: 90 });
+    expect(rows("chat-one")[0]!.card).not.toHaveProperty("done");
+    expect(rows("chat-one")[0]!.card).not.toHaveProperty("total");
+    vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+    // Before, the 90 stayed: the card showed "90% · 4 of 5 steps", its bar at 90.
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { done: 4, total: 5 } });
+    expect(rows("chat-one")[0]!.card).toMatchObject({ done: 4, total: 5 });
+    expect(rows("chat-one")[0]!.card).not.toHaveProperty("progress");
+    // Both given at once (`--json`) stay as given; a step's text alone leaves either.
+    vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 85, done: 4, total: 5 } });
+    vi.setSystemTime(Date.now() + CARD_UPDATE_GAP_MS);
+    await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { step: "Tests" } });
+    expect(rows("chat-one")[0]!.card).toMatchObject({ progress: 85, done: 4, total: 5, step: "Tests" });
+  });
+
   it("paces a card's updates in a daemon: those sooner than 2.5 s merge into one that goes when the time is up", async () => {
     const { ctx, node, rows } = fake("daemon");
     vi.useFakeTimers();
