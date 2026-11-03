@@ -96,6 +96,9 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
     await mine.hover();
     await mine.getByTestId("message-options").click();
     await check("message ⋮");
+    // Its red Delete under the pointer: danger's own red read 3.8:1 on the Cyan dark row (#ea4335 on #142840).
+    await page.getByTestId("message-delete-everyone").hover();
+    await check("message ⋮, Delete hovered");
     await page.getByTestId("message-delete-everyone").click();
     await expect(page.getByTestId("message-delete-confirm")).toBeVisible();
     await check("delete confirmation");
