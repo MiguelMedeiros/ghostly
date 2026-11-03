@@ -36,10 +36,11 @@ export interface HoldHost {
   /** Plain HTTP to this machine is a storage address too: the e2e suite's local server. Off in every shipped app. */
   loopbackStorage?: () => boolean;
   /**
-   * "Hide my IP from contacts": null when it is off. On, the only storage hosts a pickup may reach (this person's own
-   * storage's); an address on any other host, which the contact chose, is not read, and what it holds waits there.
+   * "Hide my IP from contacts": null when it is off. On, the only storage places a pickup may reach (this person's own
+   * bucket, `holdStoragePlace`); any other address, which the contact chose, is not read, and what it holds waits there.
+   * Not a host: under path-style addresses a contact's bucket at the same provider has this person's host.
    */
-  hiddenIpHosts?: () => string[] | null;
+  hiddenIpPlaces?: () => string[] | null;
   now?: () => number;
   /** How long an item is held, when a test shortens it; never longer than the profile's seven days. */
   ttlMs?: () => number | undefined;
@@ -73,6 +74,21 @@ export const holdFetchTimeoutMs = (max: number): number => HOLD_FETCH_MS + Math.
 const HOLD_HIDDEN_IP = "Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.";
 /** Thrown where an address is about to be read, so a pickup stops there and starts again once it may. */
 class HiddenIpError extends Error { constructor() { super(HOLD_HIDDEN_IP); } }
+
+/**
+ * Where a person's own S3 storage is, as `S3Store` addresses it (path-style): its endpoint's origin and path, then its
+ * bucket, ending in "/" so a bucket whose name starts with this one's ("bob", "bobby") is not under it.
+ */
+export function holdStoragePlace(s3: { endpoint: string; bucket: string }): string {
+  const url = new URL(`${s3.endpoint.trim().replace(/\/+$/, "")}/${s3.bucket.trim()}/`);
+  return `${url.origin}${url.pathname}`;
+}
+
+/** Whether an address is under a place: the same origin, and its (normalised) path inside the place's. */
+function underPlace(url: string, place: string): boolean {
+  const parsed = new URL(url);
+  return `${parsed.origin}${parsed.pathname}`.startsWith(place);
+}
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 /**
@@ -645,8 +661,8 @@ export class HoldEngine {
     // The contact named this address: checked where it is used as well as where it was read, and no redirect is
     // followed (one would lead anywhere, this machine and its network included; a presigned address has none).
     if (!isHoldUrl(url, this.host.loopbackStorage?.())) throw new Error("The storage address is not one this app reads");
-    const hosts = this.host.hiddenIpHosts?.();
-    if (hosts && !hosts.includes(new URL(url).host.toLowerCase())) throw new HiddenIpError();
+    const places = this.host.hiddenIpPlaces?.();
+    if (places && !places.some((place) => underPlace(url, place))) throw new HiddenIpError();
     const doFetch = this.host.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
     const response = await doFetch(url, { cache: "no-store", credentials: "omit", redirect: "error", signal });
     if (!response.ok) throw new Error(`The storage answered ${response.status}`);
