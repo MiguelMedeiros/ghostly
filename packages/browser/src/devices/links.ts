@@ -280,6 +280,8 @@ export class DeviceLinks implements DeviceLinkEngine {
   private lastHintRead = 0;
   /** When a link closing by the other side's doing last made this standby read the turn (`linkLost`). */
   private lastLossRead = 0;
+  /** A hint came inside `TURN_HINT_EVERY_MS` of the last read, and a read is due at its end. */
+  private hintDeferred = false;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: DeviceLinksOptions) {
@@ -314,12 +316,17 @@ export class DeviceLinks implements DeviceLinkEngine {
     }, after);
   }
 
-  /** Reads the turn and, when the device's state or the device it believes changed, tells the pages. */
+  /** Reads the turn and, when the device's state, the device it believes or a name in the set changed, tells the pages. */
   private async checkAndShow(): Promise<TurnOutcome | null> {
     const before = await this.record().catch(() => null);
     const outcome = await this.checkTurn();
     const now = await this.record().catch(() => null);
-    if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll)) this.host?.show(viewOf(now));
+    // A name is news too: the active device renamed a device (`rename.ts`), and the screen names the active device.
+    const names = (record: DeviceRecord) => record.deviceSet.map((slot) => slot?.name ?? "").join("\n");
+    if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll || names(now) !== names(before))) {
+      this.host?.show(viewOf(now));
+      if (names(now) !== names(before)) this.changed();
+    }
     return outcome;
   }
 
@@ -632,6 +639,19 @@ export class DeviceLinks implements DeviceLinkEngine {
     try { running.link.sendDeviceFrame({ t: DEVICE_TOKENS_FRAME, k: tokens }); return true; } catch { return false; }
   }
 
+  /**
+   * The active device wrote a record the other devices should read now (a rename, `rename.ts`): the turn hint goes
+   * over each live link under the current secret, as at the start of every session. The number of devices told.
+   */
+  hintTurn(): number {
+    let told = 0;
+    for (const running of this.running.values()) {
+      if (running.earlier || !this.isLive(running)) continue;
+      try { running.link.sendDeviceFrame({ t: DEVICE_TURN_HINT }); told++; } catch { /* it reads at its next session or its own timer */ }
+    }
+    return told;
+  }
+
   // ---------- push between the devices (WISP 06 § Push and the phone, `push.ts`) ----------
 
   private pushQueue: Promise<unknown> = Promise.resolve();
@@ -736,11 +756,17 @@ export class DeviceLinks implements DeviceLinkEngine {
   }
 
   /**
-   * A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. On the active
-   * device the engine reads it (`onActiveHint`): it stops itself when another device took over.
+   * A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. A hint inside
+   * that time is not dropped: one read follows at its end (the active device renamed a device just after this session
+   * opened, and its record is news). On the active device the engine reads it (`onActiveHint`): it stops itself when
+   * another device took over.
    */
   private async hinted(): Promise<void> {
-    if (Date.now() - this.lastHintRead < TURN_HINT_EVERY_MS) return;
+    const wait = this.lastHintRead + TURN_HINT_EVERY_MS - Date.now();
+    if (wait > 0) {
+      if (!this.hintDeferred) { this.hintDeferred = true; this.later(wait, () => { this.hintDeferred = false; void this.hinted().catch(() => {}); }); }
+      return;
+    }
     const record = await this.record();
     if (record?.state === "active") { this.lastHintRead = Date.now(); this.options.onActiveHint?.(); return; }
     if (!record || record.state === "removed") return;
