@@ -1,0 +1,1 @@
+Storage says that an encrypted profile has no Fedimint: encryption is not turned on while the profile has a federation, and no federation is joined while it is on (decided in 04, replacing the proposed page layer).
