@@ -82,6 +82,7 @@ import {
   createIdentity,
   decodeInviteCode,
   inviteOwnership,
+  contactAskerHolds,
   OwnInviteError,
   encodeInviteCode,
   edgeParams,
@@ -1452,13 +1453,65 @@ export class GhostlyNode implements EngineImplementation {
     accept: async (request) => {
       const params = decodeInviteCode(request.invite);
       if (!params || inviteOwnership(params, [...this.links.values()].map((l) => l.stored)).kind !== "new") throw new Error("This request's invite is for a chat you already have.");
-      const { linkId } = await this.joinLink({ inviteCode: request.invite });
-      this.renameLink({ linkId, label: request.name });
-      // Dated by the request, never later than it came: the requester chose that date.
-      await this.storeMessage({ linkId, id: `peer_contact_${request.key.slice(0, 32)}`, text: request.text, sender: "peer", timestamp: Math.min(request.issued, request.receivedAt), via: "pkarr" });
-      return linkId;
+      this.accepting = true;
+      try {
+        const { linkId } = await this.joinLink({ inviteCode: request.invite });
+        this.renameLink({ linkId, label: request.name });
+        // The invite is a bearer code: whoever made it may not be who asked. The text is the request's, not confirmed,
+        // until the requester's app proves in the chat that it holds the asker key (`contactAskerHeard`).
+        const message = `peer_contact_${request.key.slice(0, 32)}`;
+        const contactAsker = { link: request.link, key: request.key, message };
+        const live = this.links.get(linkId);
+        if (live) live.stored = { ...live.stored, contactAsker };
+        await db.patchLink(linkId, { contactAsker });
+        // Dated by the request, never later than it came: the requester chose that date.
+        await this.storeMessage({ linkId, id: message, text: request.text, sender: "peer", timestamp: Math.min(request.issued, request.receivedAt), via: "pkarr", unconfirmed: true });
+        // A proof heard while the chat was being joined.
+        const heard = this.askerHeard.get(linkId);
+        if (heard) await this.contactAskerHeard(linkId, heard.frame, heard.keys);
+        return linkId;
+      } finally {
+        this.accepting = false;
+        this.askerHeard.clear();
+      }
     },
   });
+
+  /** An accept of a contact request is under way, and the last asker's proof each chat said meanwhile. */
+  private accepting = false;
+  private readonly askerHeard = new Map<string, { frame: unknown; keys: { mine: string; peer: string } }>();
+
+  /**
+   * The contact said it asked through this profile's link (WISP 8xx § Accept). The chat's request text is confirmed
+   * when the proof is the asker key's for this chat; anything else changes nothing.
+   */
+  private async contactAskerHeard(linkId: string, frame: unknown, keys: { mine: string; peer: string }): Promise<void> {
+    const live = this.links.get(linkId);
+    if (!live) return;
+    const expected = live.stored.contactAsker;
+    if (!expected) {
+      // Heard between the join and the mark: kept for the accept to look at, and only while one runs.
+      if (this.accepting) this.askerHeard.set(linkId, { frame, keys });
+      return;
+    }
+    // This side joined the requester's invite: the contact is the inviter.
+    if (!contactAskerHolds(frame, expected, { inviter: keys.peer, joiner: keys.mine })) return;
+    live.stored = { ...live.stored, contactAsker: undefined };
+    await db.patchLink(linkId, { contactAsker: undefined });
+    if (await db.patchMessage(linkId, expected.message, m => m.unconfirmed ? { unconfirmed: undefined } : null)) await this.messagesChanged(linkId, [expected.message]);
+  }
+
+  /**
+   * A chat a request of this profile's started is live: its proof that this side asked goes to the contact, on each
+   * session (WISP 8xx § Accept). Nothing for any other chat.
+   */
+  private sayContactAsker(linkId: string): void {
+    const link = this.links.get(linkId)?.link;
+    const keys = link?.participationKeys;
+    if (!link || !keys) return;
+    // This side made the invite the owner joined: the inviter.
+    void this.contactAsks.proof(linkId, { inviter: keys.mine, joiner: keys.peer }).then(frame => { if (frame) link.sendContactAsker(frame); }).catch(() => {});
+  }
 
   /** Requests this profile sends through others' contact links (WISP 8xx). */
   readonly contactAsks = new ContactAsks({
@@ -8394,6 +8447,7 @@ export class GhostlyNode implements EngineImplementation {
         onHold: (state) => this.hold.peerSaid(linkId, state),
         onPeerProof: EXTERNAL_IDENTITIES_ENABLED ? async frame => { await (await this.proofsFor(linkId)).receive(frame); } : undefined,
         onIdentityProof: stored.profile ? frame => this.identities.frame(linkId, frame) : undefined,
+        onContactAsker: stored.profile ? (frame, keys) => { void this.contactAskerHeard(linkId, frame, keys).catch(() => {}); } : undefined,
         onTransportsChanged: () => {
           if (live.link && !live.link.availableTransports.includes("hyperdht/1")) this.retryRelayLater();
           // How to dial this side changed (an endpoint went, or homed on a relay): the capability record says so.
@@ -8440,7 +8494,7 @@ export class GhostlyNode implements EngineImplementation {
         },
         onPairingState: state => {
           live.pairing = state;
-          if (state.status === "ready") this.identities.ready(linkId); else this.identities.closed(linkId);
+          if (state.status === "ready") { this.identities.ready(linkId); this.sayContactAsker(linkId); } else this.identities.closed(linkId);
           // What the contact allows is remembered for requests held while it is away, or waiting for live: its choice,
           // not whether it had a wallet then (it may make one meanwhile), as its capability record says too.
           if (state.status === "ready" && live.link) void this.hold.rememberPeerMethods(linkId, PAYMENT_METHODS.filter(m => live.link!.peerChoosesPayment(m))).catch(() => {});
@@ -8510,6 +8564,7 @@ export class GhostlyNode implements EngineImplementation {
             this.wakeLimiter.reset(linkId);
             void this.desk.replay(linkId).catch(() => {}).then(() => this.sendWaiting(linkId)).catch(() => {});
             this.identities.ready(linkId);
+            this.sayContactAsker(linkId);
           }
           if (state !== "open") { live.proofs?.stop(); this.identities.closed(linkId); }
           if (stored.profile && live.stored.deliveryMode !== "dht" && state !== "open") void this.outboxFor(linkId).disconnected().catch(() => {});

@@ -86,6 +86,11 @@ export interface StoredLink {
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
   /**
+   * A chat started by accepting a contact request (WISP 8xx § Accept), until its requester's app proves it holds the
+   * request's asker key `key` (asked through `link`): the request's text, row `message`, shows as not confirmed till then.
+   */
+  contactAsker?: { link: string; key: string; message: string };
+  /**
    * Messages deleted on this device, by id, so a republished one is not stored again: 500 at most, my deletions never
    * pushing out the contact's ids nor theirs mine (`withDeletedId`).
    */
@@ -982,6 +987,11 @@ export interface StoredMessage {
   nick?: string;
   file?: MessageFile;
   paymentId?: string;
+  /**
+   * The text a contact request carried, while its requester's app has not proven in the chat that it sent it (WISP 8xx
+   * § Accept): whoever made the chat's invite may not be who asked.
+   */
+  unconfirmed?: true;
   /** Group messages: the member key of the sender. */
   member?: string;
   /** Group history lines that are not messages. */

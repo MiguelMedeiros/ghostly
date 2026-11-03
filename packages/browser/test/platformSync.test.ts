@@ -266,6 +266,15 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(sync.toChatMessage(message({ id: "me_y", sender: "me", edit: { seq: 1, at: 5, history: [], pending: true } }), "peer-1", "me-1", true).edit).toEqual({ seq: 1, at: 5, history: [], pending: true });
   });
 
+  it("shows a contact request's text as not confirmed, and drops the mark once the engine's row is confirmed", async () => {
+    const stored = await mirror([message({ id: "peer_contact_k", text: "Hi, it's me", unconfirmed: true })]);
+    expect(stored.messages[0]).toMatchObject({ id: "peer_contact_k", unconfirmed: true });
+    changes = 0;
+    engine.messageListeners[0]("link-1", [message({ id: "peer_contact_k", text: "Hi, it's me" })]);
+    expect(storage.loadSession("s1")!.messages[0]!.unconfirmed).toBeUndefined();
+    expect(changes).toBe(1);
+  });
+
   it("a received row the engine gave a place to takes that place here too, with the time its sender said", async () => {
     // Stored under the contact's clock, which was ahead (before places were kept); the engine settled it since.
     const shown = [{ id: "peer_x", sender: "peer" as const, text: "answer", timestamp: 500 }, { id: "me_y", sender: "me" as const, text: "reply", timestamp: 300 }];
