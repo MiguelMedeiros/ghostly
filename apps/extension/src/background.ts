@@ -2,7 +2,7 @@ import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } 
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
-import { rememberPendingUpdate } from "./updates";
+import { rememberPendingUpdate, takePagesToReopen } from "./updates";
 import servicesEn from "../../ui/src/locales/en/services.json";
 
 /**
@@ -86,13 +86,19 @@ async function waitForEngine(): Promise<EngineStatus> {
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
 /**
  * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
- * button. The tab opens even when the peer does not start, so the page can say why. An update opens nothing.
+ * button. The tab opens even when the peer does not start, so the page can say why. An update opens again the pages
+ * "Update and restart" closed; one that came by itself opens nothing, as the person is somewhere else.
  */
 chrome.runtime.onInstalled.addListener((details) => {
   const started = ensureEngine();
   if (details?.reason === "install") void started.catch(() => {}).then(() => showApp()).catch(() => {});
+  else if (details?.reason === "update") void started.catch(() => {}).then(reopenAfterUpdate).catch(() => {});
   else void started.catch(() => {});
 });
+
+async function reopenAfterUpdate(): Promise<void> {
+  for (const url of await takePagesToReopen()) await chrome.tabs.create({ url });
+}
 
 /**
  * Chrome has a newer version but will not swap it in while Ghostly is running,
