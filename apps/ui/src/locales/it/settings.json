@@ -57,6 +57,7 @@
   "defaultNicknameHint": "Usato quando avvii una nuova chat",
   "deleteAllChatsCallOn": "C’è una chiamata in una chat. Chiudila prima, poi elimina tutte le chat.",
   "deleteAllChatsConfirm": "Eliminare tutte le {{count}} chat?",
+  "deleteAllChatsConfirm_one": "Eliminare l'unica chat?",
   "deleteAllChatsHint": "Messaggi e file vengono eliminati. Opzioni e wallet restano.",
   "groupDownloads": {
     "always": "Sempre",

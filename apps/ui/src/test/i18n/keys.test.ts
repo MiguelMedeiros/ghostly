@@ -109,7 +109,7 @@ const ARABIC_COUNT_ALONE = new Set([
   "connection.history.title", "errors.group.growMore", "group.create.communityHint", "group.link.full", "group.link.note",
   "group.link.noteCommunity", "group.members.missing", "group.members.missingOne", "group.readNote", "group.readNoteCommunity",
   "messageDetails.value.edits", "profileSwitcher.unread", "pwa.sharePastLimit", "saved.rowLabel", "secretGuard.sat",
-  "secretGuard.sats", "settings.deleteAllChatsConfirm", "settings.storageParts.files", "sidebar.folder.unreadCount",
+  "secretGuard.sats", "settings.storageParts.files", "sidebar.folder.unreadCount",
   "sidebar.rail.unreadCount", "wallet.fedimint.facts.guardianList", "wallet.fedimint.restoreFailed", "wallet.remove.pending",
   "wallet.source.available",
 ]);

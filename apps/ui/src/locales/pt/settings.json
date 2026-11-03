@@ -57,6 +57,7 @@
   "defaultNicknameHint": "Usado ao iniciar uma nova conversa",
   "deleteAllChatsCallOn": "Há uma chamada em uma conversa. Encerre-a primeiro e depois exclua todas as conversas.",
   "deleteAllChatsConfirm": "Excluir todas as {{count}} conversas?",
+  "deleteAllChatsConfirm_one": "Excluir {{count}} conversa?",
   "deleteAllChatsHint": "Mensagens e arquivos são apagados. Ajustes e carteiras ficam.",
   "groupDownloads": {
     "always": "Sempre",
