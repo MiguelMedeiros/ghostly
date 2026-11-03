@@ -449,6 +449,26 @@ describe("the password proof and its limits", () => {
     expect(w.takerRecords.record.handoffAttempts).toEqual({ [C]: { recent: [], total: 9 } });
   });
 
+  it("a count the active device started again stays started again when the profile moves back to a device that kept the old one", async () => {
+    // B gave the profile away with C refused (15); on A, "Let C try again" cleared it. Moving back to B brought B's own old
+    // 15 back, and C was refused again right after the person let it try.
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    await w.giverRecords.amend({ handoffAttempts: { [C]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
+    await w.giver.allowAgain(C);
+    await w.takerRecords.amend({ handoffAttempts: { [C]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts?.[C]).toBeUndefined();
+  });
+
+  it("a count the giver no longer holds (a right password cleared it) goes from the taker's old copy too", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(100));
+    await w.takerRecords.amend({ handoffAttempts: { [C]: { recent: [], total: 9 } } });
+    await fullPull(w);
+    expect(w.takerRecords.record.handoffAttempts?.[C]).toBeUndefined();
+  });
+
   it("fifteen with no success: refused until the person lets that device try again", { timeout: 30_000 }, async () => {
     const w = world();
     await w.giverRecords.amend({ handoffAttempts: { [B]: { recent: [], total: HANDOFF_ATTEMPTS.total } } });
