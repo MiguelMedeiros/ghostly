@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -91,5 +91,21 @@ describe("an installed app's icon", () => {
     expect(pictures()).toEqual(Array.from({ length: 20 }, () => "blob:icon-1"));
     expect(fakeEngine.callsTo("appFile")).toHaveLength(2);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:icon-0");
+  });
+
+  // The bundle check reads an icon's PNG header only, so a checked icon.png can still fail to draw: Chromium put its
+  // broken-picture mark in the tile, WebKitGTK a "?". The app's generic mark shows instead, and a new version tries its own.
+  it("that does not draw shows the generic mark", async () => {
+    await refreshInstalledApps();
+    renderApp(cards());
+    await screen.findAllByTestId("app-icon", {}, { timeout: 3000 });
+    await settle();
+    for (const img of screen.getAllByTestId("app-icon").map((icon) => icon.querySelector("img"))) fireEvent.error(img!);
+    expect(pictures()).toEqual(Array.from({ length: 20 }, () => undefined));
+    expect(screen.getAllByTestId("app-icon").every((icon) => icon.querySelector("svg"))).toBe(true);
+    installed = app(NEXT);
+    await act(() => refreshInstalledApps());
+    await settle();
+    expect(pictures()).toEqual(Array.from({ length: 20 }, () => "blob:icon-1"));
   });
 });
