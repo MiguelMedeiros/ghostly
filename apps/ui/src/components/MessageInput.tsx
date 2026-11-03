@@ -188,6 +188,8 @@ export function MessageInput({
   const sharedIdentity = useRef(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showPanel, setShowPanel] = useState(false);
+  /** The panel was opened from the keyboard: it takes the focus, and Escape gives it back to its button. */
+  const [panelByKey, setPanelByKey] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const plusRef = useRef<HTMLButtonElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -999,7 +1001,7 @@ export function MessageInput({
             data-testid="composer-expressions"
             aria-expanded={showPanel}
             aria-haspopup="dialog"
-            onClick={() => { const open = !showPanel; closeAll(); setShowPanel(open); }}
+            onClick={(e) => { const open = !showPanel; closeAll(); setShowPanel(open); setPanelByKey(e.detail === 0); }}
             disabled={disabled}
             className={`composer-icon-button ${showPanel ? "composer-icon-button-on" : ""}`}
             aria-label={t("composer.expressions")}
@@ -1111,10 +1113,12 @@ export function MessageInput({
           dismissRef={fieldRef}
           onEmoji={handleEmojiSelect}
           onGif={handleGifSelect}
+          focusOnOpen={panelByKey}
           onClose={() => {
             setShowPanel(false);
             const at = document.activeElement;
-            if (!phone && (!at || at === document.body || at.closest("[data-testid='expression-panel']"))) textareaRef.current?.focus();
+            if (phone || (at && at !== document.body && !at.closest("[data-testid='expression-panel']"))) return;
+            if (panelByKey) panelButtonRef.current?.focus(); else textareaRef.current?.focus();
           }}
         />
       )}
