@@ -22,6 +22,8 @@
     "unreadCount": "{{count}} non letti in {{name}}",
     "unreadOne": "1 non letto in {{name}}"
   },
+  "foundCount": "{{count}} chat trovate",
+  "foundOne": "1 chat trovata",
   "group": {
     "adminAnswered": "L'app dell'admin ha risposto…",
     "answerFailed": "Non è andato a buon fine. Riprova.",
@@ -65,6 +67,7 @@
     "unreadCount": "{{name}}, {{count}} messaggi non letti",
     "unreadOne": "{{name}}, 1 messaggio non letto"
   },
+  "searchLabel": "Cerca chat",
   "searchPlaceholder": "Cerca chat...",
   "settings": "Opzioni",
   "sharedIdentity": "Ha condiviso un'identità",

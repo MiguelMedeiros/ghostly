@@ -56,7 +56,7 @@ const SCREENS: Screen[] = [
   { name: "Services, where sharing needs another app", render: () => <Services /> },
   { name: "Services, sharing a local app", share: true, render: () => <Services />, open: async (user) => { await user.click(await screen.findByTestId("add-service")); } },
   { name: "Home", render: () => <Home /> },
-  { name: "the chat list's search with nothing found", render: () => <UpdateProvider><Sidebar /></UpdateProvider>, open: async (user) => { await user.type(screen.getByRole("textbox"), "zzzz"); } },
+  { name: "the chat list's search with nothing found", render: () => <UpdateProvider><Sidebar /></UpdateProvider>, open: async (user) => { await user.type(screen.getByRole("searchbox"), "zzzz"); } },
   { name: "a file's details, sent live and confirmed", render: () => details(FILE_SENT), open: detailsLoaded },
   { name: "a payment request's details, on the DHT floor", render: () => details(REQUEST_ON_DHT), open: detailsLoaded },
 ];
