@@ -129,7 +129,7 @@ const LND: LightningNode = {
     const { url, macaroon } = lnd.credentials(who);
     const source = await lightningSource(actor, "lnd", async (area) => {
       const form = area.getByTestId("provider-form-lnd");
-      await form.getByLabel("REST address").fill(url);
+      await form.getByLabel(either("REST address")).fill(url);
       await form.getByLabel("Macaroon (hex)").fill(macaroon);
       await form.getByTestId("provider-save").click();
     }, macaroon);
@@ -150,8 +150,8 @@ const CLN: LightningNode = {
     const rune: string = cln.rune(who);
     const source = await lightningSource(actor, "core-lightning", async (area) => {
       const form = area.getByTestId("provider-form-core-lightning");
-      await form.getByLabel("Node id").fill(cln.nodeId(who));
-      await form.getByLabel("WebSocket address").fill(cln.CLN_REGTEST[who].websocket);
+      await form.getByLabel(either("Node id")).fill(cln.nodeId(who));
+      await form.getByLabel(either("WebSocket address")).fill(cln.CLN_REGTEST[who].websocket);
       await form.getByLabel("Rune").fill(rune);
       await form.getByTestId("provider-save").click();
     }, rune);
@@ -168,7 +168,7 @@ const NWC: LightningNode = {
     // An app connection of this scenario's own on the person's Alby Hub.
     const uri: string = await nwc.nwcUri(who, { fresh: true });
     const source = await lightningSource(actor, "nwc", async (area) => {
-      await area.getByTestId("provider-form-nwc").getByLabel("Connection URI").fill(uri);
+      await area.getByTestId("provider-form-nwc").getByLabel(either("Connection URI")).fill(uri);
       await area.getByTestId("provider-save").click();
     }, uri);
     await expect(source.getByTestId("lightning-source-current")).toContainText("Nostr Wallet Connect");
