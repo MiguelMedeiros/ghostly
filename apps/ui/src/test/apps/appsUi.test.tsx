@@ -1150,11 +1150,38 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Not in any of your stores");
   });
 
-  it("Remove takes it off the list for good, and the focus goes to Add", async () => {
+  it("Remove asks first, as a store's Remove does: Cancel and Escape keep it and give the focus back to Remove", async () => {
+    engineWith({ installed: false, removed: false });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const remove = within(await screen.findByTestId("built-in-app")).getByRole("button", { name: "Remove Chess" });
+    remove.focus();
+    await user.keyboard("{Enter}");
+    // One press removes nothing: the question takes the place of the buttons, and Enter again does not remove.
+    const question = screen.getByTestId("built-in-app-remove-question");
+    expect(question).toHaveTextContent("Remove Chess?");
+    expect(question).toHaveTextContent("not be offered again");
+    expect(question).toHaveTextContent("from a store");
+    expect(screen.queryByTestId("built-in-app-open")).not.toBeInTheDocument();
+    expect(within(question).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("built-in-app-remove-question")).not.toBeInTheDocument();
+    expect(screen.getByTestId("built-in-app-remove")).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("built-in-app-remove-question")).not.toBeInTheDocument();
+    expect(screen.getByTestId("built-in-app-remove")).toHaveFocus();
+    expect(fakeEngine.callsTo("appUninstall")).toEqual([]);
+    expect(screen.getByTestId("built-in-app")).toBeInTheDocument();
+  });
+
+  it("Remove, then Remove in its question, takes it off the list for good, and the focus goes to Add", async () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("built-in-app");
     await user.click(within(row).getByRole("button", { name: "Remove Chess" }));
+    expect(fakeEngine.callsTo("appUninstall")).toEqual([]);
+    await user.click(screen.getByTestId("built-in-app-remove-confirm"));
     await waitFor(() => expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]));
     await waitFor(() => expect(screen.queryByTestId("built-in-app")).not.toBeInTheDocument());
     expect(await screen.findByTestId("apps-none")).toBeInTheDocument();

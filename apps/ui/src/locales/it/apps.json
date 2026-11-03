@@ -31,7 +31,9 @@
     "hint": "Inclusa in Ghostly",
     "openNamed": "Apri {{title}}",
     "remove": "Rimuovi",
-    "removeNamed": "Rimuovi {{title}}"
+    "removeNamed": "Rimuovi {{title}}",
+    "removeText": "Non ti verrà più proposta. Per riaverla, installala da uno store.",
+    "removeTitle": "Rimuovere {{title}}?"
   },
   "card": {
     "ask": "Chiedi a {{name}} un link",

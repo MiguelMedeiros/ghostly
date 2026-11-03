@@ -31,7 +31,9 @@
     "hint": "Ghostly に付属",
     "openNamed": "{{title}} を開く",
     "remove": "削除",
-    "removeNamed": "{{title}} を削除"
+    "removeNamed": "{{title}} を削除",
+    "removeText": "今後は表示されません。元に戻すには、ストアからインストールしてください。",
+    "removeTitle": "{{title}} を削除しますか?"
   },
   "card": {
     "ask": "{{name}} にリンクを頼む",

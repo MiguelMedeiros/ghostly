@@ -31,7 +31,9 @@
     "hint": "Comes with Ghostly",
     "openNamed": "Open {{title}}",
     "remove": "Remove",
-    "removeNamed": "Remove {{title}}"
+    "removeNamed": "Remove {{title}}",
+    "removeText": "It will not be offered again. To get it back, install it from a store.",
+    "removeTitle": "Remove {{title}}?"
   },
   "card": {
     "ask": "Ask {{name}} for a link to it",
