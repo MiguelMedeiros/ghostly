@@ -218,8 +218,9 @@ export default async function PrivacyPage() {
           <li>
             <Term>Identities and public profiles.</Term> Checking an identity someone shared, or showing its public
             profile, asks the service behind it, such as Nostr relays, Pubky&apos;s servers, Bluesky&apos;s public API,
-            GitHub or GitLab, keys.openpgp.org, or a DNS-over-HTTPS resolver (Quad9 by default) for a domain. They see your IP address and which
-            identity is looked up. Public profiles can be turned off in Settings, Security. Some proofs you make are
+            GitHub or GitLab, keys.openpgp.org, or a DNS-over-HTTPS resolver for a domain: Quad9 by default, then
+            Cloudflare and then Google when it gives no answer (the Mac app and Safari cannot read Quad9, so they ask
+            Cloudflare). They see your IP address and which identity is looked up. Public profiles can be turned off in Settings, Security. Some proofs you make are
             public by nature, such as a DNS record, a file on your website or a post on your Bluesky account: you
             publish them, and anyone can read them.
           </li>
