@@ -11,7 +11,7 @@ import { renderApp } from "../render";
 
 // covers: app.composer.paste-files
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const onSend = vi.fn<(text: string) => Promise<string | null>>();
 const toBehind = vi.fn<(file: File) => Promise<string | null>>();

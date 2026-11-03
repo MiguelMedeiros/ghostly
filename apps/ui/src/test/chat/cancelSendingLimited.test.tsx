@@ -7,7 +7,7 @@ import { translatorFor } from "../../locales";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, playCue: vi.fn() }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {}, playCue: vi.fn() }));
 
 const PEER = "peer".padEnd(52, "p");
 const TEXT = "the door code is 4471";

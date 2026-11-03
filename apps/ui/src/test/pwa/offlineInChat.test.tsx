@@ -18,7 +18,7 @@ import { windowIs } from "../viewport";
  * has it, and the chat does not say it twice.
  */
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const SENTENCE = "Offline · Your chats are here. Nothing goes out until you're back online.";

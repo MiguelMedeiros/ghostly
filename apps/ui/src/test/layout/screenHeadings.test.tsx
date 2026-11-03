@@ -20,7 +20,7 @@ import { renderApp } from "../render";
  * named by a heading: an h1 on a phone, where it is the whole screen, an h2 beside the open chat on a wide window.
  */
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p"), ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y");
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });

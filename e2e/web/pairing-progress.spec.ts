@@ -182,7 +182,9 @@ test("the connected moment is heard once on each side, together with the scene g
     // connected.mp3 (0.88 s), decoded and played: the synthesized fallback has no buffer.
     expect(connected.duration).toBeGreaterThan(0.8);
     expect(connected.duration).toBeLessThan(1);
-    // Asked for in the same change that starts the connected moment: within a few frames of the live scene.
+    // Asked for in the same change that starts the connected moment, its file fetched while the scene waited: it starts
+    // a few microtasks after the live scene, on this page's own clock (under 7 ms on two loaded cores). Fetched and
+    // decoded only then, it came 20 to 40 ms after, and over 100 ms on a loaded machine.
     expect(liveAt).not.toBeNull();
     expect(Math.abs(connected.at - liveAt!)).toBeLessThan(100);
   }

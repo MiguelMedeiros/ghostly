@@ -18,7 +18,7 @@ import { renderApp } from "../render";
  * midnight. In 1:1 chats and groups, and when a group's older history comes in above its first page.
  */
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const at = (d: number, h: number, min = 0) => new Date(2026, 9, d, h, min).getTime();
 /** Each date on screen, in order, with the first message under it. */
