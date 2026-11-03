@@ -249,6 +249,35 @@ async function setOnline(p: Peer, online: boolean): Promise<void> {
   await expect(p.page.getByPlaceholder("Message…")).toBeVisible();
 }
 
+/**
+ * Lets the test hold what a page sends its contacts over WebRTC (`hold`), from now and after each reload: while held,
+ * frames wait in the page; let go, those whose channel is still open go out, in order, and the others are dropped
+ * with their channel. A cut is pressed while the sender's frames are held: the receiver stops within one file window
+ * (2 MiB) of where the test saw it, not wherever the transfer got in the second the Offline switch took. Here, a whole
+ * 150 MB file went by in that second, and a cut meant for mid-way came after the last byte.
+ */
+async function holdable(p: Peer): Promise<void> {
+  const install = () => {
+    const send = RTCDataChannel.prototype.send as (this: RTCDataChannel, data: unknown) => void;
+    const held: [RTCDataChannel, unknown][] = [];
+    const hold = { on: false, release() { hold.on = false; for (const [channel, data] of held.splice(0)) if (channel.readyState === "open") send.call(channel, data); } };
+    (window as unknown as { __e2eHold: typeof hold }).__e2eHold = hold;
+    RTCDataChannel.prototype.send = function (this: RTCDataChannel, data: unknown) {
+      if (hold.on) held.push([this, data]);
+      else send.call(this, data);
+    } as RTCDataChannel["send"];
+  };
+  await p.context.addInitScript(install);
+  await p.page.evaluate(install);
+}
+const hold = (p: Peer, on: boolean) => p.page.evaluate((on) => {
+  const held = (window as unknown as { __e2eHold: { on: boolean; release(): void } }).__e2eHold;
+  if (on) held.on = true;
+  else held.release();
+}, on);
+/** Polled every 100 ms: at 1 s, the last ten percent of the file could come and go between two looks. */
+const often = { intervals: [100] };
+
 test("cut mid-way, a file goes on by itself; restarted, the sender can Send again and the receiver Ask again, one bubble each", { tag: ["@feature:files.large.resume", "@feature:files.large.resend", "@feature:files.large.request"] }, async ({ peer }, testInfo) => {
   test.setTimeout(420_000);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
@@ -262,22 +291,27 @@ test("cut mid-way, a file goes on by itself; restarted, the sender can Send agai
   await alice.page.getByTestId("file-input").setInputFiles(path);
   const incoming = () => bob.page.getByTestId("file-bubble").filter({ hasText: name });
   const outgoing = () => alice.page.getByTestId("file-bubble").filter({ hasText: name });
+  await holdable(alice);
   await incoming().getByTestId("file-accept").click({ timeout: 60_000 });
 
   // 1. Cut (Bob goes offline), then back: it goes on by itself, with nothing to press.
-  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(10);
+  await expect.poll(() => percent(incoming()), { timeout: 120_000, ...often }).toBeGreaterThanOrEqual(10);
+  await hold(alice, true);
   await setOnline(bob, false);
   await expect(outgoing().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
   const cut = await percent(incoming());
+  await hold(alice, false);
   await setOnline(bob, true);
-  await expect.poll(() => percent(incoming()), { timeout: 150_000 }).toBeGreaterThan(cut + 5);
+  await expect.poll(() => percent(incoming()), { timeout: 150_000, ...often }).toBeGreaterThan(cut + 5);
   await expect(outgoing().getByTestId("file-resend")).toHaveCount(0);
 
   // 2. Cut again, and Alice's app restarts: unfinished since it started, her bubble offers Send again.
-  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(40);
+  await expect.poll(() => percent(incoming()), { timeout: 120_000, ...often }).toBeGreaterThanOrEqual(40);
+  await hold(alice, true);
   await setOnline(bob, false);
   await expect(outgoing().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
   const second = await percent(incoming());
+  // Her restart drops what was held, and nothing is held after it.
   await alice.page.reload();
   await expect(outgoing().getByTestId("file-resend")).toBeVisible({ timeout: 30_000 });
   // What she sees is what Bob confirmed, kept across the restart: not zero.
@@ -285,13 +319,19 @@ test("cut mid-way, a file goes on by itself; restarted, the sender can Send agai
   await outgoing().getByTestId("file-resend").click();
   await expect(outgoing().getByRole("alert")).toHaveCount(0);
   await setOnline(bob, true);
-  await expect.poll(() => percent(incoming()), { timeout: 150_000 }).toBeGreaterThan(second + 5);
+  await expect.poll(() => percent(incoming()), { timeout: 150_000, ...often }).toBeGreaterThan(second + 5);
   await expect(outgoing().getByTestId("file-resend")).toHaveCount(0, { timeout: 30_000 });
 
   // 3. Cut from Alice's side this time, and Bob's app restarts: his bubble offers Ask again.
-  await expect.poll(() => percent(incoming()), { timeout: 120_000 }).toBeGreaterThanOrEqual(70);
+  await expect.poll(() => percent(incoming()), { timeout: 120_000, ...often }).toBeGreaterThanOrEqual(70);
+  await hold(alice, true);
   await setOnline(alice, false);
   await expect(incoming().getByTestId("file-status")).toContainText("Waiting for connection", { timeout: 90_000 });
+  // Cut short of its last byte: with every byte here, Bob checks the file and waits for Alice's sum, with no Ask again.
+  const third = await percent(incoming());
+  testInfo.annotations.push({ type: "cuts", description: `${cut}% ${second}% ${third}%` });
+  expect(third, "the cut left the file unfinished").toBeLessThan(100);
+  await hold(alice, false);
   await bob.page.reload();
   await expect(incoming().getByTestId("file-request")).toBeVisible({ timeout: 30_000 });
   await incoming().getByTestId("file-request").click();
