@@ -305,6 +305,8 @@
     "fullBytes": "Si supererebbero i {{max}} MB in attesa per il tuo contatto",
     "fullItems": "Il tuo contatto ha già {{max}} elementi in attesa",
     "fullNext": "Invialo di nuovo quando il tuo contatto ne avrà ritirati alcuni.",
+    "hiddenIp": "Il tuo contatto ha lasciato elementi per te nel suo spazio di archiviazione",
+    "hiddenIpNext": "Nascondi il mio IP è attivo, quindi aspettano lì finché non lo disattivi.",
     "messageGone": "Il messaggio non c'è più",
     "needPinned": "I messaggi trattenuti richiedono un S3 e un contatto fissato",
     "needStorageNext": "Configura un S3 in Profilo → Backup.",

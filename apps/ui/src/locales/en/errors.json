@@ -305,6 +305,8 @@
     "fullBytes": "This would put more than {{max}} MB waiting for your contact",
     "fullItems": "Your contact already has {{max}} items waiting",
     "fullNext": "Send it again once they pick some up.",
+    "hiddenIp": "Your contact left items for you on their storage",
+    "hiddenIpNext": "Hide my IP is on, so they wait there until you turn it off.",
     "messageGone": "The message is gone",
     "needPinned": "Held messages need S3 storage and a pinned contact",
     "needStorageNext": "Set up S3 storage in Profile → Backups.",
