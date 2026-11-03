@@ -1437,6 +1437,27 @@ describe("crash recovery (WISP 06 § Installing the staged state)", () => {
     expect(toBase64Url(sha256(w.storage.spaces.get(staged)!.files.get("f1")!))).toBe(file.sha256);
   });
 
+  it("B at Checking, the release lost: Cancel changes nothing, B asks again, and installs the release that comes", async () => {
+    const w = world();
+    w.profile.add("f1", bytesOf(2_000));
+    w.link.meddle = (_from, frame) => (frame.t === "handoff-release" ? null : frame);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1);
+    await reloadGiver(w);
+    await until(() => w.giverRecords.record.state === "standby");
+    expect(w.taker.view()?.step).toBe("checking");
+    // A released already: B may leave only on A's cancel or its own turn read, never on the person's Cancel.
+    await w.taker.cancel();
+    expect(w.taker.view()?.step).toBe("checking");
+    expect(w.takerRecords.record.handoff?.step).toBe("verified");
+    expect(w.link.sent.some((s) => s.from === B && s.frame.t === "handoff-cancel")).toBe(false);
+    w.link.meddle = undefined;
+    await vi.advanceTimersByTimeAsync(HANDOFF_TIMINGS.releaseMs + 10);
+    await until(() => w.reloads === 1);
+    expect(w.takerRecords.record.state).toBe("taking");
+  });
+
   it("a standby whose last pull stopped: a reload shows nothing more about it", async () => {
     const w = world();
     await w.taker.pull("not the password");

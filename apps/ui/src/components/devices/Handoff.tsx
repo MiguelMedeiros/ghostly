@@ -64,7 +64,8 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
                           : fillNames(t("devices.handoff.step.connecting"), { device });
   // Beside the line and not in it: the line is read aloud when it changes, and the bytes change at every read of the copy.
   const amount = view.step === "copying" ? t("devices.handoff.step.copyAmount", { done: sizeText(view.bytes, t), total: sizeText(view.total, t) }) : undefined;
-  const cancellable = !failed && ["connecting", "authorizing", "copying", "paused", "ready", "rest", "checking"].includes(view.step);
+  // Not at "Checking": the other device may have let the profile go already, and only it can still stop the move.
+  const cancellable = !failed && ["connecting", "authorizing", "copying", "paused", "ready", "rest"].includes(view.step);
   // Cancel goes once the move stopped (or went past the point where it could): the keyboard focus that was on it goes to
   // the move's words, not to the page.
   const root = useRef<HTMLDivElement>(null);

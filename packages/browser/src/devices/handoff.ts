@@ -1133,10 +1133,13 @@ export class HandoffTaker {
     });
   }
 
-  /** "Not now" on an offer, or Cancel before the release. After the release there is nothing to cancel here. */
+  /**
+   * "Not now" on an offer, or Cancel before the release. Verified ("Checking"), the giver may have released already: this
+   * device leaves only on the giver's cancel or its turn read, and asks for the release meanwhile (WISP 06).
+   */
   cancel(): Promise<void> {
     return this.exclusive(async () => {
-      if (this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
+      if (this.phase === "verified" || this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
       if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
       await this.giveUp("cancelled");
     });
