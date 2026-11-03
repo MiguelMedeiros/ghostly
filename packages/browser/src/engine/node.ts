@@ -405,6 +405,12 @@ interface LiveLink {
    */
   waitingSends?: Promise<Set<string>>;
   /**
+   * The rows a reply names by an id that is not their own (`unkeyedRef`: a contact's files/2 file, a payment, a file of
+   * mine), by that id. Read from the chat's history once in a run, at the first received reply its keyed reads miss,
+   * then kept as rows are stored (`storeNewMessage`).
+   */
+  unkeyedRows?: Promise<Map<string, string>>;
+  /**
    * The messages of mine whose card is due to go again live (`cardDue`, `restoreCards`), by their id. Read from the
    * chat's history once in a run (with the chat, at the start), then kept as rows come due and go.
    */
@@ -425,6 +431,9 @@ const waitsForLive = (m: StoredMessage) => m.sender === "me" && m.delivery === "
 
 /** A message of mine whose card went as its text alone and is due to go again live (`restoreCards`). */
 const cardDue = (m: StoredMessage) => m.sender === "me" && (m.cardRestore ?? m.buttonsRestore) === "due";
+
+/** The id a 1:1 chat's row goes by on both sides when its own row is not `peer_`/`me_` and that id (`resolveReply`). */
+const unkeyedRef = (m: StoredMessage) => { const ref = replyRef(m, false); return ref && m.id !== `peer_${ref}` && m.id !== `me_${ref}` ? ref : undefined; };
 
 /** This side's participation key in a chat: derived from its seed once, not at every state built. */
 /** A read of the contact's packet that found it as the last one did: online the same, the same packet, name and services. */
@@ -3685,7 +3694,13 @@ export class GhostlyNode implements EngineImplementation {
       const row = [`peer_${reply.id}`, `me_${reply.id}`].find(id => live.deletedIds?.includes(id));
       return { ...message, replyTo: { ...reply, snippet: "", messageId: row ?? reply.id, from: reply.from ?? (row?.startsWith("peer_") ? "peer" : "me") } };
     }
-    if (!original && !group) {
+    // Else the rows that go by another id than their own, read once in a run: a contact can name ids that never were,
+    // and each reply to its own file read the whole chat, 45 ms at 10,000 messages on fake-indexeddb.
+    if (!original && !group && live) {
+      const id = (await this.unkeyedRowsOf(this.links.get(message.linkId)!)).get(reply.id);
+      const row = id === undefined || id === message.id ? undefined : await db.getMessage(message.linkId, id);
+      if (row && replyRef(row) === reply.id) original = row;
+    } else if (!original && !group) {
       history = await db.getMessages(message.linkId);
       original = history.find(m => m.id !== message.id && replyRef(m) === reply.id);
     }
@@ -4725,6 +4740,12 @@ export class GhostlyNode implements EngineImplementation {
       known.delete(message.id);
     }
     if (waiting.length) await this.messagesChanged(linkId, waiting.map(m => m.id));
+  }
+
+  /** The rows of a chat a reply names by another id than their own (`unkeyedRef`), read once in a run. */
+  private unkeyedRowsOf(live: LiveLink): Promise<Map<string, string>> {
+    return live.unkeyedRows ??= db.getMessages(live.stored.id).then(history => new Map(history.flatMap(m => { const ref = unkeyedRef(m); return ref ? [[ref, m.id] as const] : []; })),
+      error => { live.unkeyedRows = undefined; throw error; });
   }
 
   /**
@@ -9165,6 +9186,9 @@ export class GhostlyNode implements EngineImplementation {
     if (!(await db.addMessage(message))) return false;
     // It waits for the live link: `sendWaiting` finds it by its id (a list not read yet reads it from the history).
     if (live && waitsForLive(message)) void live.waitingSends?.then(known => known.add(message.id), () => {});
+    // A row a reply names by another id than its own: `resolveReply` finds it by that id.
+    const unkeyed = live && !live.stored.group && unkeyedRef(message);
+    if (unkeyed) void live.unkeyedRows?.then(rows => rows.set(unkeyed, message.id), () => {});
     // A card held as its text alone: `restoreCards` finds it by its id.
     if (live && cardDue(message)) void live.cardsDue?.then(due => due.add(message.id), () => {});
     this.clockSample(message, straight);
