@@ -82,6 +82,8 @@ interface Side {
   decide: (file: FileInfo, again?: boolean) => Promise<OfferDecision>;
   disks: Map<string, Disk>;
   sources: Map<string, OutgoingSource>;
+  /** Changes of a record other than progress: each one the app stores at once. */
+  stateChanges: number;
 }
 
 /**
@@ -128,6 +130,7 @@ function wire(options: {
       records: new Map(), transferred: new Map(), sent: [], disks: sides[name]?.disks ?? new Map(), sources: sides[name]?.sources ?? new Map(),
       decide: async () => "accept",
       files: undefined as unknown as ChatFiles,
+      stateChanges: 0,
     };
     const host: ChatFilesHost = {
       send: (frame) => {
@@ -161,7 +164,7 @@ function wire(options: {
         return disk.target();
       },
       openSource: async (record) => side.sources.get(record.id)!,
-      changed: (record, transferred) => { side.records.set(`${record.direction}:${record.id}`, record); side.transferred.set(`${record.direction}:${record.id}`, transferred); },
+      changed: (record, transferred, progress) => { if (!progress) side.stateChanges++; side.records.set(`${record.direction}:${record.id}`, record); side.transferred.set(`${record.direction}:${record.id}`, transferred); },
       room: async () => 10 * 1024 ** 3,
       ...(options.budget && options.writable && {
         writable: () => queued[name] < options.budget! / 4 ? undefined
@@ -1015,6 +1018,35 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect([...w.b.records.values()].filter((r) => r.state === "active").length).toBe(3);
     expect([...w.a.records.values()].filter((r) => r.waitingFor === "busy").length).toBe(2);
     await until(() => [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+  });
+
+  it("a file waiting its turn is told so once, not again each time another one ends", async () => {
+    // Told again for every file still waiting whenever one ended: n files at once made about n²/2 frames, and the
+    // sender stored its record for each.
+    const w = wire();
+    w.attach();
+    const n = 30;
+    for (let i = 0; i < n; i++) send(w, file(`turn-${String(i).padStart(3, "0")}`, 4 * 1024));
+    await until(() => [...w.a.records.values()].length === n && [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+    const told = new Map<string, number>();
+    for (const frame of w.b.sent) if (frame.t === "pf-wait" && frame.why === "busy") told.set(frame.id as string, (told.get(frame.id as string) ?? 0) + 1);
+    expect(told.size).toBeGreaterThan(0);
+    expect(Math.max(...told.values())).toBe(1);
+  });
+
+  it("the sender stores a wait it was already told nothing new", async () => {
+    const w = wire();
+    w.b.decide = async () => "ask";
+    w.attach();
+    send(w, file("told-twice", 4 * 1024));
+    await until(() => w.a.records.get("out:told-twice")?.waitingFor === "consent");
+    const before = w.a.stateChanges;
+    await w.a.files.handle({ t: "pf-wait", id: "told-twice", why: "consent" });
+    expect(w.a.stateChanges).toBe(before);
+    await w.a.files.handle({ t: "pf-wait", id: "told-twice", why: "busy" });
+    expect(w.a.records.get("out:told-twice")?.waitingFor).toBe("busy");
+    await w.a.files.handle({ t: "pf-wait", id: "told-twice", why: "busy" });
+    expect(w.a.stateChanges).toBe(before + 1);
   });
 
   it("files sent all at once still arrive three at a time when opening where each is written takes a while", async () => {
