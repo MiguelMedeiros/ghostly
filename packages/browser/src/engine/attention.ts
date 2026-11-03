@@ -44,6 +44,13 @@ export function writtenAt(message: Pick<StoredMessage, "timestamp" | "sentAt">, 
 
 const JOIN_NOTICE = /^👋 (?:.+ )?joined$/;
 
+/**
+ * The quiet "joined" line: a 1:1 contact's only when the engine took it as the chat's joined line (`joinLine`), since
+ * any later row of theirs in those words is a message like the rest; mine and a group's by their words.
+ */
+const joinLine = (type: "message" | "sent", message: StoredMessage) =>
+  type === "message" && !message.linkId.startsWith("group:") ? !!message.joinLine : JOIN_NOTICE.test(message.text);
+
 export interface MessageAttention { type: "message" | "sent"; mention: boolean; cue?: AttentionCue }
 
 export interface AttentionContext {
@@ -58,7 +65,7 @@ export interface AttentionContext {
 
 /** What a newly stored row says, or null when it is quiet. `type`: "message" for the contact's, "sent" for mine. */
 export function messageAttention(type: "message" | "sent", message: StoredMessage, { startedAt, newest, now, lateAt }: AttentionContext): MessageAttention | null {
-  if (message.timestamp < startedAt || message.file || message.paymentId || JOIN_NOTICE.test(message.text)) return null;
+  if (message.timestamp < startedAt || message.file || message.paymentId || joinLine(type, message)) return null;
   // A line of a group's history: only the one that says I made the group or joined it, as it always was.
   if (message.event) {
     const cue = groupCue(message);
