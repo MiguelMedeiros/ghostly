@@ -114,6 +114,8 @@
     "answered": "L'app dell'admin ha visto la tua richiesta e si sta collegando a te. Tra un attimo sei dentro.",
     "answeredCommunity": "L'app di un membro ha visto la tua richiesta e si sta collegando a te. Tra un attimo sei dentro.",
     "answeredTitleCommunity": "Un membro ti sta facendo entrare",
+    "blocked": "In attesa di un aggiornamento",
+    "blockedBody": "Questo gruppo supera 8 membri solo quando tutti hanno Ghostly aggiornato. Entri appena lo aggiornano: tieni l'app aperta.",
     "cancel": "Annulla accesso",
     "full": "Questo gruppo è pieno",
     "fullBody": "Ha {{n}} membri su {{max}}. Entri quando qualcuno esce: tieni l'app aperta.",

@@ -419,6 +419,14 @@ const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
 /** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
+/**
+ * A group with no room answers a knock with `group-full` (WISP 902 § A full group, 903 § A full community): the same
+ * joiner at most this often while it has none, its side of the entry session closed `FULL_LINGER_MS` after. The joiner
+ * shows why it waits for `FULL_SAID_MS` after the last one (one answer missed included), then waits as before.
+ */
+export const FULL_TELL_MS = 5 * 60_000;
+export const FULL_LINGER_MS = 5_000;
+export const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
 /** Messages deleted for everyone a group remembers, so a copy that comes again stays gone: as many as a chat's deleted ids. */
 export const MAX_REMOVED_IDS = 500;
 
@@ -589,6 +597,11 @@ export class Groups {
   private readonly pendingEntries = new Map<string, Map<string, number>>();
   /** Admin side: member keys whose entry did not finish, not answered again until then. */
   private readonly refused = new Map<string, number>();
+  /** Admin side: joiners told the group has no room (`group-full`), and when; those entry sessions, closed at `until`. */
+  private readonly fullTold = new Map<string, number>();
+  private readonly fullClosing = new Map<string, number>();
+  /** Joiner side: the last `group-full` the admin's app answered with, and when. */
+  private readonly toldFull = new Map<string, { n: number; max: number; update: boolean; at: number }>();
   /** Admin side: entry sessions of a member key that timed out in a row, and when the last did. */
   private readonly entryTimeouts = new Map<string, { count: number; at: number }>();
   private readonly lastPoll = new Map<string, number>();
@@ -830,11 +843,12 @@ export class Groups {
     const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
       memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
     if (!session) {
-      const invitation = group.invitation!;
+      const invitation = group.invitation!, full = invitation.entry && !invitation.admin ? this.fullSaid(group.id) : undefined;
       return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
         invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
           ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
-          ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(this.gaveUp.has(group.id) && { unanswered: true }) } : {}) } };
+          ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(full && { full: { n: full.n, max: full.max } }),
+            ...(this.gaveUp.has(group.id) && { unanswered: true }) } : {}) } };
     }
     const nicks = session.state.nicks;
     const entry = session.isAdmin ? this.entryOf(group) : undefined;
@@ -1451,6 +1465,7 @@ export class Groups {
     this.knockCheckAt.delete(groupId);
     this.knockRewrites.delete(groupId);
     this.knockingSince.delete(groupId);
+    this.toldFull.delete(groupId);
     this.gaveUp.delete(groupId);
     this.justMet.delete(groupId);
     this.welcomed.delete(groupId);
@@ -1614,8 +1629,9 @@ export class Groups {
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
-        // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
-        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
+        // With every entry session taken, a knock read now could open nothing: its requests go to the edges. (With no room
+        // it is still read: the joiner is told so, `group-full`.)
+        const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES;
         const since = now - (this.lastPoll.get(group.id) ?? 0);
         if (busy) continue;
         if (now >= (this.warmUntil.get(group.id) ?? 0)) { if (since >= this.timings.pollMs) quiet.push(group.id); }
@@ -1630,6 +1646,8 @@ export class Groups {
         }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
+      for (const [key, at] of this.fullTold) if (now - at >= FULL_TELL_MS) this.fullTold.delete(key);
+      for (const [linkId, until] of this.fullClosing) if (now >= until) { this.fullClosing.delete(linkId); await this.host.closeEdge(linkId).catch(() => {}); }
       for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
       for (const [groupId, kept] of this.lingering) if (now >= kept.until) await this.endLinger(groupId);
       this.meshTick(now);
@@ -1687,6 +1705,16 @@ export class Groups {
     if (this.isCommunity(groupId)) { this.communities.entryReady(groupId, linkId, peer); return; }
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (!session?.isAdmin || !group || !this.pendingEntries.get(groupId)?.has(peer)) return;
+    // No room (WISP 902 § A full group): the joiner is told why, and knocks on at its slow pace until there is.
+    const room = rosterHas(session.roster, peer) ? null : this.noRoom(group, session, this.placesTaken(group, session, peer));
+    if (room) {
+      const now = this.now();
+      try { this.host.sendOnLink(linkId, { t: "group-full", g: groupId, n: room.n, max: room.max, ...(room.update && { why: "update" }) }); traceJoin(groupId, "full.sent"); } catch { /* it closed */ }
+      this.pendingEntries.get(groupId)?.delete(peer);
+      this.fullTold.set(peer, now);
+      this.fullClosing.set(linkId, now + FULL_LINGER_MS);
+      return;
+    }
     // An app that takes only eight cannot follow a larger roster: it is not let in past eight (and not answered for a while).
     if (!rosterHas(session.roster, peer) && this.growthBlocked(group, session, session.roster.length + 1, linkId)) {
       this.pendingEntries.get(groupId)?.delete(peer);
@@ -1737,8 +1765,33 @@ export class Groups {
   private joinStage(group: StoredGroup): GroupJoinStage {
     const invitation = group.invitation!;
     if (invitation.admin) return "admitted";
+    const full = this.fullSaid(group.id);
+    if (full) return full.update ? "blocked" : "full";
     if (this.host.linkReady(invitation.linkId) || this.host.linkSeen?.(invitation.linkId)) return "answered";
     return this.knocked.has(group.id) ? "knocked" : "knocking";
+  }
+
+  /** The admin's app said lately that the group has no room (`group-full`): how full, as it said, and whether for an update. */
+  private fullSaid(groupId: string): { n: number; max: number; update: boolean } | undefined {
+    const told = this.toldFull.get(groupId);
+    return told && this.now() - told.at < FULL_SAID_MS ? { n: told.n, max: told.max, update: told.update } : undefined;
+  }
+
+  /**
+   * Why a group whose places `size` already takes (members, contacts invited, joiners being let in) has none for one
+   * more (WISP 902 § A full group): full, or past eight while a member's app takes only eight (`update`). Null: room.
+   */
+  private noRoom(group: StoredGroup, session: GroupSession, size: number): { n: number; max: number; update: boolean } | null {
+    if (size >= GROUP_MEMBER_CAP.max) return { n: size, max: GROUP_MEMBER_CAP.max, update: false };
+    return this.growthBlocked(group, session, size + 1) ? { n: size, max: GROUP_MEMBER_CAP.max, update: true } : null;
+  }
+
+  /** The places a group's link has to fill from: its members, contacts invited, and joiners being let in but `except`. */
+  private placesTaken(group: StoredGroup, session: GroupSession, except?: string): number {
+    const entryIds = new Set(this.host.entries(group.id).values());
+    const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
+    const pending = this.pendingEntries.get(group.id);
+    return session.roster.length + contactsInvited + (pending?.size ?? 0) - (except && pending?.has(except) ? 1 : 0);
   }
 
   private entryOf(group: StoredGroup): { link: GroupEntryLink; seedB64: string } | undefined {
@@ -1836,12 +1889,11 @@ export class Groups {
       if (!again && (ever ??= everMembers(session)).has(key)) continue;
       // Sent its welcome again lately: its knock opens no session (and keeps the link's reads at their pace) until it may be again.
       if (again && this.rewelcomedLately(group.id, key)) continue;
-      const entryIds = new Set(this.host.entries(group.id).values());
-      const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
-      const size = session.roster.length + contactsInvited + (pending?.size ?? 0);
-      // Full, or past eight while a member's app takes only eight (the newcomer's own app is checked on its entry session).
+      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES) break;
+      // Full, or past eight while a member's app takes only eight (the newcomer's own app is checked on its entry session):
+      // the knock is answered all the same, with `group-full` (`entryReady`), at most every `FULL_TELL_MS` per joiner.
       // A member let in already takes no new place.
-      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || (!again && (size >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, size + 1)))) break;
+      if (!again && this.noRoom(group, session, this.placesTaken(group, session)) && this.fullTold.has(key)) continue;
       if (!pending) this.pendingEntries.set(group.id, (pending = new Map()));
       pending.set(key, now);
       this.warmUntil.set(group.id, now + this.timings.warmMs);
@@ -1867,13 +1919,24 @@ export class Groups {
     // An edge's packet, carried over the entry session or the chat an admission ran on (WISP 902 § Signaling through members).
     if (frame.t === GROUP_SIGNAL_FRAME) { this.signals.received(linkId, this.linkMember(g, linkId), frame); return; }
     switch (frame.t) {
+      case "group-full": {
+        // No room yet, from the admin of the link I knocked at: the knock goes on at its slow pace, and the page says why.
+        const invitation = this.stored.get(g)?.invitation, { n, max } = frame;
+        if (!invitation?.entry || invitation.linkId !== linkId || invitation.admin || this.stored.get(g)?.state) return;
+        if (!Number.isSafeInteger(n) || !Number.isSafeInteger(max) || (max as number) < 1 || (n as number) < 0) return;
+        this.toldFull.set(g, { n: n as number, max: max as number, update: frame.why === "update", at: this.now() });
+        traceJoin(g, "full.received");
+        this.host.emit();
+        return;
+      }
       case "group-invite": {
         if (typeof frame.admin !== "string" || !MEMBER_KEY.test(frame.admin) || typeof frame.name !== "string") return;
         const existing = this.stored.get(g);
         // Through the group's link: the entry session is pinned to the key the link named, so this is its admin. Accepted at once.
         if (existing?.invitation?.entry && !existing.state) {
           if (existing.invitation.linkId !== linkId) return;
-          existing.invitation = { ...existing.invitation, name: groupName(frame.name) ?? "Group", admin: frame.admin, pieces: [],
+          this.toldFull.delete(g);
+          existing.invitation ={ ...existing.invitation, name: groupName(frame.name) ?? "Group", admin: frame.admin, pieces: [],
             ...invitationClaims(frame) };
           await this.store.putGroup(existing);
           traceJoin(g, "invite.received");
@@ -2051,7 +2114,7 @@ export class Groups {
         await this.event(g, "joined", group.invitation.genesis ? "You joined again" : `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
-          this.lastKnock.delete(g); this.knocked.delete(g); this.knockingSince.delete(g);
+          this.lastKnock.delete(g); this.knocked.delete(g); this.knockingSince.delete(g); this.toldFull.delete(g);
           // The entry session reaches the admin, which reaches every member: while it is kept (above), the edges about
           // to open signal through it too (WISP 902 § Signaling through members).
           if (this.host.linkReady(linkId, GROUP_VERSION_SIGNALS)) this.signals.keep(g, linkId);

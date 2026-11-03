@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, JOIN_GIVE_UP_MS, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
+import { FramesTaken, arrivalNow, cameAt, countWaitingJoin, editKey, dropMarks, eventTime, FULL_LINGER_MS, FULL_SAID_MS, FULL_TELL_MS, JOIN_GIVE_UP_MS, joinKnockWait, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
 import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
@@ -179,14 +179,6 @@ const LOBBY_CHECK_MS = 2_000;
 const LOBBY_CHECK_JITTER_MS = 3_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
-/**
- * A full community's door answers a knock with `group-full` (WISP 903 § A full community): the same joiner at most this
- * often while it stays full, its side of the entry session closed `FULL_LINGER_MS` after. The joiner shows it is full
- * for `FULL_SAID_MS` after the last one (one answer missed included), then waits as before.
- */
-const FULL_TELL_MS = 5 * 60_000;
-const FULL_LINGER_MS = 5_000;
-const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
 const RELAYED_KEPT = 4096;
 /**
  * Someone the chain took out while its app was closed comes back believing it is a member: it asks in a hub's lobby,

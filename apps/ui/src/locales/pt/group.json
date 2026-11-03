@@ -114,6 +114,8 @@
     "answered": "O app do admin viu sua batida e está se conectando a você. Você entra em instantes.",
     "answeredCommunity": "O app de um membro viu sua batida e está se conectando a você. Você entra em instantes.",
     "answeredTitleCommunity": "Um membro está deixando você entrar",
+    "blocked": "Aguardando uma atualização",
+    "blockedBody": "Este grupo passa de 8 só quando todos nele tiverem o Ghostly atualizado. Você entra assim que atualizarem: deixe o app aberto.",
     "cancel": "Cancelar entrada",
     "full": "Este grupo está cheio",
     "fullBody": "Ele tem {{n}} de {{max}} membros. Você entra quando alguém sair: deixe o app aberto.",

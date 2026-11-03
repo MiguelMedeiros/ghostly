@@ -27,7 +27,7 @@ export function invitationLine(invitation: Invitation, t: Translate): string {
 export function invitationStatus(group: GroupView, t: Translate): string {
   const invitation = group.invitation!;
   return invitation.viaLink ? (invitation.unanswered ? t("sidebar.group.linkUnanswered") : invitation.stage === "replaced" ? t("group.join.replaced")
-    : invitation.stage === "full" ? t("group.join.full") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
+    : invitation.stage === "full" ? t("group.join.full") : invitation.stage === "blocked" ? t("group.join.blocked") : invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
     : invitationLine(invitation, t);
 }
 
