@@ -337,7 +337,8 @@ function stripGif(b: Uint8Array): Uint8Array[] {
 
 // TIFF: what draws it stays where it is (size, strips or tiles, colour, Orientation, ICC profile); its text tags (Make,
 // Model, DateTime, Artist, Software, its description), XMP, IPTC and Photoshop's resources are overwritten with zeros
-// where they are, and the Exif and GPS IFDs left without an entry, so no offset in the file moves. A tag this does not
+// where they are, the Exif and GPS IFDs zeroed and their pointers taken out of the IFD that holds them (its other
+// entries move up in place), so no offset in the file moves. A tag this does not
 // know, sub-images, JPEG-compressed data (whose own segments could hold an Exif) or a maker note refuses the picture:
 // so camera raw files (DNG, CR2, NEF, ARW), and BigTIFF, are refused.
 
@@ -391,12 +392,23 @@ function stripTiff(b: Uint8Array): Uint8Array[] {
   };
   for (let ifd = u32(4); ifd;) {
     const { next, list } = entries(ifd);
-    for (const { tag, value, bytes } of list) {
+    // The entries kept move up over the pointers to the emptied IFDs: libtiff refuses an IFD without an entry.
+    let kept = 0;
+    for (const { at, tag, value, bytes } of list) {
       if (tag === 259) check(TIFF_COMPRESSION.has(u16(value)));
-      if (TIFF_METADATA_IFDS.has(tag)) empty(u32(value));
-      else if (TIFF_METADATA.has(tag)) out.fill(0, value, value + bytes);
+      if (TIFF_METADATA_IFDS.has(tag)) {
+        empty(u32(value));
+        continue;
+      }
+      if (TIFF_METADATA.has(tag)) out.fill(0, value, value + bytes);
       else check(TIFF_DRAWS.has(tag));
+      out.copyWithin(ifd + 2 + kept++ * 12, at, at + 12);
     }
+    check(kept > 0);
+    const end = ifd + 2 + kept * 12;
+    out.set(little ? [kept & 0xff, kept >> 8] : [kept >> 8, kept & 0xff], ifd);
+    out.set(b.subarray(next, next + 4), end);
+    out.fill(0, end + 4, next + 4);
     ifd = u32(next);
   }
   return [out];
