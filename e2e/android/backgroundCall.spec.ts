@@ -47,16 +47,33 @@ async function audioIn(page: Page): Promise<{ packets: number; state: string }> 
   });
 }
 
-/** The app's call service as Android has it: running, and in the foreground with which types. */
+/** The foreground-service type bits (ServiceInfo) the probe names. */
+const TYPES: [number, string][] = [[0x40, "camera"], [0x80, "microphone"]];
+
+/**
+ * The app's call service as Android has it: running, and in the foreground with which types. ServiceRecord's dump
+ * gives them as a hex mask (`isForeground=true foregroundId=3 types=00000080`); another format comes back raw.
+ */
 function callService(app: AndroidApp): string {
   const dump = app.adb.tryRun("shell", "dumpsys", "activity", "services", PKG).out;
   const block = dump.split(/\n {2}\* ServiceRecord/).find((part) => part.includes(".CallService"));
   if (!block) return "none";
-  return /isForeground=true/.test(block) ? `foreground ${/foregroundServiceType=(\S+)/.exec(block)?.[1] ?? "?"}` : "started";
+  const line = /isForeground=true.*/.exec(block)?.[0];
+  if (!line) return "started";
+  const mask = /\btypes=(?:0x)?([0-9a-f]+)/i.exec(line);
+  if (!mask) return `foreground ? (${line})`;
+  const bits = parseInt(mask[1], 16);
+  return `foreground ${TYPES.filter(([bit]) => bits & bit).map(([, name]) => name).join("|") || mask[1]}`;
 }
 
-/** Whether AudioService has the app's recording silenced (what Android does to a microphone out of sight). */
-const silenced = (app: AndroidApp) => /silenced.*tools\.ghostly\.app|tools\.ghostly\.app.*silenced/.test(app.adb.tryRun("shell", "dumpsys", "audio").out);
+/**
+ * Whether AudioService has the app's recording silenced now (what Android does to a microphone out of sight): its
+ * latest "rec start/update" event for the app says `silenced`, not `not silenced` (the log keeps every past event).
+ */
+function silenced(app: AndroidApp): boolean {
+  const events = app.adb.tryRun("shell", "dumpsys", "audio").out.split("\n").filter((line) => / rec \w+ .*pack:tools\.ghostly\.app/.test(line));
+  return /(?<!not) silenced pack:/.test(events.at(-1) ?? "");
+}
 
 /** The web peer calls the app, the app answers; then the app is away for AWAY_MS, and back. */
 async function callAndAway(app: AndroidApp, web: Peer, away: () => void, back: () => void, label: string) {
