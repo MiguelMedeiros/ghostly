@@ -209,19 +209,19 @@
   },
   "unit": {
     "bytes": "{{n}} بايت",
-    "daysHours": "{{d}} يوم {{h}} ساعة",
-    "hoursMinutes": "{{h}} ساعة {{min}} دقيقة",
+    "daysHours": "{{d}} ي {{h}} س",
+    "hoursMinutes": "{{h}} س {{min}} د",
     "kbits": "{{n}} كيلوبت/ث",
     "kilobytes": "{{n}} ك.ب ({{exact}})",
     "megabytes": "{{n}} م.ب ({{exact}})",
-    "milliseconds": "{{n}} مللي ثانية",
-    "minutesSeconds": "{{min}} دقيقة {{s}} ثانية",
+    "milliseconds": "{{n}} م.ث",
+    "minutesSeconds": "{{min}} د {{s}} ث",
     "peaks": "{{count}} قمم",
     "peaks_many": "{{count}} قمة",
     "peaks_one": "قمة واحدة",
     "peaks_other": "{{count}} قمة",
     "peaks_two": "قمتان",
-    "seconds": "{{n}} ثانية"
+    "seconds": "{{n}} ث"
   },
   "value": {
     "acceptedByApp": "التطبيق (ضمن حدوده)",
