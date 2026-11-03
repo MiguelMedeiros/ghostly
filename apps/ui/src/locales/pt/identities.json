@@ -40,6 +40,7 @@
     "continueIn": "Continue na janela do {{provider}}…",
     "continueWith": "Continuar com {{provider}}",
     "copyError": "Não foi possível copiar. Selecione o texto acima e copie você mesmo.",
+    "copyStep": "Copiar passo {{step}}",
     "dayOne": "1 dia",
     "days": "{{count}} dias",
     "experimental": "Experimental: ainda não testado com todas as ferramentas.",

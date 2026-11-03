@@ -18,6 +18,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { focusLost } from "../../lib/focus";
 import { problemText, type Problem } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { CopiedStatus } from "../chat/LinkQrDialog";
 
 const VALIDITY = [7, 30, 90, 180, 365];
 
@@ -162,6 +163,8 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 max-md:p-0 animate-fade-in" {...backdrop}>
       <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="add-identity-title" data-testid="add-identity"
         className="sheet sheet-padded focus:outline-none w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-panel-header border border-border rounded-2xl shadow-2xl p-5 space-y-4 @container">
+        {/* The progress line below, said out loud (a check can take 30 s): always there, so its first words are heard. */}
+        <p role="status" data-testid="add-identity-progress-live" className="sr-only">{progress}</p>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h2 id="add-identity-title" className="text-lg font-medium text-text-primary">{t("identities.ghostly.addOne")}</h2>
@@ -187,7 +190,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               {pending.instructions?.steps.map((step, i) => (
                 <li key={i} className="space-y-2">
                   <p><bdi>{step.text}</bdi></p>
-                  {step.copy && <CopyBlock text={step.copy} testId={`add-identity-copy-${i}`} />}
+                  {step.copy && <CopyBlock text={step.copy} step={i + 1} testId={`add-identity-copy-${i}`} />}
                 </li>
               ))}
             </ol>
@@ -350,14 +353,16 @@ function ProviderAbout({ provider: p, testId = "identity-about" }: { provider: I
 /**
  * A command or statement to copy. It is pasted into a terminal next, so "Copied" is said only once it is (the same copy
  * as money's): a refused copy leaves the clipboard as it was, and says so, the text above to select by hand.
+ * A step has two or three of them (a record's name and value): each is named by its step, and Copied is said beside it.
  */
-function CopyBlock({ text, testId }: { text: string; testId: string }) {
+function CopyBlock({ text, step, testId }: { text: string; step: number; testId: string }) {
   const { copied, failed, copy } = useMoneyCopy(text);
   const { t } = useI18n();
   return (
     <div className="space-y-1.5">
+      <CopiedStatus copied={copied} />
       <code data-testid={testId} className="block break-all select-all whitespace-pre-wrap bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono">{text}</code>
-      <Button onClick={() => void copy()}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
+      <Button aria-label={copied ? undefined : t("identities.add.copyStep", { step })} onClick={() => void copy()}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
       {failed && <Notice tone="error" testId="add-identity-copy-error">{t("identities.add.copyError")}</Notice>}
     </div>
   );
