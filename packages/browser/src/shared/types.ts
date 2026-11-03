@@ -1399,6 +1399,11 @@ export interface Settings {
    */
   wakeMutedGroups?: string[];
   /**
+   * Groups whose links this device put on one transport (WISP 902 § Transports), by group id; a group not here is on
+   * Automatic. This device's own: nothing of it goes to the members but each edge's `_tr`. Only through `setGroupTransport`.
+   */
+  groupTransports?: Record<string, PairedTransport>;
+  /**
    * Private groups → members that were given a token on an edge a group on hubs later dropped: they still hold the
    * subscription with no edge to close, so their leaving the group (or this profile leaving it, or muting it) replaces
    * it. Cleared with every new subscription. Set by the engine only.

@@ -54,6 +54,8 @@ interface MemberOptions {
   noSlot?: boolean;
   /** An app from before `packetTransportsSaid` (1.1.6): with no endpoint up, it publishes no `_tr`, whatever it said before. */
   neverRetracts?: boolean;
+  /** The group's transport was chosen on this app (node.ts `setGroupTransport`): it says what it runs from its first packet. */
+  chose?: boolean;
 }
 
 function member(name: string, group: string, me: Identity, peer: Identity, options: MemberOptions): Member {
@@ -82,7 +84,7 @@ function member(name: string, group: string, me: Identity, peer: Identity, optio
     // An entry session opens so (node.ts `startEdge`): one exchange, the member's side publishing after its first look.
     ...(options.entry ? { oneShot: true, firstPublish: options.entry === "host" ? "after-first-poll" as const : "at-start" as const } : {}),
     packetTransports: true,
-    packetTransportsSaid: !!kept.seeds && !options.neverRetracts,
+    packetTransportsSaid: (!!kept.seeds && !options.neverRetracts) || !!options.chose,
     transport: pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,
@@ -273,6 +275,37 @@ describe("a group's edge with a member whose app has no WebRTC", () => {
     expect(b.heard).toEqual([]);
     expect(published(pkarr, a, b)).toEqual([]);
     expect(published(pkarr, b, a)).toEqual([]);
+  }, 120_000);
+});
+
+/**
+ * A member chose its group's transport (node.ts `setGroupTransport`, WISP 902 § Transports): Iroh or HyperDHT runs that
+ * one alone with no WebRTC, WebRTC says `["webrtc/1"]`. The other member's app is on the rule from before a choice
+ * (1.7.4, 1.8.0): WebRTC, and every native transport it runs once a `_tr` lists no `webrtc/1`.
+ */
+describe("a member who chose the group's transport, and one on the rule from before", () => {
+  it("HyperDHT chosen: its `_tr` lists HyperDHT alone, and the two go live over it, not over WebRTC or Iroh", async () => {
+    const group = toBase64Url(randomBytes(16));
+    const [one, two] = [createIdentity(), createIdentity()];
+    const chooser = member("chooser", group, one, two, { rtc: false, transports: ["hyperdht/1"], chose: true });
+    const before = member("before", group, two, one, { rtc: true, transports: ["iroh/1", "hyperdht/1"] });
+    expect(await untilLive(chooser, before, 3 * 60_000)).toBeLessThan(90_000);
+    expect(liveOn(chooser)).toBe("hyperdht/1");
+    expect(liveOn(before)).toBe("hyperdht/1");
+    expect(before.heard[0]).toEqual(["hyperdht/1"]);
+    expect(published(pkarr, chooser, before).map(said => parsePacketTransports(said)?.transports)).toEqual([["hyperdht/1"]]);
+  }, 120_000);
+
+  it("WebRTC chosen: its first packet says `[\"webrtc/1\"]`, and the two go live over WebRTC with no listener", async () => {
+    const group = toBase64Url(randomBytes(16));
+    const [one, two] = [createIdentity(), createIdentity()];
+    const chooser = member("chooser", group, one, two, { rtc: true, chose: true });
+    const before = member("before", group, two, one, { rtc: true });
+    expect(await untilLive(chooser, before, 3 * 60_000)).toBeLessThan(60_000);
+    expect(liveOn(chooser)).toBe("webrtc/1");
+    expect(before.heard).toEqual([["webrtc/1"]]);
+    expect(before.kept.seeds).toBeUndefined();
+    expect(published(pkarr, before, chooser)).toEqual([]);
   }, 120_000);
 });
 
