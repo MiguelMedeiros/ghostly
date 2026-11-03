@@ -4,7 +4,8 @@ import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
 import { listNamesFor, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
-import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { usePlatformValue } from "../../hooks/useServicesPlatform";
+import { servicesPlatform } from "../../lib/platform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
 import { hasStandby, keepAwakeSupported, useKeepAwakeSetting } from "../../lib/keepAwake";
@@ -23,6 +24,8 @@ const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry
 const STOPPED = new Set<string>(["stalled", "dropped", "damaged"]);
 
 type Device = DeviceSetView["devices"][number];
+/** Whether this platform keeps several profiles: joining another device's profile adds one. */
+const profilesHere = () => !!servicesPlatform?.features.profiles;
 
 /**
  * Profile, Devices (WISP 06 § User experience): Add a device, then one row per device with what it is and its state
@@ -32,7 +35,8 @@ type Device = DeviceSetView["devices"][number];
 export function DevicesSection() {
   const { t, language } = useI18n();
   const view = useDeviceSet();
-  const canSwitch = !!useServicesPlatform()?.features.profiles;
+  // Drawn again when that changes, not on every engine state.
+  const canSwitch = usePlatformValue(profilesHere);
   const [keepAwake, setKeepAwake] = useKeepAwakeSetting();
   const [adding, setAdding] = useState(false);
   const [moving, setMoving] = useState<{ key: string; name: string } | null>(null);
