@@ -1847,6 +1847,8 @@ export class CommunitySession {
         case "group-left": return this.receiveLeft(frame);
         case "group-entry": {
           if (frame.to !== this.myKey || !isSealed(frame.s) || frame.x !== this.currentEntryKey()) return false;
+          // Every sync answer carries it: the seed of that key, held already, is not opened again (a key has one seed).
+          if (this.state.entry.key === frame.x && this.state.entry.seedB64) return false;
           const seed = openSecret(this.identity.seed, this.myKey, frame.s, entryAad(this.id, this.myKey));
           return !!seed && this.takeEntrySeed(toBase64Url(seed));
         }
