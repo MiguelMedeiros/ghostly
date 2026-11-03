@@ -85,6 +85,7 @@ jobs:
       full: ${{ steps.plan.outputs.full }}
       affected: ${{ steps.plan.outputs.affected }}
       draft: ${{ steps.plan.outputs.draft }}
+      left_draft: ${{ steps.plan.outputs.left_draft }}
       tested: ${{ steps.plan.outputs.tested }}
     steps:
       - name: Checkout the gate
@@ -141,6 +142,7 @@ jobs:
           # everything: it may have cancelled leaving draft's run, which GitHub sometimes creates first.
           if [[ "$draft" == "false" && "$PAYLOAD_DRAFT" == "true" ]] && node tools/scripts/ci-changes.mjs --draft-behind; then
             draft=true
+            echo "left_draft=true" >> "$GITHUB_OUTPUT"
           fi
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
           # A pull request that changes no file (main merged back into dev after a release) gives nothing to plan
@@ -874,6 +876,7 @@ jobs:
       - name: Check all jobs passed
         env:
           DRAFT: ${{ needs.changes.outputs.draft }}
+          LEFT_DRAFT: ${{ needs.changes.outputs.left_draft }}
           TESTED: ${{ needs.changes.outputs.tested }}
           PUSH_TO_DEV: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
           CHANGES: ${{ needs.changes.result }}
@@ -921,7 +924,9 @@ jobs:
           if [[ "$TESTED" == "true" ]]; then
             echo "::notice::This tree passed CI Success on a pull request already (see Changed paths): Tauri Backend saved the Cargo cache when dev lacked it."
           fi
-          if [[ "$DRAFT" == "true" ]]; then
-            echo "::notice::Draft: the fast tier passed. The required CI Success comes from the full run that leaving draft (gh pr ready) starts."
+          if [[ "$LEFT_DRAFT" == "true" ]]; then
+            echo "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts."
+          elif [[ "$DRAFT" == "true" ]]; then
+            echo "::notice::Draft: the fast tier passed. Once you mark it ready (gh pr ready), the merge train may board it on this run and cancel the full run; the batch's run is the check that counts."
           fi
           echo "All jobs passed! ($summary)"
