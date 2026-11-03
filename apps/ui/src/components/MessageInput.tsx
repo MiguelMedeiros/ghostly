@@ -234,6 +234,8 @@ export function MessageInput({
   const draftIdRef = useRef(draftId); draftIdRef.current = draftId;
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  // The secret guard's seed words in the app's other languages (`seedLists.ts`), fetched as the composer opens.
+  useEffect(() => { void import("../lib/parse/seedLists").catch(() => {}); }, []);
   const composition = useComposition();
   const [canRecord] = useState(canRecordVoice);
   /** A voice message being recorded: the mic stays (and its recording with it) even if an edit or a reply fills the field. */
