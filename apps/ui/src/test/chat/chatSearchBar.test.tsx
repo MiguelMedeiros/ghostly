@@ -15,7 +15,7 @@ vi.mock("../../components/rich/RichText", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../components/rich/RichText")>();
   return { ...real, RichText: (props: Parameters<typeof real.RichText>[0]) => { draws.text++; return real.RichText(props); } };
 });
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 const COUNT = 300;

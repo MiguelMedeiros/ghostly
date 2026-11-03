@@ -15,7 +15,7 @@ import { renderApp } from "../render";
 
 // covers: app.accessibility
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 /*
  * A drawing with no name and no aria-hidden stays in the accessibility tree as an unnamed image: VoiceOver and TalkBack

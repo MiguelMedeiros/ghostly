@@ -8,7 +8,7 @@ import { renderApp } from "../render";
 
 // covers: chat.ratchet.ui
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 
