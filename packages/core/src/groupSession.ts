@@ -816,7 +816,7 @@ export class GroupSession {
 
   transferAdmin(memberKey: string, now = Date.now()): Promise<void> {
     return this.serialize(async () => {
-      this.requireAdmin();
+      this.requireAdmin("Only the admin can hand the admin role over");
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
       await this.commit("role", memberKey, now);
     });

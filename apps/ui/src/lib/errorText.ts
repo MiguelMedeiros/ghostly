@@ -465,6 +465,7 @@ const RULES: readonly Rule[] = [
   exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),
   exact("Only the admin can renew the group's secret", "errors.group.adminRotate"),
+  exact("Only the admin can hand the admin role over", "errors.group.adminHandOver"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
   exact("This member has left the group. Make someone else the admin.", "errors.group.heirLeft", "errors.group.heirLeftNext"),

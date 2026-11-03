@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { FILE_BYTES_STEP } from "@ghostly/browser/shared/fileBytes";
-import type { GroupView } from "@ghostly/browser/shared/types";
+import type { EngineState, GroupView } from "@ghostly/browser/shared/types";
+import { callApi, type ApiContext } from "../src/api";
 import { fitName, mimeOf, saveName } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
 import { NodeFileBytes } from "../src/runtime/fileBytes";
@@ -98,6 +99,21 @@ describe("group administration", () => {
     for (const ref of ["595m389h77", "595m"]) {
       expect(() => findMember(own, ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} is you: name another member of Crew` }));
     }
+    // This profile's own name too (its own row has none): "No member" read as if it were not in the group.
+    for (const ref of ["Bia", "bia"]) {
+      expect(() => findMember(own, ref, " Bia")).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} is you: name another member of Crew` }));
+    }
+    expect(() => findMember(own, "Bo", "Bia")).toThrow(expect.objectContaining({ code: "not_found" }));
+  });
+
+  it("group admin, hub and remove say that this profile's own name is you", async () => {
+    const own = { id: "g1", name: "Dev room", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Ana", me: false }] } as unknown as GroupView;
+    const node = { getState: () => ({ links: [], groups: [own], settings: { nick: "Bia" }, transport: {} }) as unknown as EngineState, makeGroupAdmin: vi.fn(), setGroupHub: vi.fn(), removeGroupMember: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    for (const method of ["group.admin", "group.hub", "group.remove"]) {
+      await expect(callApi(ctx, method, { group: "Dev room", member: "Bia" })).rejects.toMatchObject({ code: "bad_request", message: '"Bia" is you: name another member of Dev room' });
+    }
+    expect(node.makeGroupAdmin).not.toHaveBeenCalled();
   });
 
   it("a member's whole key is that member, whatever another member calls itself", () => {

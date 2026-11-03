@@ -12,24 +12,26 @@ import { groupJson } from "./views";
  */
 
 /**
- * A member by key, unique key prefix or name; never this profile itself. A whole key is that member, whatever another
- * member calls itself; a prefix and a name stand side by side (two members is an error, not a guess).
+ * A member by key, unique key prefix or name; never this profile itself (`myName`: its name, which its own row lacks).
+ * A whole key is that member, whatever another member calls itself; a prefix and a name stand side by side (two
+ * members is an error, not a guess).
  */
-export function findMember(group: GroupView, ref: string) {
+export function findMember(group: GroupView, ref: string, myName?: string) {
   const lower = ref.toLowerCase();
   const others = group.members.filter((m) => !m.me);
   const byKey = others.filter((m) => m.key === ref);
   const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
   if (matches.length === 1) return matches[0];
-  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref);
+  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref, myName);
 }
 
 /**
- * A ref no other member answers to. When it is this profile's own key (or a prefix of it), it says so: "No member"
- * read as if this profile were not in the group.
+ * A ref no other member answers to. When it is this profile's own key (or a prefix of it), or its own name, it says
+ * so: "No member" read as if this profile were not in the group.
  */
-export function noMember(group: GroupView, ref: string): CliError {
-  if (group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
+export function noMember(group: GroupView, ref: string, myName?: string): CliError {
+  const mine = !!myName?.trim() && myName.trim().toLowerCase() === ref.toLowerCase();
+  if (mine || group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
   return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name}`);
 }
 
@@ -52,6 +54,9 @@ async function picture(params: Params): Promise<string | null> {
   return pictureFrom(str(params, "path", true));
 }
 
+/** The member `params.member` names in `group`, this profile's own name said to be it. */
+const member = (ctx: ApiContext, group: GroupView, params: Params) => findMember(group, str(params, "member", true), state(ctx).settings.nick);
+
 const view = (ctx: ApiContext, id: string, params: Params) => groupJson(state(ctx).groups.find((g) => g.id === id) ?? groupOf(ctx, { group: id }), bool(params, "showSecret"));
 
 export const GROUP_ADMIN_METHODS: Record<string, Method> = {
@@ -63,19 +68,19 @@ export const GROUP_ADMIN_METHODS: Record<string, Method> = {
   },
   async "group.remove"(ctx, params) {
     const group = groupOf(ctx, params);
-    await node(ctx).removeGroupMember({ groupId: group.id, key: findMember(group, str(params, "member", true)).key });
+    await node(ctx).removeGroupMember({ groupId: group.id, key: member(ctx, group, params).key });
     return view(ctx, group.id, params);
   },
   async "group.admin"(ctx, params) {
     const group = groupOf(ctx, params);
-    await node(ctx).makeGroupAdmin({ groupId: group.id, key: findMember(group, str(params, "member", true)).key });
+    await node(ctx).makeGroupAdmin({ groupId: group.id, key: member(ctx, group, params).key });
     return view(ctx, group.id, params);
   },
   async "group.hub"(ctx, params) {
     const group = groupOf(ctx, params);
     const role = str(params, "role") ?? "auto";
     if (!["pin", "exclude", "auto"].includes(role)) throw new CliError("bad_request", "role is pin, exclude or auto");
-    await node(ctx).setGroupHub({ groupId: group.id, key: findMember(group, str(params, "member", true)).key, role: role === "auto" ? null : role as "pin" | "exclude" });
+    await node(ctx).setGroupHub({ groupId: group.id, key: member(ctx, group, params).key, role: role === "auto" ? null : role as "pin" | "exclude" });
     return view(ctx, group.id, params);
   },
   async "group.rename"(ctx, params) {
