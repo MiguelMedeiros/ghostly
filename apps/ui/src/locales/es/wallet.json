@@ -669,6 +669,111 @@
       "onchainTestnet": "Aún no hay ningún proveedor de Bitcoin on-chain disponible aquí en Testnet."
     },
     "optional": "(opcional)",
+    "providers": {
+      "bdk": {
+        "description": "Una billetera Bitcoin en esta app (bitcoindevkit): tú guardas las claves, un servidor Esplora le informa de la cadena. Por ahora, solo redes de prueba.",
+        "fields": {
+          "esplora": {
+            "help": "En blanco: los servidores públicos de Signet (blockstream.info, mempool.space) o de Mutinynet (mutinynet.com), el que responda. Regtest necesita el tuyo propio; debe permitir el origen de esta app (CORS).",
+            "label": "Servidor Esplora",
+            "placeholder": "En blanco: un servidor público de la red",
+            "suggestions": {
+              "http_127_0_0_1_47002": "Este ordenador: la pila regtest de e2e (npm run e2e:infra:up)"
+            }
+          },
+          "mnemonic": {
+            "help": "BIP39, en inglés. Deja que Ghostly cree una billetera nueva, o escribe la tuya para restaurarla.",
+            "label": "Frase de recuperación",
+            "placeholder": "doce o veinticuatro palabras"
+          },
+          "network": {
+            "label": "Red"
+          },
+          "script": {
+            "label": "Direcciones",
+            "options": {
+              "bip84": "SegWit nativo (BIP84, bc1q…)"
+            }
+          }
+        }
+      },
+      "bitcoind": {
+        "description": "Una billetera en tu propio nodo Bitcoin Core, por su RPC. Tu nodo guarda las claves y firma. Necesita la app de escritorio.",
+        "fields": {
+          "password": {
+            "help": "rpcpassword, o el contenido del archivo .cookie del nodo (cambia cuando bitcoind se reinicia).",
+            "label": "Contraseña RPC o cookie"
+          },
+          "url": {
+            "help": "El rpcbind y el rpcport de tu nodo: 8332 mainnet, 38332 signet, 48332 testnet4, 18443 regtest.",
+            "label": "Dirección RPC"
+          },
+          "user": {
+            "help": "Déjalo en blanco para pegar el archivo .cookie abajo.",
+            "label": "Usuario RPC"
+          },
+          "wallet": {
+            "help": "Una billetera cargada en el nodo (bitcoin-cli listwallets). En blanco: su billetera predeterminada.",
+            "label": "Nombre de la billetera"
+          }
+        }
+      },
+      "breez": {
+        "description": "Una billetera Lightning autocustodiada en Spark, mediante el SDK de Breez. Su frase de recuperación queda sellada en este dispositivo; tú guardas los sats."
+      },
+      "cashu-mint": {
+        "description": "Las facturas se pagan a tu saldo Cashu, y desde él. Los mints guardan los sats."
+      },
+      "core-lightning": {
+        "description": "Tu propio nodo Core Lightning, por Commando con una rune. Tu nodo guarda los sats. La app web solo lo alcanza por wss://.",
+        "fields": {
+          "nodeId": {
+            "help": "lightning-cli getinfo → id. La conexión se autentica contra él.",
+            "label": "Id del nodo",
+            "placeholder": "02… o 03… (66 caracteres hex)"
+          },
+          "rune": {
+            "help": "Nunca una rune sin restricciones. Crea una con: {{command}}",
+            "placeholder": "Una rune restringida a los métodos de Ghostly"
+          },
+          "url": {
+            "help": "El listener bind-addr=ws:… del nodo, detrás de un proxy wss:// para la app web; ws:// solo hacia este equipo.",
+            "label": "Dirección WebSocket"
+          }
+        }
+      },
+      "fedimint": {
+        "description": "Una federación a la que te uniste (Billetera → Fedimint): las facturas se pagan a su ecash, y desde él, mediante su gateway. Sus guardianes guardan los sats."
+      },
+      "lnd": {
+        "description": "Tu propio nodo LND, por su API REST. Tu nodo guarda los sats.",
+        "fields": {
+          "certificate": {
+            "help": "Solo en escritorio: el tls.cert del nodo, fijado (el nodo debe presentar exactamente este). Déjalo en blanco para un certificado de una autoridad pública; en cualquier otro lugar debe quedar en blanco.",
+            "label": "Certificado TLS"
+          },
+          "macaroon": {
+            "help": "Nunca el macaroon de administrador: crea uno con {{command}} (solo invoices:… para solo recibir)."
+          },
+          "url": {
+            "help": "El puerto REST de LND (restlisten, 8080 por defecto). En un navegador, el nodo debe permitir esta app con restcors y tener un certificado en el que el navegador confíe; la app de escritorio no necesita ninguno de los dos.",
+            "label": "Dirección REST"
+          }
+        }
+      },
+      "nwc": {
+        "description": "Una billetera que conectas con su URI NWC (Alby Hub, el servicio NWC de un nodo, una billetera alojada). Esa billetera guarda los sats y fija su propio límite de comisión: que sea custodial o no depende de la billetera.",
+        "fields": {
+          "uri": {
+            "help": "En las conexiones de apps de tu billetera. Permite crear, pagar y consultar facturas, y leer el saldo.",
+            "label": "URI de conexión"
+          }
+        }
+      },
+      "webln": {
+        "description": "Una billetera Lightning en este navegador (Alby y otras). Esa billetera guarda los sats y te pregunta antes de pagar."
+      }
+    },
     "reconfigured": "{{name}} usa ahora ese servidor.",
     "reconfiguredUnnamed": "La fuente usa ahora ese servidor.",
     "remove": "Quitar",

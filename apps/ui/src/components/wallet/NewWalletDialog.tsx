@@ -9,6 +9,7 @@ import { Button, Notice, input } from "./ui";
 import { NETWORK_NAME, WALLET_NAME, failedBecause, shortReason } from "./names";
 import { ProviderConfigForm } from "./providers/SourcePicker";
 import { PROVIDER_FORMS } from "./providers/forms";
+import { providerText } from "./providers/providerText";
 import { rawError } from "../../lib/errorText";
 import "./new-wallet.css";
 import { problemText, type Problem } from "../../lib/problemText";
@@ -130,7 +131,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
   const switchNetwork = (next: WalletNetwork) => { if (busy || next === network) return; setNetwork(next); setChosen(null); setPhase(null); setApiKey(""); };
 
   const chosenOffer = chosen ? offer(chosen) : undefined;
-  const descriptor = chosenOffer?.providers?.find((p) => p.id === providerId);
+  const found = chosenOffer?.providers?.find((p) => p.id === providerId);
+  const descriptor = found && providerText(t, found);
   const Form = descriptor ? PROVIDER_FORMS[descriptor.id] ?? ProviderConfigForm : undefined;
   const error = phase?.state === "error" ? phase : null;
 
