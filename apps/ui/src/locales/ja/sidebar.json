@@ -65,6 +65,16 @@
     "unreadCount": "{{name}}、未読メッセージ {{count}} 件",
     "unreadOne": "{{name}}、未読メッセージ 1 件"
   },
+  "row": {
+    "mention": "あなたがメンションされました",
+    "muted": "通知はミュート中",
+    "pinned": "ピン留め済み",
+    "separator": "、",
+    "unread": "未読メッセージ {{count}} 件",
+    "unreadSome": "未読メッセージあり",
+    "unread_one": "未読メッセージ {{count}} 件",
+    "unread_other": "未読メッセージ {{count}} 件"
+  },
   "searchPlaceholder": "チャットを検索...",
   "settings": "設定",
   "sharedIdentity": "IDを共有しました",
