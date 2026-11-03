@@ -1509,7 +1509,11 @@ export class Groups {
   async disableLink(groupId: string): Promise<void> {
     if (this.isCommunity(groupId)) { await this.communities.replaceLink(groupId, true); return; }
     const group = this.stored.get(groupId);
-    if (!group?.entry) return;
+    if (!group?.entry) {
+      // No link here: the admin's is off already; anyone else's answer would read as done while the admin's stays on.
+      if (!this.sessions.get(groupId)?.isAdmin) throw new Error("Only the admin can replace or turn off the group's link");
+      return;
+    }
     delete group.entry;
     await this.store.putGroup(group);
     await this.closeEntries(groupId);
