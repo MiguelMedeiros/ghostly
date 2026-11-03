@@ -249,20 +249,21 @@ const setAttempts = (record: DeviceRecord, attempts: Record<string, DeviceAttemp
   Object.fromEntries(Object.entries(attempts ?? {}).filter(([key]) => slotOf(record, key) >= 0));
 
 /**
- * The wrong passwords the giver counted, carried with its release (`a`), kept with this device's own: for each device,
- * the higher count and the later lock-out. A value that is no count is left out.
+ * The wrong passwords the giver counted, carried with its release (`a`): they replace this device's own. The giver was
+ * the active device, so its list is the current one: each release carried the counts to it, and a count it started
+ * again ("Let <device> try again", a right password) is gone from it, where this device's own copy still had it. A
+ * release with no list (none counted there) leaves this device's own. A value that is no count is left out.
  */
 function mergedAttempts(record: DeviceRecord, carried: unknown): DevicePatch {
   if (!carried || typeof carried !== "object" || Array.isArray(carried)) return {};
-  const merged = setAttempts(record, record.handoffAttempts);
+  const given: Record<string, DeviceAttempts> = {};
   for (const [key, value] of Object.entries(carried as Record<string, unknown>).slice(0, 16)) {
     const a = value as Partial<DeviceAttempts> | null;
     if (!/^[A-Za-z0-9_-]{43}$/.test(key) || slotOf(record, key) < 0 || !a || !Number.isSafeInteger(a.total) || (a.total as number) < 0 || !Array.isArray(a.recent) || !a.recent.every((at) => Number.isSafeInteger(at) && at >= 0)) continue;
-    const mine = merged[key];
-    const until = Math.max(mine?.until ?? 0, Number.isSafeInteger(a.until) ? a.until as number : 0);
-    merged[key] = { recent: [...new Set([...(mine?.recent ?? []), ...a.recent])].sort((x, y) => x - y).slice(-16), total: Math.min(1_000_000, Math.max(mine?.total ?? 0, a.total as number)), ...(until ? { until } : {}) };
+    const until = Number.isSafeInteger(a.until) ? a.until as number : 0;
+    given[key] = { recent: [...new Set(a.recent)].sort((x, y) => x - y).slice(-16), total: Math.min(1_000_000, a.total as number), ...(until ? { until } : {}) };
   }
-  return Object.keys(merged).length ? { handoffAttempts: Object.fromEntries(Object.entries(merged).slice(0, 16)) } : {};
+  return { handoffAttempts: given };
 }
 
 /** One session of a handoff with the other device: its own X25519 key, the other's hello, and the stream key. */
