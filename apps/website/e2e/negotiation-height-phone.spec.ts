@@ -15,13 +15,29 @@ test.beforeEach(async ({ page }) => {
 test("the negotiation loop keeps one height through its four scenarios", async ({ page }) => {
   test.setTimeout(150_000);
   await page.goto("/developers");
+  // The page's script has run (the desktop chevron, hidden here, is disabled until then): the loop's observer exists.
+  await expect(page.locator(".nav-open-more")).toBeEnabled({ timeout: 45_000 });
+  // The loop's observer reads only the first entry of each batch the browser hands it. While the main thread is busy
+  // the browser can hand over two at once: "off screen", from before the jump, then "on screen". The loop then takes
+  // itself for off screen and waits for a scroll that never comes. A reader's next scroll starts it; this test's one
+  // jump would not. So the jump comes only once the browser has delivered what it saw before it: a new observer's
+  // first entry goes out with, or after, any entry still owed to the loop's.
   const ng = page.locator(".ng");
+  await ng.evaluate(
+    (el) =>
+      new Promise<void>((resolve) => {
+        const io = new IntersectionObserver(() => {
+          io.disconnect();
+          resolve();
+        });
+        io.observe(el);
+      }),
+  );
   await ng.evaluate((el) => {
     document.documentElement.style.scrollBehavior = "auto";
     el.scrollIntoView({ block: "start" });
   });
-  // The loop starts from the first scenario once it is on screen and the page's script has run: the server's page
-  // shows the second one as a still, and on a busy machine the script comes more than five seconds after the load.
+  // The loop starts from the first scenario once it is on screen: the server's page shows the second one as a still.
   await expect(ng.locator(".ng-tab").first()).toHaveAttribute("aria-pressed", "true", { timeout: 45_000 });
 
   // One full loop and a little more, read at every frame: the loop's height, where the next section starts under
