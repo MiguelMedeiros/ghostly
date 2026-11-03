@@ -329,6 +329,8 @@ export async function verifyCommunityChainPaced(raw: unknown, groupId?: string):
 
 /** `verifyCommunityChainPaced` checks commits for this long at most before it lets the thread go. */
 const CHAIN_SLICE_MS = 5;
+/** A fresh epoch's secret is sealed to members for this long at most before the thread goes (`CommunitySession.commit`). */
+const SEAL_SLICE_MS = 5;
 
 type VerifiedChain = { chain: CommunityCommit[]; roster: Roster; entry: string; rosters: Roster[] };
 
@@ -1362,8 +1364,15 @@ export class CommunitySession {
     this.hooks.broadcast({ t: "group-commit", v: 2, g: this.id, commit });
     // A key respelled in its last character could be pinned and added by a build before `MEMBER_KEY` was canonical, and
     // the roster that holds it is in every member's chain: `sealSecret` would throw on it, past the persist and the
-    // broadcast above, so it gets no secret instead.
-    if (FRESH.has(kind)) for (const [key] of roster) if (key !== this.myKey && isZ32Key(key)) this.hooks.addressed(key, { t: "group-secret", v: 2, g: this.id, to: key, h: hash, s: sealSecret(key, secret, secretAad(this.id, hash, key)) });
+    // broadcast above, so it gets no secret instead. One agreement a member, ~1 ms in JavaScript: sealed a slice at a time,
+    // so a page sharing the thread draws meanwhile (250 members held it 230 ms a commit, a hub's 40 held leaves 8.6 s).
+    if (FRESH.has(kind)) {
+      const pause = pacer(SEAL_SLICE_MS);
+      for (const [key] of roster) if (key !== this.myKey && isZ32Key(key)) {
+        this.hooks.addressed(key, { t: "group-secret", v: 2, g: this.id, to: key, h: hash, s: sealSecret(key, secret, secretAad(this.id, hash, key)) });
+        await pause();
+      }
+    }
     this.hooks.changed();
     await this.renewLasting();
     return { commit, hash, secret };
