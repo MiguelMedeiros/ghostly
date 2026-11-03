@@ -6,6 +6,7 @@ import { useRun } from "../run";
 import { Select } from "../../ui/Select";
 import { PROVIDER_FORMS, type ProviderFormProps } from "./forms";
 import { changeableFields, sourceStatus } from "./sourceStatus";
+import { fieldText, providerText } from "./providerText";
 import { useI18n } from "../../../contexts/I18nContext";
 import { focusLost } from "../../../lib/focus";
 import { exactText } from "../../../lib/exactText";
@@ -131,10 +132,12 @@ export function SourcePicker({ kind, view, onSet, onClear, onRetry, onReconfigur
     handOff.current = false;
   });
   const offered = view.offered;
-  const descriptor: ProviderDescriptorView | undefined = offered.find((d) => d.id === chosen);
+  // Its description and fields in the app's language (a plugin provider's stay its own English).
+  const found: ProviderDescriptorView | undefined = offered.find((d) => d.id === chosen);
+  const descriptor = found && providerText(t, found);
   const Form = descriptor ? PROVIDER_FORMS[descriptor.id] ?? ProviderConfigForm : null;
   const current = offered.find((d) => d.id === view.providerId);
-  const serverFields = onReconfigure ? changeableFields(view) : [];
+  const serverFields = onReconfigure ? changeableFields(view).map((f) => fieldText(t, view.providerId!, f)) : [];
   const failing = view.status === "error" || (view.status === "connecting" && !!view.failures);
   const submit = (values: Record<string, string>) => void run(async () => { setSaved(""); await onSet!(descriptor!.id, values); setChosen(""); handOff.current = true; setSaved(t(kind === "onchain" ? "wallet.source.savedOnchain" : "wallet.source.savedLightning", { name: descriptor!.label })); }, "set");
   const reconfigure = (values: Record<string, string>) => void run(async () => { setSaved(""); await onReconfigure!(values); setServerOpen(false); setSaved(view.label ? t("wallet.source.reconfigured", { name: view.label }) : t("wallet.source.reconfiguredUnnamed")); }, "server");
