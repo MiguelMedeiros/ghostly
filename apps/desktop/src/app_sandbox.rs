@@ -2299,8 +2299,12 @@ mod tests {
 
     /// The same on macOS, where wry turns it on at build: what `webkit::no_element_fullscreen` does to a
     /// window's preferences.
+    /// WebKit stops the process (SIGTRAP) when WKPreferences is made off the main thread, and the test harness runs
+    /// every test on a thread of its own: run it by hand only from a harness on the main thread. The app calls
+    /// `no_element_fullscreen` from `with_webview`, on the main thread.
     #[cfg(target_os = "macos")]
     #[test]
+    #[ignore = "WKPreferences needs the main thread; libtest runs tests on others"]
     fn an_app_window_on_macos_has_no_element_full_screen() {
         use objc2::msg_send;
         use objc2::rc::Retained;
