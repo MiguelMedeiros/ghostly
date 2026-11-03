@@ -55,6 +55,7 @@
   "dataCleared": "Todos los datos fueron borrados",
   "defaultNickname": "Nombre en los chats",
   "defaultNicknameHint": "Se usa al iniciar un chat nuevo",
+  "deleteAllChatsCallOn": "Hay una llamada en un chat. Termínala primero y luego elimina todos los chats.",
   "deleteAllChatsConfirm": "¿Eliminar los {{count}} chats?",
   "deleteAllChatsHint": "Se borran mensajes y archivos. Ajustes y billeteras se quedan.",
   "groupDownloads": {
