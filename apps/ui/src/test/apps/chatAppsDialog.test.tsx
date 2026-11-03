@@ -148,6 +148,17 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     expect(screen.getByTestId("chat-app")).toHaveTextContent("Play chess");
     expect(screen.getByTestId("chat-app-open")).toBeEnabled();
   });
+
+  it("names each Open with its app, so a screen reader tells two apps' Opens apart", async () => {
+    run = { status: "ok" };
+    const offer: BuiltInAppOffer = { ref: `${REF.split("/")[0]}/snake`, publisher: REF.split("/")[0]!, name: "snake", fingerprint: "yz7m oxuc bd4u 8aqt", digest: "e",
+      url: "https://raw.githubusercontent.com/a/snake/HEAD/app.ghostlyapp", title: "Snake", tagline: "Eat, grow." };
+    fakeEngine.on("appBuiltIns", () => [offer]);
+    await dialog();
+    expect(screen.getByTestId("chat-app-open")).toHaveAccessibleName("Open Chess");
+    expect(await screen.findByTestId("chat-built-in-app-open")).toHaveAccessibleName("Open Snake");
+    fakeEngine.on("appBuiltIns", () => []);
+  });
 });
 
 describe("the chat's Apps with an app that comes with Ghostly, never opened here", () => {
