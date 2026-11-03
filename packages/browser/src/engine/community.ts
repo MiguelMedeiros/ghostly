@@ -317,6 +317,8 @@ interface Live {
   /** Entry sessions kept open a little after the welcome went: link id → until. */
   lingering: Map<string, number>;
   lastRoster: Roster;
+  /** Members whose admission went with a branch that lost a fork, its "joined" line said: not said again when let in again. */
+  forkDropped: Set<string>;
   lastStatus: string;
   relayed: Set<string>;
   lastTick?: number;
@@ -2068,7 +2070,7 @@ export class Communities {
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
       farewells: new Map(), farewellQuiet: new Map(), farewellSaid: new Map(), ahead: new Map(), aheadQuiet: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,
-      lastRoster: session.roster, lastStatus: session.status, relayed: new Set() });
+      lastRoster: session.roster, forkDropped: new Set(), lastStatus: session.status, relayed: new Set() });
   }
 
   private async membershipChanged(groupId: string): Promise<void> {
@@ -2085,16 +2087,23 @@ export class Communities {
       // When the change was made (the newest commit's time), not when it got here: a member back after a while reads
       // the lines among the messages of their moment, not after everything it missed.
       const at = receivedTimestamp(top.ts, when);
-      for (const [key] of after) if (!rosterHas(before, key) && key !== s.myKey) await this.event(groupId, "joined", `${name(key)} joined`, at, top.e, key);
-      // One who left on their own: the commit that took them out is a `leave`, not a `remove` (WISP 903 § Leaving and removal).
-      const left = (key: string) => {
+      for (const [key] of after) {
+        if (rosterHas(before, key) || key === s.myKey || live.forkDropped.delete(key)) continue;
+        await this.event(groupId, "joined", `${name(key)} joined`, at, top.e, key);
+      }
+      // What took them out on the branch I follow: a `leave` for one who left on their own, a `remove` for one the admin
+      // took out (WISP 903 § Leaving and removal); none when their `add` was only on a branch that lost a fork.
+      const out = (key: string) => {
         const chain = s.state.chain;
-        for (let i = chain.length - 1; i >= 0; i--) if ((chain[i].k === "remove" || chain[i].k === "leave") && chain[i].s === key) return chain[i].k === "leave";
-        return false;
+        for (let i = chain.length - 1; i >= 0; i--) if ((chain[i].k === "remove" || chain[i].k === "leave") && chain[i].s === key) return chain[i].k;
+        return undefined;
       };
       for (const [key] of before) {
         if (rosterHas(after, key)) continue;
-        if (left(key)) await this.event(groupId, "left", `${name(key)} left`, at, top.e, key);
+        const k = out(key);
+        // Not gone: about to be let in again, and its "joined" line was said already.
+        if (!k) live.forkDropped.add(key);
+        else if (k === "leave") await this.event(groupId, "left", `${name(key)} left`, at, top.e, key);
         else await this.event(groupId, "gone", `${name(key)} is no longer a member`, at, top.e, key);
       }
       if (top.k === "role" && before.find(([k]) => k === top.s)?.[1] !== "admin") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === s.myKey ? "are" : "is"} now the admin`, at, top.e, top.s);
