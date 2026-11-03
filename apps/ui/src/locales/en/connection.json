@@ -265,6 +265,7 @@
     "dropped": "{{from}} dropped, and the chat came back over {{transport}}.",
     "failedDefault": "The new transport did not connect.",
     "flapping": "The live connection dropped and came back {{count}} times between {{from}} and {{to}}.",
+    "flapping_one": "The live connection dropped and came back once between {{from}} and {{to}}.",
     "lost": "The live connection over {{from}} ended. Ghostly reconnects when {{contact}} is reachable.",
     "lostDht": "The live connection over {{from}} ended. Short texts go through the DHT until it is back.",
     "lostDhtOnly": "DHT only is on: short texts go through the DHT, with no live connection.",

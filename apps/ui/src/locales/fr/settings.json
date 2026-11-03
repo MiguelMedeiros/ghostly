@@ -57,6 +57,7 @@
   "defaultNicknameHint": "Utilisé quand vous démarrez une discussion",
   "deleteAllChatsCallOn": "Un appel est en cours dans une discussion. Raccrochez d’abord, puis supprimez toutes les discussions.",
   "deleteAllChatsConfirm": "Supprimer les {{count}} discussions ?",
+  "deleteAllChatsConfirm_one": "Supprimer {{count}} discussion ?",
   "deleteAllChatsHint": "Messages et fichiers partent. Réglages et portefeuilles restent.",
   "groupDownloads": {
     "always": "Toujours",
