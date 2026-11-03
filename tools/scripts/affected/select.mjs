@@ -117,6 +117,16 @@ export const UNIT_PROJECTS = [
     tests: [],
   },
   {
+    // CI's path gates (tools/scripts/ci-changes.mjs) must cover every file the website's scripts, the packages' and the
+    // extension's code and the crates' Rust name. Its test reads those from disk for the paths they name, which no import
+    // graph shows, so a change to one runs it (whole: that one file, about 150 ms). A draft's tier is all the merge train
+    // waits for: without this, a website script naming an uncovered file went red only in batches (2026-11-03).
+    name: "ci gates", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/ci-changes.test.ts"],
+    sources: [],
+    whole: ["apps/website/scripts/**", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs"],
+    tests: [],
+  },
+  {
     // The Android app's Kotlin: only the APK builds compile it, and they are not part of CI Success. Its test reads
     // the sources from disk for a comment Kotlin would never close (whole: that one file).
     name: "android kotlin", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/androidKotlinComments.test.ts"],
