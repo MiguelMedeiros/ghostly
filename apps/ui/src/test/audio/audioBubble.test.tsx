@@ -395,6 +395,13 @@ describe("an audio file not here yet", () => {
     expect(screen.queryByTestId("audio-cancel")).toBeNull();
   });
 
+  it("one sent from here that arrived whole, offered again, has no Pause or Cancel: paused, it could be cancelled", () => {
+    const file = song({ id: "chat1-out-song-again", size: 10 * MB });
+    show(file, { state: "transferring", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("audio-pause-transfer")).toBeNull();
+    expect(screen.queryByTestId("audio-cancel")).toBeNull();
+  });
+
   it("one sent from here whose bytes cannot be read yet says so, and plays once it has gone", async () => {
     const file = song({ id: "chat1-out-song-early", size: 10 * MB });
     getFile.mockResolvedValue(null);
