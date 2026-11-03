@@ -81,6 +81,13 @@ function moneroUri(address: string, amount?: string, name?: string, description?
   return `monero:${address}${params.length ? `?${params.join("&")}` : ""}`;
 }
 
+/**
+ * A name or description at most 140 characters long, as the Bitcoin card cuts a label (money-bitcoin.ts), on whole
+ * characters. Encoded again, one character can be 12 in the link: whole, a long one or one in another script took the
+ * link past the 4,096 characters Desktop and the extension open.
+ */
+const field = (value: string | null) => Array.from(value?.trim() ?? "").slice(0, 140).join("").trim() || undefined;
+
 const B58 = "[1-9A-HJ-NP-Za-km-z]";
 const URI = new RegExp(`(?<![A-Za-z0-9])monero:(${B58}{95}(?:${B58}{11})?)(?![A-Za-z0-9])(\\?[^\\s<>"'\`]*)?`, "gi");
 const BARE = new RegExp(`(?<![A-Za-z0-9])${B58}{95}(?:${B58}{11})?(?![A-Za-z0-9])`, "g");
@@ -100,7 +107,7 @@ export function findMoneroAddress(text: string): { request: MoneroRequest; rest:
     const raw = params.get("tx_amount");
     const amount = raw === null ? undefined : xmrToPiconero(raw);
     if (amount === null) return null;
-    const recipientName = params.get("recipient_name")?.trim() || undefined, description = params.get("tx_description")?.trim() || undefined;
+    const recipientName = field(params.get("recipient_name")), description = field(params.get("tx_description"));
     const kept = amount ? raw! : undefined;
     return {
       request: { address, ...decoded, ...(kept ? { amount } : {}), ...(recipientName ? { recipientName } : {}), ...(description ? { description } : {}), uri: moneroUri(address, kept, recipientName, description) },

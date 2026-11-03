@@ -73,6 +73,21 @@ describe("Monero in a message", () => {
     expect(found.request.uri).toMatch(/^monero:[A-Za-z0-9?=&%.:_-]+$/);
   });
 
+  it("cuts a link's name and description at 140 characters, so the link it hands on stays one Desktop and the extension open", () => {
+    // Written raw, each character comes back as 9 in the link: 500 of them alone would be past Desktop's 4,096.
+    const long = "家賃".repeat(250), quoted = "(Rent)".repeat(280);
+    for (const text of [`monero:${XMR_INTEGRATED}?tx_amount=123456789012345.123456789012&recipient_name=${long}&tx_description=${long}`, `monero:${XMR_MAINNET}?recipient_name=${quoted}&tx_description=${quoted}`]) {
+      const request = findMoneroAddress(text)!.request;
+      expect([...request.recipientName!]).toHaveLength(140);
+      expect([...request.description!]).toHaveLength(140);
+      expect(request.uri.length).toBeLessThanOrEqual(4096);
+      expect(request.uri).toMatch(/^monero:[A-Za-z0-9?=&%.:_-]{1,4096}$/);
+    }
+    // A cut never leaves half of a character pair (encodeURIComponent would throw on it).
+    const emoji = findMoneroAddress(`monero:${XMR_MAINNET}?tx_description=a${"👻".repeat(200)}`)!.request;
+    expect(emoji.description).toBe(`a${"👻".repeat(139)}`);
+  });
+
   it("says a stagenet link is test money", () => {
     expect(findMoneroAddress(`MONERO:${XMR_STAGENET_INTEGRATED}`)?.request).toMatchObject({ chain: "stagenet", network: "testnet", kind: "integrated" });
   });
