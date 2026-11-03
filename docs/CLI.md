@@ -338,6 +338,8 @@ text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent thro
 
 The audio contract, one Unix socket per call:
 
+- **Token.** A program's first bytes are the call's `audio.token` and a line feed. Required on Windows (a named
+  pipe there): before it, a connection hears nothing and replaces no program.
 - **Format.** Raw PCM, no framing: s16le, mono, at the call's rate (48000 by default; 24000, 16000, 12000 or 8000
   with `--rate`).
 - **From the call.** The contact's voice in 20 ms frames, as they are decoded.

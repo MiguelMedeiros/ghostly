@@ -1367,12 +1367,14 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const ref = parsed.positionals.join(" ") || undefined;
   const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
-  let call: { call: string; audio: { socket: string; rate: number } | null };
+  let call: { call: string; audio: { socket: string; token: string; rate: number } | null };
   try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }
   const audio = call.audio;
   if (!audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
   const socket = connect(audio.socket);
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  // The call's token first: until it comes, the socket is nobody's (WISP 1100 § Calls).
+  socket.write(`${audio.token}\n`);
   process.stderr.write(`ghostly: call ${call.call}: s16le mono ${audio.rate} Hz on stdin/stdout\n`);
   // A clip that ends (`ffmpeg -t 3 … | ghostly call pipe`) is queued and played, and the contact's audio goes on
   // coming: the end of stdin never closes the socket, whose daemon side would close the call's audio with it.

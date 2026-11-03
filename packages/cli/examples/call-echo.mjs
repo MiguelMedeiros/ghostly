@@ -7,8 +7,8 @@
 //   node call-echo.mjs [greeting.wav]
 //
 // GHOSTLY_SOCKET names the daemon's socket (`ghostly daemon status` prints it; left out, the bot asks). The call's
-// audio is raw PCM on a socket of its own: s16le, mono, at the call's rate, 20 ms frames from the call, any amount to
-// it (WISP 1100 § Calls).
+// audio is raw PCM on a socket of its own, after the call's token and a line feed: s16le, mono, at the call's rate,
+// 20 ms frames from the call, any amount to it (WISP 1100 § Calls).
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { connect } from "node:net";
@@ -39,11 +39,11 @@ createInterface({ input: socket }).on("line", async (line) => {
   }
   const event = message.event;
   // With `ghostly call auto on`, the daemon answers by itself (`auto: true`): the audio socket comes with call.connected.
-  if (event?.type === "call.connected" && !talking.has(event.call)) talk(event.call, event.audio.socket);
+  if (event?.type === "call.connected" && !talking.has(event.call)) talk(event.call, event.audio);
   if (event?.type === "call.incoming" && !event.auto) {
     try {
       const answered = await call("call.answer", { call: event.call, rate: RATE });
-      talk(answered.call, answered.audio.socket);
+      talk(answered.call, answered.audio);
     } catch (error) {
       console.error("answer:", error.message);
     }
@@ -53,12 +53,14 @@ createInterface({ input: socket }).on("line", async (line) => {
 
 /** One call: the greeting, then the echo. */
 const talking = new Set();
-function talk(id, path) {
+function talk(id, { socket: path, token }) {
   if (talking.has(id)) return;
   talking.add(id);
   const audio = connect(path);
   let greetingUntil = 0;
   audio.on("connect", () => {
+    // The call's token first: until it comes, the socket gives this bot nothing (required on Windows).
+    audio.write(`${token}\n`);
     console.log(`call ${id}: connected`);
     if (greeting) {
       // Written at once: the call plays it at real time and sends silence after it.
