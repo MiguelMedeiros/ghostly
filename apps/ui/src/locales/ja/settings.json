@@ -55,6 +55,7 @@
   "dataCleared": "すべてのデータが消去されました",
   "defaultNickname": "チャットでの名前",
   "defaultNicknameHint": "新しいチャットを始めるときに使われます",
+  "deleteAllChatsCallOn": "チャットで通話中です。先に通話を終了してから、すべてのチャットを削除してください。",
   "deleteAllChatsConfirm": "{{count}}件のチャットをすべて削除しますか?",
   "deleteAllChatsHint": "メッセージとファイルは削除されます。設定とウォレットは残ります。",
   "groupDownloads": {
