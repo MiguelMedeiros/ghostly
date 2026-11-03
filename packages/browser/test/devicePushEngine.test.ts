@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { p256 } from "@noble/curves/nist.js";
 import { generateVapidKeys, newWakeToken, toBase64Url, type PkarrTransport, type WakeTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
@@ -18,7 +18,7 @@ import { dropDevicesDatabase as dropDevices, putDeviceRecord } from "./helpers/d
 
 const transport: PkarrTransport = { publish: async () => {}, publishPayload: async () => {}, resolve: async () => null, describe: () => ({ protocol: "none", relays: [] }) };
 const nodes: GhostlyNode[] = [];
-afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown().catch(() => {}); });
+afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown().catch(() => {}); await closeDevicesDb(); await dropDevices(); });
 
 const PHONE = "P".repeat(43), DESKTOP = "D".repeat(43);
 function subscription(endpoint: string): WakeSubscription {
@@ -27,6 +27,12 @@ function subscription(endpoint: string): WakeSubscription {
 const targetOf = (sub: WakeSubscription): WakeTarget => ({ endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth, vapid: sub.vapid, token: newWakeToken() });
 
 interface Inside { ownDeviceKey: string | null; settings: { wake?: WakeSubscription }; deviceWakeReceived(from: string, target: WakeTarget | null): Promise<void>; afterDeviceRemoved(key: string): Promise<void> }
+
+/** The desktop's record: the set lists the desktop and the phone. */
+const SET = [{ key: DESKTOP, name: "Desktop" }, { key: PHONE, name: "Phone" }];
+beforeEach(async () => {
+  await putDeviceRecord({ v: 1, profile: "ghostly", state: "active", saved: 1, turn: 3, rev: 0, takeovers: 0, earlierSets: [], deviceSet: SET, ownSlot: 0, activeSlot: 0 });
+});
 
 function desktop(): { node: GhostlyNode; inside: Inside } {
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
@@ -50,6 +56,17 @@ describe("the profile's push target on the active device", () => {
     await inside.deviceWakeReceived(PHONE, null);
     expect(inside.settings.wake).toBeUndefined();
     expect(node.getState().wakeOwner).toBeUndefined();
+  });
+
+  it("a device the set does not list (removed a moment before) is not heard: the profile keeps no target of it", async () => {
+    const { inside } = desktop();
+    await inside.deviceWakeReceived(PHONE, targetOf(subscription("https://fcm.googleapis.com/fcm/send/phone")));
+    await putDeviceRecord({ v: 1, profile: "ghostly", state: "active", saved: 2, turn: 3, rev: 0, takeovers: 0, earlierSets: [], deviceSet: [SET[0]!], ownSlot: 0, activeSlot: 0 });
+    // Its subscription goes with the removal; a frame of it handled after that brings nothing back.
+    await inside.afterDeviceRemoved(PHONE);
+    expect(inside.settings.wake).toBeUndefined();
+    await inside.deviceWakeReceived(PHONE, targetOf(subscription("https://fcm.googleapis.com/fcm/send/phone-2")));
+    expect(inside.settings.wake).toBeUndefined();
   });
 
   it("its own subscription names it and wins over the phone's", async () => {
@@ -118,7 +135,7 @@ interface Renewing {
 
 /** The device links as the engine uses them for push: the phone's link live, and what was said on it. */
 function fakeLinks() {
-  return { live: vi.fn(() => true), askRenew: vi.fn(() => true), sendTokens: vi.fn(() => true), views: () => [{ key: PHONE, name: "Phone", status: "live" }] };
+  return { live: vi.fn(() => true), askRenew: vi.fn(async () => true), sendTokens: vi.fn(async () => true), views: () => [{ key: PHONE, name: "Phone", status: "live" }] };
 }
 
 describe("a subscription someone should no longer reach (WISP 06 § Push and the phone)", () => {
