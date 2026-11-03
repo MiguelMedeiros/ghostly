@@ -240,8 +240,11 @@ export interface AppStoreSummary {
   problem?: string;
 }
 
-/** What `previewStore` read, before the person adds it. */
-export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number }
+/**
+ * What `previewStore` read, before the person adds it. `held`: the person has this store already (by its key, not
+ * removed), with the `sequence` of the index held (absent when none was read yet). Add then takes only a newer index.
+ */
+export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number } }
 
 /** Where to fetch an app from: a pasted URL, a store's listing, or a chat card's pointer. */
 export type AppSource =
@@ -1104,9 +1107,11 @@ export class Apps {
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
     const { index, digest } = read.store;
     this.keepPreviewed({ url: at, index, digest, at: this.now() });
+    const held = await this.storeRecord(index.key);
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
+      ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence } : {} }),
     };
   }
 
@@ -1114,8 +1119,9 @@ export class Apps {
    * Adds a store the person chose: read at its URL and pinned to its key (`key`, when given, is the key the person saw,
    * and another one is refused). A store already added under that key keeps the URL it is read from and takes only a newer
    * index: a copy of its signed index at another URL, the same one or an older one, never moves it there (it would be
-   * read only there from then on, frozen). The index the preview just read at that URL, under that key, is taken as it
-   * is (only its expiry again), not downloaded again.
+   * read only there from then on, frozen). The same index is nothing to do, and an older one is refused with the held
+   * store left as it was: a copy the person chose is not a read of the store, so it marks no problem on it. The index the
+   * preview just read at that URL, under that key, is taken as it is (only its expiry again), not downloaded again.
    */
   async addStore({ url, key }: { url: string; key?: string }): Promise<AppStoreSummary> {
     if (key !== undefined && !isAppKey(key)) fail("store-key", "Not a store key");
@@ -1132,6 +1138,11 @@ export class Apps {
     // refused, so the takedowns the person has seen since still hold.
     const seen = held?.removed && held.seen && appStoreDecision({ key: held.key, ...held.seen }, { key: index.key, sequence: index.sequence, digest });
     if (seen === "rollback" || seen === "equivocation") fail(seen, `This store's index is older than the one you had (sequence ${held!.seen!.sequence})`);
+    if (held && !held.removed && held.index) {
+      const decision = appStoreDecision({ key: held.key, sequence: held.index.sequence, digest: held.digest ?? "" }, { key: index.key, sequence: index.sequence, digest });
+      if (decision === "same") return this.summary(held);
+      if (decision === "rollback") fail("rollback", `This store's index is older than the one you have (sequence ${held.index.sequence})`);
+    }
     const record: AddedAppStore = held && !held.removed ? held : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
     await this.putStore(this.withIndex(record, index, digest));
     return this.summary((await this.storeRecord(index.key))!);
