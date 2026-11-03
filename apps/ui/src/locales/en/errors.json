@@ -210,6 +210,7 @@
     "adminAlone": "Nobody is online to become admin",
     "adminAloneNext": "Make someone admin, or wait for a member.",
     "adminFirst": "Make someone else the admin before leaving",
+    "adminHandOver": "Only the admin can hand the admin role over",
     "adminHubs": "Only the admin can choose the group's hubs",
     "adminInvites": "Only the admin can invite",
     "adminLink": "Only the admin can replace or turn off the group's link",

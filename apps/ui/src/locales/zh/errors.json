@@ -210,6 +210,7 @@
     "adminAlone": "没有人在线可以接任管理员",
     "adminAloneNext": "先指定一位管理员，或等待成员上线。",
     "adminFirst": "退出前请先让其他人成为管理员",
+    "adminHandOver": "只有管理员可以移交管理员角色",
     "adminHubs": "只有管理员可以选择群组的中继",
     "adminInvites": "只有管理员可以邀请",
     "adminLink": "只有管理员可以更换或关闭群组链接",
