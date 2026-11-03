@@ -46,6 +46,10 @@ worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The largest request an app may send the broker (WISP 1200: 64 KiB), as JSON.
 const MAX_REQUEST_BYTES: usize = 64 * 1024;
+/// The largest IPC message an app window may post: its largest request with room for Tauri's envelope. Tauri
+/// drops a larger one unread (`message_limit`), as parsing it would hold the main thread, every window's; the
+/// runner refuses such a request first, so an app that calls `window.ghostly` still gets "too-large".
+const MAX_MESSAGE_BYTES: usize = 2 * MAX_REQUEST_BYTES;
 /// The most requests an app may send the broker in a second (WISP 1200: 50), every call counted.
 const MAX_REQUESTS_PER_SECOND: usize = 50;
 /// What a window keeps of what it was refused: the last few, each cut short, so an app that keeps asking to
@@ -99,6 +103,9 @@ const RUNNER: &str = r#"<!doctype html>
   // JavaScript literal, a `__proto__` member would set the object's prototype instead of staying a key, as the web
   // broker keeps it (jsonValueOf).
   const parse = JSON.parse;
+  const stringify = JSON.stringify;
+  const encoder = new TextEncoder();
+  const utf8 = encoder.encode.bind(encoder);
   const jsonOf = (text) => {
     if (typeof text !== "string") return undefined;
     try { return parse(text); } catch (error) { return undefined; }
@@ -140,7 +147,10 @@ const RUNNER: &str = r#"<!doctype html>
   const send = (type, args) => {
     if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
-    return broker({ id, type, args }).then((answer) => {
+    const request = { id, type, args };
+    // Over the broker's 64 KiB (MAX_REQUEST_BYTES) here: far over it, Tauri would drop the call unanswered.
+    if (utf8(stringify(request)).length > 65536) return Promise.reject(refusal("too-large"));
+    return broker(request).then((answer) => {
       if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
       if (answer.ok !== true) throw refusal(answer.error);
       return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;
@@ -436,6 +446,12 @@ pub fn is_app_label(label: &str) -> bool {
         && label[LABEL_PREFIX.len()..]
             .chars()
             .all(|c| c.is_ascii_alphanumeric())
+}
+
+/// The largest IPC message the webview `label` may post, for `tauri::ipc::set_post_message_limit`: an app
+/// window's is bounded, the Ghostly window's is not.
+pub fn message_limit(label: &str) -> Option<usize> {
+    is_app_label(label).then_some(MAX_MESSAGE_BYTES)
 }
 
 /// Whether `url` is the runner, in either spelling: `ghostly-app://localhost/` on macOS and Linux, and
@@ -2056,6 +2072,25 @@ mod tests {
             admitted(&state, "app-1", request(MAX_REQUEST_BYTES - fixed + 1, 3)).unwrap_err(),
             "too-large"
         );
+    }
+
+    /// An app window's IPC message is bounded before Tauri parses it, with room for the broker's largest request
+    /// in Tauri's envelope; the Ghostly window's is not. `run()` sets the bound before any window opens.
+    #[test]
+    fn an_app_windows_message_is_bounded_before_tauri_parses_it() {
+        let request = json!({"id": MAX_ID, "type": "storage.set", "args": ["k", "x".repeat(MAX_REQUEST_BYTES)]});
+        let message = json!({
+            "cmd": "app_broker", "callback": u32::MAX, "error": u32::MAX, "payload": {"request": request},
+            "options": {"headers": {}, "customProtocolIpcBlocked": true}, "__TAURI_INVOKE_KEY__": "k".repeat(64),
+        });
+        let limit = message_limit("app-0123456789abcdef").unwrap();
+        assert!(serde_json::to_vec(&message).unwrap().len() <= limit);
+        assert!(limit <= 256 * 1024, "parsed in a few milliseconds");
+        for label in ["main", "svc-1", "app-", "App-1", "xapp-1"] {
+            assert_eq!(message_limit(label), None, "{label}");
+        }
+        assert!(include_str!("lib.rs")
+            .contains("tauri::ipc::set_post_message_limit(app_sandbox::message_limit);"));
     }
 
     /// WISP 1200: 50 requests a second per app, every call counted, refused ones too; the 51st inside the

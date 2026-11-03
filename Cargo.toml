@@ -1,3 +1,10 @@
 [workspace]
 members = ["apps/desktop", "native/transports"]
+# Vendored crates are dependencies, not members: not linted or tested as the workspace's own.
+exclude = ["apps/desktop/vendor"]
 resolver = "2"
+
+# tauri 2.12.2 with one change: a webview's IPC message can be refused by size before it is parsed
+# (apps/desktop/vendor/README.md). Same version as Cargo.lock's; drop it when upstream has a fix.
+[patch.crates-io]
+tauri = { path = "apps/desktop/vendor/tauri" }

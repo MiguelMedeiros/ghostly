@@ -288,6 +288,9 @@ pub fn run() {
     if single_instance::hand_over(&context.config().identifier) {
         return;
     }
+    // Before any window: an app window's IPC message is bounded before Tauri parses it (on the main thread on Linux).
+    #[cfg(desktop)]
+    tauri::ipc::set_post_message_limit(app_sandbox::message_limit);
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
