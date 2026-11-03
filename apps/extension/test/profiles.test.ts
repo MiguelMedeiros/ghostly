@@ -179,6 +179,24 @@ describe("switching", () => {
     expect(world.callsTo("offscreen.createDocument")).toHaveLength(1);
   });
 
+  it("a second switch made while the first one's peer starts: the page of that profile gets that profile's peer", async () => {
+    await ensure();
+    // The first switch's peer takes a moment to open its database.
+    let ready!: () => void;
+    engineControl().ready = new Promise<void>((resolve) => (ready = resolve));
+    useProfile(world, WORK);
+    const first = ensure();
+    while (engineControl().servers.length < 2) await settle(1);
+    // Meanwhile another tab switches again, and its page asks for the peer.
+    useProfile(world, HOME, [WORK]);
+    const second = ensure();
+    await settle();
+    ready();
+    expect(await Promise.all([first, second])).toEqual([{ ok: true }, { ok: true }]);
+    expect(engineControl().servers.at(-1)!.database).toBe(`ghostly_${HOME}`);
+    expect(log()).toEqual(["start ghostly", "stop ghostly", `start ghostly_${WORK}`, `stop ghostly_${WORK}`, `start ghostly_${HOME}`]);
+  });
+
   it("does not wait for ever on a peer that hangs while stopping", async () => {
     await ensure();
     const [old] = engineControl().servers;

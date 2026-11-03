@@ -38,13 +38,19 @@ async function startEngine(): Promise<void> {
 
 /** `next`: the id of the profile the new peer runs as, when a switch is what replaces it. */
 async function replaceEngine(next?: string): Promise<void> {
-  // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
-  await closeViewers();
-  await clearNotices(next);
-  await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
-  await chrome.offscreen.closeDocument().catch(() => {});
-  await createEngineDocument();
-  await waitForEngine();
+  // A page that switched again while the next peer started (another tab's) waits on this start, and must get the
+  // profile it named, not the one before: that peer goes too. A few times at most, should the registry keep moving.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
+    await closeViewers();
+    await clearNotices(next);
+    await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
+    await chrome.offscreen.closeDocument().catch(() => {});
+    await createEngineDocument();
+    const status = await waitForEngine();
+    if (status.profile === status.active) return;
+    next = status.activeId;
+  }
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
