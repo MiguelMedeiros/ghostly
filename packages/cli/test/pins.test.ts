@@ -67,6 +67,9 @@ describe("pin", () => {
     await expect(callApi(fake({ error: "You were removed from this group", refused: true }).ctx, "chat.pin", { chat: "Crew", message: "k:0:1" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
     await expect(callApi(fake({ error: "That message is not in this chat, or cannot be pinned" }).ctx, "chat.pin", { chat: "Alice", message: "x" })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(fake({ error: "Nothing is pinned in this chat" }).ctx, "chat.pin", { chat: "Alice", remove: true })).rejects.toMatchObject({ code: "not_found" });
+    // A group's say the group.
+    await expect(callApi(fake({ error: "That message is not in this group, or cannot be pinned" }).ctx, "chat.pin", { chat: "Crew", message: "x" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(fake({ error: "Nothing is pinned in this group" }).ctx, "chat.pin", { chat: "Crew", remove: true })).rejects.toMatchObject({ code: "not_found", message: "Nothing is pinned in this group" });
   });
 });
 

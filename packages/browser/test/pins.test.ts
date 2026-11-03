@@ -48,6 +48,14 @@ describe("my pin", () => {
     expect(await myPin(t.pins, linkId, "N".repeat(22), false, undefined, 5)).toEqual({ error: expect.stringMatching(/not in this chat/) });
     expect(t.whole).toHaveBeenCalledTimes(1);
   });
+
+  it("in a group, says the group when nothing is pinned or the message is not there", async () => {
+    const t = host("group:g1");
+    expect(await myPin(t.pins, "group:g1", undefined, true, undefined, 5)).toEqual({ error: "Nothing is pinned in this group" });
+    expect(await myPin(t.pins, "group:g1", "k:0:9", false, undefined, 5)).toEqual({ error: "That message is not in this group, or cannot be pinned" });
+    // A 1:1 chat's still says the chat.
+    expect(await myPin(t.pins, "chat-a", undefined, true, undefined, 5)).toEqual({ error: "Nothing is pinned in this chat" });
+  });
 });
 
 describe("a pin the contact makes", () => {

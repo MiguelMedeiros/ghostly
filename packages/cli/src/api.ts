@@ -403,7 +403,7 @@ const METHODS: Record<string, Method> = {
     if (target.group && params.wait === "confirmed") throw new CliError("bad_request", "A group has no receipts: wait confirmed is for a 1:1 chat");
     const { wait, ms } = confirmWait(ctx, params);
     const result = await node(ctx).pinMessage({ linkId: target.linkId, ...(messageId && { messageId }), remove });
-    if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this chat|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
+    if (result.error) throw new CliError(result.refused || /Only the admin/.test(result.error) ? "refused" : /not in this (?:chat|group)|Nothing is pinned/.test(result.error) ? "not_found" : "bad_request", result.error);
     if (target.group) return { group: target.id, messageId: remove ? null : messageId, removed: remove };
     // The chat's one pin of mine waiting for the contact is this one (none: the contact confirmed it already).
     const mine = node(ctx).chatUnconfirmed({ linkId: target.linkId }).pin;
@@ -847,7 +847,7 @@ async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{
   const emoji = removed ? "" : str(params, "emoji");
   if (!removed && !emoji) throw new CliError("usage", "Give one emoji, or --remove to take yours back");
   const result = await node(ctx).react({ linkId, messageId, emoji: emoji ?? "" });
-  if (result.error) throw new CliError(result.refused ? "refused" : /not in this chat|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
+  if (result.error) throw new CliError(result.refused ? "refused" : /not in this (?:chat|group)|No reaction of yours/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { messageId, emoji: emoji || null, removed };
 }
 

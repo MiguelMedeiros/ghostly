@@ -48,6 +48,8 @@ describe("react", () => {
     // Not a member of the group any more: refused, with the reason the group shows.
     await expect(callApi(fake({ error: "You were removed from this group", refused: true }).ctx, "group.react", { group: "Crew", message: "k:0:1", emoji: "👍" })).rejects.toMatchObject({ code: "refused", message: "You were removed from this group" });
     await expect(callApi(fake({ error: "That message is not in this chat, or takes no reaction" }).ctx, "chat.react", { chat: "Alice", message: "x", emoji: "👍" })).rejects.toMatchObject({ code: "not_found" });
+    // A group's says the group.
+    await expect(callApi(fake({ error: "That message is not in this group, or takes no reaction" }).ctx, "group.react", { group: "Crew", message: "x", emoji: "👍" })).rejects.toMatchObject({ code: "not_found" });
   });
 });
 

@@ -628,7 +628,8 @@ describe("the reactions store", () => {
     expect(numbers.slice(2)).toEqual([7_002, 7_003, 9_002, 9_501, 9_502]);
     // What takes no reaction, or is not here, is refused without the whole group either.
     expect(await mine("group:g", "k:0:3", "👍")).toMatch(/takes no reaction/);
-    expect(await mine("group:g", "k:0:9", "👍")).toMatch(/not in this chat/);
+    // A group's refusal names the group, not a chat.
+    expect(await mine("group:g", "k:0:9", "👍")).toBe("That message is not in this group, or takes no reaction");
     expect(whole).not.toHaveBeenCalled();
     expect(rows.map(r => r.reactions?.me?.e)).toEqual(["", "👍", "", "😂", undefined]);
 
