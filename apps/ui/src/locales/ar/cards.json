@@ -144,7 +144,7 @@
       "queued": "في الانتظار",
       "running": "قيد التنفيذ"
     },
-    "steps": "{{done}} من {{total}} خطوات",
+    "steps": "الخطوات: {{done}}/{{total}}",
     "updated": "حُدّثت {{ago}}"
   },
   "usage": {
