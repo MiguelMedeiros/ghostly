@@ -31,7 +31,9 @@
     "hint": "يأتي مع Ghostly",
     "openNamed": "فتح {{title}}",
     "remove": "إزالة",
-    "removeNamed": "إزالة {{title}}"
+    "removeNamed": "إزالة {{title}}",
+    "removeText": "لن يُعرض عليك مرة أخرى. لاستعادته، ثبّته من متجر.",
+    "removeTitle": "هل تريد إزالة {{title}}؟"
   },
   "card": {
     "ask": "اطلب من {{name}} رابطًا له",

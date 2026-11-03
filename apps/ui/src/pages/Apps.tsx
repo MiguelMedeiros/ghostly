@@ -87,6 +87,17 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
  */
 function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; busy: boolean; onOpen: () => void; onRemove: () => void }) {
   const { t } = useI18n();
+  // Remove asks first, as a store's Remove does: it is the one removal that cannot be undone here (the copy the build
+  // carries is not offered again). The question takes the place of the buttons, the focus goes to its Cancel, and
+  // Cancel or Escape gives it back to Remove.
+  const [asking, setAsking] = useState(false);
+  const questionId = useId();
+  const keep = useRef<HTMLButtonElement>(null), remove = useRef<HTMLButtonElement>(null), asked = useRef(false);
+  useEffect(() => {
+    if (!asking && !asked.current) return;
+    asked.current = true;
+    (asking ? keep : remove).current?.focus({ preventScroll: true });
+  }, [asking]);
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="built-in-app" data-ref={app.ref}>
       <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
@@ -96,10 +107,23 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
           <HintLine testId="built-in-app-hint" className="text-text-muted" lead={t("apps.builtIn.hint")} text={app.tagline} />
         </span>
       </div>
-      <div className="flex items-center gap-2 ms-auto">
-        <Button data-testid="built-in-app-remove" loading={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
-        <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>
-      </div>
+      {!asking && (
+        <div className="flex items-center gap-2 ms-auto">
+          <Button ref={remove} data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={() => setAsking(true)}>{t("apps.builtIn.remove")}</Button>
+          <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>
+        </div>
+      )}
+      {asking && (
+        <div role="group" aria-labelledby={questionId} data-testid="built-in-app-remove-question" className="basis-full space-y-2"
+          onKeyDown={(e) => { if (e.key === "Escape" && !busy) { e.stopPropagation(); setAsking(false); } }}>
+          <p id={questionId} dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{t("apps.builtIn.removeTitle", { title: app.title })}</p>
+          <p className="text-xs text-text-secondary">{t("apps.builtIn.removeText")}</p>
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button ref={keep} disabled={busy} onClick={() => setAsking(false)}>{t("common.cancel")}</Button>
+            <Button variant="danger" data-testid="built-in-app-remove-confirm" loading={busy} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
