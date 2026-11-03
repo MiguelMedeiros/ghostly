@@ -77,6 +77,49 @@ describe("what the guard asks about", () => {
     expect(findSecret("abandon ".repeat(16).trim())).toBeNull();
   });
 
+  /**
+   * Monero's classic seed, the one Monero GUI and monero-wallet-cli show: 25 words of Monero's own list, the last a
+   * checksum word. These are the test wallets of Monero's functional tests (tests/functional_tests/transfer.py).
+   */
+  const MONERO_SEEDS = [
+    "velvet lymph giddy number token physics poetry unquoted nibs useful sabotage limits benches lifestyle eden nitrogen anvil fewest avoid batch vials washing fences goat unquoted",
+    "peeled mixture ionic radar utopia puddle buying illness nuns gadget river spout cavernous bounced paradise drunk looking cottage jump tequila melting went winter adjust spout",
+    "dilute gutter certain antics pamphlet macro enjoy left slid guarded bogeys upload nineteen bomb jubilee enhanced irritate turnip eggs swung jukebox loudly reduce sedan slid",
+  ];
+  /** MyMonero's 13 words: the first 12 of the seed above and the checksum word electrum-words gives them. */
+  const MYMONERO_SEED = "velvet lymph giddy number token physics poetry unquoted nibs useful sabotage limits useful";
+
+  it.each(MONERO_SEEDS.map((seed) => [seed]))("a 25-word Monero seed: %s", (seed) => {
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`my monero seed: ${seed}`)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(seed.toUpperCase().split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"))).toEqual({ kind: "mnemonic" });
+  });
+
+  it("a 13-word MyMonero seed, alone or after a label", () => {
+    expect(findSecret(MYMONERO_SEED)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`zoo ${MYMONERO_SEED} zoo`)).toEqual({ kind: "mnemonic" });
+  });
+
+  it("Monero's documented example seed, five of whose words are also BIP39's", () => {
+    const seed = "sequence atlas unveil summon pebbles tuesday beer rudely snake rockets different fuselage woven tagged bested dented vegan hover rapid fawns obvious muppet randomly seasons randomly";
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`my monero seed: ${seed} (keep it safe)`)).toEqual({ kind: "mnemonic" });
+  });
+
+  it("an ordinary 25-word sentence, or one whose last word repeats an earlier one, is not a Monero seed", () => {
+    expect(findSecret("we should meet at the cafe near the old bridge after work on friday so we can talk about the trip and the plan today")).toBeNull();
+    expect(findSecret("tuesday dinner was lovely thanks again for cooking the pasta and the salad we should do it soon maybe at home next week on tuesday")).toBeNull();
+  });
+
+  it("a message that is only 25 Monero seed words, even with the checksum word mistyped", () => {
+    const typo = MONERO_SEEDS[0].replace(/unquoted$/, "fences");
+    expect(findSecret(`${typo} zoo`)).toBeNull(); // checksum fails and the run is not the whole message
+    expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
+    // One word 25 or 13 times always passes Monero's checksum, and is still no seed.
+    expect(findSecret("abbey ".repeat(25).trim())).toBeNull();
+    expect(findSecret(`seed: ${"abbey ".repeat(13).trim()}`)).toBeNull();
+  });
+
   it.each([
     ["an nsec", NSEC],
     ["an nsec in a sentence", `here is my key ${NSEC} ok`],
