@@ -194,12 +194,13 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
 
   // Scrolled away: it stops, and its bytes go (a Blob in memory, or the platform stops serving the stream). Not for a
   // moment out of view: a phone turned on its side lays the chat out again, and the video is below the fold until the
-  // chat brings its place back, a few frames later. Nor while it fills the screen (iOS plays it full screen itself).
+  // chat brings its place back, a few frames later. Nor while it fills the screen (iOS plays it full screen itself), or
+  // the window: fixed over it, the frame is out of the list's containing blocks, so the list never sees it then.
   useEffect(() => {
-    if (visible !== false || phase !== "playing") return;
+    if (visible !== false || phase !== "playing" || theater) return;
     const timer = setTimeout(() => { if (!fullScreen(videoRef.current)) unload(); }, OUT_OF_VIEW_MS);
     return () => clearTimeout(timer);
-  }, [visible, phase, unload]);
+  }, [visible, phase, theater, unload]);
 
   useEffect(() => {
     mounted.current = true;
