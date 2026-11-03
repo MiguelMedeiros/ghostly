@@ -5,7 +5,7 @@ import {
   type PkarrTransport, type Signer, type TurnConditions, type TurnNetwork, type TurnSourceAnswer, type TurnSourcePut,
 } from "@ghostly/core";
 import { replaceDeviceGate, resetDeviceGates } from "../src/devices/gate";
-import { DeviceLinks } from "../src/devices/links";
+import { DeviceLinks, TURN_HINT_EVERY_MS } from "../src/devices/links";
 import { moveSet, type SetMovePorts } from "../src/devices/remove";
 import { DEVICE_KEYS_DB, closeDeviceKeysDb, createDeviceSigningKey, type DeviceSigningKey } from "../src/devices/signingKey";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type DeviceSlot, type StoredDeviceState } from "../src/devices/state";
@@ -139,6 +139,17 @@ describe("the device links of the active device", () => {
     const start = Date.now();
     while (Date.now() - start < 120_000 && !hinted.mock.calls.length) await run(250);
     expect(hinted).toHaveBeenCalled();
+    // A record written since (a rename, `rename.ts`): the hint goes over the live link again. Inside the 30 seconds
+    // after the last read it is not dropped: one read follows at their end.
+    const first = Date.now(), calls = hinted.mock.calls.length;
+    expect(phoneLinks.hintTurn()).toBe(1);
+    while (Date.now() - first < 120_000 && hinted.mock.calls.length === calls) await run(250);
+    expect(hinted.mock.calls.length).toBe(calls + 1);
+    expect(Date.now() - first).toBeLessThanOrEqual(TURN_HINT_EVERY_MS + 1_000);
+    // Two hints inside one window make one read.
+    phoneLinks.hintTurn(); phoneLinks.hintTurn();
+    for (let i = 0; i < 4 * TURN_HINT_EVERY_MS / 250; i++) await run(250);
+    expect(hinted.mock.calls.length).toBe(calls + 2);
   });
 });
 
