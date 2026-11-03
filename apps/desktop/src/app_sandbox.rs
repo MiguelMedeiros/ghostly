@@ -2229,14 +2229,25 @@ mod tests {
     fn the_runners_say_activity_for_trusted_taps_and_keys() {
         let web = include_str!("../../web/public/app-frame.html");
         for (name, runner) in [("desktop", RUNNER), ("web", web)] {
-            assert!(runner.contains("if (event.isTrusted !== true) return;"), "{name}");
+            assert!(
+                runner.contains("if (event.isTrusted !== true) return;"),
+                "{name}"
+            );
             assert!(runner.contains("send(\"activity\", [])"), "{name}");
             for event in ["\"pointerdown\", heard, true", "\"keydown\", heard, true"] {
-                let at = runner.find(event).unwrap_or_else(|| panic!("{name}: {event}"));
-                assert!(runner.find("document.open()").unwrap() < at, "{name}: {event}");
+                let at = runner
+                    .find(event)
+                    .unwrap_or_else(|| panic!("{name}: {event}"));
+                assert!(
+                    runner.find("document.open()").unwrap() < at,
+                    "{name}: {event}"
+                );
             }
         }
-        assert!(RUNNER.find("\"keydown\", heard, true").unwrap() < RUNNER.find("document.write(entry)").unwrap());
+        assert!(
+            RUNNER.find("\"keydown\", heard, true").unwrap()
+                < RUNNER.find("document.write(entry)").unwrap()
+        );
     }
 
     #[test]

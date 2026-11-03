@@ -332,6 +332,9 @@ test("taps and keys in an app keep the lock away while the person plays it; left
   const ana = await peer("ana");
   await serveStore(ana.context, store);
   await install(ana, store);
+  // From here the test drives the clock of the page and of the app's frame: the person plays longer than the lock time.
+  await ana.page.clock.install();
+  await ana.page.reload();
   // Lock after 1 minute.
   await ana.page.goto("/#/settings");
   await ana.page.getByRole("switch", { name: "Lock Screen" }).click();
@@ -347,19 +350,16 @@ test("taps and keys in an app keep the lock away while the person plays it; left
   const app = ana.page.getByTestId("mini-app");
   await expect(app).toHaveAttribute("data-place", "alone");
   const notes = app.frameLocator("iframe").getByTestId("notes");
-  await expect(notes).toBeVisible();
-  // From here the test drives the page's clock: the person plays for longer than the lock time.
-  await ana.page.clock.install();
+  // The runner's start waits on timers of its own.
+  await expect.poll(async () => { await ana.page.clock.runFor(100); return notes.isVisible(); }).toBe(true);
 
-  // Two minutes of play, twice the lock time, in the app alone: the Ghostly page around it hears none of it. The runner
-  // says so at most every 5 seconds of its own time, which each step waits out.
+  // Two minutes of play, twice the lock time, in the app alone: the Ghostly page around it hears none of it.
   for (const move of ["e4", "Nf3", "Bc4"]) {
     await notes.click();
     await notes.pressSequentially(move);
-    await ana.page.waitForTimeout(5_100);
     await ana.page.clock.runFor(40_000);
+    await expect(ana.page.getByText("Ghostly is locked")).toHaveCount(0);
   }
-  await expect(ana.page.getByText("Ghostly is locked")).toHaveCount(0);
   await expect(notes).toHaveValue("e4Nf3Bc4");
 
   // Left alone, the lock comes, and the app stops with it.
