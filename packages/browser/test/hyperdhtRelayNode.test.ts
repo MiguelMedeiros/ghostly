@@ -52,7 +52,8 @@ afterEach(async () => { for (const node of nodes.splice(0)) await node.shutdown(
 
 it("takes a wss:// relay (or ws:// to this machine), refuses anything else, and keeps none as the default", async () => {
   const node = engine();
-  for (const bad of ["ws://relay.example", "https://relay.example", "relay.example", 7 as never])
+  for (const bad of ["ws://relay.example", "https://relay.example", "relay.example", 7 as never,
+    "wss://alice:hunter2@relay.example", "wss://relay.example/?token=s3cr3t", "wss://relay.example/#s3cr3t"])
     await expect(node.updateSettings({ settings: { hyperdhtRelay: bad } })).rejects.toThrow();
   expect(await db.getSettings()).toEqual({});
   await node.updateSettings({ settings: { hyperdhtRelay: "  wss://relay.example  " } });
