@@ -2287,6 +2287,11 @@ mod tests {
     fn an_app_window_on_linux_has_no_element_full_screen() {
         use webkit2gtk::glib::translate::from_glib_full;
         use webkit2gtk::SettingsExt;
+        // A WebKitSettings reads GTK's own settings, and GTK stops the process without a display (CI's runners).
+        if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            eprintln!("an_app_window_on_linux_has_no_element_full_screen: no display, not run");
+            return;
+        }
         for guard in ["full", "full+webrtc", "control"] {
             // A plain GObject: no display, so not `Settings::new`, which wants GTK started.
             let settings: webkit2gtk::Settings =
