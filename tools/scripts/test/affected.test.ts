@@ -381,6 +381,24 @@ describe("the rest", () => {
     expect(mode("apps/desktop/src/lib.rs")).toBe("skip");
   });
 
+  it("a file the scripts' tests read from disk runs them, as no import graph shows it", () => {
+    const mode = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles }).unit).scripts.mode;
+    for (const file of [
+      ".github/workflows/e2e.yml",
+      ".github/dependabot.yml",
+      "apps/web/nginx.conf",
+      "apps/web/nginx-services.conf",
+      "apps/web/Dockerfile",
+      "apps/desktop/tauri.conf.json",
+      "e2e/features.json",
+      "apps/desktop/gen/android/gradle/wrapper/gradle-wrapper.jar",
+      "apps/desktop/gen/android/gradle/wrapper/gradle-wrapper.properties",
+    ]) {
+      expect(mode(file), file).toBe("whole");
+    }
+    expect(mode("tools/scripts/ci-changes.mjs")).toBe("related");
+  });
+
   it("Rust runs for the Desktop crates, and Cargo.lock runs it", () => {
     const r = (...files: string[]) => Object.fromEntries(plan({ changed: changed(...files), inventory, e2eFiles }).rust.map((x) => [x.name, x.mode]));
     expect(r("apps/desktop/src/lib.rs")).toEqual({ desktop: "run" });
