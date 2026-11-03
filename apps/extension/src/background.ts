@@ -39,6 +39,7 @@ async function startEngine(): Promise<void> {
 async function replaceEngine(): Promise<void> {
   // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
   await closeViewers();
+  await clearNotices();
   await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
   await chrome.offscreen.closeDocument().catch(() => {});
   await createEngineDocument();
@@ -150,6 +151,19 @@ async function openNotification(id: string): Promise<void> {
 function chatRoute(chat: string): string | undefined {
   if (chat.startsWith("profile:")) return undefined;
   return chat.startsWith("group:") ? `/group/${encodeURIComponent(chat.slice(6))}` : `/chat/${encodeURIComponent(chat)}`;
+}
+
+/**
+ * A new peer (another profile, or the one after Clear all data): a notification the pages kept a chat for would open a
+ * chat this one does not have ("This chat is gone"), so it leaves the system's list, as Desktop's and Android's do
+ * (`sweepLeftOver`). Another profile's notice (`profile:<id>`) stays: that profile did not stop.
+ */
+async function clearNotices(): Promise<void> {
+  const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
+  const keys = Object.keys(kept).filter((key) => key.startsWith("notice:") && !String(kept[key]).startsWith("profile:"));
+  if (!keys.length) return;
+  await chrome.storage.session.remove(keys).catch(() => {});
+  await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
 }
 
 /** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
