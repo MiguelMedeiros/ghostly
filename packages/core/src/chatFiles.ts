@@ -747,7 +747,9 @@ export class ChatFiles {
     out.next = record.confirmed;
     const paused = record.state === "paused" && record.pausedBy === "me";
     if (!this.send(this.offerFrame(record, paused))) return;
-    if (!paused && record.state !== "offered") { record.state = "offered"; record.pausedBy = undefined; this.changed(entry); }
+    // Every byte was confirmed: it stays so (`sentWhole`), the receiver answers with its check (`pf-done`) or its offset.
+    // As `offered`, an empty file was one nobody had answered yet, and its Cancel left it cancelled here, kept there.
+    if (!paused && record.state !== "offered" && record.state !== "verifying") { record.state = "offered"; record.pausedBy = undefined; this.changed(entry); }
     this.armStall(entry);
   }
 
