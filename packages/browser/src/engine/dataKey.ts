@@ -18,13 +18,24 @@ const PEER_DB = "ghostly";
  * non-extractable key; nothing writes it anywhere. Empty, every secret is sealed as today (version 1).
  */
 let slot: CryptoKey | null = null;
+/**
+ * The profile's migration is over (no `migrating` mark): a sealed place then takes version 2 only. A version 1 or plain
+ * value there was put by someone who could write the profile's database but not read it, and is refused.
+ */
+let sealedOnly = false;
 const onDrop = new Set<() => void>();
+const LOCKED = "This profile is locked. Enter its passphrase first.";
 
 export function setDataKey(key: CryptoKey): void { slot = key; }
 export function hasDataKey(): boolean { return slot !== null; }
+/** Off until the migration that seals every place has ended; set by it. */
+export function setSealedOnly(on: boolean): void { sealedOnly = on; }
+/** Whether a sealed place may still hold a version 1 or plain value. */
+export function takesUnsealed(): boolean { return !(slot && sealedOnly); }
 /** "Lock and stop", or a profile switch: the key goes, and so does every secret opened with it and kept in memory. */
 export function dropDataKey(): void {
   slot = null;
+  sealedOnly = false;
   for (const drop of [...onDrop]) drop();
 }
 /** A cache of opened secrets empties itself when the key goes. Returns the way to stop listening. */
@@ -39,9 +50,18 @@ export async function sealSecret(value: string, at: SecretPlace): Promise<Sealed
   return { sealed: await sealSeed(value, deviceKey), deviceKey };
 }
 
+/** Version 2 only, for a field the database layer seals: refused while the profile is locked, never version 1. */
+export async function sealPlace(value: string, at: SecretPlace): Promise<SealedField> {
+  if (!slot) throw new Error(LOCKED);
+  return sealField(slot, { db: PEER_DB, ...at }, value);
+}
+
 /** Reads both versions: a profile being encrypted holds some of each until its migration ends. */
 export async function openSecret(secret: SealedSecret, at: SecretPlace): Promise<string> {
-  if (!isSealedField(secret)) return unsealSeed(secret.sealed, secret.deviceKey);
-  if (!slot) throw new Error("This profile is locked. Enter its passphrase first.");
+  if (!isSealedField(secret)) {
+    if (!takesUnsealed()) throw new Error("A secret of this profile was not sealed with its key");
+    return unsealSeed(secret.sealed, secret.deviceKey);
+  }
+  if (!slot) throw new Error(LOCKED);
   return openField(slot, { db: PEER_DB, ...at }, secret);
 }
