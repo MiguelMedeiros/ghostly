@@ -102,4 +102,17 @@ describe("a call ringing in two tabs", () => {
     stopSilent();
     stopHeard();
   });
+
+  it("stops when the call ends, where the lock is granted inside request() (Node's)", async () => {
+    const locks = { request: (_name: string, task: () => unknown) => Promise.resolve(task()) };
+    Object.defineProperty(navigator, "locks", { value: locks, configurable: true });
+    const page = await openPage();
+    await gesture();
+    const stop = page.startRinging("ring");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rings(FakeAudioContext.made[0])).toBe(1);
+    stop();
+    await vi.advanceTimersByTimeAsync(3 * 3_500);
+    expect(rings(FakeAudioContext.made[0])).toBe(1);
+  });
 });
