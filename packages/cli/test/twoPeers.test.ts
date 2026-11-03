@@ -973,4 +973,21 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     for (const until = Date.now() + 10_000; mine.card?.status !== "done" && Date.now() < until; mine = await card()) await new Promise((r) => setTimeout(r, 250));
     expect(mine).toMatchObject({ from: "peer", card: { kind: "task", id: "one-shot-task", title: "From a one-shot", status: "done" } });
   });
+
+  it("file send as a one-shot stays until the contact has the whole file, saved byte for byte", async () => {
+    // Before, it answered in about 0.3 s with the file staged and left with it unsent: Bob had no file, not even its
+    // message, until a later command of Alice's stayed online long enough.
+    const sha = (path: string) => createHash("sha256").update(readFileSync(path)).digest("hex");
+    const path = join(alice, "from-a-one-shot.bin");
+    writeFileSync(path, randomBytes(2 * 1024 * 1024));
+    expect(ok(await as(alice, "file", "send", "bob", path))).toMatchObject({ file: { name: "from-a-one-shot.bin", size: 2 * 1024 * 1024 } });
+    // Alice's process is gone: nothing else carries the file. Bob stores the last bytes as Alice hears they arrived.
+    const theirs = async () => (ok(await as(bob, "file", "list", "alice")).files as { file: { id: string; name: string }; transfer: { state: string } | null }[])
+      .find((f) => f.file.name === "from-a-one-shot.bin");
+    let file = await theirs();
+    for (const until = Date.now() + 10_000; file?.transfer?.state !== "done" && Date.now() < until; file = await theirs()) await new Promise((r) => setTimeout(r, 250));
+    expect(file?.transfer).toMatchObject({ state: "done" });
+    const saved = ok(await as(bob, "file", "save", file!.file.id, "--path", join(bob, "from-a-one-shot.bin")));
+    expect(sha(saved.path as string)).toBe(sha(path));
+  });
 });

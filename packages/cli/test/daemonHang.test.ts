@@ -138,6 +138,9 @@ describe("a daemon that accepts the socket but never answers", () => {
     expect(answerWithin("file.wait", { file: "f1" })).toBe(310_000);
     expect(answerWithin("file.save", { file: "f1", wait: true })).toBe(310_000);
     expect(answerWithin("file.save", { file: "f1" })).toBeUndefined();
+    // A file sent with --wait sent waits as file wait does, not a text's 30 s.
+    expect(answerWithin("file.send", { chat: "bob", path: "/f", wait: "sent" })).toBe(310_000);
+    expect(answerWithin("file.send", { chat: "bob", path: "/f" })).toBeUndefined();
     expect(answerWithin("chat.send", { chat: "bob", text: "hi", wait: "sent" })).toBe(40_000);
     expect(answerWithin("chat.send", { chat: "bob", text: "hi", wait: "sent", timeout: 120 })).toBe(130_000);
     expect(answerWithin("chat.send", { chat: "bob", text: "hi", wait: "none" })).toBeUndefined();
