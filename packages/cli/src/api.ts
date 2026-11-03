@@ -141,7 +141,8 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
  * Refuses DHT only (a hold, `chat transport dht`) while a call is on in the chat. A call's signals cross the live
  * link: off it, the call talked on over its own connection, and a hang-up from either side never reached the other
  * (that call ended only when its media stalled out, 16 s later). Removing the chat (`chat remove`) is refused the same
- * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross.
+ * way: the call talked on in a chat gone from this device, and its hang-up had no chat left to cross. `engine.call`
+ * refuses the raw calls that do the same (`removeLink`, `setChatTransport` / `setDeliveryMode` to `dht`).
  */
 function noCallOn(ctx: ApiContext, linkId: string, then: string): void {
   const call = ctx.calls.list().find((c) => c.chat === linkId);
@@ -769,6 +770,11 @@ const METHODS: Record<string, Method> = {
     const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
     const problem = engineParamsProblem(method, args);
     if (problem) throw wrong(problem);
+    // Removing the chat or putting it on DHT only is refused mid-call, as `chat remove` and `chat transport dht` are.
+    if (typeof args?.linkId === "string") {
+      if (method === "removeLink") noCallOn(ctx, args.linkId, "remove the chat");
+      else if ((method === "setChatTransport" && args.transport === "dht") || (method === "setDeliveryMode" && args.mode === "dht")) noCallOn(ctx, args.linkId, "put the chat on DHT only");
+    }
     if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
