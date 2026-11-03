@@ -619,3 +619,108 @@ pub async fn native_call_close(id: String) -> Result<(), String> {
         Ok(())
     }
 }
+
+/// A document takes the Ghostly window's place (`page_started` in `lib.rs`): the page before it held its cameras,
+/// meters and calls here by ids only it knew, and nothing would close them. They close as `native_call_close`,
+/// `native_camera_close` and `native_microphone_meter_close` close them, and its device watch stops being told.
+/// The ids go on counting: an id the page before had is never the next one's.
+pub fn page_started() {
+    #[cfg(target_os = "linux")]
+    {
+        devices::page_started();
+        let (cameras, meters, live) = {
+            let mut calls = calls().lock().unwrap();
+            (
+                std::mem::take(&mut calls.cameras),
+                std::mem::take(&mut calls.meters),
+                std::mem::take(&mut calls.calls),
+            )
+        };
+        if cameras.is_empty() && meters.is_empty() && live.is_empty() {
+            return;
+        }
+        for camera in cameras.values() {
+            camera.attach(None);
+        }
+        // Stopping a pipeline waits for its threads: not on the thread loading the page.
+        tauri::async_runtime::spawn(async move {
+            for call in live.into_values().filter_map(|l| l.call) {
+                call.close().await;
+            }
+            let _ = blocking(move || {
+                drop((cameras, meters));
+                Ok(())
+            })
+            .await;
+        });
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    // covers: calls.linux-native
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    fn counting(count: &Arc<AtomicU64>) -> engine::Sink {
+        let count = count.clone();
+        Arc::new(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+        })
+    }
+
+    fn until(what: &str, done: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !done() {
+            assert!(Instant::now() < deadline, "{what}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The page goes with a camera's preview, Settings' meter and a call open: the next one finds none of them,
+    /// and the camera and the microphone stop. Skipped where the GStreamer plugins are missing.
+    #[test]
+    fn a_new_page_closes_the_cameras_meters_and_calls_of_the_one_before() {
+        if let Some(missing) = engine::missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let (frames, levels) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let camera = engine::Camera::open(true, None, counting(&frames)).unwrap();
+        let meter = engine::Meter::open(true, None, counting(&levels)).unwrap();
+        {
+            let mut calls = calls().lock().unwrap();
+            calls.cameras.insert(1, Arc::new(camera));
+            calls.meters.insert(1, meter);
+            calls.calls.insert(
+                "call".into(),
+                Live {
+                    events: Channel::new(|_| Ok(())),
+                    call: None,
+                    camera: Some(1),
+                    ice: Vec::new(),
+                },
+            );
+        }
+        until("no frames", || frames.load(Ordering::Relaxed) > 0);
+        until("no levels", || levels.load(Ordering::Relaxed) > 0);
+
+        page_started();
+
+        {
+            let calls = calls().lock().unwrap();
+            assert!(calls.cameras.is_empty(), "a camera stayed open");
+            assert!(calls.meters.is_empty(), "a meter stayed open");
+            assert!(calls.calls.is_empty(), "a call stayed open");
+        }
+        // Stopped, not just forgotten: nothing more comes from either.
+        let quiet = |count: &Arc<AtomicU64>| {
+            let before = count.load(Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(500));
+            count.load(Ordering::Relaxed) == before
+        };
+        until("the camera kept running", || quiet(&frames));
+        until("the microphone kept running", || quiet(&levels));
+    }
+}
