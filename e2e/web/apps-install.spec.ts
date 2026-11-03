@@ -46,7 +46,7 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await ana.page.getByTestId("apps-add-store-confirm").click();
   const listed = ana.page.getByTestId("app-store").filter({ hasText: store.storeName });
   // The store's app is on the page without opening anything, on a phone's width too; the store's name says it is open.
-  await expect(listed.getByRole("button", { name: new RegExp(store.storeName) })).toHaveAttribute("aria-expanded", "true");
+  await expect(listed.getByRole("button", { name: new RegExp(`^${store.storeName}`) })).toHaveAttribute("aria-expanded", "true");
   const wide = ana.page.viewportSize()!;
   await ana.page.setViewportSize({ width: 375, height: 700 });
   await expect(listed.getByTestId("app-listing-install")).toBeInViewport();
@@ -200,7 +200,7 @@ test("on a phone the install screen and the app's screen show its whole title, o
   await expect(ana.page.getByTestId("app-install-confirm")).toBeVisible();
   expect(await whole("app-install")).toBe(true);
   await ana.page.getByTestId("app-install-confirm").click();
-  await ana.page.getByTestId("installed-app").getByRole("button", { name: title }).click();
+  await ana.page.getByTestId("installed-app").getByRole("button", { name: new RegExp(`^${title} .*: details$`) }).click();
   await expect(ana.page.getByTestId("app-details")).toBeVisible();
   expect(await whole("app-details")).toBe(true);
 });
