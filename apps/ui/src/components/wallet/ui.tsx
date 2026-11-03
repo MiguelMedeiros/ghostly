@@ -57,7 +57,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, d
 const BUTTON = {
   primary: "bg-accent text-on-accent hover:bg-accent-hover font-semibold",
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
-  danger: "bg-transparent text-danger hover:bg-danger/10 border border-border",
+  danger: "bg-transparent text-danger-ink hover:bg-danger/10 border border-border",
 } as const;
 /**
  * `loading`: the click is being worked on. The button keeps its words, shows a turning ring before them, is busy for a

@@ -61,7 +61,7 @@ function runLine(run: AppRunStatus, t: Translate): string | null {
 }
 
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
-  const color = { muted: "text-text-secondary", danger: "text-danger", warning: "text-test-money-ink" }[tone];
+  const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
   return <p data-testid={testId} className={`text-xs whitespace-pre-line ${color}`}>{children}</p>;
 }
 
