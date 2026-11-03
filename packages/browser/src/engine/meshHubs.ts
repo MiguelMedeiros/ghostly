@@ -113,8 +113,12 @@ interface HubLive {
   hubsUp: Set<string>;
   /** Hubs as last seen in the beacon, fresh: an edge to one stays a while after a reading misses it. */
   seenHubs: Map<string, number>;
-  /** Of `seenHubs`, those only a `group-reach` said were hubs, before any reading of this epoch's beacon: the next reading decides. */
-  heardHubs: Set<string>;
+  /**
+   * Members that said they are hubs (`group-reach`) where no reading showed them, when last heard: counted when stepping
+   * up or down (a hub whose writes the relays' budget held back is still one), and hubs to me only before any reading
+   * of this epoch's beacon.
+   */
+  claimed: Map<string, number>;
   /** What each hub said it reaches. */
   reach: Map<string, Set<string>>;
   /** What each hub in the beacon said of its own edges' apps taking no hubs (`l`): in memory, while that hub counts. */
@@ -173,7 +177,7 @@ export class MeshHubs {
       const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
       this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, epochRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, publishAfter: 0, readAt: 0, stepUpAt: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
-      seenHubs: new Map(), heardHubs: new Set(), reach: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set() }));
+      seenHubs: new Map(), claimed: new Map(), reach: new Map(), reachLegacy: new Map(), reachHeard: new Map(), takesHubs: new Set(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set() }));
     }
     return live;
   }
@@ -228,6 +232,8 @@ export class MeshHubs {
     const policy = session.hubPolicy, inRoster = (key: string) => rosterHas(session.roster, key);
     const out = new Set(this.listed(live, session, now).map(h => h.key));
     for (const [key, at] of live.seenHubs) if (now - at <= this.timings.graceMs && key !== session.myKey && inRoster(key) && !policy.no.includes(key) && !live.departed.has(key)) out.add(key);
+    // Before any reading of this epoch's beacon (my relays' budget spent), a hub on its own word: the reading decides.
+    if (!live.epochRead) for (const [key, at] of live.claimed) if (now - at <= this.timings.graceMs && inRoster(key) && !policy.no.includes(key) && !live.departed.has(key)) out.add(key);
     return [...out];
   }
 
@@ -247,6 +253,7 @@ export class MeshHubs {
     const was = live.seenHubs.delete(key) || live.myHubs.includes(key) || live.beacon.some(h => h.key === key);
     live.reach.delete(key);
     live.reachLegacy.delete(key);
+    live.claimed.delete(key);
     live.hubsUp.delete(key);
     live.myHubs = live.myHubs.filter(k => k !== key);
     return was;
@@ -424,7 +431,9 @@ export class MeshHubs {
    */
   private counted(live: HubLive, session: GroupSession, now: number): number {
     const keys = new Set(this.listed(live, session, now).map(h => h.key));
-    for (const [key, at] of live.seenHubs) {
+    // A hub no reading showed (its writes held back too) but that says whom it reaches is one as well: uncounted, every
+    // member it serves stepped up beside it, and it never saw enough to step down.
+    for (const map of [live.seenHubs, live.claimed]) for (const [key, at] of map) {
       if (now - at <= this.timings.graceMs && key !== session.myKey && rosterHas(session.roster, key) && !live.departed.has(key)) keys.add(key);
     }
     return keys.size;
@@ -454,9 +463,11 @@ export class MeshHubs {
 
   private noteHubs(live: HubLive, session: GroupSession, now: number): void {
     for (const h of this.listed(live, session, now)) live.seenHubs.set(h.key, now);
-    // Hubs only by their own word, until this reading: the beacon has them, or they are none.
-    for (const key of live.heardHubs) if (!live.beacon.some(h => h.key === key)) { live.seenHubs.delete(key); live.reach.delete(key); }
-    live.heardHubs.clear();
+    // Hubs only by their own word: the beacon has them now, or whom they said they reach is not taken.
+    for (const [key, at] of live.claimed) {
+      if (live.beacon.some(h => h.key === key)) live.claimed.delete(key);
+      else { live.reach.delete(key); if (now - at > this.timings.graceMs || !rosterHas(session.roster, key)) live.claimed.delete(key); }
+    }
     for (const [key, at] of live.seenHubs) if (now - at > this.timings.graceMs || !rosterHas(session.roster, key)) live.seenHubs.delete(key);
     // Out of the roster now: someone who leaves and is let in again later may be a hub again.
     for (const key of live.departed) if (!rosterHas(session.roster, key)) live.departed.delete(key);
@@ -639,8 +650,8 @@ export class MeshHubs {
 
   /**
    * What a hub says it reaches, and which members on its edges have apps that take no hubs. Taken from a hub of the
-   * beacon as I read it (or seen there within `graceMs`); before any reading of this epoch's beacon, a member that says
-   * it is taken as a hub on its word, until the reading, and nothing it says of other members' apps is. At most one
+   * beacon as I read it (or seen there within `graceMs`); from another member, only that it says it is a hub (`claimed`),
+   * and nothing it says of other members' apps. At most one
    * every `REACH_HEARD_MS` from a member. Nothing of it is saved: what a member's app takes, its own edge says (`edgeReady`).
    */
   reached(groupId: string, session: GroupSession, from: string, frame: Record<string, unknown>, now: number): void {
@@ -649,15 +660,19 @@ export class MeshHubs {
     if (now - (live.reachHeard.get(from) ?? -Infinity) < REACH_HEARD_MS) return;
     if (session.hubPolicy.no.includes(from) || live.departed.has(from)) return;
     const seen = live.seenHubs.get(from);
-    const inBeacon = live.beacon.some(h => h.key === from) || (seen !== undefined && now - seen <= this.timings.graceMs && !live.heardHubs.has(from));
-    if (!inBeacon && live.epochRead) return;
+    const inBeacon = live.beacon.some(h => h.key === from) || (seen !== undefined && now - seen <= this.timings.graceMs);
     live.reachHeard.set(from, now);
     for (const [key] of live.reachHeard) if (!rosterHas(session.roster, key)) live.reachHeard.delete(key);
     const reach = new Set(frame.k.filter((key): key is string => typeof key === "string" && rosterHas(session.roster, key)));
+    if (!inBeacon) {
+      // Only hubs say whom they reach, but none of my readings showed this one: counted as one when I step up or down,
+      // a hub to me only until my first reading of this epoch's beacon, and nothing it says of members' apps is taken.
+      live.claimed.set(from, now);
+      if (!live.epochRead) live.reach.set(from, reach);
+      return;
+    }
     live.reach.set(from, reach);
-    // Only hubs say whom they reach: one that does is seen as a hub, as a reading of the beacon would (not one the admin excluded).
     live.seenHubs.set(from, now);
-    if (!inBeacon) { live.heardHubs.add(from); return; }
     if (!Array.isArray(frame.l) || frame.l.length > session.roster.length) { live.reachLegacy.delete(from); return; }
     // A hub knows only of the members whose edges it holds.
     const legacy = frame.l.filter((key): key is string => typeof key === "string" && key !== session.myKey && reach.has(key) && !live.takesHubs.has(key));
