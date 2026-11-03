@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine } from "./fakeEngine";
-import { bootExtension, restartServiceWorker } from "./extension";
+import { bootExtension, restartServiceWorker, useProfile } from "./extension";
 
-// covers: app.attention.notifications
+// covers: app.attention.notifications, profiles.switch, app.clear-data
 
 vi.mock("@ghostly/browser/engine/server", async () => (await import("./fakeEngine")).engineServerModule);
 
@@ -122,6 +122,49 @@ describe("a click on a notification whose page is gone", () => {
     await restartServiceWorker(world);
     await restartServiceWorker(world);
     expect((world.chrome.notifications.onClicked as unknown as { listeners: { context: string }[] }).listeners.filter((l) => l.context === "background")).toHaveLength(1);
+
+    await click(id);
+    expect(world.callsTo("tabs.create").at(-1)).toEqual([`${APP}#/chat/chat-a`]);
+  });
+});
+
+describe("a new peer: the chats of the one before are not this one's", () => {
+  const ensure = () => world.chrome.runtime.sendMessage({ target: "background", type: "ensure-engine" });
+  const noticeKeys = () => [...world.session.keys()].filter((key) => key.startsWith("notice:"));
+
+  it("a profile switch takes the notifications of the profile before away, with the chats kept for them", async () => {
+    expect(await ensure()).toEqual({ ok: true });
+    const page = await openPage();
+    const message = await notify(page.lib, "message:link-a:m1", "chat-a");
+    const group = await notify(page.lib, "message:group:g1:m1", "group:g1");
+    // About a third profile: it did not stop, and its notice still means what it says.
+    const peek = await notify(page.lib, "peek-other-1", "profile:other00000");
+    await closePage(page.tabId, true);
+
+    useProfile(world, "work000000", ["other00000"]);
+    expect(await ensure()).toEqual({ ok: true });
+    await settle();
+    expect([...world.notices.keys()]).toEqual([peek]);
+    expect(noticeKeys()).toEqual([`notice:${peek}`]);
+    expect(world.notices.has(message) || world.notices.has(group)).toBe(false);
+  });
+
+  it("Clear all data: the cleared chats' notifications go with them", async () => {
+    const page = await openPage();
+    const id = await notify(page.lib, "message:link-a:m1", "chat-a");
+    expect(await world.chrome.runtime.sendMessage({ target: "background", type: "restart-engine" })).toEqual({ ok: true });
+    await settle();
+    expect(world.notices.has(id)).toBe(false);
+    expect(noticeKeys()).toEqual([]);
+  });
+
+  it("the same peer started again keeps them: a click still opens the chat", async () => {
+    expect(await ensure()).toEqual({ ok: true });
+    const page = await openPage();
+    const id = await notify(page.lib, "message:link-a:m1", "chat-a");
+    await closePage(page.tabId);
+    await restartServiceWorker(world);
+    expect(await ensure()).toEqual({ ok: true });
 
     await click(id);
     expect(world.callsTo("tabs.create").at(-1)).toEqual([`${APP}#/chat/chat-a`]);

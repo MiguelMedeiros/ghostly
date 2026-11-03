@@ -125,8 +125,10 @@ export default async function PrivacyPage() {
             <Term>What the apps ask our sites.</Term> A web app tab asks app.ghostly.tools for{" "}
             <Code>/version.json</Code> when it opens, every four hours and when it comes back to the foreground, to
             offer a new version. A browser extension installed outside the Chrome Web Store asks ghostly.tools for{" "}
-            <Code>/latest.json</Code>. The desktop app asks GitHub for new releases. Settings, Updates turns these
-            checks off.
+            <Code>/latest.json</Code>. The desktop app asks GitHub for new releases. The Android app asks ghostly.tools
+            for <Code>/latest.json</Code> when it opens, every four hours and when it comes back to the foreground, and
+            when you tap Download, the new version&apos;s APK comes from GitHub. Settings, Updates turns these checks
+            off.
           </li>
         </ul>
       </Section>
