@@ -272,7 +272,7 @@ function GhostlyBack({ t, card, contact, others, busy, turning, done, error, act
             <span className="id-card-back-meta">{card.category} · {card.validity}</span>
           </span>
         </div>
-        <code className="block break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="composer-identity-key">{card.subject}</code>
+        <code dir="ltr" className="block text-left break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="composer-identity-key">{card.subject}</code>
         {/* Once done, the line saying so stands for it: the engine's state catches up a moment later. */}
         {!done && <p className="id-card-back-state"><span data-testid="composer-identity-status">{state}</span></p>}
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">

@@ -356,7 +356,7 @@ function CopyBlock({ text, testId }: { text: string; testId: string }) {
   const { t } = useI18n();
   return (
     <div className="space-y-1.5">
-      <code data-testid={testId} className="block break-all select-all whitespace-pre-wrap bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono">{text}</code>
+      <code data-testid={testId} dir="ltr" className="block text-left break-all select-all whitespace-pre-wrap bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono">{text}</code>
       <Button onClick={() => void copy()}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
       {failed && <Notice tone="error" testId="add-identity-copy-error">{t("identities.add.copyError")}</Notice>}
     </div>

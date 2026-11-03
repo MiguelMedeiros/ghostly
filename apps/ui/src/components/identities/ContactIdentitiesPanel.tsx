@@ -183,7 +183,7 @@ function TheirGhostlyBack({ t, card, link, name, turning, onCards }: { t: Transl
             <span className="id-card-back-meta">{card.category}</span>
           </span>
         </div>
-        <code className="block break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="chat-identity-key">{card.subject}</code>
+        <code dir="ltr" className="block text-left break-all select-all rounded-lg bg-black/30 p-2 text-[11px] leading-4 text-white/85" data-testid="chat-identity-key">{card.subject}</code>
         <dl className="contact-card-facts">
           <dt>{t("identities.contact.name")}</dt>
           <dd>{t("identities.ghostly.nameAsSaid")}</dd>
