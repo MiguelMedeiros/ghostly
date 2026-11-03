@@ -1516,4 +1516,7 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 @media (forced-colors: active) {
   :focus-visible:not([tabindex="-1"]) { outline: 2px solid Highlight !important; }
   [class~="focus-visible:ring-inset"]:focus-visible { outline-offset: -2px; }
+  /* A field whose frame draws the focus (the chat list's search, `has-[input:focus-visible]:outline-2`): one mark, the frame's. */
+  :has(> input:focus-visible)[class~="has-[input:focus-visible]:outline-2"] { outline: 2px solid Highlight !important; }
+  [class~="has-[input:focus-visible]:outline-2"] > input:focus-visible { outline: none !important; }
 }

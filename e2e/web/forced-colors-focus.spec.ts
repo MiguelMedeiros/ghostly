@@ -58,6 +58,17 @@ test("every Tab stop on the first-run home and in Settings shows the focus, in f
   expect(home.length).toBeGreaterThan(10);
   expect.soft(unmarked(home), `first-run home, forced colors (${home.length} stops)`).toEqual([]);
 
+  // The chat list's search shows one mark in forced colors, its frame's: no second outline on the field inside.
+  const search = page.getByPlaceholder("Search chats");
+  await search.focus();
+  await page.keyboard.press("Shift+Tab");
+  await page.keyboard.press("Tab");
+  const marks = await search.evaluate(el => {
+    const own = getComputedStyle(el), frame = getComputedStyle(el.parentElement!);
+    return { own: own.outlineStyle, frame: frame.outlineStyle, frameWidth: parseFloat(frame.outlineWidth) };
+  });
+  expect(marks).toEqual({ own: "none", frame: "solid", frameWidth: 2 });
+
   await page.goto("/#/settings");
   await expect(page.getByTestId("settings-reduce-motion")).toBeVisible();
   const settings = await tabWalk(page);
