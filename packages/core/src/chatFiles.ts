@@ -947,9 +947,16 @@ export class ChatFiles {
     });
   }
 
-  /** The next file waiting its turn, once one ends. */
+  /**
+   * The next file waiting its turn, once one ends. The others were told they wait when they were queued: told again at
+   * each end, n files at once made about n²/2 frames, and their sender stored its record for each.
+   */
   private startNext(): void {
-    for (const entry of this.entries.values()) if (entry.record.direction === "in" && entry.record.state === "queued") this.startIncoming(entry);
+    for (const entry of this.entries.values()) {
+      if (entry.record.direction !== "in" || entry.record.state !== "queued" || entry.in!.starting) continue;
+      if (this.activeIncoming(entry) >= FILE_LIMITS.maxActiveIncoming) return;
+      this.startIncoming(entry);
+    }
   }
 
   private async onOffer(frame: Record<string, unknown>): Promise<void> {
@@ -1236,6 +1243,9 @@ export class ChatFiles {
       case "pf-wait": {
         // The answer to the paused offer said while the person there still decides: the pause here holds.
         if (record.state === "paused" && record.pausedBy === "me") return;
+        // Told again what it already waits for (an older receiver says so each time a file there ends): nothing changes.
+        if (frame.why === "paused" ? record.state === "paused" && record.pausedBy === "peer"
+          : record.state === "asking" && record.waitingFor === (frame.why === "busy" ? "busy" : "consent")) return;
         out.generation++;
         out.next = record.confirmed;
         clearTimeout(out.timer);
