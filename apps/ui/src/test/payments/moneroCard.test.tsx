@@ -65,6 +65,8 @@ describe("a Monero address or monero: link in a message", () => {
     const { user } = bubble(XMR_MAINNET, { sender: "me" });
     const card = screen.getByTestId("monero-bubble");
     expect(within(card).queryByTestId("monero-pay")).toBeNull();
+    // The ⓘ only explains Pay: no Pay, no ⓘ.
+    expect(within(card).queryByTestId("monero-info")).toBeNull();
     await user.click(within(card).getByRole("button", { name: "Copy address" }));
     expect(await navigator.clipboard.readText()).toBe(XMR_MAINNET);
   });
