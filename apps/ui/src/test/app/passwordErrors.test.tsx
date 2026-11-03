@@ -299,6 +299,47 @@ describe("the floating card", () => {
     expect(screen.queryByTestId("toast")).toBeNull();
   });
 
+  it("waits while it is pointed at or its × has the focus, and its time runs again when it is left", async () => {
+    const { user } = renderApp(<Harness />);
+    await user.click(screen.getByRole("button", { name: "show" }));
+    await user.hover(screen.getByTestId("toast"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    expect(screen.getByTestId("toast")).toBeInTheDocument();
+    await user.unhover(screen.getByTestId("toast"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
+    expect(screen.queryByTestId("toast")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "show" }));
+    await user.tab();
+    expect(screen.getByTestId("toast-close")).toHaveFocus();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_300)));
+    expect(screen.getByTestId("toast")).toBeInTheDocument();
+  });
+
+  it("a focused card that goes hands the focus back to the button that brought it, not to the page", async () => {
+    const { user } = renderApp(<Harness />);
+    await user.click(screen.getByRole("button", { name: "show" }));
+    await user.tab();
+    expect(screen.getByTestId("toast-close")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("toast")).toBeNull();
+    expect(screen.getByRole("button", { name: "show" })).toHaveFocus();
+  });
+
+  it("an error stays long enough to read in the app's language: Japanese takes longer than its least time", async () => {
+    function Refusal() {
+      const notice = useToast(1_000);
+      return <>
+        <button type="button" onClick={() => notice.show("パスワードは4文字以上必要です", { title: "パスワードは設定されていません" })}>show</button>
+        <Toast toast={notice.toast} onDismiss={notice.dismiss} />
+      </>;
+    }
+    const { user } = renderApp(<Refusal />, { language: "ja" });
+    await user.click(await screen.findByRole("button", { name: "show" }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 1_500)));
+    expect(screen.getByTestId("toast")).toBeInTheDocument();
+  });
+
   it("with the keyboard up, not over the button of the focused field's form either: it goes to the top", async () => {
     function Form() {
       const notice = useToast();
