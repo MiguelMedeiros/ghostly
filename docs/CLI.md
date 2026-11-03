@@ -178,7 +178,7 @@ ghostly listen --from alice --from bob --group team --exec ./bot.sh
   chat made after `listen` started, and only ever the chat of that key (a contact's own name never stands for a key).
   A prefix of a chat's id or the name its contact gave itself is refused, with the chat it found: another contact
   could call itself that. Name the chat first (`ghostly chat rename <chat> <name>`). `--group` takes a group (id,
-  prefix or name). Names are turned into ids once, at the
+  prefix or name; one that fits more than one group is refused, with their ids). Names are turned into ids once, at the
   start, so a contact who renames themselves later changes nothing. A name that matches nothing is an error (exit 3).
 - With either flag, an event of any other chat or group never reaches `--exec`, `--webhook` or stdout. The message
   itself is kept in the chat as always, and the cursor moves past it. Events of the profile itself
@@ -234,7 +234,7 @@ reactions, typing).
 | Voice calls | `call start <chat>`, `call answer`, `call auto on [--from <chat>]`, `call hangup\|list\|flush`, `call pipe`: the audio as raw PCM on a Unix socket per call, for a program of yours |
 
 A chat is named by its id, its contact's key, the label you gave it, or (only when no label matches) a unique prefix
-of its id or the name the contact gave itself; a group by its id, its name, or (only when no name matches) a unique
+of its id or the name the contact gave itself; a group by its id, its name, or a unique
 prefix of its id; a member by its key, a unique prefix or its name. **Names are a convenience for people**: a contact chooses its own name, a group's admin the
 group's and a member its own, so a bot or a script addresses by id (`<chat id>`, `group:<group id>`, a member's whole
 key), which every answer and event carries. What the CLI does when names meet:
@@ -243,9 +243,10 @@ key), which every answer and event carries. What the CLI does when names meet:
   chat found only by a prefix of its id or the name its contact gave itself never takes what also names a group. The group's id is the
   group; a prefix of it or the name of a group you are in is refused (exit 1, `bad_request`, `details.chat` and `details.groups`):
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
-- A label you gave a chat, or a group's name, wins over an id prefix: a contact can choose how a chat's id begins
-  (yours is made from their invite code), and a group's creator its id. A prefix that fits one chat and the name a
-  contact gave another is refused.
+- A label you gave a chat wins over an id prefix: a contact can choose how a chat's id begins (yours is made from
+  their invite code). A prefix that fits one chat and the name a contact gave another is refused.
+- A group's creator chooses both its name and its id, so neither wins: a ref that is one group's name and a prefix of
+  another's id is refused (exit 1, `bad_request`, `details.matches` with both ids). Use its id, or `group:<id>`.
 - A group you are in wins over an invitation with the same name or id prefix; an invitation is found by its id, and
   by a name or prefix none of your groups has.
 - A member's whole key is that member, whatever another member calls itself. A prefix or a name that fits two members

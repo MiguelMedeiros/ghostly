@@ -98,7 +98,8 @@ a command that waits (`chat wait`, `file wait`, `--wait`) within its `--timeout`
 `details.method`); `ghostly daemon restart` is the way out ([docs/CLI.md](../../docs/CLI.md#what-it-does)). On a
 terminal, a command that waits says on stderr what it waits for once it has waited a second; nothing is said there on
 a pipe. A `<chat>` is
-its id, a unique prefix of it, or its name; a `<group>` too.
+its id, a unique prefix of it, or its name; a `<group>` too. A `<group>` that is one group's name and a prefix of
+another's id is refused (exit 1, `bad_request`, both ids in `details.matches`): use its id.
 
 The rows are in alphabetical order of their first command, and every command of `ghostly help` has one
 (`test/readme.test.ts` checks both).
@@ -362,7 +363,7 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
 - `--type message.received` keeps one type; `--type message` (or `message.`, `message.*`) a family. A family deeper
   down ends in "." (`group.typing.`): `group.message` is that type alone.
 - `--from <chat|key>` and `--group <group>` (again for more): an allowlist. Only the chats (id, a label given here,
-  or the contact's `peer` key, which also matches a chat made later) and groups (id, prefix or name) named get through;
+  or the contact's `peer` key, which also matches a chat made later) and groups (id, prefix or name; one that fits more than one group is refused) named get through;
   a prefix of a chat's id or the name its contact gave itself is refused (another contact could call itself that:
   name the chat first with `chat rename`); any other chat's or
   group's event stops before `--exec`, `--webhook` and stdout (the message stays in the chat; the cursor moves past

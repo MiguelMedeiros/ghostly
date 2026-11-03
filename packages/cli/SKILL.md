@@ -121,6 +121,7 @@ Names are for people at a terminal. A contact chooses its own name, a group's ad
 name in a group, so in a script or an agent keep the **id** (`chat` and `group` in every answer and event, a member's
 key) and address by it: `<chat id>`, `group:<group id>`, `<member key>`. Where a command takes a chat or a group, a
 name that a contact gave itself and that also names one of your groups is refused (exit 1, `bad_request`) and both ids are shown.
+So is a `<group>` that is one group's name and a prefix of another's id.
 
 ### 5. Be woken: listen with an allowlist
 

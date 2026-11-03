@@ -149,10 +149,10 @@ export function namedByThem(ref: string, chat: { chat: string; name: string | nu
 const invitedOnly = (group: GroupView) => group.status === undefined && !!group.invitation;
 
 /**
- * A group by its id, by its name, or (only when no name matches) by a unique prefix of its id: whoever created a group
- * chose its id, so a prefix never wins over a name. A group this profile is in wins over an invitation with the same
- * name or prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix
- * where no group of this profile has it.
+ * A group by its id, or by its name or a unique prefix of its id. Whoever created a group chose both, so a ref that is
+ * one group's name and another's prefix is refused, with both ids (as a chat's). A group this profile is in wins over
+ * an invitation with the same name or prefix (the one who invites chooses those); an invitation is still found by its
+ * id, and by name or prefix where no group of this profile has it.
  */
 export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
   if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
@@ -160,8 +160,7 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
   if (exact) return exact;
   const lower = ref.toLowerCase();
   for (const among of [groups.filter((group) => !invitedOnly(group)), groups.filter(invitedOnly)]) {
-    const byName = among.filter((group) => group.name.trim().toLowerCase() === lower);
-    const found = byName.length ? byName : among.filter((group) => group.id.startsWith(ref));
+    const found = among.filter((group) => group.name.trim().toLowerCase() === lower || group.id.startsWith(ref));
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }

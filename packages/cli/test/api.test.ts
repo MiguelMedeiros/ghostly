@@ -149,13 +149,13 @@ describe("chats", () => {
     const teamChat = link("team9qmhjx8j1equ", { label: "mallory" });
     expect(() => findChatOrGroup([teamChat], [team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { chat: teamChat.id, groups: [team.id] } }));
     expect(findChatOrGroup([teamChat, link("chatMine", { label: "team" })], [team], "team")).toEqual({ link: expect.objectContaining({ id: "chatMine" }) });
-    // A group's id is its creator's to choose: a name wins over a prefix, among groups this profile is in too.
+    // A group's id is its creator's to choose: one group's name and another's prefix is refused, with both ids.
     const theirs = { ...team, id: "team" + "x".repeat(18), name: "Mallory's" } as unknown as GroupView;
-    expect(findGroup([theirs, team], "team").id).toBe(team.id);
+    expect(() => findGroup([theirs, team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: [theirs.id, team.id] } }));
     expect(findGroup([theirs, team], "teamx").id).toBe(theirs.id);
     // listen --from bob: the allowlist holds Bob's chat, never the one whose id starts with "bob".
     const ctx = { runtime: { server: { node: { getState: () => ({ links: [mallory, bob], groups: [team, theirs] }) } } } } as unknown as ApiContext;
-    const list = await allowlist(["bob"], ["team"], (method, params) => callApi(ctx, method, params), async () => null);
+    const list = await allowlist(["bob"], [team.id], (method, params) => callApi(ctx, method, params), async () => null);
     const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
     expect(await list.allows(event(bob.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
@@ -177,6 +177,35 @@ describe("chats", () => {
     const list = await allowlist(["owner"], [], (method, params) => callApi(named, method, params), async () => null);
     expect(await list.allows(event(owner.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
+  });
+
+  it("a ref that is one group's name and a prefix of another group's id is refused, with both ids, by every command", async () => {
+    // Mine, addressed by a prefix of its id; another member made the second one and named it with that prefix.
+    const mine = { ...group, id: "k3x9q2abcdefghijklmnop", name: "Team", status: "active" } as unknown as GroupView;
+    const named = { ...group, id: "z".repeat(22), name: "k3x9q2", status: "active" } as unknown as GroupView;
+    const groups = [mine, named];
+    const refusal = { code: "bad_request", message: '"k3x9q2" names more than one group: use its id', details: { matches: [mine.id, named.id] } };
+    const refused = expect.objectContaining(refusal);
+    expect(() => findGroup(groups, "k3x9q2")).toThrow(refused);
+    expect(() => findChatOrGroup([], groups, "k3x9q2")).toThrow(refused);
+    expect(() => findChatOrGroup([], groups, "group:k3x9q2")).toThrow(refused);
+    // Its id (as is, or group:<id>), a prefix only it fits, and a name only one group has still name it.
+    expect(findGroup(groups, mine.id).id).toBe(mine.id);
+    expect(findChatOrGroup([], groups, `group:${mine.id}`)).toEqual({ group: mine });
+    expect(findGroup(groups, "k3x9q2a").id).toBe(mine.id);
+    expect(findGroup(groups, "team").id).toBe(mine.id);
+    // What a command makes of it: group send (group.get, as every group command), send, listen --group.
+    const node = { getState: () => ({ links: [], groups }), sendGroupMessage: vi.fn(), sendMessage: vi.fn() };
+    const ctx = { runtime: { server: { node } } } as unknown as ApiContext;
+    const call = (method: string, params: Record<string, unknown>) => callApi(ctx, method, params);
+    await expect(call("group.get", { group: "k3x9q2" })).rejects.toMatchObject(refusal);
+    expect(() => chatOrGroup(ctx, "k3x9q2")).toThrow(refused);
+    await expect(allowlist([], ["k3x9q2"], call, async () => null)).rejects.toMatchObject(refusal);
+    const list = await allowlist([], [mine.id], call, async () => null);
+    const event = (id: string) => ({ seq: 1, id: "g", type: "group.message", at: 1, group: id } as GhostlyEvent);
+    expect(await list.allows(event(mine.id))).toBe(true);
+    expect(await list.allows(event(named.id))).toBe(false);
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("\"\" (and \"group:\" alone) names no chat and no group, even where it is a prefix of the only one's id", async () => {
