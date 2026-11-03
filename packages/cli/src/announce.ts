@@ -15,11 +15,14 @@ export function announceJoins(hub: EventHub, node: GhostlyNode): () => void {
   };
   return hub.onEvent((event) => {
     const chat = event.chat as string | undefined;
-    if (!chat) return;
+    // Only these two may say it: the engine's state costs ~3 ms with 300 chats, and every message, typing and app frame
+    // names a chat.
+    const live = event.type === "chat.connection" && event.live;
+    if (!chat || !(live || event.type === "chat.joined") || hub.said(chat, "join")) return;
     const link = node.getState().links.find((l) => l.id === chat);
     if (!link?.profile) return;
     // The joiner once its first pairing is live; the other side when a notice arrives (said once either way).
-    if (event.type === "chat.connection" && event.live && link.pairingProgress?.role === "joiner") say(chat);
+    if (live && link.pairingProgress?.role === "joiner") say(chat);
     else if (event.type === "chat.joined") say(chat);
   });
 }
