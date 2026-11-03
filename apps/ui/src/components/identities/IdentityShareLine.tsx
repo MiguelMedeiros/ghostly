@@ -1,4 +1,4 @@
-import type { PointerEvent } from "react";
+import { useId, type PointerEvent } from "react";
 import type { IdentityTimelineEntry } from "@ghostly/core";
 import { IDENTITY_CHALLENGE_WINDOW } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
@@ -42,6 +42,7 @@ function shareState(entry: IdentityTimelineEntry, link: Pick<LinkView, "identiti
 export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: IdentityTimelineEntry; link: LinkView | undefined; contact: string; onOpen: (entry: IdentityTimelineEntry) => void }) {
   const engine = useEngineState();
   const { t, language } = useI18n();
+  const id = useId();
   const mine = entry.side === "mine";
   const time = <time dateTime={new Date(entry.at).toISOString()} className="shrink-0 text-[10px] text-text-muted">{clockTime(entry.at, language)}</time>;
   // The identity as this app holds it now (mine: my proof, theirs: what the contact presented), else as the entry kept it.
@@ -67,24 +68,25 @@ export function IdentityShareLine({ entry, link, contact, onOpen }: { entry: Ide
       </div>
     );
   }
-  const words = state === "failed" && entry.error ? t("identities.share.notVerifiedWhy", { error: problemLine(entry.error, t) }) : card.statusLabel;
+  const why = state === "failed" ? entry.error : undefined;
   // A mouse over the card: the deck's flourish, once (it ends at rest by itself). Never for a finger, nor with reduced motion.
   const flourish = (e: PointerEvent<HTMLButtonElement>) => {
     if (e.pointerType === "mouse" && !reducedMotion()) playSwitch({ glow: null, incoming: e.currentTarget, outgoing: null, dir: 1 });
   };
   return (
     <div className="mb-3.5 flex flex-col items-center gap-1.5 message-row-x" data-testid="identity-share" data-side={entry.side} data-kind="shared" data-state={state}>
-      {/* Left to right in every language, as in the deck: the card is laid out in physical pixels. */}
+      {/* Left to right in every language, as in the deck: the card is laid out in physical pixels. Named by what its face
+          shows (Label in Name: a voice-control user says those words); who shared it, and why it failed, describe it. */}
       <button type="button" dir="ltr" onClick={() => onOpen(entry)} onPointerEnter={flourish} data-testid="identity-share-card"
-        aria-label={mine ? t("identities.share.sharedMineState", { what, state: words }) : t("identities.share.sharedTheirsState", { contact, what, state: words })}
+        aria-describedby={why ? `${id}-caption ${id}-reason` : `${id}-caption`}
         className={`identity-share-card ${idCardTone({ provider: card.provider, subject: card.bound, attested: card.attested })}`}>
         <IdCardFace card={card} />
       </button>
       <p className="m-0 inline-flex max-w-full items-baseline gap-1.5 rounded-lg bg-surface-alt/80 px-2.5 py-1 text-xs text-text-secondary">
-        <span className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : t("identities.share.captionTheirs", { contact })}</span>
+        <span id={`${id}-caption`} className="min-w-0 truncate" data-testid="identity-share-text">{mine ? t("identities.share.captionMine") : t("identities.share.captionTheirs", { contact })}</span>
         {time}
       </p>
-      {state === "failed" && entry.error && <p className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={entry.error}>{problemLine(entry.error, t)}</p>}
+      {why && <p id={`${id}-reason`} className="m-0 max-w-full truncate text-[11px] text-danger-ink" data-testid="identity-share-reason" title={why}>{problemLine(why, t)}</p>}
     </div>
   );
 }

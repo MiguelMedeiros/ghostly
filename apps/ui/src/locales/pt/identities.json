@@ -364,11 +364,8 @@
     "checking": "Verificando",
     "notChecked": "Não verificada",
     "notVerified": "Não verificada",
-    "notVerifiedWhy": "Não verificada: {{error}}",
     "revokedMine": "Seu {{what}} foi revogado",
     "revokedTheirs": "O {{what}} de {{contact}} foi revogado",
-    "sharedMineState": "Você compartilhou {{what}} · {{state}}",
-    "sharedTheirsState": "{{contact}} compartilhou {{what}} · {{state}}",
     "stoppedMine": "Você parou de compartilhar {{what}}",
     "stoppedTheirs": "{{contact}} parou de compartilhar {{what}}",
     "waiting": "Aguardando"
