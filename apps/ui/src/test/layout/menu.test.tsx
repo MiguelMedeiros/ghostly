@@ -185,6 +185,14 @@ describe("Menu: one line per row", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("menu")).not.toBeInTheDocument();
   });
+
+  it("writes a red row (Remove, Delete) in danger's ink, which reads at 4.5:1 on the menu and on a row under the pointer", () => {
+    renderApp(<MenuItem testId="remove" danger onClick={() => {}}>Remove</MenuItem>);
+    const row = screen.getByTestId("remove");
+    // Danger's own red read 3.8:1 on Cyan dark's hovered or focused row (#ea4335 on #142840), 3.6:1 at rest on Classic dark.
+    expect(row).toHaveClass("text-danger-ink");
+    expect(row).not.toHaveClass("text-danger");
+  });
 });
 
 /** A menu whose rows open a dialog, focus a field, or do nothing more; the dialog keeps what had the focus before it. */

@@ -239,7 +239,7 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
     <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
       {...(checked === undefined ? {} : { role: "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
-      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
+      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
         ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className="block truncate text-xs text-text-muted">{hint}</span></span>
