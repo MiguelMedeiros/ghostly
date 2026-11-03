@@ -1281,6 +1281,12 @@ export class GhostlyNode implements EngineImplementation {
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
+    // Hide my IP from contacts: a pickup reaches only this person's own storage host (no host is the app's own), never
+    // one a contact named. Path-style addresses: the endpoint's host is the address's.
+    hiddenIpHosts: () => {
+      if (this.settings.relayOnly !== true) return null;
+      try { return this.settings.holdStorage?.s3 ? [new URL(this.settings.holdStorage.s3.endpoint.trim()).host.toLowerCase()] : []; } catch { return []; }
+    },
     // Tests shorten the lifetime to watch an item expire, in a test build only; it never lengthens it.
     ttlMs: () => { const raw = testSwitch("ghostly-test-hold-ttl"); const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; },
     // The chat's ratchet (WISP 4xx), the same one its DHT floor seals with: one lock over both.
@@ -6711,6 +6717,8 @@ export class GhostlyNode implements EngineImplementation {
       // As at a start online: the links to the other devices, on the good read just made.
       if (!this.options.singleDevice && knownDeviceGate()?.state === "active") void this.startDeviceSet({ justRead: true }).catch(() => {});
     } else if (wasOnline && this.networkOn && relayOnlyChanged) await this.restartLinksForRelayOnly();
+    // Off: what contacts held and was left waiting on their storage is picked up now.
+    if (relayOnlyChanged && this.settings.relayOnly !== true) this.hold.wake();
     if (wasOnline && !this.networkOn) this.stopGroupEntries();
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.

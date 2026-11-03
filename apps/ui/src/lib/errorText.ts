@@ -505,6 +505,7 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", "errors.hold.contactRefused", "errors.hold.contactRefusedNext"),
   { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
   exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
+  exact("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", "errors.hold.hiddenIp", "errors.hold.hiddenIpNext"),
   { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
   // Sealed in the ratchet session the device this profile was on before shares with the contact (WISP 4xx § Held items): it
   // waits for the contact's app to seal it again, not for anything this device retries. Before the general pick-up rule.

@@ -537,6 +537,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
   ["Could not read the contact's pointer: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Could not read the contact's pointer: "],
   ["The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", `${BROWSER}/engine/hold.ts`],
+  ["Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", `${BROWSER}/engine/hold.ts`],
   ["Refused what the contact's storage offered: The manifest is malformed", `${BROWSER}/engine/hold.ts`, "Refused what the contact's storage offered: "],
   ["Could not pick up held items: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not pick up held items: "],
   ["Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", `${BROWSER}/engine/hold.ts`],

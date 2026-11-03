@@ -305,6 +305,8 @@
     "fullBytes": "等待联系人取走的内容将超过 {{max}} MB",
     "fullItems": "已有 {{max}} 项在等待联系人取走",
     "fullNext": "对方取走一些后,请重新发送。",
+    "hiddenIp": "联系人在其存储中给你留了内容",
+    "hiddenIpNext": "隐藏 IP 已开启，内容会在那里等待，直到你将其关闭。",
     "messageGone": "消息已不存在",
     "needPinned": "暂存消息需要 S3 存储，以及已固定的联系人",
     "needStorageNext": "请在个人资料 → 备份中设置 S3 存储。",
