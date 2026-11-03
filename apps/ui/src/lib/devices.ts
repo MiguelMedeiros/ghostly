@@ -205,6 +205,19 @@ export function removeErrorKey(error: unknown): TranslationKey | null {
   return reason === "busy" ? "devices.remove.fail.busy" : reason === "offline" ? "devices.fail.offline" : "devices.remove.fail.failed";
 }
 
+/** What a refused rename (`rename-<reason>:`) says; null for an error the engine did not word as one. */
+export function renameErrorKey(error: unknown): TranslationKey | null {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const reason = message.match(/^rename-([a-z-]+):/)?.[1];
+  if (!reason) return null;
+  if (reason === "name" || reason === "long") return "devices.rename.fail.name";
+  if (reason === "busy") return "devices.remove.fail.busy";
+  if (reason === "offline") return "devices.fail.offline";
+  if (reason === "unreachable") return "devices.fail.unreachable";
+  if (reason === "replaced") return "devices.fail.replaced";
+  return "devices.remove.fail.failed";
+}
+
 /** Names as a list a person reads in their language: "Desktop and Phone", "Desktop, Phone and Tablet". */
 export function listNames(names: readonly string[], language: string): string {
   // Not in this build's TypeScript library, but in every browser the app runs in.

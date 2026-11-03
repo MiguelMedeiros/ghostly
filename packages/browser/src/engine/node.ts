@@ -131,6 +131,7 @@ import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { handoffPakeReady, isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
 import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
+import { renameDevice, renamedDeviceName } from "../devices/rename";
 import { newDeviceSecretDue } from "../devices/rotate";
 import { RESTORE_UNCHECKED_KEY, isRestoreUnchecked, peekTurn, restoreCheckOf, restoredStandby, type TurnPeek } from "../devices/restoreGuard";
 import { createDeviceSigningKey } from "../devices/signingKey";
@@ -7026,15 +7027,18 @@ export class GhostlyNode implements EngineImplementation {
     this.tombstoneTimer ??= setInterval(() => void run(), GhostlyNode.TOMBSTONE_EVERY_MS);
   }
 
-  /** Whether a move of the set may begin now: this device is active, online, and nothing else changes the set. */
-  private setMoveAllowed(): void {
-    if (this.options.singleDevice) throw new Error("remove-state: A profile of the command line is on one device only");
+  /**
+   * Whether a move of the set (or a rename, `prefix` "rename") may begin now: this device is active, online, and nothing
+   * else changes the set.
+   */
+  private setMoveAllowed(prefix: "remove" | "rename" = "remove"): void {
+    if (this.options.singleDevice) throw new Error(`${prefix}-state: A profile of the command line is on one device only`);
     if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
-    if (!this.networkOn) throw new Error("remove-offline: You are offline");
+    if (!this.networkOn) throw new Error(`${prefix}-offline: You are offline`);
     const view = this.enrollment?.current();
-    if (view && view.step !== "done" && view.step !== "failed") throw new Error("remove-busy: A device is being added. Try again after it.");
+    if (view && view.step !== "done" && view.step !== "failed") throw new Error(`${prefix}-busy: A device is being added. Try again after it.`);
     const handoff = this.handoffGiver?.view();
-    if (handoff && handoff.step !== "failed") throw new Error("remove-busy: The profile is moving. Try again after it.");
+    if (handoff && handoff.step !== "failed") throw new Error(`${prefix}-busy: The profile is moving. Try again after it.`);
   }
 
   private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
@@ -7115,6 +7119,28 @@ export class GhostlyNode implements EngineImplementation {
   async deviceRemove({ key }: { key: string }): Promise<DeviceSetView> {
     if (typeof key !== "string" || !key) throw new Error("remove-device: Name the device to remove.");
     return this.moveDeviceSet(key);
+  }
+
+  /**
+   * Rename (WISP 06 § User experience, the row menu): the active device writes its next record with the new name in
+   * that device's slot (`devices/rename.ts`), and tells the devices on a live link to read it now. Only the active
+   * device renames, any device of the set, itself included. Errors start with `rename-<reason>:`.
+   */
+  async deviceRename({ key, name }: { key: string; name: string }): Promise<DeviceSetView> {
+    if (typeof key !== "string" || !key) throw new Error("rename-device: Name the device to rename.");
+    const clean = renamedDeviceName(name);
+    this.setMoveAllowed("rename");
+    if (this.settingMove) throw new Error("rename-busy: The device set is already changing.");
+    const work = (async () => {
+      const keeper = await this.deviceLinks?.turnKeeper();
+      if (!keeper) throw new Error("rename-state: This device cannot sign for its device set.");
+      return renameDevice({ profile: databaseName(), keeper, key, name: clean });
+    })();
+    this.settingMove = work;
+    let renamed: boolean;
+    try { renamed = await work; } finally { this.settingMove = null; }
+    if (renamed) this.deviceLinks?.hintTurn();
+    return this.deviceSet();
   }
 
   /** "New device secret": the set moves to a new secret with nobody removed. */
