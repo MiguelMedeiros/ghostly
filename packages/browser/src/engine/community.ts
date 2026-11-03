@@ -1981,8 +1981,10 @@ export class Communities {
     if (!fresh || !live.hub) return;
     // Relay: to every edge but the one it came on. Each hub passes a frame on once (the session says
     // whether it was new), so this is a flood with duplicates dropped: it does not need every hub to
-    // have an edge to every other one yet, which a group whose hubs just changed does not.
-    for (const [key, id] of this.hearers(groupId, f)) if (key !== peerKey) this.sendTo(id, f);
+    // have an edge to every other one yet, which a group whose hubs just changed does not. At once, with
+    // my live mark on a message that came live here (WISP 903 § Relaying): its author's clock is told by it.
+    const out = live.session.passOn(f);
+    for (const [key, id] of this.hearers(groupId, f)) if (key !== peerKey) this.sendTo(id, out);
   }
 
   private peerIsHub(live: Live, key: string): boolean {
@@ -2064,8 +2066,9 @@ export class Communities {
         const file = m.file && this.files && !this.stored.get(id)?.removedIds?.includes(m.id) ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
+        // Live (straight from its author, or handed on at once by a hub that says so): it tells the author's clock.
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
-          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }), ...(m.frame && { frame: m.frame }) });
+          ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }), ...(m.frame && { frame: m.frame }) }, m.live);
         placing(stored !== false);
         // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645).
         if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return false;

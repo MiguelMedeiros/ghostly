@@ -109,7 +109,18 @@ export const COMMUNITY_LIMITS = {
   catchUpSlice: CATCH_UP_SLICE,
   /** Between two slices, when the member's app cannot say it handled one (`handled` resolves `false`). */
   catchUpPauseMs: CATCH_UP_PAUSE_MS,
+  /**
+   * A message a member handed on with its live mark (`lv`, WISP 903 § Relaying) is live here only when the time it says
+   * is at most this long before my clock: the mark is that member's word, and past this it would make a catch-up ring.
+   */
+  liveMarkMs: 10 * 60_000,
 } as const;
+
+/**
+ * After I send a member my sync: how long what comes over its edge may be its answer (a catch-up, never `live`). Each
+ * frame of the answer keeps it open, since it goes a slice at a time. As a private group's.
+ */
+const ANSWER_WINDOW_MS = 5_000;
 
 /** What every member should know about who can read what, and what the link does, in the words the apps show. */
 export const GROUP_READ_NOTE_COMMUNITY = `Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last ${COMMUNITY_LIMITS.store} messages from whoever is there when they return.`;
@@ -428,8 +439,15 @@ export interface CommunityState {
   metaPast?: GroupMeta[];
 }
 
-/** `frame`: the frame the message came in, as it is kept to hand on to a member who missed it. An app may keep it with the message it stores. */
-export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; frame?: CommunityMessageFrame }
+/**
+ * `frame`: the frame the message came in, as it is kept to hand on to a member who missed it (without a live mark). An
+ * app may keep it with the message it stores.
+ * `live`: it came as it was written (revision 2026-11-03): straight from its author over the author's own edge, not in
+ * the author's answer to my sync and not one that waited for a commit or a secret; or handed on at once by the member
+ * at the other end of the edge, whose live mark names itself (`lv`), the time it says at most `liveMarkMs` before my
+ * clock. How long it took then says how far the author's clock is from mine.
+ */
+export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; frame?: CommunityMessageFrame; live?: true }
 /**
  * What an application sends through the group rather than as text: `frame` for everyone in the epoch (the group
  * reads it, as it reads text), or, in `pair`, a payload only `to` can open. Delivered once, like a message: the
@@ -637,6 +655,10 @@ export class CommunitySession {
   private waiting: { from: string; frame: CommunityMessageFrame }[] = [];
   private waitingBytes = 0;
   private asked = new Map<string, number>();
+  /** Per member: until when what comes over its edge may be its answer to my sync (`ANSWER_WINDOW_MS`). In memory only. */
+  private readonly answering = new Map<string, number>();
+  /** The message frames given to `handle` that came live here (`CommunityIncomingMessage.live`): `passOn` marks them. */
+  private readonly cameLive = new WeakSet<object>();
   /** Syncs answered per member, a few a minute (`COMMUNITY_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
   /** Messages taken per author, a few a second (`MessagePace`). In memory only. */
@@ -1849,7 +1871,7 @@ export class CommunitySession {
    * what was left of the first from its start: a member back after 256 messages was handed 288 (2026-10-14).
    */
   syncFrame(to?: string): CommunitySyncFrame {
-    if (to) this.asked.set(to, this.hooks.clock?.() ?? Date.now());
+    if (to) { const now = this.hooks.clock?.() ?? Date.now(); this.asked.set(to, now); this.answering.set(to, now + ANSWER_WINDOW_MS); }
     const have: Record<string, Record<string, number>> = {};
     const recent = new Set(this.state.store.map(f => seenKey(f.e, f.h)));
     for (const [sender, byKey] of Object.entries(this.state.seen)) for (const [key, entry] of Object.entries(byKey)) {
@@ -1879,6 +1901,9 @@ export class CommunitySession {
       if (!raw || typeof raw !== "object") return false;
       const frame = raw as Record<string, unknown>;
       if (frame.g !== this.id || frame.v !== 2) return false;
+      // A frame of an answer to my sync keeps it open: the answer goes a slice at a time.
+      const now = this.hooks.clock?.() ?? Date.now();
+      if ((this.answering.get(from) ?? 0) > now) this.answering.set(from, now + ANSWER_WINDOW_MS);
       // A member who lost its admission still hears commits: the next one may take it in.
       if (this.state.status !== "active" && !(this.state.status === "lost" && (frame.t === "group-commit" || frame.t === "group-secret" || frame.t === "group-secrets"))) return false;
       switch (frame.t) {
@@ -1931,9 +1956,30 @@ export class CommunitySession {
     return true;
   }
 
-  private async receiveMessage(from: string, raw: unknown): Promise<boolean> {
-    if (!isMessageFrame(raw)) return false;
+  /**
+   * What a hub hands on of a frame it took (`handle` said it was new): as it came, without the live mark of whoever
+   * handed it to me, and with mine when it came live here (WISP 903 § Relaying, revision 2026-11-03). Hand it on at
+   * once: the mark says it is passed on as it came.
+   */
+  passOn(frame: object): object {
+    if ((frame as { t?: unknown }).t !== "group-msg") return frame;
+    const { lv: _mark, ...rest } = frame as Record<string, unknown>;
+    return this.cameLive.has(frame) ? { ...rest, lv: this.myKey } : rest;
+  }
+
+  /** `waited`: it waited for a commit or a secret (`replayWaiting`), so it is not live. */
+  private async receiveMessage(from: string, input: unknown, waited = false): Promise<boolean> {
+    if (!isMessageFrame(input)) return false;
+    // The live mark is the hop's, never the frame's: it is not kept, stored or handed on as it came.
+    const { lv: mark, ...unmarked } = input as CommunityMessageFrame & { lv?: unknown };
+    const raw = unmarked as CommunityMessageFrame;
     if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
+    const now = this.hooks.clock?.() ?? Date.now();
+    // Straight from its author, outside its answer to my sync; or handed on at once by the member at the other end,
+    // whose mark names itself, and not so old that the mark would make a catch-up ring.
+    const live = !waited && (raw.s === from ? (this.answering.get(from) ?? 0) <= now
+      : mark === from && rosterHas(this.roster, from) && now - raw.ts <= COMMUNITY_LIMITS.liveMarkMs);
+    if (live) this.cameLive.add(input);
     // One I took already (from a second hub, or in a catch-up answer) is dropped before its signature is checked: it
     // would be dropped below whether the signature holds or not.
     if (this.isDuplicate(raw)) return false;
@@ -1999,7 +2045,7 @@ export class CommunitySession {
       const card = parsed.sc === undefined ? undefined : readStatusCard(parsed.sc);
       // A file that does not hold is left out too (WISP 503): the text, its caption or fallback line, shows.
       const file = parsed.fl === undefined ? undefined : readGroupFileMeta(parsed.fl) ?? undefined;
-      onRow = await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), frame: raw });
+      onRow = await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), frame: raw, ...(live ? { live: true as const } : {}) });
     }
     else if (isObject(parsed.x)) {
       const app = { id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x };
@@ -2081,6 +2127,7 @@ export class CommunitySession {
     const now = this.hooks.clock?.() ?? Date.now();
     if (now - (this.asked.get(from) ?? 0) < 5_000) return null;
     this.asked.set(from, now);
+    this.answering.set(from, now + ANSWER_WINDOW_MS);
     return this.syncFrame();
   }
 
@@ -2090,7 +2137,7 @@ export class CommunitySession {
     if (!ready.length) return;
     this.waiting = this.waiting.filter(w => !ready.includes(w));
     this.waitingBytes = this.waiting.reduce((sum, w) => sum + w.frame.c.length, 0);
-    for (const { from, frame } of ready) await this.receiveMessage(from, frame);
+    for (const { from, frame } of ready) await this.receiveMessage(from, frame, true);
   }
 
   private async receiveSync(from: string, frame: CommunitySyncFrame): Promise<void> {

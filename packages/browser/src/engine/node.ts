@@ -927,8 +927,8 @@ export class GhostlyNode implements EngineImplementation {
     return message.linkId.startsWith("group:") ? `${message.linkId} ${message.member ?? ""}` : message.linkId;
   }
   /**
-   * A contact's row came on the live session of a 1:1 chat, or a member's straight from its author (`live`, never one
-   * handed on or caught up): what it says of that clock is kept.
+   * A contact's row came on the live session of a 1:1 chat, or a member's as it was written (`live`: straight from its
+   * author, or in a community handed on at once by a hub that says so; never one caught up): what it says of that clock is kept.
    */
   private clockSample(message: StoredMessage, live = false): void {
     if (message.sender !== "peer" || message.sentAt === undefined || message.event || message.via !== "datalink") return;
