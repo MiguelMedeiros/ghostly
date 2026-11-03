@@ -257,7 +257,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
         </button>
       )}
       {/* What went wrong with an attempt here: gone once the request is paid, however it was paid. */}
-      {error && payment.state !== "settled" && <Notice problem={error} className="text-[11px] m-0 mt-1" ink />}
+      {error && payment.state !== "settled" && <Notice problem={error} className="text-[11px] m-0 mt-1" />}
     </div>
   );
 }

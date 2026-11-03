@@ -29,3 +29,12 @@ describe("an installed app's Uninstall question, by keyboard", () => {
     expect(screen.getByTestId("app-uninstall-open")).toHaveFocus();
   });
 });
+
+describe("an installed app's Uninstall, in red", () => {
+  it("is written in danger's ink, which reads at 4.5:1 on the details' surface at rest and hovered, in every theme", () => {
+    renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
+    // Danger's own red read 4.44:1 on Monochrome dark's #1a1a1a, and 4.04:1 there under its hover tint.
+    expect(screen.getByTestId("app-uninstall-open")).toHaveClass("text-danger-ink");
+    expect(screen.getByTestId("app-uninstall-open")).not.toHaveClass("text-danger");
+  });
+});

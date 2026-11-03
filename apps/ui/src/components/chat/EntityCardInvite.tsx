@@ -77,7 +77,7 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
         <p className="m-0">{t("chat.entity.joinHint")}</p>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-invite-join" className={cardButton} onClick={join}>{t("chat.entity.join")}</button>{actions}</div>
       </>}
-      {error && <Notice problem={error} className="m-0" ink />}
+      {error && <Notice problem={error} className="m-0" />}
     </EntityCardFrame>
   );
 }
@@ -133,7 +133,7 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
         <p className="m-0">{community ? t("chat.entity.communityHint") : t("chat.entity.groupHint")}</p>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>
       </>}
-      {error && <Notice problem={error} className="m-0" ink />}
+      {error && <Notice problem={error} className="m-0" />}
     </EntityCardFrame>
   );
 }
