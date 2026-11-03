@@ -235,6 +235,31 @@ describe("the standby screen after a removal", () => {
     expect(screen.getByTestId("device-standby")).toHaveTextContent("Add it again from Desktop.");
     expect(screen.getByTestId("device-standby-reenroll")).toHaveTextContent("Add this device to my profile");
   });
+
+  it("removed while its screen is open: the keyboard focus on Use here goes to Add this device, not to the page", async () => {
+    const { rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
+    act(() => screen.getByTestId("handoff-use-here").focus());
+    rerender(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    expect(screen.queryByTestId("handoff-use-here")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("device-standby-reenroll")).toHaveFocus());
+  });
+
+  it("removed while the Use here dialog is open: the focus in its password goes to Add this device", async () => {
+    const { user, rerender } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "Desktop" }} />);
+    await user.click(screen.getByTestId("handoff-use-here"));
+    const dialog = screen.getByTestId("handoff-use-here-dialog");
+    const field = dialog.querySelector<HTMLElement>("input") ?? within(dialog).getAllByRole("button")[0]!;
+    act(() => field.focus());
+    rerender(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    expect(screen.queryByTestId("handoff-use-here-dialog")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("device-standby-reenroll")).toHaveFocus());
+  });
+
+  it("a screen that opens already removed leaves the focus where it is", async () => {
+    renderApp(<DeviceStandby gate={{ state: "removed", activeDevice: "Desktop" }} />);
+    await act(async () => {});
+    expect(screen.getByTestId("device-standby-reenroll")).not.toHaveFocus();
+  });
 });
 
 describe("the forced takeover asks Lost or stolen?", () => {

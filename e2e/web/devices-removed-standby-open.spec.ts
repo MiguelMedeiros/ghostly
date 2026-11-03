@@ -4,7 +4,8 @@ import { enrollDevice } from "../support/devices";
 /**
  * A device removed while its standby screen stays open (WISP 06 § When a device checks). The active device puts the
  * tombstone and closes the removed device's link; the standby, left in front with no reload, no focus and no visibility
- * change, reads the turn on that close and says it was removed, instead of offering Use here until its 10-minute read.
+ * change, reads the turn on that close and says it was removed, instead of offering Use here until its 10-minute read. The keyboard focus that was on
+ * Use here goes to Add this device.
  */
 
 test("a device removed while its standby screen stays open says so, without a reload", { tag: ["@feature:devices.remove"] }, async ({ peer }) => {
@@ -15,6 +16,9 @@ test("a device removed while its standby screen stays open says so, without a re
   await expect(standby).toHaveAttribute("data-state", "standby", { timeout: 120_000 });
   await expect(tablet.page.getByTestId("device-standby-link")).toHaveAttribute("data-status", "live", { timeout: 120_000 });
   await expect(tablet.page.getByTestId("handoff-use-here")).toBeVisible();
+  // The keyboard focus is on Use here, which the removal takes away.
+  await tablet.page.getByTestId("handoff-use-here").focus();
+  await expect(tablet.page.getByTestId("handoff-use-here")).toBeFocused();
 
   // Profile, Devices, Remove on the tablet's row.
   await desktop.page.goto("/#/profile");
@@ -28,4 +32,6 @@ test("a device removed while its standby screen stays open says so, without a re
   await expect(tablet.page.getByTestId("device-standby-title")).toHaveText("This device was removed");
   await expect(tablet.page.getByTestId("handoff-use-here")).toHaveCount(0);
   await expect(tablet.page.getByTestId("device-standby-reenroll")).toBeVisible();
+  // The focus went to what replaced it, not to the page.
+  await expect(tablet.page.getByTestId("device-standby-reenroll")).toBeFocused();
 });
