@@ -3,8 +3,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { InputGroup, LinkRow, Page } from "../components/layout";
 import { useSettings } from "../contexts/SettingsContext";
 import { useI18n } from "../contexts/I18nContext";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { listSessions } from "../lib/storage";
+import { usePlatformValue } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
+import { knownChatKeys } from "../lib/storage";
 import { type ColorScheme } from "../lib/settings";
 import { ColorSwatches } from "../components/ColorSwatches";
 import { baseProfileName, clearRestoredMark, createProfile, currentProfile, fitsProfileName, listProfiles, renameProfile, switchProfile, type ProfileEntry } from "../lib/profiles";
@@ -12,13 +13,14 @@ import { askNameIn } from "../lib/nameStep";
 import { Block, Button, Notice, Row, Section, Segmented, Switch, input } from "../components/wallet/ui";
 import { ProfileBackups } from "../components/ProfileBackups";
 import { DevicesSection } from "../components/devices/DevicesSection";
-import { useEngineState } from "../lib/engineState";
+import { useEngineValue } from "../lib/engineState";
 import { useIdentityAttention } from "../lib/identities";
 import { DeleteProfileDialog } from "../components/DeleteProfileDialog";
 import { ProfileBadge } from "../components/ProfileBadge";
 import { setMyAvatar, setShareProfile, useMyAvatar, useShareProfile } from "../hooks/useAvatars";
 import { avatarFromFile } from "../lib/avatarImage";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { useStoredSessions } from "../hooks/useStoredSessions";
 import { formatAmount } from "../lib/amount";
 import { useComposition } from "../hooks/useComposition";
 import { useOwnNameField } from "../hooks/useOwnNameField";
@@ -37,6 +39,16 @@ function useProfiles() {
   return { current: currentProfile(), all: listProfiles() };
 }
 
+/** The chats, counted by their keys as `listSessions` counts them: no chat's stored copy, messages and all, is parsed per draw. */
+const chatCount = () => knownChatKeys().length;
+
+/** Whether profiles can be switched here, the wallets' balance (undefined with none) and how many services are shared. */
+const platformCounts = () => ({
+  canSwitch: !!servicesPlatform?.features.profiles,
+  balance: servicesPlatform?.wallet?.getState()?.balance,
+  services: servicesPlatform?.features.shareLocalServices ? servicesPlatform.getSharedServices().length : 0,
+});
+
 /**
  * The active local profile (WISP 04), as a page beside the chat list: its name and look, what belongs to
  * it, its backups, and the other profiles on this device.
@@ -46,11 +58,13 @@ export function Profile() {
   const { t, language } = useI18n();
   const { settings, updateColorScheme, randomizeNickname } = useSettings();
   const nickname = useOwnNameField();
-  const platform = useServicesPlatform();
+  // What the page shows of the platform, drawn again when that changes, not on every engine state.
+  const { canSwitch, balance, services } = usePlatformValue(platformCounts);
   const { current, all } = useProfiles();
   const myAvatar = useMyAvatar();
   const shareProfile = useShareProfile();
-  const identities = useEngineState()?.identityProofs.length ?? 0;
+  // The count only: on the whole state, the page drew again on every engine state (up to 20 a second while a file moves).
+  const identities = useEngineValue(state => state?.identityProofs.length ?? 0);
   const identityAttention = useIdentityAttention();
   // The field edits the name only: a restored profile's word for it is the tag beside the field, never text in it.
   const plain = baseProfileName(current.id) ?? current.name;
@@ -83,10 +97,7 @@ export function Profile() {
   const [error, setError] = useState<Problem | null>(null);
   useEffect(() => setName(plain), [plain]);
 
-  const canSwitch = !!platform?.features.profiles;
-  const wallet = platform?.wallet?.getState();
-  const services = platform?.features.shareLocalServices ? platform.getSharedServices() : [];
-  const chats = listSessions().length;
+  const chats = useStoredSessions(chatCount, Object.is);
   const attempt = (work: () => void) => { try { work(); setError(null); } catch (e) { setError(problemText(e, t)); } };
   const saveName = () => { if (name.trim() && name.trim() !== plain) attempt(() => renameProfile(current.id, name)); };
   const schemes: { value: ColorScheme; label: string }[] = [{ value: "light", label: t("settings.colorSchemes.light") }, { value: "dark", label: t("settings.colorSchemes.dark") }, { value: "system", label: t("settings.colorSchemes.system") }];
@@ -138,8 +149,8 @@ export function Profile() {
         <LinkRow testId="profile-identities-link" label={<span className="inline-flex items-center gap-2">{t("tabs.identities")}{identityAttention && <><span className="nav-dot-inline" aria-hidden="true" /><span className="sr-only">, {t("identities.attention")}</span></>}</span>}
           value={identities ? identities : undefined} onClick={() => nav.open("/identities")} />
         <LinkRow label={t("tabs.chats")} value={chats === 1 ? t("profile.chatOne") : t("profile.chatCount", { count: chats })} onClick={nav.home} />
-        <LinkRow label={t("tabs.wallets")} value={wallet ? t("profile.sats", { amount: formatAmount(wallet.balance, language) }) : undefined} onClick={() => nav.open("/wallet")} />
-        <LinkRow label={t("tabs.services")} value={services.length ? services.length : undefined} onClick={() => nav.open("/services")} />
+        <LinkRow label={t("tabs.wallets")} value={balance !== undefined ? t("profile.sats", { amount: formatAmount(balance, language) }) : undefined} onClick={() => nav.open("/wallet")} />
+        <LinkRow label={t("tabs.services")} value={services ? services : undefined} onClick={() => nav.open("/services")} />
         <LinkRow label={t("settings.title")} onClick={() => nav.open("/settings")} />
       </Section>
 

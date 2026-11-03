@@ -201,7 +201,8 @@ export function NewWalletDialog({ wallet, offers, setupFailed = [], initialNetwo
                   <Select aria-label={t("wallet.source.title")} data-testid="new-wallet-provider-select" value={providerId} disabled={busy} onChange={(id) => { setProviderId(id); setPhase(null); }}
                     options={(chosenOffer.providers ?? []).map((p) => ({ value: p.id, label: p.label }))} />
                 )}
-                {descriptor?.description && <p className="text-xs text-text-secondary">{descriptor.description}</p>}
+                {/* The provider's English line, in its own direction (as in SourcePicker). */}
+                {descriptor?.description && <p className="text-xs text-text-secondary"><bdi>{descriptor.description}</bdi></p>}
                 {descriptor && Form && <Form key={`${network}-${descriptor.id}`} descriptor={descriptor} mode={network} busy={busy} onSubmit={(values) => void create(chosen, { providerId: descriptor.id, values })} />}
               </div>
             )}
