@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../contexts/I18nContext";
+import { useBackCloses } from "../hooks/useDismiss";
 import type { SecretFinding } from "../lib/parse/secrets";
 import { formatAmount } from "../lib/amount";
 
@@ -15,6 +16,7 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null), confirm = useRef<HTMLButtonElement>(null);
+  useBackCloses(onCancel);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;

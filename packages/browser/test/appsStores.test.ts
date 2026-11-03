@@ -457,6 +457,19 @@ describe("stores", () => {
     expect(net.fetch).not.toHaveBeenCalled();
   });
 
+  it("a pasted link with a query or fragment (a private file's read token) is refused with no request", async () => {
+    const token = "GHSAT0AAAAAACPRIVATEREADTOKEN";
+    for (const url of [`${BUNDLE_URL}?token=${token}`, `${BUNDLE_URL}#${token}`, `${PINNED_URL}?token=${token}`, `${BUNDLE_URL}?`]) {
+      await expect(apps(net).preview({ url }), url).rejects.toThrow(/^private-link: /);
+    }
+    await expect(apps(net).previewStore({ url: `${STORE_URL}?token=${token}` })).rejects.toThrow(/^private-link: /);
+    await expect(apps(net).addStore({ url: `${STORE_URL}?token=${token}` })).rejects.toThrow(/^private-link: /);
+    // A host off the list is still that, and a github.com page's query never reaches the file read.
+    await expect(apps(net).preview({ url: `https://apps.example/app.ghostlyapp?token=${token}` })).rejects.toThrow(/^host: /);
+    expect(net.fetch).not.toHaveBeenCalled();
+    expect(appPasteUrl("https://github.com/ana/chess/raw/main/app.ghostlyapp?token=x", "app.ghostlyapp")).toBe("https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp");
+  });
+
   it("a store's listing URLs off the list are never asked", async () => {
     const v1 = await bundle();
     await net.putStore(await storeFiles({ apps: [{ ...listing(v1), urls: ["https://mirror.example/app.ghostlyapp"] }] }));

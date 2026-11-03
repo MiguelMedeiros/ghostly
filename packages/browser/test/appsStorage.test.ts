@@ -521,7 +521,7 @@ describe("the engine", () => {
     await expect(peer.appStorageSet({ ref: app.ref, scope: "l2", key: "k", value: 1 })).rejects.toThrow(/^bad-scope/);
     expect(await peer.appStorageGet({ ref: app.ref, scope: "l1", key: "k" })).toEqual({ value: 1 });
     expect((await peer.appEntry({ ref: app.ref })).entry).toContain("Chess");
-    expect(net.requests).toEqual([BUNDLE_URL]);
+    expect(net.requests).toEqual([BUNDLE_URL, new URL("ghostly-revoke.json", BUNDLE_URL).href]);
     await peer.shutdown({ quiet: true });
   });
 });

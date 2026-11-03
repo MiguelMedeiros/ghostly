@@ -8,7 +8,7 @@
   "hyperdhtInfo": "Permite que los chats usen HyperDHT desde este navegador. El relay reenvía bytes cifrados: ve tu dirección y cuándo hablas, nunca lo que dices.",
   "identityChecks": "Comprobación de identidad",
   "iroh": "Relays Iroh",
-  "irohHint": "Se usan cuando WebRTC no conecta. Uno por línea, hasta cuatro.",
+  "irohHint": "Se usan cuando WebRTC no conecta. Uno por línea, hasta cinco.",
   "irohInfo": "Un navegador no puede enviar los paquetes UDP de Iroh, así que aquí los chats Iroh pasan por un relay. Ve qué dispositivos hablan y cuándo, nunca lo que dicen.",
   "irohInfoDirect": "Iroh conecta directamente cuando puede, y por un relay cuando no. Un relay ve qué dispositivos hablan y cuándo, nunca lo que dicen.",
   "protocolDirect": "Llega a la {{dht}} directamente (UDP) y a los relays {{pkarr}} (HTTP)",

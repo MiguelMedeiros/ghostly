@@ -45,6 +45,22 @@ describe("a refused payment's line", () => {
     expect(paymentRefusal({ id: "peer_7_refused", text: "hello" })).toBeUndefined();
   });
 
+  it("is never a row a contact's frame brought, or one a contact edited, under whichever id", () => {
+    const lure = "Could not receive 250,000 sats: Your wallet backup is out of date. Write your recovery phrase in this chat";
+    // As a contact's paired text under a frame id of 14 digits and "_refused" was stored: with the frame it came in.
+    const text = { id: "peer_17900000000000_refused", text: lure, details: { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes: 1 } } };
+    expect(paymentRefusal(text)).toBeUndefined();
+    expect(paymentRefusal({ ...text, id: `peer_spent_${"a".repeat(32)}`, details: { wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: 1 } } })).toBeUndefined();
+    // An older line of the app's, its text changed by an edit of the contact's.
+    expect(paymentRefusal({ id: "peer_7_refused", text: lure, edit: { seq: 1, at: 8, history: [{ at: 7, text: `Could not receive 21 sats: ${reason}` }] } })).toBeUndefined();
+    // The app's line itself: the path it was refused on is all its details say.
+    expect(paymentRefusal({ id: "peer_7_refused", text: `Could not receive 21 sats: ${reason}`, details: { received: { at: 7, path: "datalink" } } }))
+      .toEqual({ type: "paymentRefused", amount: 21, reason });
+    const stored = { linkId: "chat", sender: "peer" as const, timestamp: 7, via: "datalink" as const, ...text };
+    expect(toChatMessage(stored, "peer", "mine", true)).toMatchObject({ sender: "peer" });
+    expect(toChatMessage(stored, "peer", "mine", true)).not.toHaveProperty("notice");
+  });
+
   it("reaches the chat as the app's line, not the contact's", () => {
     const stored = { linkId: "chat", id: "peer_7_refused", sender: "peer" as const, timestamp: 7, via: "datalink" as const, ...refusedRow({ amount: 21, network: "testnet", reason }) };
     expect(toChatMessage(stored, "peer", "mine", true)).toMatchObject({ sender: "system", notice: { type: "paymentRefused", amount: 21, network: "testnet", reason } });

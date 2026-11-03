@@ -288,7 +288,11 @@ export interface GroupEdgeView {
    * device's native listeners held by chats and other group links): it is tried again as one frees up.
    */
   noSlot?: true;
-  /** When this device last heard from the member on this edge, in ms (0: never). */
+  /**
+   * When this device last heard from the member on this edge, in ms (0: never). While the edge is open, as of when it
+   * opened (or of the member's latest packet read): the member is heard all along, and it stays the same from one state
+   * to the next.
+   */
   lastSeenAt: number;
   /** The engine's own words for why the last attempt failed (English, for logs and details); `cause` sums it up. */
   error?: string;
@@ -482,10 +486,11 @@ export interface FileTransferView {
    */
   stalled?: boolean;
   /**
-   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
-   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `author`: only
+   * its author holds it, a member this device has no edge with (a private group on hubs: it comes once a hub holds it);
+   * `busy`: its holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
    */
-  wait?: "nobody" | "busy" | "day" | "damaged";
+  wait?: "nobody" | "author" | "busy" | "day" | "damaged";
   /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }

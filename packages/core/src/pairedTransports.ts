@@ -20,6 +20,8 @@ export interface NativeEndpoint {
   onConnection: ((connection: BoundChannel) => void) | null;
   onDescriptor: (() => void) | null;
   onUnavailable?: (() => void) | null;
+  /** The endpoint is connected to its relay again after it lost it (the native Iroh's home relay; nothing else says it). */
+  onRelayBack?: (() => void) | null;
 }
 export type TransportDescriptors = Partial<Record<NativeTransport, unknown>>;
 
@@ -31,8 +33,9 @@ export type TransportDescriptors = Partial<Record<NativeTransport, unknown>>;
  *
  * So every relay URL is put in one spelling before it goes into an Iroh endpoint (the relays it homes on, a contact's
  * descriptor before a dial), and which one depends on the endpoint:
- * - `"dotted"`, the name with its trailing dot: what native Iroh homes on by default (the Desktop), and the form to
- *   compare two relays in.
+ * - `"dotted"`, n0's relays with their trailing dot: what native Iroh homes on by default (the Desktop), and the form
+ *   to compare two relays in. Any other relay keeps its plain name here too: a relay behind a proxy (a Cloudflare
+ *   tunnel) is found by its Host header, and the proxy answers the dotted name with 404.
  * - `"plain"`, the name without it: the only one every browser opens. WebKit (Safari, the iPhone app) refuses a
  *   host name that ends in a dot, for `fetch` and for a WebSocket alike, so nothing a browser's Iroh is given has one.
  *
@@ -46,7 +49,7 @@ export function irohRelayUrl(value: string, spelling: IrohRelaySpelling = "dotte
   const host = url.hostname, name = host.replace(/\.$/, "");
   if (!name.includes(".") && name !== "localhost") return value;
   if (name.startsWith("[") || /^\d+(\.\d+){3}$/.test(name)) return value;
-  const wanted = spelling === "plain" || name === "localhost" ? name : `${name}.`;
+  const wanted = spelling === "dotted" && /(^|\.)iroh\.link$/.test(name) ? `${name}.` : name;
   if (wanted === host) return value;
   url.hostname = wanted;
   return url.href;
@@ -65,6 +68,14 @@ export function irohDescriptor<T>(descriptor: T, spelling: IrohRelaySpelling = "
  * as a test relay is (the same rule as the relay settings).
  */
 export const RELAY_URL = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s]{0,100})?)$/;
+/**
+ * A relay URL with more than its server's address in it: a login, a query or a fragment, which no relay setting takes
+ * (irohWeb.ts `irohRelayProblem`, hyperdhtRelay.ts `hyperdhtRelayProblem`). An older app named its HyperDHT relay as
+ * set, with them; such a descriptor is not dialed or kept, and the rest of what the contact told still is.
+ */
+export const RELAY_WITH_SECRETS = /^[a-z]+:\/\/[^/?#]*@|[?#]/i;
+/** A relay URL a descriptor may name: `RELAY_URL`, with nothing but the server's address in it. */
+export const relayUrl = (value: unknown): value is string => typeof value === "string" && RELAY_URL.test(value) && !RELAY_WITH_SECRETS.test(value);
 const HEX_KEY = /^[0-9a-f]{64}$/;
 /** An Iroh direct address as the adapters parse it: an IPv4 or bracketed IPv6 address and its port. */
 const SOCKET_ADDRESS = /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9A-Fa-f:.]{2,45}(%[A-Za-z0-9._-]{1,16})?\]):\d{1,5}$/;
@@ -73,7 +84,7 @@ const MAX_ADDRESSES = 8;
 /**
  * A contact's native descriptors as it tells them on a session (`paired-policy`, `paired-adapters`) or as this app
  * kept them: only what the adapters dial, each field in the shape its adapter makes. The keys are 64 hex characters,
- * a relay passes `RELAY_URL` (the rule its capability record is read by), an Iroh descriptor lists at most eight
+ * a relay passes `relayUrl` (the rule its capability record is read by), an Iroh descriptor lists at most eight
  * socket addresses. A descriptor that is anything else is left out, as one the contact never told; a field this app
  * does not know is not kept.
  */
@@ -81,18 +92,17 @@ export function checkedDescriptors(value: unknown): TransportDescriptors {
   const out: TransportDescriptors = {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return out;
   const raw = value as Record<string, unknown>;
-  const relay = (v: unknown) => typeof v === "string" && RELAY_URL.test(v);
   const relayed = (v: unknown) => v === undefined || typeof v === "boolean";
   const iroh = raw["iroh/1"] as { id?: unknown; relay?: unknown; addresses?: unknown; relayed?: unknown } | null | undefined;
   if (iroh && typeof iroh === "object" && typeof iroh.id === "string" && HEX_KEY.test(iroh.id) &&
-    (iroh.relay === undefined || iroh.relay === null || relay(iroh.relay)) && relayed(iroh.relayed) &&
+    (iroh.relay === undefined || iroh.relay === null || relayUrl(iroh.relay)) && relayed(iroh.relayed) &&
     Array.isArray(iroh.addresses) && iroh.addresses.length <= MAX_ADDRESSES &&
     iroh.addresses.every(a => typeof a === "string" && SOCKET_ADDRESS.test(a)))
     out["iroh/1"] = { id: iroh.id, relay: (iroh.relay as string | null | undefined) ?? null, addresses: [...iroh.addresses] as string[],
       ...(iroh.relayed !== undefined ? { relayed: iroh.relayed } : {}) };
   const hyper = raw["hyperdht/1"] as { publicKey?: unknown; relay?: unknown; relayed?: unknown } | null | undefined;
   if (hyper && typeof hyper === "object" && typeof hyper.publicKey === "string" && HEX_KEY.test(hyper.publicKey) &&
-    (hyper.relay === undefined || relay(hyper.relay)) && relayed(hyper.relayed))
+    (hyper.relay === undefined || relayUrl(hyper.relay)) && relayed(hyper.relayed))
     out["hyperdht/1"] = { publicKey: hyper.publicKey, ...(hyper.relay !== undefined ? { relay: hyper.relay } : {}),
       ...(hyper.relayed !== undefined ? { relayed: hyper.relayed } : {}) };
   return out;

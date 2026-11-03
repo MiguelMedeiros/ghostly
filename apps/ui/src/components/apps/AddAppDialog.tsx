@@ -7,7 +7,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice, input } from "../wallet/ui";
 import { AppInstallDialog } from "./AppInstallDialog";
 import { Fingerprint } from "./AppIcon";
-import { appErrorCode, appErrorText } from "../../lib/apps/errors";
+import { appErrorCode, appErrorView, appStoreErrorView, type AppErrorView } from "../../lib/apps/errors";
 import { date } from "../../lib/identities";
 
 /*
@@ -37,7 +37,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const focusBack = useFocusBack(busy);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AppErrorView | null>(null);
   const [app, setApp] = useState<{ url: string; preview: AppPreview } | null>(null);
   const [store, setStore] = useState<AppStorePreview | null>(null);
   // Which check is the field's: a link edited while Check runs drops the answer for the link it no longer holds.
@@ -68,12 +68,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         } catch (e) {
           if (!current()) return;
           // No app there (a 404, or not a bundle): it may be a store. A link to a host off the list stops here.
-          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || appErrorCode(e) === "host" || appErrorCode(e) === "github-link") throw e;
+          if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || ["host", "github-link", "private-link"].includes(appErrorCode(e) ?? "")) { setError(appErrorView(e, t)); return; }
         }
       }
+      // Read as a store from here: one refused is a link that holds no valid store, not an app refused.
       const found = await engine.call("appStorePreview", { url: link });
       if (current()) setStore(found);
-    } catch (e) { if (current()) setError(appErrorText(e, t)); } finally { if (current()) setBusy(false); }
+    } catch (e) { if (current()) setError(appStoreErrorView(e, t)); } finally { if (current()) setBusy(false); }
   };
 
   const edit = (value: string) => {
@@ -86,7 +87,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
     focusBack();
     setBusy(true); setError(null);
     try { await engine.call("appStoreAdd", { url: store.url, key: store.key }); onStoreAdded(); onClose(); }
-    catch (e) { setError(appErrorText(e, t)); } finally { setBusy(false); }
+    catch (e) { setError(appStoreErrorView(e, t)); } finally { setBusy(false); }
   };
 
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
@@ -101,7 +102,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
           <input id={fieldId} data-testid="apps-add-url" autoFocus className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
             placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
           <Notice>{t("apps.add.hint")}</Notice>
-          {error && <Notice tone="error" testId="apps-add-error">{error}</Notice>}
+          {error && <Notice tone="error" testId="apps-add-error" details={error.info}>{error.text}</Notice>}
           {!store && (
             <div className="flex flex-wrap justify-end gap-2 pt-2">
               <Button onClick={onClose}>{t("common.cancel")}</Button>

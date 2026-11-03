@@ -60,6 +60,66 @@ describe("what the guard asks about", () => {
     expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
   });
 
+  /**
+   * A Polyseed, the 16-word seed Feather and Cake Wallet show for a Monero wallet: BIP39's English words with a checksum
+   * of its own. Before, only a BIP39 checksum over 12 or 15 of its words caught one, by chance: about 3 in 10.
+   */
+  it.each([
+    // 22 bytes of 0x11 and of 0x77, read as 16 words of 11 bits.
+    ["baby mass dust captain baby mass dust captain baby mass dust captain baby mass dust captain"],
+    ["jazz roof tape upon jazz roof tape upon jazz roof tape upon jazz roof tape upon"],
+  ])("a message that is only a 16-word Monero Polyseed: %s", (seed) => {
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(seed.split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"))).toEqual({ kind: "mnemonic" });
+    // Not inside other text: no checksum of BIP39's holds for it.
+    expect(findSecret(`${seed} zoo`)).toBeNull();
+    // One word sixteen times is still no seed.
+    expect(findSecret("abandon ".repeat(16).trim())).toBeNull();
+  });
+
+  /**
+   * Monero's classic seed, the one Monero GUI and monero-wallet-cli show: 25 words of Monero's own list, the last a
+   * checksum word. These are the test wallets of Monero's functional tests (tests/functional_tests/transfer.py).
+   */
+  const MONERO_SEEDS = [
+    "velvet lymph giddy number token physics poetry unquoted nibs useful sabotage limits benches lifestyle eden nitrogen anvil fewest avoid batch vials washing fences goat unquoted",
+    "peeled mixture ionic radar utopia puddle buying illness nuns gadget river spout cavernous bounced paradise drunk looking cottage jump tequila melting went winter adjust spout",
+    "dilute gutter certain antics pamphlet macro enjoy left slid guarded bogeys upload nineteen bomb jubilee enhanced irritate turnip eggs swung jukebox loudly reduce sedan slid",
+  ];
+  /** MyMonero's 13 words: the first 12 of the seed above and the checksum word electrum-words gives them. */
+  const MYMONERO_SEED = "velvet lymph giddy number token physics poetry unquoted nibs useful sabotage limits useful";
+
+  it.each(MONERO_SEEDS.map((seed) => [seed]))("a 25-word Monero seed: %s", (seed) => {
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`my monero seed: ${seed}`)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(seed.toUpperCase().split(" ").map((w, i) => `${i + 1}. ${w}`).join("\n"))).toEqual({ kind: "mnemonic" });
+  });
+
+  it("a 13-word MyMonero seed, alone or after a label", () => {
+    expect(findSecret(MYMONERO_SEED)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`zoo ${MYMONERO_SEED} zoo`)).toEqual({ kind: "mnemonic" });
+  });
+
+  it("Monero's documented example seed, five of whose words are also BIP39's", () => {
+    const seed = "sequence atlas unveil summon pebbles tuesday beer rudely snake rockets different fuselage woven tagged bested dented vegan hover rapid fawns obvious muppet randomly seasons randomly";
+    expect(findSecret(seed)).toEqual({ kind: "mnemonic" });
+    expect(findSecret(`my monero seed: ${seed} (keep it safe)`)).toEqual({ kind: "mnemonic" });
+  });
+
+  it("an ordinary 25-word sentence, or one whose last word repeats an earlier one, is not a Monero seed", () => {
+    expect(findSecret("we should meet at the cafe near the old bridge after work on friday so we can talk about the trip and the plan today")).toBeNull();
+    expect(findSecret("tuesday dinner was lovely thanks again for cooking the pasta and the salad we should do it soon maybe at home next week on tuesday")).toBeNull();
+  });
+
+  it("a message that is only 25 Monero seed words, even with the checksum word mistyped", () => {
+    const typo = MONERO_SEEDS[0].replace(/unquoted$/, "fences");
+    expect(findSecret(`${typo} zoo`)).toBeNull(); // checksum fails and the run is not the whole message
+    expect(findSecret(typo)).toEqual({ kind: "mnemonic" });
+    // One word 25 or 13 times always passes Monero's checksum, and is still no seed.
+    expect(findSecret("abbey ".repeat(25).trim())).toBeNull();
+    expect(findSecret(`seed: ${"abbey ".repeat(13).trim()}`)).toBeNull();
+  });
+
   it.each([
     ["an nsec", NSEC],
     ["an nsec in a sentence", `here is my key ${NSEC} ok`],
@@ -80,6 +140,13 @@ describe("what the guard asks about", () => {
     ["… is the secret", `${HEX} is the secret`],
     ["a 128-hex seed", `seed ${"ab".repeat(64)}`],
     ["the Ark wallet's private key", `ark wallet private key\n${HEX}`],
+    // A Monero wallet's keys as Cake Wallet, MyMonero and monero-wallet-cli label them: the spend key is the whole
+    // wallet, the view key every payment it receives.
+    ["Private spend key: …", `Private spend key: ${HEX}`],
+    ["Private view key: …", `Private view key:\n${HEX}`],
+    ["private_spend_key: …", `private_spend_key: ${HEX}`],
+    ["Spend key (private): …", `Spend key (private): ${HEX}`],
+    ["View key (private): …", `View key (private): ${HEX}`],
   ])("64-hex next to a word that says what it is: %s", (_, text) => expect(findSecret(text)).toEqual({ kind: "hex-key" }));
 
   it("a cashuA token, with its amount decoded here", () => {
@@ -182,6 +249,11 @@ describe("what it lets through", () => {
     "commit 207bf023" + "a".repeat(32) + " fixes it",
     "The block hash 000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f is the genesis block",
     "0x" + "de".repeat(32),
+    // A Monero wallet's public keys are written with the same words.
+    "Spend key (public): " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "Public view key: " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "spend key " + "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "Monero tx id 4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b",
     NPUB,
     `my npub is ${NPUB}`,
     XPUB,

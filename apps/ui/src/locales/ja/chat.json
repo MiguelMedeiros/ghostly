@@ -1,5 +1,14 @@
 {
   "announce": {
+    "fileAccepted": "{{name}} が {{file}} を承認しました",
+    "fileArrived": "{{file}} が届きました。保存できます",
+    "fileCancelled": "{{name}} が {{file}} をキャンセルしました",
+    "fileDeclined": "{{name}} が {{file}} を拒否しました",
+    "fileDelivered": "{{name}} が {{file}} を受け取りました",
+    "fileFailed": "{{file}}: {{status}}",
+    "fileOffer": "{{name}} が {{file}}（{{size}}）を送ろうとしています · あなたの返答待ち",
+    "filePaused": "{{name}} が {{file}} を一時停止しました",
+    "fileResumed": "{{name}} が {{file}} を再開しました",
     "message": "{{name}}: {{text}}",
     "messages": "新着メッセージ {{count}} 件",
     "messagesFrom": "{{name}} から新着メッセージ {{count}} 件",
@@ -165,6 +174,8 @@
     "restoring": "読み込み中… · {{size}}",
     "resume": "再開",
     "roomDevice": "この端末の空き {{size}}",
+    "senderOnly": "接続先にはまだありません",
+    "senderOnlyHint": "大きなグループでは、アプリは送信者ではなく一部のメンバーを経由してつながります。そのうちの誰かがダウンロードすると自動で届きます。送信者にチャットで直接送ってもらうこともできます。",
     "stalled": "進んでいません · {{progress}}",
     "verifying": "ファイルを確認中… {{size}}",
     "verifyingThere": "届きました。{{name}} が確認中… {{size}}",

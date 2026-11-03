@@ -508,6 +508,21 @@ pub fn system_bars(color: String, dark: bool) -> Result<(), String> {
     }
 }
 
+/// While the app lock is on (`on`), Android's app switcher keeps no picture of the app: it takes one before the page
+/// hears the app is going, so the lock's cover would come too late for it. Nothing elsewhere: the cover is drawn in time.
+#[tauri::command]
+pub fn hide_from_switcher(on: bool) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::hide_from_switcher(on)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = on;
+        Ok(())
+    }
+}
+
 /// `#rrggbb` as 0xRRGGBB.
 fn hex_color(color: &str) -> Option<u32> {
     let hex = color.strip_prefix('#')?;

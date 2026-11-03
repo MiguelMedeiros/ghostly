@@ -682,14 +682,15 @@ export function Settings() {
           </Row>
         )}
         {showPasswordForm && (
-          <Block testId="settings-password-form">
+          // A form: Enter in any of its fields sets or changes the password, with the button's checks (Remove stays a click).
+          <Block testId="settings-password-form" onSubmit={() => { if (!passwordBusy) void handleSetPassword(); }}>
             {hasPassword && passwordField("current", t("settings.currentPassword"), currentPassword, setCurrentPassword)}
             <FieldGrid>
               {passwordField("new", t("settings.newPassword"), newPassword, setNewPassword)}
               {passwordField("confirm", t("settings.confirmPassword"), confirmPassword, setConfirmPassword)}
             </FieldGrid>
             <ButtonGroup>
-              <Button variant="primary" disabled={passwordBusy} onClick={() => void handleSetPassword()}>
+              <Button type="submit" variant="primary" disabled={passwordBusy}>
                 {hasPassword ? t("settings.changePassword") : t("settings.setPassword")}
               </Button>
               {hasPassword && <Button variant="danger" disabled={passwordBusy} onClick={() => void handleRemovePassword()}>{t("settings.removePassword")}</Button>}

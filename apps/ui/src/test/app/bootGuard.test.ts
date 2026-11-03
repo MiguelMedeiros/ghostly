@@ -23,9 +23,10 @@ interface Guard { details(): string; clean(text: string): string }
 const guard = () => (window as unknown as { __ghostlyBoot: Guard }).__ghostlyBoot;
 const panel = () => document.getElementById("boot-fallback");
 
-function start({ agent = NEW_ANDROID, language = "en-US", loaded = true, root = "" } = {}) {
+function start({ agent = NEW_ANDROID, language = "en-US", languages = [language], loaded = true, root = "" }: { agent?: string; language?: string; languages?: string[]; loaded?: boolean; root?: string } = {}) {
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agent);
   vi.spyOn(navigator, "language", "get").mockReturnValue(language);
+  vi.spyOn(navigator, "languages", "get").mockReturnValue(languages);
   vi.spyOn(document, "readyState", "get").mockReturnValue(loaded ? "complete" : "loading");
   document.body.innerHTML = `<div id="root">${root}</div>`;
   // The guard listens for as long as the page lives: a test takes its listeners away with the page.
@@ -300,6 +301,47 @@ describe("the boot guard", () => {
     expect(document.getElementById("boot-shell")).toHaveAttribute("dir", "ltr");
   });
 
+  it("speaks the language the profile saved, over the browser's, in the first paint and the panel", () => {
+    const registry = JSON.stringify({ version: 1, active: "abcdefghij", profiles: [{ id: "", name: "Personal" }, { id: "abcdefghij", name: "Work" }] });
+    try {
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ language: "pt" }));
+      start({ language: "en-US", root: FIRST_PAINT });
+      expect(document.getElementById("boot-shell")).toHaveTextContent("Iniciando o Ghostly…");
+      fail("x");
+      vi.advanceTimersByTime(1500);
+      expect(panel()).toHaveAttribute("lang", "pt");
+      expect(panel()).toHaveTextContent("O Ghostly não conseguiu iniciar");
+      draw(); vi.advanceTimersByTime(1000);
+
+      // An English profile on an Arabic browser: English, left to right.
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ language: "en" }));
+      start({ language: "ar-EG", root: FIRST_PAINT });
+      expect(document.getElementById("boot-shell")).toHaveTextContent("Starting Ghostly…");
+      expect(document.getElementById("boot-shell")).toHaveAttribute("dir", "ltr");
+      draw(); vi.advanceTimersByTime(1000);
+
+      // The profile the page starts as, not the default one: Arabic, right to left.
+      localStorage.setItem("ghostly_profiles", registry);
+      localStorage.setItem("ghostly_abcdefghij_app_settings", JSON.stringify({ language: "ar" }));
+      start({ language: "en-US", root: FIRST_PAINT });
+      expect(document.getElementById("boot-shell")).toHaveAttribute("dir", "rtl");
+      expect(document.getElementById("boot-shell")).toHaveTextContent("جارٍ تشغيل Ghostly…");
+    } finally {
+      localStorage.clear();
+    }
+  });
+
+  it("picks a new profile's language from the browser's list as the app does, also where storage cannot be read", () => {
+    start({ language: "de-DE", languages: ["de-DE", "ja-JP"], root: FIRST_PAINT });
+    expect(document.getElementById("boot-shell")).toHaveTextContent("Ghostly を起動しています…");
+    draw(); vi.advanceTimersByTime(1000);
+
+    const blocked = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new DOMException("denied", "SecurityError"); });
+    start({ language: "de-DE", languages: ["de-DE", "pt-BR"], root: FIRST_PAINT });
+    blocked.mockRestore();
+    expect(document.getElementById("boot-shell")).toHaveTextContent("Iniciando o Ghostly…");
+  });
+
   it("has every string in all eight languages, without em dashes", () => {
     const table = /var TEXT = (\{[\s\S]*?\n {2}\});/.exec(SOURCE)![1];
     const text = new Function(`return ${table};`)() as Record<string, Record<string, string>>;
@@ -434,13 +476,12 @@ describe("the boot guard's language file", () => {
       document.head.appendChild(meta);
     }
     if (saved !== undefined) localStorage.setItem("ghostly_app_settings", saved);
-    vi.spyOn(navigator, "languages", "get").mockReturnValue(languages);
-    start({ language: languages[0] });
+    start({ language: languages[0], languages });
   }
 
   afterEach(() => {
     document.head.innerHTML = "";
-    localStorage.removeItem("ghostly_app_settings");
+    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -464,6 +505,20 @@ describe("the boot guard's language file", () => {
     document.head.innerHTML = "";
     open(["ar"], { saved: JSON.stringify({ language: "en" }) });
     expect(preloads()).toEqual([]);
+  });
+
+  it("follows the profile the page will start as, and the space a handoff moved it to, not the default profile", () => {
+    const registry = (active: string, space?: string) => JSON.stringify({ version: 1, active, profiles: [{ id: "", name: "Personal" }, { id: "abcdefghij", name: "Work", space }] });
+    localStorage.setItem("ghostly_profiles", registry("abcdefghij"));
+    localStorage.setItem("ghostly_abcdefghij_app_settings", JSON.stringify({ language: "pt" }));
+    open(["en-US"], { saved: JSON.stringify({ language: "ja" }) });
+    expect(preloads()).toEqual(["/assets/pt-ghi.js"]);
+    document.head.innerHTML = "";
+    localStorage.clear();
+    localStorage.setItem("ghostly_profiles", registry("abcdefghij", "moved-1"));
+    localStorage.setItem("ghostly_moved-1_app_settings", JSON.stringify({ language: "ar" }));
+    open(["en-US"]);
+    expect(preloads()).toEqual(["/assets/ar-abc.js"]);
   });
 
   it("asks for nothing where the page names no files (the dev server), or names them badly, and still guards", () => {

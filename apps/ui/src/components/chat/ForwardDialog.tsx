@@ -11,6 +11,7 @@ import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
 import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
 import { listParts, listText } from "../../lib/listText";
+import { useBackCloses } from "../../hooks/useDismiss";
 
 /**
  * "Forward to…" (WISP 400 § Forwards): the chats and groups to send messages on to, most recent first, found by name,
@@ -34,6 +35,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [chosen, setChosen] = useState<ChatTarget[]>([]);
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const [busy, setBusy] = useState(false);
+  useBackCloses(() => { if (!busy) onClose(); });
   const [problems, setProblems] = useState<{ name: string; partial?: string; error: string }[]>([]);
   /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
   const [sentTo, setSentTo] = useState<string[]>([]);

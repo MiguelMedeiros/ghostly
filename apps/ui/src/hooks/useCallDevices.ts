@@ -26,10 +26,13 @@ interface CallMediaControls {
   switchCamera: (deviceId: string | null) => Promise<void>;
 }
 
-/** A device went away mid-call and the default took over, the chosen one came back, or one chosen in the call could not be opened. */
+/**
+ * A device went away mid-call and the default took over (or none could), the chosen one came back, or one chosen in
+ * the call could not be opened.
+ */
 export interface DeviceNotice {
   kind: DeviceKind;
-  type: "lost" | "back" | "failed";
+  type: "lost" | "gone" | "back" | "failed";
   name: string;
   /** For "back": the device to switch back to. */
   id?: string;
@@ -117,15 +120,25 @@ export function useCallDevices(webrtc: CallMediaControls): CallDevices | null {
       offered.current.add(`${kind}:missing`);
       setNotice({ kind, type: "lost", name });
     };
+    /** The default takes over from a device that went; when it cannot be opened (it was the only one), that is said instead. */
+    const fallBack = (kind: DeviceKind, name: string, to: () => Promise<void>) => {
+      lost(kind, name);
+      return run(async () => {
+        try {
+          await to();
+        } catch (error) {
+          setNotice({ kind, type: "gone", name });
+          throw error;
+        }
+      });
+    };
 
     if (audio && gone("audioinput", mic, audio)) {
-      lost("audioinput", audio.label);
-      await run(() => call.switchMicrophone(null));
+      await fallBack("audioinput", audio.label, () => call.switchMicrophone(null));
       return;
     }
     if (showing && video && gone("videoinput", camera, video)) {
-      lost("videoinput", video.label);
-      await run(() => call.switchCamera(null));
+      await fallBack("videoinput", video.label, () => call.switchCamera(null));
       return;
     }
     if (sink && !next.audiooutput.some((d) => d.id === sink)) {

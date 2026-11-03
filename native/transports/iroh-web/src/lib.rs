@@ -118,8 +118,8 @@ impl IrohNode {
     pub fn start(seed: Vec<u8>, relays: Vec<String>, online_ms: u32) -> js_sys::Promise {
         future_to_promise(async move {
             let seed: [u8; 32] = seed.try_into().map_err(|_| err("Invalid transport seed"))?;
-            if relays.is_empty() || relays.len() > 4 {
-                return Err(err("Between one and four relays are needed"));
+            if relays.is_empty() || relays.len() > 5 {
+                return Err(err("Between one and five relays are needed"));
             }
             let urls = relays
                 .iter()

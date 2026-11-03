@@ -31,7 +31,9 @@ function pair() {
   const ledgers: Record<Me, IdentityLedger> = { a: emptyIdentityLedger(), b: emptyIdentityLedger() };
   const state = { connected: true, online: true, theirs: {} as Partial<Record<Me, string>>, providers: { a: [fakeKey], b: [fakeKey] } as Record<Me, IdentityProofProvider[]>,
     /** Chats deleted on that side: gone from its list, with their ledger. */
-    deleted: {} as Partial<Record<Me, boolean>> };
+    deleted: {} as Partial<Record<Me, boolean>>,
+    /** Settings → Hide my IP from contacts, on that side. */
+    relayOnly: {} as Partial<Record<Me, boolean>> };
   const pkarr = new Map<string, { label: string; value: string }[]>();
   const resolved: string[] = [];
   const engines = {} as Record<Me, IdentityProofs>;
@@ -47,6 +49,7 @@ function pair() {
       } : undefined,
       keys: () => ({ mine: keys[me], theirs: state.theirs[me] ?? keys[them] }),
       linkIds: () => state.deleted[me] ? ["plain"] : ["chat", "plain"], online: () => state.online, emit: vi.fn(),
+      relayOnly: () => !!state.relayOnly[me],
       publish: async (seed, records) => { pkarr.set(identityFromSeed(seed).pubKeyZ32, records); },
       resolve: async key => { resolved.push(key); return pkarr.get(key) ?? null; },
     };
@@ -342,6 +345,54 @@ describe("per chat", () => {
     state.providers.b = [{ ...fakeKey, verify: async () => { throw new Error("the key was rotated"); } } as IdentityProofProvider];
     await engines.b.recheck({ linkId: "chat", id });
     expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: "the key was rotated" });
+  });
+
+  it("with Hide my IP on, a contact's proof is checked without contacting a server the contact chose; fixed hosts and the person's own proofs still are", async () => {
+    // A provider whose check reads a file from a host, like did:web or a domain's website does from the one the evidence names.
+    const reads = (host: string): IdentityProofProvider => ({ ...fakeKey,
+      verify: async (statement, evidence, ctx) => { await ctx.fetch(`https://${host}/proof.json`); return fakeKey.verify(statement, evidence as never, ctx); } } as IdentityProofProvider);
+    const fetched: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => { fetched.push(new URL(String(input)).host); return new Response("{}", { status: 200 }); });
+    try {
+      const { engines, ledgers, state } = pair();
+      await clearStorage();
+      await engines.a.load(); await engines.b.load();
+      state.relayOnly = { a: true, b: true };
+      state.providers = { a: [reads("contact.example")], b: [reads("contact.example")] };
+      // The person's own proof is checked on their own server, as before.
+      const own = await prove(engines.a);
+      expect(fetched).toEqual(["contact.example"]);
+      fetched.length = 0;
+      await engines.a.share({ linkId: "chat", id: own.id });
+      await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === own.id)?.status).toBe("rejected"));
+      expect(fetched).toEqual([]);
+      expect(ledgers.b.received).toEqual([]);
+      // The contact is not told why, only that the check could not run; this side's timeline says why.
+      expect(ledgers.a.shared[0].error).toBe("Your contact's app could not check it. Try again later.");
+      expect(JSON.stringify(ledgers.b.timeline)).toMatch(/Hide my IP/);
+
+      // A fixed host (GitHub's API) is still asked, and so is the contact's server once Hide my IP is off.
+      state.providers = { a: [reads("api.github.com")], b: [reads("api.github.com")] };
+      await engines.a.share({ linkId: "chat", id: (await prove(engines.a)).id });
+      await vi.waitFor(() => expect(ledgers.b.received).toHaveLength(1));
+      expect(fetched).toContain("api.github.com");
+      state.relayOnly = {};
+      state.providers = { a: [reads("contact.example")], b: [reads("contact.example")] };
+      await engines.b.recheck({ linkId: "chat", id: ledgers.b.received[0].id });
+      expect(fetched).toContain("contact.example");
+      // On again: not even a recheck the person taps reaches it.
+      fetched.length = 0;
+      state.relayOnly = { b: true };
+      await engines.b.recheck({ linkId: "chat", id: ledgers.b.received[0].id });
+      expect(fetched).toEqual([]);
+      expect(engines.b.linkView("chat", true)!.received[0]).toMatchObject({ status: "unconfirmed", error: expect.stringMatching(/Hide my IP/) });
+    } finally { vi.restoreAllMocks(); }
+  });
+
+  it("the hosts a contact's proof is checked on with Hide my IP on are the ones this app names", async () => {
+    const { fixedIdentityHosts } = await import("../src/proofs/fixedHosts");
+    expect([...fixedIdentityHosts()]).toEqual(expect.arrayContaining(["dns.quad9.net", "cloudflare-dns.com", "dns.google", "plc.directory", "pkarr.pubky.org",
+      "www.googleapis.com", "api.github.com", "gitlab.com"]));
   });
 
   it("the public profile is looked up only on request, online, from a provider that has one", async () => {

@@ -35,6 +35,8 @@ pub enum Event {
     Address {
         descriptor: wire::Address,
     },
+    /// The endpoint is connected to its home relay again, after it lost it (`tell_relay_back`).
+    RelayBack {},
 }
 /// A frame for the stream, and who hears once it is written there.
 type Outgoing = (String, oneshot::Sender<()>);
@@ -82,6 +84,27 @@ async fn tell_address(
         }
     }
 }
+/// Tells the page each time the endpoint is connected to a home relay again after it lost every one: `connected` yields
+/// whether any is, each time that may have changed (Iroh's `home_relay_status`), and `up` is how it was at the start.
+async fn tell_relay_back(
+    mut connected: impl Stream<Item = bool> + Unpin,
+    mut up: bool,
+    events: Channel<Event>,
+) {
+    // Homing on a relay for the first time is not being back on one.
+    let mut ever = up;
+    while let Some(now) = connected.next().await {
+        if now && !up && ever {
+            crate::diagnostics::log("iroh: back on its home relay");
+            if events.send(Event::RelayBack {}).is_err() {
+                break;
+            }
+        }
+        ever |= now;
+        up = now;
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     peers: HashMap<u64, Peer>,
@@ -304,12 +327,26 @@ impl TransportState {
             return Err("Native endpoint limit reached".into());
         }
         let watched = endpoint.clone();
-        let watcher = tokio::spawn(tell_address(
-            endpoint.watch_addr().stream_updates_only(),
-            move || wire::address(&watched),
-            descriptor.clone(),
-            events.clone(),
-        ));
+        let mut relays = endpoint.home_relay_status();
+        let on_relay = |statuses: Vec<iroh::endpoint::RelayStatus>| {
+            statuses.iter().any(|status| status.is_connected())
+        };
+        let (address, relay_back) = (
+            tell_address(
+                endpoint.watch_addr().stream_updates_only(),
+                move || wire::address(&watched),
+                descriptor.clone(),
+                events.clone(),
+            ),
+            tell_relay_back(
+                relays.clone().stream_updates_only().map(on_relay),
+                on_relay(relays.get()),
+                events.clone(),
+            ),
+        );
+        let watcher = tokio::spawn(async move {
+            tokio::join!(address, relay_back);
+        });
         inner.peers.insert(
             id,
             Peer {
@@ -545,15 +582,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_endpoint_takes_one_to_four_relays_of_its_own() {
+    async fn an_endpoint_takes_one_to_five_relays_of_its_own() {
         let app = app();
         let (events, _) = channel();
-        let five: Vec<String> = (0..5).map(|i| format!("https://r{i}.test/")).collect();
+        // Five is the browser build's limit too: n0's four plus Ghostly's own fit.
+        let six: Vec<String> = (0..6).map(|i| format!("https://r{i}.test/")).collect();
         let refused = app
             .state::<TransportState>()
-            .start([21; 32], events.clone(), false, &five)
+            .start([21; 32], events.clone(), false, &six)
             .await;
-        assert!(refused.is_err(), "more than four relays are refused");
+        assert!(refused.is_err(), "more than five relays are refused");
         // One relay that nobody runs: the endpoint binds all the same, and homes there when it answers.
         app.state::<TransportState>()
             .start(
@@ -644,8 +682,51 @@ mod tests {
         telling.await.unwrap();
     }
 
-    fn tokio_stream(mut changes: mpsc::UnboundedReceiver<()>) -> impl Stream<Item = ()> + Unpin {
+    fn tokio_stream<T>(mut changes: mpsc::UnboundedReceiver<T>) -> impl Stream<Item = T> + Unpin {
         futures_util::stream::poll_fn(move |cx| changes.poll_recv(cx))
+    }
+
+    /// An Android phone back from Doze: its Iroh lost its relay while the network was cut and finds it again seconds after
+    /// the return. The page is told then, once, and a chat whose knock is still under way knocks again (ghostlink.ts).
+    #[tokio::test]
+    async fn the_page_is_told_when_the_endpoint_is_back_on_its_relay() {
+        let (status, statuses) = mpsc::unbounded_channel::<bool>();
+        let (events, seen) = channel();
+        let telling = tokio::spawn(tell_relay_back(tokio_stream(statuses), true, events));
+        let told = || async {
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            seen.lock().unwrap().clone()
+        };
+        // Still on it, then lost, and still lost: nothing.
+        for connected in [true, false, false] {
+            status.send(connected).unwrap();
+        }
+        assert!(told().await.is_empty());
+        // Back: one word; still on it: nothing more.
+        status.send(true).unwrap();
+        status.send(true).unwrap();
+        assert_eq!(told().await, vec![serde_json::json!({"type": "relayBack"})]);
+        // Lost and back once more: a second word.
+        status.send(false).unwrap();
+        status.send(true).unwrap();
+        assert_eq!(told().await.len(), 2);
+        drop(status);
+        telling.await.unwrap();
+    }
+
+    /// An endpoint that homes on its relay for the first time is not back on it: nothing is said.
+    #[tokio::test]
+    async fn an_endpoint_homing_first_is_not_back_on_its_relay() {
+        let (status, statuses) = mpsc::unbounded_channel::<bool>();
+        let (events, seen) = channel();
+        let telling = tokio::spawn(tell_relay_back(tokio_stream(statuses), false, events));
+        for connected in [false, true, true] {
+            status.send(connected).unwrap();
+        }
+        drop(status);
+        telling.await.unwrap();
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     /// A real endpoint is watched from its start, and no longer once it is stopped.

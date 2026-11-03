@@ -348,6 +348,11 @@ describe("the handoff's progress", () => {
     expect(screen.queryByTestId("handoff-cancel")).toBeNull();
   });
 
+  it("offers no Cancel at Checking: the other device may have let the profile go already", () => {
+    renderApp(<HandoffProgress view={view({ step: "checking" })} onCancel={() => {}} />);
+    expect(screen.queryByTestId("handoff-cancel")).toBeNull();
+  });
+
   it("says a phone that was woken must open Ghostly, and on a phone to keep Ghostly open", () => {
     vi.spyOn(window, "matchMedia").mockImplementation((query) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
     renderApp(<HandoffProgress view={view({ step: "connecting", woken: true })} />);

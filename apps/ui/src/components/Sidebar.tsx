@@ -1,5 +1,6 @@
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { DeleteChatDialog } from "./DeleteChatDialog";
+import { chatOnCall, useChatOnCall } from "../lib/chatsOnCall";
 import { useUsageByPeer } from "../hooks/useUsage";
 import { useWorkingByPeer } from "../hooks/useWorking";
 import { useChatsFound } from "../hooks/useChatsFound";
@@ -161,6 +162,8 @@ export function Sidebar() {
   const listReady = !!engineState?.groupsLoaded;
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  // A chat a call is on or rings in is not deleted under it: the dialog says to end the call first.
+  const deleteOnCall = useChatOnCall(confirmDeleteId);
 
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_WIDTH);
   const isResizingRef = useRef(false);
@@ -425,6 +428,9 @@ export function Sidebar() {
       style={isMobile ? undefined : collapsed ? { width: RAIL_WIDTH } : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
       <PinMoveNote text={moveNote} />
+      {/* For a screen reader's heading keys: the list is a phone's whole screen, its h1; beside the open chat, whose
+          name is the window's h1, an h2. */}
+      {isMobile ? <h1 className="sr-only">{t("sidebar.chats")}</h1> : <h2 className="sr-only">{t("sidebar.chats")}</h2>}
       {collapsed ? <>
         <div className="h-14 header-safe shrink-0 flex items-center justify-center bg-panel-header">
           <RailToggle ref={toggleRef} collapsed onToggle={toggleCollapsed} />
@@ -452,7 +458,7 @@ export function Sidebar() {
         <div className="grid shrink-0 grid-cols-2 items-stretch gap-1 whitespace-nowrap" data-testid="sidebar-chat-actions">
           {/* New: one click is a chat, as always; the arrow beside it also offers a group. */}
           <div ref={newMenuRef} role="group" aria-label={t("sidebar.new")} data-testid="sidebar-new" className="sidebar-new-split relative flex min-w-0">
-            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.new")}</span></button>
+            <button onClick={newChat} data-testid="sidebar-new-chat" aria-label={t("sidebar.startChat")} title={t("sidebar.newChat")} className="sidebar-header-action inline-flex min-h-10 min-w-10 flex-1 items-center justify-center gap-1 rounded-s-lg bg-accent p-2 text-sm font-semibold text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header"><ActionIcon d={NEW_CHAT_PATH} /><span className="sidebar-action-label">{t("sidebar.newChatShort")}</span></button>
             <button ref={newMoreRef} onClick={() => setNewMenuOpen(open => !open)} aria-haspopup="true" aria-expanded={!!newMenuOpen} aria-controls="sidebar-new-menu" aria-label={t("sidebar.newMenu.label")} title={t("sidebar.newMenu.label")} data-testid="sidebar-new-more"
               className="inline-flex min-h-10 w-6 shrink-0 items-center justify-center rounded-e-lg border-s border-panel-header/25 bg-accent text-panel-header hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-header">
               <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${newMenuOpen ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6"/></svg>
@@ -578,7 +584,8 @@ export function Sidebar() {
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
-        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        callOn={deleteOnCall}
+        onConfirm={() => { const id=confirmDeleteId; if (chatOnCall(id)) return; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar rail={collapsed} />}
 
       {/* Resize Handle */}

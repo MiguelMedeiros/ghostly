@@ -196,7 +196,8 @@ export default async function PrivacyPage() {
           </li>
           <li>
             <Term>Iroh relays.</Term> In the browser and the extension, Iroh connects through n0&apos;s public relays
-            (<Code>relay.n0.iroh.link</Code>) when WebRTC cannot connect. A relay sees your IP address, when you
+            (<Code>relay.n0.iroh.link</Code>) and Ghostly&apos;s own relay at <Code>iroh.miguelmedeiros.dev</Code> when
+            WebRTC cannot connect. Ghostly Desktop uses the same relays. A relay sees your IP address, when you
             connect and how much you send, never the content. You can set your own relays in Settings.
           </li>
           <li>

@@ -1,5 +1,5 @@
 import {
-  turnInstance, turnVerifierMark, bytesEqual, classifyTurnRead, fromBase64Url, newDeviceSetSecret, randomBytes, readTurnPacket, setUpdateFrame, signTombstone, signTurnPacket, toBase64Url, turnKeys,
+  turnInstance, turnVerifierMark, bytesEqual, classifyTurnRead, fromBase64Url, newDeviceSetSecret, randomBytes, readSetUpdate, readTurnPacket, setUpdateFrame, signTombstone, signTurnPacket, toBase64Url, turnKeys,
   type DeviceFrame, type Signer, type TurnKeys, type TurnNetwork, type TurnSourcePut,
 } from "@ghostly/core";
 import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, type DeviceSlot, type EarlierDeviceSet } from "./state";
@@ -23,8 +23,9 @@ import { MAX_DEVICES, MAX_EARLIER_SETS, type DevicePatch, type DeviceRecord, typ
  * and never finished its enrollment (`rotate.ts`) is not listed, so it gets nothing and loses `D`. The grants are
  * dropped in the same write as `D'`.
  *
- * A device that was off across two moves still gets the newest set: the frames of earlier sets still waiting for it are
- * signed again with the newest `D'`, over the same old tombstone.
+ * A device that was off across two moves still gets the newest set: the frames of earlier sets this device signed and
+ * still waiting for it are signed again with the newest `D'`, over the same old tombstone. One another device signed
+ * goes on unchanged, and the next set's frame takes the device on from there.
  */
 
 /** Why a removal or a new secret was refused before anything was written. Its message starts with `remove-<reason>:`. */
@@ -99,10 +100,16 @@ export async function planSetMove(record: DeviceRecord | null, signer: Signer, o
   const rec = record.turnPacket ? fromBase64Url(record.turnPacket) : undefined;
   const frame = await setUpdateFrame(oldKeys.address, { ...update, tomb, ...(rec ? { rec } : {}) }, signer);
   const staying = (keys: readonly string[]) => keys.filter((key) => key !== own.key && slots.some((slot) => slot?.key === key));
-  // Frames of earlier sets still waiting for a device that stays: signed again with the newest secret, over their own tombstone.
+  // Frames of earlier sets still waiting for a device that stays: signed again with the newest secret, over their own
+  // tombstone, when this device signed them. A device still at that older address believes whoever signed it there;
+  // another device's frame (this one took it, or the profile handed over brought it) goes on as it was signed, and the
+  // device that takes it reaches the newer set through the next set's frame, whose record shows the release.
   const earlier: EarlierDeviceSet[] = [];
   for (const set of record.earlierSets) {
     const pending = staying(set.pending);
+    let by: Uint8Array | undefined;
+    try { by = readSetUpdate(JSON.parse(set.setUpdate) as DeviceFrame)?.by; } catch { /* none */ }
+    if (!by || !bytesEqual(by, signer.publicKey)) { earlier.push({ ...set, pending }); continue; }
     // Its record at that older address stays what the first frame carried.
     let oldRec: Uint8Array | undefined;
     try { const was = JSON.parse(set.setUpdate) as { rec?: unknown }; if (typeof was.rec === "string") oldRec = fromBase64Url(was.rec); } catch { /* none */ }

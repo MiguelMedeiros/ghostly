@@ -154,7 +154,7 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
                 <StatusPill ok={card.status === "verified"} warn={card.status === "expiring"} testId="identity-panel-status">{card.statusLabel}</StatusPill></span>}
               hint={<>{card.category}<span className="block">{t("identities.mine.issued", { date: card.issued, validity: card.validity })}</span></>} />
             <Block>
-              <code className="block break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="identity-panel-subject">{card.subject}</code>
+              <code dir="ltr" className="block text-left break-all select-all bg-surface-alt rounded-lg p-2 text-[11px] text-text-primary" data-testid="identity-panel-subject">{card.subject}</code>
               <p className="text-xs text-text-muted leading-5">
                 <bdi>{p.verified.source}</bdi>. {card.attested ? (p.verified.attester ? fillNames(t("identities.mine.attested"), { attester: p.verified.attester }) : t("identities.mine.attestedByProvider")) : t("identities.contact.holderOnly")} {t("identities.mine.checkedWhenMade")}
               </p>

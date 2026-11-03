@@ -1,5 +1,6 @@
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { pacer } from "./appBundle";
 import { concatBytes, fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import { sanitizeNick, unwrapPasted } from "./text";
@@ -311,7 +312,28 @@ export function verifyCommunityCommit(raw: unknown, parent: CommunityCommit | nu
  * handed: a `leave` in it is not held to the admission it ends, since a chain from before 2026-10-10 may hold a
  * member's second leave under the one statement there was, and no newcomer could enter that group again.
  */
-export function verifyCommunityChain(raw: unknown, groupId?: string): { chain: CommunityCommit[]; roster: Roster; entry: string; rosters: Roster[] } | { error: string } {
+export function verifyCommunityChain(raw: unknown, groupId?: string): VerifiedChain | { error: string } {
+  const check = checkChain(raw, groupId);
+  for (;;) { const step = check.next(); if (step.done) return step.value; }
+}
+
+/**
+ * `verifyCommunityChain` for a client whose engine shares its page's thread: the same checks, letting the thread go every
+ * `CHAIN_SLICE_MS` of them. One commit's signature takes ~2.6 ms in JavaScript on a desktop CPU, several times that on a
+ * phone, so a history near `COMMUNITY_LIMITS.chain` checked at once was an app that drew nothing for 5 s and more.
+ */
+export async function verifyCommunityChainPaced(raw: unknown, groupId?: string): Promise<VerifiedChain | { error: string }> {
+  const check = checkChain(raw, groupId), pause = pacer(CHAIN_SLICE_MS);
+  for (;;) { const step = check.next(); if (step.done) return step.value; await pause(); }
+}
+
+/** `verifyCommunityChainPaced` checks commits for this long at most before it lets the thread go. */
+const CHAIN_SLICE_MS = 5;
+
+type VerifiedChain = { chain: CommunityCommit[]; roster: Roster; entry: string; rosters: Roster[] };
+
+/** The chain's checks, one commit per step. */
+function* checkChain(raw: unknown, groupId?: string): Generator<void, VerifiedChain | { error: string }> {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > COMMUNITY_LIMITS.chain) return { error: "Malformed membership chain" };
   const chain: CommunityCommit[] = [], rosters: Roster[] = [];
   let entry = "";
@@ -320,6 +342,7 @@ export function verifyCommunityChain(raw: unknown, groupId?: string): { chain: C
     if ("error" in result) return result;
     chain.push(result.commit); rosters.push(result.roster);
     if (result.commit.x !== undefined) entry = result.commit.x;
+    yield;
   }
   return { chain, roster: rosters[rosters.length - 1], entry, rosters };
 }
@@ -564,6 +587,15 @@ export function communityHasFrame(state: Pick<CommunityState, "seen" | "seedB64"
 function isSealed(v: unknown): v is SealedSecret {
   return !!v && typeof v === "object" && ["e", "n", "c"].every(k => typeof (v as Record<string, unknown>)[k] === "string" && B64.test((v as Record<string, string>)[k]) && (v as Record<string, string>)[k].length <= 128);
 }
+/** A welcome's shape and the whole chain it and the pieces before it carry, not yet checked (`CommunitySession.join`). */
+function readWelcome(link: { g: string }, pieces: unknown[], welcome: unknown): { welcome: Record<string, unknown>; commits: unknown[] } | { error: string } {
+  if (!welcome || typeof welcome !== "object") return { error: "Malformed welcome" };
+  const w = welcome as Record<string, unknown>;
+  if (w.t !== "group-welcome" || w.v !== 2 || w.g !== link.g || !Array.isArray(w.commits) || !Array.isArray(w.secrets) || !isSealed(w.rv) || !isSealed(w.entry)) return { error: "Malformed welcome" };
+  const commits = [...pieces.flatMap(p => (p && typeof p === "object" && Array.isArray((p as CommunityChainFrame).commits)) ? (p as CommunityChainFrame).commits : []), ...w.commits];
+  if (commits.length > COMMUNITY_LIMITS.chain) return { error: "Membership chain too long" };
+  return { welcome: w, commits };
+}
 /** A pair payload's box: an ephemeral key, a nonce and a ciphertext of at most `appBytes` sealed. */
 const MAX_PAIR_BOX = Math.ceil((COMMUNITY_LIMITS.appBytes + 16) * 4 / 3) + 4;
 function isPairBox(v: Record<string, unknown>): v is Record<string, unknown> & SealedSecret & { to: string } {
@@ -668,12 +700,19 @@ export class CommunitySession {
    * add was made by another member (the first one to answer me went away) is as good.
    */
   static join(link: { g: string; host: string }, pieces: unknown[], welcome: unknown, seedB64: string, now = Date.now()): { state: CommunityState } | { error: string } {
-    if (!welcome || typeof welcome !== "object") return { error: "Malformed welcome" };
-    const w = welcome as Record<string, unknown>;
-    if (w.t !== "group-welcome" || w.v !== 2 || w.g !== link.g || !Array.isArray(w.commits) || !Array.isArray(w.secrets) || !isSealed(w.rv) || !isSealed(w.entry)) return { error: "Malformed welcome" };
-    const commits = [...pieces.flatMap(p => (p && typeof p === "object" && Array.isArray((p as CommunityChainFrame).commits)) ? (p as CommunityChainFrame).commits : []), ...w.commits];
-    if (commits.length > COMMUNITY_LIMITS.chain) return { error: "Membership chain too long" };
-    const verified = verifyCommunityChain(commits, link.g);
+    const read = readWelcome(link, pieces, welcome);
+    if ("error" in read) return read;
+    return CommunitySession.joinVerified(link, read.welcome, verifyCommunityChain(read.commits, link.g), seedB64, now);
+  }
+
+  /** `join`, its chain checked a slice at a time (`verifyCommunityChainPaced`): what an app sharing its page's thread calls. */
+  static async joinPaced(link: { g: string; host: string }, pieces: unknown[], welcome: unknown, seedB64: string, now = Date.now()): Promise<{ state: CommunityState } | { error: string }> {
+    const read = readWelcome(link, pieces, welcome);
+    if ("error" in read) return read;
+    return CommunitySession.joinVerified(link, read.welcome, await verifyCommunityChainPaced(read.commits, link.g), seedB64, now);
+  }
+
+  private static joinVerified(link: { g: string; host: string }, w: Record<string, unknown>, verified: VerifiedChain | { error: string }, seedB64: string, now: number): { state: CommunityState } | { error: string } {
     if ("error" in verified) return verified;
     const { chain, roster, entry } = verified;
     const me = identityFromSeedB64(seedB64);
@@ -1847,6 +1886,8 @@ export class CommunitySession {
         case "group-left": return this.receiveLeft(frame);
         case "group-entry": {
           if (frame.to !== this.myKey || !isSealed(frame.s) || frame.x !== this.currentEntryKey()) return false;
+          // Every sync answer carries it: the seed of that key, held already, is not opened again (a key has one seed).
+          if (this.state.entry.key === frame.x && this.state.entry.seedB64) return false;
           const seed = openSecret(this.identity.seed, this.myKey, frame.s, entryAad(this.id, this.myKey));
           return !!seed && this.takeEntrySeed(toBase64Url(seed));
         }

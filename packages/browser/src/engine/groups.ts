@@ -1130,7 +1130,7 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.fileMembership(groupId);
     const session = this.sessions.get(groupId);
     if (session?.status !== "active") return undefined;
-    return { me: session.myKey, community: false, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
+    return { me: session.myKey, community: false, onHubs: this.hubs.active(groupId, session, this.now()), inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
   /**
@@ -1509,7 +1509,11 @@ export class Groups {
   async disableLink(groupId: string): Promise<void> {
     if (this.isCommunity(groupId)) { await this.communities.replaceLink(groupId, true); return; }
     const group = this.stored.get(groupId);
-    if (!group?.entry) return;
+    if (!group?.entry) {
+      // No link here: the admin's is off already; anyone else's answer would read as done while the admin's stays on.
+      if (!this.sessions.get(groupId)?.isAdmin) throw new Error("Only the admin can replace or turn off the group's link");
+      return;
+    }
     delete group.entry;
     await this.store.putGroup(group);
     await this.closeEntries(groupId);
@@ -1714,6 +1718,8 @@ export class Groups {
   carrySignal(groupId: string, to: string, payload: Uint8Array): { taken: number; sure: boolean } {
     return this.isCommunity(groupId) ? { taken: 0, sure: false } : this.signals.carry(groupId, to, payload);
   }
+  /** Whether `carrySignal` would hand my packet for the edge to `to` to any link now. */
+  canCarrySignal(groupId: string, to: string): boolean { return !this.isCommunity(groupId) && this.signals.canCarry(groupId, to); }
   /** My packet for the edge to `to`, over that edge itself while it is up (`MeshSignals.direct`). */
   directSignal(groupId: string, to: string, linkId: string, payload: Uint8Array): boolean {
     return !this.isCommunity(groupId) && this.signals.direct(groupId, to, linkId, payload);

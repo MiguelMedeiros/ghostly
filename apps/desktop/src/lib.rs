@@ -5,6 +5,9 @@
 // plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
 #[cfg(target_os = "android")]
 mod android;
+// Which of Android's reports have the app look at its network again (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_network;
 // The share another app made on Android, until the page takes it (built for tests on every host).
 #[cfg(any(target_os = "android", test))]
 mod android_share;
@@ -140,6 +143,7 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::hide_from_switcher,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,

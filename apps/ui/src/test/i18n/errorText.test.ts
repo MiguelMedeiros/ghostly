@@ -7,6 +7,7 @@ import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/err
 import { english } from "../../lib/english";
 import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemText } from "../../lib/problemText";
+import type { TranslationKey } from "../../contexts/I18nContext";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
 
@@ -144,6 +145,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Connect to an updated peer to send files", `${BROWSER}/platform/services.ts`],
   ["Connect to an updated peer first", `${BROWSER}/platform/services.ts`],
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
+  ["This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", `${CORE}/pictureMetadata.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
   // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
@@ -281,6 +283,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
   ["Only the admin can renew the group's secret", `${CORE}/groupSession.ts`],
+  ["Only the admin can hand the admin role over", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
   ["This member has left the group. Make someone else the admin.", `${CORE}/groupCommunity.ts`],
@@ -460,6 +463,17 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["https://example.com/.well-known/ghostly.json was not found", `${BROWSER}/proofs/domain.ts`, " was not found`"],
   ["https://example.com/.well-known/ghostly/ab12.json was not found: it was deleted, or not uploaded yet", `${BROWSER}/proofs/providers/did.ts`, " was not found: it was deleted, or not uploaded yet"],
   ["https://example.com/.well-known/ghostly.json names no Ghostly proof", `${BROWSER}/proofs/domain.ts`, " names no Ghostly proof`"],
+  // A domain proof the record, file, resolver or host refused (agents#2541).
+  ["The TXT record at _ghostly.example.com is for another proof of this key", `${BROWSER}/proofs/domain.ts`, "`${where} is for another proof of this key`"],
+  ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", `${BROWSER}/proofs/domain.ts`, "`${where} names another Ghostly key: this proof was replaced or removed`"],
+  ["https://example.com/.well-known/ghostly.json is for another proof of this key", `${BROWSER}/proofs/domain.ts`, "`${where} is for another proof of this key`"],
+  ["https://example.com/.well-known/ghostly.json names another Ghostly key: this proof was replaced or removed", `${BROWSER}/proofs/domain.ts`, "`${where} names another Ghostly key: this proof was replaced or removed`"],
+  ["https://example.com/.well-known/ghostly.json is not a valid Ghostly file", `${BROWSER}/proofs/domain.ts`, " is not a valid ${method === 'nip05' ? 'NIP-05' : 'Ghostly'} file`"],
+  ["example.com could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *", `${BROWSER}/proofs/domain.ts`, "`${domain} could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *`"],
+  ["Quad9 could not be reached", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} could not be reached`"],
+  ["Quad9 refused the lookup", `${BROWSER}/proofs/domain.ts`, "`${resolver.name} refused the lookup`"],
+  ["example.com has no address", `${BROWSER}/proofs/domain.ts`, "`${domain} has no address`"],
+  ["example.com points to a private network address, so it was not contacted", `${BROWSER}/proofs/domain.ts`, "`${domain} points to a private network address, so it was not contacted`"],
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
   // What the Add dialog's field refuses (agents#2222).
   ["Enter a domain name, like example.com", `${CORE}/domainProofs.ts`],
@@ -501,9 +515,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // What Settings, Network refuses before Save, and the engine on it (agents#2373).
   ["Enter a relay address (wss://…)", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
+  ["Not a relay address: wss://relay.example.org/?key=1", `${BROWSER}/shared/hyperdhtRelay.ts`, "Not a relay address: ${url}"],
   ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
   ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
-  ["Use at most four Iroh relays", `${BROWSER}/engine/node.ts`],
+  ["Use at most five Iroh relays", `${BROWSER}/engine/node.ts`],
   ["Enter the TURN server address", `${BROWSER}/shared/ice.ts`],
   ["“https://turn.example.org” is not a TURN or STUN address (turn:host:port)", `${BROWSER}/shared/ice.ts`, "” is not a TURN or STUN address (turn:host:port)"],
   ["A TURN server needs its username and credential", `${BROWSER}/shared/ice.ts`],
@@ -522,6 +537,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
   ["Could not read the contact's pointer: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Could not read the contact's pointer: "],
   ["The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", `${BROWSER}/engine/hold.ts`],
+  ["Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", `${BROWSER}/engine/hold.ts`],
   ["Refused what the contact's storage offered: The manifest is malformed", `${BROWSER}/engine/hold.ts`, "Refused what the contact's storage offered: "],
   ["Could not pick up held items: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not pick up held items: "],
   ["Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", `${BROWSER}/engine/hold.ts`],
@@ -697,6 +713,33 @@ describe("errors in the app's language", () => {
     expect(problemText(new Error("That did:jwk contains a private key. Never share it: make a new key"), translators.pt)).toMatchObject({ title: "Esse did:jwk contém uma chave privada", next: "Nunca a compartilhe: crie uma chave nova." });
     // In English, the same words as before.
     expect(errorText("That is not a valid domain name", english)).toBe("That is not a valid domain name");
+  });
+
+  // agents#2541: these were "Something went wrong", or the English title, in every language.
+  it.each(LANGUAGES)("a domain proof the record, file, resolver or host refused says why and what to do in %s, the English behind the ⓘ", (language) => {
+    const t = translators[language];
+    const cases: [string, TranslationKey, TranslationKey, Record<string, string>?][] = [
+      ["The TXT record at _ghostly.example.com is for another proof of this key", "errors.proof.dnsOtherProof", "errors.proof.dnsValueNext"],
+      ["The TXT record at _ghostly.example.com names another Ghostly key: this proof was replaced or removed", "errors.proof.dnsOtherKey", "errors.proof.dnsValueNext"],
+      ["https://example.com/.well-known/ghostly.json is for another proof of this key", "errors.proof.fileOtherProof", "errors.proof.fileValueNext"],
+      ["https://example.com/.well-known/ghostly.json names another Ghostly key: this proof was replaced or removed", "errors.proof.fileOtherKey", "errors.proof.fileValueNext"],
+      ["https://example.com/.well-known/ghostly.json is not a valid Ghostly file", "errors.proof.fileInvalid", "errors.proof.fileInvalidNext", { kind: "Ghostly" }],
+      ["https://example.com/.well-known/nostr.json is not a valid NIP-05 file", "errors.proof.fileInvalid", "errors.proof.fileInvalidNext", { kind: "NIP-05" }],
+      ["example.com could not be reached. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: *", "errors.proof.hostUnreachable", "errors.proof.hostUnreachableNext", { domain: "example.com" }],
+      ["Quad9 could not be reached", "errors.proof.resolverUnreachable", "errors.proof.resolverNext"],
+      ["Quad9 refused the lookup", "errors.proof.resolverRefused", "errors.proof.resolverNext"],
+      ["example.com has no address", "errors.proof.noAddress", "errors.proof.noAddressNext", { domain: "example.com" }],
+      ["example.com points to a private network address, so it was not contacted", "errors.proof.privateAddress", "errors.proof.privateAddressNext", { domain: "example.com" }],
+    ];
+    for (const [raw, key, next, values] of cases) {
+      expect(problemText(new Error(raw), t), raw).toEqual({ tone: "error", title: t(key, values), next: t(next, values), detail: raw });
+    }
+    // The lookup that ran out of time on the last resolver tried says that none answered, not that one's name.
+    for (const resolver of ["Quad9", "Cloudflare", "Google"]) {
+      const said = problemText(new Error(`${resolver} could not be reached`), t);
+      expect(said.title).toBe(t("errors.proof.resolverUnreachable"));
+      expect(`${said.title} ${said.next}`).not.toContain(resolver);
+    }
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {

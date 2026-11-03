@@ -135,6 +135,7 @@ export class FileDesk {
       room: async () => (await fileBytes()).room(),
       ...(this.deps.sendData && { sendData: (id: string, offset: number, data: Uint8Array) => this.deps.sendData!(linkId, id, offset, data) }),
       writable: () => this.deps.writable?.(linkId),
+      batchConfirms: true,
     });
     this.chats.set(linkId, made);
     chat = made;

@@ -1,5 +1,14 @@
 {
   "announce": {
+    "fileAccepted": "{{name}} a accepté {{file}}",
+    "fileArrived": "{{file}} est arrivé, prêt à enregistrer",
+    "fileCancelled": "{{name}} a annulé {{file}}",
+    "fileDeclined": "{{name}} a refusé {{file}}",
+    "fileDelivered": "{{name}} a reçu {{file}}",
+    "fileFailed": "{{file}} : {{status}}",
+    "fileOffer": "{{name}} veut envoyer {{file}} ({{size}}) · en attente de votre réponse",
+    "filePaused": "{{name}} a mis {{file}} en pause",
+    "fileResumed": "{{name}} a repris {{file}}",
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
@@ -165,6 +174,8 @@
     "restoring": "Chargement… · {{size}}",
     "resume": "Reprendre",
     "roomDevice": "{{size}} libres sur cet appareil",
+    "senderOnly": "Pas encore chez vos connexions",
+    "senderOnlyHint": "Dans un groupe aussi grand, votre app se connecte via quelques membres, pas à l'expéditeur. Il arrive tout seul dès que l'un d'eux l'a téléchargé, ou demandez à l'expéditeur de vous l'envoyer dans une discussion.",
     "stalled": "Bloqué · {{progress}}",
     "verifying": "Vérification du fichier… {{size}}",
     "verifyingThere": "Arrivé, {{name}} le vérifie… {{size}}",

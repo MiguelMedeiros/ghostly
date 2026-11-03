@@ -33,7 +33,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { groupChat } from "../lib/chatMute";
 import { forgetSentOriginal } from "../lib/sentOriginals";
 import { useI18n, type Translate } from "../contexts/I18nContext";
-import { GroupInvitationCard } from "../components/GroupInvitation";
+import { GroupInvitationCard, focusPastRow, rowAfter } from "../components/GroupInvitation";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
@@ -295,6 +295,11 @@ function usePast(since: number | undefined, ms: number): boolean {
   return past;
 }
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
+/** A step at a stage: done once reached, current while it is the next one, else still to come. */
+function joinStepState(stage: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
+  if (JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step)) return "done";
+  return JOIN_ORDER[JOIN_ORDER.indexOf(step) - 1] === stage ? "current" : "todo";
+}
 
 function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
   const waiting = t("group.join.waiting");
@@ -432,6 +437,14 @@ export function GroupChat() {
   const playingChat = useMemo(() => ({ path: groupPath(groupId), name: groupName }), [groupId, groupName]);
   // Left or deleted here: what this device keeps of it goes, and so does what plays from it (no bar naming it after).
   const goneHere = () => { forgetGroupLocal(groupId); stopPlayingFrom(groupPath(groupId), true); };
+  // Cancel joining on a first join's card: the group's row goes and home shows. The focus goes to the list's next row,
+  // or New, as a Decline's does (on a phone, once the list shows); it was left on the page's body.
+  const cancelJoin = () => {
+    const next = rowAfter(groupId), pressed = document.activeElement;
+    void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {});
+    nav.home();
+    focusPastRow(next, pressed);
+  };
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const [readStacks] = useState(() => routineStacksReader<StoredMessage, StoredMessage>(m => m));
   const stacks = useMemo(() => readStacks(messages), [readStacks, messages]);
@@ -632,6 +645,12 @@ export function GroupChat() {
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
     : joiningText(stage, group.name, group.profile === "community", t);
+  // The joining card's one live line: what changed, not the card. The two-minute hint while it shows; else at a dead
+  // end (no transport, unanswered, replaced) its title; else the last step reached, or the title before the first.
+  const staleText = waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale");
+  const lastReached = joinSteps(group.profile === "community", t).filter(step => joinStepState(stage, step.stage) === "done").pop();
+  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced ? joining.title
+    : knockedLong ? staleText : lastReached?.label ?? joining.title;
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = myJoins.some(at => Date.now() - at < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;
@@ -684,8 +703,9 @@ export function GroupChat() {
           </button>}
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5">
-              {/* In its own direction: a Latin name in Arabic is cut at its end, as in English, not at its start. */}
-              <p dir="auto" className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</p>
+              {/* In its own direction: a Latin name in Arabic is cut at its end, as in English, not at its start. The
+                  screen's heading, as a menu page's title is (layout/Page.tsx). */}
+              <h1 dir="auto" className="text-[15px] font-normal m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</h1>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
             : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer max-md:min-h-6">
@@ -742,7 +762,7 @@ export function GroupChat() {
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
         {knockingAgain ? <div className={`flex items-center justify-between gap-3${error ? " mt-2" : ""}`}>
           <p className="min-w-0"><span className="block font-medium text-text-primary">{joining.title}</span>{joining.body}
-            {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</span>}</p>
+            {knockedLong && !linkUnanswered && <span data-testid="group-joining-stale" className="mt-1 block">{staleText}</span>}</p>
           {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
             className="min-h-11 shrink-0 rounded-lg bg-accent px-3 text-xs font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent">{t("group.join.tryAgain")}</button>}
           {/* The line goes with the knock it ends: the focus goes to the group's ⋮, which stays. */}
@@ -756,7 +776,9 @@ export function GroupChat() {
       {invited && !invitedFresh && <GroupInvitationCard group={group} compact returnFocus={optionsRef} />}
       {invitedFresh ? <GroupInvitationCard group={group} returnFocus={optionsRef} />
       : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
-        <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
+        {/* Not a live region as a whole: it re-read every step and Cancel joining at each change. The one short line
+            under the steps says what changed, and each step says its own state (as the pairing scene's do). */}
+        <div data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
             <svg className={noLinks || linkUnanswered || linkReplaced ? undefined : "animate-spin"} width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56" /></svg>
           </div>
@@ -764,21 +786,25 @@ export function GroupChat() {
           <p className="mt-2 text-sm leading-relaxed text-text-muted">{joining.body}</p>
           {!linkReplaced && <ol data-testid="group-joining-steps" data-stage={stage} className="mx-auto mt-4 w-fit space-y-1.5 text-left text-xs">
             {joinSteps(group.profile === "community", t).map(step => {
-              const done = JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step.stage);
-              const current = !done && JOIN_ORDER[JOIN_ORDER.indexOf(step.stage) - 1] === stage;
-              return <li key={step.stage} data-state={done ? "done" : current ? "current" : "todo"} className={`flex items-center gap-2 ${done ? "text-text-primary" : current ? "text-accent" : "text-text-muted"}`}>
+              const state = joinStepState(stage, step.stage);
+              const done = state === "done", current = state === "current";
+              return <li key={step.stage} data-state={state} aria-current={current ? "step" : undefined} className={`flex items-center gap-2 ${done ? "text-text-primary" : current ? "text-accent" : "text-text-muted"}`}>
                 <span aria-hidden="true" className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${done ? "bg-accent text-on-accent" : current ? "border border-accent" : "border border-border"}`}>{done ? "✓" : ""}</span>
                 {step.label}
+                {done && <span className="sr-only"> ({t("pairing.done")})</span>}
               </li>;
             })}
           </ol>}
+          {/* Said once per change, politely: the step just reached (the title before any, or at a dead end), or the
+              two-minute hint. Hidden: the same words are on the card, and only this line changes. */}
+          <p role="status" data-testid="group-joining-live" className="sr-only">{joinAnnouncement}</p>
           {/* Others knocking too: a wait behind them, said as soon as it is known (a community lets people in a few at a time). */}
           {waitingWith > 0 && (stage === "knocking" || stage === "knocked") && <p data-testid="group-joining-queue" className="mt-4 text-xs leading-relaxed text-text-muted">
             {waitingWith === 1 ? t("group.join.queueOne") : t("group.join.queueCount", { count: waitingWith })}</p>}
-          {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale")}</p>}
+          {knockedLong && !linkUnanswered && <p data-testid="group-joining-stale" className="mt-4 text-xs leading-relaxed text-text-muted">{staleText}</p>}
           {linkUnanswered && <button data-testid="group-link-retry" onClick={() => void act(() => engine.call("acceptGroupInvitation", { groupId }))}
             className="mt-4 block w-full min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover">{t("group.join.tryAgain")}</button>}
-          <button onClick={() => { void engine.call("forgetGroup", { groupId }).then(() => forgetGroupLocal(groupId), () => {}); nav.home(); }} data-testid="group-joining-cancel"
+          <button onClick={cancelJoin} data-testid="group-joining-cancel"
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger max-md:min-h-11 max-md:px-3">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">

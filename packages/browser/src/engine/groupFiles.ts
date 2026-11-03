@@ -128,6 +128,11 @@ export interface GroupFilesHost {
 export interface GroupFileMembership {
   me: string;
   community: boolean;
+  /**
+   * A private group laid out on hubs (WISP 902 § Hubs): a member that is not a hub has edges with its hubs only, so the
+   * other members' files reach it only once a hub holds them.
+   */
+  onHubs?: boolean;
   inRoster(key: string): boolean;
   /**
    * In the roster now, and in the roster of the message's epoch or (given the message's time `ts`) let in no later than
@@ -278,6 +283,7 @@ const ENDED_KEPT = 8;
 /** Why a want waits, as the person reads it (the app shows its own words for each `wait`). */
 const WAITING_NOTES = {
   nobody: "Nobody you are connected to has this file yet",
+  author: "Nobody you are connected to has this file yet, and its sender is not one of them",
   busy: "Its holders are busy; asking again soon",
   day: "Its holders have shared all they can today; it comes when another member has it, or tomorrow",
   damaged: "It arrived damaged; ask again",
@@ -712,7 +718,7 @@ export class GroupFileDesk {
    * asked whether or not it said so (one that does not hold it answers `gone`, and is not asked again). Only over an
    * edge this device has. (A private group past 16 members, or a community, reaches a holder it has no edge with
    * over a file session of the two members, WISP 503 § The file session; that session is not built yet, so such a
-   * holder is not asked, and the file waits for one that is reachable.)
+   * holder is not asked, and the file waits for one that is reachable: `author` when that is its author alone.)
    */
   private ask(kept: Kept): void {
     const want = this.wants.get(kept.id);
@@ -744,8 +750,11 @@ export class GroupFileDesk {
     }
     Object.assign(want, { holder: undefined, linkId: undefined, at: this.deps.now() });
     if (behind) { this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" }); return; }
-    // Why it waits: a holder busy, bytes that came damaged (its person can ask again), or nobody in reach has it.
-    const wait = want.why ?? "nobody";
+    // Why it waits: a holder busy, bytes that came damaged (its person can ask again), or nobody in reach has it. On
+    // hubs, a file only its author is known to hold, the author with no edge here, comes only once a hub holds it: said
+    // so, rather than blamed on who is online.
+    const outOfReach = !!membership?.onHubs && known.includes(kept.author) && known.every(key => !edges.has(key));
+    const wait = want.why ?? (outOfReach ? "author" : "nobody");
     this.show(kept, { state: "transferring", stage: "waiting", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in",
       wait, note: WAITING_NOTES[wait], ...(wait === "damaged" && { stalled: true }) });
   }

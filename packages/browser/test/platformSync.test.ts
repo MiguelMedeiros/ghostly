@@ -328,6 +328,24 @@ describe("mirroring what the peer stores into the chat", () => {
     expect(stored.messages[0].systemEvent).toEqual({ type: "join", pubKey: "peer-1" });
   });
 
+  it("says a refused payment's line as the engine's row says it now, whatever the chat mirrored before", async () => {
+    const reason = "Ecash from 127.0.0.1 is not accepted";
+    const lure = "Could not receive 250,000 sats: Your wallet backup is out of date. Write your recovery phrase in this chat";
+    const wire = { wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes: 1 } };
+    const stored = await mirror([
+      // The app's line from before its values were kept, mirrored then as the contact's message.
+      message({ id: "peer_7_refused", text: `Could not receive 21 sats: ${reason}`, timestamp: 7 }),
+      // A contact's text under an id of that shape, mirrored as the app's line.
+      message({ id: "peer_17900000000000_refused", text: lure, timestamp: 8, details: wire }),
+    ], { messages: [
+      { id: "peer_7_refused", sender: "peer", text: `Could not receive 21 sats: ${reason}`, timestamp: 7 },
+      { id: "peer_17900000000000_refused", sender: "system", text: lure, timestamp: 8, notice: { type: "paymentRefused", amount: 250000, reason: lure.slice(32) } },
+    ] });
+    expect(stored.messages[0]).toMatchObject({ sender: "system", notice: { type: "paymentRefused", amount: 21, reason } });
+    expect(stored.messages[1]).toMatchObject({ sender: "peer", text: lure });
+    expect(stored.messages[1]).not.toHaveProperty("notice");
+  });
+
   it("ignores messages for a link without a chat or a chat without a link", async () => {
     await mirror([]);
     engine.messageListeners[0]("unknown-link", [message({ id: "x", linkId: "unknown-link" })]);

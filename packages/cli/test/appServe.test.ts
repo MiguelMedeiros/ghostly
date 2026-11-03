@@ -73,6 +73,14 @@ describe("app serve", () => {
     expect(servedApps(dir)).toEqual([]);
   });
 
+  it("refuses a card url with a query or fragment: a private file's read token would go to contacts", async () => {
+    const { dir, ctx, file } = profile();
+    const url = "https://raw.githubusercontent.com/ana/chess/main/app.ghostlyapp";
+    for (const bad of [`${url}?token=GHSAT0AAAAAACPRIVATEREADTOKEN`, `${url}#top`])
+      await expect(callApi(ctx, "app.serve", { bundle: file("plain", plain.bytes), grant: ["chat"], url: bad }), bad).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("no query or fragment") });
+    expect(servedApps(dir)).toEqual([]);
+  });
+
   it("refuses a bundle a client would refuse, with the client's reason", async () => {
     const { dir, ctx, file } = profile();
     for (const bad of vectors.invalid.filter((v) => v.refusal !== "too-large").slice(0, 12))

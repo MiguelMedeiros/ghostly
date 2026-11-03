@@ -3,9 +3,9 @@ import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import manifest from "../public/manifest.json";
 import servicesAr from "../../ui/src/locales/ar/services.json";
-import { settle, type FakeWorld } from "./fakeChrome";
+import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { resetEngine } from "./fakeEngine";
-import { PEER, SERVICE, TAG, bootExtension } from "./extension";
+import { PEER, SERVICE, TAG, bootExtension, restartServiceWorker } from "./extension";
 
 // covers: extension.engine, services.add, app.updates.extension, proofs.oidc.callback.extension
 
@@ -175,5 +175,44 @@ describe("updates", () => {
     const updates = await load();
     await updates.install({ version: "0.5.0", apply: "restart" });
     expect(world.callsTo("runtime.reload")).toHaveLength(1);
+  });
+
+  it("brings the app back after Update and restart, at the pages that were open", async () => {
+    const app = world.chrome.runtime.getURL("app.html");
+    await world.chrome.tabs.create({ url: `${app}#/chat/abc` });
+    await world.chrome.tabs.create({ url: "https://example.com/" });
+    await world.chrome.tabs.create({ url: `${app}#/settings` });
+    const updates = await load();
+    await updates.install({ version: "0.5.0", apply: "restart" });
+
+    // The reload closes every page of the extension and forgets its session storage; the new version's worker starts.
+    for (const tab of [...world.tabs.values()]) if (tab.url.startsWith(app)) world.tabs.delete(tab.id);
+    world.session.clear();
+    await restartServiceWorker(world);
+    world.calls.length = 0;
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[`${app}#/chat/abc`], [`${app}#/settings`]]);
+
+    // Only that once: an update nobody asked for here opens nothing.
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.5.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toHaveLength(2);
+  });
+
+  it("opens the app once after Update and restart even when no tab of it is found, and never another page", async () => {
+    const app = world.chrome.runtime.getURL("app.html");
+    world.local.set("ghostly_reopen_after_update", ["https://example.com/", `${app}#/chats`, "javascript:alert(1)"]);
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[`${app}#/chats`]]);
+
+    world.tabs.clear();
+    const updates = await load();
+    await updates.install({ version: "0.5.0", apply: "restart" });
+    world.calls.length = 0;
+    fire(world.chrome.runtime.onInstalled, { reason: "update", previousVersion: "0.4.0" });
+    await settle();
+    expect(world.callsTo("tabs.create")).toEqual([[app]]);
   });
 });

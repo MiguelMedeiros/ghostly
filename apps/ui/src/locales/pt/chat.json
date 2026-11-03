@@ -1,5 +1,14 @@
 {
   "announce": {
+    "fileAccepted": "{{name}} aceitou {{file}}",
+    "fileArrived": "{{file}} chegou, pronto para salvar",
+    "fileCancelled": "{{name}} cancelou {{file}}",
+    "fileDeclined": "{{name}} recusou {{file}}",
+    "fileDelivered": "{{name}} recebeu {{file}}",
+    "fileFailed": "{{file}}: {{status}}",
+    "fileOffer": "{{name}} quer enviar {{file}} ({{size}}) · aguardando sua resposta",
+    "filePaused": "{{name}} pausou {{file}}",
+    "fileResumed": "{{name}} retomou {{file}}",
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
     "messagesFrom": "{{count}} mensagens novas de {{name}}",
@@ -165,6 +174,8 @@
     "restoring": "Carregando… · {{size}}",
     "resume": "Continuar",
     "roomDevice": "{{size}} livres neste aparelho",
+    "senderOnly": "Ainda não está com suas conexões",
+    "senderOnlyHint": "Em um grupo deste tamanho, seu app se conecta por meio de poucos membros, não com quem enviou. Ele chega sozinho quando um deles baixar, ou peça a quem enviou que o mande para você em uma conversa.",
     "stalled": "Parado · {{progress}}",
     "verifying": "Verificando o arquivo… {{size}}",
     "verifyingThere": "Chegou, {{name}} está verificando… {{size}}",

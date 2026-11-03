@@ -84,4 +84,19 @@ describe("Hide my IP from contacts (relayOnly)", () => {
     await node.updateSettings({ settings: { relayOnly: true } });
     expect(link.stop).toHaveBeenCalledOnce();
   });
+
+  it("held items are picked up only from this person's own storage host while it is on, and looked for again once it is off", async () => {
+    const node = engine();
+    const hosts = () => node["hold"]["host"].hiddenIpHosts!();
+    await node.updateSettings({ settings: { iceServers: [TURN] } });
+    expect(hosts()).toBeNull();
+    await node.updateSettings({ settings: { relayOnly: true } });
+    expect(hosts()).toEqual([]);
+    node["settings"].holdStorage = { s3: { endpoint: "https://S3.eu.example.org/", region: "eu", bucket: "mine", prefix: "", accessKeyId: "k", secretAccessKey: "s" }, space: "abcdefghijklmnop" };
+    expect(hosts()).toEqual(["s3.eu.example.org"]);
+    const wake = vi.spyOn(node["hold"], "wake");
+    await node.updateSettings({ settings: { relayOnly: false } });
+    expect(hosts()).toBeNull();
+    expect(wake).toHaveBeenCalledOnce();
+  });
 });

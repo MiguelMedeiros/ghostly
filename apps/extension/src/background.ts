@@ -2,7 +2,7 @@ import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } 
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
-import { rememberPendingUpdate } from "./updates";
+import { rememberPendingUpdate, takePagesToReopen } from "./updates";
 import servicesEn from "../../ui/src/locales/en/services.json";
 
 /**
@@ -86,13 +86,19 @@ async function waitForEngine(): Promise<EngineStatus> {
 chrome.runtime.onStartup.addListener(() => void ensureEngine());
 /**
  * A first install also opens the app in a tab: without it nothing showed, and a new user had to find the toolbar
- * button. The tab opens even when the peer does not start, so the page can say why. An update opens nothing.
+ * button. The tab opens even when the peer does not start, so the page can say why. An update opens again the pages
+ * "Update and restart" closed; one that came by itself opens nothing, as the person is somewhere else.
  */
 chrome.runtime.onInstalled.addListener((details) => {
   const started = ensureEngine();
-  if (details?.reason === "install") void started.catch(() => {}).then(showApp).catch(() => {});
+  if (details?.reason === "install") void started.catch(() => {}).then(() => showApp()).catch(() => {});
+  else if (details?.reason === "update") void started.catch(() => {}).then(reopenAfterUpdate).catch(() => {});
   else void started.catch(() => {});
 });
+
+async function reopenAfterUpdate(): Promise<void> {
+  for (const url of await takePagesToReopen()) await chrome.tabs.create({ url });
+}
 
 /**
  * Chrome has a newer version but will not swap it in while Ghostly is running,
@@ -108,17 +114,52 @@ chrome.action.onClicked.addListener(async () => {
   await showApp();
 });
 
-/** Brings the app's tab forward, or opens one. */
-async function showApp(): Promise<void> {
+/** Brings the app's tab forward, or opens one; on `route` (`/chat/…`) when given. */
+async function showApp(route?: string): Promise<void> {
   const url = chrome.runtime.getURL("app.html");
   const existing = await openAppTab(url);
   if (existing) {
-    await chrome.tabs.update(existing.tabId, { active: true });
+    // Only the fragment changes: the page stays, and its router goes there.
+    await chrome.tabs.update(existing.tabId, route ? { active: true, url: `${url}#${route}` } : { active: true });
     if (existing.windowId >= 0) await chrome.windows.update(existing.windowId, { focused: true });
   } else {
-    await chrome.tabs.create({ url });
+    await chrome.tabs.create({ url: route ? `${url}#${route}` : url });
   }
 }
+
+// -- notifications -------------------------------------------------------------
+
+/**
+ * A click on one of Ghostly's notifications. Chrome keeps one in the system's list after the page that showed it
+ * closed or reloaded, and that page was the only one to know its chat (apps/ui/src/lib/notifications.ts): the page
+ * still open opens its own, and for any other the worker shows the app, on the chat the page kept for it in session
+ * storage (`notice:<id>`). Either way it leaves the list.
+ */
+async function openNotification(id: string): Promise<void> {
+  void chrome.notifications.clear(id).catch(() => {});
+  const key = `notice:${id}`;
+  const chat: unknown = (await chrome.storage.session.get(key))[key];
+  await chrome.storage.session.remove(key);
+  const owned = await chrome.runtime.sendMessage({ target: "app", type: "notification-open", id } satisfies RuntimeMessage).catch(() => false);
+  if (owned === true) return;
+  await ensureEngine().catch(() => {});
+  await showApp(typeof chat === "string" ? chatRoute(chat) : undefined);
+}
+
+/** The app's address for a notification's chat, as the page opens it (AttentionFeedback); none for another profile's. */
+function chatRoute(chat: string): string | undefined {
+  if (chat.startsWith("profile:")) return undefined;
+  return chat.startsWith("group:") ? `/group/${encodeURIComponent(chat.slice(6))}` : `/chat/${encodeURIComponent(chat)}`;
+}
+
+/** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
+function listenToNotifications(): void {
+  const clicks = chrome.notifications?.onClicked;
+  if (clicks && !clicks.hasListener(onNotificationClicked)) clicks.addListener(onNotificationClicked);
+}
+const onNotificationClicked = (id: string) => void openNotification(id).catch(() => {});
+listenToNotifications();
+chrome.permissions.onAdded.addListener(listenToNotifications);
 
 /**
  * A tab that shows the app already, on any of its pages (`app.html#/chat/…`). Asked of the extension's own contexts:
