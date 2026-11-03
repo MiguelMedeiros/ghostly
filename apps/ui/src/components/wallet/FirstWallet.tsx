@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { WalletNetwork, WalletOffer, WalletPlatform, WalletType } from "../../lib/platform";
 import { DEFAULT_WALLETS } from "@ghostly/browser/engine/walletSetup";
 import { useI18n } from "../../contexts/I18nContext";
@@ -47,12 +47,24 @@ export function FirstWallet({ wallet, offers, onNew, onStart, onMade }: {
     }
     setBusy(null); setRetrying(null); setMade((m) => [...m, ...done]);
     // A retry's line is replaced where it stands (or goes, once made); the other failures stay said.
-    setFailed((before) => retry ? before.flatMap((f) => f.type !== retry ? [f] : problems) : problems);
-    if (done.length && !problems.length) onMade(done[0]);
+    const left = retry ? failed.flatMap((f) => f.type !== retry ? [f] : problems) : problems;
+    setFailed(left);
+    // The setup ends once nothing failed is left: a retry that made its wallet leaves the others' failures in view, and
+    // the keys on its Try again, gone with its line, go to the next one's.
+    if (done.length && !left.length) onMade(done[0]);
+    else if (retry && done.length) focusRetry.current = left[0].type;
   };
+  const section = useRef<HTMLElement>(null);
+  const focusRetry = useRef<WalletType | null>(null);
+  useEffect(() => {
+    const type = focusRetry.current;
+    if (!type) return;
+    focusRetry.current = null;
+    section.current?.querySelector<HTMLElement>(`[data-testid="wallet-first-retry-${type}"]`)?.focus();
+  }, [failed]);
 
   return (
-    <section className="space-y-4 rounded-2xl border border-border bg-panel-header p-5" data-testid="wallet-first" aria-labelledby="wallet-first-title">
+    <section ref={section} className="space-y-4 rounded-2xl border border-border bg-panel-header p-5" data-testid="wallet-first" aria-labelledby="wallet-first-title">
       <div className="flex items-center gap-2 text-text-muted">
         {FIRST.map((type) => <span key={type} className={`wallet-card-${type} grid place-items-center w-9 h-9 rounded-lg`} style={{ color: "rgb(var(--card-rgb))", background: "rgba(var(--card-rgb), .14)" }} aria-hidden="true"><WalletMark rail={type} /></span>)}
       </div>
