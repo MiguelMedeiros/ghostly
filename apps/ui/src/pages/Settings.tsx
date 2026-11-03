@@ -507,7 +507,7 @@ export function Settings() {
           <div className="bg-surface rounded-xl divide-y divide-border">
             {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
             <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
-              label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
+              label={<span dir="auto" className="inline-block max-w-full truncate align-top">{profile.name}</span>} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
             {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
             {canSwitch && (
               <LinkRow testId="settings-profile-switch" label={<span className="inline-flex items-center gap-2">{t("profileSwitcher.title")}{others && <NeedsYouDot />}</span>}

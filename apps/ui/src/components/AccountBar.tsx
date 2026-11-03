@@ -138,7 +138,7 @@ export function AccountBar({ rail = false }: { rail?: boolean }) {
             {canSwitch && (glances.othersUnread > 0 || glances.othersFresh > 0) && <span data-testid="account-profile-others" aria-hidden="true" className="profile-others-ring" />}
             {canSwitch && glances.othersFresh > 0 && <span data-testid="account-profile-others-new" aria-hidden="true" className="profile-others-new" />}
           </span>
-          <span className="account-label" data-name="">{profileName}</span>
+          <span className="account-label" data-name="" dir="auto">{profileName}</span>
         </button>
 
         {wallet && (
