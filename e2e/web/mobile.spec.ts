@@ -115,10 +115,19 @@ test("on a 320px phone a toast holding a long file name wraps, its × on the scr
       // As the chat was before the reload, live: in the language now shown, so read through its status.
       await expect(alice.page.getByTestId("connection-options")).toHaveAttribute("data-state", "connected", { timeout: 90_000 });
     }
-    // Not a movie at all, so it cannot be converted; a file of its own each time, in a folder of its own.
+    // A QuickTime file with a movie header and no track: nothing to convert, and nothing of it is metadata, so it goes
+    // as it is (a file that is no QuickTime at all is refused before it is sent). A file of its own each time, in a
+    // folder of its own.
     mkdirSync(testInfo.outputPath(language));
     const path = testInfo.outputPath(language, name);
-    writeFileSync(path, Buffer.from(`not a movie (${language})`));
+    const qtBox = (type: string, body: Buffer) => {
+      const out = Buffer.concat([Buffer.alloc(4), Buffer.from(type, "latin1"), body]);
+      out.writeUInt32BE(out.length, 0);
+      return out;
+    };
+    const ftyp = qtBox("ftyp", Buffer.from("qt  \0\0\0\0qt  ", "latin1"));
+    const moov = qtBox("moov", qtBox("mvhd", Buffer.alloc(100)));
+    writeFileSync(path, Buffer.concat([ftyp, moov, qtBox("free", Buffer.from(language))]));
     await alice.page.getByTestId("file-input").setInputFiles(path);
     const toast = alice.page.getByRole("alert").filter({ hasText: name });
     await expect(toast).toBeVisible({ timeout: 30_000 });
