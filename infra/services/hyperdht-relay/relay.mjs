@@ -23,6 +23,11 @@ export const DEFAULT_LIMITS = Object.freeze({
   burstBytes: 4 * 1024 * 1024,
   /** Keys one client may listen on at once. */
   listens: 16,
+  /**
+   * Listens one client may start per minute, refused ones too. Each is an announcement on the DHT and its close an
+   * unannouncement. A browser starts at most eight on start and eight again when it reconnects (measured, 30 chats).
+   */
+  listensPerMinute: 60,
   /** Dials one client may start per minute. */
   connectsPerMinute: 60,
   /** HyperDHT streams one client may hold open at once: its dials and the connections its servers get. */
@@ -56,18 +61,23 @@ export const DEFAULT_LIMITS = Object.freeze({
 /**
  * The browser signs its announcements, so a relay waiting for a signature from a browser that has gone
  * would wait forever (the server it closes on that browser's behalf never finishes unannouncing, and holds
- * on). A signature comes within `SIGN_MS` or while the browser is there, or not at all.
+ * on). A signature comes within `SIGN_MS` or while the browser is there, or not at all. `onLeave(fail)` calls `fail`
+ * when the browser leaves (at once if it has) and returns what forgets it: a wait on the client's `gone` itself stayed
+ * there for every signature after it came, until the browser left.
  */
 const SIGN_MS = 10_000
-const fixSign = (sign, gone) => sign && ((target, token, id, ann, keyPair) => {
+const fixSign = (sign, onLeave) => sign && ((target, token, id, ann, keyPair) => {
   let timer
+  let forget = () => {}
   return Promise.race([
     sign(target, token, id, { peer: ann.peer.relayAddresses }, keyPair),
-    gone.then(() => { throw new Error('The browser left') }),
-    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('No signature')), SIGN_MS) }),
-  ]).finally(() => clearTimeout(timer))
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('No signature')), SIGN_MS)
+      forget = onLeave(() => reject(new Error('The browser left')))
+    }),
+  ]).finally(() => { clearTimeout(timer); forget() })
 })
-const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(options.signAnnounce, gone), signUnannounce: fixSign(options.signUnannounce, gone) })
+const fixOptions = (options = {}, onLeave) => ({ ...options, signAnnounce: fixSign(options.signAnnounce, onLeave), signUnannounce: fixSign(options.signUnannounce, onLeave) })
 
 /**
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
@@ -83,6 +93,7 @@ const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(
  */
 function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
+  let listens = []
   let dials = []
   let idle = null
   // Once the client has gone, its servers still close one by one: none of them may arm the idle timer again.
@@ -103,20 +114,32 @@ function clientDht(dht, limits, drop, gone, log) {
     stream.once('close', () => streams.delete(stream))
     return stream
   }
+  // The signatures waiting on this client (fixSign): each fails when it leaves.
+  const signing = new Set()
+  const onLeave = fail => {
+    if (left) { fail(); return () => {} }
+    signing.add(fail)
+    return () => signing.delete(fail)
+  }
   void gone.then(() => {
     clearTimeout(idle)
     left = true
     for (const stream of streams) stream.destroy()
     streams.clear()
+    for (const fail of signing) fail()
+    signing.clear()
   })
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
+        const now = Date.now()
+        listens = listens.filter(at => now - at < 60_000)
+        if (listens.push(now) > limits.listensPerMinute) { drop('listen rate'); throw new Error('Listen rate reached') }
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
         watchIdle()
         const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
         const listen = server.listen.bind(server)
-        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone)).catch(error => {
+        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, onLeave)).catch(error => {
           log('refused listen', error?.code ?? 'error')
           server.address = () => ({ publicKey: keyPair?.publicKey, host: '0.0.0.0', port: 0 })
           server.emit('listening')
@@ -208,11 +231,25 @@ class Signatures extends Map {
     for (const id of [...this.keys()]) this.delete(id)
   }
 }
+/**
+ * Each server dht-relay 0.4.3 runs for a client waits for the client's stream to close (to close itself) and never
+ * stops waiting once it has closed: every server the client had ever opened stayed in memory, 3 to 6 KiB each, until
+ * the client left. A server now stops waiting when it closes.
+ */
+class Servers extends Map {
+  set(alias, proxy) {
+    proxy._server.once('close', () => proxy._protocol._stream.off('close', proxy._onStreamClose))
+    return super.set(alias, proxy)
+  }
+}
 function bound(node, limits, gone) {
   node._limits = limits
   const signatures = new Signatures()
   for (const [id, signature] of node._signatures) signatures.set(id, signature)
   node._signatures = signatures
+  const servers = new Servers()
+  for (const [alias, proxy] of node._servers) servers.set(alias, proxy)
+  node._servers = servers
   void gone.then(() => { signatures.clear(); node._handshakes.clear() })
 }
 
