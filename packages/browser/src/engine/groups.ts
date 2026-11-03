@@ -619,6 +619,8 @@ export class Groups {
   private readonly lingering = new Map<string, { linkId: string; admin: string; until: number }>();
   /** Joiner side: groups whose knock is published, for the stage the joiner is shown. */
   private readonly knocked = new Set<string>();
+  /** Joiner side: groups whose knock record held others' fresh knocks when I last read it (`othersKnocked`). */
+  private readonly othersKnocked = new Set<string>();
   /**
    * Per mesh group, the member each unreachable member's messages were asked of (in a sync): asked of one member at a
    * time, not of everyone whose edge opens, so a member coming back is not sent the same messages by every other.
@@ -836,7 +838,8 @@ export class Groups {
       return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
         invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
           ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
-          ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(this.gaveUp.has(group.id) && { unanswered: true }) } : {}) } };
+          ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group), ...(this.gaveUp.has(group.id) && { unanswered: true }),
+            ...(this.othersKnocked.has(group.id) && { othersKnocked: true }) } : {}) } };
     }
     const nicks = session.state.nicks;
     const entry = session.isAdmin ? this.entryOf(group) : undefined;
@@ -1450,6 +1453,7 @@ export class Groups {
     this.pendingEntries.delete(groupId);
     this.framesKept.delete(groupId);
     this.knocked.delete(groupId);
+    this.othersKnocked.delete(groupId);
     this.knockCheckAt.delete(groupId);
     this.knockRewrites.delete(groupId);
     this.knockingSince.delete(groupId);
@@ -1786,7 +1790,7 @@ export class Groups {
   private async knockAgain(group: StoredGroup, now = this.now()): Promise<void> {
     if (!this.gaveUp.delete(group.id)) return;
     this.knockingSince.set(group.id, now);
-    this.lastKnock.delete(group.id); this.knocked.delete(group.id); this.knockRewrites.delete(group.id);
+    this.lastKnock.delete(group.id); this.knocked.delete(group.id); this.othersKnocked.delete(group.id); this.knockRewrites.delete(group.id);
     await this.reopenEntry(group);
     this.host.emit();
     void this.knock(group, now).catch(() => {});
@@ -1808,6 +1812,10 @@ export class Groups {
     const existing = readKnocks(link, (await this.host.resolve(identity.pubKeyZ32)) ?? []);
     const key = identityFromSeedB64(invitation.seedB64!).pubKeyZ32, mine = existing.find(k => k.key === key);
     traceJoin(group.id, "knock.read", { ms: Date.now() - started, others: existing.length, ...(mine ? { mine: now - mine.ts } : {}) });
+    // Others knocked lately (a waiting joiner writes its knock again once it is `KNOCK_REFRESH_MS` old): the admin's app
+    // may be letting them in, its relay minute spent, and the joining page says so rather than that the app is closed.
+    const crowd = existing.some(k => k.key !== key && now - k.ts < KNOCK_REFRESH_MS + this.timings.knockMs);
+    if (crowd !== this.othersKnocked.has(group.id)) { if (crowd) this.othersKnocked.add(group.id); else this.othersKnocked.delete(group.id); this.host.emit(); }
     // Still there and fresh: the admin's app reads it as it is. One another joiner's write replaced goes again.
     if (mine && now - mine.ts >= 0 && now - mine.ts < KNOCK_REFRESH_MS) {
       this.knockRewrites.delete(group.id);
@@ -2076,7 +2084,7 @@ export class Groups {
         await this.event(g, "joined", group.invitation.genesis ? "You joined again" : `You joined. ${GROUP_READ_NOTE}`, Date.now(), joined.state.chain.length - 1);
         if (viaLink) traceJoin(g, "welcome.received");
         if (viaLink) {
-          this.lastKnock.delete(g); this.knocked.delete(g); this.knockingSince.delete(g);
+          this.lastKnock.delete(g); this.knocked.delete(g); this.othersKnocked.delete(g); this.knockingSince.delete(g);
           // The entry session reaches the admin, which reaches every member: while it is kept (above), the edges about
           // to open signal through it too (WISP 902 § Signaling through members).
           if (this.host.linkReady(linkId, GROUP_VERSION_SIGNALS)) this.signals.keep(g, linkId);
