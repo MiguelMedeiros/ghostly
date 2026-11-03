@@ -52,4 +52,10 @@ export type HttpRequestReply =
 export interface EngineStatus {
   profile: string;
   active: string;
+  /**
+   * The id of the profile `active` names (`""` for the first one), as a notice about it names it (`profile:<id>`):
+   * a namespace is not an id once a handoff pointed the profile elsewhere, and the worker cannot read the registry.
+   * Absent from a document an older build started.
+   */
+  activeId?: string;
 }
