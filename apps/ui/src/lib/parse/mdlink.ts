@@ -45,7 +45,7 @@ const DOTS =
 export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
   if (!target) return true;
-  if (new RegExp(INVISIBLE.source).test(label)) return true;
+  if (new RegExp(INVISIBLE.source, "u").test(label)) return true;
   const text = label.replace(DOTS, ".").normalize("NFKC").replace(DOTS, ".");
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
