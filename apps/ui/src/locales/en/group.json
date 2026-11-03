@@ -111,6 +111,7 @@
   "join": {
     "admitted": "The admin's app answered: getting the group's keys. You are in in a moment.",
     "admittedCommunity": "A member's app answered: getting the group's keys. You are in in a moment.",
+    "admittedStuck": "No member could finish letting you in. Ask someone in the group for the current link.",
     "answered": "The admin's app saw you knock and is connecting to you. You are in in a moment.",
     "answeredCommunity": "A member's app saw you knock and is connecting to you. You are in in a moment.",
     "answeredTitleCommunity": "A member is letting you in",
