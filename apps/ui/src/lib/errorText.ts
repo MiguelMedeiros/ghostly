@@ -576,6 +576,19 @@ const RULES: readonly Rule[] = [
   { match: /^https:\/\/\S+ was not found$/, key: "errors.proof.fileNotFound", detail: true },
   { match: /^https:\/\/\S+ was not found: it was deleted, or not uploaded yet$/, key: "errors.proof.fileNotFound", next: "errors.proof.fileNotFoundNext", detail: true },
   { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
+  // A domain proof's record or file that names something else, and the resolver or host that could not be asked
+  // (packages/browser/src/proofs/domain.ts). A resolver line is thrown only once none answered, and a lookup that ran
+  // out of time names the last one tried: the line says that none answered, its name goes behind the ⓘ.
+  { match: /^The TXT record at \S+ is for another proof of this key$/, key: "errors.proof.dnsOtherProof", next: "errors.proof.dnsValueNext", detail: true },
+  { match: /^The TXT record at \S+ names another Ghostly key: this proof was replaced or removed$/, key: "errors.proof.dnsOtherKey", next: "errors.proof.dnsValueNext", detail: true },
+  { match: /^https:\/\/\S+ is for another proof of this key$/, key: "errors.proof.fileOtherProof", next: "errors.proof.fileValueNext", detail: true },
+  { match: /^https:\/\/\S+ names another Ghostly key: this proof was replaced or removed$/, key: "errors.proof.fileOtherKey", next: "errors.proof.fileValueNext", detail: true },
+  { match: /^https:\/\/\S+ is not a valid (?<kind>Ghostly|NIP-05) file$/, key: "errors.proof.fileInvalid", next: "errors.proof.fileInvalidNext", detail: true },
+  { match: /^(?<domain>\S+) could not be reached\. The file must be served at exactly this address, without a redirect, with the header Access-Control-Allow-Origin: \*$/, key: "errors.proof.hostUnreachable", next: "errors.proof.hostUnreachableNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) could not be reached$/, key: "errors.proof.resolverUnreachable", next: "errors.proof.resolverNext", detail: true },
+  { match: /^(?:Quad9|Cloudflare|Google) refused the lookup$/, key: "errors.proof.resolverRefused", next: "errors.proof.resolverNext", detail: true },
+  { match: /^(?<domain>\S+) has no address$/, key: "errors.proof.noAddress", next: "errors.proof.noAddressNext", detail: true },
+  { match: /^(?<domain>\S+) points to a private network address, so it was not contacted$/, key: "errors.proof.privateAddress", next: "errors.proof.privateAddressNext", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
   // What the Add dialog's field refuses before anything is signed (a domain, a Bitcoin address and signature, a DID:
   // packages/core domainProofs.ts, bip322.ts, did.ts and proofs/providers/bitcoin.ts). The names they quote stay as values.
