@@ -1,5 +1,14 @@
 {
   "announce": {
+    "fileAccepted": "{{name}} a accepté {{file}}",
+    "fileArrived": "{{file}} est arrivé, prêt à enregistrer",
+    "fileCancelled": "{{name}} a annulé {{file}}",
+    "fileDeclined": "{{name}} a refusé {{file}}",
+    "fileDelivered": "{{name}} a reçu {{file}}",
+    "fileFailed": "{{file}} : {{status}}",
+    "fileOffer": "{{name}} veut envoyer {{file}} ({{size}}) · en attente de votre réponse",
+    "filePaused": "{{name}} a mis {{file}} en pause",
+    "fileResumed": "{{name}} a repris {{file}}",
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
