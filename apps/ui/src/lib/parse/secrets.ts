@@ -30,7 +30,11 @@ const NSEC = /\bnsec1[02-9ac-hj-np-z]{58}(?![02-9ac-hj-np-z])/i;
 const EXTENDED_PRIVATE = /\b[xtyzuvYZUV]prv[1-9A-HJ-NP-Za-km-z]{100,}/;
 const WIF = /\b[59KLc][1-9A-HJ-NP-Za-km-z]{50,51}\b/g;
 const HEX_SECRET = /\b(?:0x)?(?:[0-9a-fA-F]{128}|[0-9a-fA-F]{64})\b/g;
-const SECRET_CONTEXT = /priv(?:ate)?[\s_-]*key|secret|seed|mnemonic|nsec|xprv|\bwif\b|recovery|passphrase/i;
+/**
+ * Monero's keys count too: "Private spend key" and "Spend key (private)" (Cake Wallet, MyMonero). A bare "spend key" or
+ * "view key" does not, as a wallet's public keys are written that way too.
+ */
+const SECRET_CONTEXT = /priv(?:ate)?[\s_-]*(?:(?:spend|view)[\s_-]*)?key|(?:spend|view)[\s_-]*key[\s_-]*\(\s*private|secret|seed|mnemonic|nsec|xprv|\bwif\b|recovery|passphrase/i;
 /** How far from a 64-hex string a word like "seed" still counts as saying what it is. */
 const CONTEXT_REACH = 48;
 const CASHU_TOKEN = /\bcashu([AB])([A-Za-z0-9_\-+/]{20,}={0,2})/g;
