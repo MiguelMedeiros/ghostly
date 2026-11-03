@@ -802,6 +802,9 @@ const METHODS: Record<string, Method> = {
  * kept): it stops once it has answered, and the next command starts on the emptied profile.
  */
 async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number; groups: number }; stopped?: true }> {
+  // Every chat goes at once: mid-call, the call's hang-up had no chat left to cross, as with `chat remove` (`noCallOn`).
+  const call = ctx.calls.list()[0];
+  if (call) throw new CliError("busy", `A call is on in a chat: hang it up first (ghostly call hangup ${call.chat}), then clear the profile`, { call: call.call });
   const { links, groups } = state(ctx);
   await node(ctx).clearProfileData();
   const cleared = { chats: links.length, groups: groups.length };
