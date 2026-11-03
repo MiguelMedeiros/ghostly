@@ -59,6 +59,7 @@ import {
   type Language,
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
+import { anyChatOnCall, useAnyChatOnCall } from "../lib/chatsOnCall";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
@@ -247,11 +248,14 @@ export function Settings() {
   const appsOn = useAppsAvailable();
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
   const [chatCount, setChatCount] = useState(0);
+  // No chat is deleted under its call (lib/chatsOnCall.ts): while one is on or rings, Delete all chats says to end it first.
+  const chatsOnCall = useAnyChatOnCall();
   // Clear and Delete all chats swap their button for a confirm and back: the focus goes to what took the pressed button's place, not to the page.
-  const dataButtons = { clear: useRef<HTMLButtonElement>(null), clearCancel: useRef<HTMLButtonElement>(null), deleteChats: useRef<HTMLButtonElement>(null) };
+  const dataButtons = { clear: useRef<HTMLButtonElement>(null), clearCancel: useRef<HTMLButtonElement>(null), deleteChats: useRef<HTMLButtonElement>(null), deleteChatsCancel: useRef<HTMLButtonElement>(null) };
   const focusDataButton = useRef<keyof typeof dataButtons | null>(null);
   const confirmData = (which: "clear" | "deleteChats", open: boolean) => {
-    focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : null;
+    // A confirm that is off cannot keep the focus: its Cancel takes it.
+    focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : chatsOnCall ? "deleteChatsCancel" : null;
     if (which === "clear") setConfirmClearData(open);
     else setConfirmDeleteChats(open);
   };
@@ -440,6 +444,7 @@ export function Settings() {
     );
   };
   const deleteChats = () => {
+    if (anyChatOnCall()) return;
     deleteAllSessions();
     setConfirmDeleteChats(false);
     setChatCount(0);
@@ -730,10 +735,10 @@ export function Settings() {
         )}
         <ForkRows forks={devices?.forks} />
         <GroupDownloadsRow />
-        <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
+        <Row label={t("sidebar.deleteAllChats")} hint={!confirmDeleteChats ? t("settings.deleteAllChatsHint") : chatsOnCall ? t("settings.deleteAllChatsCallOn") : t("settings.deleteAllChatsConfirm", { count: chatCount })}>
           {confirmDeleteChats ? <>
-            <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
-            <Button onClick={() => confirmData("deleteChats", false)}>{t("common.cancel")}</Button>
+            <Button variant="danger" data-testid="delete-all-chats-confirm" disabled={chatsOnCall} onClick={deleteChats}>{t("common.confirm")}</Button>
+            <Button ref={dataButtons.deleteChatsCancel} onClick={() => confirmData("deleteChats", false)}>{t("common.cancel")}</Button>
           </> : (
             <Button ref={dataButtons.deleteChats} variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => confirmData("deleteChats", true)}>{t("common.delete")}</Button>
           )}
