@@ -140,6 +140,17 @@ describe("Arabic counted strings", () => {
   ] as const)("%s says %d as a person reads it", (key, count, want) => {
     expect(t(key, { count, max: 4096 })).toBe(want);
   });
+
+  // A string with one number not named count is said for that number.
+  it.each([
+    ["payments.invoice.expiresDays", { n: 1 }, "تنتهي خلال يوم واحد"],
+    ["payments.invoice.expiresDays", { n: 2 }, "تنتهي خلال يومين"],
+    ["payments.invoice.expiresDays", { n: 14 }, "تنتهي خلال 14 يومًا"],
+    ["connection.duration.days", { n: 30 }, "30 يومًا"],
+    ["chat.voice.limit", { minutes: 15 }, "الحد الأقصى للرسائل الصوتية 15 دقيقة"],
+  ] as const)("%s says %o as a person reads it", (key, params, want) => {
+    expect(t(key, params)).toBe(want);
+  });
 });
 
 /** Sources read as text: which keys they ask for is all that matters here. */

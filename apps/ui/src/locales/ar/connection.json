@@ -47,6 +47,10 @@
   },
   "duration": {
     "days": "{{n}} أيام",
+    "days_many": "{{n}} يومًا",
+    "days_one": "يوم واحد",
+    "days_other": "{{n}} يوم",
+    "days_two": "يومان",
     "hours": "{{n}} س",
     "lessThanMinute": "أقل من دقيقة",
     "minutes": "{{n}} د",
