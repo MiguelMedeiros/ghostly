@@ -224,6 +224,17 @@ describe("[text](url) links", () => {
     expect(link("[paypal\ua4f8com](https://evil.example/login)")).toMatchObject({ data: { showUrl: true } });
   });
 
+  it.each([
+    0x034f, 0x115f, 0x1160, 0x3164, 0xffa0, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef, 0xe0000, 0xe0020, 0xe007f,
+    0x17b4, 0x17b5, 0x180b, 0x180e, 0x180f, 0x2028, 0x2029, 0xfff9, 0xfffb, 0x1bca0, 0x1bca3, 0x1d173, 0x1d17a,
+  ].map((code) => [code.toString(16), code]))("treats U+%s, which draws as nothing, as hidden", (_, code) => {
+    expect(labelMisleads(`paypal${String.fromCodePoint(code as number)}.com`, "https://evil.example/")).toBe(true);
+  });
+
+  it("shows the address when a character that draws as nothing splits the text's host", () => {
+    expect(link("[paypal\u034f.com](https://evil.example/)")).toMatchObject({ data: { showUrl: true } });
+  });
+
   it("leaves file names alone", () => {
     for (const label of ["report.pdf", "Node.js", "package.json", "docs/CHAT.md", "src/lib/parse/blocks.ts", "scripts/run.sh"]) {
       expect(labelMisleads(label, "https://github.com/MiguelMedeiros/ghostly")).toBe(false);
