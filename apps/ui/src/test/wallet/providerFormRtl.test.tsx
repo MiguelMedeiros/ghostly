@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ProviderConfigForm, SourcePicker } from "../../components/wallet/providers/SourcePicker";
 import { renderApp } from "../render";
 import { choose } from "../select";
+import arWallet from "../../locales/ar/wallet.json";
 import { descriptor, sourceView } from "./descriptors";
 
 // covers: wallet.lightning.sources, wallet.onchain.sources, app.i18n
@@ -42,6 +43,14 @@ describe("in Arabic, a payment provider's form", () => {
     const lnd = descriptor("lnd");
     const { user } = arabic(<SourcePicker kind="lightning" view={sourceView({ offered: [lnd] })} onSet={vi.fn()} />);
     await choose(user, screen.getByTestId("lightning-source-select"), "lnd");
-    expect(ownDirection(screen.getByTestId("lightning-source-config"), lnd.description)).toBe(true);
+    // A built-in provider's description is shown in the person's language (`providerText`).
+    expect(ownDirection(screen.getByTestId("lightning-source-config"), arWallet.source.providers.lnd.description)).toBe(true);
+  });
+
+  it("a plugin provider's description, in its own English, keeps its own direction", async () => {
+    const plugin = { ...descriptor("lnd"), id: "acme-node", name: "Acme node", description: "Acme's own node (REST)." };
+    const { user } = arabic(<SourcePicker kind="lightning" view={sourceView({ offered: [plugin] })} onSet={vi.fn()} />);
+    await choose(user, screen.getByTestId("lightning-source-select"), "acme-node");
+    expect(ownDirection(screen.getByTestId("lightning-source-config"), plugin.description)).toBe(true);
   });
 });
