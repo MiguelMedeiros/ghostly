@@ -1068,6 +1068,51 @@ describe("refusals before a byte is copied", () => {
     for (const space of w.storage.spaces.values()) expect([...space.files.values()].every((bytes) => bytes.length === 0)).toBe(true);
   });
 
+  it("no room for the copies of a file that is in several chats: it is sent once and written once per chat, so refused", async () => {
+    const w = world();
+    const video = bytesOf(50_000);
+    for (const chat of ["a", "b", "c", "d", "e"]) w.profile.add(`chat-${chat}-video`, video);
+    // Room for what is sent (one copy and the rest), not for the five copies this device writes.
+    w.storage.room = 100_000;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed" || w.quiesced.length === 1);
+    expect(w.taker.view()!.failure).toBe("room");
+    expect(w.quiesced).toHaveLength(0);
+    for (const space of w.storage.spaces.values()) expect([...space.files.values()].every((bytes) => bytes.length === 0)).toBe(true);
+  });
+
+  it("no room for the files the frozen copy holds: they are copied in, not sent, and still take room, so refused", async () => {
+    const w = world();
+    const kept = w.profile.add("old-file", bytesOf(80_000));
+    w.profile.add("new-file", bytesOf(2_000));
+    w.storage.frozen.set("frozen-id", w.profile.files_.get("old-file")!);
+    await w.takerRecords.amend({ heldFiles: [{ sha256: kept.sha256, size: kept.size, id: "frozen-id" }] });
+    w.storage.room = 20_000;
+    await w.taker.pull(PASSWORD);
+    await until(() => w.taker.view()?.step === "failed" || w.quiesced.length === 1);
+    expect(w.taker.view()!.failure).toBe("room");
+    expect(w.quiesced).toHaveLength(0);
+    for (const space of w.storage.spaces.values()) expect(space.files.size).toBe(0);
+  });
+
+  it("room for every copy: the move goes on, and its progress counts the bytes sent", async () => {
+    const w = world();
+    const video = bytesOf(50_000);
+    for (const chat of ["a", "b", "c"]) w.profile.add(`chat-${chat}-video`, video);
+    w.storage.room = 160_000;
+    const totals: number[] = [];
+    const open = w.storage.open.bind(w.storage);
+    w.storage.open = async (database) => {
+      const staging = await open(database);
+      return { ...staging, append: async (id, offset, bytes) => { totals.push(w.taker.view()!.total); await staging.append(id, offset, bytes); } };
+    };
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1 || !!w.taker.view()?.failure);
+    expect(w.taker.view()?.failure).toBeUndefined();
+    expect(totals.length).toBeGreaterThan(0);
+    expect(totals.every((total) => total === 50_000)).toBe(true);
+  });
+
   it("the giver does not answer within 30 seconds: Can't reach", async () => {
     vi.useFakeTimers();
     const w = world();
