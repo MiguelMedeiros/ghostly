@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fromBase64Url, RTC_CONFIG, setLinkTraceSink } from "@ghostly/core";
-import { irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
+import { MAX_IROH_RELAYS, irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError } from "../errors";
@@ -84,6 +84,8 @@ export function irohRelays(env = process.env): string[] | null {
   if (!relays.length) return null;
   const bad = relays.map((url) => irohRelayProblem(url)).find(Boolean);
   if (bad) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: ${bad}`);
+  // More than the endpoint takes left every chat's Iroh refused, the profile running with none.
+  if (relays.length > MAX_IROH_RELAYS) throw new CliError("usage", `GHOSTLY_IROH_RELAYS: use at most ${MAX_IROH_RELAYS} Iroh relays, not ${relays.length}`);
   return relays;
 }
 
