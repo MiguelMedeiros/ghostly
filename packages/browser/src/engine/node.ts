@@ -1684,6 +1684,8 @@ export class GhostlyNode implements EngineImplementation {
       const view = this.groups.view(groupId), membership = membershipOf(view);
       return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!view?.isAdmin };
     },
+    // Removed, say: an edit or a removal is refused with the reason the group shows, as a reaction or a pin is.
+    notMember: groupId => this.groups.view(groupId)?.statusReason,
     send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
     remove: (chat, id) => this.forgetGroupMessage(chat, id),
     removeMine: async (chat, message, removal) => {
