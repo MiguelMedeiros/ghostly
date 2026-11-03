@@ -361,11 +361,8 @@
     "checking": "確認中",
     "notChecked": "未確認",
     "notVerified": "確認できません",
-    "notVerifiedWhy": "確認できません: {{error}}",
     "revokedMine": "あなたの {{what}} は取り消されました",
     "revokedTheirs": "{{contact}} の {{what}} は取り消されました",
-    "sharedMineState": "{{what}} を共有しました · {{state}}",
-    "sharedTheirsState": "{{contact}} が {{what}} を共有しました · {{state}}",
     "stoppedMine": "{{what}} の共有を停止しました",
     "stoppedTheirs": "{{contact}} が {{what}} の共有を停止しました",
     "waiting": "待機中"

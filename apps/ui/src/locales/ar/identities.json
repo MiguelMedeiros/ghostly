@@ -361,11 +361,8 @@
     "checking": "جارٍ التحقق",
     "notChecked": "لم يُتحقق منها",
     "notVerified": "لم يتم التحقق",
-    "notVerifiedWhy": "لم يتم التحقق: {{error}}",
     "revokedMine": "أُلغي {{what}} الخاص بك",
     "revokedTheirs": "أُلغي {{what}} الخاص بـ {{contact}}",
-    "sharedMineState": "شاركت {{what}} · {{state}}",
-    "sharedTheirsState": "شارك {{contact}} {{what}} · {{state}}",
     "stoppedMine": "أوقفت مشاركة {{what}}",
     "stoppedTheirs": "أوقف {{contact}} مشاركة {{what}}",
     "waiting": "في الانتظار"

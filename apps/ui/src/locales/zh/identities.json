@@ -361,11 +361,8 @@
     "checking": "检查中",
     "notChecked": "未检查",
     "notVerified": "未验证",
-    "notVerifiedWhy": "未验证：{{error}}",
     "revokedMine": "你的 {{what}} 已被撤销",
     "revokedTheirs": "{{contact}} 的 {{what}} 已被撤销",
-    "sharedMineState": "你共享了 {{what}} · {{state}}",
-    "sharedTheirsState": "{{contact}} 共享了 {{what}} · {{state}}",
     "stoppedMine": "你已停止共享 {{what}}",
     "stoppedTheirs": "{{contact}} 已停止共享 {{what}}",
     "waiting": "等待中"
