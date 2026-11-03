@@ -1456,13 +1456,14 @@ export class HandoffTaker {
     this.pass = manifest.pass;
     this.ids = ids;
     for (const part of later) this.behind.set(part[2], part);
-    // Room for what is to come, against what this device says it has.
     const total = parts.reduce((sum, part) => sum + part[1], 0);
-    const room = await this.staging!.room();
-    if (room !== null && room < total) { this.out(handoffCancelFrame("room")); await this.giveUp("room"); return; }
-    // What the frozen copy holds is copied in here, not sent.
     const record = await this.ports.records.read();
     const staged = new Map((await this.staging!.held()).map((file) => [file.id, file]));
+    // Room for what this device writes, against what it says it has: more than what is sent. A file in several chats
+    // is sent once and written once per id (`copyStaged`), and what the frozen copy holds is copied in, not sent.
+    const room = await this.staging!.room();
+    if (room !== null && room < this.toWrite(parts, ids, record?.heldFiles ?? [], staged)) { this.out(handoffCancelFrame("room")); await this.giveUp("room"); return; }
+    // What the frozen copy holds is copied in here, not sent.
     const copies: { fromId: string; file: HandoffFile }[] = [];
     for (const held of record?.heldFiles ?? []) {
       if (this.notHeld.has(held.sha256)) continue;
@@ -1524,6 +1525,23 @@ export class HandoffTaker {
     let done: boolean;
     try { done = await this.partDone(part); } catch { await this.noRoom(); return; }
     if (done) this.out(handoffAckFrame(part.name, part.size));
+  }
+
+  /**
+   * The bytes a pass writes here: its parts that are no file (the rest, the device sets), and each file's size once per
+   * id of it not staged yet, whether its bytes are sent, copied from the frozen copy or from another id. What stays
+   * behind is not written.
+   */
+  private toWrite(parts: readonly HandoffPart[], ids: Record<string, string[]>, held: readonly HeldFile[], staged: ReadonlyMap<string, HandoffFile>): number {
+    const sizes = new Map<string, number>();
+    for (const file of [...held, ...staged.values()]) sizes.set(file.sha256, file.size);
+    let bytes = 0;
+    for (const [name, size] of parts) { const digest = filePartDigest(name); if (digest) sizes.set(digest, size); else bytes += size; }
+    for (const [digest, list] of Object.entries(ids)) {
+      if (this.behind.has(digest)) continue;
+      bytes += (sizes.get(digest) ?? 0) * list.filter((id) => !staged.has(id)).length;
+    }
+    return bytes;
   }
 
   /** Storage refused a write: no room. Nothing changed on either device. */
