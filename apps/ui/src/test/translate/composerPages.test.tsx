@@ -16,7 +16,7 @@ const runtime = vi.hoisted(() => ({ translate: vi.fn(async (pair: string, texts:
 vi.mock("../../desktop/translate", async (original) => ({ ...(await original<typeof import("../../desktop/translate")>()), translateTexts: runtime.translate }));
 /** No draft detector: a draft is taken to be in the app's language (English). */
 vi.mock("../../lib/translateDetector", () => ({ loadDetector: async () => null }));
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 import { MessageInput } from "../../components/MessageInput";
 import { Chat } from "../../pages/Chat";

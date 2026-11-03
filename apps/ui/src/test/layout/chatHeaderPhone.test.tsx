@@ -16,7 +16,7 @@ import { renderApp } from "../render";
  * The connection stays in the row: it changes by itself, and a failure has to be seen without opening a menu.
  */
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 /** How wide the window is, as matchMedia reads it. */

@@ -15,7 +15,7 @@ import { renderApp } from "../render";
 
 // covers: chats.list.pin-order, chats.folders
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const key = (c: string) => c.repeat(52);
 const NAMES: Record<string, string> = { a: "Ana", b: "Ben", c: "Cy", d: "Dee" };

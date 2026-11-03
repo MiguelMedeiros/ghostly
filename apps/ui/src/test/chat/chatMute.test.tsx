@@ -21,7 +21,7 @@ import { renderApp } from "../render";
 // covers: chats.mute
 
 const sound = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}), notice: vi.fn(async (_id: string, _body: string) => {}) }));
-vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 vi.mock("../../lib/notifications", () => ({ showPrivateNotification: sound.notice, onNotificationOpen: () => () => {}, clearChatNotification: () => {} }));
 
 const MIN = 60_000;

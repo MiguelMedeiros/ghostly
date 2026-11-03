@@ -40,7 +40,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   listen: async (name: string, handler: (event: { payload: string }) => void) => { if (name === "notification-open") tauri.opened = handler; return () => {}; },
   getVersion: async () => "0.4.0",
 }));
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "a".repeat(52);
 const posted = () => tauri.invoke.mock.calls.filter(([command]) => command === "native_private_notification").map(([, args]) => (args as { id: string }).id);

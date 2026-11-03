@@ -10,7 +10,7 @@ import { renderApp } from "../render";
 
 // covers: chat.paired.delete-message, groups.edit, devices.turn.limited
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 /**
  * Delete for everyone refused by the engine (limited mode: engine/node.ts LIMITED_MODE_METHODS has no removeMessage):

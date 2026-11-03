@@ -10,7 +10,7 @@ import { installFakeMedia, removeFakeMedia } from "../voice/fakeMedia";
 
 // covers: chat.one-chat
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const key = "a".repeat(52);
 // pairedSession.ts's words for the stop: the engine's, in English.
