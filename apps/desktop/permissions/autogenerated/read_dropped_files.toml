@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-dropped-files"
+description = "Enables the read_dropped_files command without any pre-configured scope."
+commands.allow = ["read_dropped_files"]
+
+[[permission]]
+identifier = "deny-read-dropped-files"
+description = "Denies the read_dropped_files command without any pre-configured scope."
+commands.deny = ["read_dropped_files"]

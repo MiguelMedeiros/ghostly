@@ -155,6 +155,7 @@
     "cannotRetry": "Non è possibile riprovare con questo file",
     "clipboardUnavailable": "Impossibile leggere gli appunti",
     "clipboardUnavailableNext": "Allegalo con +.",
+    "dropUnreadable": "Impossibile aggiungere questi file. Inviali con + → Documento.",
     "floor": {
       "noRoomNext": "Libera spazio, poi chiedi al tuo contatto di inviarlo di nuovo.",
       "notInAWeek": "Non è arrivato entro una settimana",

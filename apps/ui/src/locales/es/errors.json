@@ -155,6 +155,7 @@
     "cannotRetry": "No se puede reintentar este archivo",
     "clipboardUnavailable": "No se puede leer el portapapeles",
     "clipboardUnavailableNext": "Adjúntalo con +.",
+    "dropUnreadable": "No se pudieron añadir esos archivos. Envíalos con + → Documento.",
     "floor": {
       "noRoomNext": "Libera espacio y pide a tu contacto que lo envíe de nuevo.",
       "notInAWeek": "No llegó en una semana",

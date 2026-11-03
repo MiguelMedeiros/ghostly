@@ -155,6 +155,7 @@
     "cannotRetry": "Ce fichier ne peut pas être renvoyé",
     "clipboardUnavailable": "Impossible de lire le presse-papiers",
     "clipboardUnavailableNext": "Joignez-le avec +.",
+    "dropUnreadable": "Impossible d’ajouter ces fichiers. Envoyez-les avec + → Document.",
     "floor": {
       "noRoomNext": "Libérez de la place, puis demandez à votre contact de le renvoyer.",
       "notInAWeek": "Il n'est pas arrivé en une semaine",

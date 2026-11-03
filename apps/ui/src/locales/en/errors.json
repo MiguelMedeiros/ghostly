@@ -155,6 +155,7 @@
     "cannotRetry": "This file cannot be retried",
     "clipboardUnavailable": "The clipboard cannot be read",
     "clipboardUnavailableNext": "Attach it with +.",
+    "dropUnreadable": "Could not add those files. Send them with + → Document.",
     "floor": {
       "noRoomNext": "Free some space, then ask your contact to send it again.",
       "notInAWeek": "It did not come within a week",

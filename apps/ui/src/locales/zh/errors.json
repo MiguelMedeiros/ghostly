@@ -155,6 +155,7 @@
     "cannotRetry": "此文件无法重试",
     "clipboardUnavailable": "无法读取剪贴板",
     "clipboardUnavailableNext": "请用 + 添加附件。",
+    "dropUnreadable": "无法添加这些文件。请用 + → 文档 发送。",
     "floor": {
       "noRoomNext": "请释放空间，然后请联系人重新发送。",
       "notInAWeek": "一周内未送达",
