@@ -414,6 +414,9 @@ export function transition(from: DeviceRecord | null, profile: string, to: Store
   const failed = from.state === "releasing" && to === "active" && !("breezDatabases" in patch);
   const next = { ...from, ...clean(patch), state: to };
   if (failed) delete next.breezDatabases;
+  // A device that runs the profile again changes and deletes its files: the list of what its frozen copy held is of
+  // another copy, and a pull would claim files no longer here.
+  if (to === "active" && !("heldFiles" in patch)) delete next.heldFiles;
   return checked(rising(from, next));
 }
 
