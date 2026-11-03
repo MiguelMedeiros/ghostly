@@ -1328,6 +1328,8 @@ export class ChatFiles {
     const entry = this.entry(direction, id), { record } = entry;
     if (transferEnded(record) || record.state === "verifying" || (record.state === "paused" && record.pausedBy === "me")) return;
     if (direction === "in" && record.state === "asking") return;
+    // Arrived whole (offered again after a restart or a switch while it was checked there): paused, it could be cancelled.
+    if (sentWhole(record)) return;
     record.state = "paused";
     record.pausedBy = "me";
     if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }

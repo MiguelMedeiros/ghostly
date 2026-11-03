@@ -356,11 +356,11 @@ export const FILE_METHODS: Record<string, Method> = {
       // Being checked (sent: the contact checks it; received: its digest here): the engine takes no pause and it ends done.
       if (action === "pause" && transfer?.stage === "verifying") throw new CliError("refused", "Too late to pause: it is being checked");
       if (transfer?.state === "failed") throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}${outgoing && transfer.retry ? " (file resend sends it again)" : ""}`);
-      // Sent whole (the engine's `sentWhole`): the engine takes no cancel and it ends done, so it is refused, not echoed.
-      if (outgoing && action === "cancel" && transfer?.state === "transferring" && (transfer.stage === "verifying"
-        || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"))) {
-        throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
-      }
+      // Sent whole (the engine's `sentWhole`): the engine takes no cancel or pause and it ends done, so it is refused, not echoed.
+      const whole = outgoing && transfer?.state === "transferring" && (transfer.stage === "verifying"
+        || (transfer.size > 0 && transfer.transferred >= transfer.size && transfer.stage !== "asking" && transfer.stage !== "queued" && transfer.stage !== "paused"));
+      if (whole && action === "cancel") throw new CliError("refused", "Too late to cancel: it arrived whole, and the contact keeps it");
+      if (whole && action === "pause") throw new CliError("refused", "Too late to pause: it arrived whole, and the contact keeps it");
     }
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
