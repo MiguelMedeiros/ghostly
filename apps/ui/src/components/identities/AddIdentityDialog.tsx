@@ -62,8 +62,15 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     draft.current = null; setValues({}); setPasted("");
     onClose();
   };
-  useDialogFocus(dialog, close);
-  const backdrop = useBackdropDismiss(close);
+  /**
+   * A record or file to publish is put up elsewhere, slowly, and its value works only with this draft: a stray Escape,
+   * tap beside the sheet, Back or Cancel asks first. Asked, the same again answers it: the steps stay.
+   */
+  const [leaving, setLeaving] = useState(false);
+  const askFirst = !!pending && signer?.kind === "publish";
+  const requestClose = () => { if (leaving) setLeaving(false); else if (askFirst) setLeaving(true); else close(); };
+  useDialogFocus(dialog, requestClose);
+  const backdrop = useBackdropDismiss(requestClose);
   useEffect(() => () => abort.current?.abort(), []);
 
   // Each step replaces the control that led to it, and the focus would fall to the page: the step takes it instead.
@@ -81,6 +88,13 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
     const target = card ?? (step === "steps" && steps.current?.childElementCount ? steps.current : region.current && tabbables(region.current).find(el => el !== back.current));
     (target ?? dialog.current)?.focus();
   }, [step]);
+  // The question takes the focus on Keep open; answered, the steps have it again.
+  const keep = useRef<HTMLButtonElement>(null), asked = useRef(false);
+  useEffect(() => {
+    if (leaving) keep.current?.focus();
+    else if (asked.current) steps.current?.focus();
+    asked.current = leaving;
+  }, [leaving]);
   // A refusal empties a secret (a bunker:// link), which leaves the button pressed disabled: the field to paste it again takes the keys.
   useEffect(() => {
     if (busy || !focusLost()) return;
@@ -167,7 +181,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <h2 id="add-identity-title" className="text-lg font-medium text-text-primary">{t("identities.ghostly.addOne")}</h2>
             <p className="text-xs text-text-muted mt-1">{t("identities.add.lead")}</p>
           </div>
-          <button type="button" aria-label={t("common.close")} onClick={close} className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
+          <button type="button" aria-label={t("common.close")} onClick={requestClose}className="grid place-items-center w-10 h-10 shrink-0 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-alt cursor-pointer">×</button>
         </div>
 
         {!provider ? (
@@ -198,10 +212,19 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
                   : <input data-testid="add-identity-paste" className={`${input} mt-1 font-mono`} value={pasted} onChange={e => setPasted(e.target.value)} placeholder={pending.instructions.paste.placeholder} {...exactText} autoComplete="off" />}
               </label>
             )}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={close}>{t("common.cancel")}</Button>
+            {leaving ? (
+              <div role="group" aria-labelledby="add-identity-leave-title" aria-describedby="add-identity-leave-body" data-testid="add-identity-leave" className="space-y-2 rounded-xl border border-border p-3">
+                <p id="add-identity-leave-title" className="text-sm font-medium text-text-primary">{t("identities.add.leaveTitle")}</p>
+                <p id="add-identity-leave-body" className="text-xs text-text-muted">{t("identities.add.leaveBody")}</p>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button onClick={close}>{t("common.close")}</Button>
+                  <Button ref={keep} variant="primary" onClick={() => setLeaving(false)}>{t("identities.add.keepOpen")}</Button>
+                </div>
+              </div>
+            ) : <div className="flex flex-wrap justify-end gap-2">
+              <Button onClick={requestClose}>{t("common.cancel")}</Button>
               <Button variant="primary" data-testid="add-identity-finish" loading={busy} disabled={signer?.kind === "external-tool" && !pasted.trim()} onClick={finish}>{busy ? (signer?.kind === "redirect" ? t("identities.waiting") : t("identities.contact.checking")) : signer?.kind === "publish" ? t("identities.add.checkAndSave") : signer?.kind === "redirect" ? t("identities.add.continueWith", { provider: provider!.label }) : t("identities.add.verifyAndSave")}</Button>
-            </div>
+            </div>}
           </div>
         ) : approval ? (
           <div ref={region} className="space-y-4">

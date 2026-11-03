@@ -395,8 +395,59 @@ describe("AddIdentityDialog", () => {
       await user.type(screen.getByTestId("add-identity-subject"), "example.com");
       await user.click(screen.getByTestId("add-identity-start"));
       await user.click(await screen.findByRole("button", { name: "Cancel" }));
+      await user.click(within(screen.getByTestId("add-identity-leave")).getByRole("button", { name: "Close" }));
       expect(engine.callsTo("cancelIdentityProof")).toEqual([{ draftId: "draft-1" }]);
       expect(onClose).toHaveBeenCalledOnce();
+    });
+
+    /**
+     * The record or file is published elsewhere, and slowly: a stray Escape, a tap beside the sheet or Cancel would
+     * throw its value away, and the next try gives another one. Each asks first; the question's own Escape keeps the steps.
+     */
+    it.each([
+      ["Escape", async (user: ReturnType<typeof dialog>["user"]) => { await user.keyboard("{Escape}"); }],
+      ["a tap beside the sheet", async (user: ReturnType<typeof dialog>["user"]) => { await user.pointer({ keys: "[MouseLeft]", target: screen.getByTestId("add-identity").parentElement! }); }],
+      ["Cancel", async (user: ReturnType<typeof dialog>["user"]) => { await user.click(screen.getByRole("button", { name: "Cancel" })); }],
+      ["the close button", async (user: ReturnType<typeof dialog>["user"]) => { await user.click(screen.getByRole("button", { name: "Close" })); }],
+    ])("asks before %s throws away the value being published", async (_, leave) => {
+      const { user, engine, onClose } = dialog();
+      answerBegin();
+      engine.on("cancelIdentityProof", () => undefined);
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const value = (await screen.findByTestId("add-identity-copy-1")).textContent;
+      await leave(user);
+      const question = screen.getByRole("group", { name: "Close without saving?" });
+      expect(question).toHaveAccessibleDescription("The value shown works only with these steps. Once they are closed, a new try gives a new value, and the one you published must be replaced.");
+      expect(within(question).getByRole("button", { name: "Keep open" })).toHaveFocus();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([]);
+      // Escape answers the question: the steps stay, with the same value.
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("add-identity-leave")).not.toBeInTheDocument();
+      expect(screen.getByTestId("add-identity-steps")).toHaveFocus();
+      expect(screen.getByTestId("add-identity-copy-1")).toHaveTextContent(value!);
+      expect(onClose).not.toHaveBeenCalled();
+      // Asked again, Keep open does the same.
+      await leave(user);
+      await user.click(screen.getByRole("button", { name: "Keep open" }));
+      expect(screen.getByTestId("add-identity-finish")).toBeInTheDocument();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([]);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("closes an external tool's steps at once: nothing was published", async () => {
+      const { user, engine, onClose } = dialog();
+      answerBegin();
+      engine.on("cancelIdentityProof", () => undefined);
+      await user.click(screen.getByTestId("add-identity-ssh"));
+      await user.type(screen.getByTestId("add-identity-subject"), "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl");
+      await user.click(screen.getByTestId("add-identity-start"));
+      await screen.findByTestId("add-identity-steps");
+      await user.keyboard("{Escape}");
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(engine.callsTo("cancelIdentityProof")).toEqual([{ draftId: "draft-1" }]);
     });
 
     it("needs a pasted signature from an external tool, and says when it is not one", async () => {
