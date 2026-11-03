@@ -123,7 +123,7 @@ export function DevicesSection() {
       ))}
       {removed && (
         <div ref={removedBox} tabIndex={-1} data-testid="device-removed" className="focus:outline-none">
-          <Row leading={<DeviceGlyph name={removed} />} label={removed} hint={t("devices.section.removed")} info={t("devices.remove.doneInfo")} />
+          <Row leading={<DeviceGlyph name={removed} />} label={<bdi>{removed}</bdi>} hint={t("devices.section.removed")} info={t("devices.remove.doneInfo")} />
         </div>
       )}
       {view?.waiting?.length ? <Row testId="device-waiting" label={fillNames(t("devices.section.waiting", { devices: waiting[0] }), waiting[1])} /> : null}
