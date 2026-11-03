@@ -45,6 +45,7 @@
     "continueIn": "تابع في نافذة {{provider}}…",
     "continueWith": "المتابعة باستخدام {{provider}}",
     "copyError": "تعذّر النسخ. حدّد النص أعلاه وانسخه بنفسك.",
+    "copyStep": "نسخ الخطوة {{step}}",
     "dayOne": "يوم واحد",
     "days": "{{count}} يومًا",
     "days_few": "{{count}} أيام",
