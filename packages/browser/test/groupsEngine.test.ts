@@ -1518,4 +1518,11 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     expect(world.peers.get("alice")!.store.groups.get(groupId)!.entry).toBeUndefined();
     await expect(alice.enableLink(groupId)).rejects.toThrow(/Only the admin/);
   });
+
+  it("a member who is not the admin is refused turning the link off, as in a community, and the admin's link stays on", async () => {
+    const { alice, others: [bob], groupId } = await groupOf(["bob"]);
+    const link = await alice.enableLink(groupId);
+    await expect(bob.disableLink(groupId)).rejects.toThrow("Only the admin can replace or turn off the group's link");
+    expect(await alice.enableLink(groupId)).toBe(link);
+  });
 });
