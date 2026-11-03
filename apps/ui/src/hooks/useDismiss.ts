@@ -92,6 +92,9 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
 /** The open modals made of plain elements, the newest last: only the newest answers Escape and keeps Tab inside it. */
 const modals: RefObject<HTMLElement | null>[] = [];
 
+/** Whether a <dialog> (the app shows them modal only) is open over `panel` rather than holding it. */
+const dialogOver = (panel: HTMLElement | null) => [...document.querySelectorAll("dialog[open]")].some((dialog) => !dialog.contains(panel));
+
 /** What Tab can reach inside `root`, in order: enabled, shown, not taken out with tabindex="-1". */
 export function tabbables(root: HTMLElement): HTMLElement[] {
   const all = root.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]');
@@ -130,8 +133,9 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
     let away: HTMLElement | null = before;
     const focusIn = (e: FocusEvent) => { if (e.target instanceof HTMLElement && !panel?.contains(e.target)) away = e.target; };
     const key = (e: KeyboardEvent) => {
-      // Over another one, the newest answers: Escape closes it alone, Tab stays in it.
-      if (modals[modals.length - 1] !== ref) return;
+      // Over another one, the newest answers: Escape closes it alone, Tab stays in it. A <dialog> over it (the lock
+      // screen) has the keys: an Escape typed there left it closed, and what was in it lost, under the lock.
+      if (modals[modals.length - 1] !== ref || dialogOver(panel)) return;
       if (aside.current?.()) {
         const inside = !!panel?.contains(document.activeElement);
         if (e.defaultPrevented) return;
