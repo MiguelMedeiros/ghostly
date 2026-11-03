@@ -4977,6 +4977,27 @@ export class GhostlyNode implements EngineImplementation {
     this.capsChanged(linkId);
   }
 
+  /**
+   * A group's transport, chosen on this device (WISP 902 § Transports): Iroh or HyperDHT runs that one alone on the
+   * group's edges, with no WebRTC, and each edge's `_tr` says so; WebRTC says `["webrtc/1"]`; `auto` is the rule every
+   * edge had before. A member that chose otherwise, or whose app has no WebRTC, is met on a native transport, as
+   * before. Each of the group's edges starts again on it (no goodbye); its entry sessions keep the rule.
+   */
+  async setGroupTransport({ groupId, transport }: { groupId: string; transport: PairedTransport | "auto" }): Promise<void> {
+    if (!this.groups.view(groupId)) throw new Error("Group not found");
+    const runs = transport === "webrtc/1" ? typeof RTCPeerConnection !== "undefined" : transport !== "auto" && TRANSPORTS.includes(transport) && transport in this.nativeFactories;
+    if (transport !== "auto" && !runs) throw new Error("Transport unavailable");
+    if ((this.settings.groupTransports?.[groupId] ?? "auto") === transport) return;
+    const { [groupId]: _, ...others } = this.settings.groupTransports ?? {};
+    const next = transport === "auto" ? others : { ...others, [groupId]: transport };
+    this.settings = { ...this.settings, groupTransports: next };
+    if (!Object.keys(next).length) delete this.settings.groupTransports;
+    await db.putSettings(this.settings);
+    await Promise.all([...this.links.values()].filter(live => live.stored.group === groupId && !live.stored.groupEntry && live.link)
+      .map(live => this.restartEdge(live.stored.id)));
+    this.emitState();
+  }
+
   /** The chat's connection story, for paired chats (not group edges). */
   /**
    * The chat's ratchet (WISP 4xx), made once per chat: its keys are read from the chat's row when used (each start of
@@ -6596,6 +6617,8 @@ export class GhostlyNode implements EngineImplementation {
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
     delete (settings as Partial<Settings>).wakeRenew;
+    // Only through setGroupTransport, which starts the group's edges again on it.
+    delete (settings as Partial<Settings>).groupTransports;
     // The first-run wallet setup's record: the engine's alone.
     delete (settings as Partial<Settings>).walletSetup;
     const relayBefore = this.hyperdhtRelay;
@@ -7715,8 +7738,10 @@ export class GhostlyNode implements EngineImplementation {
     let seen = false;
     // Native where one side has no WebRTC (WISP 902 § Transports): an edge back after a restart resumes on a native transport both run.
     const native = this.keepsGroupNative(stored);
+    // A transport chosen for the group (`setGroupTransport`): that one, with no WebRTC.
+    const natives = this.groupNatives(stored), chosen = this.groupChoice(stored);
     const resumeOn: PairedTransport | undefined = native
-      ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
+      ? TRANSPORTS.find(t => t !== "webrtc/1" && natives.includes(t) && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
     live.edgeStartedAt = Date.now();
     // A private group's edge signals through members that reach both ends, beside the relays (WISP 902 § Signaling through members).
@@ -7743,7 +7768,7 @@ export class GhostlyNode implements EngineImplementation {
       largeFilesSupport: !entry,
       binaryFilesSupport: !entry,
       params: stored,
-      rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId),
+      rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId) && !this.groupNativeChoice(stored),
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
       // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
       // WebRTC, unless one side has none: then the native transport both run.
@@ -7752,8 +7777,9 @@ export class GhostlyNode implements EngineImplementation {
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports, peerFallback: stored.peerFallback, automatic: true },
       packetTransports: !this.options.webrtcGroupLinks,
       // It ran a native endpoint on this link in some run (its seed is kept), so it said a `_tr` there: it says what it
-      // runs now, WebRTC alone too, and the member's app stops dialling what an earlier run said.
-      packetTransportsSaid: !!stored.transportSeeds && Object.keys(stored.transportSeeds).length > 0,
+      // runs now, WebRTC alone too, and the member's app stops dialling what an earlier run said. So does an edge of a
+      // group whose transport this device chose: WebRTC chosen says `["webrtc/1"]` from its first packet.
+      packetTransportsSaid: (!!stored.transportSeeds && Object.keys(stored.transportSeeds).length > 0) || !!chosen,
       // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -7893,7 +7919,30 @@ export class GhostlyNode implements EngineImplementation {
    */
   private keepsGroupNative(stored: StoredLink): boolean {
     if (this.options.webrtcGroupLinks) return false;
-    return typeof RTCPeerConnection === "undefined" || this.edgeRtcOff.has(stored.id) || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
+    return typeof RTCPeerConnection === "undefined" || this.edgeRtcOff.has(stored.id) || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"))
+      || this.groupNativeChoice(stored) !== undefined;
+  }
+
+  /** What this device chose for the group of an edge (`setGroupTransport`); undefined on Automatic, and for an entry session. */
+  private groupChoice(stored: StoredLink): PairedTransport | undefined {
+    return stored.group && !stored.groupEntry ? this.settings.groupTransports?.[stored.group] : undefined;
+  }
+  /** The native transport chosen for the group of an edge, where this app runs it. */
+  private groupNativeChoice(stored: StoredLink): NativeTransport | undefined {
+    const chosen = this.groupChoice(stored);
+    return chosen && chosen !== "webrtc/1" && chosen in this.nativeFactories ? chosen : undefined;
+  }
+
+  /**
+   * The native transports a group's link may listen on (WISP 902 § Transports): every one this app runs, or the one
+   * chosen for its group. A member whose `_tr` lists neither WebRTC nor that one (it chose another, or its app runs only
+   * that other) is met on its own too: the two would have nothing in common.
+   */
+  private groupNatives(stored: StoredLink): NativeTransport[] {
+    const all = Object.keys(this.nativeFactories) as NativeTransport[], chosen = this.groupNativeChoice(stored);
+    if (!chosen) return all;
+    const theirs = stored.peerTransports;
+    return theirs && !theirs.includes("webrtc/1") && !theirs.includes(chosen) ? all.filter(t => t === chosen || theirs.includes(t)) : [chosen];
   }
 
   /**
@@ -8832,6 +8881,8 @@ export class GhostlyNode implements EngineImplementation {
     // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
     const group = !!live.stored.group;
     if (group && !this.keepsGroupNative(live.stored)) return false;
+    // Nor one other than the transport chosen for its group (`groupNatives`).
+    if (group && !this.groupNatives(live.stored).includes(key)) return false;
     if (link.availableTransports.includes(key)) return false;
     live.transportErrors ??= {};
     try {
