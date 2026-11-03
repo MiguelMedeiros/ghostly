@@ -47,7 +47,8 @@ import { myReaction, reactionChips } from "../lib/reactions";
 import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
-import { copyText } from "../lib/shareLink";
+import { MessageCopyNote } from "./chat/MessageCopy";
+import { useMessageCopy } from "../hooks/useMessageCopy";
 import { originalMentions, setShowsOriginal, showsOriginal, useSentOriginal, type SentOriginal } from "../lib/sentOriginals";
 import { languageName } from "../lib/documentLanguage";
 import { translateEnabled } from "../lib/translateFlag";
@@ -916,6 +917,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   };
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
   const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
+  const optionsButton = () => rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current;
+  const [copyNote, copy] = useMessageCopy(optionsButton);
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
   const [bar, setBar] = useState<"button" | "press" | null>(null);
   const bubbleRef = useRef<HTMLDivElement>(null);
@@ -1030,7 +1033,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const detailsPanel = details && (
     <MessageDetailsPanel message={message} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)}
       picture={contentType === "image"} onClose={() => setDetails(false)}
-      returnFocus={rowRef.current?.querySelector<HTMLElement>("[data-testid=message-options]") ?? rowRef.current} />
+      returnFocus={optionsButton()} />
   );
   const rowProps = choosing ? {
     ref: rowRef, "data-message-id": message.id, "data-selected": selection.selected || undefined,
@@ -1383,6 +1386,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       </div>
       {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
       {refusal}
+      <MessageCopyNote note={copyNote} />
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
@@ -1390,8 +1394,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bar === "button" ? reactRef : bubbleRef} current={myReaction(message.reactions)} onReact={onReact}
         align={barAlign} onDetails={bar === "press" ? openDetails : undefined} onSelect={bar === "press" ? onSelect : undefined}
-        onCopy={bar === "press" && copyable ? () => void copyText(copyable).catch(() => {}) : undefined}
-        onCopyOriginal={bar === "press" && copyable && sent ? () => void copyText(sent.original.trim()).catch(() => {}) : undefined} />}
+        onCopy={bar === "press" && copyable ? () => copy(copyable) : undefined}
+        onCopyOriginal={bar === "press" && copyable && sent ? () => copy(sent.original.trim()) : undefined} />}
       {detailsPanel}
     </div>
   );

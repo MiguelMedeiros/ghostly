@@ -297,8 +297,10 @@
   "message": {
     "cancelSending": "إلغاء الإرسال",
     "copied": "تم النسخ",
+    "copyFailed": "تعذّر النسخ. حدّد النص أدناه وانسخه.",
     "copyHint": "انقر للنسخ",
     "copyJson": "نسخ الكل بصيغة JSON",
+    "copyText": "نص الرسالة",
     "details": "التفاصيل",
     "detailsClose": "إغلاق",
     "detailsTitle": "تفاصيل الرسالة",
