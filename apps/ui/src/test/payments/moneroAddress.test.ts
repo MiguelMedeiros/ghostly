@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { findMoney } from "../../lib/money";
 import { previewText } from "../../lib/chatList";
+import { loadLocale, translatorFor } from "../../locales";
 import { decodeMoneroAddress, findMoneroAddress, moneroBase58Decode, xmrToPiconero } from "../../lib/parse/money-monero";
 import {
   BC1Q, XMR_INTEGRATED, XMR_MAINNET, XMR_STAGENET, XMR_STAGENET_INTEGRATED, XMR_STAGENET_SUBADDRESS, XMR_SUBADDRESS,
@@ -96,5 +97,12 @@ describe("Monero in a message", () => {
     expect(findMoney(`${BC1Q} or ${XMR_MAINNET}`)).toMatchObject({ type: "onchain" });
     expect(previewText(XMR_MAINNET)).toBe("Monero address · Real money");
     expect(previewText(XMR_STAGENET)).toBe("Monero address · Test money");
+  });
+
+  it("says a monero: link's amount in the chat list, in XMR as the card writes it", async () => {
+    expect(previewText(`monero:${XMR_STAGENET}?tx_amount=1234.5`)).toBe("Monero address · Test money · 1,234.5 XMR");
+    expect(previewText(`monero:${XMR_MAINNET}?tx_amount=0.000000000001`)).toBe("Monero address · Real money · 0.000000000001 XMR");
+    await loadLocale("pt");
+    expect(previewText(`monero:${XMR_STAGENET}?tx_amount=1234.5`, translatorFor("pt"))).toBe("Endereço Monero · Dinheiro de teste · 1.234,5 XMR");
   });
 });
