@@ -446,11 +446,13 @@ export function Settings() {
   const deleteChats = () => {
     if (anyChatOnCall()) return;
     deleteAllSessions();
+    // Confirm goes and Delete comes back off (no chat left): the focus goes on to the next row's button.
+    focusDataButton.current = confirmClearData ? "clearCancel" : "clear";
     setConfirmDeleteChats(false);
     setChatCount(0);
     setStorageInfo(getStorageUsage());
     window.dispatchEvent(new Event("session-updated"));
-    notice.show(t("sidebar.deleteAllChats"), { tone: "success" });
+    notice.show(t("settings.chatsDeleted"), { tone: "success" });
   };
   const clearData = async () => {
     setConfirmClearData(false);

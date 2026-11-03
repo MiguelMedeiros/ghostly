@@ -7,6 +7,7 @@
     "compact": "Compacta"
   },
   "chatListDensity": "Lista de chats",
+  "chatsDeleted": "Todos los chats fueron eliminados",
   "clear": "Borrar",
   "clearAllData": "Borrar todos los datos",
   "clearAllDataConfirm": "Esto borra para siempre:",
