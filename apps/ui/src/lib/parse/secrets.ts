@@ -1,6 +1,7 @@
 import { sha256 } from "@noble/hashes/sha2.js";
 import { createBase58check } from "@scure/base";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
+import { MONERO_WORDS } from "./monero-words";
 
 /**
  * What the composer asks about before a message goes: text that looks like a secret someone could take funds or an
@@ -16,14 +17,34 @@ export type SecretFinding =
 
 export type SecretKind = SecretFinding["kind"];
 
-const WORD_INDEX = new Map(wordlist.map((word, index) => [word, index]));
+interface SeedWords {
+  index: Map<string, number>;
+  /** Seed lengths whose checksum is tried on any run of these words. */
+  lengths: number[];
+  /** A message that is nothing but this many of these words counts, checksum or not. */
+  wholeMessage: number[];
+  checksumHolds: (indices: number[]) => boolean;
+}
+
 const MNEMONIC_LENGTHS = [12, 15, 18, 21, 24];
-/**
- * A message that is nothing but these many seed words: BIP39's, and a Polyseed's 16 (Monero's seed in Feather and Cake
- * Wallet, BIP39's English words with a checksum of its own, which BIP39's caught only by chance, about 3 in 10).
- */
-const WHOLE_MESSAGE_LENGTHS = [...MNEMONIC_LENGTHS, 16];
-/** Checksums tried per message at most: a 16 KiB run of seed words stays a few milliseconds. */
+const BIP39: SeedWords = {
+  index: new Map(wordlist.map((word, index) => [word, index])),
+  lengths: MNEMONIC_LENGTHS,
+  /**
+   * BIP39's lengths, and a Polyseed's 16 (Monero's seed in Feather and Cake Wallet, BIP39's English words with a
+   * checksum of its own, which BIP39's caught only by chance, about 3 in 10).
+   */
+  wholeMessage: [...MNEMONIC_LENGTHS, 16],
+  checksumHolds: bip39ChecksumHolds,
+};
+/** Monero's classic seed (Monero GUI, monero-wallet-cli): 25 words of its own list, or MyMonero's 13. */
+const MONERO: SeedWords = {
+  index: new Map(MONERO_WORDS.map((word, index) => [word, index])),
+  lengths: [25, 13],
+  wholeMessage: [25, 13],
+  checksumHolds: moneroChecksumHolds,
+};
+/** Checksums tried per message and word list at most: a 16 KiB run of seed words stays a few milliseconds. */
 const CHECKSUM_BUDGET = 4096;
 
 const NSEC = /\bnsec1[02-9ac-hj-np-z]{58}(?![02-9ac-hj-np-z])/i;
@@ -55,7 +76,7 @@ const base58check = createBase58check(sha256);
 export function findSecret(text: string): SecretFinding | null {
   const visible = text.replace(INVISIBLE, "");
   const readings = visible === text ? [text] : [text, visible];
-  if (readings.some(hasMnemonic)) return { kind: "mnemonic" };
+  if (readings.some((reading) => hasMnemonic(reading, BIP39) || hasMnemonic(reading, MONERO))) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
   if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
   if (readings.some(hasHexSecret)) return { kind: "hex-key" };
@@ -65,16 +86,18 @@ export function findSecret(text: string): SecretFinding | null {
 
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
- * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). Prose
- * breaks a run at once: "the", "a", "is", "to", "and", "of" and "I" are not on the list.
+ * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). The
+ * same for Monero's English list, 25 or 13 words. Prose breaks a run at once: "the", "a", "is", "to", "and", "of" and
+ * "I" are on neither list.
  *
- * One word said over and over is not a seed, though one in 16 such runs passes a 12-word checksum ("word" does): a
- * window of a single word never counts, and a window mostly of one word ("abandon … about") counts only when that
- * word does not go on past it on either side.
+ * One word said over and over is not a seed, though one in 16 such runs passes a 12-word checksum ("word" does), and
+ * every one passes Monero's: a window of a single word never counts, and a window mostly of one word ("abandon …
+ * about") counts only when that word does not go on past it on either side.
  */
-function hasMnemonic(text: string): boolean {
+function hasMnemonic(text: string, seed: SeedWords): boolean {
   const tokens = text.toLowerCase().match(/[a-z]+/g);
-  if (!tokens || tokens.length < 12) return false;
+  const shortest = Math.min(...seed.lengths);
+  if (!tokens || tokens.length < shortest) return false;
   let budget = CHECKSUM_BUDGET;
   let run: number[] = [];
   const seedLike = (start: number, length: number) => {
@@ -84,22 +107,22 @@ function hasMnemonic(text: string): boolean {
     if (counts.size === 1) return false;
     const [most, times] = [...counts].reduce((a, b) => (b[1] > a[1] ? b : a));
     if (times > length / 2 && (run[start - 1] === most || run[start + length] === most)) return false;
-    return checksumHolds(window);
+    return seed.checksumHolds(window);
   };
   const check = () => {
-    if (run.length >= 12) {
-      for (const length of MNEMONIC_LENGTHS) {
+    if (run.length >= shortest) {
+      for (const length of seed.lengths) {
         for (let start = 0; start + length <= run.length && budget > 0; start++, budget--) {
           if (seedLike(start, length)) return true;
         }
       }
-      if (run.length === tokens.length && WHOLE_MESSAGE_LENGTHS.includes(run.length) && new Set(run).size > 1) return true;
+      if (run.length === tokens.length && seed.wholeMessage.includes(run.length) && new Set(run).size > 1) return true;
     }
     run = [];
     return false;
   };
   for (const token of tokens) {
-    const index = WORD_INDEX.get(token);
+    const index = seed.index.get(token);
     if (index !== undefined) run.push(index);
     else if (check()) return true;
   }
@@ -107,7 +130,7 @@ function hasMnemonic(text: string): boolean {
 }
 
 /** BIP39: the words' 11-bit indices are the entropy followed by the first bits of its SHA-256. */
-function checksumHolds(indices: number[]): boolean {
+function bip39ChecksumHolds(indices: number[]): boolean {
   const bits = indices.length * 11, checksumBits = bits / 33, entropyBytes = (bits - checksumBits) / 8;
   const bytes = new Uint8Array(Math.ceil(bits / 8));
   indices.forEach((index, i) => {
@@ -116,6 +139,29 @@ function checksumHolds(indices: number[]): boolean {
   const expected = sha256(bytes.subarray(0, entropyBytes))[0] >> (8 - checksumBits);
   const got = bytes[entropyBytes] >> (8 - checksumBits);
   return expected === got;
+}
+
+/**
+ * Monero (src/mnemonics/electrum-words.cpp): the last word repeats the one at CRC-32 of the other words' first three
+ * letters, run together, modulo how many they are.
+ */
+function moneroChecksumHolds(indices: number[]): boolean {
+  const words = indices.slice(0, -1);
+  const prefixes = words.map((index) => MONERO_WORDS[index].slice(0, 3)).join("");
+  return words[crc32(prefixes) % words.length] === indices[indices.length - 1];
+}
+
+const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c;
+});
+
+/** CRC-32 (the zlib one) of ASCII text. */
+function crc32(text: string): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < text.length; i++) crc = CRC32_TABLE[(crc ^ text.charCodeAt(i)) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 /** A WIF private key: base58check with version 0x80 (mainnet) or 0xef (testnet), 32 bytes and an optional 0x01. */
