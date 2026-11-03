@@ -233,7 +233,7 @@ export class CommunityWorld {
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
         const edge = links.get(linkId), there = edge && this.counterpart(edge);
-        if (!edge || !there || !this.up(peer, edge, there.peer)) throw new Error("link down");
+        if (!edge || !there || !this.up(peer, edge, there)) throw new Error("link down");
         const data = JSON.stringify(frame);
         peer.sent.frames++; peer.sent.bytes += data.length;
         const copy = JSON.parse(data) as Record<string, unknown>;
@@ -248,7 +248,7 @@ export class CommunityWorld {
         queue.frames.push(deliver);
       },
       // Version 4 (hubs) only between two apps that announce it.
-      linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
+      linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
       // Its app runs and its packets reach this one: an app that closed, or one cut off, publishes nothing this one reads,
       // and what it published before is fresh only half a minute (`otherEndSeen`).
       linkSeen: linkId => {
@@ -379,7 +379,7 @@ export class CommunityWorld {
    */
   sendFiles(peer: Peer, linkId: string, frame: Record<string, unknown>): boolean {
     const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
-    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there)) return false;
     const data = JSON.stringify(frame);
     peer.sent.frames++; peer.sent.bytes += data.length;
     const copy = JSON.parse(data) as Record<string, unknown>;
@@ -391,7 +391,7 @@ export class CommunityWorld {
   /** A file's bytes on an edge as a binary message (files/4): the receiver's app hears the `pf-data` frame with them as bytes. */
   sendData(peer: Peer, linkId: string, id: string, offset: number, bytes: Uint8Array): boolean {
     const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
-    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there)) return false;
     peer.sent.frames++; peer.sent.bytes += 2 + id.length + 8 + bytes.length;
     const frame = { t: "pf-data", id, offset, data: bytes.slice() };
     if (this.drop?.(peer, there.peer, frame)) return true;
@@ -399,15 +399,17 @@ export class CommunityWorld {
     return true;
   }
 
-  /** Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. */
-  private up(peer: Peer, edge: Edge, there: Peer): boolean {
+  /**
+   * Both ends online and reachable, and (with a `NetworkModel`) signaling done on both sides. `other` is the caller's
+   * `counterpart(edge)`, not looked up again: that walks every link of every peer, and this runs for every frame sent.
+   */
+  private up(peer: Peer, edge: Edge, other: { peer: Peer; linkId: string }): boolean {
+    const there = other.peer;
     if (!peer.online || !there.online || !this.sameSide(peer, there)) return false;
     if (edge.kind === "edge" && this.holdEdge?.(peer, there)) return false;
-    const other = this.counterpart(edge);
     // Up at once with no model: it was up, for `linkBack`, as when its signaling is done.
-    if (!this.network) { edge.wasUp = true; if (other) there.links.get(other.linkId)!.wasUp = true; return true; }
+    if (!this.network) { edge.wasUp = true; there.links.get(other.linkId)!.wasUp = true; return true; }
     if (edge.upAt !== undefined) return true;
-    if (!other) return false;
     const theirs = there.links.get(other.linkId)!;
     if (edge.polls < this.network.signalPolls || theirs.polls < this.network.signalPolls) return false;
     edge.upAt = theirs.upAt = this.now;
@@ -462,7 +464,7 @@ export class CommunityWorld {
       for (const [linkId, edge] of peer.links) {
         const there = this.counterpart(edge);
         if (edge.done && !there) { peer.links.delete(linkId); continue; }
-        const up = !!there && this.up(peer, edge, there.peer);
+        const up = !!there && this.up(peer, edge, there);
         if (up && !edge.announced) {
           edge.announced = true;
           // An edge's session agrees files/3 as it agrees groups (group files, WISP 503).
