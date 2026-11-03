@@ -65,6 +65,20 @@
     "unreadCount": "{{name}}، {{count}} من الرسائل غير المقروءة",
     "unreadOne": "{{name}}، رسالة واحدة غير مقروءة"
   },
+  "row": {
+    "mention": "تمت الإشارة إليك",
+    "muted": "الإشعارات مكتومة",
+    "pinned": "مثبّتة",
+    "separator": "، ",
+    "unread": "{{count}} رسائل غير مقروءة",
+    "unreadSome": "رسائل غير مقروءة",
+    "unread_few": "{{count}} رسائل غير مقروءة",
+    "unread_many": "{{count}} رسالة غير مقروءة",
+    "unread_one": "رسالة واحدة غير مقروءة",
+    "unread_other": "{{count}} رسالة غير مقروءة",
+    "unread_two": "رسالتان غير مقروءتين",
+    "unread_zero": "لا رسائل غير مقروءة"
+  },
   "searchPlaceholder": "بحث في المحادثات...",
   "settings": "الإعدادات",
   "sharedIdentity": "شارك هوية",

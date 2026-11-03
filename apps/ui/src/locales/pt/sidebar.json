@@ -65,6 +65,16 @@
     "unreadCount": "{{name}}, {{count}} mensagens não lidas",
     "unreadOne": "{{name}}, 1 mensagem não lida"
   },
+  "row": {
+    "mention": "você foi mencionado",
+    "muted": "notificações silenciadas",
+    "pinned": "fixada",
+    "separator": ", ",
+    "unread": "{{count}} mensagens não lidas",
+    "unreadSome": "mensagens não lidas",
+    "unread_one": "{{count}} mensagem não lida",
+    "unread_other": "{{count}} mensagens não lidas"
+  },
   "searchPlaceholder": "Buscar conversas...",
   "settings": "Ajustes",
   "sharedIdentity": "Compartilhou uma identidade",
