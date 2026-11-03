@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
 import {
-  HandoffGiver, HandoffTaker, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
+  HandoffGiver, HandoffTaker, MAX_HELD_FILES, STOPPED_STEP, WOKEN_CONNECT_MS, type GiverPorts, type HandoffFile, type HandoffLinks, type HandoffRecords, type HandoffSelf, type HandoffSource,
   type BusyReport, type HandoffStaging, type HandoffStagingHost, type HandoffStay, type HandoffView, type LocalBusy, type TakerPorts,
 } from "../src/devices/handoff";
 import { makeHandoffVerifier, type HandoffVerifier } from "../src/devices/handoffPake";
@@ -1221,6 +1221,29 @@ describe("pass 1 and its resumption", () => {
     const h = release ? release.h : toBase64Url(handoffDigest(N + 1, giverKey.publicKey, takerKey.publicKey, [[`file/${small.sha256}`, small.size, small.sha256], ["db/peer", w.profile.rest.length, toBase64Url(sha256(w.profile.rest))]]));
     expect(h).toBe(toBase64Url(handoffDigest(N + 1, giverKey.publicKey, takerKey.publicKey, [[`file/${small.sha256}`, small.size, small.sha256], ["db/peer", w.profile.rest.length, toBase64Url(sha256(w.profile.rest))]])));
   });
+
+  it("a giver with 36,000 files writes a standby record Desktop can keep: the largest files held, one per digest", async () => {
+    const w = world();
+    // File ids as the app makes them (`group-<group>-in-<12 random bytes>`).
+    const group = `group-${toBase64Url(randomBytes(16))}`;
+    const files = Array.from({ length: 36_000 }, (_, i) => w.profile.add(`${group}-in-${toBase64Url(randomBytes(12))}`, bytesOf(8 + (i % 97))));
+    const largest = files.reduce((a, b) => (b.size > a.size ? b : a));
+    w.profile.add(`${group}-in-twin`, w.profile.files_.get(largest.id)!);
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1, 60_000);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1, 60_000);
+    const record = w.giverRecords.record;
+    expect(record.state).toBe("standby");
+    // Desktop keeps the record in a file of at most 4 MiB (`device_state.rs`), and refuses a larger one.
+    expect(JSON.stringify(record).length).toBeLessThan(4 * 1024 * 1024);
+    const held = record.heldFiles!;
+    expect(held).toHaveLength(MAX_HELD_FILES);
+    expect(new Set(held.map((f) => f.sha256)).size).toBe(held.length);
+    const smallestHeld = Math.min(...held.map((f) => f.size));
+    const heldDigests = new Set(held.map((f) => f.sha256));
+    expect(files.filter((f) => !heldDigests.has(f.sha256)).every((f) => f.size <= smallestHeld)).toBe(true);
+  }, 120_000);
 });
 
 describe("pass 2 and the release", () => {

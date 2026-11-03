@@ -282,6 +282,21 @@ function fileParts(files: readonly HandoffFile[]): HandoffPart[] {
   return [...byDigest.values()];
 }
 
+/**
+ * The most files a standby's record lists as held (`heldFiles`). The list goes into the device record, which Desktop
+ * also keeps in a file of at most 4 MiB (`device_state.rs`) and which every read parses: one entry per file made a
+ * profile of some 35,000 files unable to write `standby`, so its move failed at the very end. A file not listed is
+ * only sent again by a later pull.
+ */
+export const MAX_HELD_FILES = 10_000;
+
+/** What the frozen copy holds, for the record: one file per digest (one copy is enough to copy from), the largest first. */
+function heldFilesOf(files: readonly HandoffFile[]): HeldFile[] {
+  const byDigest = new Map<string, HeldFile>();
+  for (const file of files) if (!byDigest.has(file.sha256)) byDigest.set(file.sha256, { sha256: file.sha256, size: file.size, id: file.id });
+  return [...byDigest.values()].sort((a, b) => b.size - a.size).slice(0, MAX_HELD_FILES);
+}
+
 /** Which file ids each digest is. */
 function idsOf(files: readonly HandoffFile[]): Record<string, string[]> {
   const ids: Record<string, string[]> = {};
@@ -908,7 +923,7 @@ export class HandoffGiver {
     if (toSlot < 0) return;
     const signed = await signTurnRelease(this.ports.turnAddress, this.turn + 1, fromSlot, toSlot, fromBase64Url(from), h, (bytes) => this.ports.sign(bytes));
     const release = { turn: this.turn + 1, to: from, h: toBase64Url(h), s: toBase64Url(signed.signature) };
-    const heldFiles: HeldFile[] = this.allFiles.map((file) => ({ sha256: file.sha256, size: file.size, id: file.id }));
+    const heldFiles = heldFilesOf(this.allFiles);
     const leftFiles: LeftFile[] = this.allFiles.filter((file) => later.has(file.sha256)).map((file) => ({ sha256: file.sha256, size: file.size, where: file.id }));
     // Standby first, durably: from this write on this device is on standby, whether the frame below arrives or not.
     await this.ports.records.move("standby", {
