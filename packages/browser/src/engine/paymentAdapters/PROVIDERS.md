@@ -74,6 +74,12 @@ exports.
 2. Add it to `LIGHTNING_PROVIDERS` or `ONCHAIN_PROVIDERS` in [providers/registry.ts](providers/registry.ts).
    That is the only shared line you touch; keep the list in the order the picker should show.
 
+   The descriptor's lines are English. A built-in provider's description and its fields' label, help,
+   placeholder, options and suggestions are also translated in the app: keys under
+   `wallet.source.providers.<id>` in `apps/ui/src/locales/*/wallet.json` (`fields.<name>.<line>`; an option or
+   suggestion by its value), read by `providers/providerText.ts` in the UI. Technical names (Macaroon, Rune, hex,
+   NWC URI, RPC) and commands stay as they are; a line without a key, and every line of a plugin, shows its English.
+
 3. Only if the declared `fields` cannot express the form (a "Connect" button that asks a browser wallet, a
    QR scanner): register a component in `apps/ui/src/components/wallet/providers/forms.ts` under the provider id.
    It receives `ProviderFormProps` and calls `onSubmit(values)`.
