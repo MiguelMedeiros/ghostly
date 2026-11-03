@@ -189,6 +189,8 @@ describe("admin actions and their refusals", () => {
     await expect(bob.remove(alice.myKey)).rejects.toThrow("Only the admin can change the members of this group");
     // A new secret changes no member: it says what it does.
     await expect(bob.rotate()).rejects.toThrow("Only the admin can renew the group's secret");
+    // Nor does a hand-over (asked again by an admin who handed the role over already): it says the role.
+    await expect(bob.transferAdmin(alice.myKey)).rejects.toThrow("Only the admin can hand the admin role over");
     expect(() => bob.inviteFrame()).toThrow("Only the admin");
   });
 

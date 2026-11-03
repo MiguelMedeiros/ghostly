@@ -210,6 +210,7 @@
     "adminAlone": "Personne n'est en ligne pour devenir admin",
     "adminAloneNext": "Nommez un admin ou attendez un membre.",
     "adminFirst": "Nommez quelqu'un d'autre admin avant de partir",
+    "adminHandOver": "Seul l'admin peut céder le rôle d'admin",
     "adminHubs": "Seul l'admin peut choisir les hubs du groupe",
     "adminInvites": "Seul l'admin peut inviter",
     "adminLink": "Seul l'admin peut remplacer ou désactiver le lien du groupe",

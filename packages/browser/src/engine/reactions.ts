@@ -137,8 +137,8 @@ export class Reactions {
       const e = emoji === "" ? "" : reactionEmoji(emoji);
       if (e === null) return { error: "A reaction is one emoji" };
       const target = await this.named(chat, messageId);
-      const id = target && replyRef(target, isGroup(chat));
-      if (!target || !id) return { error: "That message is not in this chat, or takes no reaction" };
+      const group = isGroup(chat), id = target && replyRef(target, group);
+      if (!target || !id) return { error: `That message is not in this ${group ? "group" : "chat"}, or takes no reaction` };
       const current = target.reactions?.me;
       if (!e && !current?.e) return { error: "No reaction of yours to take back" };
       let last = this.last.get(chat) ?? lastMine(await this.host.messages(chat));

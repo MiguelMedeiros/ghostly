@@ -535,7 +535,7 @@ describe("errors", () => {
   it("say a group refusal as refused, and an invite into a community as a wrong request", () => {
     for (const message of [
       "Only the admin can rename the group", "Only the admin can change the members of this group", "Only the admin can renew the group's secret",
-      "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
+      "Only the admin can hand the admin role over", "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
       "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
       "No invitation to accept", "No invitation to decline",
       // A removed member's (or a former admin's) group rename, rotate, remove, admin, hub or picture.

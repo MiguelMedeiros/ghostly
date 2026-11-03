@@ -210,6 +210,7 @@
     "adminAlone": "Ninguém está online para virar admin",
     "adminAloneNext": "Torne alguém admin ou espere um membro.",
     "adminFirst": "Torne outra pessoa admin antes de sair",
+    "adminHandOver": "Só o admin pode passar o papel de admin",
     "adminHubs": "Só o admin pode escolher os hubs do grupo",
     "adminInvites": "Só o admin pode convidar",
     "adminLink": "Só o admin pode trocar ou desativar o link do grupo",
