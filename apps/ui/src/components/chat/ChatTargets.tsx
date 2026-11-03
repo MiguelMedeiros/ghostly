@@ -1,4 +1,7 @@
+import type { KeyboardEvent, RefObject } from "react";
+import { useI18n } from "../../contexts/I18nContext";
 import type { ChatTarget } from "../../hooks/useChatTargets";
+import { chatTargetRows } from "../../lib/chatTargets";
 
 /**
  * One chat in a picker: its picture and name, and for a choice of several, whether it is chosen. `disabled`: it cannot
@@ -22,5 +25,32 @@ export function ChatTargetRow({ target, testId, onClick, checked, disabled }: {
         </span>
       )}
     </button>
+  );
+}
+
+/**
+ * A picker's search by name (Forward, Open an app in a chat), in Forward's words. The down arrow goes on to the first
+ * chat it found; the list it filters takes `chatTargetKeys` for the rest.
+ */
+export function ChatTargetSearch({ inputRef, list, value, onChange, testId }: {
+  inputRef: RefObject<HTMLInputElement | null>;
+  /** The list of the chats it found. */
+  list: RefObject<HTMLElement | null>;
+  value: string;
+  onChange(value: string): void;
+  testId: string;
+}) {
+  const { t } = useI18n();
+  const keys = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "ArrowDown") return;
+    const first = chatTargetRows(list.current)[0];
+    if (!first) return;
+    e.preventDefault();
+    first.focus();
+  };
+  return (
+    <input ref={inputRef} type="search" data-testid={testId} value={value} onChange={e => onChange(e.target.value)} onKeyDown={keys}
+      placeholder={t("chat.forward.search")} aria-label={t("chat.forward.search")}
+      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus-visible:ring-2 focus-visible:ring-focus-ring" />
   );
 }
