@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { expect, it } from "vitest";
-import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, type IrohWasm } from "../src/platform/irohWeb";
+import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, onPublicIrohRelay, type IrohWasm } from "../src/platform/irohWeb";
 
 // covers: transport.iroh-web, settings.network.iroh-relays
 
@@ -40,6 +40,13 @@ it("lists the default relays in the spelling every browser opens: n0's four, the
   expect(DEFAULT_IROH_RELAYS[4]).toBe("https://iroh.miguelmedeiros.dev/");
   for (const relay of DEFAULT_IROH_RELAYS) expect(irohRelayProblem(relay)).toBeNull();
   noDottedHost([...DEFAULT_IROH_RELAYS]);
+});
+
+it("tells n0's public relays, in either spelling, from Ghostly's and a relay of one's own", () => {
+  expect(onPublicIrohRelay(DEFAULT_IROH_RELAYS)).toBe(true);
+  expect(onPublicIrohRelay(["http://127.0.0.1:4980/", "https://euc1-1.relay.n0.iroh.link./"])).toBe(true);
+  expect(onPublicIrohRelay(["https://iroh.miguelmedeiros.dev/"])).toBe(false);
+  expect(onPublicIrohRelay(["https://relay.example.com/", "http://127.0.0.1:4980/", "https://notiroh.link/", "https://iroh.link.example.com/"])).toBe(false);
 });
 
 /**
