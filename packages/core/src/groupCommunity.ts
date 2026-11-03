@@ -1150,8 +1150,8 @@ export class CommunitySession {
   /**
    * Is branch `a` better than branch `b`? After their common parent: first, the one that does not hand the
    * role to a member who left (`handedToLeaver`); then the one that keeps an admin change, however short
-   * and however far back it parts; then the longer; then, parting within the window, the lower hash of the
-   * first commit. Both holding admin changes means the admin signed two histories: `b` stays (a fresh one
+   * and however far back it parts; then one I can read over one whose tip lists me and whose secret I lack;
+   * then the longer; then, parting within the window, the lower hash of the first commit. Both holding admin changes means the admin signed two histories: `b` stays (a fresh one
    * halts the group, see `receiveCommit`).
    */
   private better(a: Branch, b: Branch, counts: number[]): boolean {
@@ -1162,10 +1162,20 @@ export class CommunitySession {
     if (toLeaver[0] !== toLeaver[1]) return toLeaver[1];
     if (admin[0] !== admin[1]) return admin[0];
     if (admin[0]) return false;
+    // A fresh secret (a member's leave) can be checked only once it comes: one that never comes, or does not confirm
+    // the tag, opens an epoch nobody else holds, and followed it would leave the whole group unable to send. Such a
+    // branch waits here until its secret comes (`takeSecret`), and is followed then.
+    const wa = this.awaitsSecret(a.tip), wb = this.awaitsSecret(b.tip);
+    if (wa !== wb) return wb;
     const ea = this.known.get(a.tip)!.e, eb = this.known.get(b.tip)!.e;
     if (ea !== eb) return ea > eb;
     if (parent < this.epoch - COMMUNITY_LIMITS.window) return false;
     return first[0] < first[1];
+  }
+
+  /** A commit whose roster lists me and whose secret I do not hold (yet). */
+  private awaitsSecret(h: string): boolean {
+    return !this.state.secrets[h] && rosterHas(this.rosterAt(h) ?? [], this.myKey);
   }
 
   /**
@@ -2054,16 +2064,14 @@ export class CommunitySession {
         case "group-secret": {
           if (frame.to !== this.myKey || typeof frame.h !== "string") return false;
           const took = this.takeSecret(frame.h, frame.s);
-          // Within a second, as a commit (agents#1767): a catch-up hands one per epoch.
-          if (took) { this.persistSoon(); this.hooks.changed(); await this.replayWaiting(); }
+          if (took) await this.tookSecrets();
           return took;
         }
         case "group-secrets": {
           if (!Array.isArray(frame.secrets) || frame.secrets.length > COMMUNITY_LIMITS.secrets) return false;
           let took = false;
           for (const entry of frame.secrets as { h?: unknown; s?: unknown }[]) if (entry && typeof entry.h === "string") took = this.takeSecret(entry.h, entry.s) || took;
-          // Within a second, as a commit (agents#1767): a catch-up hands one per epoch.
-          if (took) { this.persistSoon(); this.hooks.changed(); await this.replayWaiting(); }
+          if (took) await this.tookSecrets();
           return false;
         }
         case "group-sync": await this.receiveSync(from, frame as unknown as CommunitySyncFrame); return false;
@@ -2080,6 +2088,13 @@ export class CommunitySession {
         default: return false;
       }
     });
+  }
+
+  /** After a secret came that confirms: a branch that waited for it may be the one to follow now (see `better`). */
+  private async tookSecrets(): Promise<void> {
+    if (this.bestBranch().tip !== this.topHash) { await this.chooseBranch(); return; }
+    // Within a second, as a commit (agents#1767): a catch-up hands one per epoch.
+    this.persistSoon(); this.hooks.changed(); await this.replayWaiting();
   }
 
   private receiveLeave(frame: Record<string, unknown>): boolean {

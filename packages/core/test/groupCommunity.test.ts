@@ -1274,6 +1274,10 @@ describe("a leave ends one admission", { timeout: 60_000 }, () => {
     expect(alice.session.roster).toHaveLength(3);
     expect(ls3).toBeDefined();
     expect(await alice.session.handle(bob.session.myKey, commitFrame(second))).toBe(true);
+    // Its secret was sealed while she was away: the leave is followed once a catch-up brings it.
+    expect(alice.session.roster).toHaveLength(3);
+    await bob.session.handle(alice.session.myKey, alice.session.syncFrame());
+    await net.settle();
     expect(alice.session.roster).toHaveLength(2);
   });
 
