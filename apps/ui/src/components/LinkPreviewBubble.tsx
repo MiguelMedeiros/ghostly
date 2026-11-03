@@ -92,8 +92,10 @@ export function LocationCard({ place }: { place: Place }) {
     <div data-testid="location-card" className="mt-1.5 mb-1 w-[min(300px,68vw)] rounded-md bg-text-primary/6 border-s-4 border-accent px-2.5 py-2">
       <div className="flex items-start gap-2">
         <span className="text-accent mt-0.5 shrink-0"><PinIcon /></span>
-        <span className="min-w-0">
-          <span className="block text-[13.5px] font-semibold leading-snug truncate" data-testid="location-name">{place.name ?? t("chat.location.title")}</span>
+        {/* The place's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
+            keeps its start, and a short one stays at the line's start. */}
+        <span className="min-w-0 flex flex-col items-start">
+          <span dir="auto" className="max-w-full text-[13.5px] font-semibold leading-snug truncate" data-testid="location-name">{place.name ?? t("chat.location.title")}</span>
           <span className="block text-[12px] text-text-secondary font-mono" data-testid="location-coordinates">{formatCoordinates(place)}</span>
         </span>
       </div>
