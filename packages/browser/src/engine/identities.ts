@@ -1,11 +1,11 @@
 import {
-  emptyIdentityLedger, fromBase64Url, identityRevocationValue, identityStatement, IdentityExchange, IDENTITY_REVOCATION_LABEL, newIdentityBinding,
+  emptyIdentityLedger, fromBase64Url, identityRevocationValue, identityStatement, IdentityCheckUnavailable, IdentityExchange, IDENTITY_REVOCATION_LABEL, newIdentityBinding,
   receivedIdentityStatus, revokesIdentity, toBase64Url,
   type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { openSecret, sealSecret, whenDataKeyDropped, type SealedSecret } from "./dataKey";
-import type { IdentityProofProvider } from "../proofs/contract";
+import type { IdentityFetch, IdentityProofProvider } from "../proofs/contract";
 import { loadedIdentityProviders, loadIdentityProviders } from "../proofs/load";
 import { boundedIdentityFetch, verifyIdentity } from "../proofs/verify";
 import type { IdentityProofView, LinkIdentitiesView, PublicProfileView } from "../shared/types";
@@ -40,6 +40,8 @@ export interface IdentityLinkHost {
   keys(linkId: string): { mine?: string; theirs?: string };
   linkIds(): string[];
   online(): boolean;
+  /** Settings → Hide my IP from contacts: a contact's proof is then checked only on hosts this app names (`fixedIdentityHosts`). */
+  relayOnly?(): boolean;
   emit(): void;
   /** The public profile kept for an identity (PUBLIC-PROFILES.md), shown only while its proof is current and verified. */
   publicProfile?(provider: string, subject: string): PublicProfileView | undefined;
@@ -151,8 +153,32 @@ export class IdentityProofs {
     return seed;
   }
 
-  private ctx() { return { now: now(), signal: AbortSignal.timeout(30_000), fetch: this.fetch }; }
+  private ctx(fetch: IdentityFetch = this.fetch) { return { now: now(), signal: AbortSignal.timeout(30_000), fetch }; }
+  /** The person's own proof, before it is saved: on whatever servers it names, their own. */
   private verify = (statement: IdentityStatement, evidence: unknown) => verifyIdentity(this.providers(), statement, evidence, this.ctx());
+  /**
+   * A contact's proof. With Hide my IP on, a host its evidence names (a did:web or domain's web server, an AT Protocol
+   * server, a Pubky homeserver) is not contacted, since it would learn this device's IP address: the check fails as one
+   * that could not run, and the contact is told only that.
+   */
+  private verifyContact = async (statement: IdentityStatement, evidence: unknown) => {
+    if (!this.host.relayOnly?.()) return this.verify(statement, evidence);
+    const { fixedIdentityHosts } = await import("../proofs/fixedHosts");
+    const fixed = fixedIdentityHosts();
+    let refused: string | undefined;
+    const fetch: IdentityFetch = async (url, options) => {
+      const host = new URL(url).host;
+      if (!fixed.has(host)) { refused ??= host; throw new IdentityCheckUnavailable(`${host} was not contacted`); }
+      return this.fetch(url, options);
+    };
+    try {
+      return await verifyIdentity(this.providers(), statement, evidence, this.ctx(fetch));
+    } catch (e) {
+      // A provider words a failed fetch its own way ("could not be reached"): this says why it was not tried.
+      if (refused) throw new IdentityCheckUnavailable(`Hide my IP from contacts is on: ${refused}, a server your contact chose, was not contacted`);
+      throw e;
+    }
+  };
   private revoked = async (statement: IdentityStatement): Promise<boolean> => {
     if (!this.host.online()) return false;
     const records = await this.host.resolve(statement.binding.key);
@@ -338,7 +364,7 @@ export class IdentityProofs {
         },
         providers: () => this.providers().map(p => p.id),
         localProof: id => this.local(id),
-        verify: this.verify,
+        verify: this.verifyContact,
         revoked: this.revoked,
         onError: error => { this.errors.set(linkId, error); this.host.emit(); },
       });
