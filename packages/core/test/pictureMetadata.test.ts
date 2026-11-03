@@ -70,7 +70,81 @@ function heif({ extra = [] as number[][], exifMethod = 0, topExtra = [] as numbe
   return [...ftyp, ...meta([start, exifMethod === 1 ? 0 : start + picture.length]), ...topExtra.flat(), ...box("mdat", mdatBody)];
 }
 
+// GIF: header, screen (2 × 1, global table of 2 colours), then blocks.
+const gifHead = [...ascii("GIF89a"), 2, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 255, 255, 255];
+const subBlocks = (data: number[]) => [...(data.length ? [data.length, ...data] : []), 0];
+const gifExtension = (label: number, first: number[], rest: number[] = []) => [0x21, label, first.length, ...first, ...subBlocks(rest)];
+const gifControl = gifExtension(0xf9, [0, 10, 0, 0]);
+const gifLoop = gifExtension(0xff, ascii("NETSCAPE2.0"), [1, 0, 0]);
+const gifFrame = [0x2c, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2, ...subBlocks([0x4c, 0x01])];
+
+// TIFF, big-endian: IFD0 (size, strips, text tags, Orientation, Exif and GPS pointers), the Exif and GPS IFDs, the strip.
+function tiff({ extra = [] as number[][], compression = 1 } = {}): number[] {
+  const entry = (tag: number, type: number, count: number, value: number[]) => [...be16(tag), ...be16(type), ...be32(count), ...value];
+  const make = ascii(`${SECRET}\0`), gps = ascii(`N\0\0\0`);
+  // Layout: header 8, IFD0 at 8 (entries), then values, Exif IFD, GPS IFD, strip.
+  const ifd0Count = 9 + extra.length, ifd0End = 8 + 2 + ifd0Count * 12 + 4;
+  const makeAt = ifd0End, exifAt = makeAt + make.length, exifSecretAt = exifAt + 2 + 12 + 4, gpsAt = exifSecretAt + make.length, stripAt = gpsAt + 2 + 12 + 4;
+  const ifd0 = [...be16(ifd0Count),
+    entry(256, 3, 1, [0, 2, 0, 0]), entry(257, 3, 1, [0, 1, 0, 0]), entry(259, 3, 1, [...be16(compression), 0, 0]), entry(271, 2, make.length, be32(makeAt)),
+    entry(273, 4, 1, be32(stripAt)), entry(274, 3, 1, [0, 6, 0, 0]), entry(279, 4, 1, be32(2)), entry(0x8769, 4, 1, be32(exifAt)), entry(0x8825, 4, 1, be32(gpsAt)),
+    ...extra].flat();
+  const exifIfd = [0, 1, ...entry(0x9286, 7, make.length, be32(exifSecretAt)), ...be32(0)];
+  const gpsIfd = [0, 1, ...entry(1, 2, 2, gps), ...be32(0)];
+  return [0x4d, 0x4d, 0, 42, ...be32(8), ...ifd0, ...be32(0), ...make, ...exifIfd, ...make, ...gpsIfd, 0xab, 0xcd];
+}
+
 describe("a picture's metadata, removed before it is sent", () => {
+  it("GIF: comments, XMP and other application extensions go; frames, timing, the loop and ICC stay byte for byte", () => {
+    const icc = gifExtension(0xff, ascii("ICCRGBG1012"), [1, 2, 3]);
+    const xmp = gifExtension(0xff, ascii("XMP DataXMP"), ascii(`<x:xmpmeta>${SECRET}</x:xmpmeta>`));
+    const comment = gifExtension(0xfe, ascii(SECRET).slice(0, 20), ascii(SECRET).slice(20));
+    const sent = [...gifHead, ...gifLoop, ...comment, ...icc, ...gifControl, ...gifFrame, ...xmp, ...gifControl, ...gifFrame, 0x3b, ...ascii(SECRET)];
+    const out = strip(sent, "image/gif");
+    expect(has(Uint8Array.from(sent), SECRET)).toBe(true);
+    expect(has(out, SECRET)).toBe(false);
+    expect([...out]).toEqual([...gifHead, ...gifLoop, ...icc, ...gifControl, ...gifFrame, ...gifControl, ...gifFrame, 0x3b]);
+    expect(imageSize(out)).toEqual({ width: 2, height: 1 });
+    // A GIF with nothing to remove goes byte for byte.
+    const pixel = Buffer.from("R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==", "base64");
+    expect(Buffer.from(strip(pixel, "image/gif")).equals(pixel)).toBe(true);
+  });
+
+  it("GIF that cannot be read to its end, or with an extension this does not know, is refused", () => {
+    const whole = [...gifHead, ...gifControl, ...gifFrame, 0x3b];
+    for (const bad of [whole.slice(0, -1), whole.slice(0, 20), [...gifHead, 0x3b], [...gifHead, ...gifExtension(0x55, [1]), ...gifFrame, 0x3b], ascii("GIF89a")])
+      expect(() => stripPictureMetadata(Uint8Array.from(bad), "image/gif"), `${bad.length}`).toThrow(NO_PICTURE_METADATA);
+  });
+
+  it("TIFF: text tags, the Exif and GPS IFDs are zeroed where they are; the size, strips and Orientation stay, nothing moves", () => {
+    const sent = Uint8Array.from(tiff());
+    const out = strip(sent, "image/tiff");
+    expect(has(sent, SECRET)).toBe(true);
+    expect(has(out, SECRET)).toBe(false);
+    expect(out.length).toBe(sent.length);
+    const changed = [...sent.keys()].filter((i) => sent[i] !== out[i]);
+    expect(changed.every((i) => out[i] === 0)).toBe(true);
+    // The strip, the size and the Orientation, unchanged; the Exif and GPS IFDs now hold no entry.
+    expect([...out.subarray(-2)]).toEqual([0xab, 0xcd]);
+    expect([...out.subarray(8, 10)]).toEqual([0, 9]);
+    const exifAt = 8 + 2 + 9 * 12 + 4 + SECRET.length + 1, gpsAt = exifAt + 18 + SECRET.length + 1;
+    expect([...out.subarray(exifAt, exifAt + 2)]).toEqual([0, 0]);
+    expect([...out.subarray(gpsAt, gpsAt + 18)]).toEqual(new Array(18).fill(0));
+    expect([...out.subarray(8 + 2 + 5 * 12, 8 + 2 + 6 * 12)]).toEqual([1, 18, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0]);
+  });
+
+  it("TIFF with a part this does not know is refused: a private tag, sub-images, JPEG-compressed strips, a maker note", () => {
+    const entry = (tag: number, type: number, value: number[]) => [...be16(tag), ...be16(type), 0, 0, 0, 1, ...value];
+    for (const bad of [tiff({ extra: [entry(0xc634, 1, [1, 0, 0, 0])] }), tiff({ extra: [entry(330, 4, be32(8))] }), tiff({ compression: 7 }),
+      [0x4d, 0x4d, 0, 42, ...be32(8)], [0x49, 0x49, 43, 0, 8, 0, 0, 0]])
+      expect(() => stripPictureMetadata(Uint8Array.from(bad), "image/tiff"), `${bad.length}`).toThrow(NO_PICTURE_METADATA);
+    // A maker note in the Exif IFD.
+    const withNote = tiff();
+    const exifEntry = 8 + 2 + 9 * 12 + 4 + SECRET.length + 1 + 2;
+    withNote.splice(exifEntry, 2, 0x92, 0x7c);
+    expect(() => stripPictureMetadata(Uint8Array.from(withNote), "image/tiff")).toThrow(NO_PICTURE_METADATA);
+  });
+
   it("JPEG: Exif, XMP, IPTC and comments go; frame, tables, scan, JFIF and ICC stay byte for byte; Orientation stays alone", () => {
     const sent = jpeg(jfif, exif(6), xmp, iptc, icc, comment, dqt, sof(300, 200), dht);
     const out = strip(sent, "image/jpeg");
@@ -159,7 +233,7 @@ describe("a picture's metadata, removed before it is sent", () => {
 
   it("any other file goes as it is, whatever its type says, and a picture is known by its bytes whatever its type says", async () => {
     expect(stripPictureMetadata(Uint8Array.from(ascii(`hello ${SECRET}`)), "text/plain")).toBeUndefined();
-    expect(stripPictureMetadata(Uint8Array.from(ascii("GIF89a")), "image/gif")).toBeUndefined();
+    expect(stripPictureMetadata(Uint8Array.from(ascii("BM not stripped")), "image/bmp")).toBeUndefined();
     expect(await withoutPictureMetadata(new Blob([`hello ${SECRET}`], { type: "text/plain" }), "text/plain")).toBeUndefined();
     // A JPEG named .bin is still a JPEG.
     const out = await withoutPictureMetadata(new Blob([Uint8Array.from(jpeg(exif(1), dqt, sof(300, 200), dht))]), "application/octet-stream");
