@@ -42,10 +42,18 @@ function fieldsOf(params: Params): Record<string, unknown> {
 
 /**
  * An update merged over a card: fields given replace those there, `pr` field by field, and a field given as null goes
- * (`--json '{"step":null}'`). The kind and the id never change.
+ * (`--json '{"step":null}'`). The kind and the id never change. A task says how far it is one way: a percent given
+ * replaces the steps there and steps given the percent, unless the update gives both. Before, `--steps 4/5` over an
+ * earlier `--progress 90` showed "90% · 4 of 5 steps", its bar at 90: a card's own percent wins over its steps.
  */
 export function mergeCard(base: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...base };
+  if (base.kind === "task") {
+    const given = (key: string) => patch[key] !== undefined && patch[key] !== null;
+    const steps = given("done") || given("total");
+    if (given("progress") && !steps) { delete out.done; delete out.total; }
+    else if (steps && !given("progress")) delete out.progress;
+  }
   for (const [key, value] of Object.entries(patch)) {
     if (key === "kind" || key === "id") continue;
     if (value === null) { delete out[key]; continue; }
