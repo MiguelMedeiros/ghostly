@@ -273,10 +273,12 @@ test.describe("installing the app", () => {
     await expect(page.getByTestId("invite-card")).toBeVisible();
     await page.goto("/#/");
     await expect(page.getByTestId("install-hint")).toBeVisible();
-    await page.getByTestId("install-hint-install").click();
+    await page.getByTestId("install-hint-install").focus();
+    await page.keyboard.press("Enter");
     await expect.poll(() => installPrompts(page)).toBe(1);
-    // It has done its job, whatever the person answered the browser.
+    // It has done its job, whatever the person answered the browser. The key that pressed it lands on New chat.
     await expect(page.getByTestId("install-hint")).toBeHidden();
+    await expect(page.getByTitle("New Chat")).toBeFocused();
 
     // The browser offers again later: the menu has it, and asks the browser too.
     await offerInstall(page);
@@ -309,8 +311,10 @@ test.describe("installing the app", () => {
     let page = ana.page;
     await offerInstall(page);
     await expect(page.getByTestId("install-hint")).toBeVisible();
-    await page.getByTestId("install-hint-later").click();
+    await page.getByTestId("install-hint-later").focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByTestId("install-hint")).toBeHidden();
+    await expect(page.getByTitle("New Chat")).toBeFocused();
 
     await openAgain(ana);
     page = ana.page;
@@ -336,10 +340,13 @@ test.describe("installing the app", () => {
     await expect(steps.getByTestId("install-share-glyph")).toBeVisible();
     // iOS 26 keeps Add to Home Screen under More in the Share sheet.
     await expect(steps).toContainText("Choose Add to Home Screen (under More if you don't see it).");
-    await steps.getByTestId("install-steps-done").click();
+    await expect(steps.getByTestId("install-steps-done")).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(steps).toBeHidden();
-    // Shown once: Safari never says the app was added, so having seen the steps is enough.
+    // Shown once: Safari never says the app was added, so having seen the steps is enough. The hint's Install went
+    // with it, so the focus goes to New chat.
     await expect(page.getByTestId("install-hint")).toBeHidden();
+    await expect(page.getByTitle("New Chat")).toBeFocused();
 
     // Settings still has it, and the same steps.
     await page.getByTestId("mobile-tab-settings").click();
