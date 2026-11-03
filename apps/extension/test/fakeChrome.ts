@@ -81,6 +81,8 @@ export interface FakeWorld {
   chrome: typeof chrome;
   calls: { api: string; args: unknown[] }[];
   session: Map<string, unknown>;
+  /** `storage.local`: unlike `storage.session`, it outlives a reload of the extension. */
+  local: Map<string, unknown>;
   tabs: Map<number, Tab>;
   offscreenDocument: boolean;
   /** Runs when `offscreen.createDocument` is called; loads the offscreen module. */
@@ -128,6 +130,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     context: "page" as Context,
     calls: [] as FakeWorld["calls"],
     session: new Map<string, unknown>(),
+    local: new Map<string, unknown>(),
     tabs: new Map<number, Tab>(),
     offscreenDocument: false,
     onCreateDocument: async () => {},
@@ -146,6 +149,17 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
     return e;
   };
   const record = (api: string, ...args: unknown[]) => world.calls.push({ api, args });
+  const area = (items: Map<string, unknown>) => ({
+    async get(key: string) {
+      return items.has(key) ? { [key]: structuredClone(items.get(key)) } : {};
+    },
+    async set(values: Record<string, unknown>) {
+      for (const [key, value] of Object.entries(values)) items.set(key, structuredClone(value));
+    },
+    async remove(key: string) {
+      items.delete(key);
+    },
+  });
 
   const onMessage = event<(message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (r: unknown) => void) => boolean | undefined>();
   const onConnect = event<(port: FakePort) => void>();
@@ -229,19 +243,7 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
         closeOffscreen();
       },
     },
-    storage: {
-      session: {
-        async get(key: string) {
-          return world.session.has(key) ? { [key]: structuredClone(world.session.get(key)) } : {};
-        },
-        async set(items: Record<string, unknown>) {
-          for (const [key, value] of Object.entries(items)) world.session.set(key, structuredClone(value));
-        },
-        async remove(key: string) {
-          world.session.delete(key);
-        },
-      },
-    },
+    storage: { session: area(world.session), local: area(world.local) },
     tabs: {
       onRemoved: event<(tabId: number) => void>(),
       async create({ url }: { url: string }) {

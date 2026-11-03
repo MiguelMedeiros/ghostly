@@ -62,9 +62,42 @@ export const extensionUpdates: UpdateSource = {
   /**
    * Chrome swaps the new version in when the extension stops running, which is
    * what this does. Every Ghostly page goes with it, so it only ever runs
-   * because the user pressed the button.
+   * because the user pressed the button, and the new version opens those pages
+   * again (`takePagesToReopen`): "restart" must not read as a crash.
    */
   async install() {
+    await chrome.storage.local.set({ [REOPEN_KEY]: await openAppPages() }).catch(() => {});
     chrome.runtime.reload();
   },
 };
+
+/**
+ * The app's pages open when the person pressed "Update and restart". In `storage.local`, because a reload empties
+ * `storage.session`; taken once, by the new version's worker.
+ */
+const REOPEN_KEY = "ghostly_reopen_after_update";
+
+const appUrl = () => chrome.runtime.getURL("app.html");
+
+/** Every tab showing the app, at its page (`app.html#/chat/…`); the extension sees its own tabs without `tabs`. */
+async function openAppPages(): Promise<string[]> {
+  try {
+    const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.TAB] });
+    return contexts.map((context) => context.documentUrl ?? "").filter((url) => url.split("#")[0] === appUrl());
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The pages to open after an update the person asked for: the ones that were open, or the app once if none was
+ * found. Nothing when the update came by itself (the browser restarted, or Chrome swapped it in while idle).
+ * Only the app's own pages ever come out, whatever the storage holds.
+ */
+export async function takePagesToReopen(): Promise<string[]> {
+  const stored = (await chrome.storage.local.get(REOPEN_KEY))[REOPEN_KEY];
+  if (stored === undefined) return [];
+  await chrome.storage.local.remove(REOPEN_KEY);
+  const pages = Array.isArray(stored) ? stored.filter((url): url is string => typeof url === "string" && url.split("#")[0] === appUrl()) : [];
+  return pages.length ? [...new Set(pages)] : [appUrl()];
+}
