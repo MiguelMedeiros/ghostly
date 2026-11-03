@@ -1,7 +1,7 @@
 import {useEffect, useId, useRef} from "react";
 import {createPortal} from "react-dom";
 import {useI18n} from "../contexts/I18nContext";
-import {useBackdropDismiss} from "../hooks/useDismiss";
+import {useBackdropDismiss, useBackCloses} from "../hooks/useDismiss";
 
 /**
  * "Delete chat?" for a contact chat. `title`, `body` and `confirm`: a group's own words (a group I am no longer in, or
@@ -11,6 +11,7 @@ export function DeleteChatDialog({name, onClose, onConfirm, title, body, confirm
   const {t}=useI18n(); const id=useId();
   const dialog=useRef<HTMLDialogElement>(null), cancel=useRef<HTMLButtonElement>(null), confirm=useRef<HTMLButtonElement>(null);
   const backdrop=useBackdropDismiss(onClose);
+  useBackCloses(onClose);
   useEffect(()=>{
     const previous=document.activeElement as HTMLElement | null;
     const element=dialog.current!; element.showModal(); cancel.current?.focus();

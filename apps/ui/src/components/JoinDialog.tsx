@@ -1,4 +1,4 @@
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../hooks/useDismiss";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
 import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@ghostly/core";
 import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
@@ -62,6 +62,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     return problem;
   };
   const backdrop = useBackdropDismiss(close);
+  useBackCloses(close);
   useEffect(() => {
     closed.current = false;
     const previous = document.activeElement as HTMLElement | null;
