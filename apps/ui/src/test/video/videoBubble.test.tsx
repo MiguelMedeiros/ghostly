@@ -499,6 +499,13 @@ describe("a video not here yet", () => {
     expect(screen.queryByTestId("video-cancel")).toBeNull();
   });
 
+  it("one sent from here that arrived whole, offered again, has no Pause or Cancel: paused, it could be cancelled", () => {
+    const file = video({ id: "chat1-out-again" });
+    show(file, { state: "transferring", direction: "out", transferred: file.size, size: file.size });
+    expect(screen.queryByTestId("video-pause-transfer")).toBeNull();
+    expect(screen.queryByTestId("video-cancel")).toBeNull();
+  });
+
   it("once in, it plays", () => {
     const file = video();
     const view = show(file, { state: "transferring", direction: "in", transferred: 14 * MB, size: file.size });
