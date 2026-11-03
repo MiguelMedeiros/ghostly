@@ -37,6 +37,7 @@ mod file_stream;
 mod forget_origins;
 #[cfg(desktop)]
 mod fullscreen;
+mod hold_fetch;
 #[cfg(desktop)]
 mod hyperdht;
 #[cfg(desktop)]
@@ -145,6 +146,7 @@ macro_rules! commands {
             commands::get_profile,
             commands::get_public_key,
             commands::hide_from_switcher,
+            commands::hold_fetch,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,

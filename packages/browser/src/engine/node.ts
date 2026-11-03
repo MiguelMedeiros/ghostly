@@ -666,8 +666,8 @@ export interface NodeOptions {
    */
   holdLoopback?: boolean;
   /**
-   * How a held item or manifest is read from the address the contact chose. Default: `fetch`. The CLI passes one that
-   * connects only to public addresses, which a page cannot check (it has no resolver).
+   * How a held item or manifest is read from the address the contact chose. Default: `fetch`. The CLI and Desktop pass
+   * one that connects only to public addresses, which a page cannot check (it has no resolver).
    */
   holdFetch?: typeof fetch;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
