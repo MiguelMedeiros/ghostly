@@ -16,7 +16,7 @@ export const goesOn = (mode: "daemon" | "one-shot"): string => mode === "one-sho
  */
 export function waitsFor(method: string, params: Record<string, unknown>): number | undefined {
   if (method === "chat.wait") return 60;
-  if (method === "file.wait" || (method === "file.save" && params.wait === true)) return 300;
+  if (method === "file.wait" || (method === "file.save" && params.wait === true) || (method === "file.send" && params.wait === "sent")) return 300;
   // send, edit, forward, a button, a task or routine card: `--wait sent|confirmed|delivered`, 30 s each.
   if (typeof params.wait === "string" && params.wait !== "none") return 30;
   return undefined;
