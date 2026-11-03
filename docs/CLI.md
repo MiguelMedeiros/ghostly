@@ -334,7 +334,8 @@ ghostly listen --type call.              # call.connected carries {"audio":{"soc
 auto-answer off rather than leaving an empty list, which would answer everyone.
 
 A ready one: [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers calls by voice (speech to text, Claude,
-text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup.
+text to speech) on this socket. Clone it; its `AGENTS.md` takes an AI agent through the setup. What you need, the
+costs and where the audio goes: [Talk to an AI by voice](VOICE-AGENT.md).
 
 The audio contract, one Unix socket per call:
 
