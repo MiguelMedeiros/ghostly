@@ -268,8 +268,10 @@
   "message": {
     "cancelSending": "Cancelar envio",
     "copied": "Copiado",
+    "copyFailed": "Não foi possível copiar. Selecione o texto abaixo e copie-o.",
     "copyHint": "Clique para copiar",
     "copyJson": "Copiar tudo como JSON",
+    "copyText": "Texto da mensagem",
     "details": "Detalhes",
     "detailsClose": "Fechar",
     "detailsTitle": "Detalhes da mensagem",

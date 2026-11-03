@@ -169,6 +169,9 @@ test("message details on a phone: a long press opens the quick bar, and Details 
   await bob.page.getByTestId("reaction-bar-copy").click();
   await expect(bob.page.getByTestId("reaction-bar")).toHaveCount(0);
   await expect.poll(() => bob.page.evaluate(() => (window as unknown as { copied?: string }).copied)).toBe("press and hold me");
+  // Said once it is copied, and the focus is back on the message's ⋮, not on the page.
+  await expect(row.getByTestId("message-copied")).toHaveText("Copied");
+  await expect(row.getByTestId("message-options")).toBeFocused();
   await hold();
   await bob.page.getByTestId("reaction-bar-details").click();
   await expect(panel(bob.page)).toHaveAttribute("data-loaded", "yes");

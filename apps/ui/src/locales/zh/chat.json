@@ -268,8 +268,10 @@
   "message": {
     "cancelSending": "取消发送",
     "copied": "已复制",
+    "copyFailed": "无法复制。请选中下方的文字后复制。",
     "copyHint": "点击复制",
     "copyJson": "全部复制为 JSON",
+    "copyText": "消息文字",
     "details": "详情",
     "detailsClose": "关闭",
     "detailsTitle": "消息详情",
