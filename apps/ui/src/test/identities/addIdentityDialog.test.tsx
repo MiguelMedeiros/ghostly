@@ -380,6 +380,8 @@ describe("AddIdentityDialog", () => {
       await user.type(screen.getByTestId("add-identity-subject"), "example.com");
       await user.click(screen.getByTestId("add-identity-start"));
       expect(await screen.findByTestId("add-identity-copy-0")).toBeInTheDocument();
+      // What is typed into a DNS host's form reads left to right in every language (in Arabic "_ghostly." ended "ghostly._").
+      for (const code of screen.getAllByTestId(/^add-identity-copy-\d+$/)) expect(code).toHaveAttribute("dir", "ltr");
       await user.click(screen.getByRole("button", { name: "Check and save" }));
       expect(engine.callsTo("completeIdentityProof")).toEqual([{ draftId: "draft-1", evidence: expect.anything() }]);
       expect(onClose).toHaveBeenCalledOnce();
