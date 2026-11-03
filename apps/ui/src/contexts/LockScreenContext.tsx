@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
+import { getBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
 import { activeProfileId } from "../lib/profiles";
@@ -132,6 +133,14 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
     closeServiceWindows();
     pauseForLock();
   }, [isLocked]);
+
+  // Android's app switcher takes its picture of the app before the page hears it is going, so the cover below comes
+  // too late for it: while the lock is on, the app keeps out of that picture altogether (the host, where it can).
+  useEffect(() => {
+    let host: BrowserHost;
+    try { host = getBrowserHost(); } catch { return; }
+    void host.hideFromSwitcher?.(lockActive).catch(() => {});
+  }, [lockActive]);
 
   const lockHere = useCallback(() => {
     if (settings.lockScreen.enabled && settings.lockScreen.passwordHash) {

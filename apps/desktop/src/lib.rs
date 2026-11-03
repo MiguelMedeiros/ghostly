@@ -143,6 +143,7 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::hide_from_switcher,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
