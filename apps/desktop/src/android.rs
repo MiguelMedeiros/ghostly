@@ -2,7 +2,7 @@
 //! sheet, notifications, a save dialog), done through Android itself by the app's own Kotlin plugin
 //! (`gen/android/app/src/main/java/tools/ghostly/app/GhostlyHostPlugin.kt`). Rust calls it; it calls back here
 //! (`Java_tools_ghostly_app_GhostlyHostPlugin_received`) with what Android hands the app: a sign-in's deep link, a
-//! share from another app, a tap on a notification, a network change.
+//! share from another app, a tap on a notification, a network change, the call notification's Hang up.
 
 use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::{json, Value};
@@ -19,6 +19,8 @@ const SHARE_EVENT: &str = "incoming-share";
 /// As on macOS (notifications.rs): the page opens the chat of the notification tapped.
 const OPEN_EVENT: &str = "notification-open";
 const VISIBILITY_EVENT: &str = "app-visibility";
+/// The call notification's Hang up (CallService.kt): the page ends the call that is on.
+const HANG_UP_EVENT: &str = "call-hang-up";
 
 /// Registered before the app's own `setup`: the Kotlin half loads with it and may report an intent at once (the one
 /// that started the app), so the app handle is kept first.
@@ -175,6 +177,16 @@ pub fn keep_awake(on: bool) -> Result<bool, String> {
     Ok(call::<Held>("keepAwake", json!({ "on": on }))?.held)
 }
 
+/// Holds the call service while a call is on (`call`: who it is with, whether it sends the camera's picture), so it
+/// goes on with the app out of sight, or stops it (`None`): whether this start went through.
+pub fn call_service(on_call: Option<(String, bool)>) -> Result<bool, String> {
+    let payload = match on_call {
+        Some((name, video)) => json!({ "on": true, "name": name, "video": video }),
+        None => json!({ "on": false }),
+    };
+    Ok(call::<Held>("callService", payload)?.held)
+}
+
 /// The system bars around the page take its background colour, and light or dark icons to go on it.
 pub fn system_bars(color: u32, dark: bool) -> Result<(), String> {
     call::<Value>("systemBars", json!({ "color": color, "dark": dark })).map(drop)
@@ -242,6 +254,9 @@ fn received(kind: &str, value: String) {
         // visibility, so the page keeps this one (apps/ui/src/desktop/android.ts `followAppVisibility`).
         "visibility" => {
             let _ = app.emit_to("main", VISIBILITY_EVENT, value);
+        }
+        "call" => {
+            let _ = app.emit_to("main", HANG_UP_EVENT, ());
         }
         "share" => match serde_json::from_str::<Shared>(&value) {
             Ok(shared) => {

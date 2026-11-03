@@ -7,6 +7,12 @@
     <string name="channel_transfers">File transfers</string>
     <string name="transfer_title">Sending and receiving files</string>
     <string name="transfer_text">Ghostly keeps going until they are through.</string>
+    <!-- The ongoing notification while a call is on (CallService), its channel, and what the lock screen shows of it. -->
+    <string name="channel_calls">Calls</string>
+    <string name="call_title">Call with %1$s</string>
+    <string name="call_public">Call in progress</string>
+    <string name="call_text">Tap to go back to the call.</string>
+    <string name="call_hang_up">Hang up</string>
     <!-- The screen shown instead of the app when the phone's WebView is too old for it (MainActivity). -->
     <string name="webview_title">Update Android System WebView</string>
     <string name="webview_text">Ghostly runs in Android System WebView, and this phone\'s is too old for it (version %1$s, Ghostly needs %2$d or later). Update it from the Play Store, then open Ghostly again.</string>

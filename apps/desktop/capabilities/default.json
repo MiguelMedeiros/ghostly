@@ -23,6 +23,7 @@
     "allow-app-post",
     "allow-app-title",
     "allow-bitcoind-rpc",
+    "allow-call-service",
     "allow-close-service-windows",
     "allow-create-keypair",
     "allow-decrypt-text",
