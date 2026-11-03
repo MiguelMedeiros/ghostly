@@ -278,6 +278,13 @@ interface Edge {
   /** Its member's `group-have` frames taken lately: no more than `haveFramesTaken` in `haveWindowMs`, twice what it may send; past that, dropped. */
   haveTaken: RateWindow;
   /**
+   * Wants sent on the edge lately (`wantFrames` in `wantWindowMs`), and whether one waited for that window to free; and
+   * its member's taken lately (`wantFramesTaken`, twice that): past that, dropped before anything is looked up.
+   */
+  wantSent: RateWindow;
+  wantPaced?: boolean;
+  wantTaken: RateWindow;
+  /**
    * Message ids its member asked for while this device served all it serves at once, and when: said in a `group-have`
    * once a slot frees.
    */
@@ -592,7 +599,8 @@ export class GroupFileDesk {
   async frame(groupId: string, peer: string, linkId: string, frame: Record<string, unknown>): Promise<void> {
     if (frame.t === GROUP_WANT_FRAME) {
       const want = readGroupWant(frame, groupId);
-      if (want) await this.serve(this.edge(groupId, peer, linkId), want.id);
+      const edge = want && this.edge(groupId, peer, linkId);
+      if (edge && edge.wantTaken.take()) await this.serve(edge, want.id);
     } else if (frame.t === GROUP_WANT_NO_FRAME) {
       const no = readGroupWantNo(frame, groupId);
       if (no) this.refused(groupId, peer, linkId, no.id, no.why);
@@ -659,6 +667,10 @@ export class GroupFileDesk {
     }
     this.letGo();
     this.makeRoomForWaiting();
+    // Wants that waited for an edge's window: asked now that it freed.
+    const freed = new Set<string>();
+    for (const edge of this.edgesById.values()) if (edge.wantPaced && !this.paced(edge.linkId)) { edge.wantPaced = false; freed.add(edge.groupId); }
+    for (const groupId of freed) this.retry(groupId);
     for (const edge of this.edgesById.values()) {
       if (edge.have.size && this.deps.ready(edge.linkId)) this.sendHave(edge, [...edge.have]);
     }
@@ -697,7 +709,12 @@ export class GroupFileDesk {
 
   /** The group's edges that are up, with files/3 live and no file asked of their member: a want could be asked on them. */
   private freeEdges(groupId: string): [string, string][] {
-    return [...this.deps.edges(groupId)].filter(([, linkId]) => this.deps.ready(linkId) && this.edgesById.get(linkId)?.files.live && !this.askedOf(linkId));
+    return [...this.deps.edges(groupId)].filter(([, linkId]) => this.deps.ready(linkId) && this.edgesById.get(linkId)?.files.live && !this.askedOf(linkId) && !this.paced(linkId));
+  }
+
+  /** This device sent as many wants on the edge as its window takes (`wantFrames`). */
+  private paced(linkId: string): boolean {
+    return !!this.edgesById.get(linkId)?.wantSent.wait();
   }
 
   /** One of these free edges (member key, link id) is one `ask` would ask this want on: asked now, it would not only queue again. */
@@ -727,7 +744,7 @@ export class GroupFileDesk {
   private waitForKnown(kept: Kept, want: Want, known: string[], edges: Map<string, string>): boolean {
     if (!known.includes(kept.author)) return false;
     const linkId = edges.get(kept.author) ?? "";
-    return this.deps.ready(linkId) && (!!want.busy?.has(kept.author) || this.askedOf(linkId, want));
+    return this.deps.ready(linkId) && (!!want.busy?.has(kept.author) || this.askedOf(linkId, want) || this.paced(linkId));
   }
 
   /** The want may ask this member in this round: not asked yet, it did not serve it damaged, and did not say it is gone. */
@@ -765,9 +782,12 @@ export class GroupFileDesk {
       // A holder serves this device one file at a time (WISP 503 § Serving limits): asked now, it would answer `busy`.
       // This one waits its turn, and is asked when the file before it ends (`transferChanged`).
       if (this.askedOf(linkId, want)) { behind = true; continue; }
+      // Its wants go at their pace (§ Bounds): past it, this one waits its turn too, asked once the window frees (`tick`).
+      if (this.paced(linkId)) { this.edgesById.get(linkId)!.wantPaced = true; behind = true; continue; }
       // Asked of it before the frame goes: its answer is this want's, however soon it comes.
       Object.assign(want, { holder: key, linkId, at: this.deps.now() });
       this.askedOn.set(linkId, { id: kept.id, want });
+      this.edgesById.get(linkId)!.wantSent.take();
       if (!this.deps.send(linkId, { t: GROUP_WANT_FRAME, g: kept.groupId, id: kept.message })) { want.tried.add(key); continue; }
       if (want.holder === key) this.show(kept, { state: "transferring", stage: "queued", transferred: kept.stored ?? 0, size: kept.meta.size, direction: "in" });
       return;
@@ -1072,7 +1092,9 @@ export class GroupFileDesk {
     if (known) return known;
     const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(),
       haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()),
-      haveTaken: new RateWindow(GROUP_FILE_LIMITS.haveFramesTaken, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Map(), gone: new Set(), paced: new Set() };
+      haveTaken: new RateWindow(GROUP_FILE_LIMITS.haveFramesTaken, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()),
+      wantSent: new RateWindow(GROUP_FILE_LIMITS.wantFrames, GROUP_FILE_LIMITS.wantWindowMs, () => this.deps.now()),
+      wantTaken: new RateWindow(GROUP_FILE_LIMITS.wantFramesTaken, GROUP_FILE_LIMITS.wantWindowMs, () => this.deps.now()), busy: new Map(), gone: new Set(), paced: new Set() };
     edge.files = new ChatFiles({
       uplink: this.uplink,
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.

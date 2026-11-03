@@ -684,6 +684,56 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(asked()).toBeLessThanOrEqual(1 + GROUP_FILE_LIMITS.haveFramesTaken);
   });
 
+  it(`a member's group-want is taken at most ${GROUP_FILE_LIMITS.wantFramesTaken} times in ${GROUP_FILE_LIMITS.wantWindowMs / 1000} seconds on an edge, the rest looked up nowhere`, async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    const { messageId } = await t.send(alice, id, pattern(2_000, 50));
+    await t.world.until(() => t.done(bob, id, messageId) && t.done(carol, id, messageId), 60_000);
+    // What Bob looks up for a want: who could read its message.
+    const desk = (bob.groups as unknown as { files: { deps: { membership(groupId: string): unknown } } }).files;
+    const membership = desk.deps.membership;
+    let lookups = 0;
+    desk.deps.membership = groupId => { lookups++; return membership(groupId); };
+    // What it looks up in a second with no want.
+    await t.world.run(1000, 1000);
+    const idle = lookups;
+    lookups = 0;
+    const answered = () => t.seen.filter(s => s.from === "bob" && s.to === "carol" && (s.frame.t === "group-want-no" || s.frame.t === "pf-offer")).length;
+    const before = answered();
+    // Carol asks Bob for it 300 times at once.
+    for (let i = 0; i < 300; i++) t.say(carol, bob, id, { t: "group-want", g: id, id: messageId });
+    await t.world.run(1000, 1000);
+    expect(lookups - idle).toBeLessThanOrEqual(GROUP_FILE_LIMITS.wantFramesTaken);
+    expect(answered() - before).toBe(GROUP_FILE_LIMITS.wantFramesTaken);
+    // Once the window is past, she is heard again.
+    await t.world.run(GROUP_FILE_LIMITS.wantWindowMs, 1000);
+    t.say(carol, bob, id, { t: "group-want", g: id, id: messageId });
+    await t.world.run(1000, 1000);
+    expect(answered() - before).toBe(GROUP_FILE_LIMITS.wantFramesTaken + 1);
+  });
+
+  it("a member asking another for more files than its wants' pace sends them at that pace, and each is answered once", async () => {
+    Object.assign(limits, { wantFrames: 4, wantFramesTaken: 8 });
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const ids: string[] = [];
+    for (let i = 0; i < 20; i++) { ids.push((await t.send(alice, id, pattern(1000, 60 + i))).messageId); await t.world.run(60_000 / GROUP_FILE_LIMITS.announcePerMinute + 1000); }
+    await t.world.until(() => ids.every(m => !!t.got(carol, id, m).message?.file), 60_000);
+    // When each of Carol's wants left for Bob.
+    const at: number[] = [];
+    t.hold = (from, to, frame) => { if (from === carol && to === bob && frame.t === "group-want") at.push(t.world.now); return false; };
+    const asked = (messageId: string) => t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "group-want" && s.frame.id === messageId).length;
+    const answered = (messageId: string) => t.seen.filter(s => s.from === "bob" && s.to === "carol" && s.frame.t === "group-want-no" && s.frame.id === messageId).length;
+    // Alice is away: Carol asks Bob for all 20 at once, who does not hold them and says so.
+    alice.online = false;
+    for (const m of ids) await carol.groups.downloadFile(t.got(carol, id, m).message!.file!.id);
+    await t.world.until(() => ids.every(m => answered(m) === 1 && t.got(carol, id, m).transfer?.wait === "nobody"), 5 * 60_000, 1000,
+      () => JSON.stringify(ids.map(m => [asked(m), answered(m)])));
+    expect(ids.map(asked)).toEqual(ids.map(() => 1));
+    expect(Math.max(...at.map(a => at.filter(b => b >= a && b - a < GROUP_FILE_LIMITS.wantWindowMs).length))).toBeLessThanOrEqual(GROUP_FILE_LIMITS.wantFrames);
+  });
+
   it("a member's group-have sent at its pace is taken also when one of its frames comes late, and who said gone is asked again", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
