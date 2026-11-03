@@ -129,8 +129,10 @@ function ServiceCard({ service, online, contacts }: { service: SharedService; on
     <div data-testid="service-item">
       <Row leading={<span className={`grid place-items-center w-10 h-10 rounded-xl ${shared ? "bg-accent/15 text-accent" : "bg-surface-alt text-text-muted"}`}>{GLOBE}</span>}
         label={<>
-          <p className="font-medium truncate">{service.name}</p>
-          <a {...externalLinkProps(href)} title={service.target} className="block text-xs font-mono text-text-muted hover:text-accent truncate">{service.target.replace(/^https?:\/\//, "")}</a>
+          {/* Each in its own direction, on the box that cuts it and as wide as its words, as a contact's app below: in
+              Arabic a Latin name or address keeps its start, and a short one stays at the line's start. */}
+          <p className="font-medium"><span dir="auto" className="inline-block max-w-full truncate align-top">{service.name}</span></p>
+          <a {...externalLinkProps(href)} title={service.target} dir="auto" className="inline-block max-w-full align-top text-xs font-mono text-text-muted hover:text-accent truncate">{service.target.replace(/^https?:\/\//, "")}</a>
         </>}
         hint={<span className={`flex flex-wrap items-center gap-x-1.5 mt-0.5 ${shared ? "text-accent" : "text-text-muted"}`}>
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${shared ? "bg-accent" : "bg-gray-500"}`} />{status}
@@ -149,7 +151,7 @@ function ServiceCard({ service, online, contacts }: { service: SharedService; on
             const on = granted.includes(c.key);
             return (
               <div key={c.key} className="flex items-center gap-3 px-4 py-2.5 min-h-12" data-testid="service-grant">
-                <div className="min-w-0 flex-1"><p className="text-sm text-text-primary truncate">{c.name}</p><p className="text-[11px] text-text-muted font-mono truncate">{c.short}</p></div>
+                <div className="min-w-0 flex-1 flex flex-col items-start"><p dir="auto" className="max-w-full text-sm text-text-primary truncate">{c.name}</p><p dir="auto" className="max-w-full text-[11px] text-text-muted font-mono truncate">{c.short}</p></div>
                 <Switch label={t("services.letReach", { contact: c.name, app: service.name })} checked={on} onChange={(next) => void platform.setServiceShared(service.id, c.key, next)} />
               </div>
             );
