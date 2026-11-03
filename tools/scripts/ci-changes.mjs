@@ -89,6 +89,8 @@ export const WEBSITE_INPUTS = [
   "packages/core/src/canonicalJson.ts",
   "packages/core/src/bytes.ts",
   "packages/core/src/image.ts",
+  // privacy-hosts.test.mjs checks the privacy page's resolver list against the app's DoH resolvers.
+  "packages/browser/src/proofs/domain.ts",
   // The jobs themselves.
   ".github/workflows/ci.yml",
 ];
