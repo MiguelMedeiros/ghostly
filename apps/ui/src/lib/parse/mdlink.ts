@@ -36,6 +36,14 @@ const DOTS =
   /[\u00b7\u02d9\u0660\u06d4\u06f0\u0701\u0702\u0f0b\u0f0c\u1427\u16eb\u2022\u2024\u2027\u2219\u22c5\u2e30\u2e31\u2e33\u2e3c\u3002\u30fb\u318d\ua4f8\ua60e\ua78f\uff0e\uff61\u{10a50}]/gu;
 
 /**
+ * A whole emoji: a keycap ("1️⃣"), a flag drawn from tags (🏴 and its tag letters), or pictographs joined by zero-width
+ * joiners, each with its variation selector or skin tone ("❤️", "👩🏽‍💻"). Their invisible parts are drawn as part of
+ * the emoji, so they hide nothing; the same characters anywhere else still count.
+ */
+const EMOJI =
+  /[#*0-9]️?⃣|\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f}|\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?(?:‍\p{Extended_Pictographic}(?:[︎️]|\p{Emoji_Modifier})?)*/gu;
+
+/**
  * Whether a link's text would make a reader think it goes somewhere else: it names a host that is not the link's (nor
  * one the link's host sits under), or it holds an invisible or direction character, which can turn "moc.lapyap"
  * into "paypal.com" on screen. The text is read as a browser would read a host ("ghostly。tools" and "ｇｈｏｓｔｌｙ.tools"
@@ -45,7 +53,7 @@ const DOTS =
 export function labelMisleads(label: string, url: string): boolean {
   const target = hostOf(url);
   if (!target) return true;
-  if (new RegExp(INVISIBLE.source, "u").test(label)) return true;
+  if (new RegExp(INVISIBLE.source, "u").test(label.replace(EMOJI, ""))) return true;
   const text = label.replace(DOTS, ".").normalize("NFKC").replace(DOTS, ".");
   for (const found of text.matchAll(ADDRESS)) {
     const written = found[0];
