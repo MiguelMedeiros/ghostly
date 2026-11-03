@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { newIdentityBinding } from "@ghostly/core";
 import type { BrowserHost } from "@ghostly/browser/host";
@@ -485,6 +485,22 @@ describe("AddIdentityDialog", () => {
       expect(await screen.findByTestId("add-identity-error")).toHaveTextContent("TXT record not found");
       expect(finish).toHaveFocus();
     });
+
+    it("says the check out loud while it runs, from a status that was there before it", async () => {
+      const { user, engine } = dialog();
+      answerBegin();
+      engine.on("completeIdentityProof", () => new Promise(() => {}));
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      await screen.findByTestId("add-identity-finish");
+      const status = screen.getByTestId("add-identity-progress-live");
+      expect(status).toHaveAttribute("role", "status");
+      expect(status).toHaveTextContent(/^$/);
+      await user.click(screen.getByTestId("add-identity-finish"));
+      expect(status).toHaveTextContent("Checking it the way your contacts will…");
+      expect(screen.getByTestId("add-identity-progress-live")).toBe(status);
+    });
   });
 
   /**
@@ -509,7 +525,7 @@ describe("AddIdentityDialog", () => {
       const { user, command, step } = await openCommand();
       vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("Write permission denied.", "NotAllowedError"));
       document.execCommand = vi.fn(() => false);
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       expect(await within(step).findByTestId("add-identity-copy-error")).toHaveTextContent("Could not copy. Select the text above and copy it yourself.");
       expect(within(step).queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
       expect(command).toHaveClass("select-all");
@@ -521,7 +537,7 @@ describe("AddIdentityDialog", () => {
       const copied: string[] = [];
       // The older route copies from a textarea it adds at the end of the page for the moment.
       document.execCommand = vi.fn(() => { copied.push(document.body.querySelector<HTMLTextAreaElement>(":scope > textarea:last-of-type")!.value); return true; });
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
       expect(copied).toEqual([command.textContent]);
       expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
@@ -531,13 +547,39 @@ describe("AddIdentityDialog", () => {
       const { user, command, step } = await openCommand();
       vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new DOMException("Document is not focused.", "NotAllowedError"));
       document.execCommand = vi.fn(() => false);
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       await within(step).findByTestId("add-identity-copy-error");
       const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
-      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
       expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
       expect(writeText).toHaveBeenCalledWith(command.textContent);
       expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
+    });
+
+    it("each Copy names its step, so a button list or a voice command tells them apart",async () => {
+      const { user } = dialog();
+      answerBegin();
+      await user.click(screen.getByTestId("add-identity-domain"));
+      await user.type(screen.getByTestId("add-identity-subject"), "example.com");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const steps = await screen.findByTestId("add-identity-steps");
+      const names = (list: HTMLElement) => within(list).getAllByRole("button").map(b => b.getAttribute("aria-label") ?? b.textContent);
+      expect(names(steps)).toEqual(["Copy step 1", "Copy step 2"]);
+      // The visible "Copy" starts each name, for "click Copy step 2".
+      expect(within(steps).getByRole("button", { name: "Copy step 2" })).toHaveTextContent(/^Copy$/);
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+
+    it("says Copied once from a status beside the button, which keeps its step as its name", async () => {
+      const { user, step } = await openCommand();
+      vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      const status = within(step).getByRole("status");
+      expect(status).toHaveTextContent(/^$/);
+      await user.click(within(step).getByRole("button", { name: "Copy step 1" }));
+      expect(await within(step).findByText("Copied!", { selector: "[role=status]" })).toBe(status);
+      expect(within(step).getByRole("button", { name: "Copied" })).toBeInTheDocument();
+      await waitFor(() => expect(within(step).getByRole("button", { name: "Copy step 1" })).toBeInTheDocument(), { timeout: 3000 });
+      expect(status).toHaveTextContent(/^$/);
     });
   });
 });
