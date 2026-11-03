@@ -118,6 +118,14 @@ describe("the task commands", () => {
     usage("task update", ["g1", "t", "--steps", "0/0"], /^--steps takes done\/total/);
     usage("task send", send("--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d"), /^--tag is given at most 3 times, not 4$/);
     usage("task send", send("--progress", "150"), /^--progress takes a percent from 0 to 100, not 150$/);
+    // Before, these reached the card's check: bad_request (exit 1), "Status card: pr.number is a whole number from 1".
+    const pr = (...flags: string[]) => send("--pr-url", "https://x.example/1", ...flags);
+    usage("task send", pr("--pr-number", "1.5"), /^--pr-number takes a whole number from 1 to 1000000000, not 1.5$/);
+    usage("task send", pr("--pr-number", "0"), /^--pr-number takes a whole number from 1 to 1000000000, not 0$/);
+    for (const flag of ["additions", "deletions", "files"]) usage("task send", pr(`--${flag}`, "-3"), new RegExp(`^--${flag} takes a whole number from 0 to 1000000000, not -3$`));
+    usage("task update", ["g1", "t", "--additions", "2.5"], /^--additions takes a whole number from 0 to 1000000000, not 2.5$/);
+    usage("task send", send("--steps", "99999999999999999999/99999999999999999999"), /^--steps takes done\/total of at most 1000000000 steps, like 2\/5, not "99999999999999999999\/99999999999999999999"$/);
+    expect(params("task send", pr("--pr-number", "7", "--additions", "0", "--files", "1000000000", "--steps", "1000000000/1000000000")).card).toMatchObject({ pr: { number: 7, additions: 0, files: 1e9 }, done: 1e9, total: 1e9 });
     usage("task update", ["g1", "t", "--pr-state", "weird"], /^--pr-state takes draft, open, merged or closed, not "weird"$/);
     usage("task update", ["g1", "t", "--pr-checks", "green"], /^--pr-checks takes passing, failing or pending, not "green"$/);
     usage("task send", send("--pr-url", "http://github.com/o/r/pull/1"), /^--pr-url takes an https link of at most 512 characters, not "http:/);
