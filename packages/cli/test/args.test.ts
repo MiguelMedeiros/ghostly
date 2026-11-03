@@ -109,6 +109,15 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["--nope"], {})).toThrow(new CliError("usage", "Unknown option --nope"));
   });
 
+  // Before, `--no-pretty=true` was "Unknown option --no-pretty (did you mean --no-pretty?)": the word typed itself.
+  it("answers a boolean's --no- form with a value as --pretty=maybe is answered", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const [arg, name] of [["--no-pretty=true", "no-pretty"], ["--no-pretty=", "no-pretty"], ["--no-force=false", "no-force"]]) {
+      expect(() => parseArgs(["bob", "hi", arg], send.options, idSlot(send), { command: "send", text: true }), arg).toThrow(new CliError("usage", `--${name} takes no value`));
+    }
+    expect(() => parseArgs(["--pretty=maybe"], {})).toThrow(new CliError("usage", "--pretty takes no value"));
+  });
+
   // A word whose length is more than 2 away from a name's is more than 2 edits away from it: no distance is worked out.
   // Before, a 100,000-character text that starts with a dash took over a second to be refused (a table per name).
   it("refuses a long word that starts with a dash as fast as a short one", () => {
