@@ -24,14 +24,15 @@ const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
  */
 const NOT_YET = ["label-content-name-mismatch"];
 
-/** Language and light or dark as Settings keeps them, the app reloaded in them. */
-async function look(page: Page, language: string, scheme: "light" | "dark"): Promise<void> {
-  await page.evaluate(([language, scheme]) => {
+/** Language and light or dark as Settings keeps them, and a colour theme if given (else the default), the app reloaded in them. */
+async function look(page: Page, language: string, scheme: "light" | "dark", colorTheme?: string): Promise<void> {
+  await page.evaluate(([language, scheme, colorTheme]) => {
     const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
-    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language, colorScheme: scheme, theme: scheme }));
-  }, [language, scheme]);
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language, colorScheme: scheme, theme: scheme, ...(colorTheme ? { colorTheme } : {}) }));
+  }, [language, scheme, colorTheme]);
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
+  if (colorTheme) await expect(page.locator("html")).toHaveAttribute("data-color-theme", colorTheme);
   await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
 }
 
@@ -257,3 +258,35 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
     expect(found).toEqual({});
   });
 }
+
+/**
+ * Red words on Monochrome dark's #1a1a1a (its dialogs, panels and page): Add's refusal of a link and an app's Uninstall,
+ * at rest and hovered. Danger's own red read 4.44:1 there, under the 4.5:1 small text needs.
+ */
+test("Add's refusal and an app's Uninstall pass axe in Monochrome dark", { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:apps.page"] }, async ({ peer }) => {
+  const store = await testStore();
+  const { page, context } = await peer("axe-apps-monochrome");
+  await serveStore(context, store);
+  await look(page, "en", "dark", "monochrome");
+  const found: Record<string, string[]> = {};
+  const check = async (screen: string) => { const f = await findings(page); if (f.length) found[screen] = f; };
+
+  await page.goto("/#/apps");
+  await page.getByTestId("apps-add").click();
+  await page.getByTestId("apps-add-url").fill("https://example.com/app.ghostlyapp");
+  await page.getByTestId("apps-add-check").click();
+  await expect(page.getByTestId("apps-add-error-title")).toHaveText("Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.");
+  await check("add, a refused link");
+  await page.getByTestId("apps-add-url").fill(STORE_URL);
+  await page.getByTestId("apps-add-check").click();
+  await page.getByTestId("apps-add-store-confirm").click();
+  const listed = page.getByTestId("app-store").filter({ hasText: store.storeName });
+  await listed.getByTestId("app-listing-install").click();
+  await page.getByTestId("app-install-confirm").click();
+  await page.getByTestId("installed-app").getByRole("button").first().click();
+  await expect(page.getByTestId("app-details")).toBeVisible();
+  await check("details");
+  await page.getByTestId("app-uninstall-open").hover();
+  await check("details, Uninstall hovered");
+  expect(found).toEqual({});
+});

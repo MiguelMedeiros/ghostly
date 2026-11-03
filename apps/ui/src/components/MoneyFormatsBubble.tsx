@@ -223,7 +223,7 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
         </button>
         <button className={quiet} disabled={busy} onClick={() => setOpen(false)}>{t("common.cancel")}</button>
       </div>
-      {error && <Notice problem={error} testId="money-pay-error" className="text-xs m-0" ink />}
+      {error && <Notice problem={error} testId="money-pay-error" className="text-xs m-0" />}
     </div>
   );
 }

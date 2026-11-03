@@ -55,7 +55,7 @@ function HintLine({ lead, text, testId, className }: { lead?: string; text: stri
 function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDetails: () => void; onOpen: () => void }) {
   const { t } = useI18n();
   const hint = appHint(app, t);
-  const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger" }[hint.tone];
+  const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger-ink" }[hint.tone];
   // Named with all it shows, in its order, then "details": "Chess 1.2.0 Stopped: details". A voice saying what is on
   // screen finds it (Label in Name), and a screen reader hears the line under the title (Stopped, an update that asks).
   const shown = [app.title, app.version, hint.lead && `${hint.lead} ·`, hint.text].filter(Boolean).join(" ");
