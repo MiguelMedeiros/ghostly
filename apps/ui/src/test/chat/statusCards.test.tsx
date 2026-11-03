@@ -604,7 +604,7 @@ describe("the Tasks panel under a bot room's load", () => {
   it("reads right to left in Arabic", async () => {
     const { user } = renderApp(<TasksButton rows={load()} nameOf={nameOf} />, { language: "ar" });
     await user.click(screen.getByTestId("chat-tasks"));
-    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("3 نشطة · 14 روتينات");
+    expect(screen.getByTestId("chat-tasks-summary")).toHaveTextContent("3 نشطة · 14 روتينًا");
     expect(screen.getByTestId("chat-tasks-close")).toHaveAccessibleName("إغلاق");
   });
 });

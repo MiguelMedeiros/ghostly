@@ -261,7 +261,7 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
         </Fragment>
       )}
       {failed && <MoneyCopyRefused value={invoice.invoice} />}
-      {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
+      {error && <Notice problem={error} className="text-xs m-0 basis-full" />}
     </Card>
   );
 }
@@ -428,7 +428,7 @@ function CashuCard({ value, mine, offOn, onNetwork }: { value: string; mine: boo
       )}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("common.copy")}</button>
       {failed && <MoneyCopyRefused value={value} />}
-      {error && <Notice problem={error} className="text-xs m-0 basis-full" ink />}
+      {error && <Notice problem={error} className="text-xs m-0 basis-full" />}
     </Card>
   );
 }
