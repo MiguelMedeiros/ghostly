@@ -706,6 +706,23 @@ describe("with the apps flag on", () => {
     expect(details).toHaveAccessibleName(shownInName(details));
   });
 
+  it("names each row's buttons with its app or store, so a screen reader tells two stores' Removes apart", async () => {
+    const UNREAD = "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json";
+    fakeEngine.on("appList", () => [installed()]).on("appCheckUpdates", () => []).on("appStoreList", () => [
+      { key: "u", fingerprint: "abcd efgh ijkl mnop", url: UNREAD, preloaded: true, sequence: 0, expired: false, apps: [], removed: [] },
+      { key: "s", fingerprint: "qrst uvwx yz12 3456", url: "https://example.com/hunt.json", preloaded: false, name: "Hunt", kind: "curated", sequence: 1,
+        expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [{ ref: `${KEY}/snake`, sequence: 1, digest: DIGEST, urls: [URL_], title: "Snake", tagline: "Eat, grow." }], removed: [] },
+    ]);
+    renderApp(<Apps />, { route: "/apps" });
+    expect(await screen.findByTestId("installed-app-open")).toHaveAccessibleName("Open Chess");
+    const [unread, hunt] = await screen.findAllByTestId("app-store");
+    expect(within(unread!).getByTestId("app-store-refresh")).toHaveAccessibleName(`Read ${UNREAD}`);
+    expect(within(unread!).getByTestId("app-store-remove")).toHaveAccessibleName(`Remove ${UNREAD}`);
+    expect(within(hunt!).getByTestId("app-store-refresh")).toHaveAccessibleName("Refresh Hunt");
+    expect(within(hunt!).getByTestId("app-store-remove")).toHaveAccessibleName("Remove Hunt");
+    expect(within(hunt!).getByTestId("app-listing-install")).toHaveAccessibleName("Install Snake");
+  });
+
   it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
     let apps = [installed()];
     let stores = [{ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
@@ -860,7 +877,7 @@ describe("with the apps flag on", () => {
     // A new profile: the official store and its one app, whose Install is there to press.
     const only = await screen.findByTestId("app-store");
     expect(within(only).getByTestId("app-listing-install")).toBeInTheDocument();
-    const name = within(only).getByRole("button", { name: /Ghostly Store/ });
+    const name = within(only).getByRole("button", { name: /^Ghostly Store/ });
     expect(name).toHaveAttribute("aria-expanded", "true");
     expect(within(name).getByTestId("app-store-chevron")).toBeInTheDocument();
     // Closed by the person, it stays closed; and opens again.
@@ -876,7 +893,7 @@ describe("with the apps flag on", () => {
     const [few, many, unread] = await screen.findAllByTestId("app-store");
     expect(within(few).getAllByTestId("app-listing")).toHaveLength(1);
     expect(within(many).queryByTestId("app-listing")).not.toBeInTheDocument();
-    const opener = within(many).getByRole("button", { name: /Big/ });
+    const opener = within(many).getByRole("button", { name: /^Big/ });
     expect(opener).toHaveAttribute("aria-expanded", "false");
     expect(within(opener).getByTestId("app-store-chevron")).toBeInTheDocument();
     await user.click(opener);
