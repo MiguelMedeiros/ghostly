@@ -180,6 +180,11 @@ pub fn system_bars(color: u32, dark: bool) -> Result<(), String> {
     call::<Value>("systemBars", json!({ "color": color, "dark": dark })).map(drop)
 }
 
+/// The app switcher keeps no picture of the app (`on`, the app lock is on), or takes one again.
+pub fn hide_from_switcher(on: bool) -> Result<(), String> {
+    call::<Value>("hideFromSwitcher", json!({ "on": on })).map(drop)
+}
+
 pub use crate::android_share::{Incoming, Shared};
 
 /// The latest notification tapped, until the page takes it (`native_notification_tap`): the tap that starts the app

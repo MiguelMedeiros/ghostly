@@ -144,6 +144,7 @@ import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
 import { lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
+import { isRefusalId } from "../shared/refusals";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
 import { groupFileId, storedGroupFiles } from "./groupFiles";
@@ -1289,6 +1290,12 @@ export class GhostlyNode implements EngineImplementation {
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
+    // Hide my IP from contacts: a pickup reaches only this person's own storage host (no host is the app's own), never
+    // one a contact named. Path-style addresses: the endpoint's host is the address's.
+    hiddenIpHosts: () => {
+      if (this.settings.relayOnly !== true) return null;
+      try { return this.settings.holdStorage?.s3 ? [new URL(this.settings.holdStorage.s3.endpoint.trim()).host.toLowerCase()] : []; } catch { return []; }
+    },
     // Tests shorten the lifetime to watch an item expire, in a test build only; it never lengthens it.
     ttlMs: () => { const raw = testSwitch("ghostly-test-hold-ttl"); const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; },
     // The chat's ratchet (WISP 4xx), the same one its DHT floor seals with: one lock over both.
@@ -1324,6 +1331,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkIds: () => [...this.links.keys()],
     online: () => this.networkOn,
+    relayOnly: () => this.settings.relayOnly === true,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
@@ -1424,6 +1432,8 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => this.emitState(),
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
+    relayOnly: () => this.settings.relayOnly === true,
+    own: () => this.ownProfileSubjects(),
   });
 
   /** A contact's verified identity's posts and follows, asked when its card is chosen (PUBLIC-PROFILES.md, "Posts and follows"). */
@@ -1432,11 +1442,18 @@ export class GhostlyNode implements EngineImplementation {
     online: () => this.networkOn,
     eligible: () => this.profileSubjects(),
     nostrRelays: () => effectiveNostrSettings(this.settings.nostr).relays,
-    own: () => { const t = Math.floor(Date.now() / 1000); return this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject })); },
+    own: () => this.ownProfileSubjects(),
+    relayOnly: () => this.settings.relayOnly === true,
     contacts: () => this.contactSubjects(),
     ownNostrFollows: () => this.nostrSocial.ownFollows(),
     nostrMuted: (note, author) => this.nostrSocial.hides(note, author),
   });
+
+  /** The profile's own identities with a current proof. */
+  private ownProfileSubjects(): ProfileSubject[] {
+    const t = Math.floor(Date.now() / 1000);
+    return this.identities.views().filter(p => p.expiresAt > t).map(p => ({ provider: p.provider, subject: p.verified.subject }));
+  }
 
   /** What contacts shared that verifies now, with the chat it came in (paired chats only). */
   private contactSubjects(): (ProfileSubject & { linkId: string })[] {
@@ -3859,6 +3876,9 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
+    // A refused payment's line is the app's (`shared/refusals.ts`), under an id the contact's payment gave its time to:
+    // no edit or removal of the contact's takes it.
+    if (isRefusalId(id)) return true;
     // A removal names the contact's message by its wire id, which a message of mine goes by too: one naming mine takes
     // no reference, or the replies quoting mine would lose its line and its pin would go.
     const ref = edit.rm && !await this.namesMine(linkId, edit.id);
@@ -5279,9 +5299,10 @@ export class GhostlyNode implements EngineImplementation {
             const check = this.groups.fileCheck(groupId);
             if (check.error) { note(check.error); continue; }
             // A new announcement by me (WISP 503 § Forwards), my own copy its first holder.
-            const original = message.file!, file: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
+            const original = message.file!, picked: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
               ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
-            await copyForForward(original.id, { linkId: to, wireId: file.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file });
+            // As it goes: a picture without its metadata, its size the copy's.
+            const file = await copyForForward(original.id, { linkId: to, wireId: picked.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file: picked });
             const sent = await this.sendGroupFile({ groupId, file, forwarded: hops });
             if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); continue; }
             if (sent.messageId) result.messageIds.push(sent.messageId);
@@ -5290,9 +5311,9 @@ export class GhostlyNode implements EngineImplementation {
           }
           if (!live!.link) { note("You are offline"); continue; }
           const original = message.file!, wireId = toBase64Url(randomBytes(12)), timestamp = now();
-          const file: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
+          const picked: MessageFile = { id: GhostlyNode.outgoingFileId(to, wireId), name: original.name, size: original.size, mime: original.mime,
             ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
-          await copyForForward(original.id, { linkId: to, wireId, timestamp, file });
+          const file = await copyForForward(original.id, { linkId: to, wireId, timestamp, file: picked });
           try {
             await this.sendFile({ linkId: to, file, timestamp, forwarded: hops });
           } catch (error) {
@@ -6731,6 +6752,8 @@ export class GhostlyNode implements EngineImplementation {
       // As at a start online: the links to the other devices, on the good read just made.
       if (!this.options.singleDevice && knownDeviceGate()?.state === "active") void this.startDeviceSet({ justRead: true }).catch(() => {});
     } else if (wasOnline && this.networkOn && relayOnlyChanged) await this.restartLinksForRelayOnly();
+    // Off: what contacts held and was left waiting on their storage is picked up now.
+    if (relayOnlyChanged && this.settings.relayOnly !== true) this.hold.wake();
     if (wasOnline && !this.networkOn) this.stopGroupEntries();
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
@@ -9269,6 +9292,9 @@ export class GhostlyNode implements EngineImplementation {
    * straight from its author (`clockSample`). `place`: as `placed`.
    */
   private async storeNewMessage(message: StoredMessage, straight = false, place?: number): Promise<boolean> {
+    // The ids of a refused payment's line are the app's own (`shared/refusals.ts`): a row of the contact's under one is a
+    // frame that named it, never that line, which comes with the values no frame carries (`notice`).
+    if (message.sender === "peer" && !message.notice && isRefusalId(message.id)) return false;
     // A payment with a member lands in the group's history, from that member, under an id of the edge's own.
     const edge = this.links.get(message.linkId)?.stored;
     if (edge?.group && edge.groupPeer && !edge.groupEntry)

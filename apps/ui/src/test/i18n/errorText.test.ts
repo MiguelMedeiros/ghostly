@@ -145,6 +145,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Connect to an updated peer to send files", `${BROWSER}/platform/services.ts`],
   ["Connect to an updated peer first", `${BROWSER}/platform/services.ts`],
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
+  ["This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", `${CORE}/pictureMetadata.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
   // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
@@ -514,6 +515,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // What Settings, Network refuses before Save, and the engine on it (agents#2373).
   ["Enter a relay address (wss://…)", `${BROWSER}/shared/hyperdhtRelay.ts`],
   ["Use a wss:// relay address", `${BROWSER}/shared/hyperdhtRelay.ts`],
+  ["Not a relay address: wss://relay.example.org/?key=1", `${BROWSER}/shared/hyperdhtRelay.ts`, "Not a relay address: ${url}"],
   ["Enter a relay address (https://…)", `${BROWSER}/shared/pushRelay.ts`],
   ["Leave the user and password out of the address", `${BROWSER}/shared/pushRelay.ts`],
   ["Use at most five Iroh relays", `${BROWSER}/engine/node.ts`],
@@ -535,6 +537,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", `${BROWSER}/engine/hold.ts`],
   ["Could not read the contact's pointer: Failed to fetch", `${BROWSER}/engine/hold.ts`, "Could not read the contact's pointer: "],
   ["The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", `${BROWSER}/engine/hold.ts`],
+  ["Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", `${BROWSER}/engine/hold.ts`],
   ["Refused what the contact's storage offered: The manifest is malformed", `${BROWSER}/engine/hold.ts`, "Refused what the contact's storage offered: "],
   ["Could not pick up held items: The storage answered 403", `${BROWSER}/engine/hold.ts`, "Could not pick up held items: "],
   ["Could not pick up held items: the contact's app sealed them for the device this profile was on before. They come once it seals them again for this one.", `${BROWSER}/engine/hold.ts`],

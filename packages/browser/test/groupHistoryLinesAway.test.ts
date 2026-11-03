@@ -50,10 +50,13 @@ describe("a member back from away reads the group's lines among the messages of 
       await say(world, alice, id, "bye Bob");
       const keep = ["thanks all", "I'm off, bye", "[gone]", "bye Bob"];
       expect(history(carol, id, keep, from)).toEqual(keep);
+      // In a mesh, what a member who left wrote is not taken from the others (WISP 902 § Catch-up, revision 2026-11-02):
+      // a member away when it left reads the leave and the answer to it, not its last lines.
+      const away = profile === "mesh" ? ["[gone]", "bye Bob"] : keep;
       world.reopen(dave);
-      await world.until(() => history(dave, id, keep, from).length === keep.length, 5 * 60_000);
+      await world.until(() => history(dave, id, keep, from).length === away.length, 5 * 60_000);
       await world.run(30_000);
-      expect(history(dave, id, keep, from)).toEqual(keep);
+      expect(history(dave, id, keep, from)).toEqual(away);
     });
   }
 

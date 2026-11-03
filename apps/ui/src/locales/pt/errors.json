@@ -185,6 +185,8 @@
     "pasteLate": "Não foi possível adicionar agora o que você colou. Cole de novo quando terminar.",
     "pasteTooLarge": "Isso é grande demais para colar. Envie com + → Documento.",
     "pasteUnreadable": "Não foi possível colar esses arquivos. Envie-os com + → Documento.",
+    "pictureMetadata": "Esta imagem não pode ser enviada: o Ghostly não conseguiu remover os dados guardados nela, como o lugar onde foi tirada",
+    "pictureMetadataNext": "Envie uma captura de tela dela, ou salve uma cópia num editor de fotos e envie essa.",
     "refused": {
       "damaged": "O arquivo chegou danificado",
       "expired": "Não foi aceito a tempo",
@@ -303,6 +305,8 @@
     "fullBytes": "Isto passaria de {{max}} MB esperando por seu contato",
     "fullItems": "Seu contato já tem {{max}} itens esperando",
     "fullNext": "Envie de novo quando seu contato pegar alguns.",
+    "hiddenIp": "Seu contato deixou itens para você no armazenamento dele",
+    "hiddenIpNext": "Ocultar meu IP está ligado, então eles esperam lá até você desligar.",
     "messageGone": "A mensagem não existe mais",
     "needPinned": "Mensagens guardadas precisam de um S3 e de um contato fixado",
     "needStorageNext": "Configure um S3 em Perfil → Backups.",

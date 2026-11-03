@@ -535,6 +535,42 @@ it("asks the engine as the version it runs: every call goes to the platform of i
   expect(platform.calls).toEqual([]);
 });
 
+it("the read lane asks as the version it runs too: serves, reads and answers go to the platform of its digest", async () => {
+  const platform = memoryHost();
+  const bound = memoryHost();
+  platform.running = () => bound;
+  const posted: Record<string, unknown>[] = [];
+  const broker = createBroker({
+    host: platform,
+    launch: { ref: REF, digest: "digest-7", version: "1.0.0", title: "Cinema", permissions: ["chat", "files"], entry: "<p>app</p>", chat: { linkId: LINK } },
+    view: { theme: () => "dark", locale: () => "en" },
+    post: (message) => posted.push(message as Record<string, unknown>),
+    stopped: () => {},
+  });
+  const ask = async (id: number, type: string, args: unknown[] = []) => {
+    broker.message({ id, type, args });
+    await vi.waitFor(() => expect(posted.some((p) => p.id === id)).toBe(true));
+    return posted.find((p) => p.id === id)!;
+  };
+  broker.load();
+  broker.message({ id: 0, type: "writing", args: [] });
+  broker.load();
+  // Linked files are kept by the client, not a version: they stay on the outer platform.
+  const film = new Uint8Array(100).fill(7);
+  platform.nextPick = [{ path: "Films/Up.mp4", bytes: film }];
+  const id = ((await ask(1, "files.pick")).value as { id: string }[])[0]!.id;
+  await ask(2, "context");
+  const serve = (await ask(3, "files.serve", [id])).value as string;
+  const SERVE = "s".repeat(22);
+  bound.remote.set(SERVE, film);
+  expect(await ask(4, "remote.read", [SERVE, { offset: 0, length: 5 }])).toMatchObject({ ok: true });
+  expect(await ask(5, "remote.stat", [SERVE])).toMatchObject({ ok: true, value: { size: film.length } });
+  const app = memoryAppId(LINK, REF);
+  expect(await bound.askRange(LINK, { app, request: 6, serve, file: id, offset: 0, length: 5 })).toEqual({ app, request: 6, bytes: film.subarray(0, 5), size: film.length });
+  expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["ranges.serve", "ranges.read"]));
+  expect(platform.calls.map((c) => c.op).filter((op) => op.startsWith("ranges."))).toEqual([]);
+});
+
 describe("linked files (WISP 1200 · Linked files)", () => {
   const bytes = (n: number, fill = 7) => new Uint8Array(n).fill(fill);
 

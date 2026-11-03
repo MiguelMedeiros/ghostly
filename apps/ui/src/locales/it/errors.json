@@ -185,6 +185,8 @@
     "pasteLate": "Impossibile aggiungere ora ciò che hai incollato. Incollalo di nuovo quando hai finito.",
     "pasteTooLarge": "È troppo grande da incollare. Invialo con + → Documento.",
     "pasteUnreadable": "Impossibile incollare questi file. Inviali con + → Documento.",
+    "pictureMetadata": "Questa immagine non può essere inviata: Ghostly non è riuscito a rimuovere i dati salvati al suo interno, come il luogo in cui è stata scattata",
+    "pictureMetadataNext": "Invia uno screenshot dell'immagine, oppure salvane una copia in un editor di foto e invia quella.",
     "refused": {
       "damaged": "Il file è arrivato danneggiato",
       "expired": "Non accettato in tempo",
@@ -303,6 +305,8 @@
     "fullBytes": "Si supererebbero i {{max}} MB in attesa per il tuo contatto",
     "fullItems": "Il tuo contatto ha già {{max}} elementi in attesa",
     "fullNext": "Invialo di nuovo quando il tuo contatto ne avrà ritirati alcuni.",
+    "hiddenIp": "Il tuo contatto ha lasciato elementi per te nel suo spazio di archiviazione",
+    "hiddenIpNext": "Nascondi il mio IP è attivo, quindi aspettano lì finché non lo disattivi.",
     "messageGone": "Il messaggio non c'è più",
     "needPinned": "I messaggi trattenuti richiedono un S3 e un contatto fissato",
     "needStorageNext": "Configura un S3 in Profilo → Backup.",

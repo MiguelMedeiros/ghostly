@@ -142,6 +142,12 @@ export interface BrowserHost {
    * freezes an app out of sight otherwise.
    */
   keepAwake?(on: boolean, files: boolean): Promise<boolean>;
+  /**
+   * Keeps the app out of the system's app switcher picture while the app lock is on (`on`), or lets it be taken again:
+   * the Android app, whose switcher takes its picture before the page hears it is going, so the lock's cover comes too
+   * late for it. Left out where the page's cover is enough.
+   */
+  hideFromSwitcher?(on: boolean): Promise<void>;
 }
 
 /** One approval's cookie session, outside the page: its cookies never reach the page, and `close` forgets them. */

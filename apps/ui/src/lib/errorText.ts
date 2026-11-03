@@ -135,6 +135,8 @@ const RULES: readonly Rule[] = [
   exact("Connect to an updated peer to send files", "errors.files.updatedPeerToSend"),
   exact("Connect to an updated peer first", "errors.files.updatedPeerFirst"),
   exact("That recording cannot be sent as a voice message", "errors.files.notVoice"),
+  // A picture whose metadata could not be removed, refused before it is sent (packages/core pictureMetadata.ts).
+  exact("This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", "errors.files.pictureMetadata", "errors.files.pictureMetadataNext"),
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
@@ -503,6 +505,7 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app refused this item: it could not be verified as yours, or was too large for it. Retry to hold it again.", "errors.hold.contactRefused", "errors.hold.contactRefusedNext"),
   { match: /^Could not read the contact's pointer: [\s\S]+$/, key: "errors.hold.readFailed", next: "errors.hold.retryingNext", detail: true },
   exact("The contact holds items for you, but their address expired. They are handed out again when the contact is next online.", "errors.hold.addressExpired", "errors.hold.addressExpiredNext"),
+  exact("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off.", "errors.hold.hiddenIp", "errors.hold.hiddenIpNext"),
   { match: /^Refused what the contact's storage offered: [\s\S]+$/, key: "errors.hold.refusedOffer", detail: true },
   // Sealed in the ratchet session the device this profile was on before shares with the contact (WISP 4xx § Held items): it
   // waits for the contact's app to seal it again, not for anything this device retries. Before the general pick-up rule.

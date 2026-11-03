@@ -459,6 +459,18 @@ describe("with the apps flag on", () => {
     expect(tried).toEqual(["app"]);
   });
 
+  it("a link with a query (a private repository's file, with its token) says to publish the app in a public repository, and is not read as a store", async () => {
+    const tried: string[] = [];
+    const refused = "private-link: This link carries a query or a fragment";
+    fakeEngine.on("appPreview", () => { tried.push("app"); throw new Error(refused); })
+      .on("appStorePreview", () => { tried.push("store"); throw new Error(refused); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://raw.githubusercontent.com/ana/chess/main/dist?token=GHSAT0");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("Publish the app in a public repository and paste that link.");
+    expect(tried).toEqual(["app"]);
+  });
+
   it("Add: a host answering 500 says try again later; a store link holding no valid store says so, its refusal behind the ⓘ", async () => {
     fakeEngine.on("appStorePreview", () => { throw new Error("status: The host answered 500"); });
     const first = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);

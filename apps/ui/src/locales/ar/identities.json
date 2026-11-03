@@ -83,7 +83,7 @@
   "card": {
     "attestedBy": "موثّقة من {{attester}}",
     "attestedByProvider": "موثّقة من المزوّد",
-    "checked": "تم التحقق {{time}}",
+    "checked": "تم الفحص {{time}}",
     "expired": "منتهية",
     "expiredOn": "انتهت في {{date}}",
     "expiresIn": "تنتهي خلال {{count}} يومًا",
@@ -114,7 +114,7 @@
     "attested": "يقول {{attester}} إن هذا الحساب سجّل الدخول: وموثوقيته بقدر موثوقية {{attester}} فقط.",
     "attestedByProvider": "يقول المزوّد إن هذا الحساب سجّل الدخول: وموثوقيته بقدر موثوقية المزوّد فقط.",
     "backToCards": "العودة إلى بطاقات {{name}}",
-    "checked": "تاريخ التحقق",
+    "checked": "تاريخ الفحص",
     "checkedAgain": "على هذا الجهاز {{time}}، وآخر مرة {{last}}",
     "checkedOnce": "على هذا الجهاز {{time}}",
     "checking": "جارٍ التحقق…",
@@ -438,7 +438,7 @@
     "sourceFound": "حُمّل من {{from}} {{time}}. هذا ما يقوله الحساب عن نفسه، وليس جزءًا من الإثبات. أطلع السؤال ذلك الخادم على عنوان IP لهذا الجهاز."
   },
   "received": {
-    "checked": "{{category}} · تم التحقق {{time}}",
+    "checked": "{{category}} · تم الفحص {{time}}",
     "title": "من جهات اتصالك"
   },
   "share": {

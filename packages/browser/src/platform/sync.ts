@@ -29,7 +29,7 @@ import { engine, type ListChanges } from "./engine";
 import { forgetServicesOf } from "../host";
 import { viewerTag } from "@ghostly/core";
 import { replyRef } from "../shared/replies";
-import { paymentRefusal } from "../shared/refusals";
+import { isRefusalId, paymentRefusal } from "../shared/refusals";
 
 /**
  * The Desktop UI keeps its sessions in localStorage and that stays the list
@@ -257,6 +257,16 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
       // Only a join announcement has one; the others are not mapped again.
       const systemEvent = JOIN_PATTERN.test(message.text) ? mapped().systemEvent : undefined;
       if (systemEvent && previous.systemEvent?.pubKey !== systemEvent.pubKey) change().systemEvent = systemEvent;
+      // A refused payment's line as the engine's row says it (shared/refusals.ts): one mirrored before its values were
+      // kept as the contact's, or a contact's text under its id mirrored as the app's line. The UI reads only this.
+      if (isRefusalId(message.id)) {
+        const { sender, notice } = mapped();
+        if (previous.sender !== sender || JSON.stringify(previous.notice ?? null) !== JSON.stringify(notice ?? null)) {
+          const row = change();
+          row.sender = sender;
+          if (notice) row.notice = notice; else delete row.notice;
+        }
+      }
     }
     if (next) {
       session.messages[i!] = next;

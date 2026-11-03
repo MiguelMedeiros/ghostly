@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { openAsBlob } from "node:fs";
 import { access, constants, copyFile, link, open, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
+import { GROUP_FILE_LIMITS, LIMITS, NO_PICTURE_METADATA, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, claimedTime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, withoutPictureMetadata, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
@@ -155,12 +155,28 @@ async function voiceOf(params: Params, path: string, mime: string, size: number)
 }
 
 /**
+ * The file at `path` as it is sent, as the apps send it (platform/services.ts `sendable`): a picture without its metadata
+ * (where it was taken, the device, the time), before its size is read and its digest computed. A picture whose metadata
+ * cannot be removed is refused, never sent as it was. A voice note goes as it is.
+ */
+async function sendable(path: string, mime: string, voice: VoiceMeta | undefined): Promise<Blob> {
+  const source = await openAsBlob(path, { type: mime });
+  if (voice) return source;
+  try {
+    return await withoutPictureMetadata(source, mime) ?? source;
+  } catch (error) {
+    if (error instanceof Error && error.message === NO_PICTURE_METADATA) throw new CliError("refused", NO_PICTURE_METADATA);
+    throw error;
+  }
+}
+
+/**
  * A file announced in a group (WISP 503): its bytes staged under a group file id with their digest, as a chat's are, then
  * the announcement. This device is its first holder and serves the members who ask.
  */
-async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, size: number) {
-  if (size > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
-  if (!size) throw new CliError("refused", "An empty file cannot go to a group");
+async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, path: string, picked: number) {
+  if (picked > GROUP_FILE_LIMITS.maxBytes) throw new CliError("refused", `Too large for a group (at most ${GROUP_FILE_LIMITS.maxBytes} bytes)`);
+  if (!picked) throw new CliError("refused", "An empty file cannot go to a group");
   const mime = mimeOf(path, str(params, "mime"));
   const replyTo = str(params, "reply");
   if (replyTo) {
@@ -170,8 +186,9 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
   if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
-  const { voice, warning } = await voiceOf(params, path, mime, size);
-  const source = await openAsBlob(path, { type: mime });
+  const { voice, warning } = await voiceOf(params, path, mime, picked);
+  const source = await sendable(path, mime, voice);
+  const size = source.size;
   const image = voice ? undefined : await readImageMeta(source, mime);
   const fileId = groupFileId(group.id, "out");
   const file: MessageFile = { id: fileId, name: sanitizeFileName(str(params, "name") ?? basename(path)), size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
@@ -276,11 +293,11 @@ export const FILE_METHODS: Record<string, Method> = {
       if (!await findMessage(ctx, link.id, (m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
     }
     const { voice, warning } = await voiceOf(params, path, mime, info.size);
-    const source = await openAsBlob(path, { type: mime });
+    const source = await sendable(path, mime, voice);
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
     const image = voice ? undefined : await readImageMeta(source, mime);
     const wireId = toBase64Url(randomBytes(12));
-    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: info.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
+    const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: source.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
     const timestamp = sentAt();
     const bytes = await fileBytes();
     const digest = await bytes.stage(file.id, source);

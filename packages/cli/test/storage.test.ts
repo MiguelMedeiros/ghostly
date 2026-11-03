@@ -1161,12 +1161,12 @@ describe("messages kept in rows.db", () => {
     await closing.close();
     expect(held(close)).toEqual([]);
 
-    // A journal with no delete of a chat or a message is kept however old the snapshot: a fold costs a large profile a second.
+    // A journal with nothing taken away is kept however old the snapshot: a fold costs a large profile a second.
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
     const d = await chats(store.factory);
     await store.compact();
-    await tx(d, ["links", "settings"], (s) => { s.links.put({ id: "chat-2", seed: "kept" }); s.settings.put(1, "k"); s.settings.delete("k"); });
+    await tx(d, ["links", "messages"], (s) => { s.links.put({ id: "chat-2", seed: "kept" }); s.messages.put({ linkId: "chat-2", id: "m1", text: "kept" }); });
     d.close();
     await store.close();
     age(dir);
@@ -1174,6 +1174,69 @@ describe("messages kept in rows.db", () => {
     opened.push(await openPersistentIndexedDb(dir));
     expect(statSync(join(dir, "snapshot.bin")).mtimeMs).toBe(snapshot);
     expect(readFileSync(join(dir, "journal.bin")).includes("kept")).toBe(true);
+  });
+
+  it("a secret written over in the settings and a deleted service leave the journal once the snapshot is an hour old", async () => {
+    const profile = (factory: IDBFactory) => new Promise<IDBDatabase>((resolve, reject) => {
+      const request = factory.open("ghostly", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("services", { keyPath: "id" });
+        request.result.createObjectStore("settings");
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const held = (dir: string) => readdirSync(dir).filter((name) => readFileSync(join(dir, name)).includes("gone-"));
+    const age = (dir: string) => { const then = (Date.now() - 2 * 60 * 60_000) / 1000; utimesSync(join(dir, "snapshot.bin"), then, then); };
+    /** `x401 credential remove` and `settings set iceServers` write their row again without the secret; `service remove` deletes it. */
+    const removed = async () => {
+      const dir = folder();
+      const store = await openPersistentIndexedDb(dir);
+      const d = await profile(store.factory);
+      await store.compact();
+      await tx(d, ["services", "settings"], (s) => {
+        s.settings.put({ credentials: [{ id: "c1", holderKey: { secret: { sealed: "gone-sealed", deviceKey: "gone-device-key" } } }] }, "x401Credentials");
+        s.settings.put({ iceServers: [{ urls: "turn:relay.example", username: "u", credential: "gone-turn" }] }, "settings");
+        s.services.put({ id: "svc-1", seed: "gone-service" });
+      });
+      await tx(d, ["services", "settings"], (s) => {
+        s.settings.put({ credentials: [] }, "x401Credentials");
+        s.settings.put({ iceServers: [] }, "settings");
+        s.services.delete("svc-1");
+      });
+      d.close();
+      await store.close();
+      return dir;
+    };
+
+    // A snapshot younger than an hour: the short journal is kept.
+    const fresh = await removed();
+    opened.push(await openPersistentIndexedDb(fresh));
+    expect(held(fresh)).toEqual(["journal.bin"]);
+
+    // At a start.
+    const start = await removed();
+    age(start);
+    const started = await openPersistentIndexedDb(start);
+    opened.push(started);
+    expect(held(start)).toEqual([]);
+    expect(await read((await profile(started.factory)).transaction("settings").objectStore("settings").get("x401Credentials"))).toEqual({ credentials: [] });
+
+    // At the next write, while the store is in use.
+    const write = await removed();
+    const running = await openPersistentIndexedDb(write);
+    opened.push(running);
+    age(write);
+    await tx(await profile(running.factory), ["services"], (s) => { s.services.put({ id: "svc-2" }); });
+    await running.flush();
+    expect(held(write)).toEqual([]);
+
+    // At a close.
+    const close = await removed();
+    const closing = await openPersistentIndexedDb(close);
+    age(close);
+    await closing.close();
+    expect(held(close)).toEqual([]);
   });
 
   it("an index added by an upgrade to a store that holds messages is built in rows.db, and kept across a restart", async () => {

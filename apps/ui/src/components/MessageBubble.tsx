@@ -34,8 +34,7 @@ import { useTransfer } from "../hooks/useServicesPlatform";
 import { holdRow } from "../hooks/useRowWindow";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
-import { paymentRefusal } from "@ghostly/browser/shared/refusals";
-import { refusedLine } from "../lib/refusedLine";
+import { refusedLine, shownRefusal } from "../lib/refusedLine";
 import { callLineCount } from "../lib/storage";
 import { formatCallLength } from "../lib/messageDetails";
 import type { QuoteView } from "../lib/replies";
@@ -1052,8 +1051,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   );
 
   // A payment of the contact's this app refused: the app's own line, centred as a call's, never a bubble of theirs.
-  // From the row's values, or the English an older version stored under the same id (shared/refusals.ts).
-  const refusedPayment = paymentRefusal(message);
+  // From the values the mirror put on the row (lib/refusedLine.ts `shownRefusal`).
+  const refusedPayment = shownRefusal(message);
   if (refusedPayment) {
     return (
       <div {...rowProps} data-message-row data-sender="system" className={`group flex items-center justify-center gap-1 mb-3.5 message-row-x ${enter}`}>

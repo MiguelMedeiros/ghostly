@@ -64,7 +64,7 @@ const sized = (width: number, height: number): ImageMeta | undefined => (edge(wi
 const JPEG_FRAME = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
 
 /** The EXIF orientation in an APP1 segment's TIFF block (1 when it says none). */
-function exifOrientation(b: Uint8Array, tiff: number, end: number): number {
+export function exifOrientation(b: Uint8Array, tiff: number, end: number): number {
   if (tiff + 8 > end) return 1;
   const little = ascii(b, tiff, "II");
   if (!little && !ascii(b, tiff, "MM")) return 1;

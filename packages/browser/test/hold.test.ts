@@ -59,7 +59,7 @@ interface Side {
   refuseFiles?: string;
 }
 
-function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; loopbackStorage?: boolean; fetch?: (inner: typeof fetch) => typeof fetch; ratchet?: { alice: boolean; bob: boolean } } = {}) {
+function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; loopbackStorage?: boolean; fetch?: (inner: typeof fetch) => typeof fetch; ratchet?: { alice: boolean; bob: boolean }; bobHidesIp?: () => string[] | null } = {}) {
   const link = createLink();
   const alice = createIdentity(), bob = createIdentity();
   const transport = relay();
@@ -84,6 +84,7 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
       fetch: options.fetch ? options.fetch(other.fetcher) : other.fetcher,
       ...(options.loopbackStorage && { loopbackStorage: () => true }),
+      ...(options.bobHidesIp && mine.id === "link-b" && { hiddenIpHosts: options.bobHidesIp }),
       now,
     };
     // The chat's ratchet (WISP 4xx), on a side whose app has it; the other side's record says whether it does too.
@@ -523,6 +524,42 @@ describe("store-and-forward engine", () => {
     b.engine.start();
     await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["held"]));
     expect(asked.every((url) => url.startsWith("http://127.0.0.1:9000/"))).toBe(true);
+  });
+
+  it("with Hide my IP on, nothing is fetched from the contact's storage: the items wait, said once, and come when it goes off", async () => {
+    const asked: string[] = [];
+    let hidden: string[] | null = ["mine.example"];
+    const { a, b, buckets } = setup({ bobHidesIp: () => hidden, fetch: (inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+      asked.push(String(input));
+      const url = new URL(String(input));
+      return inner(`https://s3.test${url.pathname}${url.search}`, init);
+    }) as typeof fetch });
+    engines.push(a.engine, b.engine);
+    const presign = buckets.alice.store.presign;
+    buckets.alice.store.presign = async (name, seconds) => (await presign(name, seconds)).replace("https://s3.test/", "https://contact.example/");
+    a.messages.set("me_1", { text: "held", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-id-0001", messageId: "me_1", bytes: 4, timestamp: 1000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.engine.view("link-b")?.error).toBe("Hide my IP from contacts is on: what your contact held for you waits on their storage until you turn it off."));
+    expect(asked).toEqual([]);
+    expect(b.received).toEqual([]);
+    expect(b.stored.hold!).toMatchObject({ inSeq: 0, refused: 0 });
+    // Off: picked up at the next look, and the line goes.
+    hidden = null;
+    b.engine.wake("link-b");
+    await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["held"]));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((url) => url.startsWith("https://contact.example/"))).toBe(true);
+    expect(b.engine.view("link-b")?.error).toBeUndefined();
+  });
+
+  it("with Hide my IP on, a pickup from this person's own storage host still goes", async () => {
+    const { a, b } = setup({ bobHidesIp: () => ["s3.test"] });
+    engines.push(a.engine, b.engine);
+    a.messages.set("me_1", { text: "held", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-id-0001", messageId: "me_1", bytes: 4, timestamp: 1000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["held"]));
   });
 
   it("a storage request that never answers is given up after its timeout, and the next poll picks everything up", async () => {
