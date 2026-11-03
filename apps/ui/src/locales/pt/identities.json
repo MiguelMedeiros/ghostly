@@ -73,7 +73,7 @@
   "card": {
     "attestedBy": "Atestada por {{attester}}",
     "attestedByProvider": "Atestada pelo provedor",
-    "checked": "Verificada {{time}}",
+    "checked": "Conferida {{time}}",
     "expired": "Expirada",
     "expiredOn": "Expirou em {{date}}",
     "expiresIn": "Expira em {{count}} dias",
@@ -95,7 +95,7 @@
     "attested": "{{attester}} diz que esta conta fez login: só é tão confiável quanto {{attester}}.",
     "attestedByProvider": "O provedor diz que esta conta fez login: só é tão confiável quanto ele.",
     "backToCards": "Voltar aos cartões de {{name}}",
-    "checked": "Verificada",
+    "checked": "Conferida",
     "checkedAgain": "Neste dispositivo em {{time}}, última vez em {{last}}",
     "checkedOnce": "Neste dispositivo em {{time}}",
     "checking": "Verificando…",
@@ -356,7 +356,7 @@
     "sourceFound": "Carregado de {{from}} {{time}}. É o que a conta diz sobre si, não faz parte da prova. A consulta revelou a esse servidor o endereço IP deste dispositivo."
   },
   "received": {
-    "checked": "{{category}} · verificada em {{time}}",
+    "checked": "{{category}} · conferida em {{time}}",
     "title": "Dos seus contatos"
   },
   "share": {

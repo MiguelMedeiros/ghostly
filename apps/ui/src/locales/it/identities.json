@@ -73,7 +73,7 @@
   "card": {
     "attestedBy": "Attestata da {{attester}}",
     "attestedByProvider": "Attestata dal provider",
-    "checked": "Verificata {{time}}",
+    "checked": "Controllata {{time}}",
     "expired": "Scaduta",
     "expiredOn": "Scaduta il {{date}}",
     "expiresIn": "Scade tra {{count}} giorni",
@@ -95,7 +95,7 @@
     "attested": "{{attester}} dice che questo account ha effettuato l'accesso: affidabile solo quanto {{attester}}.",
     "attestedByProvider": "Il provider dice che questo account ha effettuato l'accesso: affidabile solo quanto il provider.",
     "backToCards": "Torna alle carte di {{name}}",
-    "checked": "Verificata",
+    "checked": "Controllata",
     "checkedAgain": "Su questo dispositivo il {{time}}, l'ultima volta il {{last}}",
     "checkedOnce": "Su questo dispositivo il {{time}}",
     "checking": "Verifica…",
@@ -356,7 +356,7 @@
     "sourceFound": "Caricato da {{from}} {{time}}. È ciò che l'account dice di sé, non fa parte della prova. La richiesta ha rivelato a quel server l'indirizzo IP di questo dispositivo."
   },
   "received": {
-    "checked": "{{category}} · verificata il {{time}}",
+    "checked": "{{category}} · controllata il {{time}}",
     "title": "Dai tuoi contatti"
   },
   "share": {
