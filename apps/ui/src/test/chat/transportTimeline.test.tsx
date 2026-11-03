@@ -311,6 +311,9 @@ describe("the chat's connection control and its panel", () => {
     // This app has Iroh (the web on its Iroh relays) and it did not start: the relays are where to look, not another app.
     expect(transportOptions({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "iroh/1"] }).find(o => o.transport === "iroh/1"))
       .toEqual({ transport: "iroh/1", available: false, reason: "Iroh couldn't reach its relay · Settings, Network" });
+    // The same for HyperDHT on a HyperDHT relay that went away (its endpoint starting again): not "set a relay", one is set.
+    expect(transportOptions({ availableTransports: ["webrtc/1"], runnableTransports: ["webrtc/1", "hyperdht/1"] }).find(o => o.transport === "hyperdht/1"))
+      .toEqual({ transport: "hyperdht/1", available: false, reason: "HyperDHT couldn't reach its relay · Settings, Network" });
     // A native adapter that could not start says so in a few words, its next step left to the line below; Linux WebKitGTK has no WebRTC.
     expect(transportOptions({ availableTransports: ["hyperdht/1"], transportErrors: { "iroh/1": "All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now." } }).map(o => o.reason))
       .toEqual(["This app has no WebRTC", "All native connections in use", undefined]);
