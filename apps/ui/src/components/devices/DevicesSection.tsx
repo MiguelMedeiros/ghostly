@@ -80,7 +80,13 @@ export function DevicesSection() {
     setMoveClosed(false);
     if (!document.activeElement || document.activeElement === document.body) runningBox.current?.focus();
   }, [moveClosed, running]);
-  const devices = view?.devices ?? [];
+  // The device a Remove here just took out of the set: its row goes in the render that adds its Removed row, not at the
+  // next read of the set seconds later, so the list never offers Move to a device it also says is removed. Forgotten
+  // once a read of the set no longer has it.
+  const [gone, setGone] = useState<string | null>(null);
+  const listed = !!gone && !!view?.devices.some((device) => device.key === gone);
+  useEffect(() => { if (gone && view && !listed) setGone(null); }, [gone, view, listed]);
+  const devices = (view?.devices ?? []).filter((device) => device.key !== gone);
   const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
@@ -171,7 +177,7 @@ export function DevicesSection() {
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => { setMoving(null); setMoveClosed(true); }} />}
-      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => { setRemoved(removing.name); setFocusRemoved(true); }} />}
+      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => { setGone(removing.key); setRemoved(removing.name); setFocusRemoved(true); }} />}
       {lost && <LostChecklist device={stopped?.name} onClose={() => setLost(false)} onRemove={stopped ? () => { setLost(false); setRemoving({ key: stopped.key, name: stopped.name }); } : undefined} />}
     </Section>
   );

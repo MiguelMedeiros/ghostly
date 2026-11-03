@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { DevicesSection } from "../../components/devices/DevicesSection";
@@ -57,6 +57,33 @@ describe("Remove, on the active device", () => {
     await waitFor(() => expect(screen.getAllByTestId("device-row")).toHaveLength(2), { timeout: 3_000 });
     await waitFor(() => expect(removed).toHaveFocus());
     expect(removed).toHaveTextContent("Tablet");
+  });
+
+  it("the removed device's row goes in the same render as its Removed row comes, not at the next read of the set", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    try {
+      const { engine } = renderApp(<DevicesSection />);
+      let devices = activeSet().devices;
+      engine.on("deviceSet", () => activeSet({ devices }));
+      engine.on("deviceRemove", () => { devices = devices.slice(0, 2); return activeSet({ devices }); });
+      const later = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+      await later(0);
+      const tablet = screen.getAllByTestId("device-row")[2];
+      expect(within(tablet).getByTestId("device-move")).toHaveTextContent("Move to Tablet");
+      act(() => within(tablet).getByTestId("device-menu").click());
+      act(() => screen.getByTestId("device-remove-open").click());
+      act(() => screen.getByTestId("device-remove-go").click());
+      // deviceRemove answered; the 3-second read of the set has not come yet.
+      await later(0);
+      expect(screen.getByTestId("device-removed")).toHaveTextContent("Tablet");
+      expect(screen.getAllByTestId("device-row").map((row) => row.textContent)).not.toContainEqual(expect.stringContaining("Tablet"));
+      expect(screen.queryAllByTestId("device-move")).toHaveLength(0);
+      expect(screen.getAllByTestId("device-menu")).toHaveLength(1);
+      // The next read says the same: still one Removed row and no Tablet row.
+      await later(3_000);
+      expect(screen.getAllByTestId("device-row")).toHaveLength(2);
+      expect(screen.getAllByTestId("device-removed")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
   });
 
   it("says why it could not, and changes nothing", async () => {
