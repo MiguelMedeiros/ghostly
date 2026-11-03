@@ -154,8 +154,8 @@ export interface DeviceLinksOptions {
   /** Makes who runs the handoff here (device-link-only mode), once the links started. */
   handoff?: (links: DeviceLinks, host: DeviceLinkHost | null) => Promise<DeviceHandoffHandler | null>;
   /**
-   * A standby reads the turn record when its screen opens and every 10 minutes while it shows (WISP 06 § When a device
-   * checks), and tells the pages when its state changed (a tombstone makes it `moving` or `removed`). Device-link-only mode.
+   * A standby reads the turn record when its screen opens, every 10 minutes while it shows and when a live link is
+   * closed from the other end (WISP 06 § When a device checks, `linkLost`), and tells the pages when its state changed (a tombstone makes it `moving` or `removed`). Device-link-only mode.
    */
   watchTurn?: boolean;
   /**
@@ -276,6 +276,8 @@ export class DeviceLinks implements DeviceLinkEngine {
   private turnQueue: Promise<unknown> = Promise.resolve();
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   private lastHintRead = 0;
+  /** When a link closing by the other side's doing last made this standby read the turn (`linkLost`). */
+  private lastLossRead = 0;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: DeviceLinksOptions) {
@@ -475,6 +477,8 @@ export class DeviceLinks implements DeviceLinkEngine {
           if (state === "open") this.rtcBacks.delete(running.id);
           if (state === "open" && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
           if (state !== "open") {
+            // A live link of the set closed, and not by this device (`close` forgets it first): a removal does this.
+            if (running.agreed && !running.earlier && this.running.get(running.id) === running) void this.linkLost().catch(() => {});
             running.agreed = false; this.failPings(running, "The device link closed");
             if (running.handoff) { running.handoff = false; if (!running.earlier) this.handoffLink(running.key, false); }
             if (running.moved.size) void this.moveNative(running);
@@ -740,6 +744,20 @@ export class DeviceLinks implements DeviceLinkEngine {
     if (!record || record.state === "removed") return;
     this.lastHintRead = Date.now();
     await this.checkAndShow().catch(() => null);
+  }
+
+  /**
+   * A standby's live link to another device of its set closed by that device's doing. A removal does this right after
+   * it puts the tombstone, and nothing else tells a screen left in front (no focus, no visibility change) before its
+   * next read, up to 10 minutes away: it would go on offering Use here, which must fail. Read once, as a hint is, at
+   * most once in `TURN_HINT_EVERY_MS`: a network that drops every link at once costs one read.
+   */
+  private async linkLost(): Promise<void> {
+    if (!this.options.watchTurn || this.stopped || Date.now() - this.lastLossRead < TURN_HINT_EVERY_MS) return;
+    this.lastLossRead = Date.now();
+    const record = await this.record();
+    if (!record || record.state === "active" || record.state === "removed") return;
+    await this.checkAndShow();
   }
 
   /** `key` holds the set under `d` (or the current one): its pending frame is done, and the old link goes. */
