@@ -68,6 +68,7 @@
     "offline": "Você está offline.",
     "otherApp": "O link tem outro app.",
     "permissionsChanged": "Esta atualização agora adiciona outras permissões. Veja-as de novo antes de atualizar.",
+    "privateLink": "Este link tem uma parte depois de ? ou #, onde fica o token de um repositório privado, e ela chegaria aos seus contatos junto com o app. Publique o app em um repositório público e cole esse link.",
     "refused": "O Ghostly não vai instalar",
     "removed": "Uma loja que você adicionou removeu este app.",
     "revoked": "O publicador revogou esta versão.",

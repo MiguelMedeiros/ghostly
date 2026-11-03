@@ -409,6 +409,18 @@ function notReadable(url: unknown, words: string): never {
   fail("host", words);
 }
 
+/**
+ * A pasted link Ghostly reads, with a query or a fragment, is refused (`private-link`): a private repository's file link
+ * carries its read token in the query, and the link an app is installed from goes on the card a contact receives. A
+ * github.com page's query never reaches the file read (`appPasteUrl` makes that link anew).
+ */
+function refusePrivateLink(url: unknown): void {
+  if (typeof url !== "string" || isGitHubPage(url)) return;
+  let href: string;
+  try { href = new URL(url.trim()).href; } catch { return; }
+  if (/[?#]/.test(href)) fail("private-link", "This link carries a query or a fragment, as a private repository's file link does: publish the app in a public repository and paste its link");
+}
+
 const versionOf = (manifest: AppManifest, digest: string): AppVersion => ({ ref: appRef(manifest.publisher, manifest.name), sequence: manifest.sequence, digest });
 const byteLength = (text: string) => utf8Encode(text).length;
 
@@ -1073,7 +1085,9 @@ export class Apps {
   }
 
   private storeUrl(url: unknown): string {
-    return (typeof url === "string" && appPasteUrl(url, "ghostly-store.json")) || notReadable(url, "Stores are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
+    const at = (typeof url === "string" && appPasteUrl(url, "ghostly-store.json")) || notReadable(url, "Stores are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
+    refusePrivateLink(url);
+    return at;
   }
 
   private keepPreviewed(previewed: Apps["previewed"]): void {
@@ -1202,6 +1216,7 @@ export class Apps {
     }
     if ("url" in source) {
       urls = [(typeof source.url === "string" && appPasteUrl(source.url, "app.ghostlyapp")) || notReadable(source.url, "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS")];
+      refusePrivateLink(source.url);
     } else if ("store" in source) {
       const s = await this.storeRecord(source.store);
       const listing = s && !s.removed ? s.index?.apps.find((a) => a.ref === source.ref) : undefined;

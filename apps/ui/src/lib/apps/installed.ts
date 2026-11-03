@@ -1,7 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
-import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
+import { appCardId, appCardUrl, statusCardText, type AppCard } from "@ghostly/core";
 import { appsRunning, openApp, stopTakenDown, type OpenAppOptions } from "./open";
 
 /*
@@ -89,12 +89,14 @@ export function installedApps(): readonly InstalledAppView[] | null {
 /**
  * The app card a person's app sends when they open (or share) an installed app in a 1:1 chat (WISP 405 § An app):
  * made from the app it installed and checked, never filled in by the person. Its `url` is where the installed version
- * came from, so a contact fetches the same bytes.
+ * came from, so a contact fetches the same bytes, never with its query or fragment (`appCardUrl`): an app installed
+ * from a private file's link before such links were refused keeps its read token there.
  */
 export function appCardFor(app: InstalledAppView, opened: boolean): AppCard {
+  const url = appCardUrl(app.from);
   return {
     kind: "app", id: appCardId(app.ref), ref: app.ref, digest: app.digest, sequence: app.sequence, title: app.title,
-    ...(app.version.length <= 32 && { version: app.version }), url: app.from, ...(opened && { opened: true as const }),
+    ...(app.version.length <= 32 && { version: app.version }), ...(url && { url }), ...(opened && { opened: true as const }),
   };
 }
 
