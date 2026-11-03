@@ -259,6 +259,11 @@ export const FILE_METHODS: Record<string, Method> = {
     if (!info.isFile()) throw new CliError("bad_request", `${path} is not a file`);
     // A file this user may not read: refused with its path (errors.ts), not the engine's "The blob could not be read" later.
     await access(path, constants.R_OK);
+    // A one-shot leaves once its command is done, and the transfer with it: in a chat it stays until the contact has the
+    // whole file, as `send` stays until its message went out. Before, it left in under a second with nothing sent, and
+    // the contact saw the file only with a later command that stayed online long enough. A group's file: none.
+    const wait = oneOf(params, "wait", "group" in target ? ["none"] as const : ["none", "sent"] as const, !("group" in target) && ctx.mode === "one-shot" ? "sent" : "none");
+    const seconds = num(params, "timeout", 300, { min: 1, max: 86_400 });
     if ("group" in target) return sendToGroup(ctx, params, target.group, path, info.size);
     const { link } = target;
     if (link.profile && link.dataLink === "open" && !link.capabilities?.files) throw new CliError("unavailable", "The contact's app takes no files");
@@ -295,6 +300,7 @@ export const FILE_METHODS: Record<string, Method> = {
     }
     // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
     // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
+    if (wait === "sent") await FILE_METHODS["file.wait"](ctx, { chat: link.id, file: file.id, timeout: seconds });
     return { chat: link.id, messageId: `me_${timestamp}`, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
 
