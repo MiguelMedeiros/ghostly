@@ -51,10 +51,11 @@ export const GROUP_LIMITS = {
   secretsPerFrame: 16,
   /**
    * Other members' messages kept to hand on to a member who missed them (any member catches up the others): count
-   * and total ciphertext bytes. The oldest go first.
+   * and total bytes as `frameBytes` counts them. The oldest go first. The bytes hold 256 texts of `textBytes` (about
+   * 22 KB each as a frame), so only messages carrying boxes beside a long text give way before their count.
    */
   relay: 256,
-  relayBytes: 256 * 1024,
+  relayBytes: 6 * 1024 * 1024,
   /** Other members' edits kept to hand on, the latest per message (WISP 902 § Edits): count and ciphertext bytes. */
   relayEdits: 64,
   relayEditBytes: 512 * 1024,

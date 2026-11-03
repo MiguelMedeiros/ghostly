@@ -3,7 +3,8 @@ import { createIdentity } from "../src/identity";
 import { encryptText, epochKeys } from "../src/groupCrypto";
 import { fromBase64Url } from "../src/bytes";
 import { LEGACY_GROUP_MEMBERS, MAX_GROUP_MEMBERS, verifyChain } from "../src/groupCommits";
-import { GROUP_LIMITS, GroupSession, asWritten, chainPieces, groupMessageId, type GroupMessageFrame, type GroupSecretsFrame, type GroupSyncFrame } from "../src/groupSession";
+import { GROUP_LIMITS, GroupSession, asWritten, chainPieces, frameBytes, groupMessageId, type GroupMessageFrame, type GroupSecretsFrame, type GroupSyncFrame } from "../src/groupSession";
+import { STATUS_CARD_LIMITS, type StatusCard } from "../src/statusCards";
 import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.catch-up, groups.remove-member, groups.protocol.mentions
 
@@ -186,16 +187,31 @@ describe("any member catches up the others", { timeout: 60_000 }, () => {
     expect(mesh.texts(bob).filter(t => t === "from alice")).toHaveLength(1);
   });
 
+  it("hands a member back the last 256 messages of one author, each as long as a message may be", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    away(mesh, bob, [alice, carol]);
+    // Carol alone writes the longest texts: a bot's reports, an announcer's paragraphs.
+    for (let i = 0; i < GROUP_LIMITS.relay; i++) await carol.sendText(`${i} ${"x".repeat(GROUP_LIMITS.textBytes - 4)}`, 1_000 + i);
+    await mesh.settle();
+    expect(alice.state.relay).toHaveLength(GROUP_LIMITS.relay);
+    away(mesh, carol, [alice]);
+    await mesh.open(bob, alice, { a: [carol.myKey] });
+    expect(mesh.texts(bob)).toHaveLength(GROUP_LIMITS.relay);
+    expect(mesh.texts(bob)[0].startsWith("0 ")).toBe(true);
+  });
+
   it("keeps what it hands on bounded, by count and by bytes, and without fields its author added", async () => {
     const { mesh, alice, bob } = await three();
     for (let i = 0; i < GROUP_LIMITS.relay + 10; i++) await bob.sendText(`b${i}`);
     await mesh.settle();
     expect(alice.state.relay).toHaveLength(GROUP_LIMITS.relay);
     expect(alice.state.relay![0].n).toBe(10);
-    const big = "x".repeat(8_000);
-    for (let i = 0; i < 40; i++) await bob.sendText(big);
+    // The longest texts, each with a card of its own: fewer than 256 fit in the bytes.
+    const big = "x".repeat(GROUP_LIMITS.textBytes), card = { kind: "task", id: "t", title: "y".repeat(STATUS_CARD_LIMITS.bytes - 64) } as unknown as StatusCard;
+    for (let i = 0; i < GROUP_LIMITS.relay; i++) await bob.sendText(big, undefined, [], undefined, undefined, card);
     await mesh.settle();
-    const bytes = alice.state.relay!.reduce((s, f) => s + f.c.length, 0);
+    expect(alice.state.relay!.length).toBeLessThan(GROUP_LIMITS.relay);
+    const bytes = alice.state.relay!.reduce((s, f) => s + frameBytes(f), 0);
     expect(bytes).toBeLessThanOrEqual(GROUP_LIMITS.relayBytes);
     // A frame padded with something else is kept without it.
     mesh.setEdge(alice.myKey, bob.myKey, false);
