@@ -12,7 +12,7 @@ import { hashPassword } from "../../lib/settings";
 import { AppProviders, renderApp } from "../render";
 import { installFakeAudio, installFakeMedia, media, removeFakeMedia } from "./fakeMedia";
 
-// covers: chat.voice
+// covers: files.voice.record
 
 const onSend = vi.fn<(text: string) => Promise<string | null>>();
 const onSendFile = vi.fn<(file: File, voice?: VoiceMeta) => Promise<string | null>>();
