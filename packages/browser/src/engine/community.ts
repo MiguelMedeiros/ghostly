@@ -1830,7 +1830,11 @@ export class Communities {
       case "group-welcome": {
         const joining = group.joining;
         if (!joining || joining.linkId !== linkId || !joining.inviter) return;
-        const joined = CommunitySession.join({ g, host: joining.host }, joining.pieces, frame, joining.seedB64);
+        // A long history is checked a slice at a time: the page draws and takes input meanwhile.
+        const inviter = joining.inviter;
+        const joined = await CommunitySession.joinPaced({ g, host: joining.host }, joining.pieces, frame, joining.seedB64);
+        // Left, deleted, joined from another welcome or invited by another member while it was checked: not this one's turn.
+        if (this.stored.get(g) !== group || group.joining !== joining || joining.linkId !== linkId || joining.inviter !== inviter) return;
         // The link was replaced (or turned off) while this entry was open: knocking at it again lets nobody in, so the
         // joiner is told and stops, until it opens the current link. A member checking it still is waits as before.
         if ("error" in joined && joined.error === LINK_REPLACED && !joining.check) {
