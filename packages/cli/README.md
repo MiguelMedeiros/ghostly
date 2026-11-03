@@ -547,7 +547,7 @@ A profile publishes on Pkarr within seconds of its first run (its `did:dht` reco
 public relays and the Mainline DHT unless told otherwise. To keep a private network or a test on its own relays from
 the start, run every command with `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desktop reads the same variable): those are
 then the only Pkarr relays, the profile's `relays` setting is not used, and the Mainline DHT is left out unless
-`GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on loopback) does the same
+`GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on loopback, at most five) does the same
 for Iroh: those are the only Iroh relays, whatever `irohRelays` says. `status` shows the relays in use (`discovery.relays`); `settings get`
 still shows the profile's own list, which is used again once the variable is unset. Without the variable,
 `settings set relays '["http://…"]'` before the first `daemon`, with `GHOSTLY_DHT=0` or `GHOSTLY_DHT_BOOTSTRAP`, does
