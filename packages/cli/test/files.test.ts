@@ -1,7 +1,8 @@
-import { mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { NO_PICTURE_METADATA } from "@ghostly/core";
 import { FILE_BYTES_STEP } from "@ghostly/browser/shared/fileBytes";
 import type { EngineState, GroupView } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
@@ -130,5 +131,21 @@ describe("group administration", () => {
     expect(await pictureFrom(join(fixtures, "avatar.jpg"))).toMatch(/^data:image\/jpeg;base64,\/9j/);
     await expect(pictureFrom(join(fixtures, "avatar.png"))).rejects.toMatchObject({ code: "bad_request" });
     await expect(pictureFrom(join(fixtures, "nothing.jpg"))).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("takes a picture without the details saved in it, and refuses one they cannot be removed from", async () => {
+    const SECRET = "GHOSTLY-SECRET-GPS 52.37N 4.89E";
+    const ascii = (value: string) => [...value].map((c) => c.charCodeAt(0));
+    const segment = (marker: number, body: number[]) => [0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
+    const jpegWith = (secret?: string) => Buffer.from([0xff, 0xd8,
+      ...(secret ? segment(0xe1, [...ascii("Exif\0\0"), 0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, ...ascii(secret)]) : []),
+      ...segment(0xdb, [0, ...new Array(64).fill(1)]), ...segment(0xc0, [8, 0, 128, 0, 128, 1, 1, 0x11, 0]),
+      ...segment(0xc4, [0, ...new Array(16).fill(0)]), ...segment(0xda, [1, 1, 0, 0, 63, 0]), 0x12, 0x34, 0xff, 0xd9]);
+    const dir = folder();
+    writeFileSync(join(dir, "photo.jpg"), jpegWith(SECRET));
+    const url = await pictureFrom(join(dir, "photo.jpg"));
+    expect(Buffer.from(url.slice(url.indexOf(",") + 1), "base64")).toEqual(jpegWith());
+    writeFileSync(join(dir, "cut.jpg"), jpegWith(SECRET).subarray(0, -2));
+    await expect(pictureFrom(join(dir, "cut.jpg"))).rejects.toMatchObject({ code: "refused", message: NO_PICTURE_METADATA });
   });
 });
