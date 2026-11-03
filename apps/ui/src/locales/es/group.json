@@ -116,6 +116,8 @@
     "answeredCommunity": "La app de un miembro vio tu llamada y se está conectando contigo. Entrarás en un momento.",
     "answeredTitleCommunity": "Un miembro te está dejando entrar",
     "cancel": "Cancelar la unión",
+    "full": "Este grupo está lleno",
+    "fullBody": "Tiene {{n}} de {{max}} miembros. Entras cuando alguien salga: deja la app abierta.",
     "joiningGroup": "Uniéndote al grupo…",
     "joiningName": "Uniéndote a {{name}}…",
     "knocked": "Ocurre cuando la app del admin esté abierta. Puedes salir de esta página.",

@@ -61,6 +61,15 @@ function chessFrame(ana: Peer) {
   return frame;
 }
 
+/**
+ * The app's heading, for `expect.poll`: null until its frame is there. The panel shows before its iframe loads, and a
+ * poll whose callback throws fails at once ("no app frame"), with no second try.
+ */
+function appHeading(ana: Peer): Promise<string | null | undefined> {
+  const frame = ana.page.frames().find((f) => f.url().includes("app-frame"));
+  return frame ? frame.evaluate(() => document.querySelector("h1")?.textContent).catch(() => null) : Promise.resolve(null);
+}
+
 test("on a wide screen the app sits beside the chat, which stays usable", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const [ana, bob] = await setUp(peer);
   await ana.page.setViewportSize({ width: 1280, height: 800 });
@@ -75,7 +84,7 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await expect(app.getByTestId("app-connection-options")).toHaveAccessibleName(/Connected · /);
   await expect(app.getByTestId("mini-app-back")).toHaveCount(0);
   await expect(app.locator("iframe")).toBeVisible();
-  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Chess");
+  await expect.poll(() => appHeading(ana)).toBe("Chess");
   await chessFrame(ana).evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
 
   // The chat is still there, beside it, and works: Ana writes, Bob reads.
@@ -129,7 +138,7 @@ test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@
   await expect(app.getByTestId("mini-app-with")).toHaveText("with Bob");
   await expect(app.getByTestId("app-connection-options")).toHaveAccessibleName(/Connected · /);
   await expect(app.getByTestId("mini-app-wide")).toHaveCount(0);
-  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Chess");
+  await expect.poll(() => appHeading(ana)).toBe("Chess");
   const frame = chessFrame(ana);
   await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
 
@@ -180,7 +189,7 @@ test("on a phone the browser's Back with the app over the chat goes back to the 
   const app = ana.page.getByTestId("mini-app");
   await expect(app).toBeVisible();
   await expect(app).toHaveAttribute("data-place", "phone");
-  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Chess");
+  await expect.poll(() => appHeading(ana)).toBe("Chess");
   const frame = chessFrame(ana);
   await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
 
@@ -271,7 +280,7 @@ test("a full-screen app opened from a chat covers the whole chat on a wide scree
   const pane = (await ana.page.locator(".chat-pane").filter({ has: app }).boundingBox())!, box = (await app.boundingBox())!;
   expect(Math.round(box.width)).toBe(Math.round(pane.width));
   await expect(app.getByTestId("mini-app-back")).toBeFocused();
-  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Browser");
+  await expect.poll(() => appHeading(ana)).toBe("Browser");
   const frame = chessFrame(ana);
   await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
 

@@ -213,6 +213,8 @@ export class IdentityProofs {
     if (!draft) throw new Error("This proof was started too long ago. Start again.");
     const statement = identityStatement(draft.binding);
     const verified = await this.verify(statement, JSON.parse(JSON.stringify(evidence ?? null)));
+    // Cancelled (or dropped) while it was checked: nothing to save, and its seed is zeroed.
+    if (this.drafts.get(draftId) !== draft) throw new Error("This proof was started too long ago. Start again.");
     if (this.proofs.length >= MAX_PROOFS) throw new Error("Remove an identity first");
     this.drafts.delete(draftId);
     const stored: StoredIdentityProof = { binding: draft.binding, evidence, seed: await sealSecret(toBase64Url(draft.seed), proofKeyAt(statement.id)), verified, createdAt: Date.now() };
