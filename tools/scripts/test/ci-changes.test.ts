@@ -1,4 +1,6 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PACKAGES_READ_FROM_SITE, RUST_INPUTS, TESTED_PAGES, WEBSITE_INPUTS, covers, draftBehind, plan, supersededBy, testedAs } from "../ci-changes.mjs";
@@ -513,5 +515,60 @@ describe("a draft run whose pull request left draft after its event", () => {
       const { api, settle } = fake([self, other]);
       expect(await draftBehind({ sha, run: own, pull: 7, repo, api, settle })).toBe(null);
     }
+  });
+});
+
+// A green "CI Success (draft)" lets a ready pull request board the merge train, which then cancels its full run: the
+// notice must not send a ready one to `gh pr ready`, nor name that full run as where the required check comes from.
+describe("the notice of a green fast tier", () => {
+  const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+  const job = (id: string) => ci.match(new RegExp(`^  ${id}:\n[\\s\\S]*?(?=^  [\\w-]+:\n|(?![\\s\\S]))`, "m"))?.[0] ?? "";
+  /** A step's `run: |` script, unindented. */
+  const script = (jobId: string, step: string) => {
+    const body = job(jobId).split(`      - name: ${step}\n`)[1]?.split(/^ {8}run: \|\n/m)[1] ?? "";
+    return body.split(/\n(?! {10}| *\n)/)[0].replace(/^ {10}/gm, "");
+  };
+  const bash = (text: string, env: Record<string, string>, path?: string) =>
+    spawnSync("bash", ["-c", text], { encoding: "utf8", env: { PATH: path ?? process.env.PATH ?? "", ...env } });
+
+  /** `changes`' outputs when the API says the pull request is ready, with leaving draft's run behind or not. */
+  const planned = (payloadDraft: string, apiDraft: string, behind: boolean) => {
+    const dir = mkdtempSync(join(tmpdir(), "ci-notice-"));
+    writeFileSync(join(dir, "gh"), `#!/bin/sh\necho ${apiDraft}\n`, { mode: 0o755 });
+    writeFileSync(join(dir, "node"), `#!/bin/sh\ncase "$*" in *--draft-behind*) exit ${behind ? 0 : 1};; esac\n`, { mode: 0o755 });
+    const output = join(dir, "output");
+    writeFileSync(output, "");
+    const run = bash(script("changes", "Which jobs this change needs"), { EVENT: "pull_request", PAYLOAD_DRAFT: payloadDraft, CHANGED: "0", GITHUB_OUTPUT: output }, `${dir}:${process.env.PATH}`);
+    expect(run.status, run.stderr).toBe(0);
+    return Object.fromEntries(readFileSync(output, "utf8").trim().split("\n").map((l) => l.split("=")));
+  };
+
+  const gate = (draft: string, leftDraft: string) => {
+    // The fast tier: lint and the affected tests passed, every other job skipped as its gate said.
+    const skipped = ["FRONTEND_TESTS", "FRONTEND_BUILD", "PACKAGES_TESTS", "CLI_ARM64", "TAURI", "WEBSITE", "WEBSITE_E2E", "DESKTOP_MEDIA", "DESKTOP_MACOS"].map((j) => [j, "skipped"]);
+    const off = ["RUST", "WEBSITE_GATE", "WEBSITE_E2E_GATE", "APP", "PACKAGES"].map((g) => [g, "false"]);
+    const ok = { ...Object.fromEntries([...skipped, ...off]), CHANGES: "success", FRONTEND_CHECKS: "success", AFFECTED: "success", LINT: "true", AFFECTED_GATE: "true" };
+    const run = bash(script("ci-success", "Check all jobs passed"), { ...ok, DRAFT: draft, LEFT_DRAFT: leftDraft, FULL: "false", TESTED: "false" });
+    expect(run.status, run.stdout).toBe(0);
+    return run.stdout.split("\n").filter((l) => l.startsWith("::notice::"));
+  };
+
+  it("tells a draft that the train may board it on this run once it is ready, and cancel the full run", () => {
+    expect(planned("true", "true", false)).toEqual({ draft: "true" });
+    expect(gate("true", "")).toEqual([
+      "::notice::Draft: the fast tier passed. Once you mark it ready (gh pr ready), the merge train may board it on this run and cancel the full run; the batch's run is the check that counts.",
+    ]);
+  });
+
+  it("tells one that left draft after this run started that the full run waits behind it, and does not ask for gh pr ready", () => {
+    expect(planned("true", "false", true)).toEqual({ draft: "true", left_draft: "true" });
+    expect(planned("true", "false", false)).toEqual({ draft: "false" });
+    expect(job("changes")).toContain("left_draft: ${{ steps.plan.outputs.left_draft }}");
+    expect(job("ci-success")).toContain("LEFT_DRAFT: ${{ needs.changes.outputs.left_draft }}");
+    const notices = gate("true", "true");
+    expect(notices).toEqual([
+      "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts.",
+    ]);
+    expect(notices.join()).not.toContain("gh pr ready");
   });
 });
