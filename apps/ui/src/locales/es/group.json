@@ -177,6 +177,7 @@
     "full": "El grupo está lleno ({{count}} de {{count}}). Nadie entra hasta que alguien salga.",
     "fullShort": "El grupo está lleno",
     "hideQr": "Ocultar QR",
+    "jammed": "Nadie puede unirse con el enlace de este grupo ahora: no deja de recibir solicitudes de apps que nunca se conectan, y ocupan los lugares donde esperan los que llegan. Alguien que tiene el enlace puede estar haciéndolo a propósito. Crea un enlace nuevo y compártelo otra vez.",
     "note": "Quien abra este enlace se une, sin ser tu contacto ni decir quién es. Entra mientras tu app esté abierta, hasta {{count}} miembros.",
     "noteCommunity": "Quien abra este enlace se une, sin ser contacto de nadie ni decir quién es. La app de cualquier miembro le deja entrar, así que funciona aunque no estés; hasta {{count}} miembros. Eliminar a alguien no le impide volver a abrir el enlace: para eso el admin crea uno nuevo.",
     "off": "El enlace está desactivado: nadie puede unirse con él, y el enlace compartido antes no volverá a funcionar. Al activarlo se crea un enlace nuevo para compartir.",

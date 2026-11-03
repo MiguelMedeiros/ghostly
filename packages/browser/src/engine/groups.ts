@@ -417,6 +417,14 @@ export const KNOCK_VERIFIES = 2;
 /** Entry sessions the admin runs at once; a joiner who does not finish in time is not answered again for a while. */
 const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
+/**
+ * A link whose entry sessions keep timing out with nobody ever on the other side lets nobody in: anyone holding it can
+ * write the knock record with keys no app holds, fresh each time, and they take the `MAX_PENDING_ENTRIES` places a
+ * joiner is answered in. This many such sessions within `JAMMED_WINDOW_MS` tell the admin (`GroupView.entryJammed`),
+ * whose new link reaches none of them; joiners who knock and close their app are a few.
+ */
+const JAMMED_ENTRIES = 8;
+const JAMMED_WINDOW_MS = 15 * 60_000;
 /** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
 /** Messages deleted for everyone a group remembers, so a copy that comes again stays gone: as many as a chat's deleted ids. */
@@ -594,6 +602,10 @@ export class Groups {
   private reconciling = Promise.resolve();
   /** Admin side: joiners with an entry session open, per group: member key → since when. */
   private readonly pendingEntries = new Map<string, Map<string, number>>();
+  /** Admin side: of those, the ones whose other side was seen, once and for as long as they are open, per group. */
+  private readonly entriesSeen = new Map<string, Set<string>>();
+  /** Admin side: when entry sessions nobody was ever on the other side of timed out, per group (`JAMMED_ENTRIES`). */
+  private readonly unansweredEntries = new Map<string, number[]>();
   /** Admin side: member keys whose entry did not finish, not answered again until then. */
   private readonly refused = new Map<string, number>();
   /** Admin side: entry sessions of a member key that timed out in a row, and when the last did. */
@@ -857,7 +869,7 @@ export class Groups {
     // A name outlives its member's place in the roster: the messages stay, and are still theirs.
     const former = Object.entries(nicks).filter(([key]) => !rosterHas(session.roster, key));
     return { ...base, name: session.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
-      ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(session.picture ? { picture: session.picture } : {}),
+      ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(entry && (this.unansweredEntries.get(group.id)?.length ?? 0) >= JAMMED_ENTRIES ? { entryJammed: true as const } : {}), ...(session.picture ? { picture: session.picture } : {}),
       canSend: session.status === "active" && session.readableEpochs.includes(session.epoch),
       ...(onHubs ? { hubs: { hub: this.hubs.isHub(group.id) } } : {}), ...(typing ? { typing } : {}),
       members: session.roster.map(([key, role]) => {
@@ -1226,6 +1238,8 @@ export class Groups {
     delete group.entry;
     this.takeBack(groupId, group);
     this.pendingEntries.delete(groupId);
+    this.entriesSeen.delete(groupId);
+    this.unansweredEntries.delete(groupId);
     this.welcomed.delete(groupId);
     this.lingering.delete(groupId);
     dropMarks(this.marks, groupId);
@@ -1481,6 +1495,8 @@ export class Groups {
     this.lastRoster.delete(groupId);
     this.lastTold.delete(groupId);
     this.pendingEntries.delete(groupId);
+    this.entriesSeen.delete(groupId);
+    this.unansweredEntries.delete(groupId);
     this.framesKept.delete(groupId);
     this.knocked.delete(groupId);
     this.othersKnocked.delete(groupId);
@@ -1645,15 +1661,18 @@ export class Groups {
         if (group.invited) await this.ageInvited(group, now);
         if (!group.entry || !session) continue;
         if (!session.isAdmin) { await this.disableLink(group.id); continue; }
-        const pending = this.pendingEntries.get(group.id);
+        const pending = this.pendingEntries.get(group.id), seen = this.seenEntries(group.id);
+        let unanswered = 0;
         for (const [key, since] of pending ?? []) if (now - since > ENTRY_TIMEOUT_MS) {
           pending!.delete(key);
+          if (!seen.delete(key)) unanswered++;
           const timeouts = (this.entryTimeouts.get(key)?.count ?? 0) + 1;
           this.entryTimeouts.set(key, { count: timeouts, at: now });
           this.refused.set(key, now + Math.min(ENTRY_RETRY_MS * 2 ** (timeouts - 1), REFUSED_FOR_MS));
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
+        this.noteUnanswered(group.id, now, unanswered);
         // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
         const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
         const since = now - (this.lastPoll.get(group.id) ?? 0);
@@ -1805,6 +1824,8 @@ export class Groups {
 
   private async closeEntries(groupId: string): Promise<void> {
     this.pendingEntries.delete(groupId);
+    this.entriesSeen.delete(groupId);
+    this.unansweredEntries.delete(groupId);
     this.welcomed.delete(groupId);
     const invited = this.invited.get(groupId);
     for (const linkId of this.host.entries(groupId).values()) { invited?.delete(linkId); await this.host.closeEdge(linkId); }
@@ -1925,6 +1946,27 @@ export class Groups {
       try { await this.host.openEntry(entry.link, "host", entry.seedB64, key); } catch { pending.delete(key); }
     }
     return held;
+  }
+
+  /** The admin's entry sessions of this group whose other side was seen, once and for as long as they are open. */
+  private seenEntries(groupId: string): Set<string> {
+    let seen = this.entriesSeen.get(groupId);
+    if (!seen) this.entriesSeen.set(groupId, (seen = new Set()));
+    const pending = this.pendingEntries.get(groupId), entries = this.host.entries(groupId);
+    for (const key of seen) if (!pending?.has(key)) seen.delete(key);
+    for (const key of pending?.keys() ?? []) {
+      const linkId = entries.get(key);
+      if (linkId && (this.host.linkReady(linkId) || this.host.linkSeen?.(linkId))) seen.add(key);
+    }
+    return seen;
+  }
+
+  /** Entry sessions that timed out with nobody ever on the other side, kept for `JAMMED_WINDOW_MS`: the admin is told past `JAMMED_ENTRIES`. */
+  private noteUnanswered(groupId: string, now: number, count: number): void {
+    const before = this.unansweredEntries.get(groupId) ?? [];
+    const times = [...before.filter(at => now - at <= JAMMED_WINDOW_MS), ...Array<number>(count).fill(now)];
+    if (times.length) this.unansweredEntries.set(groupId, times); else this.unansweredEntries.delete(groupId);
+    if ((before.length >= JAMMED_ENTRIES) !== (times.length >= JAMMED_ENTRIES)) this.host.emit();
   }
 
   /** The admin's entry session this link is, and whom it is pinned to. */

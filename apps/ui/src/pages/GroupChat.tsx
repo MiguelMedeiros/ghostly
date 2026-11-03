@@ -13,6 +13,7 @@ import { GroupMembersDialog } from "../components/GroupMembersDialog";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { LeaveGroupDialog } from "../components/LeaveGroupDialog";
 import { GroupShareDialog } from "../components/GroupLinkPanel";
+import { GroupLinkAskDialog } from "../components/GroupLinkAskDialog";
 import { GroupConnection } from "../components/GroupConnection";
 import { TasksButton } from "../components/chat/TasksButton";
 import { useJumpTo } from "../hooks/useJumpTo";
@@ -788,6 +789,7 @@ export function GroupChat() {
         {community ? t("group.chat.connectingCommunity") : t("group.chat.connectingMembers")}
       </div>}
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
+      {group.entryJammed && group.isAdmin && group.status === "active" && <LinkJammed groupId={group.id} onReplaced={() => setSharing("share")} />}
       {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error && <Notice problem={error} className="text-xs" />}
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}
@@ -905,6 +907,35 @@ export function GroupChat() {
     </MemberColorsProvider>
     </NowPlayingChat.Provider>
     </CueChat.Provider>
+  );
+}
+
+/**
+ * The group's link lets nobody in: its knocks keep coming from apps that never connect, and they take the places a
+ * joiner is answered in (`GroupView.entryJammed`). A new link, asked as the link panel's is, reaches none of them; the
+ * new link is shown to share again.
+ */
+function LinkJammed({ groupId, onReplaced }: { groupId: string; onReplaced(): void }) {
+  const { t } = useI18n();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const confirm = () => {
+    setAsking(false);
+    if (busy) return;
+    setBusy(true); setProblem(null);
+    void engine.call("enableGroupLink", { groupId, reset: true }).then(onReplaced, e => setProblem(problemText(e, t))).finally(() => setBusy(false));
+  };
+  return (
+    <div role="status" data-testid="group-link-jammed" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="min-w-0 flex-1 text-warn-ink">{t("group.link.jammed")}</span>
+        <button type="button" data-testid="group-link-jammed-reset" {...working(busy)} onClick={() => { if (!busy) setAsking(true); }}
+          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer data-[loading]:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+      </div>
+      {asking && <GroupLinkAskDialog kind="reset" onClose={() => setAsking(false)} onConfirm={confirm} />}
+      {problem && <Notice problem={problem} className="text-xs" />}
+    </div>
   );
 }
 

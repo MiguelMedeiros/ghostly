@@ -370,6 +370,11 @@ export interface GroupView {
   invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
+  /**
+   * The admin's link of a private group lets nobody in: knocks under it keep coming from keys whose app never answers,
+   * and they hold the places a joiner is answered in. A new link (`enableGroupLink` with `reset`) ends it.
+   */
+  entryJammed?: true;
   /** Contacts (by chat id) invited by me and not yet in. */
   invited: string[];
   /** Contact chats that are members, by chat id → member key. */
