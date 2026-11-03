@@ -1,5 +1,6 @@
 import { UsdtWallet, usdtMode } from "./paymentAdapters/usdtWallet";
 import { iceServerProblem, iceServerSetting, relayOnlyProblem } from "../shared/ice";
+import { settingsPatchProblem } from "../shared/settingsPatch";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
 import { ArkWallet, arkMode } from "./paymentAdapters/arkWallet";
 import { BarkWallet, barkMode } from "./paymentAdapters/barkWallet";
@@ -6550,6 +6551,9 @@ export class GhostlyNode implements EngineImplementation {
   private get sharedAvatar(): string | undefined { return this.settings.shareProfile === false ? undefined : this.settings.avatar || undefined; }
 
   async updateSettings({ settings: patch }: { settings: SettingsPatch }): Promise<void> {
+    // A value of the wrong kind (from outside the apps) is refused before anything is written.
+    const wrongKind = settingsPatchProblem(patch);
+    if (wrongKind) throw new Error(wrongKind);
     const { nostr, ...rest } = patch;
     const settings: Partial<Settings> = rest;
     // The backup reminders are the engine's: only a wallet's backup, a profile backup or "Later" changes them.
