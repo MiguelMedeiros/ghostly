@@ -65,6 +65,16 @@
     "unreadCount": "{{name}}, {{count}} unread messages",
     "unreadOne": "{{name}}, 1 unread message"
   },
+  "row": {
+    "mention": "you were mentioned",
+    "muted": "notifications muted",
+    "pinned": "pinned",
+    "separator": ", ",
+    "unread": "{{count}} unread messages",
+    "unreadSome": "unread messages",
+    "unread_one": "{{count}} unread message",
+    "unread_other": "{{count}} unread messages"
+  },
   "searchPlaceholder": "Search chats...",
   "settings": "Settings",
   "sharedIdentity": "Shared an identity",
