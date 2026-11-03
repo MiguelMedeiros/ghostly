@@ -443,23 +443,6 @@ const waitsForLive = (m: StoredMessage) => m.sender === "me" && m.delivery === "
 /** A message of mine whose card went as its text alone and is due to go again live (`restoreCards`). */
 const cardDue = (m: StoredMessage) => m.sender === "me" && (m.cardRestore ?? m.buttonsRestore) === "due";
 
-/**
- * A row id of the contact's own in a 1:1 chat: not the note a contact request carried (the chat's first row on the side
- * that accepted it, before the contact's joined line), nor a line of this app's about their payment (`shared/refusals.ts`).
- */
-const contactRowId = (id: string) => id.startsWith("peer_") && !id.startsWith("peer_contact_") && !isRefusalId(id);
-
-/** Whether a 1:1 chat holds a row of the contact's (`contactRowId`) other than `except`: oldest first, a page at a time. */
-async function contactRowStored(linkId: string, except: string): Promise<boolean> {
-  for (let after: { timestamp: number; id?: string } = { timestamp: -Infinity }; ;) {
-    const page = await db.getMessagePageAfter(linkId, { limit: 64, after });
-    if (page.messages.some((m) => m.id !== except && m.sender === "peer" && contactRowId(m.id))) return true;
-    const last = page.messages[page.messages.length - 1];
-    if (!page.more || !last) return false;
-    after = { timestamp: last.timestamp, id: last.id };
-  }
-}
-
 /** The id a 1:1 chat's row goes by on both sides when its own row is not `peer_`/`me_` and that id (`resolveReply`). */
 const unkeyedRef = (m: StoredMessage) => { const ref = replyRef(m, false); return ref && m.id !== `peer_${ref}` && m.id !== `me_${ref}` ? ref : undefined; };
 
@@ -911,8 +894,6 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The newest time written in each chat while this engine runs: a message written well before it is a catch-up. */
   private readonly newestAt = new Map<string, number>();
-  /** The chats whose contact has had a row while this engine runs (`firstContactRow`), whatever their `stored` says. */
-  private readonly contactSpoke = new WeakSet<LiveLink>();
   /** Per group: when the last message written well before it came, came. What comes after it, as old, is its catch-up. */
   private readonly lateAt = new Map<string, number>();
   /** The last place given in each chat while this engine runs (`arrivalKey`). */
@@ -2112,11 +2093,10 @@ export class GhostlyNode implements EngineImplementation {
     this.groupsLoaded = true;
     this.groupsLoadedNow();
     this.emitState();
-    for (let stored of links) {
+    for (const stored of links) {
       if (stored.group) continue;
       await this.settleHistory(stored.id);
       const messages = await db.getMessages(stored.id);
-      stored = await this.settleJoinLine(stored, messages);
       const storedFiles = await fileStore.listForLink(stored.id);
       // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
       // would have without the restart, and shows no transfer until it does. One that storage took for an away contact
@@ -9348,41 +9328,6 @@ export class GhostlyNode implements EngineImplementation {
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }
 
   /**
-   * Whether this row is the contact's first in a 1:1 chat, the only one of theirs that may be drawn as the chat's joined
-   * line (`StoredMessage.joinLine`). False at once for any later row: the chat is marked (`peerSpoke`) as the first one
-   * comes, before anything is awaited, so of two rows stored together only the first is. A chat not marked yet is looked
-   * at once, for rows of the contact's this engine did not see come (a history brought in while it runs).
-   */
-  private firstContactRow(live: LiveLink, message: StoredMessage): Promise<boolean> | false {
-    const { stored } = live;
-    if (message.sender !== "peer" || stored.group || message.linkId !== stored.id || message.linkId.startsWith("group:") || !contactRowId(message.id)) return false;
-    if (stored.peerSpoke || this.contactSpoke.has(live)) return false;
-    this.contactSpoke.add(live);
-    live.stored = { ...stored, peerSpoke: true };
-    const marked = db.patchLink(stored.id, { peerSpoke: true }).catch(() => {});
-    // A row of theirs deleted here was stored before this one.
-    if (stored.deletedIds?.some(contactRowId)) return false;
-    return Promise.all([contactRowStored(stored.id, message.id), marked]).then(([had]) => !had, () => false);
-  }
-
-  /**
-   * A chat stored before `peerSpoke` was kept, as the engine starts: the contact's oldest row left there is its joined
-   * line if it reads as one (as it was drawn before), and no later row of theirs is. Done once: the chat is marked.
-   */
-  private async settleJoinLine(stored: StoredLink, messages: StoredMessage[]): Promise<StoredLink> {
-    if (stored.peerSpoke || stored.group) return stored;
-    const at = messages.findIndex((m) => m.sender === "peer" && contactRowId(m.id));
-    if (at < 0 && !stored.deletedIds?.some(contactRowId)) return stored;
-    const first = messages[at];
-    if (first && !first.joinLine && isJoinNotice(first.text)) {
-      await db.patchMessage(stored.id, first.id, () => ({ joinLine: true }));
-      messages[at] = { ...first, joinLine: true };
-    }
-    await db.patchLink(stored.id, { peerSpoke: true });
-    return { ...stored, peerSpoke: true };
-  }
-
-  /**
    * Stores a message; false when it was there already (or deleted here): nothing new came. `straight`: a group's,
    * straight from its author (`clockSample`). `place`: as `placed`.
    */
@@ -9404,11 +9349,8 @@ export class GhostlyNode implements EngineImplementation {
     if (live?.stored.deletedIds?.includes(message.id)) return false;
     // A member's message its author deleted for everyone, coming again with a catch-up or handed on: it stays gone.
     if (message.linkId.startsWith("group:") && this.groups.isRemoved(message.linkId.slice("group:".length), message.id)) return false;
-    // Whether it may be the chat's joined line, decided before anything is awaited: rows are taken in the order they come.
-    const first = live ? this.firstContactRow(live, message) : false;
     // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.
     message = await this.resolveReply(message);
-    if (first && isJoinNotice(message.text) && await first) message = { ...message, joinLine: true };
     // Its details begin here: the path a received message came over, or the one a payment goes over right now.
     if (message.sender === "peer" && live && !message.details?.received) message = { ...message, details: { ...message.details, received: { at: Date.now(), ...pathSnapshot(live, message.via) } } };
     else if (message.sender === "me" && message.paymentId && !message.delivery && live && !message.details?.sends) {
