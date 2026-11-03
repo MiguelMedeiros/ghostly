@@ -179,6 +179,14 @@ const LOBBY_CHECK_MS = 2_000;
 const LOBBY_CHECK_JITTER_MS = 3_000;
 const REFUSED_FOR_MS = 10 * 60_000;
 const ENTRY_LINGER_MS = 20_000;
+/**
+ * A full community's door answers a knock with `group-full` (WISP 903 § A full community): the same joiner at most this
+ * often while it stays full, its side of the entry session closed `FULL_LINGER_MS` after. The joiner shows it is full
+ * for `FULL_SAID_MS` after the last one (one answer missed included), then waits as before.
+ */
+const FULL_TELL_MS = 5 * 60_000;
+const FULL_LINGER_MS = 5_000;
+const FULL_SAID_MS = 2 * FULL_TELL_MS + 60_000;
 const RELAYED_KEPT = 4096;
 /**
  * Someone the chain took out while its app was closed comes back believing it is a member: it asks in a hub's lobby,
@@ -276,6 +284,8 @@ interface Live {
   lastKnockPoll: number;
   /** Joiners with an entry session open: key → since; knocks first seen: key → when, and with which hubs at the door. */
   pendingEntries: Map<string, number>;
+  /** Joiners told the community is full (`group-full`), and when. */
+  fullTold: Map<string, number>;
   /** The entry key those entry sessions were opened through: a link replaced since reaches nobody, and they go with it. */
   doorKey?: string;
   knocksSeen: Map<string, { first: number; doors: string; changed?: boolean }>;
@@ -355,6 +365,8 @@ export class Communities {
   private readonly knockAt = new Map<string, number>();
   /** Joiners: how many others had a knock still being refreshed in the record I last read (they wait with me). */
   private readonly knockingWith = new Map<string, number>();
+  /** Joiners: the last `group-full` a member's app answered with, and when. */
+  private readonly toldFull = new Map<string, { n: number; max: number; at: number }>();
   /** Since when this run knocks with nobody answering (`JOIN_GIVE_UP_MS`), and the joins it gave up (`Groups.giveUpJoin`). */
   private readonly knockingSince = new Map<string, number>();
   private readonly gaveUp = new Set<string>();
@@ -459,6 +471,7 @@ export class Communities {
     const live = this.live.get(group.id);
     const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
     const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
+      ...(!group.joining!.inviter && this.fullSaid(group.id) && { full: this.fullSaid(group.id) }),
       ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}), ...(this.gaveUp.has(group.id) && { unanswered: true }) } : undefined;
     // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
     if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
@@ -485,8 +498,15 @@ export class Communities {
     const joining = group.joining!;
     if (joining.replaced) return "replaced";
     if (joining.inviter) return "admitted";
+    if (this.fullSaid(group.id)) return "full";
     if (this.host.linkReady(joining.linkId, 2) || this.host.linkSeen?.(joining.linkId)) return "answered";
     return this.knocked.has(group.id) ? "knocked" : "knocking";
+  }
+
+  /** A member's app said lately that the community is full (`group-full`): how full, as it said. */
+  private fullSaid(groupId: string): { n: number; max: number } | undefined {
+    const told = this.toldFull.get(groupId);
+    return told && this.now() - told.at < FULL_SAID_MS ? { n: told.n, max: told.max } : undefined;
   }
 
   // -- what the person does --------------------------------------------------------------------
@@ -548,7 +568,7 @@ export class Communities {
   /** `check`: a member, as far as this device knows, asking the door whether it still is (`joinByLink`). */
   private async startJoining(link: GroupEntryLink, seedB64: string, since: number, check = false): Promise<void> {
     this.lastKnock.delete(link.g); this.knocked.delete(link.g); this.knockAt.delete(link.g); this.knockingWith.delete(link.g); this.knockRead.delete(link.g);
-    this.knockingSince.delete(link.g); this.gaveUp.delete(link.g);
+    this.knockingSince.delete(link.g); this.gaveUp.delete(link.g); this.toldFull.delete(link.g);
     const before = this.stored.get(link.g)?.joining;
     const linkId = await this.host.openEntry(link, "guest", seedB64, link.host);
     if (before && before.linkId !== linkId) await this.host.closeEdge(before.linkId);
@@ -1603,7 +1623,11 @@ export class Communities {
   private async answerKnocks(groupId: string, live: Live, now: number, busy: boolean): Promise<void> {
     const s = live.session;
     // No door duty on a device whose admin work is off (WISP 06 § Forced takeover): the other hubs answer in turn.
-    if (!s.adminWork || !s.entryKey || !s.state.entry.seedB64 || s.roster.length >= COMMUNITY_LIMITS.members) return;
+    if (!s.adminWork || !s.entryKey || !s.state.entry.seedB64) return;
+    // Full: a knock is answered all the same, with `group-full` (`entryReady`), at most every `FULL_TELL_MS` per joiner.
+    // By the door alone, not the other hubs in turn: each keeps its own count, and two told the joiner twice as often.
+    const full = s.roster.length >= COMMUNITY_LIMITS.members;
+    for (const [key, at] of live.fullTold) if (now - at >= FULL_TELL_MS) live.fullTold.delete(key);
     const link = { g: groupId, host: s.entryKey };
     // The hubs that take turns at the door: listed lately and settled, the same set for every hub that
     // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute). A hub
@@ -1640,7 +1664,7 @@ export class Communities {
       const stillKnocking = now - ts < 2 * this.timings.slowKnockMs;
       if (rosterHas(s.roster, key)) {
         if (!stillKnocking || ts < this.addedAt(s, key) + this.timings.knockFallbackMs) continue;
-      }
+      } else if (full && (door !== s.myKey || live.fullTold.has(key))) continue;
       // Turns count from when this knock was first seen with the current set of hubs at the door: when
       // that set changes (the door's app closed), the new door answers at once instead of waiting a turn.
       const seen = live.knocksSeen.get(key);
@@ -1769,6 +1793,15 @@ export class Communities {
   entryReady(groupId: string, linkId: string, peer: string): boolean {
     const live = this.live.get(groupId);
     if (!live?.pendingEntries.has(peer) || !live.session.isMember) return false;
+    const s = live.session, now = this.now();
+    // No room (WISP 903 § A full community): the joiner is told so, and knocks on at its slow pace until there is.
+    if (s.roster.length >= COMMUNITY_LIMITS.members && !rosterHas(s.roster, peer)) {
+      try { this.host.sendOnLink(linkId, { t: "group-full", v: 2, g: groupId, n: s.roster.length, max: COMMUNITY_LIMITS.members }); traceJoin(groupId, "full.sent"); } catch { /* it closed */ }
+      live.pendingEntries.delete(peer);
+      live.fullTold.set(peer, now);
+      live.lingering.set(linkId, now + FULL_LINGER_MS);
+      return true;
+    }
     try { this.host.sendOnLink(linkId, live.session.inviteFrame()); traceJoin(groupId, "invite.sent"); } catch { /* it closed */ }
     return true;
   }
@@ -1786,11 +1819,21 @@ export class Communities {
         if (joining.inviter && joining.inviter !== frame.admin && this.now() - (joining.invitedAt ?? 0) < ENTRY_LINGER_MS) return;
         joining.invitedAt = this.now();
         joining.inviter = frame.admin;
+        this.toldFull.delete(g);
         joining.name = groupName(frame.name) ?? joining.name;
         joining.pieces = [];
         traceJoin(g, "invite.received");
         await this.store.putGroup(group);
         this.host.sendOnLink(linkId, { t: "group-accept", v: 2, g, key: identityFromSeedB64(joining.seedB64).pubKeyZ32 });
+        this.host.emit();
+        return;
+      }
+      case "group-full": {
+        // No room yet: the knock goes on at its slow pace, and the page says why it waits.
+        const joining = group.joining, { n, max } = frame;
+        if (!joining || joining.linkId !== linkId || joining.inviter || !Number.isSafeInteger(n) || !Number.isSafeInteger(max) || (max as number) < 1 || (n as number) < 0) return;
+        this.toldFull.set(g, { n: n as number, max: max as number, at: this.now() });
+        traceJoin(g, "full.received");
         this.host.emit();
         return;
       }
@@ -2064,7 +2107,7 @@ export class Communities {
       }),
     }, rows);
     this.live.set(id, { session, hub: false, hubSince: 0, beacon: [], hubClocks: new HubClocks(() => session.myKey, HUB_CLOCK_READ_GAP_MS), head: null, lastBeaconRead: 0, beaconKnown: false, beaconFailedAt: 0, beaconAt: 0, leaving: 0, stepDownAt: 0, lastBeaconWrite: 0, lastBeaconTry: 0, hubCandidateAt: 0, members: new Map(), emptySince: 0,
-      lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), knocksSeen: new Map(),
+      lastLobbyPoll: 0, myHubs: [], lobbyWrites: new Map(), lastKnockPoll: 0, pendingEntries: new Map(), fullTold: new Map(), knocksSeen: new Map(),
       hubWaits: new Map(), hubsAvoided: new Map(), hubsUp: new Set(), lingering: new Map(), seenHubs: new Map(), restored: new Map(),
       farewells: new Map(), farewellQuiet: new Map(), farewellSaid: new Map(), ahead: new Map(), aheadQuiet: new Map(),
       knocksScanned: false, knockCursor: 0, lastShardPoll: 0, crowdUntil: 0, doors: "", warmUntil: 0, lobbyBusyUntil: 0, expect: new Set(), awaited: new Map(), joinedAt: 0, admittedAt: 0, lastRearm: 0,

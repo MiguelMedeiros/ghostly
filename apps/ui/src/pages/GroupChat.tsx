@@ -295,15 +295,18 @@ function usePast(since: number | undefined, ms: number): boolean {
   return past;
 }
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
-/** A step at a stage: done once reached, current while it is the next one, else still to come. */
-function joinStepState(stage: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
+/** A step at a stage: done once reached, current while it is the next one, else still to come. Full: the knock is there. */
+function joinStepState(at: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
+  const stage = at === "full" ? "knocked" : at;
   if (JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step)) return "done";
   return JOIN_ORDER[JOIN_ORDER.indexOf(step) - 1] === stage ? "current" : "todo";
 }
 
-function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
+function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate, full?: { n: number; max: number }): { title: string; body: string } {
   const waiting = t("group.join.waiting");
   if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
+  // A member's app answered that there is no room yet (`group-full`): the link works, and asking for a new one won't help.
+  if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
     body: community ? t("group.join.admittedCommunity") : t("group.join.admitted") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
@@ -644,12 +647,12 @@ export function GroupChat() {
   const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
-    : joiningText(stage, group.name, group.profile === "community", t);
+    : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full);
   // The joining card's one live line: what changed, not the card. The two-minute hint while it shows; else at a dead
   // end (no transport, unanswered, replaced) its title; else the last step reached, or the title before the first.
   const staleText = waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale");
   const lastReached = joinSteps(group.profile === "community", t).filter(step => joinStepState(stage, step.stage) === "done").pop();
-  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced ? joining.title
+  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" ? joining.title
     : knockedLong ? staleText : lastReached?.label ?? joining.title;
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = myJoins.some(at => Date.now() - at < JUST_JOINED_MS);
