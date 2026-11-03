@@ -189,6 +189,11 @@ export function handoffNotices(was: { handoff?: boolean; session?: string }, han
   return [];
 }
 
+/** The record lists the device on this link, under the link's own secret (the current set's). */
+function listedOn(record: DeviceRecord | null, running: Pick<Running, "d" | "key">): boolean {
+  return !!record && record.d === running.d && record.deviceSet.some((slot) => slot?.key === running.key);
+}
+
 interface Running {
   id: string;
   /** The device-set secret the link is derived from, base64url: an earlier set's, or the current one. */
@@ -626,17 +631,24 @@ export class DeviceLinks implements DeviceLinkEngine {
   }
 
   /** Asks the device with this signing key to make a new subscription. False when its link is not live (ask again later). */
-  askRenew(key: string): boolean {
-    const running = this.find(key);
-    if (!running || running.earlier || !this.isLive(running)) return false;
-    try { running.link.sendDeviceFrame({ t: DEVICE_RENEW_FRAME }); return true; } catch { return false; }
+  askRenew(key: string): Promise<boolean> {
+    return this.sendListed(key, { t: DEVICE_RENEW_FRAME });
   }
 
   /** Tells the device with this signing key which chats' tokens are handed out under the profile's subscription. */
-  sendTokens(key: string, tokens: string[]): boolean {
+  sendTokens(key: string, tokens: string[]): Promise<boolean> {
+    return this.sendListed(key, { t: DEVICE_TOKENS_FRAME, k: tokens });
+  }
+
+  /**
+   * A push frame for the device on its current link, only while the record lists it under that link's secret: a
+   * removal stores the record before the links follow it, and a removed device is told nothing meanwhile.
+   */
+  private async sendListed(key: string, frame: DeviceFrame): Promise<boolean> {
     const running = this.find(key);
     if (!running || running.earlier || !this.isLive(running)) return false;
-    try { running.link.sendDeviceFrame({ t: DEVICE_TOKENS_FRAME, k: tokens }); return true; } catch { return false; }
+    if (!listedOn(await this.record().catch(() => null), running)) return false;
+    try { running.link.sendDeviceFrame(frame); return true; } catch { return false; }
   }
 
   /**
@@ -662,16 +674,21 @@ export class DeviceLinks implements DeviceLinkEngine {
     return run;
   }
 
-  /** Another device shared its push target, or said it has none: kept here, and the engine told. A malformed frame says nothing. */
+  /**
+   * Another device shared its push target, or said it has none: kept here, and the engine told. A malformed frame says
+   * nothing, and neither does a device the set does not list (one removed, whose link runs until the links follow).
+   */
   private async deviceWake(from: string, frame: DeviceFrame): Promise<void> {
     const target = readDeviceWake(frame);
     if (target === undefined) return;
-    await this.pushExclusive(async () => {
+    const listed = await this.pushExclusive(async () => {
       const record = await this.record();
-      if (!record || !record.deviceSet.some((slot) => slot?.key === from)) return;
+      if (!record || !record.deviceSet.some((slot) => slot?.key === from)) return false;
       const patch = withOtherPush(record, from, target);
       if (patch) await amendDevice(this.options.profile, patch);
+      return true;
     });
+    if (!listed) return;
     try { await this.options.onDeviceWake?.(from, target); } catch { /* the engine's own trouble */ }
   }
 
@@ -679,7 +696,8 @@ export class DeviceLinks implements DeviceLinkEngine {
   private async shareOwnPush(running: Running): Promise<void> {
     const target = await this.pushExclusive(async () => {
       const record = await this.record();
-      if (!record) return undefined;
+      // A device the record no longer lists under this link's secret gets no token, and nothing goes to it.
+      if (!record || !listedOn(record, running)) return undefined;
       const { target, patch } = ownTargetFor(record, running.key);
       if (patch) await amendDevice(this.options.profile, patch);
       return target;

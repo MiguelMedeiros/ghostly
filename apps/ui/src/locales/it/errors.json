@@ -206,6 +206,8 @@
     "unreadableNext": "Invialo di nuovo o scegli di nuovo il file.",
     "updatedPeerFirst": "Connettiti prima a un peer aggiornato",
     "updatedPeerToSend": "Connettiti a un peer aggiornato per inviare file",
+    "videoMetadata": "Questo video non può essere inviato: Ghostly non è riuscito a rimuovere i dati salvati al suo interno, come il luogo in cui è stato registrato",
+    "videoMetadataNext": "Salvane una copia in un editor video, oppure esportalo di nuovo dalla galleria, e invia quella.",
     "videoTooSlow": "Il video ha impiegato troppo tempo"
   },
   "generic": "Qualcosa è andato storto",

@@ -1,0 +1,80 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+/**
+ * Videos that say where they were recorded, built from the e2e H.264 fixture: a `udta/©xyz` (Android's MediaMuxer,
+ * older iPhones) and a timed metadata track whose sample holds the place (an iPhone's `mebx` location track).
+ */
+export const PLACE = "+52.3700+004.8900+000.000/";
+export const H264_MP4 = readFileSync(fileURLToPath(new URL("../../../../e2e/support/video-fixtures/ghosts-h264.mp4", import.meta.url)));
+
+export const hasPlace = (bytes: Uint8Array) => Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).includes(Buffer.from(PLACE, "latin1"));
+
+const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
+const u16 = (n: number) => { const b = Buffer.alloc(2); b.writeUInt16BE(n); return b; };
+export const box = (type: string, ...parts: Buffer[]): Buffer<ArrayBuffer> => {
+  const body = Buffer.concat(parts);
+  return Buffer.concat([u32(8 + body.length), Buffer.from(type, "latin1"), body]);
+};
+const full = (type: string, flags: number, ...parts: Buffer[]) => box(type, u32(flags), ...parts);
+
+/** `udta` with a `©xyz`, as MediaMuxer writes it. */
+export const xyzUdta = () => {
+  const place = Buffer.from(PLACE, "latin1");
+  return box("udta", box("\xa9xyz", u16(place.length), u16(0x15c7), place));
+};
+
+/**
+ * A timed metadata track (`meta` handler, `mebx` entry) with one sample of `length` bytes at `offset` in the file, or
+ * a track of another `handler` so made.
+ */
+export const metadataTrack = (offset: number, length: number, handler = "meta") => box("trak",
+  full("tkhd", 1, Buffer.alloc(80)),
+  box("mdia",
+    full("mdhd", 0, Buffer.alloc(8), u32(1000), u32(1000), Buffer.alloc(4)),
+    full("hdlr", 0, u32(0), Buffer.from(handler, "latin1"), Buffer.alloc(12), Buffer.from("Core Media Metadata\0", "latin1")),
+    box("minf",
+      full("nmhd", 0),
+      box("dinf", full("dref", 0, u32(1), full("url ", 1))),
+      box("stbl",
+        full("stsd", 0, u32(1), box("mebx", Buffer.alloc(6), u16(1), box("keys"))),
+        full("stts", 0, u32(1), u32(1), u32(1000)),
+        full("stsc", 0, u32(1), u32(1), u32(1), u32(1)),
+        full("stsz", 0, u32(0), u32(1), u32(length)),
+        full("stco", 0, u32(1), u32(offset))))));
+
+/** The children of `box`'s at `start`..`end`, as [type, start, body, end]. */
+function children(b: Buffer, start: number, end: number): [string, number, number, number][] {
+  const out: [string, number, number, number][] = [];
+  for (let at = start; at + 8 <= end;) {
+    const size = b.readUInt32BE(at);
+    out.push([b.toString("latin1", at + 4, at + 8), at, at + 8, at + size]);
+    at += size;
+  }
+  return out;
+}
+
+/** Every chunk offset in `moov` (at `start`..`end`) moved by `delta`. */
+function shiftChunks(b: Buffer, start: number, end: number, delta: number): void {
+  for (const [type, , body, until] of children(b, start, end)) {
+    if (["trak", "mdia", "minf", "stbl"].includes(type)) shiftChunks(b, body, until, delta);
+    else if (type === "stco") for (let i = 0; i < b.readUInt32BE(body + 4); i++) b.writeUInt32BE(b.readUInt32BE(body + 8 + i * 4) + delta, body + 8 + i * 4);
+    else if (type === "co64") for (let i = 0; i < b.readUInt32BE(body + 4); i++) b.writeBigUInt64BE(b.readBigUInt64BE(body + 8 + i * 8) + BigInt(delta), body + 8 + i * 8);
+  }
+}
+
+/**
+ * `file` with `extra` boxes added at the end of its `moov` (its samples' offsets moved where `moov` comes before them)
+ * and, with `sample`, a metadata track whose one sample it is, in a `mdat` added at the end of the file.
+ */
+export function withMovie(file: Buffer, extra: Buffer[], sample?: Buffer): Buffer<ArrayBuffer> {
+  const top = children(file, 0, file.length);
+  const [, at, , end] = top.find(([type]) => type === "moov")!;
+  const added = extra.reduce((sum, b) => sum + b.length, 0) + (sample ? metadataTrack(0, 0).length : 0);
+  const moov = Buffer.from(file.subarray(at, end));
+  if (top.some(([type, start]) => type === "mdat" && start > at)) shiftChunks(moov, 8, moov.length, added);
+  const track = sample ? [metadataTrack(file.length + added + 8, sample.length)] : [];
+  const grown = Buffer.concat([moov, ...extra, ...track]);
+  grown.writeUInt32BE(grown.length, 0);
+  return Buffer.concat([file.subarray(0, at), grown, file.subarray(end), ...(sample ? [box("mdat", sample)] : [])]);
+}

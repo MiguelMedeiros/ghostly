@@ -19,7 +19,7 @@ import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
 import { takeWakeSlot } from "./wakeLimit";
 import { readWake } from "../../../../packages/core/src/pairedWake";
-import { SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
+import { MAX_HELD_SHARES, SHARE_HOLD_MS, type FromWorker, type ToWorker } from "./messages";
 
 declare const __SW_BUILD__: string;
 declare const __SW_PRECACHE__: string[];
@@ -113,13 +113,42 @@ async function tellBuildGone(): Promise<void> {
 
 // ---------- share target ----------
 
-let held: { item: SharedItem; done: () => void } | null = null;
+type Held = { item: SharedItem; done: () => void };
 
-/** Holds a share for the page that asks for it, in place of one held before; `done` once it is taken or dropped. */
+/**
+ * The shares held for the page that asks, oldest first. Any website can post to the share target, so a share never
+ * takes the place of one that waits: it waits behind it, and one past `MAX_HELD_SHARES` is dropped.
+ */
+let held: Held[] = [];
+/**
+ * Asked to forward the shares held while no page of that profile was there (none yet, or this worker restarted and
+ * forgot them): the first page of it that says it is there gets them. `profile` null: a page that did not say its own.
+ */
+let forwardFor: { profile: string | null } | null = null;
+/** The app's pages that take shares (they hold the peer), by window id: their profile, and when they were last in front. */
+const sharePages = new Map<string, { profile: string; at: number }>();
+let inFront = 0;
+
+/** Holds a share for the page that asks for it, behind those held before; `done` once it is taken or dropped. */
 function hold(item: SharedItem, done: () => void): void {
-  held?.done();
-  held = { item, done };
-  setTimeout(() => { if (held?.done === done) { held = null; done(); } }, SHARE_HOLD_MS);
+  if (held.length >= MAX_HELD_SHARES) { done(); return; }
+  const entry = { item, done };
+  held.push(entry);
+  setTimeout(() => {
+    if (!held.includes(entry)) return;
+    held = held.filter((other) => other !== entry);
+    if (!held.length) forwardFor = null;
+    done();
+  }, SHARE_HOLD_MS);
+}
+
+/** Every share held, handed to `client` in the order they came. */
+function handOver(client: WindowClient): void {
+  const taken = held;
+  held = [];
+  forwardFor = null;
+  for (const { item } of taken) client.postMessage({ type: "share", item });
+  for (const { done } of taken) done();
 }
 
 function share(event: FetchEvent): void {
@@ -160,22 +189,32 @@ worker.addEventListener("message", (event) => {
   const source = event.source;
   if (!source) return;
   if (message.type === "share-ready") {
-    const taken = held;
-    held = null;
-    source.postMessage(taken ? { type: "share", item: taken.item } : { type: "share-none" });
-    taken?.done();
+    if (held.length) handOver(source);
+    else source.postMessage({ type: "share-none" });
+    return;
+  }
+  if (message.type === "share-here") {
+    if (PUSH_PROFILE !== null || typeof message.profile !== "string") return;
+    sharePages.set(source.id, { profile: message.profile, at: ++inFront });
+    if (held.length && forwardFor && (forwardFor.profile === null || forwardFor.profile === message.profile)) handOver(source);
     return;
   }
   if (message.type === "share-forward") {
-    const taken = held;
-    if (!taken) { source.postMessage({ type: "share-none" }); return; }
+    if (!held.length) { source.postMessage({ type: "share-none" }); return; }
+    const profile = typeof message.profile === "string" ? message.profile : null;
     event.waitUntil(worker.clients.matchAll({ type: "window" }).then((all) => {
-      const others = all.filter((client) => client.id !== source.id);
-      // No other window to give it to: it stays held, for whichever page asks next (this one, once it is the app).
-      if (!others.length || held !== taken) return;
-      held = null;
-      for (const client of others) client.postMessage({ type: "share", item: taken.item });
-      taken.done();
+      const open = new Set(all.map((client) => client.id));
+      for (const id of sharePages.keys()) if (!open.has(id)) sharePages.delete(id);
+      // One window only: the app's page of the same profile that was in front last. Never every window of the origin,
+      // and never another profile's: a share is the person's, for the profile they opened it in.
+      const [to] = all
+        .filter((client) => client.id !== source.id && sharePages.has(client.id) && (profile === null || sharePages.get(client.id)!.profile === profile))
+        .sort((a, b) => sharePages.get(b.id)!.at - sharePages.get(a.id)!.at);
+      if (!held.length) return;
+      // No such page: the shares stay held, for whichever page asks next (this one, once it is the app, or one of the
+      // profile that says it is there).
+      if (!to) { forwardFor = { profile }; return; }
+      handOver(to);
     }));
   }
 });

@@ -103,7 +103,9 @@ test("forced colors keep Settings' switches, the chosen Mode and Chat list optio
   expect(button.border, "New chat border in forced colors").toBeGreaterThanOrEqual(1);
   expect(button.borderColor, "New chat border against the page").not.toBe(button.around);
 
-  // Back in normal colours, New chat has its old size.
+  // Back in normal colours, New chat has its old size. Its place is not compared: Home centres its content, and what
+  // shows above it after a visit to Settings can move it by a pixel or two.
   await page.emulateMedia({ forcedColors: "none", colorScheme: "dark" });
-  expect(await newChat.boundingBox()).toEqual(newChatBox);
+  const back = (await newChat.boundingBox())!;
+  expect({ width: back.width, height: back.height }).toEqual({ width: newChatBox!.width, height: newChatBox!.height });
 });

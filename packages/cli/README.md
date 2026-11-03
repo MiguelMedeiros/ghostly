@@ -465,9 +465,12 @@ Its `AGENTS.md` is the guide for an AI agent that sets it up.
 
 **The audio.** The socket is `<profile>/calls/<call>.sock` (0600), or `ghostly-calls-<hash>/<call>.sock` in
 `$XDG_RUNTIME_DIR`, else in `/tmp/ghostly-calls-<uid>-<hash>/` (a folder of yours alone, 0700), when that path is too long; `call start`, `call answer`, `call list` and the
-`call.connected` event name it. It carries raw PCM,
+`call.connected` event name it. On Windows it is a named pipe. It carries raw PCM,
 with no framing:
 
+- First, the call's token: `audio.token` (64 hex digits, new for every call, in the same answers and events as the
+  socket) and a line feed. Required on Windows: until a connection sends it, it gets no audio and replaces no program,
+  and a wrong one is closed. On Linux and macOS a program that does not send it still works.
 - s16le, mono, at the call's rate: 48000 by default, or 24000, 16000, 12000, 8000 with `--rate`. Opus runs at that
   rate itself, so nothing is resampled.
 - From the call: the contact's audio in 20 ms frames (1920 bytes at 48 kHz, 640 at 16 kHz), as they are decoded.
@@ -480,13 +483,13 @@ with no framing:
   no sooner than 2 s later: `call start` refuses sooner with `busy` and `details.retryAfterMs`. The contact's app
   would not ring a call that comes that fast after a missed one.
 - The socket exists from `call start`/`call answer`, so the program may connect before the media is up. One program
-  at a time: a new connection replaces the old one. When the call ends, the program reads EOF and the socket is
+  at a time: a new connection (once it sent the token, on Windows) replaces the old one. When the call ends, the program reads EOF and the socket is
   removed.
 - Added latency inside the CLI: at most one 20 ms frame going out; coming in, a frame as soon as its packet is
   decoded (up to 40 ms more when a packet is late; a lost one becomes 20 ms of silence).
 
 **Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`,
-`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, `call.stalled`
+`call.connected` `{call, chat, direction, audio: {socket, token, rate, channels, format, frameMs}}`, `call.stalled`
 `{call, chat, direction, silentMs}` (a connected call heard no packet from the contact for 5 s: its side may have died;
 `call.get` says `stalled: true`), `call.resumed` `{call, chat, direction, silentMs}` (packets came back after
 `silentMs` without any), and `call.ended` `{call, chat, direction, reason, duration?}` with `reason`:

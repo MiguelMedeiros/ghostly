@@ -137,6 +137,8 @@ const RULES: readonly Rule[] = [
   exact("That recording cannot be sent as a voice message", "errors.files.notVoice"),
   // A picture whose metadata could not be removed, refused before it is sent (packages/core pictureMetadata.ts).
   exact("This picture cannot be sent: Ghostly could not remove the details saved in it, like where it was taken", "errors.files.pictureMetadata", "errors.files.pictureMetadataNext"),
+  // A video whose metadata could not be removed, refused before it is sent (packages/core videoMetadata.ts).
+  exact("This video cannot be sent: Ghostly could not remove the details saved in it, like where it was recorded", "errors.files.videoMetadata", "errors.files.videoMetadataNext"),
   exact("This file cannot be retried", "errors.files.cannotRetry"),
   exact("This file is no longer here", "errors.files.gone"),
   { match: /^Not enough space on your contact's device for this file \((?<free>.+) free\)\.$/, key: "errors.files.noRoom", next: "errors.files.noRoomNext" },
