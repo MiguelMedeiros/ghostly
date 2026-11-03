@@ -42,6 +42,17 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   const restored = gate.state === "standby" && takeover?.copy === "restored";
   // Out of its set for good (WISP 06 § Removing a device): nothing it can accept brings it back, or it was removed.
   const reenroll = !!gate.reenroll && (gate.state === "moving" || gate.state === "removed");
+  const offersReenroll = reenroll || gate.state === "removed";
+  const reenrollButton = useRef<HTMLButtonElement>(null);
+  // Removed while this screen was open: what had the keyboard focus (Use here, its dialog, a Check connection) went with
+  // that change. The focus goes to Add this device, not to the page; a screen that opens removed leaves it where it is.
+  const offered = useRef(offersReenroll);
+  useEffect(() => {
+    const was = offered.current;
+    offered.current = offersReenroll;
+    if (was || !offersReenroll) return;
+    if (!document.activeElement || document.activeElement === document.body) reenrollButton.current?.focus();
+  }, [offersReenroll]);
   const title = unfinished ? t("devices.standby.unfinished.title")
     : reenroll ? t("devices.standby.reenroll.title")
     : restored ? (gate.activeDevice ? fillNames(t("devices.restore.activeOn"), { device: gate.activeDevice }) : t("devices.restore.activeOnUnnamed"))
@@ -88,8 +99,8 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
         )}
         {unfinished && <Unfinished />}
         {gate.state === "standby" && gate.notice && <SetNotice names={gate.notice} />}
-        {(reenroll || gate.state === "removed") && (
-          <Actions><button type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button></Actions>
+        {offersReenroll && (
+          <Actions><button ref={reenrollButton} type="button" data-testid="device-standby-reenroll" onClick={() => reenrollHere()} className={SCREEN_BUTTON}>{t("devices.join.addThis")}</button></Actions>
         )}
         {!unfinished && !restored && (gate.state === "standby" || gate.state === "superseded" || gate.state === "releasing" || gate.state === "taking") && <StandbyHandoff gate={gate} />}
         {!unfinished && takeover?.offered && <Takeover gate={gate} info={takeover} />}
