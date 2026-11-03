@@ -144,6 +144,7 @@ import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
 import { lightningPaying } from "./paymentAdapters/providers/lightningService";
 import { COUNTER_RAISE_KEY, GROUP_ADMIN_OFF_KEY, PENDING_RAISE_KEY, applyCounterRaise, isCounterRaise, isGroupAdminOff, isPendingRaise, type PendingRaise } from "../devices/raise";
 import { blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
+import { isRefusalId } from "../shared/refusals";
 import { FileAppender, readStored, removeStored, storedSize, streamStored } from "../shared/storedFiles";
 import { FileDesk } from "./fileDesk";
 import { groupFileId, storedGroupFiles } from "./groupFiles";
@@ -3859,6 +3860,9 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
+    // A refused payment's line is the app's (`shared/refusals.ts`), under an id the contact's payment gave its time to:
+    // no edit or removal of the contact's takes it.
+    if (isRefusalId(id)) return true;
     // A removal names the contact's message by its wire id, which a message of mine goes by too: one naming mine takes
     // no reference, or the replies quoting mine would lose its line and its pin would go.
     const ref = edit.rm && !await this.namesMine(linkId, edit.id);
@@ -9270,6 +9274,9 @@ export class GhostlyNode implements EngineImplementation {
    * straight from its author (`clockSample`). `place`: as `placed`.
    */
   private async storeNewMessage(message: StoredMessage, straight = false, place?: number): Promise<boolean> {
+    // The ids of a refused payment's line are the app's own (`shared/refusals.ts`): a row of the contact's under one is a
+    // frame that named it, never that line, which comes with the values no frame carries (`notice`).
+    if (message.sender === "peer" && !message.notice && isRefusalId(message.id)) return false;
     // A payment with a member lands in the group's history, from that member, under an id of the edge's own.
     const edge = this.links.get(message.linkId)?.stored;
     if (edge?.group && edge.groupPeer && !edge.groupEntry)

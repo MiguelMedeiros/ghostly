@@ -8,6 +8,7 @@ import type { GroupEditsHost } from "../src/engine/groupEdits";
 import type { Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredLink, StoredMessage } from "../src/shared/types";
+import { refusedRow } from "../src/shared/refusals";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.edit.wire
 
@@ -380,7 +381,9 @@ describe("the contact's edits", () => {
     for (const id of ids) expect(await t.contact.sendEdit({ id, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
     await vi.waitFor(() => expect(t.contactReceipts.map(([id]) => id)).toEqual(ids));
     const store = (t.node as unknown as { storeMessage(m: object): Promise<unknown> }).storeMessage.bind(t.node);
-    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `line ${i}`, sender: "peer", timestamp: 1_790_000_000_000 + i, via: "datalink", ...(i === 0 && { paymentId: "p1" }) });
+    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `line ${i}`, sender: "peer", timestamp: 1_790_000_000_000 + i, via: "datalink",
+      // A payment line has its payment's id; a refusal line, the values the payment desk writes with it (`refusedRow`).
+      ...(i === 0 ? { paymentId: "p1" } : { notice: { type: "paymentRefused", reason: "refused" } }) });
     expect((await t.messages()).filter(m => m.text.startsWith("line ")).map(m => m.text)).toEqual(["line 0", "line 1", "line 2"]);
     expect(t.node.deletedIdsOf(t.id).filter(id => ids.some(w => id === `peer_${w}`))).toEqual([]);
   });
@@ -389,7 +392,7 @@ describe("the contact's edits", () => {
     const t = await setup();
     const ids = ["1790000000001_refused", `spent_${"ab".repeat(16)}`];
     const store = (t.node as unknown as { storeMessage(m: object): Promise<unknown> }).storeMessage.bind(t.node);
-    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, text: `Could not receive ${i + 1} sats: refused`, sender: "peer", timestamp: 1_790_000_000_001 + i, via: "datalink" });
+    for (const [i, id] of ids.entries()) await store({ linkId: t.id, id: `peer_${id}`, sender: "peer", timestamp: 1_790_000_000_001 + i, via: "datalink", ...refusedRow({ amount: i + 1, reason: "refused" }) });
     expect(await t.contact.sendMessage("a text", Date.now(), WIRE("T"))).toBeNull();
     await t.peerRow("a text");
     for (const id of [...ids, WIRE("T")]) expect(await t.contact.sendEdit({ id, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();

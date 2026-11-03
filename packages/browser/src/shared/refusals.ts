@@ -8,8 +8,15 @@ import type { PaymentRefusedNotice } from "./types";
  * says it in its own language from the values. Lines stored before the notice existed are read back from that English.
  */
 
-/** The ids the engine writes these lines under; a contact's message is stored as `peer_<number>`, never under one. */
+/**
+ * The ids the engine writes these lines under. A contact's frame names its own id, and one of these shapes fits what a
+ * paired text (22 characters) or a held one may name: the engine stores no frame of a contact's under one
+ * (`GhostlyNode.storeNewMessage`) and takes no edit of one (`receiveEdit`).
+ */
 const REFUSAL_ID = /^peer_(?:\d+_refused|spent_[0-9a-f]{32})$/;
+
+/** Whether a chat row's id is one a refusal line is written under. */
+export const isRefusalId = (id: string): boolean => REFUSAL_ID.test(id);
 /** The English `refusedText` writes, and every version before it wrote ("Could not receive 21 sats: …"). */
 const REFUSAL_TEXT = /^Could not receive (?:(a payment)|(Fedimint ecash)|(\d[\d.,'\u00a0\u202f ]*) (test )?sats): ([\s\S]+)$/;
 /** A reason longer than this is not one the engine wrote: it is cut, as a damaged copy must not fill a chat. */
@@ -43,10 +50,12 @@ const amountOf = (value: unknown): number | undefined =>
 /**
  * The refusal a chat row is, or undefined when it is not one: its stored values (anything invalid in them left out,
  * read as unknown), else the English an older version stored under the same ids. Only rows under the engine's
- * refusal ids count, so a contact who writes "Could not receive…" is shown as the message it is.
+ * refusal ids count, so a contact who writes "Could not receive…" is shown as the message it is; and never one a
+ * contact's frame brought (every received text and file keeps the frame it came in, `details.wire`, which the engine's
+ * lines never have) or one a contact edited, which older versions took under those ids.
  */
-export function paymentRefusal(row: { id: string; text: string; notice?: unknown }): PaymentRefusedNotice | undefined {
-  if (!REFUSAL_ID.test(row.id)) return undefined;
+export function paymentRefusal(row: { id: string; text: string; notice?: unknown; details?: { wire?: unknown }; edit?: unknown }): PaymentRefusedNotice | undefined {
+  if (!REFUSAL_ID.test(row.id) || row.details?.wire || row.edit) return undefined;
   const stored = row.notice as Partial<Record<keyof PaymentRefusedNotice, unknown>> | undefined;
   if (stored && typeof stored === "object" && stored.type === "paymentRefused" && typeof stored.reason === "string" && stored.reason.trim()) {
     const amount = amountOf(stored.amount);
