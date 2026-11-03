@@ -142,11 +142,15 @@ const PICK_CHUNK = 4096;
 /** Whether a path names something hidden: any of its parts starts with a dot. */
 const hidden = (path: string) => path.startsWith(".") || path.includes("/.");
 
+/** A file's extension in lower case (ASCII letters only, as the Desktop's walk), "" for none. */
 const extensionOf = (path: string) => {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  return dot > 0 ? name.slice(dot + 1).replace(/[A-Z]+/g, (letters) => letters.toLowerCase()) : "";
 };
+
+/** Whether `accept` names a file's extension: everything does when it names none. */
+const accepted = (path: string, accept: string[]) => !accept.length || accept.includes(extensionOf(path));
 
 type PermissionHandle = FileSystemHandle & {
   queryPermission?(options: { mode: "read" }): Promise<PermissionState>;
@@ -187,14 +191,18 @@ const factsOf = async (handle: FileSystemFileHandle) => {
   return { size, lastModified };
 };
 
-/** Everything under a folder, its name first in each path, hidden entries left out, at most `limit` files. */
-async function walk(dir: FileSystemDirectoryHandle, path: string, out: PickedFile[], limit: number): Promise<void> {
+/**
+ * The files under a folder that `accept` names (all when it names none), its name first in each path, hidden entries
+ * left out, as the Desktop's walk. A file left out is neither got nor counted: the walk stops one past `limit` kept
+ * files, so a folder past it is refused whole (`too-large`), never cut to the files met first.
+ */
+async function walk(dir: FileSystemDirectoryHandle, path: string, accept: string[], out: PickedFile[], limit: number): Promise<void> {
   for await (const handle of (dir as unknown as { values(): AsyncIterable<FileSystemHandle> }).values()) {
     if (out.length > limit) return;
     if (handle.name.startsWith(".")) continue;
     const at = `${path}/${handle.name}`;
-    if (handle.kind === "directory") await walk(handle as FileSystemDirectoryHandle, at, out, limit);
-    else out.push({ path: at, file: await factsOf(handle as FileSystemFileHandle) });
+    if (handle.kind === "directory") await walk(handle as FileSystemDirectoryHandle, at, accept, out, limit);
+    else if (accepted(handle.name, accept)) out.push({ path: at, file: await factsOf(handle as FileSystemFileHandle) });
   }
 }
 
@@ -210,7 +218,7 @@ export const handlePicker: BrowserPicker = async (folder, accept) => {
     if (folder) {
       const dir = await w.showDirectoryPicker!({ mode: "read" });
       const files: PickedFile[] = [];
-      await walk(dir, dir.name, files, MINI_APP_LIMITS.filesEntries);
+      await walk(dir, dir.name, accept, files, MINI_APP_LIMITS.filesEntries);
       return { files, keep: { dir } };
     }
     const handles = await w.showOpenFilePicker!({ multiple: true, ...(accept.length && { types: [{ accept: { "application/octet-stream": accept.map((e) => `.${e}`) } }] }) });
@@ -494,7 +502,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       // In chunks, the thread let go between them: at 100,000 files the links took the page for half a second.
       for (let from = 0; from < picked.files.length; from += PICK_CHUNK) {
         if (from) await yieldThread();
-        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
+        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path) && accepted(path, accept));
         if (linksOf(ref).size + added.length + chunk.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
         const ids = randomIds(chunk.length);
         chunk.forEach(({ path, file, at }, i) => {
