@@ -397,7 +397,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
 
 /**
  * A Monero address or `monero:` link. No Monero wallet here: Pay hands the link to the person's own wallet app (a
- * plain link on the web, the system's opener on Desktop and Android), and the ⓘ says so.
+ * plain link on the web, the system's opener on Desktop and Android), and the ⓘ says so. My own card has neither.
  */
 function MoneroCard({ request, mine }: { request: MoneroRequest; mine: boolean }) {
   const { t } = useI18n();
@@ -414,8 +414,8 @@ function MoneroCard({ request, mine }: { request: MoneroRequest; mine: boolean }
     >
       {!mine && <OpenInWallet className={`${button} no-underline`} uri={request.uri} title={t("payments.formats.moneroPayTitle")} testId="monero-pay">{t("payments.invoice.pay")}</OpenInWallet>}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
-      <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="monero-info" className="self-center" />
-      {info && <p id={infoId} className="basis-full order-last text-[12px] leading-snug m-0 text-text-primary/80" data-testid="monero-info-text">{t("payments.formats.moneroInfo")}</p>}
+      {!mine && <InfoButton open={info} onToggle={() => setInfo(!info)} controls={infoId} testId="monero-info" className="self-center" />}
+      {!mine && info && <p id={infoId} className="basis-full order-last text-[12px] leading-snug m-0 text-text-primary/80" data-testid="monero-info-text">{t("payments.formats.moneroInfo")}</p>}
       {failed && <MoneyCopyRefused value={request.address} />}
     </Shell>
   );
