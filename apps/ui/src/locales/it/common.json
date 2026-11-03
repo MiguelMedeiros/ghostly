@@ -13,6 +13,7 @@
     "turnBack": "Carte"
   },
   "delete": "Elimina",
+  "deleteChatCallOn": "C’è una chiamata in questa chat. Chiudila prima, poi elimina la chat.",
   "deleteChatLocal": "La chat e la cronologia saranno eliminate da questo dispositivo, non da quello del contatto.",
   "deleteChatTitle": "Eliminare la chat?",
   "error": "Errore",
