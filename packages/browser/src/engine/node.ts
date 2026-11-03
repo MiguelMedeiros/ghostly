@@ -1316,6 +1316,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkIds: () => [...this.links.keys()],
     online: () => this.networkOn,
+    relayOnly: () => this.settings.relayOnly === true,
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
