@@ -5,6 +5,7 @@ import { AvatarOpener } from "../components/AvatarViewer";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
+import { setChatOnCall } from "../lib/chatsOnCall";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
@@ -316,7 +317,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const incomingOfferTs = useMemo(() => (incomingCallSignal ? parseCallSignal(incomingCallSignal)?.ts : undefined), [incomingCallSignal]);
   useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"), incomingOfferTs);
 
-  useEffect(() => () => onCallChange(sessionId, false), [onCallChange, sessionId]);
+  useEffect(() => () => { onCallChange(sessionId, false); setChatOnCall(sessionId, false); }, [onCallChange, sessionId]);
 
   const incomingHasVideo = (() => {
     if (!incomingCallSignal) return false;
@@ -647,9 +648,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A chat on a call is kept loaded by `App` wherever the person goes next,
   // so the call itself — and the signaling that ends it — survives the trip.
   // So is one waking its contact for a call: the wait, and the call it places, go on there too.
+  // Nor is it deleted under its call, from here or from the chat list (lib/chatsOnCall.ts).
+  const onCall = callState !== "idle" || wakeCall.waking;
   useEffect(() => {
-    onCallChange(sessionId, callState !== "idle" || wakeCall.waking);
-  }, [onCallChange, sessionId, callState, wakeCall.waking]);
+    onCallChange(sessionId, onCall);
+    setChatOnCall(sessionId, onCall);
+  }, [onCallChange, sessionId, onCall]);
 
   // What the contact last said on the session wins over a name read out of an older message.
   const contactNick = profileNick !== undefined ? profileNick : peerNick;
@@ -702,6 +706,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   if (holdForUnlock) return null;
 
   const handleDelete = () => {
+    if (onCall) return;
     if (confirmDelete) {
       deleteSession(params.sessionId);
       setChatFolder(params.sessionId, undefined);
@@ -1257,7 +1262,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         <ChatHoldDialog peer={chatPeer} name={shownName} onClose={() => setShowHold(false)}
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
-      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
+      {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} callOn={onCall} />}
       {showTechInfo && techInfo && (
         <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
         <div className="p-4 space-y-4 text-sm">
