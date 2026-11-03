@@ -102,6 +102,26 @@ describe("adding a proof: drafts and limits", () => {
     expect(engines.a.views()).toEqual([]);
   });
 
+  /**
+   * A check takes up to 30 s (a domain's DNS, a provider's server), and Identities → Add → "Close without saving?" cancels
+   * the draft meanwhile: the check went on and saved the proof anyway, its proof key sealed after the cancel zeroed it.
+   */
+  it("a draft cancelled while its evidence is being checked saves nothing", async () => {
+    const { engines, state } = pair();
+    await clearStorage(); await engines.a.load();
+    let checked!: () => void;
+    const gate = new Promise<void>(resolve => { checked = resolve; });
+    state.providers.a = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });
+    const completing = engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) });
+    await Promise.resolve();
+    engines.a.cancel({ draftId });
+    checked();
+    await expect(completing).rejects.toThrow(/started too long ago/);
+    expect(engines.a.views()).toEqual([]);
+    expect(await stored("identityProofs")).toBeUndefined();
+  });
+
   it("a profile holds at most 32 proofs", async () => {
     const { engines, make } = pair();
     await clearStorage(); await engines.a.load();
