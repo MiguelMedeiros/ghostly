@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffDigest, randomBytes, readHandoffManifest, readTurnPacket, seedSigner,
+  HANDOFF_ATTEMPTS, HANDOFF_PIECE_BYTES, HANDOFF_TIMINGS, fromBase64Url, handoffDigest, randomBytes, readHandoffHave, readHandoffManifest, readTurnPacket, seedSigner,
   toBase64Url, turnReleaseMessage, verify, type DeviceFrame, type HandoffPart, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
@@ -152,7 +152,14 @@ class Storage implements HandoffStagingHost {
       },
       finish: async (file) => { space.held.set(file.id, file); },
       discard: async (id) => { space.files.delete(id); space.held.delete(id); },
-      copyHeld: async (copies) => { for (const { fromId, file } of copies) { space.files.set(file.id, this.frozen.get(fromId)!.slice()); space.held.set(file.id, file); } },
+      // As the app's own: a file the frozen copy no longer holds is left out, and the ones after it are still copied.
+      copyHeld: async (copies) => {
+        for (const { fromId, file } of copies) {
+          const bytes = this.frozen.get(fromId);
+          if (!bytes) continue;
+          space.files.set(file.id, bytes.slice()); space.held.set(file.id, file);
+        }
+      },
       copyStaged: async (fromId, file) => { space.files.set(file.id, space.files.get(fromId)!.slice()); space.held.set(file.id, file); },
       restore: async (bundle, files) => { this.restoring?.(); space.restored = { bundle: bundle.slice(), files }; },
       dropRest: async () => { space.restored = null; },
@@ -1162,6 +1169,43 @@ describe("pass 1 and its resumption", () => {
     expect(parts).not.toContain(`file/${kept.sha256}`);
     const space = w.storage.spaces.get(w.takerRecords.record.handoff?.staging ?? w.storage.pointer)!;
     expect(toBase64Url(sha256(space.files.get("old-file")!))).toBe(kept.sha256);
+  });
+
+  it("a file this device deleted after it ran the profile again is sent, not claimed from the list of its last release", async () => {
+    const w = world();
+    const gone = w.profile.add("x", bytesOf(5_000));
+    // 1. This device gave the profile away: its frozen copy held the file, listed at its release.
+    await w.takerRecords.amend({ heldFiles: [{ sha256: gone.sha256, size: gone.size, id: "deleted-since" }], copy: "frozen" });
+    // 2. The profile came back to it: it runs it again.
+    await w.takerRecords.move("taking", { handoff: { role: "taking", step: "install", id: "back", peer: A, from: N, at: Date.now() } });
+    await w.takerRecords.move("active", { handoff: undefined });
+    expect(w.takerRecords.record.heldFiles).toBeUndefined();
+    // 3. It deleted the file (nothing of it in its own copy), 4. was replaced by the other device...
+    await w.takerRecords.move("superseded", { copy: "frozen" });
+    // 5. ...and Use here.
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1 || !!w.taker.view()?.failure);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1 || !!w.taker.view()?.failure || !!w.giver.view()?.failure);
+    expect([w.taker.view()?.failure, w.giver.view()?.failure, w.giverRecords.record.state]).toEqual([undefined, undefined, "standby"]);
+    const parts = w.link.sent.filter((s) => s.frame.t === "handoff-manifest").flatMap((s) => readHandoffManifest(s.frame)!.parts.map((p) => p[0]));
+    expect(parts).toContain(`file/${gone.sha256}`);
+    // Not said to be here before it came.
+    const first = w.link.sent.find((s) => s.from === B && s.frame.t === "handoff-have")!;
+    expect(readHandoffHave(first.frame)!.d).not.toContain(gone.sha256);
+  });
+
+  it("a held file the frozen copy no longer has is asked for, not counted as here", async () => {
+    const w = world();
+    const gone = w.profile.add("x", bytesOf(5_000));
+    await w.takerRecords.amend({ heldFiles: [{ sha256: gone.sha256, size: gone.size, id: "deleted-since" }] });
+    await w.taker.pull(PASSWORD);
+    await until(() => w.quiesced.length === 1 || !!w.taker.view()?.failure);
+    await reloadGiver(w);
+    await until(() => w.reloads === 1 || !!w.taker.view()?.failure || !!w.giver.view()?.failure);
+    expect([w.taker.view()?.failure, w.giver.view()?.failure, w.giverRecords.record.state]).toEqual([undefined, undefined, "standby"]);
+    const space = w.storage.spaces.get(w.takerRecords.record.handoff!.staging!)!;
+    expect(toBase64Url(sha256(space.files.get("x")!))).toBe(gone.sha256);
   });
 
   it("on mobile data, files over the limit stay behind: not sent, not in H, noted by the giver for later", async () => {
