@@ -135,6 +135,33 @@ describe("Pubky approval in the UI", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it("Cancel while the proof is checked cancels the draft: nothing is saved, the sheet stays and says so", async () => {
+    const onClose = vi.fn();
+    const { user, engine } = renderApp(<AddIdentityDialog onClose={onClose} />);
+    engine.on("beginIdentityProof", ({ provider, subject, validityDays = 90 }) =>
+      ({ draftId: "draft-1", binding: newIdentityBinding({ provider, subject, validitySeconds: validityDays * 86_400 }).binding }));
+    // The engine's check takes a while, and a draft cancelled meanwhile is not saved when it ends.
+    let checked!: () => void;
+    engine.on("completeIdentityProof", () => new Promise((resolve, reject) => {
+      checked = () => engine.callsTo("cancelIdentityProof").length ? reject(new Error("This proof was started too long ago. Start again.")) : resolve(proofView({ provider: "pubky", subject: key }));
+    }));
+    engine.on("cancelIdentityProof", () => undefined);
+    await user.click(screen.getByTestId("add-identity-pubky"));
+    await user.click(screen.getByTestId("add-identity-start"));
+    await screen.findByTestId("approval");
+    await act(async () => { sdk.approve!(session(), "cookie"); });
+    await vi.waitFor(() => expect(engine.callsTo("completeIdentityProof")).toHaveLength(1), { timeout: 5_000 });
+    expect(screen.getByTestId("add-identity-progress")).toHaveTextContent("Checking it the way your contacts will…");
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(engine.callsTo("cancelIdentityProof")).toEqual([{ draftId: "draft-1" }]);
+    await act(async () => { checked(); });
+    await waitFor(() => expect(screen.getByTestId("add-identity-start")).not.toHaveAttribute("aria-busy"));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId("add-identity-error")).toHaveTextContent("Cancelled. Nothing was saved.");
+    expect(screen.queryByTestId("add-identity-progress")).not.toBeInTheDocument();
+  });
+
   it("removes one: says what removal needs, asks again for the same folder, deletes the file, then revokes", async () => {
     const folder = "a".repeat(64);
     const id = "b".repeat(64);
