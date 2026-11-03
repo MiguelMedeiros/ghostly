@@ -18,6 +18,8 @@ const SAID: Record<string, string> = {
   "link.native": "entry session: WebRTC connected nothing, going on over a native transport",
   "invite.sent": "invitation sent on the entry session",
   "invite.received": "invitation received on the entry session: accepting",
+  "full.sent": "the group is full: told the joiner on the entry session",
+  "full.received": "the group is full: knocking on until there is room",
   "welcome.sent": "welcome sent",
   "welcome.received": "welcome received: in the group",
 };
