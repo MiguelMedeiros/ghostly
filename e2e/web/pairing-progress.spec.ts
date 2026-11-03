@@ -112,10 +112,14 @@ test("the inviter's invite card leaves once the joiner knocks, and the scene alo
   });
 
   const invite = await copyInvite(alice.page);
+  // The keyboard is still on its Copy when the contact arrives.
+  await alice.page.getByTestId("invite-card").getByRole("button", { name: "Copy invite" }).focus();
   await bob.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
   await pasteInvite(bob.page, invite);
 
   await expect(alice.page.getByTestId("invite-card")).toHaveCount(0);
+  // The focus went to the message field with it, not to the top of the page.
+  await expect(alice.page.getByPlaceholder("Message…")).toBeFocused();
   // It left while the scene was still on, before the chat took over: the contact had arrived, not the chat gone live.
   const leftAt = await alice.page.evaluate(() => (window as unknown as { qaInviteLeftAt?: string | null }).qaInviteLeftAt);
   // An inviter whose contact does not knock knocks itself, so its scene can be at knocking too.
