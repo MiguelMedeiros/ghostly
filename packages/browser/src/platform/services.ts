@@ -10,7 +10,9 @@ import {
   parseVideoMeta,
   readImageMeta,
   NO_PICTURE_METADATA,
+  NO_VIDEO_METADATA,
   withoutPictureMetadata,
+  withoutVideoMetadata,
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
@@ -94,16 +96,17 @@ async function copying<T>(copy: Promise<T>): Promise<T> {
   }
 }
 /**
- * A file as it is sent: a picture without its metadata (where it was taken, the device, the time), under the name and
- * type it was picked with, before its size is read and its digest computed. A picture whose metadata cannot be removed
- * is refused (`NO_PICTURE_METADATA`), never sent as it was.
+ * A file as it is sent: a picture or an MP4 or QuickTime video without its metadata (where it was taken or recorded,
+ * the device, the time), under the name and type it was picked with, before its size is read and its digest computed.
+ * One whose metadata cannot be removed is refused (`NO_PICTURE_METADATA`, `NO_VIDEO_METADATA`), never sent as it was.
  */
 async function sendable(source: File): Promise<File> {
   let stripped: Blob | undefined;
   try {
-    stripped = await withoutPictureMetadata(source, sanitizeMime(source.type));
+    const mime = sanitizeMime(source.type);
+    stripped = await withoutPictureMetadata(source, mime) ?? await withoutVideoMetadata(source, mime);
   } catch (error) {
-    if (error instanceof Error && error.message === NO_PICTURE_METADATA) throw error;
+    if (error instanceof Error && (error.message === NO_PICTURE_METADATA || error.message === NO_VIDEO_METADATA)) throw error;
     return copying(Promise.reject(error));
   }
   return stripped ? new File([stripped], source.name, { type: source.type, lastModified: source.lastModified }) : source;
@@ -385,7 +388,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     if (link.profile && !link.capabilities?.files && link.dataLink === "open") throw new Error("Connect to an updated peer to send files");
     const tooLarge = servicesPlatform!.fileTooLarge!(peerPubKeyZ32, picked.size);
     if (tooLarge) throw new Error(tooLarge);
-    const source = options?.voice || options?.video ? picked : await sendable(picked);
+    const source = options?.voice ? picked : await sendable(picked);
 
     const wireId = toBase64Url(randomBytes(12));
     // A reply (WISP 400 § Replies) goes with the file as it goes with a text: the engine keeps it and sends it along.
@@ -462,7 +465,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     // checks again.
     const check = await engine.call("groupFileCheck", { groupId });
     if (check.error) throw new Error(check.error);
-    const source = options?.voice || options?.video ? picked : await sendable(picked);
+    const source = options?.voice ? picked : await sendable(picked);
     const mime = sanitizeMime(source.type);
     const image = options?.voice || options?.video ? undefined : await readImageMeta(source, mime);
     const file = {

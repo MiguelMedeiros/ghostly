@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS, NO_PICTURE_METADATA, isViewerTag, viewerTag } from "@ghostly/core";
+import { LIMITS, NO_PICTURE_METADATA, NO_VIDEO_METADATA, isViewerTag, viewerTag } from "@ghostly/core";
+import { H264_MP4, PLACE, hasPlace, withMovie, xyzUdta } from "../../core/test/support/videoFixtures";
 import { setBrowserHost, type BrowserHost } from "../src/host";
 import { blobDigest, registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
@@ -300,6 +301,46 @@ describe("sending files", () => {
     }
     expect(engine.calls.map(([method]) => method)).toEqual(["groupFileCheck", "groupFileCheck"]);
     expect(await fileStore.listForLink("bad-pic-link")).toEqual([]);
+  });
+
+  // covers: files.video.metadata
+  it("a video goes without where it was recorded, to a chat and to a group, described or not: what is stored and digested is the stripped copy", async () => {
+    withLinks(chat({ id: "video-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const recorded = withMovie(H264_MP4, [xyzUdta()], Buffer.from(`location ${PLACE}`, "latin1"));
+    const video = () => new File([recorded], "VID_20261103.mp4", { type: "video/mp4" });
+    // As the chat sends a video it could describe (Chat.tsx), and one it could not.
+    const described = { duration: 1000, width: 320, height: 240 };
+    const sent = [
+      await services.sendFile("peer-1", video(), { video: described }),
+      await services.sendFile("peer-1", video()),
+      await services.sendGroupFile!("g1", video(), { video: described }),
+      await services.sendGroupFile!("g1", video()),
+    ];
+    for (const { file } of sent) {
+      const stored = await fileStore.get(file.id);
+      const bytes = new Uint8Array(await stored!.blob!.arrayBuffer());
+      expect(hasPlace(bytes)).toBe(false);
+      expect(bytes.length).toBe(recorded.length);
+      expect(file.size).toBe(bytes.length);
+      expect(stored!.digest).toBe(await blobDigest(new Blob([bytes])));
+      expect(hasPlace(new Uint8Array(await (await services.getFile(file.id))!.arrayBuffer()))).toBe(false);
+      expect(file).toMatchObject({ name: "VID_20261103.mp4", mime: "video/mp4" });
+    }
+    expect(sent[0]!.file.video).toEqual(described);
+  });
+
+  it("a video whose metadata cannot be removed is refused, to a chat and to a group, and nothing of it is stored or sent", async () => {
+    withLinks(chat({ id: "bad-video-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    const cut = withMovie(H264_MP4, [xyzUdta()]).subarray(0, 500);
+    for (const options of [undefined, { video: { duration: 1000, width: 320, height: 240 } }]) {
+      const bad = new File([cut], "cut.mp4", { type: "video/mp4" });
+      await expect(services.sendFile("peer-1", bad, options)).rejects.toThrow(NO_VIDEO_METADATA);
+      await expect(services.sendGroupFile!("g1", bad, options)).rejects.toThrow(NO_VIDEO_METADATA);
+    }
+    expect(engine.calls.map(([method]) => method)).toEqual(["groupFileCheck", "groupFileCheck"]);
+    expect(await fileStore.listForLink("bad-video-link")).toEqual([]);
   });
 
   it("a file whose copy into this device fails says it in the app's words, the system's reason kept, to a chat and to a group", async () => {

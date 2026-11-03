@@ -90,6 +90,8 @@ export async function convertVideo(file: File, { onProgress, signal }: PrepareOp
       tracks: "primary",
       // The audio is copied as it is (an iPhone's AAC): Chromium on Linux has no AAC encoder.
       video: plan.kind === "transcode" ? { codec: "avc", quality: new Quality({ bitrate: plan.bitrate }), forceTranscode: true } : {},
+      // None of the input's tags (where it was recorded, the device): mediabunny copies them unless told.
+      tags: {},
       showWarnings: false,
     });
     // A track it would drop (audio it cannot copy nor encode) is a worse video than the original.

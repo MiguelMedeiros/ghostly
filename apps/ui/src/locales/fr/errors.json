@@ -205,6 +205,8 @@
     "unreadableNext": "Renvoyez-le ou choisissez à nouveau le fichier.",
     "updatedPeerFirst": "Connectez-vous d'abord à un pair à jour",
     "updatedPeerToSend": "Connectez-vous à un pair à jour pour envoyer des fichiers",
+    "videoMetadata": "Cette vidéo ne peut pas être envoyée : Ghostly n'a pas pu retirer les informations qu'elle contient, comme l'endroit où elle a été filmée",
+    "videoMetadataNext": "Enregistrez-en une copie dans un éditeur vidéo, ou exportez-la à nouveau depuis votre galerie, et envoyez celle-ci.",
     "videoTooSlow": "La vidéo a mis trop de temps"
   },
   "generic": "Une erreur s'est produite",
