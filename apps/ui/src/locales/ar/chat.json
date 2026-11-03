@@ -1,5 +1,14 @@
 {
   "announce": {
+    "fileAccepted": "وافق {{name}} على {{file}}",
+    "fileArrived": "وصل {{file}} وهو جاهز للحفظ",
+    "fileCancelled": "ألغى {{name}} {{file}}",
+    "fileDeclined": "رفض {{name}} {{file}}",
+    "fileDelivered": "استلم {{name}} {{file}}",
+    "fileFailed": "{{file}}: {{status}}",
+    "fileOffer": "يريد {{name}} إرسال {{file}} ({{size}}) · في انتظار ردك",
+    "filePaused": "أوقف {{name}} {{file}} مؤقتًا",
+    "fileResumed": "استأنف {{name}} {{file}}",
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} رسائل جديدة",
     "messagesFrom": "{{count}} رسائل جديدة من {{name}}",

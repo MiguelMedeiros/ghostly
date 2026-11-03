@@ -17,7 +17,9 @@ export function timeLeft(seconds: number, tr: Translate = englishT): string {
 /** A size as a status line shows it: a no-break space keeps "26.0" and "MB" on one line when the line wraps. */
 export const statusSize = (bytes: number): string => formatFileSize(bytes).replace(" ", "\u00a0");
 
-const percent = (transfer: FileTransferState) => Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100);
+/** How far a transfer got, in whole percent (0-100), as its status line and its progress bar say it. */
+export const filePercent = (transfer: FileTransferState): number => Math.min(100, Math.floor((transfer.transferred / Math.max(1, transfer.size)) * 100));
+const percent = filePercent;
 
 /**
  * A group's file (WISP 503), by its local id (`group-<group>-in-…`, `group-<group>-out-…`). Each member's app fetches it
