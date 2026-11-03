@@ -1658,22 +1658,29 @@ describe("Use here on a replaced device (WISP 06 § States and events, supersede
     const w = world();
     // The phone was replaced at turn N - 3: its own record stays there, and its mark holds the turn that replaced it.
     w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen" };
+    const before = Date.now();
     await fullPull(w);
     expect(w.takes).toHaveLength(1);
     expect(w.takes[0].turn).toBe(N + 1);
-    // What only the phone held stays: its old namespace is not dropped, and the new record lists it.
+    // What only the phone held stays: its old namespace is not dropped, and the new record lists it, with when it was kept.
     expect(w.storage.dropped).toEqual([]);
     expect(w.takerRecords.record.forks).toEqual(["ghostly"]);
+    expect(Object.keys(w.takerRecords.record.forkKeptAt ?? {})).toEqual(["ghostly"]);
+    expect(w.takerRecords.record.forkKeptAt!.ghostly).toBeGreaterThanOrEqual(before);
+    expect(w.takerRecords.record.forkKeptAt!.ghostly).toBeLessThanOrEqual(Date.now());
     expect(w.takerRecords.record.handoff).toBeUndefined();
   });
 
   it("lists the old namespace as one more fork when the device already keeps 8: none is left on disk unlisted", async () => {
     const w = world();
     const earlier = Array.from({ length: 8 }, (_, i) => `ghostly_fork${i}`);
-    w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen", forks: earlier };
+    // Two kept with their time, the rest by a build that wrote none; a time left of a fork no longer listed goes.
+    const forkKeptAt = { ghostly_fork6: 1_000, ghostly_fork7: 2_000, ghostly_gone: 500 };
+    w.takerRecords.record = { ...w.takerRecords.record, state: "superseded", turn: N - 3, seenSequence: N * 2 ** 20 + 1, copy: "frozen", forks: earlier, forkKeptAt };
     await fullPull(w);
     expect(w.storage.dropped).toEqual([]);
     expect(w.takerRecords.record.forks).toEqual([...earlier, "ghostly"]);
+    expect(w.takerRecords.record.forkKeptAt).toEqual({ ghostly_fork6: 1_000, ghostly_fork7: 2_000, ghostly: expect.any(Number) });
     expect(w.takerRecords.record.handoff).toBeUndefined();
   });
 });

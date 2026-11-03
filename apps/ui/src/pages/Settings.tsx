@@ -733,7 +733,7 @@ export function Settings() {
             )}
           </Row>
         )}
-        <ForkRows forks={devices?.forks} />
+        <ForkRows forks={devices?.forks} keptAt={devices?.forkKeptAt} />
         <GroupDownloadsRow />
         <Row label={t("sidebar.deleteAllChats")} hint={!confirmDeleteChats ? t("settings.deleteAllChatsHint") : chatsOnCall ? t("settings.deleteAllChatsCallOn") : t("settings.deleteAllChatsConfirm", { count: chatCount })}>
           {confirmDeleteChats ? <>
