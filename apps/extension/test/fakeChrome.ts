@@ -150,14 +150,16 @@ export function installFakeChrome(manifest: chrome.runtime.Manifest): FakeWorld 
   };
   const record = (api: string, ...args: unknown[]) => world.calls.push({ api, args });
   const area = (items: Map<string, unknown>) => ({
-    async get(key: string) {
+    /** One key, or every item (`null`), as Chrome's. */
+    async get(key: string | null) {
+      if (key === null) return Object.fromEntries([...items].map(([k, value]) => [k, structuredClone(value)]));
       return items.has(key) ? { [key]: structuredClone(items.get(key)) } : {};
     },
     async set(values: Record<string, unknown>) {
       for (const [key, value] of Object.entries(values)) items.set(key, structuredClone(value));
     },
-    async remove(key: string) {
-      items.delete(key);
+    async remove(keys: string | string[]) {
+      for (const key of typeof keys === "string" ? [keys] : keys) items.delete(key);
     },
   });
 

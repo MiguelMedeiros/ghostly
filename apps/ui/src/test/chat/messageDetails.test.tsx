@@ -4,7 +4,7 @@ import type { MessageDetailsView } from "@ghostly/browser/shared/types";
 import { LONG_PRESS_MS, MessageBubble } from "../../components/MessageBubble";
 import { useState } from "react";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
-import { buildDetails, formatBytes, formatDuration, pathWords } from "../../lib/messageDetails";
+import { buildDetails, formatBytes, formatCallLength, formatDuration, pathWords } from "../../lib/messageDetails";
 import type { ChatMessage } from "../../lib/types";
 import { servicesPlatform } from "../../lib/platform";
 import { LOCALES as locales } from "../i18n/locales";
@@ -478,6 +478,16 @@ describe("the words", () => {
     const clock = (tag: string) => new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23" } as Intl.DateTimeFormatOptions).format(1_700_000_000_000);
     expect(model.sections[1].rows[0].value).toBe(clock("pt-BR"));
     expect(buildDetails(message(), null, { t: translateWith(locales.ar, "ar") }).sections[1].rows[0].value).toBe(clock("ar"));
+  });
+
+  it("in Arabic, a duration says short units, right for every number (a full noun changes form from 3 to 10)", () => {
+    const ar = translateWith(locales.ar, "ar");
+    expect(formatDuration(42, ar)).toBe("42 م.ث");
+    expect(formatDuration(5_000, ar)).toMatch(/^5[.,٫]00 ث$/);
+    expect(formatDuration(5 * 60_000 + 3_000, ar)).toBe("5 د 3 ث");
+    expect(formatDuration(3 * 3_600_000 + 7 * 60_000, ar)).toBe("3 س 7 د");
+    expect(formatDuration(4 * 86_400_000 + 5 * 3_600_000, ar)).toBe("4 ي 5 س");
+    expect(formatCallLength(8 * 60_000 + 4_000, ar)).toBe("8 د 4 ث");
   });
 
   it("says nothing it does not know", () => {

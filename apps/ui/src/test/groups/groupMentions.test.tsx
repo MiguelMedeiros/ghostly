@@ -17,7 +17,7 @@ import { windowIs } from "../viewport";
 // covers: groups.mentions, groups.mentions.notify
 
 const sound = vi.hoisted(() => ({ playSound: vi.fn((_name: string) => () => {}), notice: vi.fn(async (_id: string, _body: string) => {}) }));
-vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: sound.playSound, startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 vi.mock("../../lib/notifications", () => ({ showPrivateNotification: sound.notice, onNotificationOpen: () => () => {}, clearChatNotification: () => {} }));
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y"), BOB2 = "bobtwo".padEnd(52, "k");
@@ -215,7 +215,8 @@ describe("an unread mention in the chat list", () => {
     const t = 1_700_000_000_000;
     markGroupRead("group-1", t - 10);
     const view = list([active({ lastMessageAt: t, lastMentionAt: t - 5 })]);
-    expect(within(row()).getByTestId("group-row-mention")).toHaveAccessibleName("You were mentioned");
+    expect(within(row()).getByTestId("group-row-mention")).toBeInTheDocument();
+    expect(within(row()).getByTestId("group-row-open")).toHaveAccessibleName(/, you were mentioned$/);
     view.unmount();
     // Newer messages, but the mention was read.
     markGroupRead("group-1", t - 1);

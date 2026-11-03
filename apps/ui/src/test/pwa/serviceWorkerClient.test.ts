@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyUpdate, askForShare, buildGone, followNewVersion, forwardShare, listenForShares, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
-import { carryIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
+import { carryIncomingShare, dropIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
+import { activeProfileId } from "../../lib/profiles";
 
 // covers: app.pwa.update, app.pwa.share-target
 
@@ -183,7 +184,36 @@ describe("a share, on the page's side", () => {
   it("a page that waits for another tab has it forwarded there", async () => {
     window.location.hash = "#/shared";
     forwardShare();
-    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-forward" }]));
+    // To this profile's tab only: the worker gives it to no other profile's.
+    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-forward", profile: activeProfileId() }]));
+  });
+
+  it("the page that takes shares tells the worker its profile, when it starts and whenever it comes to the front", async () => {
+    listenForShares();
+    await vi.waitFor(() => expect(registration.active!.posted).toEqual([{ type: "share-here", profile: activeProfileId() }]));
+    window.dispatchEvent(new Event("focus"));
+    await vi.waitFor(() => expect(registration.active!.posted).toHaveLength(2));
+    expect(registration.active!.posted[1]).toEqual({ type: "share-here", profile: activeProfileId() });
+  });
+
+  it("a share never replaces one waiting in the picker: it is offered once that one is put aside", () => {
+    listenForShares();
+    const mine = { title: "", text: "mine", url: "", files: [] };
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: mine } }));
+    window.location.hash = "#/chat/abc";
+    for (const text of ["a page's", "two", "three"]) {
+      container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item: { title: "", text, url: "", files: [] } } }));
+    }
+    expect(incomingShare()).toMatchObject(mine);
+    // The person left the picker for a chat: one waiting behind does not take them back to it.
+    expect(window.location.hash).toBe("#/chat/abc");
+    dropIncomingShare();
+    expect(incomingShare()).toMatchObject({ text: "a page's" });
+    dropIncomingShare();
+    expect(incomingShare()).toMatchObject({ text: "two" });
+    // Three at most: the newest past that was dropped.
+    dropIncomingShare();
+    expect(incomingShare()).toBeNull();
   });
 
   it("a page not opened for one asks for nothing", async () => {

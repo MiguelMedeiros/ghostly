@@ -162,9 +162,11 @@ describe("FileBubble: files/3", () => {
     const view = show({ ...whole, stage: "verifying" }, { id: "chat1-out-late" });
     expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived, Ana is checking it… 4.2 GB");
     expect(screen.queryByTestId("file-cancel")).toBeNull();
-    // Offered again after a quiet spell, or waiting for a connection, every byte still there.
+    // Offered again after a quiet spell, or waiting for a connection, every byte still there. No Pause either: paused,
+    // it could be cancelled.
     act(() => fakeEngine.update({ transfers: { "chat1-out-late": whole } }));
     expect(screen.queryByTestId("file-cancel")).toBeNull();
+    expect(screen.queryByTestId("file-pause")).toBeNull();
     act(() => fakeEngine.update({ transfers: { "chat1-out-late": { ...whole, stage: "waiting" } } }));
     expect(screen.queryByTestId("file-cancel")).toBeNull();
     // The contact asks about it again: it can be cancelled.

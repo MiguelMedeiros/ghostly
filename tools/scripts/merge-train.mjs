@@ -471,8 +471,10 @@ const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const escapeMark = (f) => f.replaceAll("<", "&lt;");
 // Several aboard whose files GitHub does not list, and a push refused for one workflow: any of them may change it.
-const unlistedText = (workflow, others) =>
-  `Merge train: GitHub lists no files for this pull request (it has 3000 or more), and it refused the batch's push for a workflow (${workflow ? `\`${escapeMark(workflow)}\`: ` : ""}the queue app's token has no \`workflows\` permission). GitHub lists none for ${others.map((o) => `#${o.number}`).join(", ")} either, so the train cannot tell which of them changes it, and all of them left the line: the rest of the line goes on without them. Once the others are out of the line, add \`queue\` again: it boards alone among them, and only leaves again if it is the one that changes it (the train takes \`queue:failed\` off).`;
+// They come back one at a time, in number order, each after the one before it (`after`): told the same thing, all of
+// them added `queue` again at once, boarded together and left together again, run after run.
+const unlistedText = (workflow, others, after) =>
+  `Merge train: GitHub lists no files for this pull request (it changes 3000 files or more, or none), and it refused the batch's push for a workflow (${workflow ? `\`${escapeMark(workflow)}\`: ` : ""}the queue app's token has no \`workflows\` permission). GitHub lists none for ${others.map((o) => `#${o.number}`).join(", ")} either, so the train cannot tell which of them changes it, and all of them left the line: the rest of the line goes on without them. They come back one at a time, in number order, so that only one of them boards at once: ${after ? `once #${after.number} has landed, left the line again or is not coming back, add \`queue\` again` : "add `queue` again now, before the others"}, and it only leaves again if it is the one that changes it (the train takes \`queue:failed\` off).`;
 const workflowText = (base, workflows) =>
   `Merge train: this pull request changes a workflow (${workflows.map(escapeMark).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
 
@@ -760,7 +762,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       }
       if (!changing.length) {
         const named = `${e?.message ?? e}`.match(/workflow `([^`]+)`/)?.[1];
-        for (const p of unlisted) changing.push([p, unlisted.length > 1 ? unlistedText(named, unlisted.filter((o) => o !== p)) : workflowText(base, [named ?? "a workflow"])]);
+        const turns = [...unlisted].sort((a, b) => a.number - b.number);
+        for (const p of unlisted) changing.push([p, unlisted.length > 1 ? unlistedText(named, unlisted.filter((o) => o !== p), turns[turns.indexOf(p) - 1]) : workflowText(base, [named ?? "a workflow"])]);
       }
       if (!changing.length) throw e;
       for (const [p, text] of changing) {

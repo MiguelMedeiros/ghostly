@@ -111,10 +111,13 @@
   "join": {
     "admitted": "L'app dell'admin ha risposto: ricezione delle chiavi del gruppo. Tra un attimo sei dentro.",
     "admittedCommunity": "L'app di un membro ha risposto: ricezione delle chiavi del gruppo. Tra un attimo sei dentro.",
+    "admittedStuck": "Nessun membro è riuscito a completare il tuo ingresso. Chiedi il link attuale a qualcuno del gruppo.",
     "answered": "L'app dell'admin ha visto la tua richiesta e si sta collegando a te. Tra un attimo sei dentro.",
     "answeredCommunity": "L'app di un membro ha visto la tua richiesta e si sta collegando a te. Tra un attimo sei dentro.",
     "answeredTitleCommunity": "Un membro ti sta facendo entrare",
     "cancel": "Annulla accesso",
+    "full": "Questo gruppo è pieno",
+    "fullBody": "Ha {{n}} membri su {{max}}. Entri quando qualcuno esce: tieni l'app aperta.",
     "joiningGroup": "Accesso al gruppo…",
     "joiningName": "Accesso a {{name}}…",
     "knocked": "Succede appena l'app dell'admin è aperta. Puoi lasciare questa pagina.",

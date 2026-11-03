@@ -268,8 +268,10 @@
   "message": {
     "cancelSending": "取消发送",
     "copied": "已复制",
+    "copyFailed": "无法复制。请选中下方的文字后复制。",
     "copyHint": "点击复制",
     "copyJson": "全部复制为 JSON",
+    "copyText": "消息文字",
     "details": "详情",
     "detailsClose": "关闭",
     "detailsTitle": "消息详情",
@@ -321,6 +323,7 @@
     "invoice": "⚡ Lightning 发票",
     "lightningAddress": "Lightning 地址",
     "lightningOffer": "⚡ Lightning 报价",
+    "moneroAddress": "Monero 地址",
     "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "真实资金",
     "sats": "{{amount}} sats",

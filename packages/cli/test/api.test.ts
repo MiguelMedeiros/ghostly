@@ -224,6 +224,10 @@ describe("chats", () => {
     const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" })).rejects.toMatchObject({ code: "confirm" });
     await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow" })).rejects.toMatchObject({ code: "confirm" });
+    // BIP39's Portuguese list, entropy 0x7f repeated: the app's other languages' lists are the guard's too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "imitador vinheta sogro xerife veleiro pomar volumoso tratador imitador vinheta sogro xingar" })).rejects.toMatchObject({ code: "confirm" });
+    // Monero's own Portuguese test seed (tests/unit_tests/mnemonics.cpp): Monero's lists in them too.
+    await expect(callApi(ctx, "chat.send", { chat: "Alice", text: "cinzento luxuriante leonardo gnostico digressao cupula fifa broxar iniquo louvor ovario dorsal ideologo besuntar decurso rosto susto lemure unheiro pagodeiro nitroglicerina eclusa mazurca bigorna gnostico" })).rejects.toMatchObject({ code: "confirm" });
     expect(node.sendMessage).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.send", { chat: "Alice", text: "hi" })).toEqual({ chat: "chat-one", messageId: "me_1", delivery: "sending" });
     await callApi(ctx, "chat.send", { chat: "Alice", text: "legal winner thank year wave sausage worth useful legal winner thank yellow", force: true });

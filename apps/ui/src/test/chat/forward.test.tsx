@@ -91,6 +91,18 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-none")).toHaveTextContent("No chat by that name");
   });
 
+  it("starts on its search; the down arrow goes on to the chats found, up from the first goes back", async () => {
+    const { user } = open([message()]);
+    const search = screen.getByTestId("forward-search");
+    expect(search).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getAllByTestId("forward-target")[0]).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getAllByTestId("forward-target")[1]).toHaveFocus();
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(search).toHaveFocus();
+  });
+
   it("does not read the chats again on an engine change while it is open, only when one changes", async () => {
     open([message()]);
     await screen.findByText("Ana");

@@ -139,4 +139,38 @@ describe("the Paid mark of a Lightning invoice", () => {
     expect(within(card).queryByTestId("invoice-paid")).not.toBeInTheDocument();
     expect(within(card).getByTestId("invoice-pay")).toBeInTheDocument();
   });
+
+  const refusedBy = (reason: string) => {
+    fakeEngine.setState({ links: [linkView()], wallet: { lightning: lightningSource({ mode: "testnet", providerId: "fake-lightning" }) } });
+    const text = fakeInvoice(100, new Uint8Array(32).fill(9));
+    const view = renderApp(<MessageBubble message={message("m1", text)} peerPubKey="peer" />);
+    view.engine.on("walletQuoteInvoice", () => ({ quote: "quote-A", mint: "", amount: 100, feeReserve: 1, source: "fake-lightning" })).on("walletPayQuote", () => {
+      throw new Error(reason);
+    });
+    return { view, text };
+  };
+  const pay = async (view: ReturnType<typeof renderApp>) => {
+    await view.user.click(within(screen.getByTestId("invoice-bubble")).getByTestId("invoice-pay"));
+    await view.user.click(await screen.findByTestId("invoice-confirm"));
+  };
+
+  it("is shown when the mint refuses because the invoice was already paid: there is nothing left to pay", async () => {
+    const { view } = refusedBy("Invoice already paid");
+    await pay(view);
+    expect(await screen.findByTestId("invoice-paid")).toBeInTheDocument();
+  });
+
+  it("is not shown when the recipient refused an invoice it does not know: nothing was paid", async () => {
+    // LND's FAILURE_REASON_INCORRECT_PAYMENT_DETAILS: the recipient's node does not take the payment, which it says for
+    // an invoice it never made, cancelled or settled alike. Nothing left the wallet, and nobody is known to have paid.
+    const { view, text } = refusedBy("The recipient refused the payment (unknown or already paid invoice)");
+    await pay(view);
+    const card = screen.getByTestId("invoice-bubble");
+    expect(await within(card).findByText("The recipient refused the payment (unknown or already paid invoice)")).toBeInTheDocument();
+    expect(within(card).queryByTestId("invoice-paid")).not.toBeInTheDocument();
+    view.unmount();
+
+    renderApp(<MessageBubble message={message("m2", text)} peerPubKey="peer" />);
+    expect(within(screen.getByTestId("invoice-bubble")).queryByTestId("invoice-paid")).not.toBeInTheDocument();
+  });
 });

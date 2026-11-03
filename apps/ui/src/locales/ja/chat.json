@@ -268,8 +268,10 @@
   "message": {
     "cancelSending": "送信を取り消す",
     "copied": "コピーしました",
+    "copyFailed": "コピーできませんでした。下のテキストを選択してコピーしてください。",
     "copyHint": "クリックしてコピー",
     "copyJson": "すべてJSONとしてコピー",
+    "copyText": "メッセージの本文",
     "details": "詳細",
     "detailsClose": "閉じる",
     "detailsTitle": "メッセージの詳細",
@@ -321,6 +323,7 @@
     "invoice": "⚡ Lightning 請求書",
     "lightningAddress": "Lightning アドレス",
     "lightningOffer": "⚡ Lightning オファー",
+    "moneroAddress": "Monero アドレス",
     "payment": "⚡ {{what}}：{{amount}}",
     "realMoney": "本物のお金",
     "sats": "{{amount}} sats",

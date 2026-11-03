@@ -288,6 +288,11 @@ export interface DeviceRecord {
    * person discards one.
    */
   forks?: string[];
+  /**
+   * When each fork was kept (ms), by its name in `forks`: what tells two of them apart in Data and storage. A fork kept
+   * by an older build has none, and an older build that discards one leaves its time here: read it through `forkTimes`.
+   */
+  forkKeptAt?: Record<string, number>;
   earlierSets: EarlierDeviceSet[];
   /** Grants sent whose `enroll-done` never came back: devices that hold `D` and are in no record. */
   unfinishedGrants?: UnfinishedGrant[];
@@ -625,6 +630,21 @@ function cleanNames(record: DeviceRecord): DeviceRecord {
     ...record, deviceSet: record.deviceSet.map((slot) => slot && { ...slot, name: turnName(slot.name) }),
     ...(record.unfinishedGrants ? { unfinishedGrants: record.unfinishedGrants.map((grant) => ({ ...grant, name: turnName(grant.name) })) } : {}),
   };
+}
+
+/**
+ * When each fork the record lists was kept (`forkKeptAt`): only a listed fork's, only a time a date holds. A fork kept
+ * before the time was written has none, and anything else in the field is taken as no time: it only tells rows apart.
+ */
+export function forkTimes(record: Pick<DeviceRecord, "forks" | "forkKeptAt">): Record<string, number> {
+  const kept = record.forkKeptAt;
+  if (!kept || typeof kept !== "object" || Array.isArray(kept)) return {};
+  const times: Record<string, number> = {};
+  for (const fork of record.forks ?? []) {
+    const at = Object.prototype.hasOwnProperty.call(kept, fork) ? kept[fork] : undefined;
+    if (count(at, 8.64e15)) times[fork] = at;
+  }
+  return times;
 }
 
 function checked(record: DeviceRecord): DeviceRecord {

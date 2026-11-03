@@ -12,7 +12,7 @@ import {
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
-import { MAX_EARLIER_SETS, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
+import { MAX_EARLIER_SETS, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
 import type { HandoffTakerFacts } from "./handoffWallets";
 
@@ -280,6 +280,21 @@ function fileParts(files: readonly HandoffFile[]): HandoffPart[] {
   const byDigest = new Map<string, HandoffPart>();
   for (const file of files) if (!byDigest.has(file.sha256)) byDigest.set(file.sha256, [filePartName(file.sha256), file.size, file.sha256]);
   return [...byDigest.values()];
+}
+
+/**
+ * The most files a standby's record lists as held (`heldFiles`). The list goes into the device record, which Desktop
+ * also keeps in a file of at most 4 MiB (`device_state.rs`) and which every read parses: one entry per file made a
+ * profile of some 35,000 files unable to write `standby`, so its move failed at the very end. A file not listed is
+ * only sent again by a later pull.
+ */
+export const MAX_HELD_FILES = 10_000;
+
+/** What the frozen copy holds, for the record: one file per digest (one copy is enough to copy from), the largest first. */
+function heldFilesOf(files: readonly HandoffFile[]): HeldFile[] {
+  const byDigest = new Map<string, HeldFile>();
+  for (const file of files) if (!byDigest.has(file.sha256)) byDigest.set(file.sha256, { sha256: file.sha256, size: file.size, id: file.id });
+  return [...byDigest.values()].sort((a, b) => b.size - a.size).slice(0, MAX_HELD_FILES);
 }
 
 /** Which file ids each digest is. */
@@ -908,7 +923,7 @@ export class HandoffGiver {
     if (toSlot < 0) return;
     const signed = await signTurnRelease(this.ports.turnAddress, this.turn + 1, fromSlot, toSlot, fromBase64Url(from), h, (bytes) => this.ports.sign(bytes));
     const release = { turn: this.turn + 1, to: from, h: toBase64Url(h), s: toBase64Url(signed.signature) };
-    const heldFiles: HeldFile[] = this.allFiles.map((file) => ({ sha256: file.sha256, size: file.size, id: file.id }));
+    const heldFiles = heldFilesOf(this.allFiles);
     const leftFiles: LeftFile[] = this.allFiles.filter((file) => later.has(file.sha256)).map((file) => ({ sha256: file.sha256, size: file.size, where: file.id }));
     // Standby first, durably: from this write on this device is on standby, whether the frame below arrives or not.
     await this.ports.records.move("standby", {
@@ -1441,13 +1456,14 @@ export class HandoffTaker {
     this.pass = manifest.pass;
     this.ids = ids;
     for (const part of later) this.behind.set(part[2], part);
-    // Room for what is to come, against what this device says it has.
     const total = parts.reduce((sum, part) => sum + part[1], 0);
-    const room = await this.staging!.room();
-    if (room !== null && room < total) { this.out(handoffCancelFrame("room")); await this.giveUp("room"); return; }
-    // What the frozen copy holds is copied in here, not sent.
     const record = await this.ports.records.read();
     const staged = new Map((await this.staging!.held()).map((file) => [file.id, file]));
+    // Room for what this device writes, against what it says it has: more than what is sent. A file in several chats
+    // is sent once and written once per id (`copyStaged`), and what the frozen copy holds is copied in, not sent.
+    const room = await this.staging!.room();
+    if (room !== null && room < this.toWrite(parts, ids, record?.heldFiles ?? [], staged)) { this.out(handoffCancelFrame("room")); await this.giveUp("room"); return; }
+    // What the frozen copy holds is copied in here, not sent.
     const copies: { fromId: string; file: HandoffFile }[] = [];
     for (const held of record?.heldFiles ?? []) {
       if (this.notHeld.has(held.sha256)) continue;
@@ -1509,6 +1525,23 @@ export class HandoffTaker {
     let done: boolean;
     try { done = await this.partDone(part); } catch { await this.noRoom(); return; }
     if (done) this.out(handoffAckFrame(part.name, part.size));
+  }
+
+  /**
+   * The bytes a pass writes here: its parts that are no file (the rest, the device sets), and each file's size once per
+   * id of it not staged yet, whether its bytes are sent, copied from the frozen copy or from another id. What stays
+   * behind is not written.
+   */
+  private toWrite(parts: readonly HandoffPart[], ids: Record<string, string[]>, held: readonly HeldFile[], staged: ReadonlyMap<string, HandoffFile>): number {
+    const sizes = new Map<string, number>();
+    for (const file of [...held, ...staged.values()]) sizes.set(file.sha256, file.size);
+    let bytes = 0;
+    for (const [name, size] of parts) { const digest = filePartDigest(name); if (digest) sizes.set(digest, size); else bytes += size; }
+    for (const [digest, list] of Object.entries(ids)) {
+      if (this.behind.has(digest)) continue;
+      bytes += (sizes.get(digest) ?? 0) * list.filter((id) => !staged.has(id)).length;
+    }
+    return bytes;
   }
 
   /** Storage refused a write: no room. Nothing changed on either device. */
@@ -1671,7 +1704,11 @@ export class HandoffTaker {
       await this.ports.forget(handoff.old!).catch(() => {});
       // A replaced device's old namespace is the fork: what only it held stays, as "Only on this device", until the
       // person discards it (WISP 06 § Installing the staged state). Any other old namespace goes.
-      if (handoff.fork) await this.ports.records.amend({ handoff: undefined, forks: [...new Set([...(record.forks ?? []), handoff.old!])] }).catch(() => {});
+      // The time it was kept goes beside it (`forkKeptAt`): two of them are told apart by it.
+      if (handoff.fork) {
+        const forks = [...new Set([...(record.forks ?? []), handoff.old!])];
+        await this.ports.records.amend({ handoff: undefined, forks, forkKeptAt: { ...forkTimes({ ...record, forks }), [handoff.old!]: this.now() } }).catch(() => {});
+      }
       else {
         await this.ports.staging.drop(handoff.old!).catch(() => {});
         await this.ports.records.amend({ handoff: undefined }).catch(() => {});

@@ -489,6 +489,10 @@ fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(links) = app.try_state::<linked_files::LinkedFiles>() {
         links.page_started();
     }
+    // The cookie jars of its Pubky approvals, which it can no longer close (`pubky_session::page_started`).
+    pubky_session::page_started();
+    // Its cameras, microphone meters and calls (Linux): stopped, and its device watch no longer told.
+    native_call::page_started();
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
@@ -1180,6 +1184,24 @@ mod tests {
         page_started(app.handle());
         assert_eq!(serve(), tauri::http::StatusCode::NOT_FOUND);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// The Pubky sessions of the page before this one, which it never closed, are forgotten: their ids were its own.
+    #[test]
+    fn a_new_page_forgets_the_pubky_sessions_the_page_before_left_open() {
+        let app = app();
+        // A session is open once its first request is in; a bad address is refused before that.
+        tauri::async_runtime::block_on(pubky_session::fetch(
+            "session-000000000001".into(),
+            "http://127.0.0.1:9/session".into(),
+            "GET".into(),
+            vec![],
+            None,
+        ))
+        .ok();
+        assert_eq!(pubky_session::open_sessions(), 1);
+        page_started(app.handle());
+        assert_eq!(pubky_session::open_sessions(), 0);
     }
 
     /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its

@@ -57,8 +57,13 @@
   "fork": {
     "confirm": "Eliminare questa copia per sempre? Ciò che è solo in essa andrà perso.",
     "discard": "Elimina",
+    "discardWhich": "Elimina: {{which}}",
     "hint": "Una copia di questo profilo da prima che un altro dispositivo lo prendesse.",
     "info": "Usa qui ha tenuto ciò che questo dispositivo conteneva allora. Messaggi e pagamenti presenti solo in quella copia non sono nel tuo profilo. Elimina la rimuove per sempre.",
+    "kept": "Conservata il {{when}}",
+    "older": "Copia precedente",
+    "olderNumbered": "Copia precedente {{n}}",
+    "repeat": "{{which}} ({{n}})",
     "title": "Solo su questo dispositivo"
   },
   "handoff": {
@@ -255,6 +260,15 @@
     "removing": "Rimozione…",
     "text": "Non potrà più prendere questo profilo.",
     "title": "Rimuovere {{device}}?"
+  },
+  "rename": {
+    "button": "Rinomina",
+    "fail": {
+      "name": "Questo nome non si può usare. Provane un altro."
+    },
+    "label": "Nome del dispositivo",
+    "save": "Salva",
+    "title": "Rinomina {{device}}"
   },
   "restore": {
     "activeHint": "Avviare questo backup qui creerebbe una seconda copia.",

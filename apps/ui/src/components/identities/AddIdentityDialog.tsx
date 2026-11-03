@@ -18,6 +18,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { focusLost } from "../../lib/focus";
 import { problemText, type Problem } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
 import { CopiedStatus } from "../chat/LinkQrDialog";
 
 const VALIDITY = [7, 30, 90, 180, 365];
@@ -104,6 +105,12 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
 
   /** Stopped by the person: nothing to do, and nothing was saved. */
   const cancelled = (): Problem => ({ tone: "error", title: t("identities.add.cancelled") });
+  /** Cancel while a signer works: a check already running is stopped with its draft, so the engine saves nothing. */
+  const stop = () => {
+    abort.current?.abort();
+    if (draft.current) void engine.call("cancelIdentityProof", { draftId: draft.current }).catch(() => {});
+    draft.current = null; setProgress(""); setError(cancelled());
+  };
   const validity = days || provider?.validity.defaultDays || 30;
   const validityOptions = provider ? [...new Set([...VALIDITY.filter(d => d <= provider.validity.maxDays), provider.validity.defaultDays])].sort((a, b) => a - b) : [];
   const choose = (p: IdentityProofProvider) => { chosen.current = p.id; setProvider(p); setSignerId(""); setSubject(p.subject.options?.[0]?.value ?? ""); setDays(0); setError(""); };
@@ -161,6 +168,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   });
 
   const needsSubject = signer && signer.kind !== "in-app";
+  const subjectStop = radioTabStop(provider?.subject.options?.map(o => ({ checked: subject === o.value, disabled: busy })) ?? []);
   const card = (p: IdentityProofProvider) => <ProviderCard key={p.id} provider={p} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />;
   const basic = providers.filter(p => !p.advanced), more = providers.filter(p => p.advanced);
   const signerChoice = <>
@@ -257,10 +265,11 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               </label>
             ))}
             {needsSubject && (provider.subject.options ? (
-              <div className="text-xs text-text-muted" role="radiogroup" aria-label={provider.subject.label} data-testid="add-identity-subject" data-value={subject}>{provider.subject.label}
+              <div className="text-xs text-text-muted" role="radiogroup" aria-label={provider.subject.label} data-testid="add-identity-subject" data-value={subject}
+                onKeyDown={e => radioGroupKeys(e, { choose: true })}>{provider.subject.label}
                 <div className="mt-1 grid gap-2 grid-cols-2 @sm:grid-cols-3">
-                  {provider.subject.options.map(o => (
-                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)}
+                  {provider.subject.options.map((o, i) => (
+                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)} tabIndex={i === subjectStop ? 0 : -1}
                       className={`flex items-center gap-2 rounded-xl border p-2 text-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${subject === o.value ? "border-accent bg-accent/5 text-text-primary" : "border-border text-text-secondary hover:bg-surface-alt"}`}>
                       <ProviderMark provider={provider.id} subject={o.value} /><span className="truncate">{o.label}</span>
                     </button>
@@ -282,7 +291,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <p className="text-xs text-text-muted"><bdi>{provider.privacy}</bdi> {t("identities.add.linkable")}</p>
             {provider.experimental && <Notice tone="warning">{t("identities.add.experimental")}</Notice>}
             <div className="flex flex-wrap justify-end gap-2">
-              {busy && <Button onClick={() => { abort.current?.abort(); setProgress(""); setError(cancelled()); }}>{t("common.cancel")}</Button>}
+              {busy && <Button onClick={stop}>{t("common.cancel")}</Button>}
               <Button variant="primary" data-testid="add-identity-start" loading={busy} disabled={!signer || !fieldsFilled || (needsSubject && !subject.trim()) || (previewFirst && preview.status !== "ok")} onClick={start}>
                 {busy ? t("identities.waiting") : signer?.action ?? (signer?.kind === "in-app" ? t("identities.add.signWithNamed", { signer: signer.label.replace(/ \(.*\)$/, "") }) : t("identities.add.continue"))}
               </Button>

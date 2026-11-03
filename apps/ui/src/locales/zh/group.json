@@ -111,10 +111,13 @@
   "join": {
     "admitted": "管理员的应用已回应：正在获取群组密钥。马上就能进入。",
     "admittedCommunity": "某个成员的应用已回应：正在获取群组密钥。马上就能进入。",
+    "admittedStuck": "没有成员能完成让你加入。请向群组里的人索取当前链接。",
     "answered": "管理员的应用看到了你的敲门请求，正在连接你。马上就能进入。",
     "answeredCommunity": "某个成员的应用看到了你的敲门请求，正在连接你。马上就能进入。",
     "answeredTitleCommunity": "有成员正在让你进入",
     "cancel": "取消加入",
+    "full": "该群组已满",
+    "fullBody": "已有 {{n}}/{{max}} 名成员。有人离开后你即可加入：请保持应用打开。",
     "joiningGroup": "正在加入群组…",
     "joiningName": "正在加入 {{name}}…",
     "knocked": "管理员的应用打开后会自动完成。你可以离开此页面。",

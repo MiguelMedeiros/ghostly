@@ -410,6 +410,34 @@ describe("the RTCPeerConnection stand-in", () => {
     expect(ice).not.toHaveBeenCalled();
   });
 
+  it("ends the microphone Rust still sends when it fails while another one opens, not the one picked", async () => {
+    let opened!: () => void;
+    tauri.invoke.mockImplementation(async (command, args) => {
+      if (command === "native_call_offer") return { sdp: "sdp", microphone: "Mic A" };
+      // Rust waits for the new microphone's first sound (up to 2 s) before it sends it in place of the old one.
+      if (command === "native_call_microphone") { await new Promise<void>((done) => { opened = done; }); return args?.device ?? null; }
+      return undefined;
+    });
+    const media = nativeCallMedia();
+    const pc = new NativePeerConnection({});
+    const [audio] = pc.getTransceivers();
+    const before = (await media.getUserMedia({ audio: { deviceId: { exact: "Mic A" } } })).getAudioTracks()[0];
+    pc.addTrack(before);
+    await pc.createOffer();
+    const picked = (await media.getUserMedia({ audio: { deviceId: { exact: "Mic B" } } })).getAudioTracks()[0];
+    const switching = audio.sender.replaceTrack(picked);
+    await vi.waitFor(() => expect(opened).toBeTypeOf("function"));
+    // Mic A, still the one sent, fails meanwhile.
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(picked.readyState, "Mic B is not the one that failed").toBe("live");
+    expect(before.readyState).toBe("ended");
+    opened();
+    await switching;
+    // Now Mic B is the one sent: its own failure ends it.
+    tauri.channels[0].onmessage(json({ ended: "microphone" }));
+    expect(picked.readyState).toBe("ended");
+  });
+
   it("ends the camera's track when Rust says the camera failed, and closes it in Rust", async () => {
     tauri.invoke.mockImplementation(async (command) => (command === "native_camera_open" ? { camera: 7, device: "Webcam" } : undefined));
     const decoded = vi.fn(async () => ({ width: 640, height: 480, close() {} }));

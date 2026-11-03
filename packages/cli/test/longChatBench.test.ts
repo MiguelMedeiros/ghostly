@@ -30,6 +30,8 @@ async function seed(db: typeof import("@ghostly/browser/engine/db").db) {
   // The two chats, and a third one around them in the store.
   for (const [linkId, count] of [["long", SIZES.long], ["short", SIZES.short], ["other", 500]] as const) for (let i = 0; i < count; i++) await db.putMessage(message(linkId, i));
 }
+/** What `messagePage` reaches on its node: the store's page and a bound's place (private, so taken off the prototype). */
+const pageReaders = (proto: object) => { const p = proto as Record<"storedPage" | "pagePlace", unknown>; return { storedPage: p.storedPage, pagePlace: p.pagePlace }; };
 const row = (store: string, what: string, ms: Record<string, number>) => `${store.padEnd(10)} ${what.padEnd(30)} ${ms.long!.toFixed(1).padStart(8)} ms ${ms.short!.toFixed(1).padStart(8)} ms`;
 
 describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")("opening a long chat", () => {
@@ -40,13 +42,14 @@ describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")(
     const { db } = await import("@ghostly/browser/engine/db");
     const { GhostlyNode } = await import("@ghostly/browser/engine/node");
     await seed(db);
+    const self = pageReaders(GhostlyNode.prototype) as never;
     const whole: Record<string, number> = {}, page: Record<string, number> = {};
     for (const linkId of Object.keys(SIZES)) {
       whole[linkId] = await time(() => db.getMessages(linkId));
-      page[linkId] = await time(() => GhostlyNode.prototype.messagePage.call(null as never, { linkId }));
+      page[linkId] = await time(() => GhostlyNode.prototype.messagePage.call(self, { linkId }));
     }
     console.log(`\n${"store".padEnd(10)} ${"read".padEnd(30)} ${"2000".padStart(11)} ${"50".padStart(11)}\n${row("web", "whole history (getMessages)", whole)}\n${row("web", "first page (messagePage)", page)}`);
-    expect((await GhostlyNode.prototype.messagePage.call(null as never, { linkId: "long" })).messages).toHaveLength(50);
+    expect((await GhostlyNode.prototype.messagePage.call(self, { linkId: "long" })).messages).toHaveLength(50);
     vi.unstubAllGlobals();
   }, 600_000);
 
@@ -65,7 +68,7 @@ describe.skipIf(!process.env.GHOSTLY_BENCH && import.meta.env.MODE !== "bench")(
       const { db } = await import("@ghostly/browser/engine/db");
       const { GhostlyNode } = await import("@ghostly/browser/engine/node");
       const { callApi } = await import("../src/api");
-      const node = { getState: () => ({ links: Object.keys(SIZES).map((id) => ({ id })), groups: [] }), getMessages: db.getMessages, messagePage: GhostlyNode.prototype.messagePage };
+      const node = { getState: () => ({ links: Object.keys(SIZES).map((id) => ({ id })), groups: [] }), getMessages: db.getMessages, messagePage: GhostlyNode.prototype.messagePage, ...pageReaders(GhostlyNode.prototype) };
       const ctx = { runtime: { server: { node }, paths: { name: "default" } } } as unknown as ApiContext;
       const whole: Record<string, number> = {}, page: Record<string, number> = {};
       for (const linkId of Object.keys(SIZES)) {

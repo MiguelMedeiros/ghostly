@@ -88,7 +88,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
           setInfo(resolved);
           if (resolved.minSat === resolved.maxSat) setAmount(String(resolved.minSat));
         }); }}>{busy ? t("wallet.lightning.lookingUp") : t("wallet.lightning.lookUp")}</button>
-        {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
+        {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
       </div>
     );
   }
@@ -115,7 +115,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
             <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
           </div>
         )}
-        {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
+        {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
       </div>
     );
   }
@@ -171,7 +171,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         <button type="button" className={primary} disabled={!Number(amount)} {...working} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
         <button type="button" className={quiet} disabled={busy} onClick={() => { setError(null); setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
       </div>
-      {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
+      {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} />}
     </div>
   );
 }

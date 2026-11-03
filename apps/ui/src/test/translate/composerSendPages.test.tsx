@@ -16,7 +16,7 @@ const runtime = vi.hoisted(() => ({ translate: vi.fn(async (pair: string, texts:
 vi.mock("../../desktop/translate", async (original) => ({ ...(await original<typeof import("../../desktop/translate")>()), translateTexts: runtime.translate }));
 /** The draft detector: one that is sure every draft is Spanish, while the app is in English. */
 vi.mock("../../lib/translateDetector", () => ({ loadDetector: async () => () => [{ code: "es", probability: 0.99 }] }));
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 import { Chat } from "../../pages/Chat";
 import { GroupChat } from "../../pages/GroupChat";

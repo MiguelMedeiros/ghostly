@@ -669,6 +669,111 @@
       "onchainTestnet": "这里的 Testnet 还没有可用的链上 Bitcoin 提供方。"
     },
     "optional": "（可选）",
+    "providers": {
+      "bdk": {
+        "description": "本应用内的比特币钱包（bitcoindevkit）：密钥由你持有，Esplora 服务器为它提供链上数据。目前仅限测试网络。",
+        "fields": {
+          "esplora": {
+            "help": "留空：使用 Signet（blockstream.info、mempool.space）或 Mutinynet（mutinynet.com）的公共服务器，哪个响应就用哪个。Regtest 需要你自己的服务器，并且它必须允许本应用的来源（CORS）。",
+            "label": "Esplora 服务器",
+            "placeholder": "留空：该网络的公共服务器",
+            "suggestions": {
+              "http_127_0_0_1_47002": "本机：e2e 的 regtest 环境（npm run e2e:infra:up）"
+            }
+          },
+          "mnemonic": {
+            "help": "BIP39，英文。让 Ghostly 创建新钱包，或输入你自己的短语来恢复钱包。",
+            "label": "恢复短语",
+            "placeholder": "12 或 24 个单词"
+          },
+          "network": {
+            "label": "网络"
+          },
+          "script": {
+            "label": "地址",
+            "options": {
+              "bip84": "原生 SegWit (BIP84, bc1q…)"
+            }
+          }
+        }
+      },
+      "bitcoind": {
+        "description": "你自己的 Bitcoin Core 节点上的钱包，通过其 RPC 连接。密钥由你的节点持有并签名。需要桌面应用。",
+        "fields": {
+          "password": {
+            "help": "rpcpassword，或节点 .cookie 文件的内容（bitcoind 重启后会变化）。",
+            "label": "RPC 密码或 cookie"
+          },
+          "url": {
+            "help": "你的节点的 rpcbind 和 rpcport：mainnet 8332，signet 38332，testnet4 48332，regtest 18443。",
+            "label": "RPC 地址"
+          },
+          "user": {
+            "help": "如果要在下方粘贴 .cookie 文件，请留空。",
+            "label": "RPC 用户"
+          },
+          "wallet": {
+            "help": "节点中已加载的钱包（bitcoin-cli listwallets）。留空：节点的默认钱包。",
+            "label": "钱包名称"
+          }
+        }
+      },
+      "breez": {
+        "description": "通过 Breez SDK 使用的 Spark 自托管 Lightning 钱包。其恢复短语密封在本设备上；sats 由你持有。"
+      },
+      "cashu-mint": {
+        "description": "发票款项存入你的 Cashu 余额，也从中支付。sats 由 mint 保管。"
+      },
+      "core-lightning": {
+        "description": "你自己的 Core Lightning 节点，通过 Commando 和 rune 连接。sats 由你的节点持有。Web 应用只能通过 wss:// 访问它。",
+        "fields": {
+          "nodeId": {
+            "help": "lightning-cli getinfo → id。连接会以它进行认证。",
+            "label": "节点 ID",
+            "placeholder": "02… 或 03…（66 个十六进制字符）"
+          },
+          "rune": {
+            "help": "切勿使用不受限制的 rune。用以下命令创建：{{command}}",
+            "placeholder": "仅限 Ghostly 所用方法的 rune"
+          },
+          "url": {
+            "help": "节点的 bind-addr=ws:… 监听器，Web 应用需经 wss:// 代理；ws:// 仅限连接本机。",
+            "label": "WebSocket 地址"
+          }
+        }
+      },
+      "fedimint": {
+        "description": "你已加入的联盟（钱包 → Fedimint）：发票通过其网关存入其 ecash，也从中支付。sats 由其守护者保管。"
+      },
+      "lnd": {
+        "description": "你自己的 LND 节点，通过其 REST API 连接。sats 由你的节点持有。",
+        "fields": {
+          "certificate": {
+            "help": "仅限桌面：节点的 tls.cert，固定使用（节点必须出示的正是这个证书）。若使用公共证书机构颁发的证书则留空；在其他地方必须留空。",
+            "label": "TLS 证书"
+          },
+          "macaroon": {
+            "help": "切勿使用管理员 macaroon：用 {{command}} 创建一个（只收款则只需 invoices:…）。"
+          },
+          "url": {
+            "help": "LND 的 REST 端口（restlisten，默认 8080）。在浏览器中，节点必须用 restcors 允许本应用，并拥有浏览器信任的证书；桌面应用两者都不需要。",
+            "label": "REST 地址"
+          }
+        }
+      },
+      "nwc": {
+        "description": "通过 NWC URI 连接的钱包（Alby Hub、节点的 NWC 服务、托管钱包）。sats 由该钱包持有，手续费上限也由它自己设定：是否托管取决于钱包。",
+        "fields": {
+          "uri": {
+            "help": "在你钱包的应用连接中获取。请允许创建、支付和查询发票，以及读取余额。",
+            "label": "连接 URI"
+          }
+        }
+      },
+      "webln": {
+        "description": "本浏览器中的 Lightning 钱包（Alby 等）。sats 由该钱包持有，付款前它会先询问你。"
+      }
+    },
     "reconfigured": "{{name}} 现在使用该服务器。",
     "reconfiguredUnnamed": "来源现在使用该服务器。",
     "remove": "移除",

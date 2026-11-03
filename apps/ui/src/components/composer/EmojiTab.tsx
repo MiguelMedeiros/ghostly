@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type Mo
 import { useI18n } from "../../contexts/I18nContext";
 import { ReloadButton } from "../ui/ReloadButton";
 import { emojiCategories, emojiFailedAgain, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
+import { radioGroupKeys } from "../../lib/radioGroup";
 import { EMOJI_CATEGORY_ICONS } from "./icons";
 import { CategoryBar, PanelSearch } from "./PanelParts";
 
@@ -133,8 +134,9 @@ function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
         after={<div className="relative">
           <button type="button" data-testid="emoji-skin" aria-label={t("composer.skinTone")} title={t("composer.skinTone")} aria-expanded={choosingSkin}
             onClick={() => setChoosingSkin((v) => !v)} className="expression-skin">{TONES[skin]}</button>
-          {choosingSkin && <div role="radiogroup" aria-label={t("composer.skinTone")} className="expression-skins" data-testid="emoji-skins">
-            {TONES.map((tone, i) => <button key={tone} type="button" role="radio" aria-checked={i === skin} aria-label={tone} data-testid={`emoji-skin-${i}`}
+          {/* Choosing closes the row, so the arrows only move; Space or Enter chooses. */}
+          {choosingSkin && <div role="radiogroup" aria-label={t("composer.skinTone")} className="expression-skins" data-testid="emoji-skins" onKeyDown={radioGroupKeys}>
+            {TONES.map((tone, i) => <button key={tone} type="button" role="radio" aria-checked={i === skin} aria-label={tone} data-testid={`emoji-skin-${i}`} tabIndex={i === skin ? 0 : -1}
               onClick={() => { setSkin(i); setSkinTone(i); setChoosingSkin(false); }}>{tone}</button>)}
           </div>}
         </div>} />

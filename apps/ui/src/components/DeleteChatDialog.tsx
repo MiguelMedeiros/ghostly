@@ -18,6 +18,11 @@ export function DeleteChatDialog({name, onClose, onConfirm, title, body, confirm
     const element=dialog.current!; element.showModal(); cancel.current?.focus();
     return ()=>{element.close(); if(previous?.isConnected) previous.focus(); else document.querySelector<HTMLButtonElement>('[data-testid="sidebar-new-chat"]')?.focus();};
   },[]);
+  // A call that starts while Delete has the focus turns it off under the focus, which a browser drops to the page
+  // (where Tab goes nowhere): Cancel takes it, as when the dialog opens.
+  useEffect(()=>{
+    if(callOn && (document.activeElement===confirm.current || document.activeElement===document.body)) cancel.current?.focus();
+  },[callOn]);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e=>{e.preventDefault();onClose();}}
     onKeyDown={e=>{if(e.key==="Tab") {e.preventDefault();(document.activeElement===cancel.current ? confirm.current : cancel.current)?.focus();}}}
     aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}

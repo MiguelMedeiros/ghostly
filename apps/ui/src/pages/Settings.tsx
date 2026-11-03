@@ -28,7 +28,7 @@ import { openProfileSwitcher, useProfileGlances } from "../hooks/useProfileSwitc
 import { NeedsYouDot, NeedsYouList } from "../components/NeedsYou";
 import type { NeedsYou } from "../lib/needsYou";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import { Button, Switch } from "../components/wallet/ui";
+import { Button, Switch, chosenInForcedColors } from "../components/wallet/ui";
 import { setLoadPublicProfiles, useLoadPublicProfiles } from "../hooks/usePublicProfileRequest";
 import { setSendTyping, useSendTyping } from "../hooks/useTyping";
 import { Select } from "../components/ui/Select";
@@ -59,6 +59,7 @@ import {
   type Language,
 } from "../lib/settings";
 import { deleteAllSessions, listSessions } from "../lib/storage";
+import { anyChatOnCall, useAnyChatOnCall } from "../lib/chatsOnCall";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { peekEnabled, peekNotifies } from "../lib/profilePeek";
 import { externalLinkProps, isDesktopApp } from "../lib/externalLink";
@@ -247,11 +248,14 @@ export function Settings() {
   const appsOn = useAppsAvailable();
   const [confirmDeleteChats, setConfirmDeleteChats] = useState(false);
   const [chatCount, setChatCount] = useState(0);
+  // No chat is deleted under its call (lib/chatsOnCall.ts): while one is on or rings, Delete all chats says to end it first.
+  const chatsOnCall = useAnyChatOnCall();
   // Clear and Delete all chats swap their button for a confirm and back: the focus goes to what took the pressed button's place, not to the page.
-  const dataButtons = { clear: useRef<HTMLButtonElement>(null), clearCancel: useRef<HTMLButtonElement>(null), deleteChats: useRef<HTMLButtonElement>(null) };
+  const dataButtons = { clear: useRef<HTMLButtonElement>(null), clearCancel: useRef<HTMLButtonElement>(null), deleteChats: useRef<HTMLButtonElement>(null), deleteChatsCancel: useRef<HTMLButtonElement>(null) };
   const focusDataButton = useRef<keyof typeof dataButtons | null>(null);
   const confirmData = (which: "clear" | "deleteChats", open: boolean) => {
-    focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : null;
+    // A confirm that is off cannot keep the focus: its Cancel takes it.
+    focusDataButton.current = !open ? which : which === "clear" ? "clearCancel" : chatsOnCall ? "deleteChatsCancel" : null;
     if (which === "clear") setConfirmClearData(open);
     else setConfirmDeleteChats(open);
   };
@@ -440,12 +444,15 @@ export function Settings() {
     );
   };
   const deleteChats = () => {
+    if (anyChatOnCall()) return;
     deleteAllSessions();
+    // Confirm goes and Delete comes back off (no chat left): the focus goes on to the next row's button.
+    focusDataButton.current = confirmClearData ? "clearCancel" : "clear";
     setConfirmDeleteChats(false);
     setChatCount(0);
     setStorageInfo(getStorageUsage());
     window.dispatchEvent(new Event("session-updated"));
-    notice.show(t("sidebar.deleteAllChats"), { tone: "success" });
+    notice.show(t("settings.chatsDeleted"), { tone: "success" });
   };
   const clearData = async () => {
     setConfirmClearData(false);
@@ -502,7 +509,7 @@ export function Settings() {
           <div className="bg-surface rounded-xl divide-y divide-border">
             {/* A phone has no account bar, and Profile no tab of its own (the bar is full): this is the way there. */}
             <LinkRow testId="settings-profile-link" leading={<ProfileBadge entry={profile} size={36} avatar={myAvatar} />}
-              label={profile.name} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
+              label={<span dir="auto" className="inline-block max-w-full truncate align-top">{profile.name}</span>} hint={t("settings.profileLinkHint")} onClick={() => nav.open("/profile")} />
             {/* The account switcher, where a phone's tab bar holds it (holding Settings opens it too). */}
             {canSwitch && (
               <LinkRow testId="settings-profile-switch" label={<span className="inline-flex items-center gap-2">{t("profileSwitcher.title")}{others && <NeedsYouDot />}</span>}
@@ -553,7 +560,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.colorScheme")} className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {COLOR_SCHEME_OPTIONS.map((option) => (
               <button key={option.value} onClick={() => handleColorSchemeChange(option.value)} aria-pressed={settings.colorScheme === option.value}
-                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`flex items-center gap-1 px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.colorScheme === option.value ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {option.value === "light" && (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <circle cx="12" cy="12" r="5" strokeWidth="2" />
@@ -579,7 +586,7 @@ export function Settings() {
           <div role="group" aria-label={t("settings.chatListDensity")} data-testid="chat-list-density" className="flex flex-wrap gap-1 bg-surface-alt rounded-lg p-1">
             {(["compact", "comfortable"] as const).map((density) => (
               <button key={density} onClick={() => updateChatListDensity(density)} aria-pressed={settings.chatListDensity === density} data-density={density}
-                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? "bg-accent text-on-accent" : "text-text-secondary hover:text-text-primary"}`}>
+                className={`px-3 min-h-8 rounded-md text-sm whitespace-nowrap transition-colors cursor-pointer ${settings.chatListDensity === density ? `bg-accent text-on-accent ${chosenInForcedColors}` : "text-text-secondary hover:text-text-primary"}`}>
                 {t(`settings.chatListDensities.${density}` as const)}
               </button>
             ))}
@@ -728,12 +735,12 @@ export function Settings() {
             )}
           </Row>
         )}
-        <ForkRows forks={devices?.forks} />
+        <ForkRows forks={devices?.forks} keptAt={devices?.forkKeptAt} />
         <GroupDownloadsRow />
-        <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
+        <Row label={t("sidebar.deleteAllChats")} hint={!confirmDeleteChats ? t("settings.deleteAllChatsHint") : chatsOnCall ? t("settings.deleteAllChatsCallOn") : t("settings.deleteAllChatsConfirm", { count: chatCount })}>
           {confirmDeleteChats ? <>
-            <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
-            <Button onClick={() => confirmData("deleteChats", false)}>{t("common.cancel")}</Button>
+            <Button variant="danger" data-testid="delete-all-chats-confirm" disabled={chatsOnCall} onClick={deleteChats}>{t("common.confirm")}</Button>
+            <Button ref={dataButtons.deleteChatsCancel} onClick={() => confirmData("deleteChats", false)}>{t("common.cancel")}</Button>
           </> : (
             <Button ref={dataButtons.deleteChats} variant="danger" data-testid="delete-all-chats" disabled={chatCount === 0} onClick={() => confirmData("deleteChats", true)}>{t("common.delete")}</Button>
           )}

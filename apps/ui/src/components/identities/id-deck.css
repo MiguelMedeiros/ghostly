@@ -63,7 +63,9 @@
 .id-card-provider{font-size:clamp(.875rem,calc(var(--card-w) * .055 + var(--text-grow) * 1.25),1.25rem);font-weight:700;letter-spacing:-.01em;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .id-card-name{font-size:clamp(.6875rem,calc(var(--card-w) * .036 + var(--text-grow) * .8125),.8125rem);color:rgba(255,255,255,.88);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .id-card-subject{margin-bottom:2px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(.625rem,calc(var(--card-w) * .034 + var(--text-grow) * .78125),.78125rem);letter-spacing:.02em;color:rgb(var(--card-rgb));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.id-card-field{font-size:clamp(.5625rem,calc(var(--card-w) * .03 + var(--text-grow) * .6875),.6875rem);line-height:1.35;color:rgba(255,255,255,.7);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The fields are sentences ("What contacts see by default"): one that no longer fits its line (wider text spacing,
+   WCAG 1.4.12, or a longer language) goes on to a second rather than lose its end to an ellipsis. */
+.id-card-field{font-size:clamp(.5625rem,calc(var(--card-w) * .03 + var(--text-grow) * .6875),.6875rem);line-height:1.35;color:rgba(255,255,255,.7);overflow-wrap:break-word}
 
 .id-card-mrz{grid-area:mrz;min-width:0;overflow:hidden;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:clamp(.5rem,calc(var(--card-w) * .027 + var(--text-grow) * .625),.625rem);letter-spacing:.14em;color:rgba(255,255,255,.3)}
 
@@ -106,7 +108,8 @@
    the photo, the identity and one status line (its validity); no machine line. Small (under 190px): the provider's
    mark and name and the status seal alone. (A container query reads the face's content box: the card's width less its
    padding, --pad on each side, and border: 250px of card is about 223px inside, 190px about 168px.) Text a size leaves out stays in the card's accessible name (hidden to the
-   eye only); what is decoration goes. Every line is one line, cut with an ellipsis, never mid-word or under the seal.
+   eye only); what is decoration goes. Every line but the fields is one line, cut with an ellipsis, never mid-word or
+   under the seal; a field that does not fit wraps.
    The widths are in rem (the same px at the default 16px text size): at a larger text size a card is narrower for its
    text, so it shows fewer lines rather than lines drawn over each other. */
 .id-card-face{container:id-card/inline-size}

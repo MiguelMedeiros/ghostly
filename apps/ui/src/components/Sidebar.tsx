@@ -12,7 +12,8 @@ import { FolderIcon } from "./chat/ChatFolderMenu";
 import { groupChat, mentionsNotify, mutedUntil } from "../lib/chatMute";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { formatListTime } from "../lib/chatList";
-import { foldText } from "../lib/chatSearch";
+import { foldText, searchText } from "../lib/chatSearch";
+import type { Translate } from "../locales/translate";
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
@@ -81,16 +82,17 @@ const found = (text: string | undefined, q: string) => !!text && foldText(text).
 /**
  * A chat's message texts folded for search, once per list of messages: the page's one cache keeps that list while the
  * chat is unchanged (`listShownSessions`). Folded at every draw, a search over 100k messages took ~100 ms of each
- * engine state, which draws the list again with nothing in a message changed.
+ * engine state, which draws the list again with nothing in a message changed. Each message reads as the search inside
+ * the chat reads it (`searchText`): "hello world" finds "*hello* world" in both, a file by its name, no payment lines.
  */
-const foldedTexts = new WeakMap<ChatSession["messages"], string[]>();
-function messagesFound(messages: ChatSession["messages"], q: string): boolean {
-  let texts = foldedTexts.get(messages);
-  if (!texts) {
-    texts = messages.flatMap((m) => (m.text ? [foldText(m.text)] : []));
-    foldedTexts.set(messages, texts);
+const foldedTexts = new WeakMap<ChatSession["messages"], { t: Translate; texts: string[] }>();
+function messagesFound(messages: ChatSession["messages"], q: string, t: Translate): boolean {
+  let folded = foldedTexts.get(messages);
+  if (folded?.t !== t) {
+    folded = { t, texts: messages.flatMap((m) => { const text = searchText(m, t); return text ? [foldText(text)] : []; }) };
+    foldedTexts.set(messages, folded);
   }
-  return texts.some((text) => text.includes(q));
+  return folded.texts.some((text) => text.includes(q));
 }
 
 /** The groups whose name has the search in it; all of them with no search. (Outside the component: the React Compiler keeps its memoization then.) */
@@ -281,7 +283,7 @@ export function Sidebar() {
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return messagesFound(s.messages, query) || foundInEngine.has(s.id);
+    return messagesFound(s.messages, query, t) || foundInEngine.has(s.id);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.

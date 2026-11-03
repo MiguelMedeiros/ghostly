@@ -266,6 +266,18 @@ describe("GroupChat: joining through a link", () => {
     expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it("a full community: says it is full (n of max), with the knock left, and never that the link may be old", async () => {
+    openGroup(groupView({ profile: "community", createdAt: Date.now() - 2 * 60_000 + 400, canSend: false,
+      invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "full", full: { n: 256, max: 256 } } }));
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This group is full");
+    expect(card).toHaveTextContent("It has 256 of 256 members. You get in once someone leaves: keep the app open.");
+    expect(screen.getByTestId("group-joining-live")).toHaveTextContent("This group is full");
+    expect(within(card).getByTestId("group-joining-steps").querySelector("li")).toHaveAttribute("data-state", "done");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");
@@ -301,6 +313,43 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-members")).toHaveTextContent("Joining…");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("Joining Friends…");
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
+  });
+
+  it("let into a community five minutes ago and still no keys: says no member could finish, and to ask for the current link", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // The welcome was lost and the link replaced since: nobody answers the old link's knocks any more.
+      const admitted = (admittedAt: number) => groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt } });
+      const stuck = "No member could finish letting you in. Ask someone in the group for the current link.";
+      const view = openGroup(admitted(Date.now()));
+      const card = screen.getByTestId("group-joining");
+      expect(card).toHaveTextContent("A member's app answered: getting the group's keys. You are in in a moment.");
+      act(() => { vi.advanceTimersByTime(5 * 60_000 - 1_000); });
+      expect(card).not.toHaveTextContent(stuck);
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(card).toHaveTextContent(stuck);
+      expect(card).not.toHaveTextContent("You are in in a moment");
+      expect(spoken()).toEqual([stuck]);
+      // It keeps knocking: the steps and Cancel joining stay.
+      expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", "admitted");
+      expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+      // Let in again since (a member answered a later knock): the moment starts over.
+      act(() => view.engine.update({ groups: [admitted(Date.now())] }));
+      expect(card).toHaveTextContent("You are in in a moment");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("welcomed within five minutes: never told no member could finish", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const view = openGroup(groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt: Date.now() } }));
+      act(() => { vi.advanceTimersByTime(4 * 60_000); });
+      act(() => view.engine.update({ groups: [active()] }));
+      act(() => { vi.advanceTimersByTime(2 * 60_000); });
+      expect(document.body).not.toHaveTextContent("No member could finish letting you in");
+    } finally { vi.useRealTimers(); }
   });
 
   const staged = (stage: GroupJoinStage, admin = "") => groupView({ canSend: false, invitation: { linkId: "", contact: "", admin, members: 0, accepted: true, viaLink: true, stage } });

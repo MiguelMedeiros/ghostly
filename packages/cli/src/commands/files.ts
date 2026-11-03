@@ -53,9 +53,14 @@ export const commands: Record<string, Command> = {
     },
   },
   "file send": {
-    method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
-    args: ["chat", "path"], options: { name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply },
-    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, ...voiceOf(options), reply: options.reply }),
+    method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>] [--wait none|sent] [--timeout s]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
+    args: ["chat", "path"],
+    options: {
+      name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply,
+      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until the contact has the whole file, in a 1:1 chat (default: none with a daemon, sent without; a group: none)" },
+      timeout: { type: "number", description: "Seconds --wait sent waits (default 300)" },
+    },
+    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, ...voiceOf(options), reply: options.reply, wait: options.wait, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },
   "file wait": {
     method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",

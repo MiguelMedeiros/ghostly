@@ -15,7 +15,7 @@ const TINY_JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 1, 0, 1,
 
 // covers: chat.replies, files.voice.record
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p"), WIRE = "A".repeat(22), MINE = "B".repeat(22);
 const lunch: ChatMessage = { id: `peer_${WIRE}`, text: "lunch at noon?", sender: "peer", timestamp: 1_700_000_000_000 };

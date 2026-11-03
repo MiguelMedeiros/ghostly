@@ -57,8 +57,13 @@
   "fork": {
     "confirm": "永久丢弃此副本？仅存在于其中的内容将会丢失。",
     "discard": "丢弃",
+    "discardWhich": "丢弃：{{which}}",
     "hint": "另一台设备接管之前此个人资料的副本。",
     "info": "“在此使用”保留了此设备当时的内容。仅存在于该副本中的消息和付款不在你的个人资料中。丢弃会将其永久删除。",
+    "kept": "保存于 {{when}}",
+    "older": "较早的副本",
+    "olderNumbered": "较早的副本 {{n}}",
+    "repeat": "{{which}}（{{n}}）",
     "title": "仅在此设备上"
   },
   "handoff": {
@@ -255,6 +260,15 @@
     "removing": "正在移除…",
     "text": "它将无法再接管此个人资料。",
     "title": "移除 {{device}}？"
+  },
+  "rename": {
+    "button": "重命名",
+    "fail": {
+      "name": "无法使用这个名称。请换一个。"
+    },
+    "label": "设备名称",
+    "save": "保存",
+    "title": "重命名 {{device}}"
   },
   "restore": {
     "activeHint": "在这里启动这份备份会产生第二份副本。",

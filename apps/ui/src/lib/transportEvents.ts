@@ -156,13 +156,13 @@ export interface TransportOption {
 }
 
 /**
- * Why this app lacks a transport, and how to get it where there is a way. Iroh this app runs (the web on its Iroh
- * relays) that did not start is not lacking: its relays in Settings, Network are where to look.
+ * Why this app lacks a transport, and how to get it where there is a way. Iroh or HyperDHT this app runs (the web on
+ * its Iroh relays or its HyperDHT relay) that did not start is not lacking: its relays in Settings, Network are where to look.
  */
 function missing(transport: PairedTransport, link: OwnTransports, tr: Translate): string {
   if (transport === "webrtc/1") return tr("connection.option.noWebrtc");
-  if (transport === "hyperdht/1") return tr("connection.option.hyperdhtNeeds");
   if (link.runnableTransports?.includes(transport)) return tr("connection.option.relayUnreached", { transport: name(transport) });
+  if (transport === "hyperdht/1") return tr("connection.option.hyperdhtNeeds");
   return tr("connection.option.needsDesktop", { transport: name(transport) });
 }
 

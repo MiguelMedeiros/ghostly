@@ -65,6 +65,16 @@
     "unreadCount": "{{name}}，{{count}} 条未读消息",
     "unreadOne": "{{name}}，1 条未读消息"
   },
+  "row": {
+    "mention": "有人提及了你",
+    "muted": "通知已静音",
+    "pinned": "已置顶",
+    "separator": "，",
+    "unread": "{{count}} 条未读消息",
+    "unreadSome": "未读消息",
+    "unread_one": "{{count}} 条未读消息",
+    "unread_other": "{{count}} 条未读消息"
+  },
   "searchPlaceholder": "搜索聊天...",
   "settings": "设置",
   "sharedIdentity": "分享了一个身份",

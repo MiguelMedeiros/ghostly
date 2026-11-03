@@ -6,7 +6,7 @@ import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type A
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
-import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
+import { findSecret } from "./secretGuard";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test

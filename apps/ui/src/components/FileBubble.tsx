@@ -173,8 +173,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
-  // Sent whole: too late to cancel, the contact keeps it.
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
   const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;

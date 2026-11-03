@@ -98,11 +98,8 @@ pub async fn endpoint(seed: [u8; 32], local_only: bool) -> Result<Endpoint, Stri
 /// self-hosted `iroh-relay`, or the e2e one. Direct paths are kept, so two
 /// native peers still hole-punch; a browser peer reaches it through the relay.
 pub async fn endpoint_with_relays(seed: [u8; 32], relays: &[String]) -> Result<Endpoint, String> {
-    let urls = relay_urls(relays)?;
     Endpoint::builder(presets::Minimal)
-        .relay_mode(RelayMode::Custom(RelayMap::from_iter(
-            urls.into_iter().map(RelayConfig::from),
-        )))
+        .relay_mode(RelayMode::Custom(relay_map(relays)?))
         .secret_key(SecretKey::from_bytes(&seed))
         .alpns(vec![ALPN.to_vec()])
         .transport_config(transport())
@@ -122,6 +119,22 @@ fn relay_urls(relays: &[String]) -> Result<Vec<RelayUrl>, String> {
         .map(|url| url.parse::<RelayUrl>())
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "Invalid Iroh relay URL".into())
+}
+
+/// The relays given, and which of them to ask for this endpoint's public address (QUIC address discovery, UDP 7842):
+/// n0's alone. Iroh homes on a relay only once each one asked has answered or waited 3 s, so on a relay that offers
+/// none every listener took 3 s to start. `iroh-relay` offers none unless set to, and never without TLS; Ghostly's
+/// cannot through its tunnel (`default_relays`).
+fn relay_map(relays: &[String]) -> Result<RelayMap, String> {
+    Ok(RelayMap::from_iter(relay_urls(relays)?.into_iter().map(
+        |url| {
+            let n0 = url
+                .host_str()
+                .is_some_and(|host| host.trim_end_matches('.').ends_with(".iroh.link"));
+            let quic = RelayConfig::from(url.clone()).quic.filter(|_| n0);
+            RelayConfig::new(url, quic)
+        },
+    )))
 }
 
 pub fn address(endpoint: &Endpoint) -> Address {
@@ -266,6 +279,27 @@ mod tests {
         let ours: RelayUrl = "https://iroh.miguelmedeiros.dev/".parse().unwrap();
         let config = relays.get(&ours).expect("Ghostly's relay, plain name");
         assert_eq!(config.quic, None, "no QUIC address discovery through the tunnel");
+    }
+
+    /// Iroh homes on a relay only once its address discovery has answered or waited 3 s: a listener on a relay that
+    /// offers none (Ghostly's, a lab one) took 3 s to start. Only n0's relays are asked.
+    #[test]
+    fn set_relays_ask_only_n0s_for_their_address() {
+        let relays: Vec<String> = [
+            "https://use1-1.relay.n0.iroh.link./",
+            "https://euc1-1.relay.n0.iroh.link/",
+            "https://iroh.miguelmedeiros.dev/",
+            "https://relay.example.com/",
+            "http://127.0.0.1:4980/",
+        ]
+        .map(String::from)
+        .to_vec();
+        let map = relay_map(&relays).unwrap();
+        let asked: Vec<bool> = relays
+            .iter()
+            .map(|url| map.get(&url.parse().unwrap()).unwrap().quic.is_some())
+            .collect();
+        assert_eq!(asked, [true, true, false, false, false]);
     }
 }
 

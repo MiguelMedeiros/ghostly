@@ -32,7 +32,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   const { t } = useI18n();
   const closed = useRef(false);
   const busyRef = useRef(false);
-  const primary = useRef<HTMLButtonElement>(null), scanButton = useRef<HTMLButtonElement>(null);
+  const primary = useRef<HTMLButtonElement>(null), scanButton = useRef<HTMLButtonElement>(null), cancelButton = useRef<HTMLButtonElement>(null);
+  /** Scan or the camera's Cancel had the focus as it was pressed: the one that takes its place gets it. */
+  const focusSwap = useRef<"scan" | "cancel" | null>(null);
   const manualInput = useRef<HTMLTextAreaElement>(null);
   const [manual, setManual] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -80,6 +82,14 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { if (manual) manualInput.current?.focus(); }, [manual]);
+  // Scan and the camera's Cancel take each other's place: the keys that were on one go to the other.
+  const camera = scanning || starting;
+  useEffect(() => {
+    const next = focusSwap.current === "cancel" && camera ? cancelButton : focusSwap.current === "scan" && !camera ? scanButton : null;
+    if (!next) return;
+    focusSwap.current = null;
+    next.current?.focus();
+  }, [camera]);
   const accept = (value: string) => {
     if (joined.current || closed.current) return;
     if (onDevice) {
@@ -140,6 +150,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   };
   const scan = async () => {
     if (busyRef.current || joined.current || closed.current) return;
+    focusSwap.current = document.activeElement === scanButton.current ? "cancel" : null;
     stop(); busyRef.current = true; setError(null); setOwn(null); setStarting(true);
     const current = generation.current;
     // The decoder loads while the camera starts.
@@ -223,7 +234,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       <button onClick={close} aria-label={t(onDevice ? "common.close" : "join.close")} className="h-10 w-10 cursor-pointer rounded-lg text-xl hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </div>
     <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} mb-3 aspect-square w-full rounded-xl bg-black object-cover`} />
-    {scanning || starting ? <button onClick={stop} className={`${button} mb-3 w-full border border-border`}>{t("common.cancel")}</button> : <>
+    {camera ? <button ref={cancelButton} onClick={() => { focusSwap.current = document.activeElement === cancelButton.current ? "scan" : null; stop(); }} className={`${button} mb-3 w-full border border-border`}>{t("common.cancel")}</button> : <>
       <button ref={primary} disabled={busy} onClick={() => void paste()} className={`${button} min-h-12 w-full bg-accent text-panel-header`}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M8 12h8M8 16h5"/></svg>
         {t("join.paste")}

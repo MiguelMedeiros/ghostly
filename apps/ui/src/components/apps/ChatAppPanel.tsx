@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, type KeyboardEvent, type RefObject } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
+import { usePhoneHeader } from "../../hooks/usePhoneHeader";
 import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
 import { takedownText } from "../../lib/apps/open";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
@@ -46,6 +47,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
+  // A phone held upright: the header's buttons are the chat header's size there (Chat.tsx).
+  const phoneHeader = usePhoneHeader();
   const app = useChatApp(linkId);
   const box = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
@@ -123,7 +126,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
         {withBack && (
           <button ref={back} type="button" data-testid="mini-app-back" onClick={goBack}
             aria-label={t("apps.view.back")} title={t("apps.view.back")}
-            className="w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0">
+            className={`${phoneHeader ? "w-11 max-[340px]:w-9" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
           </button>
         )}
@@ -142,8 +145,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
           </p>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          {/* The chat's connection control, the same as in its header. */}
-          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} />
+          {/* The chat's connection control, the same as in its header: on a phone held upright, 44 px to tap as there. */}
+          <ChatConnection peerKey={peerKey} myKey={myKey} status={status} testIdPrefix="app-" callOn={callOn} phone={phoneHeader} />
           {!withBack && (
             <button type="button" data-testid="mini-app-wide" aria-pressed={wide} onClick={() => updateChatApp(linkId, { wide: !wide })}
               aria-label={t(wide ? "apps.view.beside" : "apps.view.full")} title={t(wide ? "apps.view.beside" : "apps.view.full")}
@@ -154,8 +157,8 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
             </button>
           )}
           <button type="button" data-testid="mini-app-close" onClick={close} aria-label={t("common.close")} title={t("common.close")}
-            className="p-2 max-md:px-1.5 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-            <svg {...iconProps}><path d="M18 6 6 18M6 6l12 12" /></svg>
+            className={`${phoneHeader ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}>
+            <svg {...iconProps} width={phoneHeader ? 20 : 18} height={phoneHeader ? 20 : 18}><path d="M18 6 6 18M6 6l12 12" /></svg>
           </button>
         </div>
       </div>}

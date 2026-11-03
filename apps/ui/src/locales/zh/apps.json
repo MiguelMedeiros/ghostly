@@ -5,8 +5,12 @@
     "checking": "正在检查…",
     "hint": "GitHub 仓库、raw.githubusercontent.com 文件，或固定到某个提交的 jsDelivr。",
     "label": "应用或商店链接",
+    "storeHeld": "你已经有这个商店了：它在你的应用页面上。",
+    "storeNewer": "你已经有这个商店了。这个链接里是它的较新副本。",
+    "storeOlder": "这是你已有商店的较旧副本。你的那份更新，保持不变。",
     "storeReads": "Ghostly 从 {{host}} 读取它，该主机会知道你的 IP 地址。",
-    "title": "添加应用或商店"
+    "title": "添加应用或商店",
+    "updateStore": "更新商店"
   },
   "app": {
     "export": "导出数据",
@@ -31,7 +35,9 @@
     "hint": "随 Ghostly 提供",
     "openNamed": "打开 {{title}}",
     "remove": "移除",
-    "removeNamed": "移除 {{title}}"
+    "removeNamed": "移除 {{title}}",
+    "removeText": "它将不再出现。要找回它，请从商店安装。",
+    "removeTitle": "移除 {{title}}？"
   },
   "card": {
     "ask": "向 {{name}} 要一个链接",

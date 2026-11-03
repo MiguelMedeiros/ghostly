@@ -33,22 +33,30 @@ async function startEngine(): Promise<void> {
   if (status.profile === status.active) return;
   // A page made another profile the one in use. The running peer stops and its document closes before
   // the next one opens: never two peers, and never one peer over two profiles' data.
-  await replaceEngine();
+  await replaceEngine(status.activeId);
 }
 
-async function replaceEngine(): Promise<void> {
-  // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
-  await closeViewers();
-  await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
-  await chrome.offscreen.closeDocument().catch(() => {});
-  await createEngineDocument();
-  await waitForEngine();
+/** `next`: the id of the profile the new peer runs as, when a switch is what replaces it. */
+async function replaceEngine(next?: string): Promise<void> {
+  // A page that switched again while the next peer started (another tab's) waits on this start, and must get the
+  // profile it named, not the one before: that peer goes too. A few times at most, should the registry keep moving.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // A contact's app open as the profile before is no page of the next one's: its tab closes before that peer answers.
+    await closeViewers();
+    await clearNotices(next);
+    await chrome.runtime.sendMessage({ target: "engine", type: "stop" } satisfies RuntimeMessage).catch(() => {});
+    await chrome.offscreen.closeDocument().catch(() => {});
+    await createEngineDocument();
+    const status = await waitForEngine();
+    if (status.profile === status.active) return;
+    next = status.activeId;
+  }
 }
 
 /** A new peer in place of the running one, which stopped for good ("Clear all data"); after any start in progress. */
 function restartEngine(): Promise<void> {
   const previous = starting ?? Promise.resolve();
-  const next = previous.catch(() => {}).then(replaceEngine);
+  const next = previous.catch(() => {}).then(() => replaceEngine());
   const tracked: Promise<void> = next.finally(() => { if (starting === tracked) starting = null; });
   // The caller hears of a failure through `next`; this copy may have nobody else waiting on it.
   tracked.catch(() => {});
@@ -152,6 +160,22 @@ function chatRoute(chat: string): string | undefined {
   return chat.startsWith("group:") ? `/group/${encodeURIComponent(chat.slice(6))}` : `/chat/${encodeURIComponent(chat)}`;
 }
 
+/**
+ * A new peer (another profile, or the one after Clear all data): a notification the pages kept a chat for would open a
+ * chat this one does not have ("This chat is gone"), so it leaves the system's list, as Desktop's and Android's do
+ * (`sweepLeftOver`). Another profile's notice (`profile:<id>`) stays: that profile did not stop. One about `next`, the
+ * profile now in use, goes too: its "New messages in" is read once it is open, as the pages' `clearPeek` does where a
+ * notice can be taken back by its chat (useProfilePeek.ts).
+ */
+async function clearNotices(next?: string): Promise<void> {
+  const kept = await chrome.storage.session.get(null).catch(() => ({}) as Record<string, unknown>);
+  const gone = (chat: string) => !chat.startsWith("profile:") || (typeof next === "string" && chat === `profile:${next}`);
+  const keys = Object.keys(kept).filter((key) => key.startsWith("notice:") && gone(String(kept[key])));
+  if (!keys.length) return;
+  await chrome.storage.session.remove(keys).catch(() => {});
+  await Promise.all(keys.map((key) => chrome.notifications?.clear(key.slice("notice:".length)).catch(() => false)));
+}
+
 /** `chrome.notifications` exists only once the optional permission is granted, maybe while the worker runs. */
 function listenToNotifications(): void {
   const clicks = chrome.notifications?.onClicked;
@@ -190,7 +214,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
   }
   if (message.type === "open-payment-link") {
     // Only a payment link, and only the characters one is made of: nothing else leaves the extension this way.
-    const uri = typeof message.uri === "string" && /^(lightning|bitcoin):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
+    const uri = typeof message.uri === "string" && /^(lightning|bitcoin|monero):[A-Za-z0-9?=&%.:_-]{1,4096}$/.test(message.uri) ? message.uri : null;
     if (!uri) { sendResponse({ ok: false, error: "Not a payment link" }); return false; }
     void chrome.tabs.create({ url: uri }).then(
       () => sendResponse({ ok: true }),

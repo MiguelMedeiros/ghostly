@@ -122,6 +122,13 @@ it("leaves a chat's session on the old relay alone until it can let go", async (
   await node.updateSettings({ settings: { hyperdhtRelay: "wss://b.example" } });
   expect(link.releaseEndpoint).not.toHaveBeenCalled();
   expect(link.registerEndpoint).toHaveBeenCalledTimes(1);
+  // The session ended: at the engine's next tick (each second) it moves to the new relay. Before, it stayed on the old
+  // one until the app restarted.
+  link.canReleaseEndpoint.mockReturnValue(true);
+  node["retryNative"]();
+  await vi.waitFor(() => expect(link.registerEndpoint).toHaveBeenCalledTimes(2));
+  expect(link.releaseEndpoint).toHaveBeenCalledWith("hyperdht/1");
+  expect(relayed.create).toHaveBeenLastCalledWith(expect.any(String), "wss://b.example");
 });
 
 it("while the relay stays out of reach, queues one start per chat at a time, not another every 15 s", async () => {

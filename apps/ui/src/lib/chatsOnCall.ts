@@ -30,3 +30,13 @@ function subscribe(listener: () => void): () => void {
 export function useChatOnCall(sessionId: string | null | undefined): boolean {
   return useSyncExternalStore(subscribe, () => chatOnCall(sessionId), () => false);
 }
+
+/** Whether a call is on or rings in any chat: Settings' Delete all chats waits for it to end. */
+export function anyChatOnCall(): boolean {
+  return onCall.size > 0;
+}
+
+/** Whether a call is on or rings in any chat, as it changes. */
+export function useAnyChatOnCall(): boolean {
+  return useSyncExternalStore(subscribe, anyChatOnCall, () => false);
+}

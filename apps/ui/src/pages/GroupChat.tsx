@@ -278,6 +278,11 @@ const JUST_JOINED_MS = 5 * 60_000;
  * nobody, and nothing tells the joiner so: WISP 902), or every app that could answer is closed. The joiner is told both.
  */
 const LONG_KNOCK_MS = 2 * 60_000;
+/**
+ * Let into a community this long and still no welcome: it was lost, and if the link was replaced before the next knock,
+ * no member reads the old link's knocks to say it again. The joiner keeps knocking, but is told to ask for the current link.
+ */
+const LONG_ADMITTED_MS = 5 * 60_000;
 const NO_MESSAGES: StoredMessage[] = [];
 const NO_ROWS: readonly ChatMessage[] = [];
 
@@ -295,17 +300,20 @@ function usePast(since: number | undefined, ms: number): boolean {
   return past;
 }
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
-/** A step at a stage: done once reached, current while it is the next one, else still to come. */
-function joinStepState(stage: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
+/** A step at a stage: done once reached, current while it is the next one, else still to come. Full: the knock is there. */
+function joinStepState(at: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
+  const stage = at === "full" ? "knocked" : at;
   if (JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step)) return "done";
   return JOIN_ORDER[JOIN_ORDER.indexOf(step) - 1] === stage ? "current" : "todo";
 }
 
-function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate): { title: string; body: string } {
+function joiningText(stage: GroupJoinStage, name: string, community: boolean, t: Translate, full?: { n: number; max: number }, admittedLong = false): { title: string; body: string } {
   const waiting = t("group.join.waiting");
   if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
+  // A member's app answered that there is no room yet (`group-full`): the link works, and asking for a new one won't help.
+  if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
-    body: community ? t("group.join.admittedCommunity") : t("group.join.admitted") };
+    body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
     body: community ? t("group.join.answeredCommunity") : t("group.join.answered") };
   if (stage === "knocked") return { title: waiting, body: community ? t("group.join.knockedCommunity") : t("group.join.knocked") };
@@ -544,6 +552,8 @@ export function GroupChat() {
   const knock = rosterGroup?.invitation?.viaLink ? rosterGroup.invitation.stage ?? (rosterGroup.invitation.admin ? "admitted" : "knocked") : undefined;
   // Timed from the knock: a group kept here, knocking to get back in, was created long before it.
   const knockedLong = usePast(knock === "knocked" ? rosterGroup!.invitation!.since ?? rosterGroup!.createdAt : undefined, LONG_KNOCK_MS);
+  // Let into a community and still no keys a while on: the welcome was lost, and maybe the link replaced since.
+  const admittedLong = usePast(knock === "admitted" ? rosterGroup!.invitation!.admittedAt : undefined, LONG_ADMITTED_MS);
   // Saved messages: kept on this device, never sent; the Saved view lists them. A hook: before the returns below.
   const savedHere = useSavedIn(`group:${groupId}`);
   // The composer turned off under the focus (removed, left on another device, the group forked): the field goes disabled
@@ -644,13 +654,14 @@ export function GroupChat() {
   const noLinks = state?.transport.groupLinks === false;
   const joining = noLinks ? { title: t("group.connection.noWebrtc"), body: t("group.connection.noWebrtcHint") }
     : linkUnanswered ? { title: t("group.join.unanswered"), body: t("group.join.unansweredBody") }
-    : joiningText(stage, group.name, group.profile === "community", t);
-  // The joining card's one live line: what changed, not the card. The two-minute hint while it shows; else at a dead
+    : joiningText(stage, group.name, group.profile === "community", t, group.invitation?.full, admittedLong);
+  // The joining card's one live line: what changed, not the card. The five-minute line when let in and still no keys,
+  // the two-minute hint while it shows; else at a dead
   // end (no transport, unanswered, replaced) its title; else the last step reached, or the title before the first.
   const staleText = waitingWith > 0 ? t("group.join.staleBusy") : t("group.join.stale");
   const lastReached = joinSteps(group.profile === "community", t).filter(step => joinStepState(stage, step.stage) === "done").pop();
-  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced ? joining.title
-    : knockedLong ? staleText : lastReached?.label ?? joining.title;
+  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" ? joining.title
+    : admittedLong ? joining.body : knockedLong ? staleText : lastReached?.label ?? joining.title;
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = myJoins.some(at => Date.now() - at < JUST_JOINED_MS);
   const connecting = group.status === "active" && others.length > 0 && reachable === 0 && justJoined;

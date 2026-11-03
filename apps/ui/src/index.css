@@ -1507,3 +1507,16 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
   padding-inline-start: max(0.75rem, env(safe-area-inset-left));
   padding-inline-end: max(0.75rem, env(safe-area-inset-right));
 }
+
+/* Forced colors (Windows Contrast themes, Edge and Chrome's forced colors): the keyboard focus's mark. Most controls
+   show the focus with a Tailwind ring alone (`focus-visible:outline-none focus-visible:ring-2`), a box-shadow, which
+   forced colors drops, and Tailwind 4's `outline-none` is `outline-style: none`: nothing marked the focus there. A
+   system-colour outline instead, where the ring was (an inset ring's inside the control). Only the focus's mark here;
+   other forced-colors rules go in blocks of their own. Elements focused only by script (`tabindex="-1"`) keep none. */
+@media (forced-colors: active) {
+  :focus-visible:not([tabindex="-1"]) { outline: 2px solid Highlight !important; }
+  [class~="focus-visible:ring-inset"]:focus-visible { outline-offset: -2px; }
+  /* A field whose frame draws the focus (the chat list's search, `has-[input:focus-visible]:outline-2`): one mark, the frame's. */
+  :has(> input:focus-visible)[class~="has-[input:focus-visible]:outline-2"] { outline: 2px solid Highlight !important; }
+  [class~="has-[input:focus-visible]:outline-2"] > input:focus-visible { outline: none !important; }
+}

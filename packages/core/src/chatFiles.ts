@@ -747,7 +747,9 @@ export class ChatFiles {
     out.next = record.confirmed;
     const paused = record.state === "paused" && record.pausedBy === "me";
     if (!this.send(this.offerFrame(record, paused))) return;
-    if (!paused && record.state !== "offered") { record.state = "offered"; record.pausedBy = undefined; this.changed(entry); }
+    // Every byte was confirmed: it stays so (`sentWhole`), the receiver answers with its check (`pf-done`) or its offset.
+    // As `offered`, an empty file was one nobody had answered yet, and its Cancel left it cancelled here, kept there.
+    if (!paused && record.state !== "offered" && record.state !== "verifying") { record.state = "offered"; record.pausedBy = undefined; this.changed(entry); }
     this.armStall(entry);
   }
 
@@ -945,9 +947,16 @@ export class ChatFiles {
     });
   }
 
-  /** The next file waiting its turn, once one ends. */
+  /**
+   * The next file waiting its turn, once one ends. The others were told they wait when they were queued: told again at
+   * each end, n files at once made about n²/2 frames, and their sender stored its record for each.
+   */
   private startNext(): void {
-    for (const entry of this.entries.values()) if (entry.record.direction === "in" && entry.record.state === "queued") this.startIncoming(entry);
+    for (const entry of this.entries.values()) {
+      if (entry.record.direction !== "in" || entry.record.state !== "queued" || entry.in!.starting) continue;
+      if (this.activeIncoming(entry) >= FILE_LIMITS.maxActiveIncoming) return;
+      this.startIncoming(entry);
+    }
   }
 
   private async onOffer(frame: Record<string, unknown>): Promise<void> {
@@ -1234,6 +1243,9 @@ export class ChatFiles {
       case "pf-wait": {
         // The answer to the paused offer said while the person there still decides: the pause here holds.
         if (record.state === "paused" && record.pausedBy === "me") return;
+        // Told again what it already waits for (an older receiver says so each time a file there ends): nothing changes.
+        if (frame.why === "paused" ? record.state === "paused" && record.pausedBy === "peer"
+          : record.state === "asking" && record.waitingFor === (frame.why === "busy" ? "busy" : "consent")) return;
         out.generation++;
         out.next = record.confirmed;
         clearTimeout(out.timer);
@@ -1328,6 +1340,8 @@ export class ChatFiles {
     const entry = this.entry(direction, id), { record } = entry;
     if (transferEnded(record) || record.state === "verifying" || (record.state === "paused" && record.pausedBy === "me")) return;
     if (direction === "in" && record.state === "asking") return;
+    // Arrived whole (offered again after a restart or a switch while it was checked there): paused, it could be cancelled.
+    if (sentWhole(record)) return;
     record.state = "paused";
     record.pausedBy = "me";
     if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }

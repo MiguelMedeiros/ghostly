@@ -42,7 +42,8 @@ export function canRetryFile(file: ChatFile, transfer: FileTransferState | null,
 
 /**
  * Whether a file sent from here arrived whole, its contact checking it or about to: too late to cancel (a cancel then
- * left the contact with the file while this side said it was cancelled). Its Cancel goes; the engine refuses it too.
+ * left the contact with the file while this side said it was cancelled). Its Cancel goes, and its Pause (paused, it
+ * could be cancelled); the engine refuses both too.
  * Not while the contact decides again, its turn there (`queued`), or paused.
  */
 export const sentWhole = (transfer: FileTransferState): boolean =>

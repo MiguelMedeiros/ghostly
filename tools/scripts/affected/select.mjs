@@ -87,8 +87,13 @@ export const UNIT_PROJECTS = [
   },
   {
     name: "scripts", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts"],
-    sources: ["tools/scripts/**", "e2e/features.json", "apps/web/nginx.conf", ".github/workflows/**"],
-    whole: ["tools/scripts/vitest.config.ts", "tools/vitest.shared.ts"],
+    sources: ["tools/scripts/**"],
+    // Also the files its tests read from disk: `vitest related` finds no test for those (the whole suite is ~20 s).
+    whole: [
+      "tools/scripts/vitest.config.ts", "tools/vitest.shared.ts",
+      ".github/workflows/**", ".github/dependabot.yml", "e2e/features.json", "apps/web/nginx*.conf", "apps/web/Dockerfile",
+      "apps/desktop/tauri.conf.json", "apps/desktop/gen/android/gradle/wrapper/**",
+    ],
     tests: ["tools/scripts/test/**"],
   },
   {
@@ -114,6 +119,16 @@ export const UNIT_PROJECTS = [
     name: "chess fixture", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/chessFixture.test.ts"],
     sources: [],
     whole: ["e2e/fixtures/chess/**"],
+    tests: [],
+  },
+  {
+    // CI's path gates (tools/scripts/ci-changes.mjs) must cover every file the website's scripts, the packages' and the
+    // extension's code and the crates' Rust name. Its test reads those from disk for the paths they name, which no import
+    // graph shows, so a change to one runs it (whole: that one file, about 150 ms). A draft's tier is all the merge train
+    // waits for: without this, a website script naming an uncovered file went red only in batches (2026-11-03).
+    name: "ci gates", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/ci-changes.test.ts"],
+    sources: [],
+    whole: ["apps/website/scripts/**", "packages/**/*.{ts,tsx,mts,js,mjs}", "apps/extension/**/*.{ts,tsx,mts,js,mjs}", "apps/desktop/**/*.rs", "native/transports/**/*.rs"],
     tests: [],
   },
   {

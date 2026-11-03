@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { engine } from "@ghostly/browser/platform/engine";
 import { contactArrived, deriveStage, pairingView, reportedProgress, stepIndex, type PairingProgress, type PairingRole, type PairingStage } from "../lib/pairingProgress";
 import { loadSettings } from "../lib/settings";
-import { playSound } from "../lib/sounds";
+import { playSound, warmSound } from "../lib/sounds";
 import { problemLine } from "../lib/problemText";
 import { useT } from "../contexts/I18nContext";
 
@@ -160,6 +160,12 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   }, [until]);
   // Heard as the scene bursts: in the commit that shows it. Reduced motion stills the scene, not the sound: that is the
   // sound setting's.
+  // Its file is fetched while the pairing is on its way: fetched and decoded only when the moment came, the sound came
+  // after the scene had burst.
+  const soundAhead = enabled && firstPairing && !celebrated.current && !muted;
+  useEffect(() => {
+    if (soundAhead && loadSettings().notifications.soundEnabled) warmSound("connected");
+  });
   useEffect(() => {
     if (!soundOwed.current) return;
     soundOwed.current = false;

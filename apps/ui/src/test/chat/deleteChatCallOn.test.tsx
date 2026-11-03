@@ -38,6 +38,19 @@ describe("Delete chat from the chat list while a call is on in that chat", () =>
     expect(loadSession("a")).toBeNull();
   });
 
+  // A call ringing while Delete held the focus turned it off under the focus: Chromium dropped it to the page, where
+  // Tab went nowhere and only Escape left the dialog. Cancel takes it, as when the dialog opens.
+  it("hands the focus to Cancel when a call starts while Delete has it", async () => {
+    saveSession(chat("a", "Ana"));
+    const { user } = renderApp(<UpdateProvider><Sidebar /></UpdateProvider>);
+    await user.click(within(rowOf("Ana")).getByRole("button", { name: "Delete chat" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete chat?" });
+    await user.keyboard("{Tab}");
+    expect(within(dialog).getByRole("button", { name: "Delete chat" })).toHaveFocus();
+    act(() => setChatOnCall("a", true));
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+  });
+
   it("leaves another chat's delete as it was", async () => {
     saveSession(chat("a", "Ana"));
     saveSession(chat("b", "Bo"));

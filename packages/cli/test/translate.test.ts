@@ -59,7 +59,7 @@ const msg = (text: string, fields: Record<string, unknown> = {}) => ({ id: `m${t
 let seq = 0;
 const received = (text: string, fields: Record<string, unknown> = {}, type = "message.received"): GhostlyEvent =>
   ({ seq: ++seq, id: `${type}:chat1:${seq}`, type, at: 5, chat: "chat1", message: msg(text, fields) });
-const translated = (pair: string, text: string) => expect.stringMatching(new RegExp(`^${pair}\\|\\d+\\|${text.replace(/[?.]/g, "\\$&")}$`));
+const translated = (pair: string, text: string) => expect.stringMatching(new RegExp(`^${pair}\\|\\d+\\|${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`));
 
 describe("a received message with --translate", () => {
   it("gets translation: { from, text } from the runtime, which one process gives for every message", async () => {

@@ -13,10 +13,12 @@ import { AddDeviceDialog } from "./AddDeviceDialog";
 import { DeviceGlyph } from "./DeviceGlyph";
 import { HandoffProgress, MoveDialog } from "./Handoff";
 import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
+import { RenameDeviceDialog } from "./RenameDeviceDialog";
 import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { nextOf, said } from "../../lib/notices";
 import { fillNames } from "../../lib/fillNodes";
 import { problemText, type Problem } from "../../lib/problemText";
+import { useFocusKept } from "../../hooks/useFocusKept";
 
 /** The refusals that come from this device's wallets (WISP 06 § Wallets). */
 const WALLET_REFUSALS = new Set<string>(["wallet", "loading", "mainnet", "expiry", "call"]);
@@ -30,7 +32,8 @@ const profilesHere = () => !!servicesPlatform?.features.profiles;
 /**
  * Profile, Devices (WISP 06 § User experience): Add a device, then one row per device with what it is and its state
  * (This device · Active, Active, Standby, Not finished, Removed). On the active device a row offers "Move to <device>"
- * while that device is connected, and its menu Check connection and Remove. The details are behind the ⓘ marks.
+ * while that device is connected, and its menu Check connection, Rename and Remove (this device's own row: Rename). The
+ * details are behind the ⓘ marks.
  */
 export function DevicesSection() {
   const { t, language } = useI18n();
@@ -80,7 +83,13 @@ export function DevicesSection() {
     setMoveClosed(false);
     if (!document.activeElement || document.activeElement === document.body) runningBox.current?.focus();
   }, [moveClosed, running]);
-  const devices = view?.devices ?? [];
+  // The device a Remove here just took out of the set: its row goes in the render that adds its Removed row, not at the
+  // next read of the set seconds later, so the list never offers Move to a device it also says is removed. Forgotten
+  // once a read of the set no longer has it.
+  const [gone, setGone] = useState<string | null>(null);
+  const listed = !!gone && !!view?.devices.some((device) => device.key === gone);
+  useEffect(() => { if (gone && view && !listed) setGone(null); }, [gone, view, listed]);
+  const devices = (view?.devices ?? []).filter((device) => device.key !== gone);
   const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
@@ -117,7 +126,7 @@ export function DevicesSection() {
       ))}
       {removed && (
         <div ref={removedBox} tabIndex={-1} data-testid="device-removed" className="focus:outline-none">
-          <Row leading={<DeviceGlyph name={removed} />} label={removed} hint={t("devices.section.removed")} info={t("devices.remove.doneInfo")} />
+          <Row leading={<DeviceGlyph name={removed} />} label={<bdi>{removed}</bdi>} hint={t("devices.section.removed")} info={t("devices.remove.doneInfo")} />
         </div>
       )}
       {view?.waiting?.length ? <Row testId="device-waiting" label={fillNames(t("devices.section.waiting", { devices: waiting[0] }), waiting[1])} /> : null}
@@ -171,7 +180,7 @@ export function DevicesSection() {
       )}
       {adding && <AddDeviceDialog onClose={() => setAdding(false)} />}
       {moving && <MoveDialog device={moving.name} deviceKey={moving.key} onClose={() => { setMoving(null); setMoveClosed(true); }} />}
-      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => { setRemoved(removing.name); setFocusRemoved(true); }} />}
+      {removing && <RemoveDeviceDialog device={removing.name} deviceKey={removing.key} onClose={() => setRemoving(null)} onRemoved={() => { setGone(removing.key); setRemoved(removing.name); setFocusRemoved(true); }} />}
       {lost && <LostChecklist device={stopped?.name} onClose={() => setLost(false)} onRemove={stopped ? () => { setLost(false); setRemoving({ key: stopped.key, name: stopped.name }); } : undefined} />}
     </Section>
   );
@@ -180,7 +189,8 @@ export function DevicesSection() {
 /**
  * One device: its mark, its name, its state and, for another device, whether its link is connected. "Move to
  * <device>" stays on the row, the main thing to do with a device; the rest is in its menu. While a move runs (`busy`)
- * neither another move nor Remove is offered: the engine would refuse them, and the move's Cancel is right above.
+ * neither another move nor Rename nor Remove is offered: the engine would refuse them, and the move's Cancel is right
+ * above. Rename opens its dialog from the row, and the focus comes back to the ⋮ when it closes.
  * `focus`: a move to this device was cancelled from the section, and once it no longer runs the keyboard focus that was
  * on Cancel comes here (Move to, else the menu).
  */
@@ -189,48 +199,68 @@ function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  // The name just saved, shown until the set read next says it (the section reads it every few seconds).
+  const [renamed, setRenamed] = useState<string | null>(null);
+  useEffect(() => setRenamed(null), [device.name]);
+  const name = renamed ?? device.name;
   const anchor = useRef<HTMLDivElement>(null);
   const move = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLButtonElement>(null);
+  // The link drops while Move to, or a ⋮ that holds only Check connection, has the keyboard focus: they go, and the
+  // focus goes to what is left on the row (its ⋮, else the row), not to the page. Not for a move that starts: the
+  // section gives that focus to the move's steps. The Row takes no ref: its box is found from the link's state in it.
+  const rowBox = useRef<HTMLElement | null>(null);
+  useFocusKept(rowBox, () => !busy && menu.current);
   const live = device.status === "live";
   const state = device.self ? (device.active ? t("devices.section.thisActive") : t("devices.section.thisStandby"))
     : device.active ? t("devices.section.active") : t("devices.section.standby");
   const canMove = !device.self && live && thisActive && !busy;
   const canCheck = !device.self && live;
   const canRemove = !device.self && thisActive && !busy;
+  // Only the active device writes the set's record, so only it renames: any device, itself included (WISP 06 § Record).
+  const canRename = thisActive && !busy;
+  // The dialog closed: the focus goes back to the ⋮ that opened it, not to the page.
+  const wasRenaming = useRef(false);
+  useEffect(() => {
+    if (wasRenaming.current && !renaming) menu.current?.focus();
+    wasRenaming.current = renaming;
+  }, [renaming]);
   useEffect(() => {
     if (!focus || busy) return;
     onFocused?.();
     if (!document.activeElement || document.activeElement === document.body) (move.current ?? menu.current)?.focus();
   }, [focus, busy, onFocused]);
-  const menuLabel = t("devices.section.menu", { device: device.name });
+  const menuLabel = t("devices.section.menu", { device: name });
   return (
-    <Row testId="device-row" leading={<DeviceGlyph name={device.name} active={device.active} />} label={<bdi>{device.name}</bdi>}
+    <Row testId="device-row" leading={<DeviceGlyph name={name} active={device.active} />} label={<bdi>{name}</bdi>}
       hint={<>
         <span data-testid="device-state">{state}</span>
         {!device.self && <>
           <span aria-hidden="true"> · </span>
-          <span data-testid="device-link-status" data-status={device.status ?? "none"} className="inline-flex items-center gap-1">
+          <span ref={(node) => { rowBox.current = node?.closest<HTMLElement>("[data-testid=device-row]") ?? null; }} data-testid="device-link-status" data-status={device.status ?? "none"} className="inline-flex items-center gap-1">
             <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${live ? "bg-accent" : "bg-text-muted"}`} />
             {live ? t("devices.section.live") : t("devices.section.connecting")}
           </span>
         </>}
         {checked && <span data-testid="device-check-result" role="status" className="block">{checked}</span>}
       </>}>
-      {canMove && <Button ref={move} data-testid="device-move" onClick={onMove}>{fillNames(t("devices.handoff.moveTo"), { device: device.name })}</Button>}
-      {(canCheck || canRemove) && (
+      {canMove && <Button ref={move} data-testid="device-move" onClick={onMove}>{fillNames(t("devices.handoff.moveTo"), { device: name })}</Button>}
+      {(canCheck || canRename || canRemove) && (
         <div ref={anchor} className="relative">
-          <button ref={menu} type="button" data-testid="device-menu" aria-haspopup="true" aria-expanded={open} aria-label={menuLabel} title={menuLabel} onClick={() => setOpen((was) => !was)}
+          <button ref={menu} type="button" data-testid={device.self ? "device-menu-self" : "device-menu"} aria-haspopup="true" aria-expanded={open} aria-label={menuLabel} title={menuLabel} onClick={() => setOpen((was) => !was)}
             className="grid h-10 w-10 max-md:h-11 max-md:w-11 cursor-pointer place-items-center rounded-lg text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
           </button>
           <Menu open={open} onClose={() => setOpen(false)} anchorRef={anchor} testId="device-menu-items" label={menuLabel} focusFirst>
             {canCheck && <MenuItem testId="device-check" onClick={() => { setOpen(false); onCheck(); }}>{t("devices.section.check")}</MenuItem>}
-            {canCheck && canRemove && <MenuSeparator />}
+            {canRename && <MenuItem testId="device-rename-open" onClick={() => { setOpen(false); setRenaming(true); }}>{t("devices.rename.button")}</MenuItem>}
+            {(canCheck || canRename) && canRemove && <MenuSeparator />}
             {canRemove && <MenuItem testId="device-remove-open" danger onClick={() => { setOpen(false); onRemove(); }}>{t("devices.remove.button")}</MenuItem>}
           </Menu>
         </div>
       )}
+      {renaming && <RenameDeviceDialog device={name} deviceKey={device.key} onClose={() => setRenaming(false)} onRenamed={setRenamed} />}
     </Row>
   );
 }

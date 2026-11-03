@@ -184,6 +184,9 @@
     "maxFee": "許容する最大手数料（{{unit}}）",
     "maxFeeAria": "最大手数料（{{unit}}）",
     "millisats": "{{amount}} millisats",
+    "moneroInfo": "Ghostly には Monero ウォレットがありません。「支払う」でこのリンクをこの端末の Monero ウォレットで開き、そこで確認して送金します。",
+    "moneroLabel": "Monero",
+    "moneroPayTitle": "この端末の Monero ウォレットを開きます",
     "networkNotStated": "ネットワーク不明",
     "noWallet": {
       "mainnet": "この本物のお金を支払える Mainnet の {{wallet}} ウォレットがありません。",

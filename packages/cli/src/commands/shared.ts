@@ -270,6 +270,13 @@ function percent(options: Parsed["options"], flag: string): void {
   if (value !== undefined && !(typeof value === "number" && value >= 0 && value <= 100)) throw new CliError("usage", `--${flag} takes a percent from 0 to 100, not ${JSON.stringify(value)}`);
 }
 
+/**
+ * `--pr-number`, `--additions`, `--used`, `--limit`…: a count as the card takes it, a whole number from `min` up to
+ * `STATUS_CARD_LIMITS.count`. Before, it reached the card's check: `bad_request` (exit 1), "Status card: pr.number is a
+ * whole number from 1".
+ */
+const cardCount = (options: Parsed["options"], flag: string, min: number) => inRange(options, flag, "a whole number", min, STATUS_CARD_LIMITS.count, true);
+
 /** The flags of a task's pull request, and the field of `pr` each one gives. */
 const PR_FLAGS = [["pr-url", "url"], ["pr-number", "number"], ["additions", "additions"], ["deletions", "deletions"], ["files", "files"], ["pr-state", "state"], ["pr-checks", "checks"]] as const;
 
@@ -297,9 +304,11 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
     const match = /^(\d+)\s*\/\s*(\d+)$/.exec(String(options.steps));
     if (!match) throw new CliError("usage", `--steps takes done/total, like 2/5, not ${JSON.stringify(options.steps)}`);
     fields.done = Number(match[1]); fields.total = Number(match[2]);
+    if (Number(match[2]) > STATUS_CARD_LIMITS.count) throw new CliError("usage", `--steps takes done/total of at most ${STATUS_CARD_LIMITS.count} steps, like 2/5, not ${JSON.stringify(options.steps)}`);
     if (Number(match[2]) < 1 || Number(match[1]) > Number(match[2])) throw new CliError("usage", `--steps takes done/total with done at most total, like 2/5, not ${JSON.stringify(options.steps)}`);
   }
   if (options["pr-url"] !== undefined && !cardUrl(options["pr-url"])) throw new CliError("usage", `--pr-url takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, not ${JSON.stringify(options["pr-url"])}`);
+  for (const flag of ["pr-number", "additions", "deletions", "files"]) cardCount(options, flag, flag === "pr-number" ? 1 : 0);
   const pr: Record<string, unknown> = {};
   for (const [flag, key] of PR_FLAGS) if (options[flag] !== undefined) pr[key] = options[flag];
   if (Object.keys(pr).length) fields.pr = { ...(fields.pr && typeof fields.pr === "object" ? fields.pr as object : {}), ...pr };
@@ -453,6 +462,8 @@ export function usageFields(options: Parsed["options"]): Record<string, unknown>
   const fields: Record<string, unknown> = { ...cardJson(options.json) };
   percent(options, "left");
   if (options.left !== undefined && (options.used !== undefined || options.limit !== undefined)) throw new CliError("usage", "--left or --used with --limit, not both");
+  const used = cardCount(options, "used", 0), limit = cardCount(options, "limit", 1);
+  if (used !== undefined && limit !== undefined && used > limit) throw new CliError("usage", `--used takes at most --limit (${limit}), not ${used}`);
   for (const [flag, max] of [["label", STATUS_CARD_LIMITS.usageLabel], ["account", STATUS_CARD_LIMITS.usageLabel], ["window", STATUS_CARD_LIMITS.usageWindow]] as const) cardText(`--${flag}`, options[flag], max);
   given("also", options.also, STATUS_CARD_LIMITS.usageWindows);
   for (const key of ["id", "left", "used", "limit", "label", "account", "window"] as const) if (options[key] !== undefined) fields[key] = options[key];

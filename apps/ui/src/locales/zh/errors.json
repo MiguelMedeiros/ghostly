@@ -205,6 +205,8 @@
     "unreadableNext": "请重新发送，或重新选择文件。",
     "updatedPeerFirst": "请先连接到已更新的节点",
     "updatedPeerToSend": "请连接到已更新的节点以发送文件",
+    "videoMetadata": "无法发送这个视频：Ghostly 无法删除其中保存的信息，例如录制地点",
+    "videoMetadataNext": "请在视频编辑器中另存一份副本，或从相册重新导出，然后发送。",
     "videoTooSlow": "视频处理时间过长"
   },
   "generic": "出错了",

@@ -91,6 +91,13 @@ describe("usage send", () => {
     usage(["Alice", "--limit", "50"], /^--limit goes with --used: ghostly usage send/);
     usage(["Alice", "--limit", "50", "--left", "40"], /^--left or --used with --limit, not both$/);
     usage(["Alice", "--left", "140"], /^--left takes a percent from 0 to 100, not 140$/);
+    // Before, these reached the card's check: bad_request (exit 1), "Status card: limit is a whole number from 1".
+    usage(["Alice", "--used", "5", "--limit", "0"], /^--limit takes a whole number from 1 to 1000000000, not 0$/);
+    usage(["Alice", "--used", "1.5", "--limit", "3"], /^--used takes a whole number from 0 to 1000000000, not 1.5$/);
+    usage(["Alice", "--used", "-1", "--limit", "3"], /^--used takes a whole number from 0 to 1000000000, not -1$/);
+    usage(["Alice", "--used", "6", "--limit", "3"], /^--used takes at most --limit \(3\), not 6$/);
+    expect(params(["Alice", "--used", "3", "--limit", "3"]).card).toEqual({ used: 3, limit: 3 });
+    expect(params(["Alice", "--used", "0", "--limit", "1"]).card).toEqual({ used: 0, limit: 1 });
     // --json may give them, and the two ways to say it stand.
     expect(params(["Alice", "--json", '{"left":40}']).card).toEqual({ left: 40 });
     expect(params(["Alice", "--used", "5", "--limit", "50"]).card).toEqual({ used: 5, limit: 50 });

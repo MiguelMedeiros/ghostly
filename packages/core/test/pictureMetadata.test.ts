@@ -94,6 +94,33 @@ function tiff({ extra = [] as number[][], compression = 1 } = {}): number[] {
   return [0x4d, 0x4d, 0, 42, ...be32(8), ...ifd0, ...be32(0), ...make, ...exifIfd, ...make, ...gpsIfd, 0xab, 0xcd];
 }
 
+/** TIFF as macOS `sips` writes it, little-endian: the Exif IFD at 8 (before IFD0), then the strip, then IFD0 last. */
+function sipsTiff(): number[] {
+  const le16 = (n: number) => [n & 0xff, n >> 8];
+  const entry = (tag: number, type: number, count: number, value: number[]) => [...le16(tag), ...le16(type), ...le32(count), ...value];
+  const secret = ascii(`${SECRET}\0`);
+  const exifAt = 8, secretAt = exifAt + 2 + 2 * 12 + 4, stripAt = secretAt + secret.length, ifd0At = stripAt + 6;
+  const exifIfd = [...le16(2), ...entry(0x9003, 2, secret.length, le32(secretAt)), ...entry(0xa002, 4, 1, le32(2)), ...le32(0)];
+  const ifd0 = [...le16(9), ...[entry(256, 3, 1, [2, 0, 0, 0]), entry(257, 3, 1, [1, 0, 0, 0]), entry(258, 3, 1, [8, 0, 0, 0]), entry(259, 3, 1, [1, 0, 0, 0]),
+    entry(262, 3, 1, [2, 0, 0, 0]), entry(273, 4, 1, le32(stripAt)), entry(277, 3, 1, [3, 0, 0, 0]), entry(279, 4, 1, le32(6)), entry(0x8769, 4, 1, le32(exifAt))].flat(), ...le32(0)];
+  return [0x49, 0x49, 42, 0, ...le32(ifd0At), ...exifIfd, ...secret, 255, 0, 0, 0, 0, 255, ...ifd0];
+}
+
+/** Every IFD a TIFF reader reaches (the chain from the header, and the Exif, GPS and interoperability IFDs) and its tags. */
+function tiffIfds(b: Uint8Array): { at: number; tags: number[] }[] {
+  const view = new DataView(b.buffer, b.byteOffset, b.byteLength), little = b[0] === 0x49;
+  const u16 = (at: number) => view.getUint16(at, little), u32 = (at: number) => view.getUint32(at, little);
+  const found: { at: number; tags: number[] }[] = [];
+  const read = (at: number): number => {
+    const count = u16(at), tags = Array.from({ length: count }, (_, i) => u16(at + 2 + i * 12));
+    found.push({ at, tags });
+    for (let i = 0; i < count; i++) if ([0x8769, 0x8825, 0xa005].includes(tags[i]!)) read(u32(at + 2 + i * 12 + 8));
+    return u32(at + 2 + count * 12);
+  };
+  for (let at = u32(4); at;) at = read(at);
+  return found;
+}
+
 describe("a picture's metadata, removed before it is sent", () => {
   it("GIF: comments, XMP and other application extensions go; frames, timing, the loop and ICC stay byte for byte", () => {
     const icc = gifExtension(0xff, ascii("ICCRGBG1012"), [1, 2, 3]);
@@ -122,15 +149,32 @@ describe("a picture's metadata, removed before it is sent", () => {
     expect(has(sent, SECRET)).toBe(true);
     expect(has(out, SECRET)).toBe(false);
     expect(out.length).toBe(sent.length);
+    // Past IFD0's entry count, every byte that changed is now zero.
     const changed = [...sent.keys()].filter((i) => sent[i] !== out[i]);
-    expect(changed.every((i) => out[i] === 0)).toBe(true);
-    // The strip, the size and the Orientation, unchanged; the Exif and GPS IFDs now hold no entry.
+    expect(changed.filter((i) => i !== 9).every((i) => out[i] === 0)).toBe(true);
+    // The strip, the size and the Orientation, unchanged; IFD0 without the Exif and GPS pointers, those IFDs zeroed.
     expect([...out.subarray(-2)]).toEqual([0xab, 0xcd]);
-    expect([...out.subarray(8, 10)]).toEqual([0, 9]);
+    expect([...out.subarray(8, 10)]).toEqual([0, 7]);
     const exifAt = 8 + 2 + 9 * 12 + 4 + SECRET.length + 1, gpsAt = exifAt + 18 + SECRET.length + 1;
     expect([...out.subarray(exifAt, exifAt + 2)]).toEqual([0, 0]);
     expect([...out.subarray(gpsAt, gpsAt + 18)]).toEqual(new Array(18).fill(0));
     expect([...out.subarray(8 + 2 + 5 * 12, 8 + 2 + 6 * 12)]).toEqual([1, 18, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0]);
+  });
+
+  it("TIFF: IFD0 no longer points at the emptied Exif and GPS IFDs, so every IFD a reader reaches has an entry (libtiff refuses one without)", () => {
+    for (const sent of [Uint8Array.from(tiff()), Uint8Array.from(sipsTiff())]) {
+      const out = strip(sent, "image/tiff");
+      expect(has(sent, SECRET)).toBe(true);
+      expect(has(out, SECRET)).toBe(false);
+      expect(out.length).toBe(sent.length);
+      const ifds = tiffIfds(out);
+      expect(ifds.map(({ tags }) => tags.length)).toEqual([sent[0] === 0x49 ? 8 : 7]);
+      expect(ifds[0]!.tags).toEqual(tiffIfds(sent)[0]!.tags.filter((tag) => tag !== 0x8769 && tag !== 0x8825));
+    }
+    // The sips picture's strip and IFD0's other entries, byte for byte.
+    const sent = Uint8Array.from(sipsTiff()), out = strip(sent, "image/tiff"), ifd0 = sent.length - 2 - 9 * 12 - 4;
+    expect([...out.subarray(ifd0 - 6, ifd0)]).toEqual([255, 0, 0, 0, 0, 255]);
+    expect([...out.subarray(ifd0 + 2, ifd0 + 2 + 8 * 12)]).toEqual([...sent.subarray(ifd0 + 2, ifd0 + 2 + 8 * 12)]);
   });
 
   it("TIFF with a part this does not know is refused: a private tag, sub-images, JPEG-compressed strips, a maker note", () => {

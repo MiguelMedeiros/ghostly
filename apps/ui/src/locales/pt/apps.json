@@ -5,8 +5,12 @@
     "checking": "Verificando…",
     "hint": "Um repositório do GitHub, um arquivo do raw.githubusercontent.com ou jsDelivr em um commit.",
     "label": "Link do app ou da loja",
+    "storeHeld": "Você já tem esta loja: ela está na sua página de Apps.",
+    "storeNewer": "Você já tem esta loja. Este link tem uma cópia mais recente dela.",
+    "storeOlder": "Esta é uma cópia mais antiga de uma loja que você já tem. A sua é mais recente e fica como está.",
     "storeReads": "O Ghostly a lê de {{host}}, que fica sabendo do seu endereço IP.",
-    "title": "Adicionar um app ou uma loja"
+    "title": "Adicionar um app ou uma loja",
+    "updateStore": "Atualizar loja"
   },
   "app": {
     "export": "Exportar dados",
@@ -31,7 +35,9 @@
     "hint": "Vem com o Ghostly",
     "openNamed": "Abrir {{title}}",
     "remove": "Remover",
-    "removeNamed": "Remover {{title}}"
+    "removeNamed": "Remover {{title}}",
+    "removeText": "Ele não será oferecido de novo. Para tê-lo de volta, instale-o de uma loja.",
+    "removeTitle": "Remover {{title}}?"
   },
   "card": {
     "ask": "Peça a {{name}} um link para ele",

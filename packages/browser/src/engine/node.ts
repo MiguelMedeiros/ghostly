@@ -1,5 +1,6 @@
 import { UsdtWallet, usdtMode } from "./paymentAdapters/usdtWallet";
 import { iceServerProblem, iceServerSetting, relayOnlyProblem } from "../shared/ice";
+import { settingsPatchProblem } from "../shared/settingsPatch";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
 import { ArkWallet, arkMode } from "./paymentAdapters/arkWallet";
 import { BarkWallet, barkMode } from "./paymentAdapters/barkWallet";
@@ -130,13 +131,14 @@ import { handoffLinks, profileRecords } from "../devices/handoffStandby";
 import { handoffPakeReady, isHandoffVerifier, makeHandoffVerifier, provesHandoffPassword, type HandoffVerifier } from "../devices/handoffPake";
 import { deviceIdentity, openTurnKeeper } from "../devices/setup";
 import { moveSet, resumeSetMove, type SetMovePorts } from "../devices/remove";
+import { renameDevice, renamedDeviceName } from "../devices/rename";
 import { newDeviceSecretDue } from "../devices/rotate";
 import { RESTORE_UNCHECKED_KEY, isRestoreUnchecked, peekTurn, restoreCheckOf, restoredStandby, type TurnPeek } from "../devices/restoreGuard";
 import { createDeviceSigningKey } from "../devices/signingKey";
 import { afterStop, money, planHandoffWallets, type HandoffTakerFacts, type HandoffWalletPlan, type WalletHome } from "../devices/handoffWallets";
 import { clearWalletHomes, readWalletHomes, writeWalletHomes } from "../devices/walletHomes";
 import { postPush, profileWakeAfter, profileWakeOnRemoval, wakeOwnerOf } from "../devices/push";
-import { MAX_ALLOWED_TOKENS } from "../devices/state";
+import { MAX_ALLOWED_TOKENS, forkTimes } from "../devices/state";
 import { awayFrom, setAwayWallets, setSingleWriterGate, refuseAway } from "./paymentAdapters/away";
 import { breezDatabaseInUse } from "./paymentAdapters/providers/breezDatabases";
 import { normalizePhrase } from "./paymentAdapters/providers/recoveryPhrase";
@@ -214,7 +216,7 @@ import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
-import { HoldEngine } from "./hold";
+import { HoldEngine, holdStoragePlace } from "./hold";
 import { RTT_STEP_MS, TransportLog, resumeHere } from "./transportLog";
 import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
@@ -227,7 +229,7 @@ import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdht
 import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
 import { SETUP_NETWORK, WalletSetup } from "./walletSetup";
-import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
+import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, onPublicIrohRelay } from "../platform/irohWeb";
 
 /**
  * How long a chat waits, on average, before listening again after its HyperDHT relay went away. Each app draws its own
@@ -246,6 +248,14 @@ const NATIVE_SLOTS = 8;
  * links listen there as well), and each of the CLI's is a whole DHT node.
  */
 const IROH_WEB_SLOTS = 16;
+/**
+ * The same where none of its Iroh relays is n0's (a relay of the person's own, or Ghostly's): measured on a lab
+ * `iroh-relay` 1.3, a Chromium page (phone-sized too) and the CLI each held 128 with none refused, started one after
+ * another or all at once, at about 0.2 MiB and one WebSocket each, and the relay about 30 KiB each. Half of that:
+ * Firefox opens 200 WebSockets at most, and a listener dialling a contact on another relay opens one more. 1:1 chats
+ * hold half of them at most.
+ */
+const IROH_WEB_OWN_RELAY_SLOTS = 64;
 /** Of a transport's listeners, the ones a group's links never hold: 1:1 chats keep that room. */
 const CHAT_NATIVE_SLOTS = 4;
 /**
@@ -1281,11 +1291,11 @@ export class GhostlyNode implements EngineImplementation {
     changed: () => this.emitState(),
     fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
-    // Hide my IP from contacts: a pickup reaches only this person's own storage host (no host is the app's own), never
-    // one a contact named. Path-style addresses: the endpoint's host is the address's.
-    hiddenIpHosts: () => {
+    // Hide my IP from contacts: a pickup reaches only this person's own bucket (no storage is the app's own), never one a
+    // contact named, even at the same provider: path-style addresses share the endpoint's host, the bucket is whose.
+    hiddenIpPlaces: () => {
       if (this.settings.relayOnly !== true) return null;
-      try { return this.settings.holdStorage?.s3 ? [new URL(this.settings.holdStorage.s3.endpoint.trim()).host.toLowerCase()] : []; } catch { return []; }
+      try { return this.settings.holdStorage?.s3 ? [holdStoragePlace(this.settings.holdStorage.s3)] : []; } catch { return []; }
     },
     // Tests shorten the lifetime to watch an item expire, in a test build only; it never lengthens it.
     ttlMs: () => { const raw = testSwitch("ghostly-test-hold-ttl"); const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; },
@@ -3180,6 +3190,9 @@ export class GhostlyNode implements EngineImplementation {
    */
   private async deviceWakeReceived(from: string, target: WakeTarget | null): Promise<void> {
     if (!this.ownDeviceKey || this.shuttingDown) return;
+    // Only a device the set lists now: a removed one's subscription must not come back to the contacts.
+    const record = await readDeviceRecord(databaseName()).catch(() => null);
+    if (!record?.deviceSet.some((slot) => slot?.key === from)) return;
     const before = this.settings.wake;
     // A new subscription asked of `from` (`wakeRenew`) is done once it shares another endpoint than the one to replace.
     const asked = this.settings.wakeRenew?.[from];
@@ -3248,7 +3261,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!links) return;
     for (const key of Object.keys(this.settings.wakeRenew ?? {})) {
       if (!links.live(key)) { this.renewAsked.delete(key); continue; }
-      if (!this.renewAsked.has(key) && links.askRenew(key)) this.renewAsked.add(key);
+      if (this.renewAsked.has(key)) continue;
+      // Marked before it goes, so a second call meanwhile asks nothing more; unmarked when it did not go.
+      this.renewAsked.add(key);
+      void links.askRenew(key).then((sent) => { if (!sent) this.renewAsked.delete(key); }, () => this.renewAsked.delete(key));
     }
   }
 
@@ -3270,7 +3286,12 @@ export class GhostlyNode implements EngineImplementation {
     for (const view of links.views()) {
       if (view.earlier) continue;
       if (view.status !== "live") { this.sentTokens.delete(view.key); continue; }
-      if (this.sentTokens.get(view.key) !== said && links.sendTokens(view.key, tokens)) this.sentTokens.set(view.key, said);
+      if (this.sentTokens.get(view.key) === said) continue;
+      // Marked before it goes, as `askDeviceRenewals` does; unmarked when it did not go, unless a newer list took its place.
+      const key = view.key;
+      this.sentTokens.set(key, said);
+      const unsent = () => { if (this.sentTokens.get(key) === said) this.sentTokens.delete(key); };
+      void links.sendTokens(key, tokens).then((sent) => { if (!sent) unsent(); }, unsent);
     }
   }
 
@@ -4996,6 +5017,27 @@ export class GhostlyNode implements EngineImplementation {
     this.capsChanged(linkId);
   }
 
+  /**
+   * A group's transport, chosen on this device (WISP 902 § Transports): Iroh or HyperDHT runs that one alone on the
+   * group's edges, with no WebRTC, and each edge's `_tr` says so; WebRTC says `["webrtc/1"]`; `auto` is the rule every
+   * edge had before. A member that chose otherwise, or whose app has no WebRTC, is met on a native transport, as
+   * before. Each of the group's edges starts again on it (no goodbye); its entry sessions keep the rule.
+   */
+  async setGroupTransport({ groupId, transport }: { groupId: string; transport: PairedTransport | "auto" }): Promise<void> {
+    if (!this.groups.view(groupId)) throw new Error("Group not found");
+    const runs = transport === "webrtc/1" ? typeof RTCPeerConnection !== "undefined" : transport !== "auto" && TRANSPORTS.includes(transport) && transport in this.nativeFactories;
+    if (transport !== "auto" && !runs) throw new Error("Transport unavailable");
+    if ((this.settings.groupTransports?.[groupId] ?? "auto") === transport) return;
+    const { [groupId]: _, ...others } = this.settings.groupTransports ?? {};
+    const next = transport === "auto" ? others : { ...others, [groupId]: transport };
+    this.settings = { ...this.settings, groupTransports: next };
+    if (!Object.keys(next).length) delete this.settings.groupTransports;
+    await db.putSettings(this.settings);
+    await Promise.all([...this.links.values()].filter(live => live.stored.group === groupId && !live.stored.groupEntry && live.link)
+      .map(live => this.restartEdge(live.stored.id)));
+    this.emitState();
+  }
+
   /** The chat's connection story, for paired chats (not group edges). */
   /**
    * The chat's ratchet (WISP 4xx), made once per chat: its keys are read from the chat's row when used (each start of
@@ -6571,6 +6613,9 @@ export class GhostlyNode implements EngineImplementation {
   private get sharedAvatar(): string | undefined { return this.settings.shareProfile === false ? undefined : this.settings.avatar || undefined; }
 
   async updateSettings({ settings: patch }: { settings: SettingsPatch }): Promise<void> {
+    // A value of the wrong kind (from outside the apps) is refused before anything is written.
+    const wrongKind = settingsPatchProblem(patch);
+    if (wrongKind) throw new Error(wrongKind);
     const { nostr, ...rest } = patch;
     const settings: Partial<Settings> = rest;
     // The backup reminders are the engine's: only a wallet's backup, a profile backup or "Later" changes them.
@@ -6613,6 +6658,8 @@ export class GhostlyNode implements EngineImplementation {
     delete (settings as Partial<Settings>).wakeMutedGroups;
     delete (settings as Partial<Settings>).wakeHeldBy;
     delete (settings as Partial<Settings>).wakeRenew;
+    // Only through setGroupTransport, which starts the group's edges again on it.
+    delete (settings as Partial<Settings>).groupTransports;
     // The first-run wallet setup's record: the engine's alone.
     delete (settings as Partial<Settings>).walletSetup;
     const relayBefore = this.hyperdhtRelay;
@@ -6991,15 +7038,18 @@ export class GhostlyNode implements EngineImplementation {
     this.tombstoneTimer ??= setInterval(() => void run(), GhostlyNode.TOMBSTONE_EVERY_MS);
   }
 
-  /** Whether a move of the set may begin now: this device is active, online, and nothing else changes the set. */
-  private setMoveAllowed(): void {
-    if (this.options.singleDevice) throw new Error("remove-state: A profile of the command line is on one device only");
+  /**
+   * Whether a move of the set (or a rename, `prefix` "rename") may begin now: this device is active, online, and nothing
+   * else changes the set.
+   */
+  private setMoveAllowed(prefix: "remove" | "rename" = "remove"): void {
+    if (this.options.singleDevice) throw new Error(`${prefix}-state: A profile of the command line is on one device only`);
     if (this.limitedMode) throw new Error(LIMITED_MODE_ERROR);
-    if (!this.networkOn) throw new Error("remove-offline: You are offline");
+    if (!this.networkOn) throw new Error(`${prefix}-offline: You are offline`);
     const view = this.enrollment?.current();
-    if (view && view.step !== "done" && view.step !== "failed") throw new Error("remove-busy: A device is being added. Try again after it.");
+    if (view && view.step !== "done" && view.step !== "failed") throw new Error(`${prefix}-busy: A device is being added. Try again after it.`);
     const handoff = this.handoffGiver?.view();
-    if (handoff && handoff.step !== "failed") throw new Error("remove-busy: The profile is moving. Try again after it.");
+    if (handoff && handoff.step !== "failed") throw new Error(`${prefix}-busy: The profile is moving. Try again after it.`);
   }
 
   private async moveDeviceSet(remove?: string): Promise<DeviceSetView> {
@@ -7080,6 +7130,28 @@ export class GhostlyNode implements EngineImplementation {
   async deviceRemove({ key }: { key: string }): Promise<DeviceSetView> {
     if (typeof key !== "string" || !key) throw new Error("remove-device: Name the device to remove.");
     return this.moveDeviceSet(key);
+  }
+
+  /**
+   * Rename (WISP 06 § User experience, the row menu): the active device writes its next record with the new name in
+   * that device's slot (`devices/rename.ts`), and tells the devices on a live link to read it now. Only the active
+   * device renames, any device of the set, itself included. Errors start with `rename-<reason>:`.
+   */
+  async deviceRename({ key, name }: { key: string; name: string }): Promise<DeviceSetView> {
+    if (typeof key !== "string" || !key) throw new Error("rename-device: Name the device to rename.");
+    const clean = renamedDeviceName(name);
+    this.setMoveAllowed("rename");
+    if (this.settingMove) throw new Error("rename-busy: The device set is already changing.");
+    const work = (async () => {
+      const keeper = await this.deviceLinks?.turnKeeper();
+      if (!keeper) throw new Error("rename-state: This device cannot sign for its device set.");
+      return renameDevice({ profile: databaseName(), keeper, key, name: clean });
+    })();
+    this.settingMove = work;
+    let renamed: boolean;
+    try { renamed = await work; } finally { this.settingMove = null; }
+    if (renamed) this.deviceLinks?.hintTurn();
+    return this.deviceSet();
   }
 
   /** "New device secret": the set moves to a new secret with nobody removed. */
@@ -7493,7 +7565,10 @@ export class GhostlyNode implements EngineImplementation {
     const host = handoffProfileHost();
     if (!host) throw new Error("This app cannot discard it");
     await host.staging.drop(database);
-    await amendDevice(databaseName(), { forks: record.forks.filter((name) => name !== database) });
+    // Its time goes with it (`forkKeptAt`), and any an older build left behind of a fork it discarded.
+    const forks = record.forks.filter((name) => name !== database);
+    const kept = forkTimes({ forks, forkKeptAt: record.forkKeptAt });
+    await amendDevice(databaseName(), { forks, forkKeptAt: Object.keys(kept).length ? kept : undefined });
     this.emitState();
   }
 
@@ -7734,8 +7809,10 @@ export class GhostlyNode implements EngineImplementation {
     let seen = false;
     // Native where one side has no WebRTC (WISP 902 § Transports): an edge back after a restart resumes on a native transport both run.
     const native = this.keepsGroupNative(stored);
+    // A transport chosen for the group (`setGroupTransport`): that one, with no WebRTC.
+    const natives = this.groupNatives(stored), chosen = this.groupChoice(stored);
     const resumeOn: PairedTransport | undefined = native
-      ? TRANSPORTS.find(t => t !== "webrtc/1" && t in this.nativeFactories && !!stored.peerTransports?.includes(t)) : "webrtc/1";
+      ? TRANSPORTS.find(t => t !== "webrtc/1" && natives.includes(t) && !!stored.peerTransports?.includes(t)) : "webrtc/1";
     live.pairing = { status: "connecting" };
     live.edgeStartedAt = Date.now();
     // A private group's edge signals through members that reach both ends, beside the relays (WISP 902 § Signaling through members).
@@ -7762,7 +7839,7 @@ export class GhostlyNode implements EngineImplementation {
       largeFilesSupport: !entry,
       binaryFilesSupport: !entry,
       params: stored,
-      rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId),
+      rtcAvailable: typeof RTCPeerConnection !== "undefined" && !this.edgeRtcOff.has(linkId) && !this.groupNativeChoice(stored),
       // Live when this app last ran: the member likely watches for this app to come back, and is dialled at once,
       // whichever end's turn it is, rather than left to its offer and a read at the background pace (WISP 100).
       // WebRTC, unless one side has none: then the native transport both run.
@@ -7771,8 +7848,9 @@ export class GhostlyNode implements EngineImplementation {
       native: { peerDescriptors: stored.peerDescriptors, peerTransports: stored.peerTransports, peerFallback: stored.peerFallback, automatic: true },
       packetTransports: !this.options.webrtcGroupLinks,
       // It ran a native endpoint on this link in some run (its seed is kept), so it said a `_tr` there: it says what it
-      // runs now, WebRTC alone too, and the member's app stops dialling what an earlier run said.
-      packetTransportsSaid: !!stored.transportSeeds && Object.keys(stored.transportSeeds).length > 0,
+      // runs now, WebRTC alone too, and the member's app stops dialling what an earlier run said. So does an edge of a
+      // group whose transport this device chose: WebRTC chosen says `["webrtc/1"]` from its first packet.
+      packetTransportsSaid: (!!stored.transportSeeds && Object.keys(stored.transportSeeds).length > 0) || !!chosen,
       // An offer from before that session began is not answered after a restart (a relay that missed its clearing).
       resumeFloor: !entry && stored.edgeLive ? stored.edgeLiveSince : undefined,
       // Pinned in advance to the member the roster names: there is nothing to trust on first use.
@@ -7912,7 +7990,30 @@ export class GhostlyNode implements EngineImplementation {
    */
   private keepsGroupNative(stored: StoredLink): boolean {
     if (this.options.webrtcGroupLinks) return false;
-    return typeof RTCPeerConnection === "undefined" || this.edgeRtcOff.has(stored.id) || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"));
+    return typeof RTCPeerConnection === "undefined" || this.edgeRtcOff.has(stored.id) || (!!stored.peerTransports && !stored.peerTransports.includes("webrtc/1"))
+      || this.groupNativeChoice(stored) !== undefined;
+  }
+
+  /** What this device chose for the group of an edge (`setGroupTransport`); undefined on Automatic, and for an entry session. */
+  private groupChoice(stored: StoredLink): PairedTransport | undefined {
+    return stored.group && !stored.groupEntry ? this.settings.groupTransports?.[stored.group] : undefined;
+  }
+  /** The native transport chosen for the group of an edge, where this app runs it. */
+  private groupNativeChoice(stored: StoredLink): NativeTransport | undefined {
+    const chosen = this.groupChoice(stored);
+    return chosen && chosen !== "webrtc/1" && chosen in this.nativeFactories ? chosen : undefined;
+  }
+
+  /**
+   * The native transports a group's link may listen on (WISP 902 § Transports): every one this app runs, or the one
+   * chosen for its group. A member whose `_tr` lists neither WebRTC nor that one (it chose another, or its app runs only
+   * that other) is met on its own too: the two would have nothing in common.
+   */
+  private groupNatives(stored: StoredLink): NativeTransport[] {
+    const all = Object.keys(this.nativeFactories) as NativeTransport[], chosen = this.groupNativeChoice(stored);
+    if (!chosen) return all;
+    const theirs = stored.peerTransports;
+    return theirs && !theirs.includes("webrtc/1") && !theirs.includes(chosen) ? all.filter(t => t === chosen || theirs.includes(t)) : [chosen];
   }
 
   /**
@@ -8537,15 +8638,48 @@ export class GhostlyNode implements EngineImplementation {
     return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS];
   }
 
-  /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
+  /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends (`moveNative`). */
   private async rehomeIroh(): Promise<void> {
     if (!this.options.irohWeb && !this.ownIrohRelays) return;
     this.deviceLinks?.nativeChanged(["iroh/1"]);
     for (const [linkId, live] of this.links) {
       const link = live.link;
-      if (!link?.availableTransports.includes("iroh/1") || !link.canReleaseEndpoint("iroh/1")) continue;
+      if (!link?.availableTransports.includes("iroh/1")) continue;
+      if (!link.canReleaseEndpoint("iroh/1")) { this.nativeMoved(linkId).add("iroh/1"); continue; }
       await link.releaseEndpoint("iroh/1");
       void this.ensureNativeEndpoints(linkId);
+    }
+  }
+
+  /**
+   * Chats and group links whose listener of a transport is on a relay the person changed or removed, kept while a
+   * session ran on it (or a dial or a switch was under way), by link id. Before, it stayed there until the app restarted:
+   * its record went on naming the old relay, and a contact dialled it there.
+   */
+  private readonly movedNative = new Map<string, Set<NativeTransport>>();
+  private nativeMoved(linkId: string): Set<NativeTransport> {
+    let moved = this.movedNative.get(linkId);
+    if (!moved) this.movedNative.set(linkId, moved = new Set());
+    return moved;
+  }
+  /** Each second: those whose session ended let the old relay go, and start again on the new one (none where it was removed). */
+  private moveNative(): void {
+    for (const [linkId, moved] of this.movedNative) {
+      const link = this.links.get(linkId)?.link;
+      for (const key of [...moved]) {
+        if (!link?.availableTransports.includes(key)) { moved.delete(key); continue; }
+        if (!link.canReleaseEndpoint(key)) continue;
+        moved.delete(key);
+        void link.releaseEndpoint(key).then(() => {
+          const live = this.links.get(linkId);
+          if (this.shuttingDown || live?.link !== link) return;
+          if (key === "iroh/1") { void this.ensureNativeEndpoints(linkId); return; }
+          if (live.transportErrors) delete live.transportErrors[key];
+          if (this.hyperdhtRelay) void this.ensureNativeEndpoints(linkId);
+          this.emitState();
+        }, () => {});
+      }
+      if (!moved.size) this.movedNative.delete(linkId);
     }
   }
 
@@ -8593,7 +8727,7 @@ export class GhostlyNode implements EngineImplementation {
         if (this.hyperdhtRelay && link && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
         continue;
       }
-      if (!link.canReleaseEndpoint("hyperdht/1")) continue;
+      if (!link.canReleaseEndpoint("hyperdht/1")) { this.nativeMoved(linkId).add("hyperdht/1"); continue; }
       await link.releaseEndpoint("hyperdht/1");
       if (live.transportErrors) delete live.transportErrors["hyperdht/1"];
       if (this.hyperdhtRelay) void this.ensureNativeEndpoints(linkId);
@@ -8819,9 +8953,17 @@ export class GhostlyNode implements EngineImplementation {
     start.go();
   }
 
-  /** The listeners this app may hold for a transport: sixteen for Iroh's browser build (`IROH_WEB_SLOTS`), eight for the others. */
+  /**
+   * The listeners this app may hold for a transport: for Iroh's browser build sixteen (`IROH_WEB_SLOTS`), or 64 where
+   * none of its relays is n0's (`IROH_WEB_OWN_RELAY_SLOTS`); eight for the others. They start one at a time either way.
+   */
   private nativeSlots(key: NativeTransport): number {
-    return key === "iroh/1" && this.options.irohWeb ? IROH_WEB_SLOTS : NATIVE_SLOTS;
+    if (key !== "iroh/1" || !this.options.irohWeb) return NATIVE_SLOTS;
+    return onPublicIrohRelay(this.irohRelays) ? IROH_WEB_SLOTS : IROH_WEB_OWN_RELAY_SLOTS;
+  }
+  /** Of those, the most 1:1 chats hold: eight, or half of them where there are more. */
+  private chatNativeSlots(key: NativeTransport): number {
+    return Math.max(NATIVE_SLOTS, this.nativeSlots(key) / 2);
   }
   /** Of those, what its groups' links may hold, all groups together. */
   private groupNativeSlots(key: NativeTransport): number {
@@ -8851,6 +8993,8 @@ export class GhostlyNode implements EngineImplementation {
     // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
     const group = !!live.stored.group;
     if (group && !this.keepsGroupNative(live.stored)) return false;
+    // Nor one other than the transport chosen for its group (`groupNatives`).
+    if (group && !this.groupNatives(live.stored).includes(key)) return false;
     if (link.availableTransports.includes(key)) return false;
     live.transportErrors ??= {};
     try {
@@ -8883,8 +9027,9 @@ export class GhostlyNode implements EngineImplementation {
       // One that finds none waits for a slot.
       if (group && (entry || extra(live)) && (full || groups >= this.groupNativeSlots(key)
         || (!entry && !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key)))) return "no-slot";
-      // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a browser).
-      if (full || (!group && owners.length - groups >= NATIVE_SLOTS)) {
+      // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a
+      // browser; half of its 64 on relays that are not n0's).
+      if (full || (!group && owners.length - groups >= this.chatNativeSlots(key))) {
         // Who may take one that is held: the chat in use (on screen, or a text going or coming in it), one paired in this
         // run and not live yet (as used when it was paired), an edge of the group on screen, and the one edge a group
         // keeps while it is not.
@@ -9034,6 +9179,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private retryNative(): void {
     this.groupAnchorsAnswered();
+    this.moveNative();
     const now = Date.now();
     for (const [linkId, failed] of this.nativeFailed) {
       if (now < failed.at || this.nativeRetrying.has(linkId)) continue;

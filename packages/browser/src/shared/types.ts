@@ -347,13 +347,15 @@ export interface GroupView {
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
    * `since`: joining a community through its link, when the knock started (a group kept here, knocking to get back in,
    * was created long before).
+   * `admittedAt`: joining a community through its link, at stage `admitted`, when a member's app let me in. A welcome
+   * lost there, and the link replaced before I knock again, is never said again: nobody reads the old link's knocks.
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
    * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
    * while that chat was up: the answer is offered again. Through a link (`viaLink`): nobody answered it for an hour of
    * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; admittedAt?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -1398,6 +1400,11 @@ export interface Settings {
    * subscription, as a muted chat's contact is. Only through `setWakeMuted` with the group's `group:<id>`.
    */
   wakeMutedGroups?: string[];
+  /**
+   * Groups whose links this device put on one transport (WISP 902 § Transports), by group id; a group not here is on
+   * Automatic. This device's own: nothing of it goes to the members but each edge's `_tr`. Only through `setGroupTransport`.
+   */
+  groupTransports?: Record<string, PairedTransport>;
   /**
    * Private groups → members that were given a token on an edge a group on hubs later dropped: they still hold the
    * subscription with no edge to close, so their leaving the group (or this profile leaving it, or muting it) replaces

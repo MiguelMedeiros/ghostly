@@ -730,6 +730,18 @@ describe("a device's name in a right-to-left language", () => {
     expect(names(rows[1]!)).toEqual(["Pixel-of-a-very-", "Pixel-of-a-very-"]);
   });
 
+  it("keeps its own direction on the Removed row", async () => {
+    const { user, engine } = renderApp(<DevicesSection />, { language: "ar" });
+    const tablet = { key: TABLET, name: "Tablet (2)", slot: 1, self: false, active: false, status: "live" as const };
+    engine.on("deviceSet", () => set({ devices: [set().devices[0]!, tablet] }));
+    engine.on("deviceHandoffView", () => null);
+    engine.on("deviceRemove", () => set({ devices: [set().devices[0]!] }));
+    await user.click(await screen.findByTestId("device-menu"));
+    await user.click(screen.getByTestId("device-remove-open"));
+    await user.click(screen.getByTestId("device-remove-go"));
+    expect(names(await screen.findByTestId("device-removed"))).toEqual(["Tablet (2)"]);
+  });
+
   it("keeps its own direction in the takeover's title, hint and the name to type", () => {
     renderApp(<TakeoverDialog device="Pixel-of-a-very-" password onClose={() => {}} />, { language: "ar" });
     const dialog = screen.getByTestId("takeover-dialog");

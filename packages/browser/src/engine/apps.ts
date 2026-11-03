@@ -61,6 +61,8 @@ export const APP_CHECK_TIMINGS = {
   /** A check at start is skipped when every app was checked this recently (a page reloaded several times). */
   freshMs: 60 * 60 * 1000,
 } as const;
+/** Apps the update check reads at once (their publishers' files, their sources' peeks): all on the same two hosts. */
+const APP_CHECK_PARALLEL = 6;
 
 /** Revocations are checked this long at a time before the page's thread is let go. */
 const REVOCATIONS_SLICE_MS = 10;
@@ -240,8 +242,11 @@ export interface AppStoreSummary {
   problem?: string;
 }
 
-/** What `previewStore` read, before the person adds it. */
-export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number }
+/**
+ * What `previewStore` read, before the person adds it. `held`: the person has this store already (by its key, not
+ * removed), with the `sequence` of the index held (absent when none was read yet). Add then takes only a newer index.
+ */
+export interface AppStorePreview { url: string; key: string; fingerprint: string; name: string; description?: string; kind: AppStoreKind; sequence: number; expires: number; expired: boolean; apps: number; held?: { sequence?: number } }
 
 /** Where to fetch an app from: a pasted URL, a store's listing, or a chat card's pointer. */
 export type AppSource =
@@ -454,6 +459,11 @@ function sameRecord(now: InstalledApp | undefined, was: InstalledApp | undefined
   if (!was) return !now;
   return !!now && now.installedAt === was.installedAt && now.digest === was.digest && now.pending?.digest === was.pending?.digest
     && now.bytes === was.bytes && now.equivocation?.digest === was.equivocation?.digest;
+}
+
+/** Whether two records of an app differ in nothing but `checkedAt`. */
+function sameExceptChecked(a: InstalledApp, b: InstalledApp): boolean {
+  try { return canonicalJson({ ...a, checkedAt: 0 }) === canonicalJson({ ...b, checkedAt: 0 }); } catch { return false; }
 }
 
 /** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`, counter rows included. */
@@ -1104,9 +1114,11 @@ export class Apps {
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
     const { index, digest } = read.store;
     this.keepPreviewed({ url: at, index, digest, at: this.now() });
+    const held = await this.storeRecord(index.key);
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
+      ...(held && !held.removed && { held: held.index ? { sequence: held.index.sequence } : {} }),
     };
   }
 
@@ -1114,8 +1126,9 @@ export class Apps {
    * Adds a store the person chose: read at its URL and pinned to its key (`key`, when given, is the key the person saw,
    * and another one is refused). A store already added under that key keeps the URL it is read from and takes only a newer
    * index: a copy of its signed index at another URL, the same one or an older one, never moves it there (it would be
-   * read only there from then on, frozen). The index the preview just read at that URL, under that key, is taken as it
-   * is (only its expiry again), not downloaded again.
+   * read only there from then on, frozen). The same index is nothing to do, and an older one is refused with the held
+   * store left as it was: a copy the person chose is not a read of the store, so it marks no problem on it. The index the
+   * preview just read at that URL, under that key, is taken as it is (only its expiry again), not downloaded again.
    */
   async addStore({ url, key }: { url: string; key?: string }): Promise<AppStoreSummary> {
     if (key !== undefined && !isAppKey(key)) fail("store-key", "Not a store key");
@@ -1132,6 +1145,11 @@ export class Apps {
     // refused, so the takedowns the person has seen since still hold.
     const seen = held?.removed && held.seen && appStoreDecision({ key: held.key, ...held.seen }, { key: index.key, sequence: index.sequence, digest });
     if (seen === "rollback" || seen === "equivocation") fail(seen, `This store's index is older than the one you had (sequence ${held!.seen!.sequence})`);
+    if (held && !held.removed && held.index) {
+      const decision = appStoreDecision({ key: held.key, sequence: held.index.sequence, digest: held.digest ?? "" }, { key: index.key, sequence: index.sequence, digest });
+      if (decision === "same") return this.summary(held);
+      if (decision === "rollback") fail("rollback", `This store's index is older than the one you have (sequence ${held.index.sequence})`);
+    }
     const record: AddedAppStore = held && !held.removed ? held : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
     await this.putStore(this.withIndex(record, index, digest));
     return this.summary((await this.storeRecord(index.key))!);
@@ -1446,146 +1464,156 @@ export class Apps {
     if (!apps.length) return [];
     await this.refreshStores();
     const stores = await this.stores();
-    const out: AppCheckResult[] = [];
-    for (const listed of apps) {
-      if (!(await this.hasBundle(listed.bytes, listed.digest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
-      const first = await this.app(listed.ref);
-      if (!first) continue;
-      // The record as stored when this check last read or wrote it: what it writes back must still be there.
-      let stored = first;
-      let app = first;
-      let outcome: AppCheckOutcome = "none";
-      let wrote: { bytes: FileBytesKind; digest: string } | undefined;
-      // A waiting update this check drops or replaces: its files go once the record without it is written, not before
-      // (accepted meanwhile, it is the version installed and runs from them).
-      const dropped: { bytes: FileBytesKind; digest: string }[] = [];
-      // A store the person removed pins nothing any more (as `removeStore` does).
-      if (app.store !== undefined && !stores.some((s) => s.key === app.store)) { const { store: _s, ...unpinned } = app; app = unpinned; }
-      // A waiting update its store no longer lists goes, so the version the store lists now is looked at instead.
-      if (app.store !== undefined && app.pending && stores.find((s) => s.key === app.store)?.index && this.pinnedListing(app, stores)?.digest !== app.pending.digest) {
-        dropped.push(app.pending);
-        const { pending: _p, ...rest } = app;
-        app = rest;
-      }
-      const highest = Math.max(app.sequence, app.pending?.sequence ?? 0);
-      const known = new Set([app.digest, ...(app.pending ? [app.pending.digest] : [])]);
-      // Stores first (they name the version), then the publisher's own sources. An app installed from a store looks only
-      // in that store's listing and takes only the digest it lists: a newer version at the publisher's sources, or at a
-      // listing URL that moved on (a repository's HEAD), waits until the store lists it.
-      const pinned = app.store;
-      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept;
-      // `holds`: what a source's peek showed it holds; `sequence`: the number its listing or its peek names.
-      const candidates = new Map<string, { sequence: number; digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
-      const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
-      for (const s of stores) {
-        if (pinned !== undefined && s.key !== pinned) continue;
-        const listing = s.index?.apps.find((a) => a.ref === app.ref);
-        if (!listing || !newer(listing)) continue;
-        const seen = `${s.digest} ${listing.digest}`;
-        for (const url of listingUrls(listing.urls)) {
-          const missed = `${s.key} ${app.ref} ${url}`;
-          if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
-          candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
-        }
-      }
-      if (pinned === undefined) {
-        for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
-          if (candidates.has(url)) continue;
-          try {
-            const peek = await this.peekAt(url);
-            if (peek && newer(peek)) candidates.set(url, { sequence: peek.sequence, holds: peek });
-          } catch { /* this source does not answer now */ }
-        }
-      }
-      // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
-      const revokeRead = new Set<string>();
-      const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
-      app = withRevocations(app, before ?? []);
-      // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
-      if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
-        dropped.push(app.pending);
-        const { pending: _p, ...rest } = app;
-        app = rest;
-      }
-      // The newest first, whichever store or source names it (then in the order found): the next is tried only when it
-      // cannot be taken.
-      for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
-        // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
-        // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
-        // index lists the same.
-        let holds = want.holds;
-        if (want.peek) {
-          let peek: ReturnType<typeof peekAppManifest>;
-          try { peek = await this.peekAt(url); } catch { continue; }
-          if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
-            if (want.miss) this.listingMisses.set(...want.miss);
-            continue;
-          }
-          holds = peek;
-        }
-        // A version a store of the person's removed, or its publisher revoked, is not taken: known from the peek, so it is
-        // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
-        const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
-        if (holds && !twin && this.runStatus(holds, this.storeViews(stores), app.revocations).status !== "ok") continue;
-        let fetched: { bundle: AppBundle; bytes: Uint8Array };
-        try { fetched = await this.fetchBundle(url); } catch { continue; }
-        const { bundle, bytes } = fetched;
-        const version = versionOf(bundle.manifest, bundle.digest);
-        if (version.ref !== app.ref || known.has(version.digest)) continue;
-        if (want.digest !== undefined && version.digest !== want.digest) continue;
-        if (app.pending && version.sequence === app.pending.sequence) {
-          app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } };
-          outcome = "equivocation";
-          continue;
-        }
-        const plan = planAppUpdate(app, { ...version, permissions: bundle.manifest.permissions });
-        if (plan.action === "refuse") {
-          if (plan.decision === "equivocation") { app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } }; outcome = "equivocation"; }
-          continue;
-        }
-        if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
-        if (app.pending && version.sequence < app.pending.sequence) continue;
-        const kind = await this.writeBundle(version.digest, bytes);
-        wrote = { bytes: kind, digest: version.digest };
-        if (plan.action === "install") {
-          const old = app;
-          const next = this.versionRecord(app, bundle, kind, url, app.store);
-          const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
-          if (passed) delete next.pending;
-          // Uninstalled while it downloaded, or changed by the person: not put back.
-          if (!(await this.putAppIfUnchanged(next, stored))) break;
-          app = stored = next;
-          if (passed) await this.removeBundle(passed.bytes, passed.digest);
-          await this.removeBundle(old.bytes, old.digest);
-          outcome = "updated";
-        } else {
-          if (app.pending) dropped.push(app.pending);
-          app = { ...app, pending: { sequence: version.sequence, digest: version.digest, manifest: bundle.manifest, added: plan.added as AppPermission[], bytes: kind, from: url, at: this.now() } };
-          outcome = "ask";
-        }
-        break;
-      }
-      // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
-      const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
-      // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
-      // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
-      // version not found yet): a file that changes does not pile up.
-      const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
-      // A store's index carries some too: those that stop one of these are kept, as a store may drop them or be removed.
-      const versions = this.versionsOf(app);
-      const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
-      const carried = stopping(versions, stores.flatMap((s) => s.index?.revoked ?? []));
-      const merged = new Map([...stays, ...(revocations ?? []), ...carried].map((r) => [canonicalJson(r), r]));
-      // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
-      const current = await this.app(app.ref);
-      if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
-      app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
-      const put = await this.putAppIfUnchanged(app, stored);
-      for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
-      if (!put) continue;
-      out.push({ ref: app.ref, outcome, run: await this.runCheckOf(app, stores) });
+    // A few apps at a time: each waits on its publisher's files (and its sources' peeks), so one after the other a
+    // check took the app count times the round trip. The results stay in the installed order.
+    const out: (AppCheckResult | null)[] = [];
+    let next = 0;
+    const worker = async () => { while (next < apps.length) { const i = next++; out[i] = await this.checkApp(apps[i]!, stores); } };
+    await Promise.all(Array.from({ length: Math.min(APP_CHECK_PARALLEL, apps.length) }, worker));
+    return out.filter((r) => r !== null);
+  }
+
+  /** One app's part of the update check (`checkNow`); null when it is not installed any more. */
+  private async checkApp(listed: InstalledApp, stores: AddedAppStore[]): Promise<AppCheckResult | null> {
+    if (!(await this.hasBundle(listed.bytes, listed.digest))) await this.fetchFiles({ ref: listed.ref }).catch(() => {});
+    const first = await this.app(listed.ref);
+    if (!first) return null;
+    // The record as stored when this check last read or wrote it: what it writes back must still be there.
+    let stored = first;
+    let app = first;
+    let outcome: AppCheckOutcome = "none";
+    let wrote: { bytes: FileBytesKind; digest: string } | undefined;
+    // A waiting update this check drops or replaces: its files go once the record without it is written, not before
+    // (accepted meanwhile, it is the version installed and runs from them).
+    const dropped: { bytes: FileBytesKind; digest: string }[] = [];
+    // A store the person removed pins nothing any more (as `removeStore` does).
+    if (app.store !== undefined && !stores.some((s) => s.key === app.store)) { const { store: _s, ...unpinned } = app; app = unpinned; }
+    // A waiting update its store no longer lists goes, so the version the store lists now is looked at instead.
+    if (app.store !== undefined && app.pending && stores.find((s) => s.key === app.store)?.index && this.pinnedListing(app, stores)?.digest !== app.pending.digest) {
+      dropped.push(app.pending);
+      const { pending: _p, ...rest } = app;
+      app = rest;
     }
-    return out;
+    const highest = Math.max(app.sequence, app.pending?.sequence ?? 0);
+    const known = new Set([app.digest, ...(app.pending ? [app.pending.digest] : [])]);
+    // Stores first (they name the version), then the publisher's own sources. An app installed from a store looks only
+    // in that store's listing and takes only the digest it lists: a newer version at the publisher's sources, or at a
+    // listing URL that moved on (a repository's HEAD), waits until the store lists it.
+    const pinned = app.store;
+    // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept;
+    // `holds`: what a source's peek showed it holds; `sequence`: the number its listing or its peek names.
+    const candidates = new Map<string, { sequence: number; digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
+    const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
+    for (const s of stores) {
+      if (pinned !== undefined && s.key !== pinned) continue;
+      const listing = s.index?.apps.find((a) => a.ref === app.ref);
+      if (!listing || !newer(listing)) continue;
+      const seen = `${s.digest} ${listing.digest}`;
+      for (const url of listingUrls(listing.urls)) {
+        const missed = `${s.key} ${app.ref} ${url}`;
+        if (candidates.has(url) || (s.digest !== undefined && this.listingMisses.get(missed) === seen)) continue;
+        candidates.set(url, { sequence: listing.sequence, ...(pinned !== undefined && { digest: listing.digest }), peek: true, ...(s.digest !== undefined && { miss: [missed, seen] as [string, string] }) });
+      }
+    }
+    if (pinned === undefined) {
+      for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
+        if (candidates.has(url)) continue;
+        try {
+          const peek = await this.peekAt(url);
+          if (peek && newer(peek)) candidates.set(url, { sequence: peek.sequence, holds: peek });
+        } catch { /* this source does not answer now */ }
+      }
+    }
+    // The publisher's revocations are read before a candidate is taken: a version revoked before this check is not installed.
+    const revokeRead = new Set<string>();
+    const before = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+    app = withRevocations(app, before ?? []);
+    // A waiting update its publisher revoked, or a store of the person's removed, goes too: Accept would refuse it.
+    if (app.pending && this.runStatus(versionOf(app.pending.manifest, app.pending.digest), this.storeViews(stores), app.revocations).status !== "ok") {
+      dropped.push(app.pending);
+      const { pending: _p, ...rest } = app;
+      app = rest;
+    }
+    // The newest first, whichever store or source names it (then in the order found): the next is tried only when it
+    // cannot be taken.
+    for (const [url, want] of [...candidates].sort(([, a], [, b]) => b.sequence - a.sequence)) {
+      // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
+      // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
+      // index lists the same.
+      let holds = want.holds;
+      if (want.peek) {
+        let peek: ReturnType<typeof peekAppManifest>;
+        try { peek = await this.peekAt(url); } catch { continue; }
+        if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
+          if (want.miss) this.listingMisses.set(...want.miss);
+          continue;
+        }
+        holds = peek;
+      }
+      // A version a store of the person's removed, or its publisher revoked, is not taken: known from the peek, so it is
+      // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
+      const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
+      if (holds && !twin && this.runStatus(holds, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      let fetched: { bundle: AppBundle; bytes: Uint8Array };
+      try { fetched = await this.fetchBundle(url); } catch { continue; }
+      const { bundle, bytes } = fetched;
+      const version = versionOf(bundle.manifest, bundle.digest);
+      if (version.ref !== app.ref || known.has(version.digest)) continue;
+      if (want.digest !== undefined && version.digest !== want.digest) continue;
+      if (app.pending && version.sequence === app.pending.sequence) {
+        app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } };
+        outcome = "equivocation";
+        continue;
+      }
+      const plan = planAppUpdate(app, { ...version, permissions: bundle.manifest.permissions });
+      if (plan.action === "refuse") {
+        if (plan.decision === "equivocation") { app = { ...app, equivocation: { sequence: version.sequence, digest: version.digest, at: this.now() } }; outcome = "equivocation"; }
+        continue;
+      }
+      if (this.runStatus(version, this.storeViews(stores), app.revocations).status !== "ok") continue;
+      if (app.pending && version.sequence < app.pending.sequence) continue;
+      const kind = await this.writeBundle(version.digest, bytes);
+      wrote = { bytes: kind, digest: version.digest };
+      if (plan.action === "install") {
+        const old = app;
+        const next = this.versionRecord(app, bundle, kind, url, app.store);
+        const passed = old.pending && old.pending.sequence <= version.sequence ? old.pending : undefined;
+        if (passed) delete next.pending;
+        // Uninstalled while it downloaded, or changed by the person: not put back.
+        if (!(await this.putAppIfUnchanged(next, stored))) break;
+        app = stored = next;
+        if (passed) await this.removeBundle(passed.bytes, passed.digest);
+        await this.removeBundle(old.bytes, old.digest);
+        outcome = "updated";
+      } else {
+        if (app.pending) dropped.push(app.pending);
+        app = { ...app, pending: { sequence: version.sequence, digest: version.digest, manifest: bundle.manifest, added: plan.added as AppPermission[], bytes: kind, from: url, at: this.now() } };
+        outcome = "ask";
+      }
+      break;
+    }
+    // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
+    const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
+    // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
+    // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
+    // version not found yet): a file that changes does not pile up.
+    const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
+    // A store's index carries some too: those that stop one of these are kept, as a store may drop them or be removed.
+    const versions = this.versionsOf(app);
+    const stays = revocations ? stopping(versions, app.revocations ?? []) : app.revocations ?? [];
+    const carried = stopping(versions, stores.flatMap((s) => s.index?.revoked ?? []));
+    const merged = new Map([...stays, ...(revocations ?? []), ...carried].map((r) => [canonicalJson(r), r]));
+    // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
+    const current = await this.app(app.ref);
+    if (current?.store === undefined && app.store !== undefined) { const { store: _s, ...unpinned } = app; app = unpinned; }
+    app = { ...app, ...(merged.size && { revocations: [...merged.values()] }), checkedAt: this.now() };
+    // Nothing new but when it was checked, marked recently: not written (each Apps page visit checks, and a write drops
+    // the record held for the app's calls). The mark is kept fresh enough for a reload to skip the check at start.
+    const idle = stored.checkedAt !== undefined && this.now() - stored.checkedAt < APP_CHECK_TIMINGS.freshMs / 2 && sameExceptChecked(app, stored);
+    const put = idle ? sameRecord(current, stored) : await this.putAppIfUnchanged(app, stored);
+    for (const files of [...dropped, ...(!put && wrote ? [wrote] : [])]) await this.removeUnusedBundle(app.ref, files.bytes, files.digest);
+    if (!put) return null;
+    return { ref: app.ref, outcome, run: await this.runCheckOf(app, stores) };
   }
 
   // ---------- files again (a restored profile) ----------

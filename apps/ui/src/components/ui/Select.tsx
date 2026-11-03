@@ -234,8 +234,11 @@ export function Select<V extends string = string>({
         className={`${fit ? "inline-flex w-auto" : "flex w-full"} min-w-0 max-w-full items-center gap-2 rounded-lg border border-border bg-input-bg text-start text-text-primary transition-colors hover:border-border-bright focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-border ${open ? "border-border-bright" : ""} ${small ? "min-h-8 px-2 py-1 text-xs max-md:min-h-11" : "min-h-10 px-3 py-2 text-sm max-md:min-h-11"}`}
       >
         {current?.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{current.icon}</span>}
-        <span className="min-w-0 flex-1 truncate">
-          {current ? <>{current.label}{current.description && <> <span className="ms-1 text-xs text-text-muted">{current.description}</span></>}</> : <span className="text-text-muted">{placeholder}</span>}
+        {/* A label is often not the app's words (a microphone's, a mint's, a card's name): laid out by its own letters, so
+            a Latin one cut in Arabic keeps its start, and as wide as it is, so a short one stays at the line's start. */}
+        <span className="flex min-w-0 flex-1">
+          {current ? <span dir="auto" className="min-w-0 truncate">{current.label}{current.description && <> <span className="ms-1 text-xs text-text-muted">{current.description}</span></>}</span>
+            : <span className="min-w-0 truncate text-text-muted">{placeholder}</span>}
         </span>
         <svg aria-hidden="true" width={small ? 12 : 14} height={small ? 12 : 14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
           className={`shrink-0 text-text-muted transition-transform ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
@@ -275,9 +278,9 @@ export function Select<V extends string = string>({
               className="flex min-h-10 cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 data-[active]:bg-surface-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-40 max-md:min-h-11"
             >
               {o.icon && <span aria-hidden="true" className="flex shrink-0 items-center">{o.icon}</span>}
-              <span className="min-w-0 flex-1">
-                <span id={`${optionId(i)}-label`} className="block truncate">{o.label}</span>
-                {o.description && <span id={`${optionId(i)}-description`} className="block truncate text-xs text-text-muted">{o.description}</span>}
+              <span className="flex min-w-0 flex-1 flex-col items-start">
+                <span id={`${optionId(i)}-label`} dir="auto" className="max-w-full truncate">{o.label}</span>
+                {o.description && <span id={`${optionId(i)}-description`} dir="auto" className="max-w-full truncate text-xs text-text-muted">{o.description}</span>}
               </span>
               <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
                 className={`shrink-0 text-accent ${i === selected ? "" : "invisible"}`}><path d="M20 6 9 17l-5-5" /></svg>

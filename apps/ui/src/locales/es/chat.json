@@ -268,8 +268,10 @@
   "message": {
     "cancelSending": "Cancelar envío",
     "copied": "Copiado",
+    "copyFailed": "No se pudo copiar. Selecciona el texto de abajo y cópialo.",
     "copyHint": "Clic para copiar",
     "copyJson": "Copiar todo como JSON",
+    "copyText": "Texto del mensaje",
     "details": "Detalles",
     "detailsClose": "Cerrar",
     "detailsTitle": "Detalles del mensaje",
@@ -321,6 +323,7 @@
     "invoice": "⚡ Factura Lightning",
     "lightningAddress": "Dirección Lightning",
     "lightningOffer": "⚡ Oferta Lightning",
+    "moneroAddress": "Dirección Monero",
     "payment": "⚡ {{what}} {{amount}}",
     "realMoney": "Dinero real",
     "sats": "{{amount}} sats",

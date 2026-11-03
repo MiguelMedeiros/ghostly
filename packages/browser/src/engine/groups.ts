@@ -487,6 +487,14 @@ const MAX_FAREWELLS = 8;
 const FAREWELL_ANSWERS = 3;
 /** Commits sent to a removed member that was behind when it left, at most. */
 const FAREWELL_COMMITS = 64;
+/**
+ * The commit of epoch `e` for a removed member, with no secret: with the admin's `left` mark on a removal of someone who
+ * left on their own, or its app says that the admin removed them (WISP 902 § Admission and departure).
+ */
+function farewellCommit(groupId: string, session: GroupSession, e: number): GroupEdgeFrame {
+  const left = session.state.leftMarks?.[e];
+  return { t: "group-commit", g: groupId, commit: session.state.chain[e], ...(left ? { left } : {}) };
+}
 /** The edge kept to a removed member closes this long after its connection first opened, told or not. */
 export const FAREWELL_OPEN_MS = 60_000;
 /**
@@ -1366,7 +1374,7 @@ export class Groups {
   private sayFarewell(groupId: string, session: GroupSession, group: StoredGroup, key: string, linkId: string): void {
     const farewell = group.farewells![key], commit = session.state.chain[farewell.e];
     if (!commit) { this.dropFarewell(group, key); return; }
-    try { this.host.sendOnLink(linkId, { t: "group-commit", g: groupId, commit }); } catch { return; /* it closed again: the next time it opens */ }
+    try { this.host.sendOnLink(linkId, farewellCommit(groupId, session, farewell.e)); } catch { return; /* it closed again: the next time it opens */ }
     // Counted from the first time: saying it again never keeps the edge longer.
     farewell.told ??= this.now();
     void this.store.putGroup(group).catch(() => {});
@@ -1380,8 +1388,7 @@ export class Groups {
     farewell.answered = (farewell.answered ?? 0) + 1;
     try {
       for (let e = Math.max((from as number) + 1, farewell.e - FAREWELL_COMMITS); e <= farewell.e; e++) {
-        const commit = session.state.chain[e];
-        if (commit) this.host.sendOnLink(linkId, { t: "group-commit", g: groupId, commit });
+        if (session.state.chain[e]) this.host.sendOnLink(linkId, farewellCommit(groupId, session, e));
       }
     } catch { /* it closed: the next sync */ }
     farewell.told ??= this.now();
@@ -2122,8 +2129,7 @@ export class Groups {
     }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-here") { this.heardHere(groupId, session, peerKey, frame as Record<string, unknown>); return; }
     if (session?.status === "active" && frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-reach") {
-      const group = this.stored.get(groupId);
-      if (group && this.hubs.enabled && this.hubs.reached(groupId, session, group, peerKey, frame as Record<string, unknown>, this.now())) await this.store.putGroup(group);
+      if (this.hubs.enabled) this.hubs.reached(groupId, session, peerKey, frame as Record<string, unknown>, this.now());
       this.host.emit();
       return;
     }

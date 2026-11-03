@@ -331,6 +331,28 @@ describe("AddIdentityDialog", () => {
       expect(group).toHaveAttribute("data-value", "https://login.microsoftonline.com/{tenantid}/v2.0");
     });
 
+    it("are one Tab stop, the chosen provider, the arrows moving and choosing", async () => {
+      restore = configureOidc();
+      const { user } = dialog();
+      await user.click(screen.getByTestId("add-identity-oidc"));
+      const group = screen.getByRole("radiogroup", { name: "Provider" });
+      const [google, microsoft] = within(group).getAllByRole("radio");
+      expect([google.tabIndex, microsoft.tabIndex]).toEqual([0, -1]);
+      google.focus();
+      await user.keyboard("{ArrowRight}");
+      expect(microsoft).toHaveFocus();
+      expect(microsoft).toHaveAttribute("aria-checked", "true");
+      expect([google.tabIndex, microsoft.tabIndex]).toEqual([-1, 0]);
+      await user.keyboard("{ArrowDown}");
+      expect(google).toHaveFocus();
+      expect(google).toHaveAttribute("aria-checked", "true");
+      await user.keyboard("{End}");
+      expect(microsoft).toHaveFocus();
+      await user.keyboard("{Home}");
+      expect(google).toHaveFocus();
+      expect(group).toHaveAttribute("data-value", "https://accounts.google.com");
+    });
+
     it("keep proofs short-lived and begin with the chosen issuer", async () => {
       restore = configureOidc();
       const { user, engine } = dialog();
