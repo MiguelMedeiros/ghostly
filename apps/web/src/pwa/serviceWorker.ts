@@ -1,4 +1,4 @@
-import { receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
+import { incomingShare, receiveShare, type IncomingShare } from "../../../ui/src/lib/incomingShare";
 import { activeProfileId, listProfiles, switchProfile } from "../../../ui/src/lib/profiles";
 import type { FromWorker, ToWorker } from "../sw/messages";
 
@@ -175,10 +175,24 @@ export function listenForShares(): void {
       tell(workers.controller, { type: "share-keep", item });
       return true;
     };
-    receiveShare({ ...(item as IncomingShare), carry });
-    if (!openedForShare()) window.location.hash = "#/shared";
+    // Any website can post to the share target: a share waits behind one already in the picker, never in its place,
+    // and only one that is shown at once opens the picker.
+    const shown = !!incomingShare();
+    receiveShare({ ...(item as IncomingShare), carry }, { queue: true });
+    if (!shown && incomingShare() && !openedForShare()) window.location.hash = "#/shared";
   });
   workers.startMessages();
+  // This page takes the shares forwarded to its profile: the worker gives one to the page of the profile in front last.
+  const here = () => tellReady({ type: "share-here", profile: activeProfileId() });
+  here();
+  addEventListener("focus", here);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") here(); });
+}
+
+/** Tells the active worker, once there is one, even before it controls this page. */
+function tellReady(message: ToWorker): void {
+  const workers = container();
+  void workers?.ready.then((registration) => tell(workers.controller ?? registration.active, message)).catch(() => {});
 }
 
 /**
@@ -200,15 +214,15 @@ export function openChat(path: string, profile: string): void {
 export function askForShare(): void {
   const workers = container();
   if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-ready" })).catch(() => {});
+  tellReady({ type: "share-ready" });
 }
 
 /** How long a tab opened for a share waits for the peer's lock before it hands the share to the tab that holds it. */
 export const SHARE_FORWARD_AFTER_MS = 3000;
 
-/** Another tab holds the peer: the worker hands the share to that one instead. */
+/** Another tab of this profile holds the peer: the worker hands the share to that one instead, and to no other. */
 export function forwardShare(): void {
   const workers = container();
   if (!workers || !openedForShare()) return;
-  void workers.ready.then((registration) => tell(workers.controller ?? registration.active, { type: "share-forward" })).catch(() => {});
+  tellReady({ type: "share-forward", profile: activeProfileId() });
 }

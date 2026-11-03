@@ -75,4 +75,19 @@ describe("a share into the installed web app", () => {
     const told = await shareThenAsk(post({ "content-type": "multipart/form-data; boundary=x", "content-length": String(300 * 1024 * 1024) }, body(1)));
     expect(told).toEqual({ type: "share", item: { title: "", text: "", url: "", files: [], leftOut: [""] } });
   });
+
+  it("a second share never replaces one still waiting: it waits behind it, and past three the newest is dropped", async () => {
+    const { onFetch, onMessage } = await startWorker();
+    for (const text of ["mine", "a page's", "two", "three"]) {
+      const form = new FormData();
+      form.append("text", text);
+      const sent = new Request(`${ORIGIN}/share-target`, { method: "POST", body: form });
+      let answer: Promise<Response> | Response | undefined;
+      onFetch({ request: { method: "POST", url: sent.url, mode: "navigate", headers: sent.headers, body: sent.body }, respondWith: (response: Promise<Response> | Response) => { answer = response; }, waitUntil: () => {} });
+      expect((await answer)!.status).toBe(303);
+    }
+    const told: FromWorker[] = [];
+    onMessage({ data: { type: "share-ready" }, source: { id: "page", url: `${ORIGIN}/#/shared`, postMessage: (message: FromWorker) => told.push(message) }, waitUntil: () => {} });
+    expect(told.map((message) => message.type === "share" && message.item.text)).toEqual(["mine", "a page's", "two"]);
+  });
 });

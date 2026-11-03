@@ -5,7 +5,7 @@ import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { Notice } from "../components/ui/Notice";
-import { MAX_SHARE_FILES, dropIncomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare } from "../lib/incomingShare";
+import { MAX_SHARE_FILES, dropIncomingShare, incomingShare, isEmptyShare, sendShareTo, sharePreview, useIncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
 const WAIT_MS = 5000;
@@ -42,7 +42,8 @@ export function SharePicker() {
   };
   const cancel = () => {
     dropIncomingShare();
-    nav.home();
+    // Another share waited behind this one (the web app's, `receiveShare` with `queue`): the picker shows it now.
+    if (!incomingShare()) nav.home();
   };
 
   return (
