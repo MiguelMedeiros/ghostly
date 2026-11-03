@@ -8575,15 +8575,48 @@ export class GhostlyNode implements EngineImplementation {
     return this.settings.irohRelays?.length ? this.settings.irohRelays : [...DEFAULT_IROH_RELAYS];
   }
 
-  /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends. */
+  /** New Iroh relays: idle endpoints move now; one carrying a chat keeps its relay until that session ends (`moveNative`). */
   private async rehomeIroh(): Promise<void> {
     if (!this.options.irohWeb && !this.ownIrohRelays) return;
     this.deviceLinks?.nativeChanged(["iroh/1"]);
     for (const [linkId, live] of this.links) {
       const link = live.link;
-      if (!link?.availableTransports.includes("iroh/1") || !link.canReleaseEndpoint("iroh/1")) continue;
+      if (!link?.availableTransports.includes("iroh/1")) continue;
+      if (!link.canReleaseEndpoint("iroh/1")) { this.nativeMoved(linkId).add("iroh/1"); continue; }
       await link.releaseEndpoint("iroh/1");
       void this.ensureNativeEndpoints(linkId);
+    }
+  }
+
+  /**
+   * Chats and group links whose listener of a transport is on a relay the person changed or removed, kept while a
+   * session ran on it (or a dial or a switch was under way), by link id. Before, it stayed there until the app restarted:
+   * its record went on naming the old relay, and a contact dialled it there.
+   */
+  private readonly movedNative = new Map<string, Set<NativeTransport>>();
+  private nativeMoved(linkId: string): Set<NativeTransport> {
+    let moved = this.movedNative.get(linkId);
+    if (!moved) this.movedNative.set(linkId, moved = new Set());
+    return moved;
+  }
+  /** Each second: those whose session ended let the old relay go, and start again on the new one (none where it was removed). */
+  private moveNative(): void {
+    for (const [linkId, moved] of this.movedNative) {
+      const link = this.links.get(linkId)?.link;
+      for (const key of [...moved]) {
+        if (!link?.availableTransports.includes(key)) { moved.delete(key); continue; }
+        if (!link.canReleaseEndpoint(key)) continue;
+        moved.delete(key);
+        void link.releaseEndpoint(key).then(() => {
+          const live = this.links.get(linkId);
+          if (this.shuttingDown || live?.link !== link) return;
+          if (key === "iroh/1") { void this.ensureNativeEndpoints(linkId); return; }
+          if (live.transportErrors) delete live.transportErrors[key];
+          if (this.hyperdhtRelay) void this.ensureNativeEndpoints(linkId);
+          this.emitState();
+        }, () => {});
+      }
+      if (!moved.size) this.movedNative.delete(linkId);
     }
   }
 
@@ -8631,7 +8664,7 @@ export class GhostlyNode implements EngineImplementation {
         if (this.hyperdhtRelay && link && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
         continue;
       }
-      if (!link.canReleaseEndpoint("hyperdht/1")) continue;
+      if (!link.canReleaseEndpoint("hyperdht/1")) { this.nativeMoved(linkId).add("hyperdht/1"); continue; }
       await link.releaseEndpoint("hyperdht/1");
       if (live.transportErrors) delete live.transportErrors["hyperdht/1"];
       if (this.hyperdhtRelay) void this.ensureNativeEndpoints(linkId);
@@ -9083,6 +9116,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   private retryNative(): void {
     this.groupAnchorsAnswered();
+    this.moveNative();
     const now = Date.now();
     for (const [linkId, failed] of this.nativeFailed) {
       if (now < failed.at || this.nativeRetrying.has(linkId)) continue;
