@@ -609,7 +609,7 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
       if (when === "offered again") {
         await until(() => state(w.a, "out", "whole-01") === "verifying");
         await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
-        expect(state(w.a, "out", "whole-01")).toBe("offered");
+        expect(state(w.a, "out", "whole-01")).toBe("verifying");
       } else await until(() => state(w.b, "in", "whole-01") === "verifying");
       if (when === "away") w.drop();
       // The person's Cancel, as the app takes it.
@@ -623,6 +623,27 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     });
   }
 
+  for (const how of ["Send again", "offered again on its own", "a restart"] as const) {
+    it(`an empty file the contact took, offered again (${how}), stays sent whole: its person's cancel is refused, it ends done on both sides`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      // The receiver's first answer is lost: it kept the file, the sender still waits to hear so.
+      const w = wire({ drop: (frame, from) => from === "b" && frame.t === "pf-done" && w.b.sent.filter((f) => f.t === "pf-done").length === 1 });
+      w.attach();
+      send(w, file("empty-01", 0));
+      await until(() => state(w.b, "in", "empty-01") === "done" && state(w.a, "out", "empty-01") === "verifying");
+      if (how === "Send again") w.a.files.resend("empty-01");
+      else if (how === "offered again on its own") await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
+      else { w.drop(); w.restart("a"); w.attach(); }
+      // Offered again, before the receiver's answer to it: as the app takes the person's Cancel.
+      expect(w.a.sent.filter((f) => f.t === "pf-offer")).toHaveLength(how === "a restart" ? 1 : 2);
+      expect(w.a.files.get("out", "empty-01")?.state).toBe("verifying");
+      if (!sentWhole(w.a.files.get("out", "empty-01")!)) w.a.files.cancel("out", "empty-01");
+      await until(() => state(w.a, "out", "empty-01") === "done");
+      expect(state(w.b, "in", "empty-01")).toBe("done");
+      expect(w.a.sent.some((f) => f.t === "pf-abort")).toBe(false);
+    });
+  }
+
   it("a file whose every byte arrived, offered again while the receiver's answer is lost, takes no pause: its cancel stays refused, it ends done on both sides", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     // The receiver checked it and kept it; its pf-done is lost (a switch, a restart, the receiver gone meanwhile).
@@ -632,11 +653,11 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     send(w, file("whole-03", 300_000));
     await until(() => state(w.b, "in", "whole-03") === "done" && state(w.a, "out", "whole-03") === "verifying");
     await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
-    expect(state(w.a, "out", "whole-03")).toBe("offered");
+    expect(state(w.a, "out", "whole-03")).toBe("verifying");
     // The person's Pause, then Cancel, as the app takes them.
     w.a.files.pause("out", "whole-03");
     if (!sentWhole(w.a.files.get("out", "whole-03")!)) w.a.files.cancel("out", "whole-03");
-    expect(state(w.a, "out", "whole-03")).toBe("offered");
+    expect(state(w.a, "out", "whole-03")).toBe("verifying");
     lose = false;
     await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
     await until(() => state(w.a, "out", "whole-03") === "done");
