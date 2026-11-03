@@ -88,9 +88,11 @@ export function GroupPaymentComposer({ group, onClose }: { group: GroupView; onC
             <button type="button" data-testid="group-pay-recipient" data-key={m.key} disabled={!!reason} title={reason} onClick={() => setTo(m.key)}
               className="flex w-full min-h-11 items-center gap-2 rounded-lg px-2 py-1.5 text-start hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50">
               <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${edgeDot(m)}`} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm text-text-primary">{memberName(m, t)}</span>
-                {reason && <span className="block truncate text-[11px] text-text-muted">{reason}</span>}
+              {/* The member's name in its own direction, on the box that cuts it and as wide as it: a Latin name in Arabic
+                  keeps its start, and a short one stays at the line's start. */}
+              <span className="min-w-0 flex-1 flex flex-col items-start">
+                <span dir="auto" className="max-w-full truncate text-sm text-text-primary">{memberName(m, t)}</span>
+                {reason && <span className="max-w-full truncate text-[11px] text-text-muted">{reason}</span>}
               </span>
             </button>
           </li>;
