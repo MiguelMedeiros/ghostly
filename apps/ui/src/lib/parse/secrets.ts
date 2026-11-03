@@ -18,7 +18,10 @@ export type SecretFinding =
 export type SecretKind = SecretFinding["kind"];
 
 interface SeedWords {
-  index: Map<string, number>;
+  /** Each word's place in the list, as `words` spells it. */
+  index: () => Map<string, number>;
+  /** The words of a text, spelled as `index` keys them. */
+  words: (text: string) => string[] | null;
   /** Seed lengths whose checksum is tried on any run of these words. */
   lengths: number[];
   /** A message that is nothing but this many of these words counts, checksum or not. */
@@ -26,9 +29,26 @@ interface SeedWords {
   checksumHolds: (indices: number[]) => boolean;
 }
 
+const englishWords = (text: string) => text.toLowerCase().match(/[a-z]+/g);
+
+/**
+ * A word of another language's list as it is matched: decomposed, in lower case and without its marks, so "ábaco",
+ * "ABACO" and "abaco" are one word, and a Japanese word is one with or without its voicing marks. No two words of a
+ * list are the same once read this way.
+ */
+const fold = (text: string) => text.normalize("NFKD").toLowerCase().replace(/\p{M}/gu, "");
+const foldedWords = (text: string) => fold(text).match(/\p{L}+/gu);
+
+/** Built the first time a message is read: most messages never get past English. */
+function lazyIndex(list: readonly string[], spell: (word: string) => string): () => Map<string, number> {
+  let index: Map<string, number> | undefined;
+  return () => (index ??= new Map(list.map((word, i) => [spell(word), i])));
+}
+
 const MNEMONIC_LENGTHS = [12, 15, 18, 21, 24];
 const BIP39: SeedWords = {
-  index: new Map(wordlist.map((word, index) => [word, index])),
+  index: lazyIndex(wordlist, (word) => word),
+  words: englishWords,
   lengths: MNEMONIC_LENGTHS,
   /**
    * BIP39's lengths, and a Polyseed's 16 (Monero's seed in Feather and Cake Wallet, BIP39's English words with a
@@ -39,11 +59,28 @@ const BIP39: SeedWords = {
 };
 /** Monero's classic seed (Monero GUI, monero-wallet-cli): 25 words of its own list, or MyMonero's 13. */
 const MONERO: SeedWords = {
-  index: new Map(MONERO_WORDS.map((word, index) => [word, index])),
+  index: lazyIndex(MONERO_WORDS, (word) => word),
+  words: englishWords,
   lengths: [25, 13],
   wholeMessage: [25, 13],
   checksumHolds: moneroChecksumHolds,
 };
+let seeds = [BIP39, MONERO];
+
+/**
+ * BIP39's own lists in the app's other languages, which a wallet set to one of them shows its seed in: the same
+ * lengths and checksum as the English list. Handed in by `seedLists.ts`, which the composer loads as it opens (47 KB
+ * gzipped, kept out of the app's first download) and the CLI with the guard.
+ */
+export function addSeedLists(lists: readonly (readonly string[])[]): void {
+  seeds = [BIP39, MONERO, ...lists.map((list): SeedWords => ({
+    index: lazyIndex(list, fold),
+    words: foldedWords,
+    lengths: MNEMONIC_LENGTHS,
+    wholeMessage: MNEMONIC_LENGTHS,
+    checksumHolds: bip39ChecksumHolds,
+  }))];
+}
 /** Checksums tried per message and word list at most: a 16 KiB run of seed words stays a few milliseconds. */
 const CHECKSUM_BUDGET = 4096;
 
@@ -76,7 +113,7 @@ const base58check = createBase58check(sha256);
 export function findSecret(text: string): SecretFinding | null {
   const visible = text.replace(INVISIBLE, "");
   const readings = visible === text ? [text] : [text, visible];
-  if (readings.some((reading) => hasMnemonic(reading, BIP39) || hasMnemonic(reading, MONERO))) return { kind: "mnemonic" };
+  if (readings.some((reading) => seeds.some((seed) => hasMnemonic(reading, seed)))) return { kind: "mnemonic" };
   if (readings.some((reading) => NSEC.test(reading))) return { kind: "nsec" };
   if (readings.some((reading) => EXTENDED_PRIVATE.test(reading) || hasWif(reading))) return { kind: "bitcoin-key" };
   if (readings.some(hasHexSecret)) return { kind: "hex-key" };
@@ -87,17 +124,19 @@ export function findSecret(text: string): SecretFinding | null {
 /**
  * 12 to 24 words in a row from the English BIP39 list whose checksum holds, anywhere in the text; or a message that
  * is nothing but 12, 15, 16, 18, 21 or 24 of those words (a seed with one word mistyped is still most of a seed). The
- * same for Monero's English list, 25 or 13 words. Prose breaks a run at once: "the", "a", "is", "to", "and", "of" and
- * "I" are on neither list.
+ * same for Monero's English list, 25 or 13 words, and for BIP39's lists in the app's other languages. Prose breaks a
+ * run at once: "the", "a", "is", "to", "and", "of" and "I" are on neither English list, nor "de", "la", "a", "e" on
+ * the others.
  *
  * One word said over and over is not a seed, though one in 16 such runs passes a 12-word checksum ("word" does), and
  * every one passes Monero's: a window of a single word never counts, and a window mostly of one word ("abandon …
  * about") counts only when that word does not go on past it on either side.
  */
 function hasMnemonic(text: string, seed: SeedWords): boolean {
-  const tokens = text.toLowerCase().match(/[a-z]+/g);
+  const tokens = seed.words(text);
   const shortest = Math.min(...seed.lengths);
   if (!tokens || tokens.length < shortest) return false;
+  const index = seed.index();
   let budget = CHECKSUM_BUDGET;
   let run: number[] = [];
   const seedLike = (start: number, length: number) => {
@@ -122,8 +161,8 @@ function hasMnemonic(text: string, seed: SeedWords): boolean {
     return false;
   };
   for (const token of tokens) {
-    const index = seed.index.get(token);
-    if (index !== undefined) run.push(index);
+    const at = index.get(token);
+    if (at !== undefined) run.push(at);
     else if (check()) return true;
   }
   return check();
