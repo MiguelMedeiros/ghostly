@@ -449,6 +449,30 @@ describe("a run of the train", () => {
     expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/failed twice in a batch with only this pull request on `dev`/);
   });
 
+  // 2026-11-03: two pull requests got queue:failed from batch runs cancelled mid-test, whose CI Success failed only on that.
+  it("never blames a pull request for a batch run whose jobs were cancelled, and still does for a real red", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14]) repo.add(n);
+    await repo.run();
+    for (let i = 0; i < 10 && !(repo.members().join() === "13" && readState(repo.batch()!.body).retried); i++) {
+      repo.settle([13]);
+      await repo.run();
+    }
+    expect(readState(repo.batch()!.body)).toMatchObject({ prs: [{ number: 13 }], retried: true });
+    const job = (name: string, conclusion: string, id: number) => ({ name, status: "completed", conclusion, started_at: "2026-10-08T00:00:00Z", id });
+    const cut = [job("Changed paths", "success", 1), job("Frontend tests (app)", "cancelled", 2), job("Frontend builds", "cancelled", 3), job("CI Success", "failure", 4)];
+    const sha = repo.batch()!.sha;
+    repo.runs.set(sha, cut);
+    await repo.run();
+    expect(repo.pulls.get(13)!.labels).not.toContain(LABEL.failed);
+    expect(repo.members()).toEqual([13]);
+    expect(repo.batch()!.sha).toBe(sha);
+
+    repo.runs.set(sha, [...cut.slice(0, 1), job("Frontend tests (app)", "failure", 2), cut[2], cut[3]]);
+    await repo.run();
+    expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
+  });
+
   it("boards ready pull requests on a green fast tier while their own full CI runs, and cancels those runs", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13]) {
@@ -2253,6 +2277,18 @@ describe("CI on a commit", () => {
   it("does not count a cancelled run as red", () => {
     expect(ciState([run("CI Success", "completed", "cancelled"), run("Changed paths", "queued")])).toBe("pending");
     expect(ciState([run("CI Success", "completed", "cancelled")])).toBe("none");
+  });
+
+  // 2026-11-03: runs cancelled mid-test (10 and 7 jobs cancelled, none failed) whose gate still ran and failed on them.
+  it("does not count a CI Success red only because the jobs it needs were cancelled", () => {
+    const job = (name: string, conclusion: string, id: number) => run(name, "completed", conclusion, undefined, id);
+    const cut = [job("Changed paths", "success", 1), job("Frontend tests (app)", "cancelled", 2), job("Frontend builds", "cancelled", 3), job("Website", "skipped", 4), job("CI Success", "failure", 5)];
+    expect(ciState(cut)).toBe("none");
+    expect(ciState([...cut, run("Tauri Backend (apps/desktop)", "in_progress", null, undefined, 6)])).toBe("pending");
+    // A job that failed (its shards cancelled by fail-fast) is red, and so is a gate that failed with nothing cancelled.
+    expect(ciState([...cut, job("Frontend tests (packages 1/4)", "failure", 7)])).toBe("failure");
+    expect(ciState([...cut, job("Desktop on macOS", "timed_out", 7)])).toBe("failure");
+    expect(ciState([job("Changed paths", "success", 1), job("CI Success", "failure", 2)])).toBe("failure");
   });
 
   it("takes the newest gate by id, never by a start time the caller set", () => {

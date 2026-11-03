@@ -148,7 +148,7 @@ export function draftState(jobs) {
 
 /**
  * CI on one commit, from the jobs of its CI run: "success", "failure", "pending" (CI Success has not finished, or has
- * no job yet while other jobs run) or "none" (nothing ran: CI never started). A rerun adds a job with the same name, so
+ * no job yet while other jobs run) or "none" (nothing ran: CI never started, or it was cancelled). A rerun adds a job with the same name, so
  * the newest (by id, never by a time the caller sets) counts; a draft's gate "CI Success (draft)" does not count.
  */
 export function ciState(runs) {
@@ -157,8 +157,11 @@ export function ciState(runs) {
   if (!gate) return running ? "pending" : "none";
   if (gate.status !== "completed") return "pending";
   if (gate.conclusion === "success") return "success";
-  // A run cancelled by a newer one (a push, a rerun) says nothing about the commit until the newer one ends.
-  if (gate.conclusion === "cancelled" || gate.conclusion === "skipped") return running ? "pending" : "none";
+  // A run cancelled by a newer one (a push, a rerun) says nothing about the commit until the newer one ends. Nor does
+  // a gate that failed only because jobs it needs were cancelled (a run cut short mid-test): no job of it failed.
+  const others = runs.filter((r) => r.name !== "CI Success" && r.name !== DRAFT_GATE && r.status === "completed");
+  const cut = others.some((r) => r.conclusion === "cancelled") && others.every((r) => ["success", "skipped", "neutral", "cancelled"].includes(r.conclusion));
+  if (gate.conclusion === "cancelled" || gate.conclusion === "skipped" || cut) return running ? "pending" : "none";
   return "failure";
 }
 
