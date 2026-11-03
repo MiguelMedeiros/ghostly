@@ -39,6 +39,13 @@ export const DEFAULT_LIMITS = Object.freeze({
   handshakes: 64,
   /** Bytes the relay may hold for one client that the client has not read yet (a chat's files have at most 2 MiB out). */
   queuedBytes: 8 * 1024 * 1024,
+  /**
+   * Bytes the relay may hold over all clients that they have not read yet; past it, the client holding the most is
+   * dropped. `clients` times `queuedBytes` is far more than the 512 MiB docker-compose.yml gives the process, and each
+   * byte counted costs about three in the process while clients come and go (every ~1.4 KiB message is a Buffer of its
+   * own, with its objects): at 96 MiB, 256 clients that stop reading keep it near 400 MiB.
+   */
+  queuedTotalBytes: 96 * 1024 * 1024,
 })
 
 /**
@@ -270,6 +277,11 @@ export function addressKey(address) {
  */
 export async function startRelay(options = {}) {
   const limits = { ...DEFAULT_LIMITS, ...options.limits }
+  // Each message waiting for a client is a small Buffer, and Node cuts small Buffers out of shared slabs (8 KiB, 64 KiB
+  // from Node 26): one waiting message keeps its whole slab, with the other clients' messages in it, so dropping a
+  // client freed almost nothing and `queuedTotalBytes` bounded only a part of what the process held. Unpooled, a
+  // dropped client's messages are freed with it.
+  Buffer.poolSize = 0
   const log = options.log ?? (() => {})
   let testnet = null
   let bootstrap = options.bootstrap ?? []
@@ -296,6 +308,31 @@ export async function startRelay(options = {}) {
   const nodes = new Set()
   const perAddress = new Map()
   const stats = { accepted: 0, refused: 0, dropped: 0 }
+  // What each client had waiting unread when the relay last wrote to it, and their sum. A count grows only on a write
+  // and shrinks as the client reads, so the sum is never below what the relay holds: past `queuedTotalBytes` every
+  // client is counted again, and while the sum is still past it the client holding the most is dropped.
+  const queued = new Map()
+  let queuedTotal = 0
+  const recount = ws => {
+    const entry = queued.get(ws)
+    if (!entry) return
+    queuedTotal += ws.bufferedAmount - entry.bytes
+    entry.bytes = ws.bufferedAmount
+  }
+  const unqueue = ws => {
+    queuedTotal -= queued.get(ws)?.bytes ?? 0
+    queued.delete(ws)
+  }
+  const holdQueued = ws => {
+    recount(ws)
+    if (queuedTotal <= limits.queuedTotalBytes) return
+    for (const client of queued.keys()) recount(client)
+    while (queuedTotal > limits.queuedTotalBytes) {
+      let most = null
+      for (const [client, entry] of queued) if (!most || entry.bytes > most[1].bytes) most = [client, entry]
+      most[1].drop('queue total')
+    }
+  }
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const origins = new Set((options.origins ?? []).map(origin => originOf(origin) ?? origin))
   const refusedOrigin = originRefusals(log)
@@ -351,8 +388,10 @@ export async function startRelay(options = {}) {
     const drop = why => {
       if (dropped) return
       dropped = true; stats.dropped++; log('dropped', why)
+      unqueue(ws)
       ws.terminate()
     }
+    queued.set(ws, { bytes: 0, drop })
     // A token bucket on what the client sends: past it, the relay stops reading its socket for a while.
     let tokens = limits.burstBytes
     let last = Date.now()
@@ -382,6 +421,7 @@ export async function startRelay(options = {}) {
     ws.once('close', () => {
       // A client that has closed is no longer dropped, counted or logged.
       dropped = true
+      unqueue(ws)
       clearInterval(ping)
       leave()
       clients.delete(ws)
@@ -394,10 +434,12 @@ export async function startRelay(options = {}) {
     stream.on('error', () => drop('stream error'))
     // dht-relay 0.4.3 hands the WebSocket every chunk a HyperDHT stream brings, however slowly the client reads, and
     // a UDX stream has no receive window to slow its far end: a client that reads slowly or not at all would have the
-    // relay hold everything its far peers send. Past `queuedBytes` waiting for it, it is dropped.
+    // relay hold everything its far peers send. Past `queuedBytes` waiting for it, it is dropped, and past
+    // `queuedTotalBytes` over all clients, the one holding the most.
     stream._write = (data, cb) => {
       ws.send(data)
       if (ws.bufferedAmount > limits.queuedBytes) drop('queue')
+      else holdQueued(ws)
       cb(null)
     }
     void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => {
