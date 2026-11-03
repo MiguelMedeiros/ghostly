@@ -36,6 +36,7 @@ const COMMANDS: &[&str] = &[
     "generate_enc_key",
     "get_profile",
     "get_public_key",
+    "hide_from_switcher",
     "incoming_share_done",
     "incoming_share_take",
     "keep_awake",

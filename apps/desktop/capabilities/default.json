@@ -48,6 +48,7 @@
     "allow-generate-enc-key",
     "allow-get-profile",
     "allow-get-public-key",
+    "allow-hide-from-switcher",
     "allow-incoming-share-done",
     "allow-incoming-share-take",
     "allow-keep-awake",
