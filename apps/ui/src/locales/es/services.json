@@ -20,6 +20,7 @@
   "remove": "Quitar",
   "removeNamed": "Quitar {{app}}",
   "requestCount": "· {{count}} solicitudes",
+  "requestCount_one": "· {{count}} solicitud",
   "share": "Compartir",
   "shareLocal": "Compartir un servicio local",
   "shareNamed": "Compartir {{app}}",

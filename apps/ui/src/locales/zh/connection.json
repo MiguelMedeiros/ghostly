@@ -265,6 +265,7 @@
     "dropped": "{{from}} 已断开，聊天已通过 {{transport}} 恢复。",
     "failedDefault": "新的传输方式未能连接。",
     "flapping": "在 {{from}} 到 {{to}} 之间，直连断开又恢复了 {{count}} 次。",
+    "flapping_one": "在 {{from}} 到 {{to}} 之间，直连断开又恢复了 {{count}} 次。",
     "lost": "经 {{from}} 的直连已断开。{{contact}} 可达时 Ghostly 会重新连接。",
     "lostDht": "经 {{from}} 的直连已断开。恢复前短文字经 DHT 发送。",
     "lostDhtOnly": "仅 DHT 已开启：短文字经 DHT 发送，无直连。",

@@ -265,6 +265,7 @@
     "dropped": "{{from}} が切断され、チャットは {{transport}} で戻りました。",
     "failedDefault": "新しいトランスポートは接続できませんでした。",
     "flapping": "{{from}} から {{to}} の間に、直接接続が {{count}} 回切れて戻りました。",
+    "flapping_one": "{{from}} から {{to}} の間に、直接接続が {{count}} 回切れて戻りました。",
     "lost": "{{from}} の直接接続が切れました。{{contact}} に届くようになると Ghostly が再接続します。",
     "lostDht": "{{from}} の直接接続が切れました。戻るまで短いテキストは DHT 経由で送られます。",
     "lostDhtOnly": "DHT のみがオンです。短いテキストは直接接続なしで DHT 経由で送られます。",

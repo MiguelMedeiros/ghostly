@@ -35,7 +35,7 @@ test("Delete all chats in Settings waits for the call to end; after the call it 
   await expect(chat(alice).getByText("Audio call ended")).toBeVisible();
 
   // Once it is over, the confirm is on again and every chat goes, as before.
-  await expect(bob.page.getByText("Delete all 1 chats?")).toBeVisible();
+  await expect(bob.page.getByText("Delete your only chat?")).toBeVisible();
   await bob.page.getByTestId("delete-all-chats-confirm").click();
   await expect(bob.page.getByTestId("chat-row")).toHaveCount(0);
 });

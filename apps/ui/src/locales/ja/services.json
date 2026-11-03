@@ -20,6 +20,7 @@
   "remove": "削除",
   "removeNamed": "{{app}} を削除",
   "requestCount": "· {{count}} 件のリクエスト",
+  "requestCount_one": "· {{count}} 件のリクエスト",
   "share": "共有",
   "shareLocal": "ローカルサービスを共有",
   "shareNamed": "{{app}} を共有",

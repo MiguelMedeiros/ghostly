@@ -265,6 +265,7 @@
     "dropped": "{{from}} caiu e a conversa voltou via {{transport}}.",
     "failedDefault": "O novo transporte não conectou.",
     "flapping": "A conexão direta caiu e voltou {{count}} vezes entre {{from}} e {{to}}.",
+    "flapping_one": "A conexão direta caiu e voltou {{count}} vez entre {{from}} e {{to}}.",
     "lost": "A conexão direta via {{from}} caiu. O Ghostly reconecta quando {{contact}} estiver acessível.",
     "lostDht": "A conexão direta via {{from}} caiu. Textos curtos vão pela DHT até ela voltar.",
     "lostDhtOnly": "Só DHT está ativo: textos curtos vão pela DHT, sem conexão direta.",
