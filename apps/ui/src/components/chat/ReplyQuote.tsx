@@ -11,9 +11,11 @@ function QuoteBody({ name, snippet, mine, member, note, italic }: { name?: strin
   const memberText = useMemberText();
   // A group member's original: their colour, on the bar and the name (lib/memberColors.ts).
   const colour = member && !mine ? memberText(member) : undefined;
+  // The name is someone's own words: laid out by its own letters, so a Latin one cut in Arabic keeps its start, and as
+  // wide as it is, so a short one stays at the line's start.
   return (
     <span className={`flex min-w-0 flex-col border-s-4 ps-2 pe-1 py-1 ${mine ? "border-accent" : colour ? `border-current ${colour}` : "border-link"}`}>
-      {name && <span data-testid="reply-quote-name" data-key={colour && member} className={`truncate text-[12.8px] font-medium leading-[18px] ${mine ? "text-accent-hover" : colour ?? "text-link"}`}>{name}</span>}
+      {name && <span data-testid="reply-quote-name" data-key={colour && member} dir="auto" className={`max-w-full self-start truncate text-[12.8px] font-medium leading-[18px] ${mine ? "text-accent-hover" : colour ?? "text-link"}`}>{name}</span>}
       <span data-testid="reply-quote-snippet" dir="auto" className={`truncate text-[13px] leading-[18px] text-text-primary/70 ${italic ? "italic" : ""}`}>{snippet}</span>
       {note && <span data-testid="reply-quote-note" className="truncate text-[11px] leading-[15px] text-text-muted">{note}</span>}
     </span>

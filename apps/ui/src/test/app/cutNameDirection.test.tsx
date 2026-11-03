@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import type { GroupMemberView } from "@ghostly/browser/shared/types";
 import { GroupPaymentComposer } from "../../components/GroupPaymentComposer";
 import { MessageBubble } from "../../components/MessageBubble";
+import { ReplyBar, ReplyQuote } from "../../components/chat/ReplyQuote";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { everyWallet } from "../payments/fixtures";
 import { renderApp } from "../render";
 
-// covers: groups.payments.member, chat.location.card, app.i18n
+// covers: groups.payments.member, chat.location.card, chat.replies, app.i18n
 
 /*
  * A member's name and a place's name are someone's own words, in any script, and long enough to be cut. In Arabic a
@@ -35,5 +36,17 @@ describe("a person's own words in Arabic keep their own direction where they are
     expect(name).toHaveTextContent("Torre de Belém e arredores");
     expect(name).toHaveAttribute("dir", "auto");
     expect(name).toHaveClass("truncate");
+  });
+
+  it("the name of whom a reply quotes, above the reply and in the composer's bar", () => {
+    renderApp(<>
+      <ReplyQuote quote={{ state: "found", name: NAME, snippet: "Bonjour", mine: false, targetId: "m1" }} />
+      <ReplyBar name={NAME} snippet="Bonjour" mine={false} onCancel={() => {}} />
+    </>, { language: "ar" });
+    for (const name of screen.getAllByTestId("reply-quote-name")) {
+      expect(name).toHaveTextContent(NAME);
+      expect(name).toHaveAttribute("dir", "auto");
+      expect(name).toHaveClass("truncate", "max-w-full", "self-start");
+    }
   });
 });
