@@ -1067,6 +1067,8 @@ export class HandoffTaker {
   private incoming = new Map<string, InPart>();
   /** Every file id of the giver, by digest, as the manifests said. */
   private ids: Record<string, string[]> = {};
+  /** Digests the record lists as held that the frozen copy could not give: not said to be here again, so they are sent. */
+  private notHeld = new Set<string>();
   private behind = new Map<string, HandoffPart>();
   private failure: HandoffFailure | undefined;
   private retry: number | undefined;
@@ -1419,7 +1421,8 @@ export class HandoffTaker {
   private async sendHave(): Promise<void> {
     const record = await this.ports.records.read();
     const staged = await this.staging!.held();
-    const digests = [...staged.map((file) => file.sha256), ...(record?.heldFiles ?? []).map((file) => file.sha256)];
+    const held = (record?.heldFiles ?? []).filter((file) => !this.notHeld.has(file.sha256));
+    const digests = [...staged.map((file) => file.sha256), ...held.map((file) => file.sha256)];
     const partial: Record<string, number> = {};
     for (const part of this.incoming.values()) if (!part.done && part.got > 0) partial[part.name] = part.got;
     for (const frame of handoffHaveFrames(digests, partial)) this.out(frame);
@@ -1447,9 +1450,17 @@ export class HandoffTaker {
     const staged = new Map((await this.staging!.held()).map((file) => [file.id, file]));
     const copies: { fromId: string; file: HandoffFile }[] = [];
     for (const held of record?.heldFiles ?? []) {
+      if (this.notHeld.has(held.sha256)) continue;
       for (const id of ids[held.sha256] ?? []) if (!staged.has(id)) copies.push({ fromId: held.id, file: { id, size: held.size, sha256: held.sha256 } });
     }
-    if (copies.length) try { await this.staging!.copyHeld(copies); } catch { /* sent again below on a later pass */ }
+    // A file it said it has and could not copy (gone from the frozen copy): the giver counted it and did not send it.
+    // It is asked for, with what is here said again, and the giver sends the pass again with it.
+    let missing = false;
+    if (copies.length) {
+      try { await this.staging!.copyHeld(copies); } catch { /* each one not copied is asked for below */ }
+      const copied = new Set((await this.staging!.held()).map((file) => file.id));
+      for (const { file } of copies) if (!copied.has(file.id) && !this.notHeld.has(file.sha256)) { this.notHeld.add(file.sha256); missing = true; }
+    }
     // This device said it held part of a bundle, and the giver made another: it is sending that one from the wrong byte.
     let saidOtherBundle = false;
     for (const [partName, size, digest] of parts) {
@@ -1466,8 +1477,9 @@ export class HandoffTaker {
     }
     this.totals = { bytes: 0, total };
     this.changed();
-    if (saidOtherBundle) await this.sendHave();
-    await this.maybeVerified();
+    if (saidOtherBundle || missing) await this.sendHave();
+    // The pass comes again with the missing files: H is not checked on this one.
+    if (!missing) await this.maybeVerified();
   }
 
   private async onData(from: string, frame: DeviceFrame): Promise<void> {
