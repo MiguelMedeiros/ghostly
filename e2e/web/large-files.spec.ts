@@ -167,6 +167,78 @@ test("a declined offer says so to the sender; a transfer cancelled by the sender
   await expect.poll(async () => Object.keys(await opfsFiles(bob)).length).toBe(0);
 });
 
+/**
+ * Records every line the chat's live region is given (`chat-announcement`), in order, from now on: what a screen
+ * reader is told. Read it back with `heard`.
+ */
+async function listen(p: Peer): Promise<void> {
+  await p.page.evaluate(() => {
+    const said: string[] = [];
+    (window as unknown as { __heard: string[] }).__heard = said;
+    new MutationObserver(() => {
+      const text = document.querySelector("[data-testid=chat-announcement]")?.textContent ?? "";
+      if (text && text !== said[said.length - 1]) said.push(text);
+    }).observe(document.body, { childList: true, characterData: true, subtree: true });
+  });
+}
+const heard = (p: Peer) => p.page.evaluate(() => [...(window as unknown as { __heard: string[] }).__heard]);
+const times = (lines: string[], line: RegExp) => lines.filter((l) => line.test(l)).length;
+
+// agents#2509: a screen reader heard a file once, as "📎 name" when it came; nothing said that it waited for an answer,
+// and the contact's pause, cancel or decline, and its arrival, were never read out.
+test("a screen reader hears each step of a file once: the offer waits for an answer, the contact's answer, pause and resume, its arrival, a decline; never its progress", { tag: ["@feature:files.large.offer", "@feature:files.large.resume", "@feature:app.accessibility"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(240_000);
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await Promise.all([listen(alice), listen(bob)]);
+
+  const name = "minutes.bin";
+  const path = testInfo.outputPath(name);
+  await generate(path, 200 * 1024 * 1024);
+  await alice.page.getByTestId("file-input").setInputFiles(path);
+  const incoming = bob.page.getByTestId("file-bubble").filter({ hasText: name });
+  const outgoing = alice.page.getByTestId("file-bubble").filter({ hasText: name });
+  await expect.poll(() => heard(bob), { timeout: 60_000 }).toContainEqual(expect.stringMatching(/ wants to send minutes\.bin \(200\.0 MB\) · waiting for your answer$/));
+  await incoming.getByTestId("file-accept").click();
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ accepted minutes\.bin$/));
+
+  // The bar is a progress bar, named by its file.
+  const bar = incoming.getByRole("progressbar", { name });
+  await expect(bar).toHaveAttribute("aria-valuemax", "100");
+  await expect.poll(async () => Number(await bar.getAttribute("aria-valuenow")), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+  await expect(bar).toHaveAttribute("aria-valuetext", /^\d+% of 200\.0\sMB$/);
+
+  // Bob pauses and goes on: Alice hears each, once.
+  await incoming.getByTestId("file-pause").click();
+  await expect(outgoing.getByTestId("file-status")).toContainText("Paused by", { timeout: 30_000 });
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ paused minutes\.bin$/));
+  await incoming.getByTestId("file-resume").click();
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ resumed minutes\.bin$/));
+
+  await expect(incoming.getByTestId("file-save")).toBeVisible({ timeout: 150_000 });
+  await expect.poll(() => heard(bob), { timeout: 30_000 }).toContain("minutes.bin arrived, ready to save");
+  await expect.poll(() => heard(alice), { timeout: 60_000 }).toContainEqual(expect.stringMatching(/ received minutes\.bin$/));
+
+  // A decline: the sender hears it; the receiver, who pressed it, does not hear it again.
+  const declined = "no thanks.bin";
+  const second = testInfo.outputPath(declined);
+  await generate(second, 30 * 1024 * 1024);
+  await alice.page.getByTestId("file-input").setInputFiles(second);
+  await expect.poll(() => heard(bob), { timeout: 60_000 }).toContainEqual(expect.stringMatching(/ wants to send no thanks\.bin \(30\.0 MB\) · waiting for your answer$/));
+  await bob.page.getByTestId("file-bubble").filter({ hasText: declined }).getByTestId("file-decline").click();
+  await expect.poll(() => heard(alice), { timeout: 30_000 }).toContainEqual(expect.stringMatching(/ declined no thanks\.bin$/));
+  await bob.page.waitForTimeout(3_000);
+
+  const [a, b] = [await heard(alice), await heard(bob)];
+  testInfo.annotations.push({ type: "heard", description: JSON.stringify({ alice: a, bob: b }) });
+  // Each step once; Bob's own Accept, Pause, Resume and Decline are not read back to him; no percent is ever read.
+  for (const line of [/ accepted minutes\.bin$/, / paused minutes\.bin$/, / resumed minutes\.bin$/, / received minutes\.bin$/, / declined no thanks\.bin$/]) expect(times(a, line), String(line)).toBe(1);
+  for (const line of [/ wants to send minutes\.bin /, /^minutes\.bin arrived/, / wants to send no thanks\.bin /]) expect(times(b, line), String(line)).toBe(1);
+  expect(b.filter((l) => /paused|resumed|declined|accepted/.test(l))).toEqual([]);
+  expect([...a, ...b].filter((l) => /\d%/.test(l))).toEqual([]);
+});
+
 /** Ghostly's own Offline switch, on the Services page, then back to the chat: the link goes, or may come back. */
 async function setOnline(p: Peer, online: boolean): Promise<void> {
   await p.page.getByTestId("account-services").click();
