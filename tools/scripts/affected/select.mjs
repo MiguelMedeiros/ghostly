@@ -87,8 +87,13 @@ export const UNIT_PROJECTS = [
   },
   {
     name: "scripts", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts"],
-    sources: ["tools/scripts/**", "e2e/features.json", "apps/web/nginx.conf", ".github/workflows/**"],
-    whole: ["tools/scripts/vitest.config.ts", "tools/vitest.shared.ts"],
+    sources: ["tools/scripts/**"],
+    // Also the files its tests read from disk: `vitest related` finds no test for those (the whole suite is ~20 s).
+    whole: [
+      "tools/scripts/vitest.config.ts", "tools/vitest.shared.ts",
+      ".github/workflows/**", ".github/dependabot.yml", "e2e/features.json", "apps/web/nginx*.conf", "apps/web/Dockerfile",
+      "apps/desktop/tauri.conf.json", "apps/desktop/gen/android/gradle/wrapper/**",
+    ],
     tests: ["tools/scripts/test/**"],
   },
   {
