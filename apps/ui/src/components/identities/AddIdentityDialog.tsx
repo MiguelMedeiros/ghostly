@@ -18,6 +18,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { focusLost } from "../../lib/focus";
 import { problemText, type Problem } from "../../lib/problemText";
 import { exactText } from "../../lib/exactText";
+import { radioGroupKeys, radioTabStop } from "../../lib/radioGroup";
 import { CopiedStatus } from "../chat/LinkQrDialog";
 
 const VALIDITY = [7, 30, 90, 180, 365];
@@ -161,6 +162,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   });
 
   const needsSubject = signer && signer.kind !== "in-app";
+  const subjectStop = radioTabStop(provider?.subject.options?.map(o => ({ checked: subject === o.value, disabled: busy })) ?? []);
   const card = (p: IdentityProofProvider) => <ProviderCard key={p.id} provider={p} open={about === p.id} onAbout={() => setAbout(about === p.id ? null : p.id)} onChoose={() => choose(p)} />;
   const basic = providers.filter(p => !p.advanced), more = providers.filter(p => p.advanced);
   const signerChoice = <>
@@ -257,10 +259,11 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
               </label>
             ))}
             {needsSubject && (provider.subject.options ? (
-              <div className="text-xs text-text-muted" role="radiogroup" aria-label={provider.subject.label} data-testid="add-identity-subject" data-value={subject}>{provider.subject.label}
+              <div className="text-xs text-text-muted" role="radiogroup" aria-label={provider.subject.label} data-testid="add-identity-subject" data-value={subject}
+                onKeyDown={e => radioGroupKeys(e, { choose: true })}>{provider.subject.label}
                 <div className="mt-1 grid gap-2 grid-cols-2 @sm:grid-cols-3">
-                  {provider.subject.options.map(o => (
-                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)}
+                  {provider.subject.options.map((o, i) => (
+                    <button key={o.value} type="button" role="radio" aria-checked={subject === o.value} disabled={busy} onClick={() => setSubject(o.value)} tabIndex={i === subjectStop ? 0 : -1}
                       className={`flex items-center gap-2 rounded-xl border p-2 text-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${subject === o.value ? "border-accent bg-accent/5 text-text-primary" : "border-border text-text-secondary hover:bg-surface-alt"}`}>
                       <ProviderMark provider={provider.id} subject={o.value} /><span className="truncate">{o.label}</span>
                     </button>
