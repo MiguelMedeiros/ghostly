@@ -325,11 +325,14 @@ describe("stores", () => {
     const five = await storeFiles({ sequence: 5 });
     await net.putStore(five);
     await store.refreshStores();
-    // The same signed index, copied byte for byte, and an older one: neither moves the store.
+    // The same signed index, copied byte for byte, and an older one: neither moves the store, nor marks it.
     await net.putStore(five, COPY_URL);
     expect(await store.addStore({ url: COPY_URL })).toMatchObject({ url: STORE_URL, sequence: 5, preloaded: true });
     await net.putStore(await storeFiles({ sequence: 4 }), COPY_URL);
-    expect(await store.addStore({ url: COPY_URL })).toMatchObject({ url: STORE_URL, sequence: 5, problem: "rollback" });
+    await expect(store.addStore({ url: COPY_URL })).rejects.toThrow(/^rollback: This store's index is older than the one you have \(sequence 5\)/);
+    const [kept] = await store.listStores();
+    expect(kept).toMatchObject({ url: STORE_URL, sequence: 5 });
+    expect(kept!.problem, "a copy the person chose is not a read of the store").toBeUndefined();
     // A newer one there is taken, and the store is still read at its own URL.
     await net.putStore(await storeFiles({ sequence: 6 }), COPY_URL);
     expect(await store.addStore({ url: COPY_URL })).toMatchObject({ url: STORE_URL, sequence: 6 });
@@ -339,6 +342,30 @@ describe("stores", () => {
     expect(await store.refreshStores()).toMatchObject([{ url: STORE_URL, sequence: 7, apps: [{ ref: v1.ref }] }]);
     expect(net.requests).toContain(STORE_URL);
     expect(net.requests).not.toContain(COPY_URL);
+  });
+
+  it("a store's preview says whether the person has it already, and the held index's sequence; a removed one is new again", async () => {
+    const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
+    const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
+    await store.start();
+    store.stop();
+    const five = await storeFiles({ sequence: 5 });
+    await net.putStore(five);
+    // A default store not read yet is held, with no index.
+    expect((await store.previewStore({ url: STORE_URL })).held).toEqual({});
+    await store.refreshStores();
+    expect(await store.previewStore({ url: STORE_URL })).toMatchObject({ sequence: 5, held: { sequence: 5 } });
+    await net.putStore(await storeFiles({ sequence: 4 }), COPY_URL);
+    expect(await store.previewStore({ url: COPY_URL })).toMatchObject({ sequence: 4, held: { sequence: 5 } });
+    await net.putStore(await storeFiles({ sequence: 6 }), COPY_URL);
+    expect(await store.previewStore({ url: COPY_URL })).toMatchObject({ sequence: 6, held: { sequence: 5 } });
+    // The same index again is nothing to do: the held record is not written.
+    const before = (await store.listStores())[0]!;
+    await store.previewStore({ url: STORE_URL });
+    expect(await store.addStore({ url: STORE_URL })).toEqual(before);
+    await store.removeStore({ key: keyOf(STORE_KEY) });
+    expect((await store.previewStore({ url: STORE_URL })).held, "a removed store is added as a new one").toBeUndefined();
+    expect(await store.addStore({ url: STORE_URL })).toMatchObject({ url: STORE_URL, sequence: 5 });
   });
 
   it("a newer index added while the store is being read again stays: the read's older one does not replace it", async () => {
