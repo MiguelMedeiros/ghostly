@@ -381,6 +381,17 @@ describe("the rest", () => {
     expect(mode("apps/desktop/src/lib.rs")).toBe("skip");
   });
 
+  it("a file whose named paths CI's gates must cover runs the check of them, which reads it from disk", () => {
+    // ci-changes.test.ts reads the website's scripts, the packages' code and the crates' Rust for the paths they name:
+    // no import graph shows it. A draft's tier is all the train waits for, so a website script naming an uncovered
+    // file went red only in the train's batches (2026-11-03, three in a row).
+    const mode = (...files: string[]) => byName(plan({ changed: changed(...files), inventory, e2eFiles }).unit)["ci gates"]?.mode;
+    for (const file of ["apps/website/scripts/privacy-hosts.test.mjs", "packages/browser/src/proofs/domain.ts", "packages/cli/test/x.test.ts", "apps/extension/src/background.ts", "apps/desktop/src/lib.rs", "native/transports/src/lib.rs"]) {
+      expect(mode(file), file).toBe("whole");
+    }
+    for (const file of ["apps/website/app/privacy/page.tsx", "apps/ui/src/App.tsx", "docs/TESTING.md", "apps/desktop/gen/android/build.gradle.kts"]) expect(mode(file), file).toBe("skip");
+  });
+
   it("Rust runs for the Desktop crates, and Cargo.lock runs it", () => {
     const r = (...files: string[]) => Object.fromEntries(plan({ changed: changed(...files), inventory, e2eFiles }).rust.map((x) => [x.name, x.mode]));
     expect(r("apps/desktop/src/lib.rs")).toEqual({ desktop: "run" });
