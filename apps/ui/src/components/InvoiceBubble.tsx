@@ -213,7 +213,9 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
         }
       } catch (e) {
         // Someone else got there first. The mint refused, so it is not paid twice, and there is nothing left to pay.
-        if (!/already paid/i.test(rawError(e))) throw e;
+        // Not a recipient that refused an invoice it does not know or already settled (LND's "unknown or already paid"):
+        // nobody is known to have paid it.
+        if (!/already paid/i.test(rawError(e)) || /unknown or already paid/i.test(rawError(e))) throw e;
       }
       markSettled(payable.id);
       if (payable.id === id) setPaid(true);
