@@ -2399,6 +2399,29 @@ describe("private groups through the engine", () => {
       expect(onIroh(chats.map((c) => c.id))).toHaveLength(8);
     });
 
+    it("on Iroh relays that are not n0's the browser build holds 64 Iroh listeners, 32 of them at most for 1:1 chats", async () => {
+      // A relay of the person's own (Settings, Network): a lab relay held 128 per app, n0's refused bursts of sixteen.
+      const chats = Array.from({ length: 34 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      irohWeb.start.mockImplementation(async () => endpoint());
+      await db.putSettings({ ...(await db.getSettings()), hyperdhtRelay: "", irohRelays: ["https://relay.example.com/"] });
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, irohWeb: true });
+      nodes.push(node);
+      await node.start();
+      const onIroh = (ids: string[]) => ids.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"));
+      await vi.waitFor(() => expect(onIroh(chats.map((c) => c.id))).toHaveLength(32), { timeout: 3_000 });
+      await node["nativeQueues"].get("iroh/1");
+      expect(onIroh(chats.map((c) => c.id))).toHaveLength(32);
+      for (const [, options] of irohWeb.start.mock.calls) expect(options).toEqual({ relays: ["https://relay.example.com/"] });
+      // With no WebRTC, its groups may have the 60 the four kept for chats leave.
+      const { groupId } = await node.createGroup({ name: "Team" });
+      vi.unstubAllGlobals();
+      expect((node["groups"]["host"] as { peerRoom(groupId: string): number | undefined }).peerRoom(groupId)).toBe(60);
+    });
+
     it("group links hold at most half the native slots, a chat takes one back from an idle group link, and a link with none says it waits", async () => {
       // Five saved contacts: each keeps a native listener (five of eight).
       const chats = Array.from({ length: 5 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));

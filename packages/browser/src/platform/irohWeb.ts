@@ -30,6 +30,14 @@ export const DEFAULT_IROH_RELAYS = [
 export const MAX_IROH_RELAYS = 5;
 
 /**
+ * Whether one of these relays is n0's public ones (`*.iroh.link`, either spelling): those refused six of sixteen
+ * listeners started at once, so an app that may home on one keeps the listener count they took.
+ */
+export function onPublicIrohRelay(relays: readonly string[]): boolean {
+  return relays.some(relay => { try { return /(^|\.)iroh\.link\.?$/.test(new URL(relay).hostname); } catch { return false; } });
+}
+
+/**
  * The spelling of every relay URL handed to the wasm Iroh (`irohRelayUrl`): the relays it homes on and a contact's
  * relay before a dial. One spelling, so a contact on this endpoint's relay is reached over the connection already
  * open to it; without the dot, so Safari can open it (a Desktop's record names its relay with the dot).

@@ -227,7 +227,7 @@ import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdht
 import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
 import { SETUP_NETWORK, WalletSetup } from "./walletSetup";
-import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem } from "../platform/irohWeb";
+import { DEFAULT_IROH_RELAYS, MAX_IROH_RELAYS, createIrohWebEndpoint, irohRelayProblem, onPublicIrohRelay } from "../platform/irohWeb";
 
 /**
  * How long a chat waits, on average, before listening again after its HyperDHT relay went away. Each app draws its own
@@ -246,6 +246,14 @@ const NATIVE_SLOTS = 8;
  * links listen there as well), and each of the CLI's is a whole DHT node.
  */
 const IROH_WEB_SLOTS = 16;
+/**
+ * The same where none of its Iroh relays is n0's (a relay of the person's own, or Ghostly's): measured on a lab
+ * `iroh-relay` 1.3, a Chromium page (phone-sized too) and the CLI each held 128 with none refused, started one after
+ * another or all at once, at about 0.2 MiB and one WebSocket each, and the relay about 30 KiB each. Half of that:
+ * Firefox opens 200 WebSockets at most, and a listener dialling a contact on another relay opens one more. 1:1 chats
+ * hold half of them at most.
+ */
+const IROH_WEB_OWN_RELAY_SLOTS = 64;
 /** Of a transport's listeners, the ones a group's links never hold: 1:1 chats keep that room. */
 const CHAT_NATIVE_SLOTS = 4;
 /**
@@ -8849,9 +8857,17 @@ export class GhostlyNode implements EngineImplementation {
     start.go();
   }
 
-  /** The listeners this app may hold for a transport: sixteen for Iroh's browser build (`IROH_WEB_SLOTS`), eight for the others. */
+  /**
+   * The listeners this app may hold for a transport: for Iroh's browser build sixteen (`IROH_WEB_SLOTS`), or 64 where
+   * none of its relays is n0's (`IROH_WEB_OWN_RELAY_SLOTS`); eight for the others. They start one at a time either way.
+   */
   private nativeSlots(key: NativeTransport): number {
-    return key === "iroh/1" && this.options.irohWeb ? IROH_WEB_SLOTS : NATIVE_SLOTS;
+    if (key !== "iroh/1" || !this.options.irohWeb) return NATIVE_SLOTS;
+    return onPublicIrohRelay(this.irohRelays) ? IROH_WEB_SLOTS : IROH_WEB_OWN_RELAY_SLOTS;
+  }
+  /** Of those, the most 1:1 chats hold: eight, or half of them where there are more. */
+  private chatNativeSlots(key: NativeTransport): number {
+    return Math.max(NATIVE_SLOTS, this.nativeSlots(key) / 2);
   }
   /** Of those, what its groups' links may hold, all groups together. */
   private groupNativeSlots(key: NativeTransport): number {
@@ -8915,8 +8931,9 @@ export class GhostlyNode implements EngineImplementation {
       // One that finds none waits for a slot.
       if (group && (entry || extra(live)) && (full || groups >= this.groupNativeSlots(key)
         || (!entry && !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key)))) return "no-slot";
-      // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a browser).
-      if (full || (!group && owners.length - groups >= NATIVE_SLOTS)) {
+      // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a
+      // browser; half of its 64 on relays that are not n0's).
+      if (full || (!group && owners.length - groups >= this.chatNativeSlots(key))) {
         // Who may take one that is held: the chat in use (on screen, or a text going or coming in it), one paired in this
         // run and not live yet (as used when it was paired), an edge of the group on screen, and the one edge a group
         // keeps while it is not.
