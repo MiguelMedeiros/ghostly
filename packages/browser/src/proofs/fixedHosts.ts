@@ -2,7 +2,7 @@ import { DEFAULT_RELAYS } from "@ghostly/core";
 import { plcDirectory } from "./atproto/resolve";
 import { DOH_RESOLVERS } from "./domain";
 import { oidcProviders } from "./oidc/providers";
-import { PUBKY_RELAYS } from "./pubky";
+import { PUBKY_RELAYS } from "./pubkyRelays";
 import { SSH_FORGE_HOST } from "./sshForges";
 
 /**
