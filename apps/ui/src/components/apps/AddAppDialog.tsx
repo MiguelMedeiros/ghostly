@@ -90,6 +90,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
     catch (e) { setError(appStoreErrorView(e, t)); } finally { setBusy(false); }
   };
 
+  // A store the person has already (by its key): Add takes only a newer index of it, so only that is offered.
+  const held = store?.held;
+  const heldLine = !store || !held ? null
+    : held.sequence === undefined || store.sequence > held.sequence ? t("apps.add.storeNewer")
+    : store.sequence < held.sequence ? t("apps.add.storeOlder") : t("apps.add.storeHeld");
+  const offered = !!store && (!held || held.sequence === undefined || store.sequence > held.sequence);
+
   if (app) return <AppInstallDialog source={{ url: app.url }} fetched={app.preview} onClose={onClose} onInstalled={onInstalled} />;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
@@ -122,11 +129,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
               {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
-            <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
+            {heldLine && <Notice testId="apps-add-store-held">{heldLine}</Notice>}
+            {/* A store held is still read from its own link: this one is not where it is read from. */}
+            {!held && <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>}
             {/* Wraps rather than push Cancel off the screen (a phone at a large text size), as the install screen's. */}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button ref={storeCancel} onClick={onClose}>{t("common.cancel")}</Button>
-              <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{t("apps.add.addStore")}</Button>
+              <Button ref={storeCancel} onClick={onClose}>{offered ? t("common.cancel") : t("common.close")}</Button>
+              {offered && <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{held ? t("apps.add.updateStore") : t("apps.add.addStore")}</Button>}
             </div>
           </div>
         )}

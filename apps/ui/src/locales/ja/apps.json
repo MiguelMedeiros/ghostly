@@ -5,8 +5,12 @@
     "checking": "確認中…",
     "hint": "GitHub リポジトリ、raw.githubusercontent.com のファイル、またはコミット固定の jsDelivr。",
     "label": "アプリまたはストアのリンク",
+    "storeHeld": "このストアはすでに追加済みです。アプリ画面にあります。",
+    "storeNewer": "このストアはすでに追加済みです。このリンクには新しいコピーがあります。",
+    "storeOlder": "これはすでに追加済みのストアの古いコピーです。お使いのものの方が新しく、そのまま残ります。",
     "storeReads": "Ghostly は {{host}} から読み込みます。そのホストにはあなたの IP アドレスが伝わります。",
-    "title": "アプリまたはストアを追加"
+    "title": "アプリまたはストアを追加",
+    "updateStore": "ストアを更新"
   },
   "app": {
     "export": "データを書き出す",
