@@ -123,6 +123,9 @@ test("a message taller than the chat: the bar and the + panel open at the React 
   const [alice, bob] = await Promise.all([peer("react-tall-alice"), peer("react-tall-bob")]);
   await link(alice, bob);
   await connect(alice, bob);
+  // The first pairing's scene sits above the rows and goes 1.8 s after the chat went live (CELEBRATE_MS). Going between
+  // the bar's box and the button's, it moved the button up by its height for one layout, before the view was put back.
+  await expect(alice.page.getByTestId("pairing-scene")).toHaveCount(0);
 
   // Two screens of lines, one message: the React button beside its middle.
   const lines = Array.from({ length: 120 }, (_, i) => `line ${i + 1}`).join("\n");
