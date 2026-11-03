@@ -308,6 +308,31 @@ export function addressKey(address) {
 }
 
 /**
+ * The relay's lines about refusals and drops (`refused address`, `refused listen KEYPAIR_ALREADY_USED`, `dropped idle`):
+ * the first `most` of each kind in a minute, then, once a minute while it goes on, one line with how many were left out
+ * (`refused address (812 more this minute, not logged)`). A client repeating what it is refused for would otherwise write
+ * a line per attempt, thousands a second, and rotate the whole log away. The push relay's refusalLog, with a few lines.
+ */
+export function refusalLines (log, { most = 5 } = {}) {
+  // Kind → lines written and lines left out since the last flush. Present: the kind has had a line in this minute.
+  const kinds = new Map()
+  return {
+    line: (...words) => {
+      const kind = words.join(' ')
+      const seen = kinds.get(kind) ?? { shown: 0, more: 0 }
+      kinds.set(kind, seen)
+      if (seen.shown < most) { seen.shown++; log(...words) } else seen.more++
+    },
+    flush: () => {
+      for (const [kind, seen] of kinds) {
+        // A kind still going on keeps its lines spent: one line a minute from it while it lasts.
+        if (seen.more) { log(kind, `(${seen.more} more this minute, not logged)`); seen.more = 0; seen.shown = most } else kinds.delete(kind)
+      }
+    },
+  }
+}
+
+/**
  * Starts a relay: an HTTP server whose WebSocket upgrades each carry one browser's HyperDHT (dht-relay,
  * non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream itself;
  * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts and the node's state,
@@ -377,6 +402,9 @@ export async function startRelay(options = {}) {
   // Compared as a browser writes them: `https://app.example/` in the settings still lets https://app.example in.
   const origins = new Set((options.origins ?? []).map(origin => originOf(origin) ?? origin))
   const refusedOrigin = originRefusals(log)
+  const refusals = refusalLines(log)
+  const flushing = setInterval(refusals.flush, 60_000)
+  flushing.unref?.()
   // Once per start each: a proxy in front the relay was not told about makes every client count as that proxy.
   const hinted = new Set()
   const hint = (header, setting) => {
@@ -411,7 +439,7 @@ export async function startRelay(options = {}) {
     const refuse = (status, why) => {
       stats.refused++
       // The origin is logged by refusedOrigin, once per value: a crawler would otherwise write a line per attempt.
-      if (why) log('refused', why)
+      if (why) refusals.line('refused', why)
       socket.on('error', () => {})
       socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`)
     }
@@ -428,7 +456,7 @@ export async function startRelay(options = {}) {
     let dropped = false
     const drop = why => {
       if (dropped) return
-      dropped = true; stats.dropped++; log('dropped', why)
+      dropped = true; stats.dropped++; refusals.line('dropped', why)
       unqueue(ws)
       ws.terminate()
     }
@@ -483,7 +511,7 @@ export async function startRelay(options = {}) {
       else holdQueued(ws)
       cb(null)
     }
-    void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => {
+    void relay(clientDht(dht, limits, drop, gone, refusals.line), stream).then(node => {
       guardProtocol(node._protocol, drop)
       bound(node, limits, gone)
       nodes.add(node)
@@ -525,6 +553,9 @@ export async function startRelay(options = {}) {
         clearTimeout(timer)
       }
       for (const ws of clients) ws.terminate()
+      // What the last minute left out is said before the relay stops.
+      clearInterval(flushing)
+      refusals.flush()
       await new Promise(resolve => { wss.close(); server.close(() => resolve()); server.closeAllConnections() })
       if (!options.dht) await dht.destroy()
       if (testnet) await testnet.destroy()
