@@ -1,4 +1,4 @@
-import { useState, useEffect, useId, useRef } from "react";
+import { useState, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { useLockScreen, type LockedCall } from "../contexts/LockScreenContext";
 import { useI18n } from "../contexts/I18nContext";
 import { currentProfile, listProfiles } from "../lib/profiles";
@@ -109,6 +109,9 @@ export function LockScreen() {
   const profile = listProfiles().length > 1 ? currentProfile() : null;
 
   return (
+    <>
+    {/* Away while locked too: a layer the lock screen does not reach (a dialog left open) stays out of the picture. */}
+    {covered && <AwayCover />}
     <div
       // Over everything the lock hides, the call window included.
       className="fixed inset-0 z-[60] bg-app-bg"
@@ -212,16 +215,46 @@ export function LockScreen() {
         }
       `}</style>
     </div>
+    </>
   );
+}
+
+/**
+ * Puts `el` last in the browser's top layer, over every other layer the page draws: whatever its z-index, a modal
+ * dialog, a select's list. Where there is no popover API, its z-index (the highest there is) does what it can.
+ */
+function raiseToTop(el: HTMLElement | null) {
+  if (!el?.isConnected || typeof el.showPopover !== "function") return;
+  try {
+    el.hidePopover();
+    el.showPopover();
+  } catch {
+    // unsupported: the z-index stands
+  }
 }
 
 /**
  * What the system's app switcher keeps of the app while it is away with the lock on: the lock screen's background and
  * its icon, nothing of the content. Taken away on return, once the lock has decided whether the time away was up.
+ * Drawn over every other layer, at once (it is up before the picture is taken), and again over any opened meanwhile.
  */
 function AwayCover() {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const cover = ref.current;
+    raiseToTop(cover);
+    const again = (e: Event) => { if (e.target !== cover) raiseToTop(cover); };
+    // A dialog opened modal says so by its `open`; a popover (and, in newer browsers, a dialog) by `toggle`.
+    const opened = new MutationObserver(() => raiseToTop(cover));
+    opened.observe(document.body, { subtree: true, attributeFilter: ["open"] });
+    document.addEventListener("toggle", again, true);
+    return () => {
+      opened.disconnect();
+      document.removeEventListener("toggle", again, true);
+    };
+  }, []);
   return (
-    <div className="fixed inset-0 z-[60] bg-app-bg flex items-center justify-center" aria-hidden="true" data-testid="lock-cover">
+    <div ref={ref} popover="manual" className="fixed inset-0 z-[2147483647] w-full h-full bg-app-bg flex items-center justify-center" aria-hidden="true" data-testid="lock-cover">
       <div className="w-20 h-20 rounded-full bg-surface flex items-center justify-center">
         <LockIcon className="w-10 h-10 text-accent" />
       </div>
