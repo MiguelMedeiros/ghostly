@@ -54,6 +54,24 @@ describe("the chats' texts searched in the engine", () => {
     expect(reads).toEqual(["a", "b", "a", "a", "b"]);
   });
 
+  it("reads a text with its formatting's marks left out, a file by its name, and no payment lines", async () => {
+    const stored: Record<string, StoredMessage[]> = {
+      a: [row("a", "1", "*hello* world"), row("a", "2", "read [the plan](https://ghostly.tools/p) now"), row("a", "3", "run ||npm ci|| first")],
+      b: [{ ...row("b", "1", "Payment of 21 sats"), paymentId: "p1" }, { ...row("b", "2", "here is the plan"), file: { id: "f", name: "report.pdf", size: 1, mime: "application/pdf" } as never }],
+      c: [row("c", "1", "my_snake_case var")],
+    };
+    const search = new ChatTextSearch(async (linkId) => stored[linkId] ?? []);
+    const found = (query: string) => search.found(["a", "b", "c"], query);
+    expect(await found("hello world")).toEqual(["a"]);
+    expect(await found("the plan now")).toEqual(["a"]);
+    expect(await found("ghostly.tools/p")).toEqual(["a"]);
+    expect(await found("npm ci first")).toEqual(["a"]);
+    expect(await found("snake_case")).toEqual(["c"]);
+    expect(await found("Payment of")).toEqual([]);
+    expect(await found("report.pdf")).toEqual(["b"]);
+    expect(await found("here is")).toEqual([]);
+  });
+
   it("does not keep a read that failed", async () => {
     let fail = true;
     const search = new ChatTextSearch(async () => { if (fail) throw new Error("store closed"); return [row("a", "1", "hello")]; });
