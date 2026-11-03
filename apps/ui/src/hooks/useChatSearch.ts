@@ -4,6 +4,7 @@ import { jumpToMessage } from "../lib/replies";
 import type { Translate } from "../locales/translate";
 import type { ChatMessage } from "../lib/types";
 import { revealMessage } from "./useRowWindow";
+import { useIsLocked } from "../contexts/LockScreenContext";
 
 /** How long typing rests before the chat is searched: a long chat is searched once per pause, not once per key. */
 export const SEARCH_DEBOUNCE_MS = 150;
@@ -28,6 +29,8 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   const inputRef = useRef<HTMLInputElement>(null);
   /** What had the focus as the search opened, to have it back: not a menu's row (it goes with the menu), not the bar. */
   const before = useRef<HTMLElement | null>(null);
+  // Behind the lock screen the chat stays mounted: Ctrl/Cmd+F typed there is the lock screen's, not the chat's.
+  const locked = useIsLocked();
 
   const close = useCallback(() => { setOpen(false); setQuery(""); setTerm(""); setCurrent(null); }, []);
   const show = useCallback(() => {
@@ -61,7 +64,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
   useEffect(() => close, [chat, close]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || locked) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.key.toLowerCase() !== "f" || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
       e.preventDefault();
@@ -69,7 +72,7 @@ export function useChatSearch({ messages, chat, active, t, returnFocus }: { mess
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, show]);
+  }, [active, locked, show]);
 
   useEffect(() => {
     if (!query.trim()) { setTerm(""); return; }
