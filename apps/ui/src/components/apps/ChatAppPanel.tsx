@@ -3,7 +3,7 @@ import { useI18n } from "../../contexts/I18nContext";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { usePhoneHeader } from "../../hooks/usePhoneHeader";
 import { useBackCloses, useTabTrap } from "../../hooks/useDismiss";
-import { takedownText } from "../../lib/apps/open";
+import { takedownText, useAppOpener } from "../../lib/apps/open";
 import { ChatOnScreen } from "../../lib/chatOnScreen";
 import { chatApp, registerAppSlot, setChatApp, updateChatApp, useChatApp, type AppContact } from "../../lib/apps/running";
 import { PeerAvatar } from "../Avatar";
@@ -50,6 +50,7 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
   // A phone held upright: the header's buttons are the chat header's size there (Chat.tsx).
   const phoneHeader = usePhoneHeader();
   const app = useChatApp(linkId);
+  const appOpener = useAppOpener();
   const box = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   const back = useRef<HTMLButtonElement>(null);
@@ -166,6 +167,13 @@ export function ChatAppPanel({ linkId, sessionId, contact, peerKey, photo, myKey
       {shown && app?.stopped && <p role="status" data-testid="mini-app-stopped" className="m-0 p-6 text-center text-sm text-text-secondary">
         {takedownText(title, app.stopped, t)}
       </p>}
+      {/* Stopped by the watchdog: it may run fine once started again, and the person decides. */}
+      {shown && app?.stopped?.why === "unresponsive" && appOpener && (
+        <button type="button" data-testid="mini-app-open-again" onClick={() => void appOpener(app.ref, linkId).catch((error: unknown) => console.warn(`[apps] ${title} did not open again`, error))}
+          className="mx-auto min-h-11 rounded px-4 py-1 text-sm font-medium text-accent hover:bg-surface-hover cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          {t("apps.view.openAgain")}
+        </button>
+      )}
       <div ref={box} data-testid="mini-app-frame" className="chat-app-frame" />
     </section>
   );

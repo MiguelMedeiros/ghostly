@@ -65,6 +65,7 @@
   const httpEquiv = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "httpEquiv").set;
   const metaContent = Object.getOwnPropertyDescriptor(HTMLMetaElement.prototype, "content").set;
   const listen = EventTarget.prototype.addEventListener;
+  const portPost = MessagePort.prototype.postMessage;
   const stopImmediately = Event.prototype.stopImmediatePropagation;
   const here = location;
   const reload = here.reload;
@@ -350,6 +351,11 @@
     port.onmessage = (event) => {
       const message = event.data;
       if (!message || typeof message !== "object") return;
+      // The page's watchdog: answered at once, so the answer is late only while the app holds this thread.
+      if (message.event === "ping") {
+        try { reflectApply(portPost, port, [{ pong: message.data }]); } catch (e) { /* closed */ }
+        return;
+      }
       if (typeof message.id === "number") {
         const waiting = pending.get(message.id);
         if (!waiting) return;

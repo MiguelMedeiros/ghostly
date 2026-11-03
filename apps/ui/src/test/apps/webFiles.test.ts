@@ -413,6 +413,41 @@ describe("a folder kept past the page (File System Access)", () => {
     }
   });
 
+  it("walks a picked folder for what accept names: other files and hidden ones are not read, nor counted toward the limit", async () => {
+    let reads = 0;
+    const entry = (name: string) => ({ kind: "file", name, getFile: async () => { reads++; return { size: 1, lastModified: 1 }; } });
+    const folder = (name: string, items: () => Iterable<object>) => ({ kind: "directory", name, async *values() { yield* items(); } });
+    function* numbered(n: number, name: (i: number) => string) { for (let i = 0; i < n; i++) yield entry(name(i)); }
+    // More photos than an app may link, then 50 films (some named in capitals), and hidden ones that are no film.
+    const library = (photos: number, films: number) => folder("Library", function* () {
+      yield folder("a-photos", () => numbered(photos, (i) => `${i}.jpg`));
+      yield folder("b-films", function* () {
+        yield* numbered(films, (i) => `${i}.${i % 10 ? "mp4" : "MP4"}`);
+        yield entry(".partial.mp4");
+        yield entry("mp4");
+        yield folder(".trash", () => numbered(3, (i) => `${i}.mp4`));
+      });
+    });
+    const pick = (photos: number, films: number) => {
+      reads = 0;
+      vi.stubGlobal("showDirectoryPicker", async () => library(photos, films));
+      return webLinkedFiles({ text: () => text, ask: (_app, folder, accept) => handlePicker(folder, accept) }).pick(REF, "Cinema", { folder: true, accept: ["mp4"] });
+    };
+    try {
+      const entries = await pick(120_000, 50);
+      // A photo or a hidden file is never got: a real disk pays for each.
+      expect(reads).toBe(50);
+      expect(entries.map((e) => e.path)).toEqual(Array.from({ length: 50 }, (_, i) => `Library/b-films/${i}.${i % 10 ? "mp4" : "MP4"}`));
+      // More films than an app may link: too large, never some of them, and the walk stops one past the limit.
+      await expect(pick(0, MINI_APP_LIMITS.filesEntries + 1)).rejects.toThrow(/^too-large: /);
+      expect(reads).toBe(MINI_APP_LIMITS.filesEntries + 1);
+      // At the limit, every one of them.
+      expect(await pick(10, MINI_APP_LIMITS.filesEntries)).toHaveLength(MINI_APP_LIMITS.filesEntries);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }, 30_000);
+
   it("the IndexedDB store keeps picks per app", async () => {
     const store = idbPickStore(() => "ghostly-test-files");
     const pick = (ref: string, id: string): StoredPick => ({ ref, id, keep: { files: [] }, entries: [{ id: `${id}e`, path: "a.mp4", size: 1, modified: 1 }] });
