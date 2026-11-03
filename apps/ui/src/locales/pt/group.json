@@ -111,6 +111,7 @@
   "join": {
     "admitted": "O app do admin respondeu: recebendo as chaves do grupo. Você entra em instantes.",
     "admittedCommunity": "O app de um membro respondeu: recebendo as chaves do grupo. Você entra em instantes.",
+    "admittedStuck": "Nenhum membro conseguiu terminar de deixar você entrar. Peça o link atual a alguém do grupo.",
     "answered": "O app do admin viu sua batida e está se conectando a você. Você entra em instantes.",
     "answeredCommunity": "O app de um membro viu sua batida e está se conectando a você. Você entra em instantes.",
     "answeredTitleCommunity": "Um membro está deixando você entrar",

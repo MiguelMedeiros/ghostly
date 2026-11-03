@@ -303,6 +303,43 @@ describe("GroupChat: joining through a link", () => {
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app answered: getting the group's keys.");
   });
 
+  it("let into a community five minutes ago and still no keys: says no member could finish, and to ask for the current link", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // The welcome was lost and the link replaced since: nobody answers the old link's knocks any more.
+      const admitted = (admittedAt: number) => groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt } });
+      const stuck = "No member could finish letting you in. Ask someone in the group for the current link.";
+      const view = openGroup(admitted(Date.now()));
+      const card = screen.getByTestId("group-joining");
+      expect(card).toHaveTextContent("A member's app answered: getting the group's keys. You are in in a moment.");
+      act(() => { vi.advanceTimersByTime(5 * 60_000 - 1_000); });
+      expect(card).not.toHaveTextContent(stuck);
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(card).toHaveTextContent(stuck);
+      expect(card).not.toHaveTextContent("You are in in a moment");
+      expect(spoken()).toEqual([stuck]);
+      // It keeps knocking: the steps and Cancel joining stay.
+      expect(screen.getByTestId("group-joining-steps")).toHaveAttribute("data-stage", "admitted");
+      expect(screen.getByTestId("group-joining-cancel")).toBeInTheDocument();
+      // Let in again since (a member answered a later knock): the moment starts over.
+      act(() => view.engine.update({ groups: [admitted(Date.now())] }));
+      expect(card).toHaveTextContent("You are in in a moment");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("welcomed within five minutes: never told no member could finish", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const view = openGroup(groupView({ profile: "community", canSend: false,
+        invitation: { linkId: "", contact: "", admin: ALICE, members: 0, accepted: true, viaLink: true, stage: "admitted", admittedAt: Date.now() } }));
+      act(() => { vi.advanceTimersByTime(4 * 60_000); });
+      act(() => view.engine.update({ groups: [active()] }));
+      act(() => { vi.advanceTimersByTime(2 * 60_000); });
+      expect(document.body).not.toHaveTextContent("No member could finish letting you in");
+    } finally { vi.useRealTimers(); }
+  });
+
   const staged = (stage: GroupJoinStage, admin = "") => groupView({ canSend: false, invitation: { linkId: "", contact: "", admin, members: 0, accepted: true, viaLink: true, stage } });
   const steps = () => within(screen.getByTestId("group-joining-steps")).getAllByRole("listitem").map(li => li.getAttribute("data-state"));
   /** The text of every live region on the page that says something now: what a screen reader is told. */
