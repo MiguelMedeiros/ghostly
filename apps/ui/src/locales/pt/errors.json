@@ -155,6 +155,7 @@
     "cannotRetry": "Não é possível tentar enviar este arquivo de novo",
     "clipboardUnavailable": "Não foi possível ler a área de transferência",
     "clipboardUnavailableNext": "Anexe com +.",
+    "dropUnreadable": "Não foi possível adicionar esses arquivos. Envie-os com + → Documento.",
     "floor": {
       "noRoomNext": "Libere espaço e peça ao seu contato para enviar de novo.",
       "notInAWeek": "Não chegou em uma semana",

@@ -78,6 +78,44 @@ function dragNamesAddress(data: DataTransfer | null): boolean {
 }
 
 /**
+ * Another app's drag of files that the webview names by address only, as the platform tells it (the desktop app on
+ * Linux: WebKitGTK gives the page neither the files nor their addresses). The platform holds the files of its drop;
+ * the page reads them by token, never by path.
+ */
+let platformDrag: { over: boolean; read: () => Promise<ClipboardFile[]> } | null = null;
+
+/**
+ * The platform takes drops of files: `read` hands over the files of the drop that just happened. Returns what the
+ * platform calls while such a drag is over the window (true) and once it left (false). The page forgets it once a
+ * drop's handlers ran: the platform says nothing of a drop, which it could say before the page hears of it.
+ */
+export function followPlatformDrags(read: () => Promise<ClipboardFile[]>, target: Window = window): (over: boolean) => void {
+  const drag = { over: false, read };
+  platformDrag = drag;
+  target.addEventListener("drop", () => { setTimeout(() => { drag.over = false; }); });
+  return (over) => { drag.over = over; };
+}
+
+/** Whether a drag carries files: the page's own, or another app's the platform holds (not a link). */
+export function dragCarriesFiles(data: DataTransfer | null): boolean {
+  return dragHasFiles(data) || (!!platformDrag?.over && dragNamesAddress(data));
+}
+
+/**
+ * The files of a drop the platform holds (`followPlatformDrags`), read into the page as a paste's are; null when the
+ * drop handed the page its files itself, or is no drop of files.
+ */
+export function platformDroppedFiles(data: DataTransfer | null): Promise<File[]> | null {
+  if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
+  return platformDrag.read().then((clips) => readPlatformFiles(clips, new Date(), true));
+}
+
+/** Tests only. */
+export function resetPlatformDrags(): void {
+  platformDrag = null;
+}
+
+/**
  * Keeps a file dropped where nothing takes it from opening in place of the app (a browser tab
  * shows it, the desktop app's window would navigate to it), and a link or a file named by its
  * address too. Where a drop is taken, its handler has already said so.
@@ -86,8 +124,9 @@ export function guardFileDrops(target: Window = window): () => void {
   const ours = (e: DragEvent) => {
     if (e.defaultPrevented) return false;
     const on = e.target instanceof Element ? e.target : null;
-    // A file field on the page (a backup to restore) takes its drop as the browser does.
-    if (dragHasFiles(e.dataTransfer)) return !on?.closest("input[type='file']");
+    // A file field on the page (a backup to restore) takes its drop as the browser does. Another app's files the
+    // platform holds are files too: never their address in a text field.
+    if (dragCarriesFiles(e.dataTransfer)) return !on?.closest("input[type='file']");
     // An address dropped into a text field is its text.
     return dragNamesAddress(e.dataTransfer) && !on?.closest("input, textarea, [contenteditable=''], [contenteditable='true']");
   };
