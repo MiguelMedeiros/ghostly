@@ -43,7 +43,10 @@ export const DEFAULT_LIMITS = Object.freeze({
   requestMs: 15_000,
   /** How long the relay waits for a client's part of a handshake (a browser answers in one round trip). */
   handshakeMs: 15_000,
-  /** Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. */
+  /**
+   * Handshakes that may wait on one client's answer at once: its dials and the connections its servers get. One server's
+   * incoming ones take at most a quarter of it, and all of them together leave that quarter to the dials (see crowded).
+   */
   handshakes: 64,
   /** Bytes the relay may hold for one client that the client has not read yet (a chat's files have at most 2 MiB out). */
   queuedBytes: 8 * 1024 * 1024,
@@ -246,10 +249,36 @@ const untracked = create => create && ((...args) => {
   handshake._node._handshakes.delete(handshake._id)
   return handshake
 })
+/**
+ * Why a handshake may not wait on its client now (a word for the log), or null. The connections a client's servers
+ * get are started by whoever knows the key, so one contact dialling its own chat over and over would fill the client's
+ * whole `handshakes` and leave its other chats unreachable and its dials refused. A server's incoming handshakes take at
+ * most a quarter of it, and all servers' together leave that quarter to the client's dials.
+ */
+function crowded(handshake, handshakes, limits) {
+  if (handshakes.size >= limits.handshakes) return 'limit'
+  // A dial's handshake has no server.
+  if (handshake._serverAlias == null) return null
+  const quarter = Math.floor(limits.handshakes / 4)
+  let incoming = 0
+  let server = 0
+  for (const other of handshakes.values()) {
+    if (other._serverAlias == null) continue
+    incoming++
+    if (other._serverAlias === handshake._serverAlias) server++
+  }
+  if (server >= Math.max(1, quarter)) return 'listen share'
+  if (incoming >= limits.handshakes - quarter) return 'incoming'
+  return null
+}
 const roundTrip = original => function (payload) {
   const handshakes = this._node._handshakes
   const limits = this._node._limits ?? DEFAULT_LIMITS
-  if (handshakes.size >= limits.handshakes) return Promise.reject(new Error('Too many handshakes'))
+  const why = crowded(this, handshakes, limits)
+  if (why) {
+    this._node._refused?.('refused handshake', why)
+    return Promise.reject(new Error('Too many handshakes'))
+  }
   handshakes.set(this._id, this)
   let timer
   return Promise.race([
@@ -288,8 +317,9 @@ class Servers extends Map {
     return super.set(alias, proxy)
   }
 }
-function bound(node, limits, gone) {
+function bound(node, limits, gone, refused) {
   node._limits = limits
+  node._refused = refused
   const signatures = new Signatures()
   for (const [id, signature] of node._signatures) signatures.set(id, signature)
   node._signatures = signatures
@@ -564,7 +594,7 @@ export async function startRelay(options = {}) {
     }
     void relay(clientDht(dht, limits, drop, gone, refusals.line), stream).then(node => {
       guardProtocol(node._protocol, drop)
-      bound(node, limits, gone)
+      bound(node, limits, gone, refusals.line)
       nodes.add(node)
       void gone.then(() => nodes.delete(node))
     })
