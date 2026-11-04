@@ -634,6 +634,16 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
   });
 
+  it.each(LANGUAGES)("a HyperDHT relay the web's listener could not use says what to do next in %s: check it in Settings, or ask whoever runs it", (language) => {
+    const t = translators[language];
+    // A browser sees no status on a refused WebSocket: a relay that leaves this app's origin out reads "unreachable" too.
+    expect(knownErrorParts("Could not reach the HyperDHT relay", t)).toEqual({ title: t("errors.transport.hyperdhtUnreachable"), next: t("errors.transport.hyperdhtUnreachableNext") });
+    expect(knownErrorParts("The HyperDHT relay did not answer", t)).toEqual({ title: t("errors.transport.hyperdhtSilent"), next: t("errors.transport.hyperdhtCheckNext") });
+    expect(knownErrorParts("The HyperDHT relay closed the connection", t)).toEqual({ title: t("errors.transport.hyperdhtClosed"), next: t("errors.transport.hyperdhtCheckNext") });
+    expect(knownErrorParts("The HyperDHT relay did not let this chat listen", t)).toEqual({ title: t("errors.transport.hyperdhtRefused"), next: t("errors.transport.hyperdhtRefusedNext") });
+    for (const key of ["hyperdhtUnreachableNext", "hyperdhtCheckNext", "hyperdhtRefusedNext"] as const) expect(t(`errors.transport.${key}`)).not.toBe(`errors.transport.${key}`);
+  });
+
   it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
     const t = translators[language];
     const file = { id: "L-in-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
