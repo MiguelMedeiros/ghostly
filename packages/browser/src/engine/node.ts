@@ -208,7 +208,7 @@ import { db } from "./db";
 import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen } from "./groups";
 import { AUTHOR_ORDER_ROOM } from "./groupAuthorOrder";
-import { edgeView } from "./groupEdges";
+import { edgeView, keptMeshPeer, meshPeersKeeping } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
 import { Reactions,groupReactionsToResend, latestReaction, noteAfterChange, noteIfStanding } from "./reactions";
 import { mayPinIn, myPin, pinView, pinnedRow, type PinsHost } from "./pins";
@@ -8868,17 +8868,26 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * A group's edges that run native transports (`keepsGroupNative`), the one it keeps while it is not on screen first
-   * (WISP 902 § Transports): to a hub, then the admin, then one the member keeps itself (`chosenByPeer`), then one that
-   * holds a listener already (so the one it keeps does not change hands each time another member is heard), then the
-   * member seen last. One passed over lately (`groupAnchorsAnswered`: its member never answered) comes after all of
+   * (WISP 902 § Transports): to a hub, then, in a private group, the one the rule gives this member (`keptMeshPeer`:
+   * spread over the members, not every member's to the admin), or in a community the admin; then one the member keeps
+   * itself (`chosenByPeer`), then, in a private group, one whose member keeps it by the rule, then the admin, then one
+   * that holds a listener already (so the one it keeps does not change hands each time another member is heard), then
+   * the member seen last. One passed over lately (`groupAnchorsAnswered`: its member never answered) comes after all of
    * them. The mesh's catch-up brings the group's messages through any member.
    */
   private groupEdgesByRank(groupId: string, view: GroupView | undefined): LiveLink[] {
     const native = Object.keys(this.nativeFactories) as NativeTransport[], now = Date.now();
+    const mesh = this.groups.meshOrder(groupId);
+    const kept = mesh && keptMeshPeer(mesh.order, mesh.admin, mesh.me), keeping = new Set(mesh ? meshPeersKeeping(mesh.order, mesh.admin, mesh.me) : []);
     const lead = new Map(view?.members.filter(member => !member.me && (member.hub || member.role === "admin")).map(member => [member.key, member.hub ? 2 : 1]));
-    const rank = (live: LiveLink) => [Number(!this.anchorPassed(live, now)), lead.get(live.stored.groupPeer!) ?? 0, Number(this.chosenByPeer(live)),
-      Number(native.some(t => live.link!.availableTransports.includes(t))),
-      live.link!.groupsSupport ? now : Math.max(presenceSeenAt(live.presence), live.lastSyncAt)];
+    // The admin leads in a community; in a private group only a hub does, and the admin comes after the edges the rule gives.
+    const leads = (peer: string) => mesh && lead.get(peer) === 1 ? 0 : lead.get(peer) ?? 0;
+    const rank = (live: LiveLink) => {
+      const peer = live.stored.groupPeer!;
+      return [Number(!this.anchorPassed(live, now)), leads(peer), Number(peer === kept), Number(this.chosenByPeer(live)), Number(keeping.has(peer)),
+        Number(!!mesh && lead.get(peer) === 1), Number(native.some(t => live.link!.availableTransports.includes(t))),
+        live.link!.groupsSupport ? now : Math.max(presenceSeenAt(live.presence), live.lastSyncAt)];
+    };
     const edges = [...this.links.values()].filter(live => live.stored.group === groupId && !live.stored.groupEntry && live.link && this.keepsGroupNative(live.stored));
     const ranks = new Map(edges.map(live => [live, rank(live)]));
     return edges.sort((a, b) => {
@@ -8932,7 +8941,7 @@ export class GhostlyNode implements EngineImplementation {
    * Every few seconds, each group not on screen whose edges run native transports: the one edge it keeps has a
    * listener (or waits for one, `groupNativeWaiting`), and when its member has not answered it in
    * `GROUP_ANCHOR_ANSWER_MS` (it is there with no listener for it: all its own taken), the group keeps the next
-   * one instead (hub, then admin, then the member heard from last), whose member answers the edge it keeps
+   * one instead (in `groupEdgesByRank`'s order), whose member answers the edge it keeps
    * (`chosenByPeer`). Not while any edge of the group is live: the group is reachable through it. Every other one passed
    * over lately too: the one it keeps stays, without its listener going back and forth.
    */

@@ -615,6 +615,21 @@ export class GroupSession {
   get top(): GroupCommit { return this.state.chain[this.state.chain.length - 1]; }
   get roster(): Roster { return this.top.m; }
   get admin(): string | undefined { return rosterAdmin(this.roster); }
+  /**
+   * The roster in the order its members were last admitted, the creator first (WISP 902 § Transports, the edge a
+   * member keeps): every member holding the same chain reads the same order, and a member reads everyone admitted
+   * before it from its welcome. Kept for the current top commit.
+   */
+  get admissionOrder(): string[] {
+    const top = this.top;
+    if (this.admissionCache?.top === top) return this.admissionCache.order;
+    const chain = this.state.chain, at = new Map<string, number>();
+    for (let e = 1; e < chain.length; e++) if (chain[e].k === "add" && chain[e].s) at.set(chain[e].s!, e);
+    const order = this.roster.map(([key]) => key).sort((a, b) => (at.get(a) ?? 0) - (at.get(b) ?? 0) || (a < b ? -1 : a > b ? 1 : 0));
+    this.admissionCache = { top, order };
+    return order;
+  }
+  private admissionCache?: { top: GroupCommit; order: string[] };
   get isAdmin(): boolean { return this.admin === this.myKey && this.state.status === "active"; }
   get status(): GroupStatus { return this.state.status; }
   /** Members other than me, in the current roster. */

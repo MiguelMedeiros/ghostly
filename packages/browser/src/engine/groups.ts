@@ -866,6 +866,15 @@ export class Groups {
 
   private isCommunity(groupId: string): boolean { return this.communities.has(groupId); }
   /**
+   * A private group's roster in admission order, its admin and my key: what the edge each member keeps while the group
+   * is not on screen is computed from (`keptMeshPeer`, WISP 902 § Transports). Undefined for a community or no session.
+   */
+  meshOrder(groupId: string): { order: string[]; admin?: string; me: string } | undefined {
+    const session = this.sessions.get(groupId);
+    if (!session || this.isCommunity(groupId)) return undefined;
+    return { order: session.admissionOrder, admin: session.admin, me: session.myKey };
+  }
+  /**
    * What paces a private group's edges (`meshEdgeIntervals`), as a roster of that many members would: the roster in a
    * full mesh, the edges this member keeps (and one) with hubs. 0 for no group.
    */
