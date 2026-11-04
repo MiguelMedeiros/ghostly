@@ -28,6 +28,8 @@ let watching = false;
 let leaving = false;
 /** The entry the page was last seen on: its page (the state under the mark, the address) and its depth. */
 let last: { page: string; depth: number } | null = null;
+/** The layers `onPop` closes are closed by a move onto another page, not by Back (`closedByArrival`). */
+let arrived = false;
 
 const depthOf = (state: unknown): number => {
   const depth = state && typeof state === "object" ? (state as Record<string, unknown>)[MARK] : undefined;
@@ -96,7 +98,8 @@ function onPop() {
   // The person's Back: the layers over the entry it reached close.
   const depth = depthOf(history.state);
   const closing = open.splice(depth).reverse();
-  for (const layer of closing) layer.close();
+  arrived = !!from && from.page !== last!.page;
+  try { for (const layer of closing) layer.close(); } finally { arrived = false; }
   // Back off an entry a layer closed another way left, over what was still open: that Back would show nothing. It
   // closes the layer on top, or with none, leaves the page, as it would have with that entry gone.
   if (!closing.length && from && from.page === last!.page && depth < from.depth) {
@@ -105,6 +108,14 @@ function onPop() {
     else history.go(-depth - 1);
   }
   schedule();
+}
+
+/**
+ * Asked by a layer as it is closed: the entry reached is another page's (a link put in the address, `location.hash =`),
+ * not the one under the layers. A layer that is a question (NameStep) stays: that is no answer.
+ */
+export function closedByArrival(): boolean {
+  return arrived;
 }
 
 /** A layer opened: Back closes it with `close`. Returns what to call once it is closed. */
