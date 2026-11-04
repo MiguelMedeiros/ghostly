@@ -1,5 +1,6 @@
 import { getStorageProfile } from "./storage";
 import { markFirstStart } from "./nameStep";
+import { cleanOwnName } from "./ownName";
 import { sizeIn } from "./sizeText";
 import type { Translate } from "../locales/translate";
 
@@ -148,7 +149,8 @@ export function loadSettings(): AppSettings {
         ...parsed.notifications,
         cues: { ...DEFAULT_CUES, ...parsed.notifications?.cues },
       },
-      defaultNickname: parsed.defaultNickname ?? DEFAULT_SETTINGS.defaultNickname,
+      // Cleaned as it is saved now: a name kept before, of spaces or zero-width characters only, is no name.
+      defaultNickname: typeof parsed.defaultNickname === "string" ? cleanOwnName(parsed.defaultNickname) : DEFAULT_SETTINGS.defaultNickname,
       chatListDensity: parsed.chatListDensity === "comfortable" ? "comfortable" : "compact",
       chatListCollapsed: parsed.chatListCollapsed === true,
       linkPreviews: parsed.linkPreviews !== false,

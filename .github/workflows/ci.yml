@@ -11,7 +11,9 @@ on:
     # ready_for_review: a draft runs the fast tier only (see `changes`); leaving draft runs everything.
     # Whether the pull request is a draft is read from the API when `changes` runs, never from the event: a push and
     # `gh pr ready` a second apart start two runs, the later one cancels the other, and the survivor may be the push's
-    # run, whose payload still says draft (#742, #737, #759).
+    # run, whose payload still says draft (#742, #737, #759). Leaving draft cancels nothing now (see `concurrency`):
+    # only a push's run cancels, and a push's run that saw a draft plans the fast tier only while leaving draft's run
+    # waits behind it.
     types: [opened, synchronize, reopened, ready_for_review]
   # A merge queue on dev tests what dev would become (dev plus the pull requests ahead in the queue) on a temporary
   # gh-readonly-queue/dev/... branch, and merges only when CI Success passes there. Inert until the dev ruleset has a
@@ -22,7 +24,10 @@ on:
 permissions:
   contents: read
 
-# A new push to a pull request cancels the run it supersedes. A merge queue entry groups by its ref
+# A new push to a pull request cancels the run it supersedes. Leaving draft (ready_for_review) does not: its run waits
+# behind the one in progress, so a draft run on the same head ends and its green "CI Success (draft)" lets the pull
+# request board the merge train, which then cancels the full run it would not land on (the run of a draft that left
+# draft seconds after its event plans the fast tier too: see `changes`). A merge queue entry groups by its ref
 # (gh-readonly-queue/dev/pr-<n>-<base sha>), which no other entry shares, so entries never cancel each other: a queue
 # that drops an entry builds the ones behind it again on new refs. Pushes to dev share one group without
 # cancel-in-progress: the merge train lands a green batch as one squash merge per pull request, a push each, seconds
@@ -32,9 +37,12 @@ permissions:
 # would cancel a queued run whenever a third arrives, even without cancel-in-progress.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'merge_group' && github.ref || github.event_name == 'push' && github.ref == 'refs/heads/dev' && 'push-dev' || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.event.action != 'ready_for_review' }}
 
 env:
+  # GitHub's ubuntu-24.04 runners refuse the unprivileged user namespaces Chromium's sandbox needs ("Chromium sandboxing
+  # failed!"): the e2e and site checks launch it without here, as before; our own machines keep it on (e2e/support/chromiumSandbox.ts).
+  E2E_CHROMIUM_SANDBOX: "0"
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
@@ -80,6 +88,7 @@ jobs:
       full: ${{ steps.plan.outputs.full }}
       affected: ${{ steps.plan.outputs.affected }}
       draft: ${{ steps.plan.outputs.draft }}
+      left_draft: ${{ steps.plan.outputs.left_draft }}
       tested: ${{ steps.plan.outputs.tested }}
     steps:
       - name: Checkout the gate
@@ -96,6 +105,8 @@ jobs:
           EVENT: ${{ github.event_name }}
           PAYLOAD_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
           PR_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CHANGED: ${{ github.event.pull_request.changed_files }}
           FILES_URL: repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files
           BASE_SHA: ${{ github.event.merge_group.base_sha }}
@@ -129,6 +140,13 @@ jobs:
           draft=$(gh api "$PR_URL" --jq .draft)
           [[ "$draft" == "true" || "$draft" == "false" ]] || { echo "::error::Could not read the draft state: $draft"; exit 1; }
           echo "Draft: $draft (the event said $PAYLOAD_DRAFT)"
+          # Left draft after this run's event: when leaving draft's run waits behind this one (it cancels none) and will
+          # run everything, this one stays the fast tier (ci-changes.mjs's draftBehind). Otherwise this one runs
+          # everything: it may have cancelled leaving draft's run, which GitHub sometimes creates first.
+          if [[ "$draft" == "false" && "$PAYLOAD_DRAFT" == "true" ]] && node tools/scripts/ci-changes.mjs --draft-behind; then
+            draft=true
+            echo "left_draft=true" >> "$GITHUB_OUTPUT"
+          fi
           echo "draft=$draft" >> "$GITHUB_OUTPUT"
           # A pull request that changes no file (main merged back into dev after a release) gives nothing to plan
           # from: every path gate is on (a draft still gets the fast tier).
@@ -861,6 +879,7 @@ jobs:
       - name: Check all jobs passed
         env:
           DRAFT: ${{ needs.changes.outputs.draft }}
+          LEFT_DRAFT: ${{ needs.changes.outputs.left_draft }}
           TESTED: ${{ needs.changes.outputs.tested }}
           PUSH_TO_DEV: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
           CHANGES: ${{ needs.changes.result }}
@@ -908,7 +927,9 @@ jobs:
           if [[ "$TESTED" == "true" ]]; then
             echo "::notice::This tree passed CI Success on a pull request already (see Changed paths): Tauri Backend saved the Cargo cache when dev lacked it."
           fi
-          if [[ "$DRAFT" == "true" ]]; then
-            echo "::notice::Draft: the fast tier passed. The required CI Success comes from the full run that leaving draft (gh pr ready) starts."
+          if [[ "$LEFT_DRAFT" == "true" ]]; then
+            echo "::notice::Left draft after this run started: the fast tier passed, and the full run waits behind this one. The merge train may board it on this run and cancel that full run; the batch's run is the check that counts."
+          elif [[ "$DRAFT" == "true" ]]; then
+            echo "::notice::Draft: the fast tier passed. Once you mark it ready (gh pr ready), the merge train may board it on this run and cancel the full run; the batch's run is the check that counts."
           fi
           echo "All jobs passed! ($summary)"

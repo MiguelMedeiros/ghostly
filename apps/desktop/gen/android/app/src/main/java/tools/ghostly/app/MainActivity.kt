@@ -3,6 +3,7 @@ package tools.ghostly.app
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.system.Os
@@ -34,6 +35,20 @@ class MainActivity : TauriActivity() {
     private set
   /** The oldest WebView this start takes: [MIN_WEBVIEW], or a debug start's `ghostly_min_webview`. */
   private var minimumWebView = MIN_WEBVIEW
+
+  /**
+   * Whether the app lock is on (GhostlyHostPlugin's `hideFromSwitcher`). The page's own cover comes only once it hears
+   * the app is going, after the switcher already shows the app's live window: this one goes over the page as soon as
+   * the app leaves the front (SwitcherPicture.covered), and goes again when it is back.
+   */
+  var lockOn = false
+    set(value) {
+      field = value
+      updateCover()
+    }
+  private var resumed = false
+  private var focused = false
+  private var cover: View? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // Before the page loads. Debug builds take `--ei ghostly_min_webview <major>`, so the screen can be seen on an
@@ -121,14 +136,52 @@ class MainActivity : TauriActivity() {
    * page's `system_bars` is not for this screen (GhostlyHostPlugin leaves the bars alone while it shows).
    */
   private fun updateScreenBars() {
-    val background = TypedValue()
-    theme.resolveAttribute(android.R.attr.colorBackground, background, true)
-    val color = if (background.resourceId != 0) ContextCompat.getColor(this, background.resourceId) else background.data
-    window.decorView.setBackgroundColor(color)
+    window.decorView.setBackgroundColor(themeBackground())
     val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
     val controller = WindowCompat.getInsetsController(window, window.decorView)
     controller.isAppearanceLightStatusBars = !night
     controller.isAppearanceLightNavigationBars = !night
+  }
+
+  override fun onResume() {
+    super.onResume()
+    resumed = true
+    updateCover()
+  }
+
+  override fun onPause() {
+    resumed = false
+    updateCover()
+    super.onPause()
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    focused = hasFocus
+    updateCover()
+  }
+
+  /** The cover over the page, plain in the page's background colour (`system_bars` set it), shown or hidden. */
+  private fun updateCover() {
+    val show = SwitcherPicture.covered(lockOn, resumed, focused)
+    if (!show && cover == null) return
+    val view = cover ?: View(this).also {
+      it.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+      // Above the WebView (and the update screen): the content view's last child.
+      addContentView(it, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+      cover = it
+    }
+    if (show) {
+      view.setBackgroundColor((window.decorView.background as? ColorDrawable)?.color ?: themeBackground())
+      view.bringToFront()
+    }
+    view.visibility = if (show) View.VISIBLE else View.GONE
+  }
+
+  private fun themeBackground(): Int {
+    val background = TypedValue()
+    theme.resolveAttribute(android.R.attr.colorBackground, background, true)
+    return if (background.resourceId != 0) ContextCompat.getColor(this, background.resourceId) else background.data
   }
 
   private fun pad(view: View, insets: WindowInsetsCompat) {

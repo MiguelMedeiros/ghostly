@@ -54,7 +54,10 @@ interface SecretSocket {
 }
 interface RelayedServer {
   listen(keyPair: KeyPair): Promise<void>;
+  /** Where the relay's node listens for it, as the relay said; port 0 when the relay refused the listen. */
+  address(): { port: number } | null;
   close(): Promise<void>;
+  once(event: "close", listener: () => void): unknown;
 }
 interface RelayedNode {
   ready(): Promise<void>;
@@ -272,6 +275,12 @@ export interface RelayedHyperOptions {
  * A chat's HyperDHT endpoint through the relay at `url`: it listens on the key of `seedB64` (the chat's
  * own transport seed, as on the Desktop) and dials a contact's descriptor. Fails, and so is not offered,
  * when the relay cannot be reached or does not let it listen.
+ *
+ * dht-relay 0.4.3 has no message for a refused listen (the relay's node refuses a key it already listens on, for
+ * another client or an old connection of this one), and its client drops a `closed` for a server that has not had
+ * `listening`. So the relay answers a refusal with `listening` at no address (port 0), then `closed`: that fails here
+ * at once. A relay that answers nothing leaves the listen to LISTEN_MS. A server the relay closes later says the
+ * endpoint is unavailable, as when the whole connection goes.
  */
 export async function createRelayedHyperEndpoint(seedB64: string, url: string, options: RelayedHyperOptions = {}): Promise<NativeEndpoint> {
   const problem = hyperdhtRelayProblem(url);
@@ -300,6 +309,8 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
       else bound.channel.close();
     }).catch(() => {});
   });
+  let serverClosed = false;
+  server.once("close", () => { serverClosed = true; member.unavailable(); });
   try {
     await Promise.race([
       server.listen(keyPair),
@@ -307,6 +318,7 @@ export async function createRelayedHyperEndpoint(seedB64: string, url: string, o
       new Promise((_, reject) => setTimeout(() => reject(new Error("The HyperDHT relay did not let this chat listen")), LISTEN_MS)),
     ]);
     if (client.gone) throw new Error("The HyperDHT relay closed the connection");
+    if (serverClosed || !server.address()?.port) throw new Error("The HyperDHT relay did not let this chat listen");
   } catch (error) {
     stopped = true;
     void server.close().catch(() => {});

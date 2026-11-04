@@ -6,7 +6,7 @@ import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type A
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError, type ErrorCode } from "./errors";
 import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
-import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
+import { findSecret } from "./secretGuard";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -178,6 +178,20 @@ const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
   [/^Ghostly cannot ask this wallet's faucet by itself\b/, "unavailable"],
 ];
 
+/**
+ * `chat pay` or `chat request` refused for want of a Cashu wallet of that network at all: the engine says the wallet
+ * is short of sats, or that no mint could make an invoice, and names nothing to do. `refused` with the command that
+ * makes one, as a contact with no wallet is told; `details.reason` `no_wallet`. With a wallet, the engine's own words.
+ */
+function noWalletOf(ctx: ApiContext, n: WalletNetwork, error: unknown): unknown {
+  if ((state(ctx).wallet.wallets ?? []).some((w) => w.type === "cashu" && w.network === n)) return error;
+  const name = n === "mainnet" ? "Mainnet" : "Testnet";
+  return new CliError("refused", `You have no ${name} Cashu wallet: ghostly wallet create cashu${n === "mainnet" ? " --network mainnet" : ""}`, { reason: "no_wallet" });
+}
+const engineCode = (error: unknown) => error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
+/** What the engine says to a Cashu request it has no mint for: no mint for the invoice, or none to name for ecash. */
+const NO_MINT = /^(No mint could create an invoice: No mint configured|You have no (Mainnet|Testnet) Cashu wallet: create one in Wallet → New)$/;
+
 function walletRefusal(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof CliError) return error;
   const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
@@ -298,6 +312,11 @@ const WALLETS: Record<string, Method> = {
     let invoice = text.replace(/^lightning:/i, "");
     let n: WalletNetwork;
     let note: string | undefined;
+    // The chat the invoice was found in: on Testnet its contact is told it was paid, as a chat card's Pay tells it. A test
+    // mint says every invoice is paid, so one from `wallet receive` is credited only on its payer's word.
+    if (params.chat !== undefined && !isInvoice(text)) throw new CliError("usage", "--chat names the chat an invoice came from: an address's or LNURL's invoice is its server's");
+    const chat = params.chat === undefined ? undefined : chatOf(ctx, params);
+    if (chat) inviteTaken(chat);
     if (isInvoice(text)) {
       // Which wallet pays is named, never guessed from the invoice: test mints issue `lnbc` invoices too, and a
       // guess must never be what makes real money move. Testnet unless `network` says mainnet.
@@ -316,7 +335,7 @@ const WALLETS: Record<string, Method> = {
     const quote =await node(ctx).walletQuoteInvoice({ invoice, network: n, ...(card ? { card } : {}) });
     const maxFee = params.maxFee === undefined ? null : num(params, "maxFee", 0);
     if (maxFee !== null && quote.feeReserve > maxFee) throw new CliError("refused", `The fee may reach ${quote.feeReserve} sats, more than the ${maxFee} allowed`);
-    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params) });
+    const paid = await node(ctx).walletPayQuote({ quote: quote.quote, mint: quote.mint, ...(note ? { note } : {}), ...real(params), ...(chat ? { linkId: chat.id, invoice } : {}) });
     return { network: n, amount: quote.amount, feeReserve: quote.feeReserve, source: (quote as { source?: string }).source ?? quote.mint, paid: paid.paid };
   },
 
@@ -330,7 +349,8 @@ const WALLETS: Record<string, Method> = {
     const n = network(params);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
-    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: sentAt(), network: n, ...(memo ? { memo } : {}), ...real(params) });
+    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: sentAt(), network: n, ...(memo ? { memo } : {}), ...real(params) })
+      .catch((error: unknown) => { throw engineCode(error) === "notEnoughSats" ? noWalletOf(ctx, n, error) : error; });
     return { chat: link.id, paymentId };
   },
 
@@ -343,10 +363,11 @@ const WALLETS: Record<string, Method> = {
     const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
+    const n = network(params);
     const { paymentId } = await node(ctx).requestPayment({
-      linkId: link.id, amount, timestamp: sentAt(), network: network(params),
+      linkId: link.id, amount, timestamp: sentAt(), network: n,
       ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
-    });
+    }).catch((error: unknown) => { throw (!method || method === "cashu") && error instanceof Error && NO_MINT.test(error.message) ? noWalletOf(ctx, n, error) : error; });
     return { chat: link.id, paymentId };
   },
 

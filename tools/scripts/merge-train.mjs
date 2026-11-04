@@ -6,8 +6,10 @@
 // - The line, per base: `queue:priority` first (alone it is in the line too), then by the time each got `queue` (the
 //   latest `labeled` event, so taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request with
 //   neither CI Success nor the draft's fast tier (CI Success (draft)) green on its last commit, or with CI Success red
-//   there, waits without losing its place. A green run of CI that skipped jobs the pull request's own files turn on
-//   (ci.yml planned it from other files: a run for another base) does not count; the run before it does. Nor does a
+//   there, waits without losing its place. So does one with `queue:hold` (HOLD), whatever else it has: it never boards
+//   or lands until the label comes off, and the train never takes the hold off itself. A green run of CI that skipped
+//   jobs the pull request's own files turn on (ci.yml planned it from other files: a run for another base) does not
+//   count; the run before it does. Nor does a
 //   green pull request run that is not its own: from another branch, from before its base was changed, or while another
 //   pull request from its branch into another base holds the same head (that base's ci.yml ran it).
 // - One batch per base at a time: up to 12 pull requests from the front of the line, once 3 can board, or the one that
@@ -27,8 +29,8 @@
 //   new commit must hold exactly the files (the same tree) of the batch's commit of that pull request: what CI tested
 //   is what landed. If it does not, the landing stops with an error, nothing is reverted, the rest go back to the line
 //   and the batch closes with a comment that says what happened. A pull request that changed or left the line (new
-//   commits, `queue` taken off, turned into a draft) stops the landing too: the ones ahead of it land, it and the
-//   ones after it do not. When all landed, the batch closes with a comment that lists them.
+//   commits, `queue` taken off, turned into a draft, given `queue:hold`) stops the landing too: the ones ahead of it
+//   land, it and the ones after it do not. When all landed, the batch closes with a comment that lists them.
 //   - A pull request of a batch is seldom up to date with dev by itself, which dev's ruleset asks for, so the queue
 //     app must be on that ruleset's bypass list (pull requests only). Until it is, GitHub refuses the first merge and
 //     the batch lands the old way with a warning: its own rebase merge, whose commits GitHub does not sign, and each
@@ -84,6 +86,14 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "queue:conflict", failed: "queue:failed" };
+/**
+ * A person's "not yet" (a feature waiting for the next minor, a change waiting on a decision): a pull request with it
+ * never boards or lands, even with `queue` or `queue:priority`. It waits in line and keeps its place, and boards once
+ * the label comes off. Not in LABEL, the train's own labels that it takes off a pull request leaving the line: only the
+ * person who held it lifts a hold.
+ */
+export const HOLD = "queue:hold";
+export const onHold = (p) => !!p?.labels?.includes(HOLD);
 // 12, not 5: each pull request's own full CI no longer gates boarding (the batch's does), so one batch run covers more
 // of the line, and bisection still finds a culprit of 12 in four splits.
 export const MAX_BATCH = 12;
@@ -277,6 +287,7 @@ const AT_BACK = "again at the back once it is reviewed and queued";
 
 /** Why a queued pull request cannot board now, or null. It keeps its place while it waits, unless the reason says otherwise. */
 export function waiting(pr) {
+  if (onHold(pr)) return `it is on hold (\`${HOLD}\`): it boards once the label comes off`;
   if (pr.draft) return "it is a draft";
   if (pr.fork) return "it comes from a fork";
   if (pr.unread === "comments") return `it has more comments than the train reads (${PAGES_READ * 100}), so it cannot find its own record of the reviewed head; it moves on once a maintainer deletes some of them`;
@@ -288,7 +299,9 @@ export function waiting(pr) {
   if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit; after the push it leaves the line and joins it ${AT_BACK}`;
   if (pr.crowded) return `its branch has more pull requests than the train reads (${PAGES_READ * 100}), so one into another base may have run CI on the same commit; open a new pull request from a new branch, which joins the line ${AT_BACK}`;
   if (pr.retargeted) return `its green CI run on its last commit ran before its base was changed; close and reopen it for a run against this base, which keeps its place (after a pushed commit instead, it leaves the line and joins it ${AT_BACK})`;
-  if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base); run CI on it again";
+  // A re-run plans from the run's own merge commit again (GitHub keeps its sha), so it skips the same jobs: a run
+  // planned by an older ci-changes.mjs than the base's stays short. Closing and reopening makes a new merge commit.
+  if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base, or by an older copy of ci-changes.mjs); close and reopen it for a new run (re-running that run plans it the same way again)";
   return "CI Success has not passed on its last commit yet";
 }
 
@@ -467,8 +480,14 @@ export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 
 // A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
+const escapeMark = (f) => f.replaceAll("<", "&lt;");
+// Several aboard whose files GitHub does not list, and a push refused for one workflow: any of them may change it.
+// They come back one at a time, in number order, each after the one before it (`after`): told the same thing, all of
+// them added `queue` again at once, boarded together and left together again, run after run.
+const unlistedText = (workflow, others, after) =>
+  `Merge train: GitHub lists no files for this pull request (it changes 3000 files or more, or none), and it refused the batch's push for a workflow (${workflow ? `\`${escapeMark(workflow)}\`: ` : ""}the queue app's token has no \`workflows\` permission). GitHub lists none for ${others.map((o) => `#${o.number}`).join(", ")} either, so the train cannot tell which of them changes it, and all of them left the line: the rest of the line goes on without them. They come back one at a time, in number order, so that only one of them boards at once: ${after ? `once #${after.number} has landed, left the line again or is not coming back, add \`queue\` again` : "add `queue` again now, before the others"}, and it only leaves again if it is the one that changes it (the train takes \`queue:failed\` off).`;
 const workflowText = (base, workflows) =>
-  `Merge train: this pull request changes a workflow (${workflows.map((f) => f.replaceAll("<", "&lt;")).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
+  `Merge train: this pull request changes a workflow (${workflows.map(escapeMark).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission: then add \`queue\` again (the train takes \`queue:failed\` off).`;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -707,7 +726,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
    */
   let tipNow;
   const cancelBehind = async (p) => {
-    if (!mayCancel || p.draft || p.ci !== "pending" || p.fast !== "success") return;
+    // A held one does not board soon: its own full run is the green it needs when the hold comes off.
+    if (!mayCancel || p.draft || onHold(p) || p.ci !== "pending" || p.fast !== "success") return;
     try {
       tipNow ??= await gh.branchSha(base);
       if ((await gh.behindBy(tipNow, p.sha)) === 0) return;
@@ -741,16 +761,27 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // requests aboard that change one leave the line, saying so, and the rest board without them. Else every run
       // failed here, and the whole line waited behind them.
       if (!WORKFLOW_PUSH_REFUSED.test(`${e?.message ?? e}`)) throw e;
+      // GitHub lists no files for a pull request of 3000 or more: those leave only when none aboard lists a workflow,
+      // naming the one GitHub refused (a push still refused without the others says one of them changes it). With
+      // several of them the train cannot tell which one, and each one's comment says so.
       const changing = [];
+      const unlisted = [];
       for (const p of aboard) {
-        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
-        if (workflows.length) changing.push([p, workflows]);
+        const files = await gh.pullFiles(p.number);
+        if (!files) unlisted.push(p);
+        const workflows = (files ?? []).filter((f) => f.startsWith(".github/workflows/"));
+        if (workflows.length) changing.push([p, workflowText(base, workflows)]);
+      }
+      if (!changing.length) {
+        const named = `${e?.message ?? e}`.match(/workflow `([^`]+)`/)?.[1];
+        const turns = [...unlisted].sort((a, b) => a.number - b.number);
+        for (const p of unlisted) changing.push([p, unlisted.length > 1 ? unlistedText(named, unlisted.filter((o) => o !== p), turns[turns.indexOf(p) - 1]) : workflowText(base, [named ?? "a workflow"])]);
       }
       if (!changing.length) throw e;
-      for (const [p, workflows] of changing) {
+      for (const [p, text] of changing) {
         say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
         done.dropped.push(p.number);
-        await leave(p, LABEL.failed, workflowText(base, workflows));
+        await leave(p, LABEL.failed, text);
       }
       // From the ones aboard: those the build dropped have left the line already, and building them again drops them twice.
       return board(aboard.filter((p) => !changing.some(([c]) => c === p)), next, extra);
@@ -809,6 +840,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const baseCi = ci === "failure" ? ciState(await gh.ciJobs(state.baseSha, planned(null))) : null;
     const stay = { number: batch.number, members };
     const names = (list) => list.map((s) => `#${s.number}`).join(" ");
+    /** Why the landing stops at the ones that changed or left the line, naming those that were put on hold. */
+    const changedText = (list) => {
+      const holds = list.filter((s) => onHold(byNumber.get(s.number)));
+      return `${names(list)} changed or left the line${holds.length ? ` (${names(holds)} ${holds.length > 1 ? "are" : "is"} on hold, \`${HOLD}\`)` : ""}`;
+    };
     say(`BATCH #${batch.number} [${names(state.prs)}] CI ${ci}`);
 
     // dev: a green batch lands one pull request at a time, each by GitHub's squash merge (a commit GitHub signs),
@@ -831,8 +867,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       }
     }
     // Among the ones still to land: which changed or left the line, and the first of them. Nothing lands from it on.
-    // One turned into a draft counts where each is merged by itself: GitHub merges no draft.
-    const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || (bySquash && members[i].draft)));
+    // One turned into a draft counts where each is merged by itself: GitHub merges no draft. One put on hold counts
+    // everywhere: the hold says it must not land (the labels are read again at the start of every run, and a batch
+    // never lands in the run that built it).
+    const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || onHold(members[i]) || (bySquash && members[i].draft)));
     const stop = changed.length ? state.prs.indexOf(changed[0]) : state.prs.length;
 
     /**
@@ -921,7 +959,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         await w.deleteBranch(batch.branch);
         return board(next);
       }
-      why ??= `${names(changed)} changed or left the line`;
+      why ??= changedText(changed);
       const left = rest.length ? ` ${names(rest)} did not land; the ones still queued go back to the line.` : "";
       await retire(batch, `Merge train: ${inBase.length ? `${names(inBase)} landed on \`${base}\`` : "nothing landed"}, and the landing stopped there: ${why}.${left}`);
       // After a commit that is not what was tested, nothing more boards in this run.
@@ -939,16 +977,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (!rest.length) inFlight = await landEach(tested, before);
       else if (ci === "success" && stop > before && tested && (await gh.commit(tip)).tree === tested[before - 1].tree) inFlight = await landEach(tested, before);
       else {
-        const why = changed.length && stop === before ? `${names(changed)} changed or left the line` : ci !== "success" ? "CI Success is no longer green on it" : `\`${base}\` no longer holds what this batch tested`;
+        const why = changed.length && stop === before ? changedText(changed) : ci !== "success" ? "CI Success is no longer green on it" : `\`${base}\` no longer holds what this batch tested`;
         await retire(batch, `Merge train: ${names(inBase)} landed on \`${base}\`, and the landing cannot go on (${why}), so this batch closes; ${names(rest)} did not land, and the ones still queued go back to the line.`);
       }
     } else if (changed.length && bySquash && ci === "success" && stop > 0 && tip === state.baseSha) {
       // Green, but one changed or left: the ones ahead of it land (in the order CI tested), it and the rest do not.
       const tested = await readTested();
       if (tested) inFlight = await landEach(tested, 0);
-      else await retire(batch, `Merge train: ${names(changed)} changed or left the line, so this batch closes; the rest go back to the line.`);
+      else await retire(batch, `Merge train: ${changedText(changed)}, so this batch closes; the rest go back to the line.`);
     } else if (changed.length) {
-      await retire(batch, `Merge train: ${names(changed)} changed or left the line, so this batch closes; the rest go back to the line.`);
+      await retire(batch, `Merge train: ${changedText(changed)}, so this batch closes; the rest go back to the line.`);
     } else if (tip !== state.baseSha) {
       // Red on an old tip says nothing about the batch on the new one, and green on an old tip must not land.
       await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
@@ -1052,8 +1090,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       if (!pushed.ok && WORKFLOW_PUSH_REFUSED.test(pushed.message)) {
         // As for a batch's push: it leaves the line, saying so. Else every run rebased it and was refused again, and it
         // waited for good under a comment naming a commit GitHub never took. A diff that lists no workflow (commits
-        // that change one and change it back, which the rebase replays) names the one GitHub refused.
-        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
+        // that change one and change it back, which the rebase replays) or none at all (3000 files or more) names the one
+        // GitHub refused.
+        const workflows = ((await gh.pullFiles(p.number)) ?? []).filter((f) => f.startsWith(".github/workflows/"));
         if (!workflows.length) workflows.push(pushed.message.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow");
         say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
         done.dropped.push(p.number);
@@ -1071,8 +1110,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const stay = { number: p.number, members: [p], alone: true };
     const tip = await gh.branchSha(base);
     say(`ALONE #${p.number} at ${p.sha.slice(0, 12)} CI ${p.ci}`);
-    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place.
-    if (p.draft) return null;
+    // Turned into a draft since: GitHub merges no draft, so it waits in line like any draft and keeps its place. Put
+    // on hold since: the same, until the label comes off.
+    if (p.draft || onHold(p)) return null;
     // Red on an old tip says nothing about the new one, and green on an old tip must not land.
     if (tip !== mark.baseSha) return goAlone(p, { retried: mark.retried });
     if (p.ci === "failure") {
@@ -1267,13 +1307,25 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
   };
   const runsRead = new Map();
   const jobsRead = new Map();
-  /** The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). */
-  const ciRunsOn = (sha) =>
-    once(runsRead, sha, async () => {
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+  /**
+   * The answer to the list of CI's runs on a commit: the runs, or a 403 (a token that may not read Actions). Pages are
+   * read, newest first, until `enough` of this repository's own runs are in (see `ciRuns`) or the list ends: anyone can
+   * open pull requests from a fork at a public commit, and their runs would fill a first page that holds none of ours.
+   * GitHub lists at most 1000 runs for one commit, PAGES_READ pages.
+   */
+  const readCiRuns = async (sha, enough) => {
+    const runs = [];
+    for (let page = 1; page <= PAGES_READ; page++) {
+      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100${page > 1 ? `&page=${page}` : ""}`);
       if (!r.ok && r.status !== 403) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
-      return r;
-    });
+      if (!r.ok) return r;
+      const list = r.data?.workflow_runs ?? [];
+      runs.push(...list);
+      if (list.length < 100 || ciRuns(runs, repo, sha).length >= enough) break;
+    }
+    return { ok: true, status: 200, data: { workflow_runs: runs } };
+  };
+  const ciRunsOn = (sha) => once(runsRead, sha, () => readCiRuns(sha, CI_RUNS_READ));
   const runJobs = (id) => once(jobsRead, id, () => all(`/actions/runs/${id}/jobs?filter=latest`));
   const pull = (p) => ({
     number: p.number,
@@ -1374,9 +1426,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      */
     cancelCi: async (sha) => {
       if (cancelDenied) return { cancelled: [], denied: cancelDenied };
-      const r = await api("GET", `/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`);
+      const r = await readCiRuns(sha, Infinity);
       if (r.status === 403) return { cancelled: [], denied: (cancelDenied = `HTTP 403 ${r.data?.message ?? ""}`.trim()) };
-      if (!r.ok) throw new Error(`GET CI runs of ${sha}: HTTP ${r.status} ${r.data?.message ?? ""}`);
       const cancelled = [];
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).filter((x) => x.event === "pull_request" && x.status !== "completed")) {
         const c = await api("POST", `/actions/runs/${run.id}/cancel`);

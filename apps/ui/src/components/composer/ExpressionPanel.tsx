@@ -30,7 +30,7 @@ const SHEET_FLOOR = 290;
  * switch between the two at the bottom that is remembered per profile. On a wide screen it floats over the
  * composer, inside the chat's column however narrow that is; on a phone it is a sheet over the keyboard's place.
  */
-export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose }: {
+export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose, focusOnOpen }: {
   /** The composer: the panel stands on it and never runs past its sides. */
   boundsRef: RefObject<HTMLElement | null>;
   /** Clicks in here (the button that opens the panel, the message field) do not close it. */
@@ -38,6 +38,8 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
   onEmoji: (emoji: string) => void;
   onGif: (url: string) => void;
   onClose: () => void;
+  /** Opened from the keyboard: the emoji search takes the focus, as it does after a switch from GIFs. */
+  focusOnOpen?: boolean;
 }) {
   const { t } = useI18n();
   const phone = useIsMobile();
@@ -114,7 +116,7 @@ export function ExpressionPanel({ boundsRef, dismissRef, onEmoji, onGif, onClose
     <div ref={ref} role="dialog" aria-label={t("composer.expressions")} data-testid="expression-panel" data-tab={tab}
       className={`expression-panel ${phone ? "sheet expression-sheet" : "expression-popover"}`} style={position ?? { visibility: "hidden" }}>
       {tab === "emoji"
-        ? <EmojiTab key="emoji" onPick={onEmoji} autoFocus={switched && !phone} />
+        ? <EmojiTab key="emoji" onPick={onEmoji} autoFocus={(switched || focusOnOpen) && !phone} />
         : <GifTab key="gif" onSelect={onGif} onEmojiTab={() => choose("emoji")} autoFocus={!phone} />}
       <div role="tablist" aria-label={t("composer.expressions")} className="expression-switch" onKeyDown={tabKeys}>
         {TABS.map((id) => (

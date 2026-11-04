@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -484,6 +484,33 @@ describe("listen with an allowlist and --turns", () => {
     const named = await ghostly(["--home", home, "listen", "--cursor", folder]);
     expect(named.code, named.stdout + named.stderr).toBe(1);
     expect(named.json).toEqual({ error: { code: "bad_request", message: `${folder} is a folder: name a file` } });
+  });
+
+  it("a cursor file that holds no event number is said before anything starts, not taken as the journal's end", async () => {
+    // Empty, garbage or a negative number gave undefined, and listen started on live events only: every event since
+    // the last one handled was skipped without a word, and the next write replaced the file.
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    expect(readCursor(undefined)).toBeUndefined();
+    expect(readCursor(join(dir, "none"))).toBeUndefined();
+    writeFileSync(join(dir, "kept"), "42\n");
+    expect(readCursor(join(dir, "kept"))).toBe(42);
+    const refusal = (path: string) => { try { readCursor(path); } catch (error) { return asCliError(error).toJSON(); } return null; };
+    for (const [name, text, shown] of [["empty", "", "nothing"], ["blank", " \n", "nothing"], ["garbage", "abc\n", '"abc"'], ["negative", "-1", '"-1"'], ["fraction", "1.5", '"1.5"']] as const) {
+      writeFileSync(join(dir, name), text);
+      expect(refusal(join(dir, name)), name).toEqual({ code: "bad_request", message: `${join(dir, name)} holds no event number (${shown}): fix or remove it, or give --since` });
+    }
+    // Something long is cut where it is shown.
+    writeFileSync(join(dir, "long"), "x".repeat(500));
+    expect(refusal(join(dir, "long"))!.message).toContain(`("${"x".repeat(32)}…")`);
+
+    // The command says it at once, with the code a bot branches on, and no profile was opened or made for it; the file
+    // is left as it was, and --since still starts it.
+    const home = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const result = await ghostly(["--home", home, "listen", "--cursor", join(dir, "garbage")]);
+    expect(result.code, result.stdout + result.stderr).toBe(1);
+    expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number ("abc"): fix or remove it, or give --since` } });
+    expect(readdirSync(home)).toEqual([]);
+    expect(readFileSync(join(dir, "garbage"), "utf8")).toBe("abc\n");
   });
 
   it("an output that wants a drain holds the next event until it drains; the events wait as `behind`", async () => {

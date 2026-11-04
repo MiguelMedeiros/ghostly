@@ -56,6 +56,15 @@ describe('DNS TXT through DNS over HTTPS', () => {
     await expect(assertDomainRecord('nowhere.com', 'dns', mine, { fetch: net.fetch })).rejects.toThrow(/take a few minutes/);
   });
 
+  it('finds the proof among many records, in whatever order the resolver answers', async () => {
+    const others = Array.from({ length: 31 }, record);
+    for (const values of [[mine, ...others], [...others, mine]]) {
+      clearDomainCache();
+      const net = network({ txt: { '_ghostly.example.com': values.map(domainTxtRecord) } });
+      expect((await assertDomainRecord('example.com', 'dns', mine, { fetch: net.fetch })).records).toHaveLength(32);
+    }
+  });
+
   it('shares a lookup for its TTL, at most 30 seconds, so a re-check sees a removed record', async () => {
     const zone: Zone = { txt: { '_ghostly.example.com': [domainTxtRecord(mine)] }, ttl: 3600 };
     const net = network(zone);
@@ -145,6 +154,12 @@ describe('/.well-known/ghostly.json and NIP-05', () => {
     expect(await assertDomainRecord('example.com', 'https', mine, { fetch: net.fetch })).toMatchObject({ found: true, dnssec: false, records: [other, mine] });
     expect(net.calls.find(c => c.url === url)!.options).toMatchObject({ redirect: 'error', maxBytes: 16384 });
     expect(net.calls.filter(c => c.url.includes('dns-query'))).toHaveLength(2);
+  });
+
+  it('finds the proof listed after eight others in the file', async () => {
+    const proofs = [...Array.from({ length: 8 }, record), mine];
+    const net = network(publicZone, { [url]: { body: JSON.stringify({ ghostly: 1, proofs }) } });
+    expect((await assertDomainRecord('example.com', 'https', mine, { fetch: net.fetch })).records).toEqual(proofs);
   });
 
   it.each([

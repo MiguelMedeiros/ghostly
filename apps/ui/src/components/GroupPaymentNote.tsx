@@ -6,7 +6,7 @@ import { formatAmount, formatTokenAmount } from "../lib/amount";
 
 const amountOf = (note: GroupPayNote, t: Translate) => note.decimals
   ? `${formatTokenAmount(note.amount, note.decimals, t.language)} ${note.unit === "testusdt" ? t("payments.group.testUsdt") : "USDT"}`
-  : `${formatAmount(Number(note.amount), t.language)} ${satsIn(t, note.test ? "testnet" : "mainnet")}`;
+  : `${formatAmount(Number(note.amount), t.language)} ${satsIn(t, note.test ? "testnet" : "mainnet", Number(note.amount))}`;
 
 /**
  * A payment between two members, as everyone in the group sees it: who pays whom, how much, over what, and how it

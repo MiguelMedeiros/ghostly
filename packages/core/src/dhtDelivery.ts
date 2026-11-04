@@ -10,7 +10,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
-import { AWAITING_PEER_MS, countUnusedInvite, UNUSED_INVITE_UPKEEP_MS, unusedInviteWait } from "./link";
+import { AWAITING_PEER_MS, countUnusedInvite, PRESENCE_WINDOW, UNUSED_INVITE_UPKEEP_MS, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { readForwarded } from "./forwards";
 import { validEditNumber } from "./pairedEdits";
@@ -225,6 +225,11 @@ export class DhtDelivery {
   private live = false;
   private active = false;
   private readonly startedAt = Date.now();
+  /**
+   * When an envelope of the contact's newer than any before was last read here, in this run. A contact that is there
+   * puts a keep-alive every four minutes: none in `PRESENCE_WINDOW`, it is away (`publish`).
+   */
+  private peerNewAt = -Infinity;
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
   private urgent = false;
   /** Reads left that are signaling: the contact is leaving DHT only, and the live link waits on them (`expect`). */
@@ -736,15 +741,27 @@ export class DhtDelivery {
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
+    // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
+    // The one that replaces an unsealed envelope goes where that lies.
+    const identity = (!reseal && this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
+    // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
+    // link's heartbeat, `LinkSession.publishOnce`), so a profile's live chats never take the requests its groups need.
+    // So is it while the contact, pinned, is away (nothing new from it in `PRESENCE_WINDOW`); not an envelope a first
+    // contact waits for. As a chat's write, which goes first
+    // once refused, the keep-alives of 200 chats whose contacts were away held back every read on one relay, and most
+    // of those contacts were not read once in 25 minutes (bug hunt, 2026-11-01).
+    const away = !!this.options.credentials.peerKey && now - this.peerNewAt >= PRESENCE_WINDOW;
+    const options = keepAlive && (this.live || away) ? { background: true } : undefined;
+    // No relay takes it now: refused before it is signed and encrypted, its sequence set aside or a ratchet key taken
+    // (`LinkSession.publishOnce`). With 500 contacts away, about 500 envelopes a minute were built for none that went.
+    const held = this.options.transport.publishHeld?.(identity.pubKeyZ32, options);
+    if (held) { await this.heldBack(held, now, { lastPublish: this.lastPublish, controlDue: this.controlDue }, undefined, undefined); throw held; }
     const fittedEnvelope = this.fitted(this.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
     const { body, reactions } = fittedEnvelope;
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
     this.reactionsDue = !reactions && !!this.options.reactions?.().length;
-    // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
-    // The one that replaces an unsealed envelope goes where that lies.
-    const identity = (!reseal && this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
     // Persist the sequence (set aside, a block at a time) and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
     const sequence = body[1];
@@ -761,9 +778,7 @@ export class DhtDelivery {
     this.lastPublish = now; this.controlDue = now + (ownInvite ? UNUSED_INVITE_UPKEEP_MS : 4 * 60_000);
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }), ...(records[0]?.label === "_dr" && { ratchet: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
-    // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
-    // link's heartbeat, `LinkSession.publishOnce`), so a profile's live chats never take the requests its groups need.
-    try { await this.options.transport.publish(identity, records, keepAlive && this.live ? { background: true } : undefined); }
+    try { await this.options.transport.publish(identity, records, options); }
     catch (error) {
       this.reactionsDue ||= reactionsWereDue;
       if (isDiscoveryBudgetError(error)) await this.heldBack(error, now, before, pending, receipt);
@@ -786,7 +801,8 @@ export class DhtDelivery {
     this.budgetUntil = at;
     this.lastPublish = before.lastPublish; this.controlDue = Math.min(before.controlDue, at);
     traceLink(this.from, "dht-publish-waits", { retryInMs: at - now });
-    await this.persist({ ...this.state, pending: pending ?? this.state.pending, receipt: receipt ?? this.state.receipt });
+    // Held back before it was built, nothing was counted: no save.
+    if (pending || receipt) await this.persist({ ...this.state, pending: pending ?? this.state.pending, receipt: receipt ?? this.state.receipt });
   }
   /**
    * One packet from one of the contact's mailboxes, opened and checked the way `receive` takes it: the right address,
@@ -912,6 +928,7 @@ export class DhtDelivery {
     // A joiner pinning its inviter from the envelope the inviter put out before anyone joined: that says nothing of the
     // inviter being there, whose chat may be deleted or its app gone (bug hunt 1014-0136).
     const unanswered = !this.options.credentials.peerKey && !!this.options.credentials.expectedPeerKey && !sender && !this.live;
+    this.peerNewAt = Date.now();
     await this.options.pin(author); this.options.credentials.peerKey = author; this.options.credentials.requireSignedSignals = true;
     // Store content before advancing anti-replay state. Retrying after a crash
     // is safe because the durable message table deduplicates the stable ID.

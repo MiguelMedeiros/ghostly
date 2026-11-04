@@ -61,7 +61,7 @@ One held item is one object: `"GHLD" || 0x01 || nonce(24) || XSalsa20-Poly1305(s
 | `pay-req` | JSON of the [`pay-req`](../PROTOCOL.md#63-payments) frame without `t` | None | 64 KiB; Cashu and Lightning endpoints only |
 | `manifest` | empty | `{ "entries": [[seq, id, kind, bytes, url, expires], …] }` | 64 KiB, at most 64 entries, sequences strictly increasing |
 
-A receiver refuses a bundle whole, never partially, when: authentication fails; the header is malformed; `from`/`to`/`recipient` are not this link and this device; `author` is not the pinned contact; the signature fails; the digest does not match; `expires ≤ ts` or `expires` is more than one lifetime and a day past now (the sender's clock may be ahead); `mailbox` differs from the manifest's; or the kind's limits are exceeded. A refused item is counted and skipped; its sequence is still passed, so a bad object cannot stall the mailbox.
+A receiver refuses a bundle whole, never partially, when: authentication fails; the header is malformed; `from`/`to`/`recipient` are not this link and this device; `author` is not the pinned contact; the signature fails; the digest does not match; `expires ≤ ts` or `expires` is more than one lifetime and a day past now (the sender's clock may be ahead); `mailbox` differs from the manifest's; or the kind's limits are exceeded. A refused item is counted and skipped; its sequence is still passed, so a bad object cannot stall the mailbox. A ratcheted item sealed in a session the reader never had (its profile moved to this device or was restored) is not refused: it waits until its sender seals it again ([4xx § Held items](4xx-ratchet.md#held-items), revision 2026-11-02).
 
 ## Storage layout ([1000](1000-storage.md))
 

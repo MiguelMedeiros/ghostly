@@ -12,6 +12,8 @@
   "decline": "拒绝",
   "devices": {
     "back": "{{name}} 已重新连接",
+    "failed": "无法使用 {{name}}。通话继续使用原来的设备。",
+    "gone": "{{name}} 已断开。请连接其他设备以继续。",
     "lost": "{{name}} 已断开。正在使用默认设备。",
     "menu": "设备",
     "switchBack": "切换回去"
@@ -34,6 +36,11 @@
   "mute": "静音",
   "needLive": "通话需要直连",
   "noAnswer": "无人接听",
+  "noPath": "通话无法连接",
+  "noPathGuide": "如何解决",
+  "noPathNext": "你或联系人的 VPN 或防火墙可能阻止了通话。TURN 服务器可以让通话接通。",
+  "noPathSettings": "网络设置",
+  "noPathTurnSet": "通话也无法经过你设置的 TURN 服务器。请检查它的地址（443 端口上的 TURN over TLS）和凭据，或者你的联系人也可能需要一个。",
   "onAnother": "你正在另一通话中",
   "outgoing": "呼叫中...",
   "reconnecting": "正在重新连接...",

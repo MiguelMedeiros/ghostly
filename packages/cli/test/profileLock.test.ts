@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { CliError } from "../src/errors";
-import { acquireLock, createProfile, type ProfilePaths } from "../src/profiles";
+import { acquireLock, createProfile, processStart, type ProfilePaths } from "../src/profiles";
 
 // covers: headless.cli
 
@@ -40,11 +40,12 @@ function busy(paths: ProfilePaths): CliError {
 
 /** One process per profile (agents#1642): the lock is never taken from a process that holds it or is making it. */
 describe("the profile lock", () => {
-  it("is taken when free, holds this pid, leaves no other file and is removed on release", () => {
+  it("is taken when free, holds this pid and its start, leaves no other file and is removed on release", () => {
     const paths = profile("free");
     const release = acquireLock(paths);
     expect(readFileSync(paths.lock, "utf8")).toBe(String(process.pid));
-    expect(readdirSync(paths.dir)).toEqual(["daemon.lock"]);
+    expect(readdirSync(paths.dir)).toEqual(withStart(process.pid));
+    expect(readFileSync(`${paths.lock}.${process.pid}.start`, "utf8")).toBe(processStart(process.pid));
     expect(busy(paths)).toMatchObject({ code: "busy", details: { pid: process.pid } });
     release();
     expect(readdirSync(paths.dir)).toEqual([]);
@@ -73,7 +74,7 @@ describe("the profile lock", () => {
     writeFileSync(paths.lock, String(await deadPid()));
     const release = acquireLock(paths);
     expect(readFileSync(paths.lock, "utf8")).toBe(String(process.pid));
-    expect(readdirSync(paths.dir)).toEqual(["daemon.lock"]);
+    expect(readdirSync(paths.dir)).toEqual(withStart(process.pid));
     release();
   });
 
@@ -95,3 +96,65 @@ describe("the profile lock", () => {
     expect(readFileSync(paths.lock, "utf8")).toBe(String(process.ppid));
   });
 });
+
+/**
+ * A holder that died without releasing the lock (kill -9, Ctrl-C of a one-shot, a reboot) left its pid; once another
+ * process has that pid the profile was held for good: every command, the daemon and `restart` busy.
+ */
+describe.skipIf(process.platform === "win32")("a lock whose pid is another process's now", () => {
+  const sleepers: ChildProcess[] = [];
+  afterAll(() => { for (const child of sleepers) child.kill("SIGKILL"); });
+
+  /** A live process that is not the lock's holder: the pid reused. */
+  async function liveOther(): Promise<number> {
+    const child = spawn("sleep", ["60"], { stdio: "ignore" });
+    sleepers.push(child);
+    await new Promise((resolve) => child.once("spawn", resolve));
+    return child.pid!;
+  }
+
+  it("is taken over when that process started at another time than the holder", async () => {
+    const paths = profile("reused");
+    const pid = await liveOther();
+    writeFileSync(paths.lock, String(pid));
+    // The dead holder's start, beside its lock.
+    writeFileSync(`${paths.lock}.${pid}.start`, "the dead holder's start");
+    const release = acquireLock(paths);
+    expect(readFileSync(paths.lock, "utf8")).toBe(String(process.pid));
+    expect(readdirSync(paths.dir)).toEqual(withStart(process.pid));
+    release();
+  });
+
+  it("is taken over when it is this process's pid and this process does not hold it", () => {
+    const paths = profile("mine-now");
+    // A daemon that ran as pid 1 of a container, restarted: the new one is pid 1 too.
+    writeFileSync(paths.lock, String(process.pid));
+    writeFileSync(`${paths.lock}.${process.pid}.start`, "the dead holder's start");
+    const release = acquireLock(paths);
+    expect(readFileSync(paths.lock, "utf8")).toBe(String(process.pid));
+    release();
+    expect(readdirSync(paths.dir)).toEqual([]);
+  });
+
+  it("is busy while that process is the holder: its start is the one beside the lock", async () => {
+    const paths = profile("holder");
+    const pid = await liveOther();
+    writeFileSync(paths.lock, String(pid));
+    writeFileSync(`${paths.lock}.${pid}.start`, processStart(pid)!);
+    expect(busy(paths)).toMatchObject({ code: "busy", details: { pid } });
+    expect(readdirSync(paths.dir).sort()).toEqual(["daemon.lock", `daemon.lock.${pid}.start`]);
+  });
+
+  it("an older release's lock, with no start beside it, is busy while its pid is alive, as before", async () => {
+    const paths = profile("older");
+    const pid = await liveOther();
+    writeFileSync(paths.lock, String(pid));
+    expect(busy(paths)).toMatchObject({ code: "busy", details: { pid } });
+    expect(readdirSync(paths.dir)).toEqual(["daemon.lock"]);
+  });
+});
+
+/** The profile's folder with the lock of `pid` and its start (none where the start cannot be read). */
+function withStart(pid: number): string[] {
+  return processStart(pid) === null ? ["daemon.lock"] : ["daemon.lock", `daemon.lock.${pid}.start`];
+}

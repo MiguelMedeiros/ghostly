@@ -318,6 +318,10 @@ export class LightningCards {
   /** The cards whose source is opened on this device: not one at home on another device (WISP 06 § Wallets that stay home). */
   private here(): LightningService[] { return [...this.services].filter(([id]) => awayFrom(`lightning:${this.network}:${id}`) === undefined).map(([, s]) => s); }
   async reconcile() { await Promise.all(this.here().map((s) => s.reconcile())); }
+  /** The screen shows this invoice of ours: the card that made it asks about it at the fast pace a while longer. */
+  async watch(invoice: string): Promise<boolean> { return (await Promise.all(this.here().map((s) => s.watch(invoice)))).some(Boolean); }
+  /** A payer says it paid this invoice of ours: the card that made it asks its source about it now, and about nothing else. */
+  async check(invoice: string): Promise<boolean> { return (await Promise.all(this.here().map((s) => s.check(invoice)))).some(Boolean); }
   async recover() { for (const s of this.here()) await s.recover(); }
   async ensureReady() { await Promise.all(this.here().map((s) => s.ensureReady())); }
   refreshOffered() { for (const s of this.all()) s.refreshOffered(); }

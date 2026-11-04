@@ -86,7 +86,7 @@ test.describe("Cashu and Lightning", () => {
     await bob.page.getByTestId("wallet-receive-amount").fill("25");
     await bob.page.getByTestId("wallet-create-invoice").click();
     await expect(bob.page.getByTestId("wallet-invoice")).toHaveText(/^\s*lnbc/);
-    await expect(bob.page.getByTestId("wallet-panel")).toContainText("counts only once a contact pays it in a chat");
+    await expect(bob.page.getByTestId("wallet-panel")).toContainText("share this one in a 1:1 chat: it counts only once a contact pays it there");
     // The mint reads it paid within a poll or two (4 s each): nothing comes of it.
     await bob.page.waitForTimeout(12_000);
     await expect(bob.page.getByTestId("wallet-paid")).toHaveCount(0);

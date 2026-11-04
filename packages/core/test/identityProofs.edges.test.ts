@@ -26,10 +26,19 @@ describe("bounding what a provider returns", () => {
   it("strips control and bidi-override characters, bounds lengths, and drops unknown fields", () => {
     const out = boundVerifiedIdentity({ subject: "alice", source: `\u202eDNS\u0007 ${"s".repeat(200)}`, attester: `  ${"a".repeat(300)}`, evil: "<script>" } as unknown as VerifiedIdentity);
     expect(out.source.startsWith("DNS s")).toBe(true);
-    expect(out.source).toHaveLength(120);
+    expect(out.source).toHaveLength(204);
+    expect(boundVerifiedIdentity({ subject: "alice", source: "s".repeat(700) }).source).toHaveLength(640);
     expect(out.attester).toHaveLength(253);
     expect(out).not.toHaveProperty("evil");
     expect(boundVerifiedIdentity({ subject: "alice", source: "s", attester: "\u200e\u2066" })).toEqual({ subject: "alice", source: "s" });
+  });
+
+  it("keeps a name, source and reason on one line with nothing hidden in it", () => {
+    const hidden = "\u2028\u2029\u200b\u2060\ufeff\u061c\u180e\u00ad";
+    const out = boundVerifiedIdentity({ subject: "alice", source: `ok${hidden} Verified by Ghostly`, display: { source: `kind-0${hidden}`, fetchedAt: 5, name: `Alice${hidden}Verified by Google` } });
+    expect(out).toMatchObject({ source: "ok Verified by Ghostly", display: { source: "kind-0", name: "AliceVerified by Google" } });
+    expect(boundVerifiedIdentity({ subject: "alice", source: "s", display: { source: "kind-0", fetchedAt: 5, name: "\u200d\u200c" } }).display).not.toHaveProperty("name");
+    expect(boundVerifiedIdentity({ subject: "alice", source: "s", display: { source: "kind-0", fetchedAt: 5, name: "\u{1F469}\u200d\u{1F4BB} Ana" } }).display!.name).toBe("\u{1F469}\u200d\u{1F4BB} Ana");
   });
 
   it("keeps only an inline PNG/JPEG avatar and an https profile link without credentials", () => {
@@ -202,7 +211,7 @@ describe("sharing", () => {
     const ids = [w.addProof(), w.addProof(), w.addProof()];
     for (const id of ids) { await w.peers.alice.share(id, true); await w.peers.alice.receive({ t: "idp-challenge", id, nonce: "N".repeat(43), issuedAt: NOW }); }
     await w.peers.alice.receive({ t: "idp-result", id: ids[0], ok: true, error: "ignored" });
-    await w.peers.alice.receive({ t: "idp-result", id: ids[1], ok: false, error: "\u202eNope\u0000" });
+    await w.peers.alice.receive({ t: "idp-result", id: ids[1], ok: false, error: "\u202eNo\u2028pe\u061c\u0000" });
     await w.peers.alice.receive({ t: "idp-result", id: ids[2], ok: "yes" });
     expect(w.ledgers.alice.shared.map(s => [s.status, s.error])).toEqual([["accepted", undefined], ["rejected", "Nope"], ["rejected", "Your contact could not verify it"]]);
     // A late result for a settled share changes nothing.
@@ -368,6 +377,28 @@ describe("verifying a presentation", () => {
     expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "revoked"]]);
   });
 
+  it("stores a proof withdrawn while its presentation was being checked as withdrawn, not verified", async () => {
+    const w = world();
+    const id = w.addProof();
+    const frame = await present(w, id);
+    // The owner's withdraw comes on a new session while the old one's check is still out.
+    w.verify.mockImplementationOnce(async () => {
+      await w.peers.bob.receive({ t: "idp-withdraw", id });
+      return { subject: SUBJECT, source: "Test" };
+    });
+    await w.peers.bob.receive(frame);
+    expect(w.sent("idp-withdrawn").map(f => f.frame)).toEqual([{ t: "idp-withdrawn", id }]);
+    expect(w.ledgers.bob.received.map(r => [r.id, r.status])).toEqual([[id, "withdrawn"]]);
+    // No late result: it would settle a new share of the same proof.
+    expect(w.sent("idp-result")).toEqual([]);
+    expect(w.ledgers.bob.timeline?.filter(e => e.side === "theirs").map(e => [e.kind, e.state ?? e.reason])).toEqual([["shared", "verified"], ["stopped", "withdrawn"]]);
+    expect(w.ledgers.bob.challenges).toEqual([]);
+    // A second withdraw writes nothing more.
+    const ledger = w.ledgers.bob;
+    await w.peers.bob.receive({ t: "idp-withdraw", id });
+    expect(w.ledgers.bob).toBe(ledger);
+  });
+
   it("refuses evidence the provider rejects, and a presentation signed for another nonce", async () => {
     const w = world();
     const id = w.addProof({ evidence: { for: "someone else" } });
@@ -467,6 +498,18 @@ describe("re-checking a received proof", () => {
     const id = await received(w);
     w.state.subject = "someone-else";
     expect(await w.peers.bob.recheck(id)).toMatchObject({ status: "unconfirmed", error: "The identity changed", verified: { subject: SUBJECT } });
+  });
+
+  it("keeps a long domain's whole record name in the How line and in the reason a re-check failed", async () => {
+    // A domain may be 253 characters: a cut inside it names a record that does not exist, and the reason no longer reads as itself.
+    const domain = `${"a".repeat(63)}.${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.example`;
+    const w = world();
+    w.verify.mockImplementation(async s => ({ subject: s.binding.subject, source: `DNS TXT record at _ghostly.${domain}, via Quad9, DNSSEC validated` }));
+    const id = await received(w);
+    expect(w.ledgers.bob.received[0].verified.source).toBe(`DNS TXT record at _ghostly.${domain}, via Quad9, DNSSEC validated`);
+    const reason = `No Ghostly TXT record at _ghostly.${domain} (DNS changes can take a few minutes)`;
+    w.verify.mockRejectedValue(new Error(reason));
+    expect(await w.peers.bob.recheck(id)).toMatchObject({ status: "unconfirmed", error: reason });
   });
 
   it("keeps a withdrawn proof withdrawn whatever the re-check finds", async () => {

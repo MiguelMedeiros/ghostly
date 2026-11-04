@@ -20,6 +20,11 @@ skip (`deployedBuild` in support/fixtures.ts; a URL on this machine is the suite
 
 Locally Playwright runs `E2E_WORKERS` workers (default 2, so parallel sessions on one machine leave each other room); CI runs 2.
 
+Chromium runs with its sandbox on (`chromiumSandbox: true`, support/chromiumSandbox.ts; Playwright's default is off). A spec
+that sets its own `launchOptions` replaces the config's, so it carries `chromiumSandbox: CHROMIUM_SANDBOX` too. Where the
+machine has no sandbox to give (a container running as root, a kernel without unprivileged user namespaces), Chromium
+won't start: run with `E2E_CHROMIUM_SANDBOX=0`.
+
 ## Everything, gated suites included
 
 ```bash
@@ -239,6 +244,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `compat/v11.spec.ts` | the current app (mini-apps on) with a real v1.1.4, which has no apps/1: an app card reaches it as its text with the bundle URL a link, the chat goes on both ways, and + → Apps says the contact's app can't run apps. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/chat-and-group.spec.ts` | the current app with a real v1.1.5 and the newest release: a chat from either side's invite, texts delivered both ways; in a private group the old member back after its app was closed catches up from a current member, and a current member from the old one. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT. See [Desktop on macOS](#desktop-on-macos) |
+| `desktop-macos/services-forget.spec.ts` | macOS only: a bot's shared app opened in the Desktop app keeps localStorage, IndexedDB and Cache Storage; Delete chat and Clear all data empty its folder under `~/Library/WebKit/<bundle id>` at once, and after the next launch no file there names its origin (WebKit's tracking prevention database included) |
 | `desktop-macos/external-links.spec.ts` | macOS only: a link in a message and Settings → About → GitHub go to the system browser (`open_web_link`), not to a dropped new window |
 | `desktop-macos/headless-call.spec.ts` | macOS only: the Desktop app and a headless bot (`packages/cli`) call each other both ways, tones checked on the bot's audio socket and in the app's stats |
 | `desktop-macos/video-stream.spec.ts` | macOS only: a 100 MB video plays and seeks from the `ghostly-file` scheme, read in ranges of at most 4 MiB |
@@ -268,7 +274,7 @@ Two things to know:
 - Build with `tauri build`, not `cargo build`. A plain cargo debug build points the WebView at `devUrl`, and with no dev server running the window only says "Connection refused". `--debug --no-bundle` keeps the compile short and skips the installers; the test runs the binary from `target/`, newest of `debug` and `release`.
 - The app runs under `GHOSTLY_PROFILE=e2e`, so a test never opens your own chats.
 
-The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
+The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network says it reaches Mainline DHT (BEP44) directly over UDP (`data-testid="network-protocol"` with `data-kind="direct"`: Rust reaching the DHT, where a browser has `relays`, Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
 
 ### On macOS
 
