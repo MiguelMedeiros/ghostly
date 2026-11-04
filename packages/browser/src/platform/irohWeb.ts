@@ -100,6 +100,8 @@ export interface IrohWebOptions {
 
 const SEND_BUDGET = 120 * 1024;
 const MAX_FRAME = 60 * 1024;
+/** How often an endpoint reads which relay it is homed on (`createIrohWebEndpoint`). */
+const HOME_CHECK_MS = 5_000;
 
 /** One paired channel over one QUIC stream. Sends are queued in order. */
 class IrohWebChannel implements FrameChannel {
@@ -179,11 +181,23 @@ export async function createIrohWebEndpoint(seedB64: string, options: IrohWebOpt
     async close() {
       if (stopped) return;
       stopped = true;
+      clearInterval(watching);
       for (const channel of [...channels]) channel.close();
       for (const bound of early.splice(0)) bound.channel.close();
       await node.close().catch(() => {});
     },
   };
+  // Iroh moves its home to another of the relays when the one it homed on goes away or another answers faster, and a
+  // contact reaches it only through the relay its record names (the one left: no answer, every time). The wasm says
+  // nothing when it moves, so its address is read again (`HOME_CHECK_MS`) and a new home is published, as the
+  // Desktop's own Iroh does (`onDescriptor`). Between two homes it has none: the last stays published.
+  const watching = setInterval(() => {
+    let now: IrohWebDescriptor;
+    try { now = node.address(); } catch { return; }
+    if (stopped || !now.relay || now.relay === (endpoint.descriptor as IrohWebDescriptor).relay) return;
+    endpoint.descriptor = { ...now, relayed: true };
+    endpoint.onDescriptor?.();
+  }, HOME_CHECK_MS);
   void (async () => {
     while (!stopped) {
       let conn: WasmConn | undefined;
