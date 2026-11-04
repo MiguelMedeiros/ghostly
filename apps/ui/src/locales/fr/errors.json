@@ -159,7 +159,10 @@
     "clipboardUnavailableNext": "Joignez-le avec +.",
     "declinedHere": "Vous l'avez refusé. Si vous le voulez, demandez à votre contact de le renvoyer.",
     "declinedThere": "Votre contact l'a refusé.",
+    "dropGone": "Ces fichiers déposés ne sont plus disponibles",
+    "dropGoneNext": "Déposez-les à nouveau.",
     "dropLate": "Impossible d'ajouter pour l'instant ce que vous avez déposé. Déposez-le à nouveau quand vous aurez terminé.",
+    "dropTooLarge": "C'est trop volumineux pour être déposé. Envoyez-le avec + → Document.",
     "dropUnreadable": "Impossible d’ajouter ces fichiers. Envoyez-les avec + → Document.",
     "floor": {
       "noRoomNext": "Libérez de la place, puis demandez à votre contact de le renvoyer.",

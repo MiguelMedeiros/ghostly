@@ -424,6 +424,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The clipboard's picture is damaged", "apps/desktop/src/clipboard.rs"],
   ["Clipboard unavailable", "apps/desktop/src/clipboard.rs"],
   ["That paste is gone. Paste it again.", "apps/desktop/src/clipboard.rs"],
+  ["That is too large to drop. Send it with + → Document.", "apps/ui/src/lib/pastedFiles.ts"],
+  ["That drop is gone. Drop it again.", "apps/ui/src/lib/pastedFiles.ts"],
   ["Could not read the pasted file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the pasted file: {e}"],
   ["Could not read the file: The file changed while it was being copied", `${CORE}/chatFiles.ts`, "Could not read the file: "],
   ["This browser cannot wake Ghostly while it is closed.", "apps/ui/src/lib/wakePush.ts"],

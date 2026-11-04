@@ -23,6 +23,7 @@ const TYPES: Record<string, string> = {
 /** The most a paste read by the platform brings into the page, all its files together: more goes through + → Document. */
 export const PLATFORM_PASTE_MAX = 256 * 1024 * 1024;
 const READ_STEP = 16 * 1024 * 1024;
+const TOO_LARGE_TO_PASTE = "That is too large to paste. Send it with + → Document.";
 
 /** A name a browser gives an image that has none of its own ("image.png", or nothing). */
 const GENERIC_IMAGE = /^(image\.\w+)?$/i;
@@ -101,13 +102,23 @@ export function dragCarriesFiles(data: DataTransfer | null): boolean {
   return dragHasFiles(data) || (!!platformDrag?.over && dragNamesAddress(data));
 }
 
+/** A paste's refusals as a drop's read says them: the person dropped, and pasted nothing. */
+const DROP_WORDS: Record<string, string> = {
+  [TOO_LARGE_TO_PASTE]: "That is too large to drop. Send it with + → Document.",
+  // The platform's shelf (apps/desktop/src/clipboard.rs) let the drop's files go before the page read them.
+  "That paste is gone. Paste it again.": "That drop is gone. Drop it again.",
+};
+
 /**
  * The files of a drop the platform holds (`followPlatformDrags`), read into the page as a paste's are; null when the
  * drop handed the page its files itself, or is no drop of files.
  */
 export function platformDroppedFiles(data: DataTransfer | null): Promise<File[]> | null {
   if (!platformDrag?.over || dragHasFiles(data) || !dragNamesAddress(data)) return null;
-  return platformDrag.read().then((clips) => readPlatformFiles(clips, new Date(), true));
+  return platformDrag.read().then((clips) => readPlatformFiles(clips, new Date(), true)).catch((error: unknown) => {
+    const words = DROP_WORDS[error instanceof Error ? error.message : String(error)];
+    throw words ? new Error(words) : error;
+  });
 }
 
 /** Tests only. */
@@ -186,7 +197,7 @@ const clipType = (clip: ClipboardFile) => clip.mime ?? TYPES[clip.name?.split(".
 export async function readPlatformFiles(clips: ClipboardFile[], at: Date = new Date(), together = false): Promise<File[]> {
   try {
     const largest = together ? clips.reduce((sum, clip) => sum + clip.size, 0) : Math.max(0, ...clips.map((clip) => clip.size));
-    if (largest > PLATFORM_PASTE_MAX) throw new Error("That is too large to paste. Send it with + → Document.");
+    if (largest > PLATFORM_PASTE_MAX) throw new Error(TOO_LARGE_TO_PASTE);
     const files: File[] = [];
     for (const clip of clips) {
       const parts: Uint8Array[] = [];
