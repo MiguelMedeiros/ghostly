@@ -419,19 +419,21 @@ const METHODS: Record<string, Method> = {
   async "saved.remove"(ctx, params) {
     return saveMark(ctx, params, true);
   },
-  /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
+  /** The saved messages under `saved`, the last saved first, each as it is now and named by its chat or group. */
   async "saved.list"(ctx) {
     const { links, groups } = state(ctx);
     const saved = await node(ctx).savedMessages();
     // A saved reply quotes its original as history gives it: per chat or group, one read per quoted original.
     const originals = new Map<string, Originals>();
     for (const linkId of new Set(saved.map((s) => s.message.linkId))) originals.set(linkId, await originalsNow(ctx, linkId, saved.flatMap((s) => (s.message.linkId === linkId ? [s.message] : []))));
-    return saved.map(({ savedAt, message }) => {
-      const checked = (json: MessageJson) => quoteChecked(json, message, originals.get(message.linkId)!);
-      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
-      const id = message.linkId.slice("group:".length);
-      return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
-    });
+    return {
+      saved: saved.map(({ savedAt, message }) => {
+        const checked = (json: MessageJson) => quoteChecked(json, message, originals.get(message.linkId)!);
+        if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
+        const id = message.linkId.slice("group:".length);
+        return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
+      }),
+    };
   },
   /**
    * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
