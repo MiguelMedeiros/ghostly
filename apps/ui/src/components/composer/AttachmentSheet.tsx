@@ -96,7 +96,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
             {/* The name is cut in its own direction, at its end, as in the file rows; the size stays whole beside it. */}
             <figcaption className="px-4 pt-2 text-xs text-text-muted flex min-w-0" data-testid="attachment-name">
               <span dir="auto" className="min-w-0 truncate">{single.name}</span>
-              <span className="shrink-0 whitespace-pre"> · {formatFileSize(single.size)}</span>
+              <span className="shrink-0 whitespace-pre"> · {formatFileSize(single.size, t)}</span>
             </figcaption>
           </figure>
         ) : (
@@ -108,7 +108,7 @@ export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, on
                     <span className="shrink-0" aria-hidden="true"><DocumentGlyph /></span>
                     <span className={`min-w-0 ${single ? "" : "w-full"}`}>
                       <span dir="auto" className="block text-xs text-text-primary truncate">{file.name}</span>
-                      <span className="block text-[11px] text-text-muted">{formatFileSize(file.size)}</span>
+                      <span className="block text-[11px] text-text-muted">{formatFileSize(file.size, t)}</span>
                     </span>
                   </div>}
                 {files.length > 1 && (
