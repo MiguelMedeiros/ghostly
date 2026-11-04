@@ -1310,8 +1310,8 @@ export class Communities {
       const records = read ?? [];
       existing = live.hubClocks.inMyTime(readBeacon(keys, records), now); head = readBeaconHead(keys, records);
     }
-    // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones.
-    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !this.gone(live, key));
+    // Nobody drops a hub it does not know: a member behind on the roster would erase newer ones. Those it knows go first.
+    const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !this.gone(live, key), key => rosterHas(live.session.roster, key));
     // Nor a newer head: several hubs write this record in turn.
     const newest = newerHead(head, this.newestFrame(live), now);
     await this.host.publish(keys.identity, beaconRecords(keys, live.hubClocks.asWritten(hubs), newest), !back, live.hub && !back, back);
@@ -1322,13 +1322,15 @@ export class Communities {
 
   /**
    * The beacon's hubs, less those the chain took out: hubs are members. Someone removed while its app was closed lists
-   * itself there when it comes back, believing it is a member, until it is told (`wantFarewell`).
+   * itself there when it comes back, believing it is a member, until it is told (`wantFarewell`). A key my roster does
+   * not have is nobody's hub here either (anyone holding the rendezvous secret can write one in), though it stays in the
+   * beacon I write: a member behind on the roster must not erase the newest hubs.
    */
   private hubs(live: Live): Hub[] {
     // Asked many times a tick: worked out again only when the beacon, the chain or the leave requests moved.
     const top = live.session.top, leaves = live.session.state.pendingLeaves, memo = live.hubsMemo;
     if (memo && memo.beacon === live.beacon && memo.top === top && memo.leaves === leaves) return memo.hubs;
-    const hubs = live.beacon.filter(h => !this.gone(live, h.key));
+    const hubs = live.beacon.filter(h => !this.gone(live, h.key) && rosterHas(live.session.roster, h.key));
     live.hubsMemo = { beacon: live.beacon, top, leaves, hubs };
     return hubs;
   }
