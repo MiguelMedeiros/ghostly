@@ -284,6 +284,16 @@ describe("real money", () => {
     expect(node.payRequest.mock.calls.at(-1)![0]).not.toHaveProperty("confirmedReal");
   });
 
+  it("pay --chat names the chat the invoice came from, so a Testnet one is said paid to its contact, as a chat card's Pay does", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "pay", { target: "lightning:lntbs10u1pxyz", chat: "Alice" });
+    expect(node.walletPayQuote.mock.calls.at(-1)![0]).toEqual({ quote: "q", mint: "m", linkId: "chat-one", invoice: "lntbs10u1pxyz" });
+    // An address's invoice is its server's, never one of the contact's; a chat nobody joined has nobody to tell.
+    await expect(callApi(ctx, "pay", { target: "alice@example.com", amount: 5, chat: "Alice" })).rejects.toMatchObject({ code: "usage" });
+    await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", chat: "Bob" })).rejects.toMatchObject({ code: "unavailable" });
+    expect(node.walletPayQuote).toHaveBeenCalledTimes(1);
+  });
+
   it("a fee above --max-fee is refused before paying", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "pay", { target: "lntbs10u1pxyz", maxFee: 2 })).rejects.toMatchObject({ code: "refused" });
