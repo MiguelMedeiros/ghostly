@@ -1530,10 +1530,12 @@ export class Apps {
     await this.refreshStores();
     const stores = await this.stores();
     // A few apps at a time: each waits on its publisher's files (and its sources' peeks), so one after the other a
-    // check took the app count times the round trip. The results stay in the installed order.
+    // check took the app count times the round trip. The results stay in the installed order. An app whose check fails
+    // (a bundle write refused on a full disk) is left out, as one uninstalled meanwhile is: a throw would end the check
+    // while the other workers still run, and the next check would start beside them.
     const out: (AppCheckResult | null)[] = [];
     let next = 0;
-    const worker = async () => { while (next < apps.length) { const i = next++; out[i] = await this.checkApp(apps[i]!, stores); } };
+    const worker = async () => { while (next < apps.length) { const i = next++; out[i] = await this.checkApp(apps[i]!, stores).catch(() => null); } };
     await Promise.all(Array.from({ length: Math.min(APP_CHECK_PARALLEL, apps.length) }, worker));
     return out.filter((r) => r !== null);
   }
