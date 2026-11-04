@@ -362,6 +362,22 @@ describe("removing a proof and its revocation", () => {
     expect(engines.b.linkView("chat", true)!.received[0].status).toBe("withdrawn");
     engines.b.stop();
   });
+
+  it("a chat whose connection drops while its withdrawal is written does not stop the removal: the contact is told on reconnect", async () => {
+    const { engines, ledgers, state, pkarr, id, binding } = await shared();
+    // The chat's link closes right after A's ledger write, before the withdraw frame is sent.
+    let a = ledgers.a;
+    Object.defineProperty(ledgers, "a", { get: () => a, set: (next: IdentityLedger) => { a = next; state.connected = false; } });
+    await engines.a.remove({ id });
+    expect(engines.a.views()).toEqual([]);
+    expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawal-pending");
+    expect(await stored<{ id: string }[]>("identityRevocations")).toEqual([expect.objectContaining({ id, key: binding.key })]);
+    await vi.waitFor(() => expect(pkarr.get(binding.key)?.[0]).toMatchObject({ label: "_ghostly-revoked", value: expect.stringContaining(id) }));
+    engines.a.closed("chat");
+    state.connected = true;
+    engines.a.ready("chat");
+    await vi.waitFor(() => expect(ledgers.a.shared.find(s => s.id === id)?.status).toBe("withdrawn"));
+  });
 });
 
 describe("per chat", () => {

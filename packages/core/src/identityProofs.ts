@@ -389,7 +389,8 @@ export class IdentityExchange {
     // One the contact refused, it never held: its app writes no stop, and neither does this side.
     await this.setShared({ ...s, status: "withdrawal-pending", at: this.now(), error: undefined },
       s.status === "rejected" ? undefined : { type: "stopped", side: "mine", proof: id, provider: s.provider, subject: s.subject, reason: "withdrawn" });
-    if (connected) this.send({ t: "idp-withdraw", id });
+    // A link that closed during that write: the withdrawal stays pending and ready() sends it on reconnect.
+    if (connected) try { this.send({ t: "idp-withdraw", id }); } catch { /* sent on reconnect */ }
   }
 
   /**
