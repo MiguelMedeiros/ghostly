@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { LAST_UPDATED_APPS } from "../app/privacy/updated";
-import { clientLabel } from "../content/apps";
+import { PERMISSIONS, clientLabel } from "../content/apps";
 import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
 import { VERSION } from "../lib/release";
 
@@ -173,7 +173,10 @@ test.describe("once the released Ghostly has Apps", () => {
       "Keep its own data on this device, separately in each chat",
       "Talk to the same app on your contact's side, while you are both in the chat",
     ]);
-    await expect(main).toContainText("No internet access. Its publisher may still learn your IP address and when you open it.");
+    // As the install screen warns there: in WebKit on the web an app can still reach a server it names (WISP 1200 · Threats).
+    await expect(main).toContainText(
+      "No internet access. Its publisher may still learn your IP address and when you open it. In Safari, and any browser on iPhone or iPad, an app can still contact other servers, which learn your IP address. The desktop app blocks them.",
+    );
     await expect(main).toContainText("Inside a one-to-one chat, with a contact who has it too.");
     await expect(main).toContainText("Made for: Web, Desktop.");
     const fingerprint = `${PREFIX.a.slice(0, 4)} ${PREFIX.a.slice(4, 8)} ${PREFIX.a.slice(8, 12)} ${PREFIX.a.slice(12, 16)}`;
@@ -214,6 +217,13 @@ test.describe("once the released Ghostly has Apps", () => {
     expect(["web", "desktop", "extension"].map(clientLabel)).toEqual(["Web", "Desktop", "Browser extension"]);
     // Both pass WISP 1200's reader. CLIENTS is a plain object: `constructor` must not reach its prototype.
     for (const name of ["android", "constructor"]) expect(clientLabel(name)).toBe(name);
+  });
+
+  test("the files permission says what is picked stays with the app, not the chat it was picked in", () => {
+    // No app of the test store asks for files. Picks are kept per app (WISP 1200 · Keeping), and sharing them needs `chat`.
+    expect(PERMISSIONS.files.info).toBe(
+      "It reads only what you pick, without copying it. What you pick stays with the app, not with the chat: if it may also talk to your contact's app, it can share it in any chat you open it in.",
+    );
   });
 
   test("an app with the internet permission says so, and one without an icon shows its letter", async ({ page, request }) => {
