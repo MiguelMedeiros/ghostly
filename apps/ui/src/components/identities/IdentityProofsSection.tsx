@@ -4,7 +4,7 @@ import type { IdentityProofView, LinkView } from "@ghostly/browser/shared/types"
 import type { ApprovalRequest } from "@ghostly/browser/proofs/contract";
 import { Block, Button, Notice, Row } from "../wallet/ui";
 import { Deck } from "../deck/Deck";
-import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, sharedStatus, useEngineState, useNewProof } from "../../lib/identities";
+import { addableProviders, chatsByPeer, contactName, profileSince, providerOf, sharedStatus, useEngineValue, useNewProof } from "../../lib/identities";
 import { contactTag } from "../../lib/publicKeyLabel";
 import { chatPath } from "../../lib/url";
 import type { ChatSession } from "../../lib/types";
@@ -28,6 +28,19 @@ const PANEL = { id: "identity-panel", tabId: (id: string) => `identity-tab-${id}
 const REMOVE = '[data-testid="identity-proof-remove"]';
 
 /**
+ * What the section reads of the engine's state: the profile's proofs, its DID and Ghostly card, and each chat's link as
+ * far as where those proofs are shared and when the chat began.
+ */
+function proofsView(state: NonNullable<typeof engine.state>) {
+  return {
+    identityProofs: state.identityProofs ?? [],
+    did: state.did,
+    settings: { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false, online: state.settings.online },
+    links: state.links.map(l => ({ id: l.id, peerPubKeyZ32: l.peerPubKeyZ32, createdAt: l.createdAt, identities: l.identities && { shared: l.identities.shared } })),
+  };
+}
+
+/**
  * Identities → Yours: a deck of ID cards (the wallet's deck, with ID cards for faces). The first card is the
  * profile's own Ghostly identity, what contacts see by default: its name and picture, and a key pair made for
  * each chat. Then this profile's proofs of other identities. Below the deck, the chosen card's details: for the
@@ -36,7 +49,8 @@ const REMOVE = '[data-testid="identity-proof-remove"]';
  * the person chooses (the chat's Identities). Adding one is the page's New (`onAdd`), not a card in the deck.
  */
 export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
-  const state = useEngineState();
+  // Only what the section shows of the engine's state: the page stays open, and drew it again on every state.
+  const state = useEngineValue(s => s && proofsView(s));
   const { t } = useI18n();
   const nav = useAppNavigation();
   const proofs = state?.identityProofs ?? [];
@@ -75,11 +89,11 @@ export function IdentityProofsSection({ onAdd }: { onAdd?: () => void }) {
   const providers = addableProviders().map(p => p.id);
   const canAdd = providers.length > 0;
   const chats = state.links.some(l => l.identities?.shared.length) ? chatsByPeer() : new Map<string, ChatSession>();
-  const nameOf = (link: LinkView) => contactName(chats.get(link.peerPubKeyZ32)) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
+  const nameOf = (link: Pick<LinkView, "peerPubKeyZ32">) => contactName(chats.get(link.peerPubKeyZ32)) ?? t("common.unnamedContact", { key: contactTag(link.peerPubKeyZ32) });
   /** Contacts whose app checked this proof and refused it. */
   const refusedBy = (id: string) => state.links.filter(l => l.identities?.shared.some(s => s.id === id && s.status === "rejected")).map(nameOf);
   // Every chat has a key pair of its own (a legacy one too), so the Ghostly identity is used in every chat.
-  const ghostly = ghostlyCard(t, { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile !== false },
+  const ghostly = ghostlyCard(t, { nick: state.settings.nick, avatar: state.settings.avatar, shareProfile: state.settings.shareProfile },
     { chats: state.links.length, since: profileSince(state.links) });
 
   const entries: Entry[] = [
