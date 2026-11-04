@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { GroupSession, type GroupState } from "../src/groupSession";
 import { Mesh, admit, clone } from "./support/groupMesh";
-// covers: groups.messages
+// covers: groups.send, groups.catch-up
 
 /*
  * A member's app killed while it sends a text (kill -9, out of memory, a tab closed): what it saved and stored up to
