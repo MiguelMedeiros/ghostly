@@ -297,6 +297,11 @@ export const INVOICE_LOOKS_PER_CHAT = 5;
  */
 export const RAIL_LOOK_MS = 10_000;
 /**
+ * Whether `at` was less than `ms` ago, for the desk's paces. A time later than now (the device clock went back) is long
+ * ago: otherwise a pace stays shut for as long as the clock went back.
+ */
+const within = (now: number, at: number | undefined, ms: number): boolean => at !== undefined && at <= now && now - at < ms;
+/**
  * How long a receipt of ours (an on-chain, Ark, Bark, Spark or USDT payment already made) the payee has not confirmed
  * goes again at every reconnect (`receiptOwed`): a week. After that, once per run of the app.
  */
@@ -815,7 +820,7 @@ export class PaymentDesk {
     const link = this.host.getLink(linkId);
     if (!link) return;
     const now = Date.now();
-    if (now - (this.lastAskFrom.get(linkId) ?? 0) < 3_000) return;
+    if (within(now, this.lastAskFrom.get(linkId), 3_000)) return;
     this.lastAskFrom.set(linkId, now);
     const open = [...this.payments.values()].filter((p) => p.linkId === linkId && p.kind === "request" && p.direction === "out" && p.state === "pending" && p.ask).length;
     if (open >= 5 || !/^[1-9]\d{0,15}$/.test(ask.amount.value)) return;
@@ -1206,7 +1211,7 @@ export class PaymentDesk {
       : request.invoice ? [ENDPOINT.bolt11, request.invoice] : undefined;
     if (!endpoint) throw new Error("This request cannot be paid from another wallet");
     const now = Date.now();
-    if (now - (this.lastCheck.get(request.id) ?? 0) < 5_000) return;
+    if (within(now, this.lastCheck.get(request.id), 5_000)) return;
     this.lastCheck.set(request.id, now);
     const link = this.requireLink(params.linkId);
     await this.sendTo(link, { id: newId(), timestamp: now, requestId: request.id, amount: { value: String(request.amount), asset: UNIT }, endpoint });
@@ -1230,7 +1235,7 @@ export class PaymentDesk {
     // A Lightning look is at this request's invoice; any other looks at every open request of its rail, so one
     // look per rail, whatever the request or chat, and no sooner than the wallet's own refresh.
     const [key, every] = rail === "lightning" ? [request.id, 3_000] : [rail, RAIL_LOOK_MS];
-    if (now - (this.lastCheckFrom.get(key) ?? 0) < every) return;
+    if (within(now, this.lastCheckFrom.get(key), every)) return;
     this.lastCheckFrom.set(key, now);
     try {
       // The invoice it says it paid, when it is this request's: the only one a contact can speak for.
@@ -1255,15 +1260,15 @@ export class PaymentDesk {
     const now = Date.now();
     const wanted = invoice.trim().toLowerCase();
     const key = `${linkId}:${wanted}`;
-    if (now - (this.lastInvoiceCheck.get(key) ?? 0) < 3_000) return;
-    const looks = (this.invoiceLooks.get(linkId) ?? []).filter((at) => now - at < 3_000);
+    if (within(now, this.lastInvoiceCheck.get(key), 3_000)) return;
+    const looks = (this.invoiceLooks.get(linkId) ?? []).filter((at) => within(now, at, 3_000));
     if (looks.length >= INVOICE_LOOKS_PER_CHAT) { this.invoiceLooks.set(linkId, looks); return; }
     this.invoiceLooks.set(linkId, [...looks, now]);
     // Oldest first (each key is set again only once it went, at the end): the ones gone are at the front.
-    for (const [seen, at] of this.lastInvoiceCheck) { if (now - at < 3_000) break; this.lastInvoiceCheck.delete(seen); }
+    for (const [seen, at] of this.lastInvoiceCheck) { if (within(now, at, 3_000)) break; this.lastInvoiceCheck.delete(seen); }
     this.lastInvoiceCheck.delete(key);
     this.lastInvoiceCheck.set(key, now);
-    for (const [chat, times] of this.invoiceLooks) if (chat !== linkId && times.every((at) => now - at >= 3_000)) this.invoiceLooks.delete(chat);
+    for (const [chat, times] of this.invoiceLooks) if (chat !== linkId && times.every((at) => !within(now, at, 3_000))) this.invoiceLooks.delete(chat);
     try {
       const quote = (await this.wallet.quotes()).find((q) => q.held && !q.paymentId && q.invoice.toLowerCase() === wanted);
       if (quote) await this.wallet.vouch(quote.invoice);
