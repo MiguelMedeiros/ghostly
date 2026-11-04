@@ -88,6 +88,20 @@ describe("usage send", () => {
     expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2026-02-30"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a day the month has (2026-02 has 28), not \"2026-02-30\"" }));
   });
 
+  it("refuses a --resets or --also time more than a year ahead as a usage error (exit 2) that names the flag and the last time it takes", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.UTC(2026, 10, 4, 11, 30, 20) });
+      // Before, bad_request (exit 1): "Status card: resetsAt is a time in milliseconds, within a year", and windows[0].resetsAt.
+      expect(() => params(["Miguel", "--left", "40", "--resets", "2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(() => params(["Miguel", "--left", "40", "--also", "week=80@2028-01-01"])).toThrow(expect.objectContaining({ code: "usage", message: "--also takes a time within a year from now (until 2027-11-05 11:30), not \"2028-01-01\"" }));
+      expect(params(["Miguel", "--left", "40", "--resets", "2027-11-05 11:30", "--also", "week=80@2026-11-01"]).card).toMatchObject({ resetsAt: Date.UTC(2027, 10, 5, 11, 30), windows: [{ resetsAt: Date.UTC(2026, 10, 1) }] });
+    } finally {
+      if (zone === undefined) delete process.env.TZ; else process.env.TZ = zone;
+    }
+  });
+
   it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {
     const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
     usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
