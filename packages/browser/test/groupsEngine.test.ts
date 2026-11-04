@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Groups, KNOCK_REFRESH_MS, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
-import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, decodeGroupEntryLink, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, knockIdentity, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
+import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, decodeGroupEntryLink, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, knockIdentity, readKnocks, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
 
 // Counts the derivations of a public key from a seed (the group link's entry key is derived once, not at every state).
@@ -1330,6 +1330,29 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     const later = t0 + 1_000 + KNOCK_REFRESH_MS + timings.knockMs;
     vi.setSystemTime(later); await dan.tick(later);
     expect(view(dan).invitation?.othersKnocked).toBeUndefined();
+  });
+
+  it("a joiner let in takes its knock out of the link's record: the next one is not told others knocked", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const world = new World();
+    const alice = world.add("alice", timings);
+    const groupId = await alice.create("Ghosts", "mesh");
+    const code = await alice.enableLink(groupId);
+    const link = decodeGroupEntryLink(code)!, knockKey = knockIdentity(link).pubKeyZ32;
+    const erin = world.add("erin", timings);
+    await erin.joinByLink(code); await flush();
+    for (let i = 0; i < 6 && view(erin, groupId)?.status !== "active"; i++) {
+      vi.setSystemTime(Date.now() + 2_000);
+      await alice.tick(Date.now()); await erin.tick(Date.now()); await world.settle(); await world.meetEntries(); await world.meet();
+    }
+    expect(view(erin, groupId).status).toBe("active");
+    await world.settle();
+    expect(readKnocks(link, world.pkarr.get(knockKey) ?? [])).toEqual([]);
+    // Dan opens the link a moment after: nobody is waiting, so the admin's app is the one to open.
+    const dan = world.add("dan", timings);
+    await dan.joinByLink(code); await flush();
+    expect(view(dan, groupId).invitation).toMatchObject({ stage: "knocked" });
+    expect(view(dan, groupId).invitation?.othersKnocked).toBeUndefined();
   });
 
   it("a link just handed out is looked at fast for a minute, as a community's door, not for ten", async () => {
