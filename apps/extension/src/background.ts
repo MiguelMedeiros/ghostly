@@ -1,4 +1,4 @@
-import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders } from "@ghostly/core";
+import { concatBytes, fromBase64, toBase64, utf8Encode, viewerResponseHeaders, VIEWER_SERVICE_CSP, withViewerPolicy } from "@ghostly/core";
 import type { EngineStatus, HttpRequestReply, RuntimeMessage, ViewerPage } from "./messages";
 import { fromOwnPage } from "./shared/sender";
 import { parseViewerUrl, viewerUrl, VIEWER_URL_PATTERN } from "./shared/viewer";
@@ -248,7 +248,11 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 //
 // A tab serves the one service it was opened for. The app in it is a
 // contact's code: if it could reach another virtual origin, it would talk to
-// another contact's app as the user.
+// another contact's app as the user. Nor may it reach the person's own
+// services: every answer carries Ghostly's connection policy
+// (`withViewerPolicy`), which keeps it off plain http, whatever the browser's
+// own guard for local addresses allows. A top-level navigation is beyond any
+// policy, and once the tab leaves the virtual origin it is no viewer any more.
 //
 // The `debugger` permission reaches every tab, so its use is kept narrow here,
 // the only place in the extension that calls `chrome.debugger`:
@@ -408,7 +412,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     await devtools(tabId, "Fetch.fulfillRequest", {
       requestId: paused.requestId,
       responseCode: reply.status,
-      responseHeaders: viewerResponseHeaders(reply.headers).map(([name, value]) => ({ name, value })),
+      responseHeaders: withViewerPolicy(viewerResponseHeaders(reply.headers)).map(([name, value]) => ({ name, value })),
       body: reply.bodyB64,
     });
     return;
@@ -425,6 +429,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
       { name: "content-type", value: "text/html; charset=utf-8" },
       { name: "cache-control", value: "no-store" },
       { name: "x-ghostly-error", value: reply.code },
+      { name: "content-security-policy", value: VIEWER_SERVICE_CSP },
     ],
     body: toBase64(utf8Encode(errorPage(page, gone ? page.unreachable : page.failed))),
   });
