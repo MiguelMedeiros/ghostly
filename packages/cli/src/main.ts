@@ -374,9 +374,24 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
+/** The most stdin gives a command: the longest request line a daemon reads (host.ts `MAX_LINE`). */
+const STDIN_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Stdin up to `STDIN_BYTES`; more is refused as it comes. It was read to its end first: `send bob --stdin < big.log`
+ * with 1 GiB took 3 GB and answered V8's "Cannot create a string longer than 0x1fffffe8 characters", 128 MiB to
+ * `settings set nick -` ran the CLI out of memory, an endless pipe never ended, and past 16 MiB a daemon cut the line,
+ * answered "The daemon went away".
+ */
 async function readStdin(onData?: () => void): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) { onData?.(); chunks.push(chunk as Buffer); }
+  let bytes = 0;
+  for await (const chunk of process.stdin) {
+    onData?.();
+    bytes += (chunk as Buffer).length;
+    if (bytes > STDIN_BYTES) throw new CliError("bad_request", "More than 16 MiB came on stdin, more than any command takes (a long text goes as a file: ghostly file send <chat|group> <path>)");
+    chunks.push(chunk as Buffer);
+  }
   return Buffer.concat(chunks).toString("utf8");
 }
 
