@@ -195,7 +195,8 @@
     "showQr": "Show QR",
     "title": "Group link",
     "tooMany": "Too many group links opened",
-    "tooManyNext": "Delete a group that is still waiting to be let in, or paste the link in Join."
+    "tooManyNext": "Delete a group that is still waiting to be let in, or paste the link in Join.",
+    "unanswered": "People opening the link may not be getting in: many who knocked lately never answered. A new link fixes it; share the new one after."
   },
   "makeAdmin": {
     "body": "You will no longer be the admin. Only {{name}} can then rename the group, change its picture and link, invite or remove members, and give the role back.",

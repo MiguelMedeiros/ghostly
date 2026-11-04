@@ -195,7 +195,8 @@
     "showQr": "Mostrar QR",
     "title": "Link do grupo",
     "tooMany": "Muitos links de grupo abertos",
-    "tooManyNext": "Apague um grupo que ainda espera para entrar ou cole o link em Entrar."
+    "tooManyNext": "Apague um grupo que ainda espera para entrar ou cole o link em Entrar.",
+    "unanswered": "Quem abre o link talvez não esteja conseguindo entrar: muitos que bateram há pouco nunca responderam. Um novo link resolve; compartilhe o novo depois."
   },
   "makeAdmin": {
     "body": "Você deixa de ser o admin. Só {{name}} vai poder renomear o grupo, mudar a foto e o link, convidar ou remover membros, e devolver o papel.",

@@ -790,6 +790,13 @@ export function GroupChat() {
       </div>}
       {group.adminOff && group.status === "active" && (group.isAdmin || group.profile === "community") && <ManageHere groupId={group.id} />}
       {group.entryJammed && group.isAdmin && group.status === "active" && <LinkJammed groupId={group.id} onReplaced={() => setSharing("share")} />}
+      {/* Joiners the door let in whose side never came up, many lately: real ones may not get in. One tap replaces the
+          link, and its share sheet opens on the new one. */}
+      {group.isAdmin && group.status === "active" && !!community?.unansweredKnocks && <div role="status" data-testid="group-knocks-unanswered" className="flex flex-wrap items-center gap-2 px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
+        <span className="min-w-0 flex-1">{t("group.link.unanswered")}</span>
+        <button type="button" data-testid="group-knocks-reset" onClick={() => void act(async () => { await engine.call("enableGroupLink", { groupId, reset: true }); setSharing("share"); })}
+          className="rounded px-2 py-1 font-semibold text-accent hover:bg-accent/10 cursor-pointer max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+      </div>}
       {(error || (group.status && group.status !== "active")) && <div ref={noticeRef} tabIndex={-1} role="status" data-testid="group-notice" className="px-4 py-2 text-xs bg-surface-alt text-text-secondary border-b border-border">
         {error && <Notice problem={error} className="text-xs" />}
         {/* Knocking again: how far the knock got, and a way to stop asking that keeps the group here (a decline, not a delete). */}

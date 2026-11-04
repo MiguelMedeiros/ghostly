@@ -195,7 +195,8 @@
     "showQr": "Afficher le QR",
     "title": "Lien du groupe",
     "tooMany": "Trop de liens de groupe ouverts",
-    "tooManyNext": "Supprimez un groupe qui attend encore d'être admis, ou collez le lien dans Rejoindre."
+    "tooManyNext": "Supprimez un groupe qui attend encore d'être admis, ou collez le lien dans Rejoindre.",
+    "unanswered": "Ceux qui ouvrent le lien n'entrent peut-être pas : beaucoup de ceux qui ont frappé récemment n'ont jamais répondu. Un nouveau lien règle cela ; partagez le nouveau ensuite."
   },
   "makeAdmin": {
     "body": "Vous ne serez plus l'admin. Seule la personne {{name}} pourra renommer le groupe, changer sa photo et son lien, inviter ou retirer des membres, et vous rendre le rôle.",

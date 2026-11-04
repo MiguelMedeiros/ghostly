@@ -195,7 +195,8 @@
     "showQr": "Mostra QR",
     "title": "Link del gruppo",
     "tooMany": "Troppi link di gruppo aperti",
-    "tooManyNext": "Elimina un gruppo che aspetta ancora di entrare o incolla il link in Unisciti."
+    "tooManyNext": "Elimina un gruppo che aspetta ancora di entrare o incolla il link in Unisciti.",
+    "unanswered": "Chi apre il link forse non riesce a entrare: molti che hanno bussato di recente non hanno mai risposto. Un nuovo link risolve; poi condividi quello nuovo."
   },
   "makeAdmin": {
     "body": "Non sarai più l'admin. Solo {{name}} potrà rinominare il gruppo, cambiarne foto e link, invitare o rimuovere membri, e restituirti il ruolo.",

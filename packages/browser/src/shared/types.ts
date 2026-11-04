@@ -397,7 +397,14 @@ export interface GroupView {
    */
   hubs?: { hub: boolean };
   /** Community groups: how this device is connected (a hub for others, or through hubs). */
-  community?: { hub: boolean; hubs: number; connected: number };
+  community?: {
+    hub: boolean; hubs: number; connected: number;
+    /**
+     * Admin only: this many joiners lately were let in to an entry session that never came up on their side, enough that
+     * the knocks may not be real people and real ones may not get in. A new link (`enableLink` with `reset`) ends it.
+     */
+    unansweredKnocks?: number;
+  };
   /** Private groups: the members typing now, in the order they started (WISP 902 · Group Mesh § Typing). Never stored. */
   typing?: GroupTypingView[];
   /** Private groups: this side's wake-up tokens, one per member it shared its subscription with (the push worker's table). */

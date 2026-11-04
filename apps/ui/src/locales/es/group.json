@@ -195,7 +195,8 @@
     "showQr": "Mostrar QR",
     "title": "Enlace del grupo",
     "tooMany": "Demasiados enlaces de grupo abiertos",
-    "tooManyNext": "Elimina un grupo que aún espera para entrar o pega el enlace en Unirse."
+    "tooManyNext": "Elimina un grupo que aún espera para entrar o pega el enlace en Unirse.",
+    "unanswered": "Quien abre el enlace quizá no consiga entrar: muchos que llamaron hace poco nunca respondieron. Un enlace nuevo lo resuelve; comparte el nuevo después."
   },
   "makeAdmin": {
     "body": "Dejarás de ser el admin. Solo {{name}} podrá renombrar el grupo, cambiar su foto y su enlace, invitar o eliminar miembros, y devolverte el rol.",
