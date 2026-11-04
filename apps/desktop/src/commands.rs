@@ -734,7 +734,8 @@ mod project_link_tests {
         assert_eq!(super::call_name(&"é".repeat(100)), "é".repeat(64));
         assert_eq!(super::call_name(""), "");
         // Nothing held on a desktop: the page asks the same everywhere.
-        let call = serde_json::from_value(serde_json::json!({ "name": "Alice", "video": true })).unwrap();
+        let call =
+            serde_json::from_value(serde_json::json!({ "name": "Alice", "video": true })).unwrap();
         assert_eq!(super::call_service(Some(call)), Ok(false));
         assert_eq!(super::call_service(None), Ok(false));
     }
