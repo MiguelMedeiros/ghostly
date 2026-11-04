@@ -222,6 +222,7 @@ describe("ChatConnection: what the header says", () => {
     } })] }));
     const [hyperdht, iroh] = screen.getAllByTestId("connection-transport-error");
     expect(within(hyperdht!).getByTestId("connection-transport-error-title")).toHaveTextContent("HyperDHT: Relay HyperDHT inacessível");
+    expect(within(hyperdht!).getByTestId("connection-transport-error-next")).toHaveTextContent("Confira o endereço em Ajustes → Rede. Ele também pode não aceitar este app: pergunte a quem o mantém.");
     expect(within(iroh!).getByTestId("connection-transport-error-title")).toHaveTextContent("Iroh: Todas as conexões nativas em uso");
     expect(within(iroh!).getByTestId("connection-transport-error-next")).toHaveTextContent("Desconecte a conexão nativa de outra conversa, ou espere uma ficar ociosa.");
     // The option says the same few words: its tooltip, its description and its second line on a phone.

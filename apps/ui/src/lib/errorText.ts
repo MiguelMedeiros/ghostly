@@ -244,11 +244,12 @@ const RULES: readonly Rule[] = [
   exact("Your contact's app cannot show a screen in this call", "calls.share.contactCannot"),
   exact("Screen sharing is not available on Linux yet", "calls.share.notOnLinux"),
   exact("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "errors.transport.slotsFull", "errors.transport.slotsFullNext"),
-  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts).
-  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable"),
-  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent"),
-  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed"),
-  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused"),
+  // Its listener, which did not start or stopped (packages/browser/src/platform: hyperdhtRelay.ts, irohWeb.ts). A
+  // browser sees no status on a refused WebSocket, so a relay that leaves this app's origin out reads "unreachable" too.
+  exact("Could not reach the HyperDHT relay", "errors.transport.hyperdhtUnreachable", "errors.transport.hyperdhtUnreachableNext"),
+  exact("The HyperDHT relay did not answer", "errors.transport.hyperdhtSilent", "errors.transport.hyperdhtCheckNext"),
+  exact("The HyperDHT relay closed the connection", "errors.transport.hyperdhtClosed", "errors.transport.hyperdhtCheckNext"),
+  exact("The HyperDHT relay did not let this chat listen", "errors.transport.hyperdhtRefused", "errors.transport.hyperdhtRefusedNext"),
   exact("Iroh endpoint is stopped", "errors.transport.irohStopped"),
   // "The codes match" refused: the connection changed or closed after the code was shown (packages/core pairedSession.ts,
   // ghostlink.ts `confirmPair`).
