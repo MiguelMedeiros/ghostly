@@ -621,23 +621,19 @@ export class GroupSession {
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
   /**
    * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster now, and in the roster of
-   * its epoch or, given the message's time `ts`, in the roster of the epoch its author, behind on the chain, said it
-   * again under (`saidAgainEpoch`): the newest after its own that comes before any `add` dated later than it. That
-   * member read it under its first id. A holder serves a group file only to such a member (WISP 503 § Asking).
+   * its epoch, or of an epoch it was said again under (its author was behind, `resealBehind`): `arrived`, the one its
+   * copy reached this device under, or, for a message of mine, one I said it again under. That member read it under its
+   * first id. Decided by the epochs a frame was sealed under, never by comparing two devices' clocks. A holder serves a
+   * group file only to such a member (WISP 503 § Asking).
    */
-  couldRead(key: string, messageId: string, ts?: number): boolean {
-    const e = Number(messageId.split(":")[1]);
-    const then = this.state.chain.find(c => c.e === e);
-    if (!then || !rosterHas(this.roster, key)) return false;
+  couldRead(key: string, messageId: string, arrived?: number): boolean {
+    const ref = meshMessageRef(messageId);
+    const then = ref && this.state.chain[ref.e];
+    if (!ref || !then || !rosterHas(this.roster, key)) return false;
     if (rosterHas(then.m, key)) return true;
-    if (ts === undefined) return false;
-    let again: GroupCommit | undefined;
-    for (let later = e + 1; later <= this.epoch; later++) {
-      const c = this.state.chain[later];
-      if (!c || (c.k === "add" && c.ts > ts)) break;
-      again = c;
-    }
-    return !!again && rosterHas(again.m, key);
+    const again = ref.s === this.myKey ? this.state.sent.filter(f => f.o?.e === ref.e && f.o.n === ref.n).map(f => f.e) : [];
+    if (arrived !== undefined && arrived > ref.e) again.push(arrived);
+    return again.some(e => rosterHas(this.state.chain[e]?.m ?? [], key));
   }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */

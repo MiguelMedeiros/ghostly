@@ -2063,7 +2063,7 @@ export class Communities {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself. Not one of
         // a message deleted for everyone that comes after its removal (`Groups.removed`): its row is not stored either.
-        const file = m.file && this.files && !this.stored.get(id)?.removedIds?.includes(m.id) ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
+        const file = m.file && this.files && !this.stored.get(id)?.removedIds?.includes(m.id) ? await this.files.announced(id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         // Live (straight from its author, or handed on at once by a hub that says so): it tells the author's clock.

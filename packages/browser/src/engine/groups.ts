@@ -2886,7 +2886,7 @@ export class Groups {
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself. Not one of
         // a message deleted for everyone that comes after its removal: its row is not stored, and its file stays away too.
-        const file = m.file && this.files && !this.isRemoved(state.id, m.id) ? await this.files.announced(state.id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
+        const file = m.file && this.files && !this.isRemoved(state.id, m.id) ? await this.files.announced(state.id, { id: m.id, sender: m.sender, epoch: m.epoch, file: m.file }, session.myKey) : undefined;
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }),
           ...(m.frame && { frame: m.frame }) };
@@ -2915,7 +2915,12 @@ export class Groups {
         this.typings.messageFrom(state.id, m.sender);
       },
       // Said again for a message I had read: its row takes this frame, the one a member who could not read the first asks for.
-      kept: async (id, frame) => { await this.host.keepFrame?.(MESSAGE_LINK(state.id), id, frame).catch(() => {}); await this.frameKept(state.id, id, frame); },
+      kept: async (id, frame) => {
+        await this.host.keepFrame?.(MESSAGE_LINK(state.id), id, frame).catch(() => {});
+        await this.frameKept(state.id, id, frame);
+        // Its file, if it has one, may be served to the members of the epoch it was said again under.
+        this.files?.arrivedAgain(state.id, id, frame.e);
+      },
       edit: e => this.host.groupEdit?.(state.id, e),
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).

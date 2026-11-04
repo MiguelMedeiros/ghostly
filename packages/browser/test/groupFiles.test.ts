@@ -839,6 +839,24 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(answers.map(s => [s.from, s.frame.t, s.frame.why]).sort()).toEqual([["alice", "group-want-no", "refused"], ["bob", "group-want-no", "refused"]]);
   });
 
+  it("a member let in after the announcement is refused it by every holder, the author's clock ahead of the admin's", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    // Bob's device clock is two minutes ahead: his announcement is dated after the add that lets Dave in a moment later.
+    bob.clock = 120_000;
+    const wall = Date.now;
+    Date.now = () => wall() + 120_000;
+    const { messageId } = await t.send(bob, id, pattern(20_000)).finally(() => { Date.now = wall; });
+    await t.world.until(() => t.done(alice, id, messageId) && t.done(carol, id, messageId), 60_000);
+    const dave = t.add("dave");
+    await dave.groups.joinByLink(await alice.groups.enableLink(id));
+    await t.world.until(() => t.world.view(alice, id)!.members.length === 4 && t.world.view(dave, id)?.members.every(m => m.online) === true, 20 * 60_000);
+    for (const holder of [alice, bob, carol]) t.say(dave, holder, id, { t: "group-want", g: id, id: messageId });
+    await t.world.run(2_000);
+    const answers = t.seen.filter(s => s.to === "dave" && (s.frame.t === "group-want-no" || s.frame.t === "pf-offer"));
+    expect(answers.map(s => [s.from, s.frame.t, s.frame.why]).sort()).toEqual(["alice", "bob", "carol"].map(from => [from, "group-want-no", "refused"]));
+  });
+
   it("a file sent while its author was behind on the chain reaches the member let in meanwhile, who read it said again", async () => {
     const t = new FilesWorld(RELAY_NETWORK);
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
@@ -859,6 +877,12 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(xena, id, messageId).bytes!)).toBe(meta.d);
     expect(t.seen.filter(s => s.to === "xena" && s.frame.t === "group-want-no" && s.frame.why === "refused")).toEqual([]);
     await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    // Bob read the first, and the copy reached him too, under Xena's epoch: he serves her as well.
+    const epoch = Number(messageId.split(":")[1]);
+    await t.world.until(() => (t.files.get(bob)!.store.records.get(t.got(bob, id, messageId).message!.file!.id)!.group!.arrived ?? 0) > epoch, 60_000);
+    const offered = t.seen.filter(s => s.from === "bob" && s.to === "xena" && s.frame.t === "pf-offer").length;
+    t.say(xena, bob, id, { t: "group-want", g: id, id: messageId });
+    await t.world.until(() => t.seen.filter(s => s.from === "bob" && s.to === "xena" && s.frame.t === "pf-offer").length > offered, 10_000);
   });
 
   it("serving is busy when turned off, past one transfer per member, and past the day's bytes", async () => {
@@ -1539,7 +1563,7 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     // It stays stopped: nothing asked, nothing stored, and not counted as fetched by itself.
     expect(wants()).toBe(1);
     expect(t.got(bob, id, messageId)).toMatchObject({ transfer: { state: "transferring", stage: "asking" }, bytes: undefined });
-    expect(files.store.records.get(fileId)!.group).toEqual({ message: messageId, author: t.key(alice, id), ts: t.got(bob, id, messageId).message!.timestamp });
+    expect(files.store.records.get(fileId)!.group).toEqual({ message: messageId, author: t.key(alice, id) });
     // After a restart too.
     await t.restart(bob);
     await t.world.run(3 * 60_000);
@@ -1712,7 +1736,7 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
         const { message, transfer, bytes } = t.got(bob, id, messageId);
         expect(transfer).toEqual({ state: "transferring", stage: "asking", transferred: 0, size: 64 * 1024, direction: "in" });
         expect(bytes).toBeUndefined();
-        expect(t.files.get(bob)!.store.records.get(message!.file!.id)!.group).toEqual({ message: messageId, author: t.key(alice, id), ts: message!.timestamp });
+        expect(t.files.get(bob)!.store.records.get(message!.file!.id)!.group).toEqual({ message: messageId, author: t.key(alice, id) });
       }
       // Each still comes when its person asks.
       await bob.groups.downloadFile(t.got(bob, id, sent[0].messageId).message!.file!.id);

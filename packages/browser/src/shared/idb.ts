@@ -203,8 +203,11 @@ export interface StoredFile {
    * device fetched it without asking (it counts toward the group's automatic limit), and whether its person asked for it.
    * `digest` is the author's, which the bytes are checked against.
    */
-  /** A group's file (WISP 503): its message, author and the message's time (`ts`, absent on records from before). */
-  group?: { message: string; author: string; ts?: number; auto?: boolean; asked?: boolean; paused?: boolean };
+  /**
+   * A group's file (WISP 503): its message, author and, when its announcement reached this device said again under a
+   * later epoch than the message's own, that epoch (`arrived`). A `ts` on records from before is not read.
+   */
+  group?: { message: string; author: string; arrived?: number; auto?: boolean; asked?: boolean; paused?: boolean };
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
