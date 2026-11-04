@@ -230,7 +230,7 @@
     "settings": "Ajustes",
     "testBalance": "{{amount}} sats de teste (sem valor)",
     "testBalance_one": "{{amount}} sat de teste (sem valor)",
-    "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então esta só conta quando um contato a pagar em um chat. Para ter sats de teste agora, use Obter moedas de teste acima.",
+    "testMintInvoice": "Aguardando o pagamento… Mints de teste marcam toda fatura como paga sozinhos, então compartilhe esta em um chat 1:1: ela só conta quando um contato a pagar ali. Para ter sats de teste agora, use Obter moedas de teste acima.",
     "tokenHint": "Recebeu um token ecash? Cole-o em Enviar.",
     "tokenRedeemedFee": "{{amount}} sats resgatados (a mint ficou com {{fee}} de taxa).",
     "tokenRedeemedFeeTest": "{{amount}} sats de teste resgatados (a mint ficou com {{fee}} de taxa).",

@@ -611,6 +611,11 @@ export function GroupChat() {
     const inRoster = group.members.some(x => x.key === author.key);
     return { author, ...(inRoster && { onOpenAuthor: () => { setFocusMember(author.key); setShowMembers(true); } }) };
   };
+  /** The contact who wrote a member's message, when they are one: told when an invoice in it is paid from its card. */
+  const payeeOf = (m: StoredMessage) => {
+    const linkId = m.member ? Object.keys(group.memberLinks).find(id => group.memberLinks[id] === m.member) : undefined;
+    return linkId ? state.links?.find(l => l.id === linkId)?.peerPubKeyZ32 : undefined;
+  };
   const peerOf = (paymentId: string) => { const linkId = state.payments[paymentId]?.linkId; return state.edges?.find(l => l.id === linkId)?.peerPubKeyZ32 ?? ""; };
   // A row of the timeline: an event, a payment's note, or a message.
   const row = (m: StoredMessage, inStack?: MessageAuthor) => m.event
@@ -622,7 +627,7 @@ export function GroupChat() {
       {(() => { const note = captionOf(state, notes, m, group.myKey); return note && <GroupPaymentCaption note={note} group={group} />; })()}
     </div>
     // No `peerAck`: a group has no receipts (WISP 902), so a message of mine is sent, one tick, never "Delivered".
-    : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)}
+    : <MessageBubble key={m.id} message={shownOf(m)} linkId={`group:${groupId}`} {...forwarding.rowProps(shownOf(m))} highlight={search.highlight(m.id)} {...authorProps(m, inStack)} payee={payeeOf(m)}
       onReply={replyTarget(m, true) ? () => { setEditing(null); setReplyingTo(m); } : undefined} quote={quoteOf(m)}
       buttons={group.canSend ? buttonsOf.get(m.id) : undefined} compactPress={presses.has(m.id)}
       onEdit={canEditInGroup(m) && !m.card && group.canSend ? () => { setReplyingTo(null); setEditing(m); } : undefined}
