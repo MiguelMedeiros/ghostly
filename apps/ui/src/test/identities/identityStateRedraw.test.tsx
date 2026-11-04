@@ -3,7 +3,7 @@
 // Identities page) draws again only when what it shows changes: a state that changes nothing of it draws nothing.
 import { Profiler } from "react";
 import { act, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IdentityTimelineEntry } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import type { NostrContactView, NostrOwnView } from "@ghostly/browser/nostr/types";
@@ -56,6 +56,11 @@ function transfersOnly(engine: FakeEngine) {
 }
 
 describe("an engine state that changes nothing of what shows identities", () => {
+  // Each state's proofs carry times from views.ts's `now()`, in whole seconds: a second that turns inside the 20 states
+  // changes them for real, and the lines rightly draw again. The clock stands still here; timers still run.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
   it("draws none of a chat's ID card lines, and a changed proof draws only its own line", () => {
     const commits = entries.map(() => 0);
     const view = renderApp(<></>);
