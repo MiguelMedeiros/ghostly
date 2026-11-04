@@ -301,9 +301,9 @@ function usePast(since: number | undefined, ms: number): boolean {
   return past;
 }
 const JOIN_ORDER: JoinStep[] = ["knocking", "knocked", "answered", "admitted", "in"];
-/** A step at a stage: done once reached, current while it is the next one, else still to come. Full: the knock is there. */
+/** A step at a stage: done once reached, current while it is the next one, else still to come. Full or blocked: the knock is there. */
 function joinStepState(at: GroupJoinStage, step: JoinStep): "done" | "current" | "todo" {
-  const stage = at === "full" ? "knocked" : at;
+  const stage = at === "full" || at === "blocked" ? "knocked" : at;
   if (JOIN_ORDER.indexOf(stage) >= JOIN_ORDER.indexOf(step)) return "done";
   return JOIN_ORDER[JOIN_ORDER.indexOf(step) - 1] === stage ? "current" : "todo";
 }
@@ -313,6 +313,8 @@ function joiningText(stage: GroupJoinStage, name: string, community: boolean, t:
   if (stage === "replaced") return { title: t("group.join.replaced"), body: t("group.join.replacedBody") };
   // A member's app answered that there is no room yet (`group-full`): the link works, and asking for a new one won't help.
   if (stage === "full" && full) return { title: t("group.join.full"), body: t("group.join.fullBody", { n: full.n, max: full.max }) };
+  // Or that it grows only once every member's app is updated: the same, until they are.
+  if (stage === "blocked") return { title: t("group.join.blocked"), body: t("group.join.blockedBody") };
   if (stage === "admitted") return { title: name ? t("group.join.joiningName", { name }) : t("group.join.joiningGroup"),
     body: !community ? t("group.join.admitted") : admittedLong ? t("group.join.admittedStuck") : t("group.join.admittedCommunity") };
   if (stage === "answered") return { title: community ? t("group.join.answeredTitleCommunity") : waiting,
@@ -680,7 +682,7 @@ export function GroupChat() {
   // Others waiting too (a community's queue, a private group's fresh knocks): the group is busy, not the link dead.
   const staleText = waitingWith > 0 || group.invitation?.othersKnocked ? t("group.join.staleBusy") : t("group.join.stale");
   const lastReached = joinSteps(group.profile === "community", t).filter(step => joinStepState(stage, step.stage) === "done").pop();
-  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" ? joining.title
+  const joinAnnouncement = noLinks || linkUnanswered || linkReplaced || stage === "full" || stage === "blocked" ? joining.title
     : admittedLong ? joining.body : knockedLong ? staleText : lastReached?.label ?? joining.title;
   // Just in (my own "You joined" line is recent), and no member reached yet: the edges are being set up.
   const justJoined = myJoins.some(at => Date.now() - at < JUST_JOINED_MS);
