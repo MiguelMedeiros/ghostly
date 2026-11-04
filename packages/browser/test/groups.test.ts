@@ -201,6 +201,28 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(again.views()[0]).toMatchObject({ id: groupId, status: "active", epoch: 1 });
     expect((await again.messages(groupId)).map(m => m.event)).toEqual(["joined"]);
   });
+  it("a row of mine an older app stored before it was killed, its counter unsaved: after a restart the next text takes a new id", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    await alice.load(); await bob.load();
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    await bob.accept(groupId); await world.settle();
+    await world.meet();
+    const store = world.peers.get("alice")!.store;
+    // The group as saved before the send: an app killed after the row was stored and before its state was saved.
+    const before = (await store.getGroups()).find(g => g.id === groupId)!;
+    const residue = await alice.send(groupId, "residue", []);
+    await world.settle();
+    await store.putGroup(before);
+    const again = new Groups({ ...(alice as unknown as { host: GroupsHost }).host, emit: vi.fn() }, store);
+    await again.load();
+    const probe = await again.send(groupId, "probe", []);
+    expect(probe.messageId).toBeDefined();
+    expect(probe.messageId).not.toBe(residue.messageId);
+    expect((await again.messages(groupId)).filter(m => !m.event).map(m => m.text)).toEqual(["residue", "probe"]);
+  });
   it("what makes a group unread: another member's message, never mine nor a membership line, also after a restart", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");
