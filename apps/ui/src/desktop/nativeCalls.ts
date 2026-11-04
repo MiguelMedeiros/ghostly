@@ -391,7 +391,9 @@ export class NativePeerConnection extends EventTarget {
     open.add(this);
     const events = new CallChannel();
     events.onmessage = (message) => this.heard(bytesOf(message));
-    this.opened = invoke("native_call_open", { id: this.id, events, iceServers: ownIceServers(config) });
+    // Hide my IP from contacts (`callRtcConfig`'s relay policy): Rust asks no STUN server and gathers relay
+    // candidates only, from the TURN servers here.
+    this.opened = invoke("native_call_open", { id: this.id, events, iceServers: ownIceServers(config), relayOnly: config.iceTransportPolicy === "relay" });
     const lane = (kind: "audio" | "video"): Lane => ({
       mid: null,
       direction: "sendrecv",
@@ -694,6 +696,8 @@ export function nativeCallMedia(): CallMedia {
     screenUnavailable: SCREEN_UNAVAILABLE,
     choosesDevices: true,
     restartsIce: true,
+    // Hide my IP from contacts: Rust keeps the call to the TURN server under the relay policy (`relayOnly` above).
+    keepsToRelays: true,
   };
 }
 

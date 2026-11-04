@@ -21,7 +21,7 @@ use gstreamer as gst;
 use gstreamer_app as gst_app;
 use rtc::media::Sample;
 use rtc::peer_connection::configuration::media_engine::{MIME_TYPE_OPUS, MIME_TYPE_VP8};
-use rtc::peer_connection::configuration::RTCOfferOptions;
+use rtc::peer_connection::configuration::{RTCIceTransportPolicy, RTCOfferOptions};
 use rtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use rtc::rtp_transceiver::rtp_sender::{
     RTCPFeedback, RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters,
@@ -1343,6 +1343,47 @@ pub struct Call {
     ssrcs: (u32, u32),
     /// The profile has a TURN server: gathering waits for a relay candidate.
     uses_turn: bool,
+    /// Hide my IP from contacts: relay candidates only ([`ice_configuration`]).
+    relay_only: bool,
+}
+
+/// The connection's ICE servers and policy. Hide my IP from contacts (`relay_only`, WISP 601 Relay only): the
+/// profile's TURN servers alone under the relay policy, so no STUN server is asked and the only candidates
+/// gathered are the relay's. Otherwise the built-in STUN server (`stun`, by address), then the profile's own.
+fn ice_configuration(
+    stun: Vec<String>,
+    servers: &[IceServer],
+    relay_only: bool,
+) -> (Vec<RTCIceServer>, RTCIceTransportPolicy) {
+    let own = |server: &IceServer| RTCIceServer {
+        urls: server.urls.clone(),
+        username: server.username.clone().unwrap_or_default(),
+        credential: server.credential.clone().unwrap_or_default(),
+    };
+    if relay_only {
+        return (
+            ice::relays(servers).iter().map(own).collect(),
+            RTCIceTransportPolicy::Relay,
+        );
+    }
+    let builtin = RTCIceServer {
+        urls: stun,
+        ..Default::default()
+    };
+    (
+        std::iter::once(builtin)
+            .chain(servers.iter().map(own))
+            .collect(),
+        RTCIceTransportPolicy::All,
+    )
+}
+
+/// A description with its relay candidates alone: what a relay-only call may tell the peer, whatever webrtc-rs
+/// gathered.
+fn relay_candidates_only(sdp: &str) -> String {
+    sdp.split_inclusive('\n')
+        .filter(|line| !line.starts_with("a=candidate:") || line.contains(gather::RELAY))
+        .collect()
 }
 
 /// The microphone and the speaker a call starts with, by name (None: the default).
@@ -1355,7 +1396,8 @@ pub struct Devices {
 impl Call {
     /// The pipelines playing and the peer connection ready to offer or answer. `fake`: a test tone and nothing
     /// played by default ([`fake_media`]; a device chosen by name is used all the same). `servers`: the profile's
-    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state and
+    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server; with `relay_only` (Hide my IP from
+    /// contacts) their TURN servers alone ([`ice_configuration`]). `events` hears the ICE state and
     /// each side's loudness (JSON, [`Shared::hears`]), a microphone that stopped mid-call ([`Shared::ended`]), and
     /// each picture that arrives (JPEG).
     pub async fn new(
@@ -1364,8 +1406,13 @@ impl Call {
         fake: bool,
         devices: Devices,
         servers: &[IceServer],
+        relay_only: bool,
         events: Sink,
     ) -> Result<Call, String> {
+        // Never a direct path instead: the call does not start.
+        if relay_only && ice::relays(servers).is_empty() {
+            return Err("Hide my IP from contacts is on and no TURN server is set".into());
+        }
         let uses_turn = ice::uses_turn(servers);
         let mut media = MediaEngine::default();
         media
@@ -1390,23 +1437,19 @@ impl Call {
             closed: AtomicBool::new(false),
         });
         // By address: webrtc-rs would otherwise resolve the name on its driver, ahead of the host candidates.
-        let stun = gather::stun_urls(STUN, gather::resolve, STUN_LOOKUP).await;
-        // Then the profile's own servers (a TURN server, typically).
-        let ice_servers: Vec<RTCIceServer> = std::iter::once(RTCIceServer {
-            urls: stun,
-            ..Default::default()
-        })
-        .chain(servers.iter().map(|server| RTCIceServer {
-            urls: server.urls.clone(),
-            username: server.username.clone().unwrap_or_default(),
-            credential: server.credential.clone().unwrap_or_default(),
-        }))
-        .collect();
+        // Not even looked up with relay only.
+        let stun = if relay_only {
+            Vec::new()
+        } else {
+            gather::stun_urls(STUN, gather::resolve, STUN_LOOKUP).await
+        };
+        let (ice_servers, policy) = ice_configuration(stun, servers, relay_only);
         let pc: Arc<dyn PeerConnection> = Arc::new(
             PeerConnectionBuilder::new()
                 .with_configuration(
                     RTCConfigurationBuilder::new()
                         .with_ice_servers(ice_servers)
+                        .with_ice_transport_policy(policy)
                         .build(),
                 )
                 // An ICE restart (WISP 601, "Reconnecting") gathers anew on sockets bound again: after a
@@ -1497,6 +1540,7 @@ impl Call {
             microphone: Mutex::new(microphone),
             ssrcs,
             uses_turn,
+            relay_only,
         })
     }
 
@@ -1588,7 +1632,10 @@ impl Call {
             .local_description()
             .await
             .ok_or("No local description")?;
-        let described = describe(&local.sdp, &gathered, self.ssrcs);
+        let mut described = describe(&local.sdp, &gathered, self.ssrcs);
+        if self.relay_only {
+            described = relay_candidates_only(&described);
+        }
         // Which kinds of candidates went out (not their addresses): why a call never connected, afterwards.
         let kinds: Vec<&str> = described
             .lines()
@@ -1842,6 +1889,165 @@ mod tests {
             ),
             "{out}"
         );
+    }
+
+    fn turn_server(url: &str) -> IceServer {
+        IceServer {
+            urls: vec!["stun:stun.example.org".into(), url.into()],
+            username: Some("ghost".into()),
+            credential: Some("test-credential".into()),
+        }
+    }
+
+    /// Hide my IP from contacts: the profile's TURN URLs alone under the relay policy, no STUN server; off, the
+    /// built-in STUN server first as before.
+    #[test]
+    fn relay_only_asks_no_stun_server_and_keeps_to_the_relay() {
+        let servers = [turn_server("turn:turn.example.org:3478")];
+        let stun = || vec!["stun:192.0.2.1:19302".to_string()];
+        let (relay, policy) = ice_configuration(stun(), &servers, true);
+        assert_eq!(policy, RTCIceTransportPolicy::Relay);
+        let urls: Vec<&str> = relay
+            .iter()
+            .flat_map(|s| s.urls.iter().map(String::as_str))
+            .collect();
+        assert_eq!(urls, ["turn:turn.example.org:3478"]);
+        assert_eq!(relay[0].credential, "test-credential");
+        let (all, policy) = ice_configuration(stun(), &servers, false);
+        assert_eq!(policy, RTCIceTransportPolicy::All);
+        assert_eq!(all[0].urls, stun());
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn a_relay_only_description_carries_relay_candidates_alone() {
+        let sdp = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\n\
+                   a=candidate:1 1 udp 2130706431 192.168.1.5 40000 typ host\r\n\
+                   a=candidate:2 1 udp 1694498815 203.0.113.7 40000 typ srflx\r\n\
+                   a=candidate:3 1 udp 16777215 198.51.100.9 50000 typ relay\r\n";
+        let out = relay_candidates_only(sdp);
+        assert!(
+            out.ends_with("a=mid:0\r\na=candidate:3 1 udp 16777215 198.51.100.9 50000 typ relay\r\n"),
+            "{out}"
+        );
+    }
+
+    /// With relay only and no TURN server, no call: never a direct path instead.
+    #[tokio::test]
+    async fn relay_only_without_a_turn_server_makes_no_call() {
+        let stun_only = IceServer {
+            urls: vec!["stun:stun.example.org".into()],
+            ..Default::default()
+        };
+        let made = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[stun_only],
+            true,
+            Arc::new(|_| {}),
+        )
+        .await;
+        assert!(made.is_err());
+    }
+
+    /// Relay only, against a local TURN server that never answers: the connection asks it for an allocation and
+    /// gathers no host or server reflexive candidate (this machine's addresses) meanwhile. Off, host candidates
+    /// come within milliseconds.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_relay_only_call_gathers_nothing_but_the_relay() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let silent = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        silent
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let url = format!("turn:{}?transport=udp", silent.local_addr().unwrap());
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[turn_server(&url)],
+            true,
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
+        let offer = a.pc.create_offer(None).await.unwrap();
+        a.pc.set_local_description(offer).await.unwrap();
+        // An Allocate request (STUN method 0x003) reaches the TURN server.
+        let mut packet = [0u8; 1500];
+        let (n, _) = silent.recv_from(&mut packet).expect("no Allocate request");
+        assert!(n >= 20 && packet[..2] == [0x00, 0x03], "{:?}", &packet[..n]);
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let gathered = a.shared.gathering.gathered();
+        assert!(gathered.is_empty(), "{gathered:?}");
+        a.close().await;
+    }
+
+    /// Two relay-only calls through a real TURN server (local lab only: coturn or node-turn on this machine,
+    /// `GHOSTLY_TURN_LAB=host:port`, user `ghost`, password `test-credential`): every candidate either side sends is
+    /// `typ relay`, and they hear each other. Skipped without it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn two_relay_only_calls_connect_through_the_turn_server() {
+        let Ok(lab) = std::env::var("GHOSTLY_TURN_LAB") else {
+            eprintln!("skipped: no GHOSTLY_TURN_LAB");
+            return;
+        };
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let servers = [turn_server(&format!("turn:{lab}?transport=udp"))];
+        let call = || {
+            Call::new(
+                OPUS_PT,
+                VP8_PT,
+                true,
+                Devices::default(),
+                &servers,
+                true,
+                Arc::new(|_| {}),
+            )
+        };
+        let a = call().await.unwrap();
+        let offer = a.offer(false).await.unwrap();
+        let b = call().await.unwrap();
+        let answer = b.answer(&offer, false).await.unwrap();
+        for sdp in [&offer, &answer] {
+            let candidates: Vec<&str> = sdp
+                .lines()
+                .filter(|l| l.starts_with("a=candidate:"))
+                .collect();
+            assert!(!candidates.is_empty(), "{sdp}");
+            assert!(
+                candidates.iter().all(|c| c.contains(" typ relay")),
+                "{candidates:?}"
+            );
+        }
+        a.accept(&answer).await.unwrap();
+        let stats = || {
+            format!(
+                "a {} b {}",
+                serde_json::to_string(&a.stats()).unwrap(),
+                serde_json::to_string(&b.stats()).unwrap()
+            )
+        };
+        until(
+            "both hear through the relay",
+            30,
+            || a.stats().audio_received > 20 && b.stats().audio_received > 20,
+            stats,
+        )
+        .await;
+        let pair = a.selected_pair().await;
+        eprintln!("selected pair: {pair:?}");
+        a.close().await;
+        b.close().await;
     }
 
     #[test]
@@ -2175,6 +2381,7 @@ mod tests {
             true,
             Devices::default(),
             &[],
+            false,
             Arc::new(move |bytes: Vec<u8>| a_told.heard(&bytes)),
         )
         .await
@@ -2194,6 +2401,7 @@ mod tests {
             true,
             Devices::default(),
             &[],
+            false,
             Arc::new(move |bytes: Vec<u8>| {
                 if bytes.starts_with(&[0xff, 0xd8]) {
                     seen.fetch_add(1, Ordering::Relaxed);
@@ -2351,6 +2559,7 @@ mod tests {
             true,
             Devices::default(),
             &[],
+            false,
             Arc::new(|_| {}),
         )
         .await
@@ -2370,7 +2579,7 @@ mod tests {
             });
         let offer = a.offer(false).await.unwrap();
         let (opus, vp8) = offered_payload_types(&offer);
-        let b = Call::new(opus, vp8, true, Devices::default(), &[], Arc::new(|_| {}))
+        let b = Call::new(opus, vp8, true, Devices::default(), &[], false, Arc::new(|_| {}))
             .await
             .unwrap();
         let answer = closed_video(&b.answer(&offer, false).await.unwrap());
@@ -2431,6 +2640,7 @@ mod tests {
                 true,
                 Devices::default(),
                 &[],
+                false,
                 Arc::new(|_| {}),
             )
             .await
@@ -2539,6 +2749,7 @@ mod tests {
             true,
             Devices::default(),
             &[],
+            false,
             Arc::new(move |bytes: Vec<u8>| {
                 into.heard(&bytes);
                 heard.heard(&bytes);
@@ -2611,6 +2822,7 @@ mod tests {
                 true,
                 Devices::default(),
                 &[],
+                false,
                 Arc::new(|_| {}),
             )
         };
@@ -2700,13 +2912,14 @@ mod tests {
             true,
             Devices::default(),
             &[],
+            false,
             Arc::new(|_| {}),
         )
         .await
         .unwrap();
         let offer = a.offer(false).await.unwrap();
         let (opus, vp8) = offered_payload_types(&offer);
-        let b = Call::new(opus, vp8, true, Devices::default(), &[], Arc::new(|_| {}))
+        let b = Call::new(opus, vp8, true, Devices::default(), &[], false, Arc::new(|_| {}))
             .await
             .unwrap();
         let answer = b.answer(&offer, false).await.unwrap();
