@@ -175,6 +175,17 @@ describe("GroupMembersDialog", () => {
     expect(within(panel).queryByTestId("group-link-disable")).not.toBeInTheDocument();
   });
 
+  it("gives a community member's focus to the list when the admin turns the link off under it, with the panel", () => {
+    const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
+    const group = groupView({ status: "active", isAdmin: false, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin" })] });
+    members_(group);
+    screen.getByTestId("group-link-copy").focus();
+    act(() => fakeEngine.update({ groups: [{ ...group, entryLink: undefined }] }));
+    expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
+    // It fell to the page, out of the open dialog.
+    expect(screen.getByTestId("group-member-list")).toHaveFocus();
+  });
+
   it("says, while the group's link works, that whoever is removed can join again with it until a new link", async () => {
     for (const profile of ["mesh", "community"] as const) {
       const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
