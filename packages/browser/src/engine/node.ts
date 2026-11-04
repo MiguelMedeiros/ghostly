@@ -723,6 +723,8 @@ export interface NodeOptions {
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
   staysOnline?: boolean;
+  /** How long a chat reads a contact that left a live session no slower than the idle pace (GhostLink `watchPeerIdleMs`): the CLI's daemon, `DAEMON_WATCH_PEER_IDLE_MS`. */
+  watchPeerIdleMs?: number;
   /**
    * Tests only: group links behave as before they could go native (WISP 902 § Transports): WebRTC alone, no `_tr` read
    * or published, no native endpoint. A compatibility test runs this app as one from before against a current one.
@@ -8337,6 +8339,7 @@ export class GhostlyNode implements EngineImplementation {
       avatar: this.sharedAvatar,
       lastSeenTimestamp,
       pollIntervals: this.pollIntervals,
+      ...(this.options.watchPeerIdleMs ? { watchPeerIdleMs: this.options.watchPeerIdleMs } : {}),
       autoConnect: true,
       createPeerConnection: () => this.chatPeer(new RTCPeerConnection(this.contactRtcConfig())),
       localFetch: this.localFetch,

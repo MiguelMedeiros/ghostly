@@ -90,6 +90,17 @@ export const EXPECT_PEER_MS = 30_000;
  */
 export const WATCH_PEER_MS = 2 * 60_000;
 /**
+ * A CLI daemon (a bot) reads a contact that went away from a live session at the idle pace, not its background one, from
+ * the end of `WATCH_PEER_MS` until this long after it left (`LinkSession.watchPeer`). A phone that put the app to sleep is
+ * often back after more than 2 minutes, and where WebRTC is all there is between them its offer waits for the daemon's
+ * read: every 30 s past 2 minutes, a web app at phone size was live again 18.3 s after 5 minutes asleep (the lab,
+ * 2026-11-01). Cost, a contact away the whole 5 minutes: from 2 to 5 minutes, a read every 10 s and not every 30 s, 12
+ * more. A key's reads take turns between the two default relays (`readOrder` in relay.ts), 6 more on each: at 12 such
+ * absences an hour, 72 more an hour on a relay, 4% of the 1,800 this client allows itself there (`REQUESTS_PER_MINUTE`).
+ * At the active pace for the whole 5 minutes instead, 39 more an absence: 13%.
+ */
+export const DAEMON_WATCH_PEER_IDLE_MS = 5 * 60_000;
+/**
  * The longest a link reads fast for a data link whose connection went `disconnected` (`setDataLinkStalled`): a little
  * past the 12 s such a connection is given (`DISCONNECT_GRACE_MS`), by when it is back or the session is gone.
  */
@@ -338,6 +349,8 @@ export class LinkSession {
   private watchUntil = 0;
   /** The time of the peer's packet read last when it went away (`watchPeer`): a newer one that advertises says it is back. */
   private watchFrom = 0;
+  /** Until when a contact that went away is read at the idle pace once `watchUntil` passed (`watchPeer`'s `idleMs`). */
+  private lingerUntil = 0;
   /** Until when the reads of a contact that went away are its first ones (`DEPARTED_READ_MS`). */
   private departedUntil = 0;
   private publishRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -508,10 +521,12 @@ export class LinkSession {
 
   /**
    * The contact just left a live session, and is likely coming back (an app restarting): fast for `EXPECT_PEER_MS`,
-   * then the active pace until `WATCH_PEER_MS` passed, whatever the chat's pace would be.
+   * then the active pace until `WATCH_PEER_MS` passed, whatever the chat's pace would be. `idleMs` (a daemon's,
+   * `DAEMON_WATCH_PEER_IDLE_MS`): then no slower than the idle pace until that long after now.
    */
-  watchPeer(): void {
+  watchPeer(idleMs = 0): void {
     this.watchUntil = Math.max(this.watchUntil, Date.now() + WATCH_PEER_MS);
+    this.lingerUntil = Math.max(this.lingerUntil, Date.now() + idleMs);
     this.watchFrom = this.presence.lastPacketAt;
     this.departedUntil = Date.now() + DEPARTED_READ_MS;
     this.expectPeer();
@@ -524,7 +539,7 @@ export class LinkSession {
    */
   calm(): void {
     if (this.rtcSignal !== null) return;
-    this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = 0;
+    this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = this.lingerUntil = 0;
   }
 
   /** The data link carries chat and services while it is up. */
@@ -694,6 +709,8 @@ export class LinkSession {
     if (Date.now() < this.watchUntil) return "active";
     // Someone who just sent an invite may look elsewhere while waiting: the join still comes in quickly.
     if (!this.active && this.awaitingPeer()) return "active";
+    // A contact that went away, still not back, a daemon's minutes after `watchUntil` (`watchPeer`'s `idleMs`).
+    if (!this.active && Date.now() < this.lingerUntil && !(this.presence.online && this.presence.lastPacketAt > this.watchFrom)) return "idle";
     if (!this.active) return "background";
     return Date.now() - this.lastActivity > IDLE_THRESHOLD ? "idle" : "active";
   }
@@ -851,7 +868,8 @@ export class LinkSession {
       // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
       const departed = !signal && Date.now() < this.departedUntil;
-      const background = pace === "background" || pace === "connected";
+      // A daemon's idle-pace reads of a contact long gone (`watchPeer`'s `idleMs`) can wait as much.
+      const background = pace === "background" || pace === "connected" || (pace === "idle" && !this.active);
       // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
       const resume = !signal && !watch && (this.resumeReads || Date.now() < this.awaitedUntil);
       const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) });
