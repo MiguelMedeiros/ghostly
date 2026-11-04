@@ -339,11 +339,12 @@ describe("group roster changes: only the admin, and someone removed reads nothin
 
   it("a pin by a member who is removed goes with them; the others' pins stay", async () => {
     const { world, alice, others: [bob, carol], groupId, key } = await groupOf(["bob", "carol"]);
-    const pinBy = (by: string) => ({ id: `${key(bob)}:1:1`, n: Date.now(), by, at: Date.now(), k: by, sig: "s" });
+    // One time for Carol's pin, so each member holds it at the same number.
+    const n = Date.now();
+    const pinBy = (by: string) => ({ id: `${key(bob)}:1:1`, n, by, at: n, k: by, sig: "s" });
     await alice.setPin(groupId, pinBy(key(carol)));
     await carol.setPin(groupId, { ...pinBy(key(carol)), by: "me" });
     await bob.setPin(groupId, pinBy(key(carol)));
-    const n = alice.pinOf(groupId)!.n;
     await alice.remove(groupId, key(carol)); await world.settle();
     // Dropped to an unpin at its number, unsigned: nothing shows, and only a pin numbered past it does.
     for (const pin of [alice.pinOf(groupId), bob.pinOf(groupId), world.peers.get("alice")!.store.groups.get(groupId)!.pin]) {
