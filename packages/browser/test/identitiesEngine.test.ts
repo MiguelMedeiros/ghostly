@@ -122,6 +122,28 @@ describe("adding a proof: drafts and limits", () => {
     expect(await stored("identityProofs")).toBeUndefined();
   });
 
+  /**
+   * A daemon's `identity add` (or another window's Add) still checking when "Clear all data" comes: the check went on,
+   * and its save wrote every proof the cleared profile had, with its sealed key, back under `identityProofs`.
+   */
+  it("a proof whose check ends after Clear all data saves nothing into the cleared profile", async () => {
+    const { engines, state, make } = await shared();
+    let checked!: () => void;
+    const gate = new Promise<void>(resolve => { checked = resolve; });
+    state.providers.a = [{ ...fakeKey, verify: async (statement, evidence, ctx) => { await gate; return fakeKey.verify(statement, evidence, ctx); } }];
+    const { draftId, binding } = engines.a.begin({ provider: "fake-key", subject: fakeKeySubject() });
+    const completing = engines.a.complete({ draftId, evidence: fakeKeySign(identityStatement(binding)) }).then(() => "saved", () => "refused");
+    await engines.a.revokeAll();
+    await clearProfileStores();
+    checked();
+    const outcome = await completing;
+    expect((await stored<{ binding: unknown }[]>("identityProofs"))?.length, "the cleared profile has no proofs").toBeUndefined();
+    expect(outcome).toBe("refused");
+    const next = make("a");
+    await next.load();
+    expect(next.views()).toEqual([]);
+  });
+
   it("a profile holds at most 32 proofs", async () => {
     const { engines, make } = pair();
     await clearStorage(); await engines.a.load();
