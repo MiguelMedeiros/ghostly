@@ -150,7 +150,7 @@ test("a declined offer says so to the sender; a transfer cancelled by the sender
   await expect(refused.getByTestId("file-status")).toHaveText("Declined");
   // Who declined it is behind the ⓘ; a declined file has no ↻.
   await refused.getByTestId("file-why").click();
-  await expect(refused.getByTestId("file-why-text")).toHaveText("Declined by your contact");
+  await expect(refused.getByTestId("file-why-text")).toHaveText("Your contact declined it.");
   await expect(refused.getByTestId("file-retry")).toHaveCount(0);
 
   const second = testInfo.outputPath("changed my mind.bin");

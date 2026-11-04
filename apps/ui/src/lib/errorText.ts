@@ -154,6 +154,11 @@ const RULES: readonly Rule[] = [
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
   exact("Cancelled by the sender", "chat.file.cancelled", "errors.files.askAgain"),
+  // A 1:1 file declined or cancelled, by the contact (chatFiles.ts `refusalText`) or here: the status says what, the ⓘ who.
+  exact("Declined by your contact", "chat.file.declined", "errors.files.declinedThere"),
+  exact("Cancelled by your contact", "chat.file.cancelled", "errors.files.cancelledThere"),
+  exact("You declined it", "chat.file.declined", "errors.files.declinedHere"),
+  exact("You cancelled it", "chat.file.cancelled", "errors.files.cancelledHere"),
   // A file said on the DHT floor that ended here before it came (packages/browser engine/fileDesk.ts): why this device
   // refused its offer, or its week ran out. Its sender still has it, and its next offer takes the bubble over.
   exact("No room on this device for this file", "errors.files.noRoomHere", "errors.files.floor.noRoomNext"),
