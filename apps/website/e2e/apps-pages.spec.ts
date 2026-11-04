@@ -3,7 +3,8 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { clientLabel } from "../content/apps";
+import { LAST_UPDATED_APPS } from "../app/privacy/updated";
+import { PERMISSIONS, clientLabel } from "../content/apps";
 import { APPS_RELEASE, versionAtLeast } from "../lib/appsGate";
 import { VERSION } from "../lib/release";
 
@@ -149,8 +150,12 @@ test.describe("once the released Ghostly has Apps", () => {
     for (const title of ["Removed App", "Revoked App", "Older App", "Elsewhere App"]) await expect(page.locator("main")).not.toContainText(title);
     await expect(page.locator(".ap-count")).toHaveText("2 apps");
     await expect(page.locator(".ap-store")).toContainText(`Test Store. Signed by the store key ${fixture.key.slice(0, 16).match(/.{4}/g)!.join(" ")}.`);
-    await expect(page.locator(".ap-card img")).toHaveCount(1);
-    expect(await page.locator(".ap-card img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(64);
+    const icon = page.locator(".ap-card img");
+    await expect(icon).toHaveCount(1);
+    // A card waits to be near the screen: the store may list 200 apps.
+    await expect(icon).toHaveAttribute("loading", "lazy");
+    // The publisher's icon is 512 px; a card draws it at 56 px, on this screen of one device pixel per CSS pixel.
+    await expect.poll(() => icon.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(56);
     expect(others()).toEqual([]);
   });
 
@@ -168,7 +173,10 @@ test.describe("once the released Ghostly has Apps", () => {
       "Keep its own data on this device, separately in each chat",
       "Talk to the same app on your contact's side, while you are both in the chat",
     ]);
-    await expect(main).toContainText("No internet access. Its publisher may still learn your IP address and when you open it.");
+    // As the install screen warns there: in WebKit on the web an app can still reach a server it names (WISP 1200 · Threats).
+    await expect(main).toContainText(
+      "No internet access. Its publisher may still learn your IP address and when you open it. In Safari, and any browser on iPhone or iPad, an app can still contact other servers, which learn your IP address. The desktop app blocks them.",
+    );
     await expect(main).toContainText("Inside a one-to-one chat, with a contact who has it too.");
     await expect(main).toContainText("Made for: Web, Desktop.");
     const fingerprint = `${PREFIX.a.slice(0, 4)} ${PREFIX.a.slice(4, 8)} ${PREFIX.a.slice(8, 12)} ${PREFIX.a.slice(12, 16)}`;
@@ -177,16 +185,45 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect(main.locator(".ap-fingerprint")).toHaveText(fingerprint);
     await expect(main.locator(".ap-code")).toHaveText("https://raw.githubusercontent.com/ghostly-fixtures/chess/HEAD/app.ghostlyapp");
     await expect(main.getByRole("link", { name: "Open Ghostly" })).toHaveAttribute("href", "https://app.ghostly.tools");
-    expect(await main.locator("img.ap-icon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(64);
+    await expect.poll(() => main.locator("img.ap-icon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(96);
     await expect(main).toContainText("Clocks for both players.");
     await expect(main).toContainText("Listed by Test Store, reviewed by its maintainers.");
     expect(others()).toEqual([]);
+  });
+
+  test("an icon comes at the size it is drawn on the screen it is drawn on, and the route makes no other", async ({ browser, request }) => {
+    // A phone's screen: three device pixels per CSS pixel.
+    const context = await browser.newContext({ deviceScaleFactor: 3 });
+    const page = await context.newPage();
+    for (const [path, edge] of [["/apps", 168], [`/apps/${CHESS}`, 288]] as const) {
+      await page.goto(LIVE + path);
+      const img = page.locator("img.ap-icon");
+      await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete), path).toBe(true);
+      // The file's own pixels: naturalWidth is in CSS pixels, so a 3x picture of 168 px reads 56.
+      const width = await img.evaluate(async (el: HTMLImageElement) => (await createImageBitmap(await (await fetch(el.currentSrc)).blob())).width);
+      expect(width, path).toBe(edge);
+    }
+    await context.close();
+    const icon = (query: string) => request.get(`${LIVE}/apps/${CHESS}/app-icon${query}`);
+    // As the bundle holds it, for a page cached before the sizes: 512 px.
+    const original = await icon("");
+    expect(original.headers()["content-type"]).toBe("image/png");
+    expect((await original.body()).readUInt32BE(16)).toBe(512);
+    for (const edge of [56, 288]) expect((await icon(`?s=${edge}`)).headers()["content-type"], `${edge}`).toBe("image/webp");
+    for (const edge of ["57", "512", "1024", "-1", ""]) expect((await icon(`?s=${edge}`)).status(), edge).toBe(404);
   });
 
   test("a client the site doesn't know is shown as the manifest names it, an inherited name too", () => {
     expect(["web", "desktop", "extension"].map(clientLabel)).toEqual(["Web", "Desktop", "Browser extension"]);
     // Both pass WISP 1200's reader. CLIENTS is a plain object: `constructor` must not reach its prototype.
     for (const name of ["android", "constructor"]) expect(clientLabel(name)).toBe(name);
+  });
+
+  test("the files permission says what is picked stays with the app, not the chat it was picked in", () => {
+    // No app of the test store asks for files. Picks are kept per app (WISP 1200 · Keeping), and sharing them needs `chat`.
+    expect(PERMISSIONS.files.info).toBe(
+      "It reads only what you pick, without copying it. What you pick stays with the app, not with the chat: if it may also talk to your contact's app, it can share it in any chat you open it in.",
+    );
   });
 
   test("an app with the internet permission says so, and one without an icon shows its letter", async ({ page, request }) => {
@@ -202,6 +239,16 @@ test.describe("once the released Ghostly has Apps", () => {
     const icon = await request.get(`${LIVE}/apps/${CHESS}/app-icon`);
     expect(icon.headers()["content-type"]).toBe("image/png");
     for (const path of ["/apps/nothing.here", `/apps/gone.${PREFIX.a}`, `/apps/older.${PREFIX.a}`]) expect((await request.get(LIVE + path)).status(), path).toBe(404);
+  });
+
+  test("a missing app's page reads as not found in the browser's tab", async ({ page }) => {
+    // A browser gets the metadata streamed after the page: a plain request read the not-found title while the tab kept
+    // the home page's. Read it where people see it.
+    for (const url of [`${LIVE}/apps/nothing.here`, `${LIVE}/apps/gone.${PREFIX.a}`, `${HIDDEN}/apps/${CHESS}`]) {
+      await page.goto(url);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveAccessibleName("404: Page not found");
+      await expect(page, url).toHaveTitle("Page not found | Ghostly");
+    }
   });
 
   test("the nav, the footer, the sitemap and the privacy policy name them", async ({ page, request }) => {
@@ -221,7 +268,7 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect(main).toContainText("Apps and stores.");
     await expect(main).toContainText("The apps pages.");
     await expect(main).toContainText("cdn.jsdelivr.net");
-    await expect(main).toContainText("Last updated: October 8, 2026");
+    await expect(main).toContainText(`Last updated: ${LAST_UPDATED_APPS}`);
   });
 
   test("a prerendered page keeps the build's gate until it is revalidated", async ({ page }) => {

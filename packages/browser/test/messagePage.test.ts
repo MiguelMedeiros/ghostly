@@ -80,6 +80,41 @@ describe.each([
     expect(await db.getMessage("chat", "zz")).toBeUndefined();
   });
 
+  it("after a message or a time, the oldest that come after it: the pages, walked forward, are getMessages' order", async () => {
+    const chat = Array.from({ length: 237 }, (_, i) => message("chat-b", `m${(i * 37) % 1000}`, 1_000 + Math.floor(i / 3)));
+    const around = ["chat-a", "chat-c", "group:g1"].flatMap((linkId) => Array.from({ length: 40 }, (_, i) => message(linkId, `x${i}`, 1_000 + i)));
+    for (const m of shuffled([...chat, ...around])) await db.putMessage(m);
+    const all = (await db.getMessages("chat-b")).map((m) => m.id);
+    for (const limit of [1, 7, 50, 237, 500]) {
+      let page = await db.getMessagePageAfter("chat-b", { limit, after: { timestamp: -Infinity } });
+      const ids = page.messages.map((m) => m.id);
+      while (page.more) {
+        page = await db.getMessagePageAfter("chat-b", { limit, after: page.messages.at(-1)! });
+        ids.push(...page.messages.map((m) => m.id));
+      }
+      expect(ids).toEqual(all);
+    }
+  });
+
+  it("after and before together hold only what is between them, ties at either end by id", async () => {
+    for (const [id, at] of [["a", 1], ["b", 2], ["c", 2], ["d", 2], ["e", 3]] as const) await db.putMessage(message("chat", id, at));
+    const ids = async (after: { timestamp: number; id?: string }, before?: { timestamp: number; id?: string }, limit = 10) => {
+      const page = await db.getMessagePageAfter("chat", { limit, after, before });
+      return [page.messages.map((m) => m.id), page.more];
+    };
+    expect(await ids({ timestamp: 1 })).toEqual([["b", "c", "d", "e"], false]);
+    expect(await ids({ timestamp: 2, id: "b" }, undefined, 2)).toEqual([["c", "d"], true]);
+    expect(await ids({ timestamp: 2, id: "b" }, { timestamp: 2, id: "d" })).toEqual([["c"], false]);
+    expect(await ids({ timestamp: 1, id: "a" }, { timestamp: 3 })).toEqual([["b", "c", "d"], false]);
+    expect(await ids({ timestamp: 2, id: "d" }, { timestamp: 3, id: "e" })).toEqual([[], false]);
+    // Empty windows: crossed, the same message, or one time that both ends leave out.
+    expect(await ids({ timestamp: 3 }, { timestamp: 1 })).toEqual([[], false]);
+    expect(await ids({ timestamp: 2, id: "c" }, { timestamp: 2, id: "c" })).toEqual([[], false]);
+    expect(await ids({ timestamp: 2 }, { timestamp: 2, id: "c" })).toEqual([[], false]);
+    expect(await ids({ timestamp: 2, id: "b" }, { timestamp: 2 })).toEqual([[], false]);
+    expect(await ids({ timestamp: 5 })).toEqual([[], false]);
+  });
+
   it.each([8, 9])("works on a database kept before pages (v%i): the upgrade indexes the history already there", async (version) => {
     await new Promise<void>((resolve, reject) => {
       const open = indexedDB.open("ghostly", version);

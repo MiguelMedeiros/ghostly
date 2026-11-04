@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, checkTypes, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, checkTypes, checkWebhook, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, readCursor, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -18,8 +18,8 @@ import { ghostly } from "./support/cli";
  * per message a contact sends (or group message that mentions this profile), the contact's words under `untrusted`.
  */
 
-const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
-const OTHER_KEY = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqx";
+const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+const OTHER_KEY = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqy";
 
 let seq = 0;
 const received = (chat: string, id: string, text: string, fields: Record<string, unknown> = {}): GhostlyEvent =>
@@ -147,6 +147,23 @@ describe("agent turns", () => {
 });
 
 describe("hooks", () => {
+  it("the output line writes a contact's C1 and bidi controls as \\uXXXX; the event keeps its text whole", async () => {
+    const text = "A\u009b2JB\u009d0;title\u009cC\u0085D\u202eE";
+    const lines: string[] = [];
+    for (const turns of [false, true]) {
+      const handle = eventHandler({ types: [], turns, print: true, write: (line) => { lines.push(line); } });
+      handle(received("c1", "m1", text));
+      await handle.idle();
+    }
+    expect(lines).toHaveLength(2);
+    for (const line of lines) {
+      expect(line).not.toMatch(/[\u0080-\u009f\u202e]/);
+      expect(line).toContain("A\\u009b2JB\\u009d0;title\\u009cC\\u0085D\\u202eE");
+    }
+    expect((JSON.parse(lines[0]) as GhostlyEvent).message).toMatchObject({ text });
+    expect((JSON.parse(lines[1]) as { untrusted: { text: string } }).untrusted.text).toBe(text);
+  });
+
   it("run without the backup passphrase in their environment", () => {
     const env = hookEnv({ PATH: "/bin", GHOSTLY_BACKUP_PASSPHRASE: "correct horse", GHOSTLY_PROFILE: "bot" });
     expect(env).toEqual({ PATH: "/bin", GHOSTLY_PROFILE: "bot" });
@@ -163,7 +180,7 @@ describe("hooks", () => {
     try {
       const event = received("c1", "m1", "the plan for tonight");
       eventHandler({ types: [], print: false, write: () => {}, webhook: `http://127.0.0.1:${port(hook)}/hook` })(event);
-      await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`the webhook did not take event ${event.seq}`), { timeout: 8000 });
+      await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`answered 307: event ${event.seq} (message.received) passed, not taken`), { timeout: 8000 });
       expect(asked).toBeGreaterThan(0);
       expect(elsewhere).toEqual([]);
     } finally {
@@ -171,6 +188,123 @@ describe("hooks", () => {
       hook.close(); other.close();
     }
   }, 10_000);
+
+  it("a webhook not answering holds its event, the cursor before it, and takes the stream up in order when it is back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor");
+    const got: number[] = [];
+    let busy = 2;
+    // A bridge that took nothing yet: its port, closed (connection refused, as while it restarts).
+    const bridge = createServer((request, response) => {
+      request.resume();
+      // Back, and busy at first: a 503 is not there yet either.
+      if (busy-- > 0) return void response.writeHead(503).end();
+      got.push(Number(request.headers["x-ghostly-seq"]));
+      response.writeHead(204).end();
+    });
+    await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+    const hookPort = (bridge.address() as AddressInfo).port;
+    await new Promise<void>((resolve) => bridge.close(() => resolve()));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const said = () => stderr.mock.calls.map(([text]) => String(text)).join("");
+    try {
+      // The bridge's token in the path and the query, as docs/CLI.md tells: stderr names the bridge by its origin only.
+      const handle = eventHandler({ types: [], print: false, write: () => {}, cursor, retryMs: 10, webhook: `http://127.0.0.1:${hookPort}/hook/s3cret?token=s3cret` });
+      const events = [received("c1", "a", "one"), received("c1", "b", "two"), received("c1", "c", "three")];
+      for (const event of events) handle(event);
+      await vi.waitFor(() => expect(said()).toMatch(`is not answering: holding event ${events[0].seq}`));
+      // Down for longer than the 3.5 s that used to pass the event: still held, nothing acknowledged.
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(existsSync(cursor)).toBe(false);
+      expect(handle.behind()).toBe(3);
+      await new Promise<void>((resolve) => bridge.listen(hookPort, "127.0.0.1", resolve));
+      await handle.idle();
+      expect(got).toEqual(events.map((event) => event.seq));
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(events[2].seq));
+      // Said once for the outage, and again when it is over; never "did not take".
+      expect(said().match(/is not answering/g)).toHaveLength(1);
+      expect(said()).toMatch(`ghostly: the webhook at http://127.0.0.1:${hookPort} is not answering: holding event ${events[0].seq}`);
+      expect(said()).toMatch(`ghostly: the webhook at http://127.0.0.1:${hookPort} answers again: event ${events[0].seq} taken`);
+      expect(said()).not.toMatch("passed, not taken");
+      expect(said()).not.toMatch("s3cret");
+    } finally {
+      stderr.mockRestore();
+      bridge.close();
+    }
+  }, 10_000);
+
+  it("a webhook with a user or password in its URL is a usage error that does not repeat them: fetch never posts to one", async () => {
+    // What `post` would meet: every event held as "not answering", for good, the password on stderr each time.
+    await expect(fetch("http://bridge:s3cret@127.0.0.1:1/hook", { method: "POST" })).rejects.toThrow(TypeError);
+    for (const url of ["http://bridge:s3cret@127.0.0.1:8080/hook", "http://s3cret@localhost:8080/hook", "https://:s3cret@[::1]/hook"]) {
+      let error: unknown;
+      try { checkWebhook(url); } catch (thrown) { error = thrown; }
+      expect(error, url).toBeInstanceOf(CliError);
+      expect((error as CliError).code).toBe("usage");
+      expect((error as CliError).message).toMatch("no user or password");
+      expect((error as CliError).message).not.toMatch("s3cret");
+    }
+    expect(checkWebhook("http://127.0.0.1:8080/hook?token=abc").href).toBe("http://127.0.0.1:8080/hook?token=abc");
+  });
+
+  // agents#1710: on a full disk the listener ran on with exit 0, a stderr line per event and its cursor never written.
+  it("a cursor that can no longer be written stops the listener, the cursor at the last event kept", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-cursor-")), cursor = join(dir, "bridge.cursor");
+    const lines: string[] = [], failed: unknown[] = [];
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({ types: [], print: true, write: (line) => { lines.push(line); }, cursor, cursorFailed: (error) => { failed.push(error); } });
+      const [first, second, third] = [received("c1", "p", "one"), received("c1", "p", "two"), received("c1", "p", "three")];
+      handle(first);
+      await handle.idle();
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(first.seq));
+      // The folder stops taking files (as a full disk does).
+      chmodSync(dir, 0o500);
+      handle(second);
+      handle(third);
+      await handle.idle();
+      expect(failed).toHaveLength(1);
+      expect((failed[0] as NodeJS.ErrnoException).code).toMatch(/EACCES|EPERM/);
+      // The event that could not be kept was handed once; none after it, and no line per event on stderr.
+      expect(lines.map((line) => (JSON.parse(line) as GhostlyEvent).seq)).toEqual([first.seq, second.seq]);
+      expect(stderr).not.toHaveBeenCalled();
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(first.seq));
+    } finally {
+      chmodSync(dir, 0o700);
+      stderr.mockRestore();
+    }
+  });
+
+  it("a full disk is said as no room, naming the file, with a code a bot can branch on", () => {
+    const full = Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", errno: -28, syscall: "write" });
+    expect(asCliError(full).toJSON()).toEqual({ code: "unavailable", message: "No room left on the disk: free some space, then try again", details: { reason: "no_space", errno: "ENOSPC" } });
+    const named = Object.assign(new Error("EDQUOT: disk quota exceeded, open '/x/p.backup'"), { code: "EDQUOT", syscall: "open", path: "/x/p.backup" });
+    expect(asCliError(named).toJSON()).toEqual({ code: "unavailable", message: "No room left for /x/p.backup: free some space, then try again", details: { reason: "no_space", errno: "EDQUOT", path: "/x/p.backup" } });
+  });
+
+  it("an event the webhook refuses (a 4xx) is passed: said on stderr, the cursor moves on", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-hook-")), cursor = join(dir, "bridge.cursor");
+    let asked = 0;
+    const bridge = createServer((request, response) => { asked++; request.resume(); response.writeHead(400).end(); });
+    await new Promise<void>((resolve) => bridge.listen(0, "127.0.0.1", resolve));
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const handle = eventHandler({ types: [], print: false, write: () => {}, cursor, retryMs: 10, webhook: `http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook/s3cret?token=s3cret` });
+      const event = received("c1", "p", "poison");
+      handle(event);
+      await handle.idle();
+      expect(asked).toBe(3);
+      // The bridge (its origin: a token in the path or query stays off stderr), what it answered, and that the event
+      // will not come again: a wrong path or a missing token is seen by its status.
+      const said = stderr.mock.calls.map(([text]) => String(text)).join("");
+      expect(said).toMatch(
+        `ghostly: the webhook at http://127.0.0.1:${(bridge.address() as AddressInfo).port} answered 400: event ${event.seq} (message.received) passed, not taken (a 4xx or a redirect is not tried again)\n`);
+      expect(said).not.toMatch("s3cret");
+      expect(readFileSync(cursor, "utf8").trim()).toBe(String(event.seq));
+    } finally {
+      stderr.mockRestore();
+      bridge.close();
+    }
+  });
 });
 
 describe("the allowlist", () => {
@@ -202,7 +336,7 @@ describe("the allowlist", () => {
 
   it("resolves names to ids once at start; a contact key with no chat yet is kept as a key; anything else is an error", async () => {
     const call = vi.fn(async (method: string, params: Record<string, unknown>) => {
-      if (method === "chat.get" && params.chat === "bob") return { id: "c1", peer: KEY };
+      if (method === "chat.get" && params.chat === "bob") return { id: "c1", label: "bob", peer: KEY };
       if (method === "group.get" && params.group === "team") return { id: "g1" };
       throw new CliError("not_found", `No ${method} ${String(params.chat ?? params.group)}`);
     });
@@ -226,6 +360,9 @@ describe("the allowlist", () => {
     expect(call).not.toHaveBeenCalled();
     expect(await list.allows(received("chatAlice", "a", "hi"))).toBe(true);
     expect(await list.allows(received("chatMallory", "b", "hi"))).toBe(false);
+    // The key with its last character respelled is no key, and is not asked of the chats either (a contact may call itself that too).
+    await expect(allowlist([KEY.slice(0, 51) + "t"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
+    expect(call).not.toHaveBeenCalled();
   });
 });
 
@@ -284,7 +421,7 @@ describe("listen with an allowlist and --turns", () => {
       getMessages: vi.fn(async () => chat), groupMessages: vi.fn(async () => crew),
       getMessage: vi.fn(async (linkId: string, id: string) => (linkId === "c1" ? chat : crew).find((m) => m.id === id)),
       sendMessage: vi.fn(async () => ({ error: null, messageId: "me_2" })), sendGroupMessage: vi.fn(async () => ({ error: null, messageId: "mine:1:1" })), groupTaken: () => 0,
-      react: vi.fn(async () => ({ error: null })), pinMessage: vi.fn(async () => ({ error: null })), deleteMessage: vi.fn(async () => {}), messageDetails: vi.fn(async () => ({})),
+      react: vi.fn(async () => ({ error: null })), pinMessage: vi.fn(async () => ({ error: null })), chatUnconfirmed: () => ({ reactions: [], pin: null }), deleteMessage: vi.fn(async () => {}), messageDetails: vi.fn(async () => ({})),
       forwardMessages: vi.fn(async () => ({ results: [{ messageIds: [], error: null }] })), pressButton: vi.fn(async () => ({ error: null })),
     };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -340,6 +477,40 @@ describe("listen with an allowlist and --turns", () => {
     expect(result.code, result.stdout + result.stderr).toBe(3);
     expect(result.json).toEqual({ error: { code: "not_found", message: `No such file or folder: ${join(dir, "nodir")}` } });
     expect(readdirSync(home)).toEqual([]);
+
+    // A cursor that is a folder is named, as every other file option is.
+    const folder = join(dir, "afolder");
+    mkdirSync(folder);
+    const named = await ghostly(["--home", home, "listen", "--cursor", folder]);
+    expect(named.code, named.stdout + named.stderr).toBe(1);
+    expect(named.json).toEqual({ error: { code: "bad_request", message: `${folder} is a folder: name a file` } });
+  });
+
+  it("a cursor file that holds no event number is said before anything starts, not taken as the journal's end", async () => {
+    // Empty, garbage or a negative number gave undefined, and listen started on live events only: every event since
+    // the last one handled was skipped without a word, and the next write replaced the file.
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    expect(readCursor(undefined)).toBeUndefined();
+    expect(readCursor(join(dir, "none"))).toBeUndefined();
+    writeFileSync(join(dir, "kept"), "42\n");
+    expect(readCursor(join(dir, "kept"))).toBe(42);
+    const refusal = (path: string) => { try { readCursor(path); } catch (error) { return asCliError(error).toJSON(); } return null; };
+    for (const [name, text, shown] of [["empty", "", "nothing"], ["blank", " \n", "nothing"], ["garbage", "abc\n", '"abc"'], ["negative", "-1", '"-1"'], ["fraction", "1.5", '"1.5"']] as const) {
+      writeFileSync(join(dir, name), text);
+      expect(refusal(join(dir, name)), name).toEqual({ code: "bad_request", message: `${join(dir, name)} holds no event number (${shown}): fix or remove it, or give --since` });
+    }
+    // Something long is cut where it is shown.
+    writeFileSync(join(dir, "long"), "x".repeat(500));
+    expect(refusal(join(dir, "long"))!.message).toContain(`("${"x".repeat(32)}…")`);
+
+    // The command says it at once, with the code a bot branches on, and no profile was opened or made for it; the file
+    // is left as it was, and --since still starts it.
+    const home = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const result = await ghostly(["--home", home, "listen", "--cursor", join(dir, "garbage")]);
+    expect(result.code, result.stdout + result.stderr).toBe(1);
+    expect(result.json).toEqual({ error: { code: "bad_request", message: `${join(dir, "garbage")} holds no event number ("abc"): fix or remove it, or give --since` } });
+    expect(readdirSync(home)).toEqual([]);
+    expect(readFileSync(join(dir, "garbage"), "utf8")).toBe("abc\n");
   });
 
   it("an output that wants a drain holds the next event until it drains; the events wait as `behind`", async () => {
@@ -382,6 +553,35 @@ describe("listen with an allowlist and --turns", () => {
     expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual(events.slice(0, MAX_BEHIND).map((e) => e.seq));
     feed.take(events[MAX_BEHIND]);
     expect(handle.behind()).toBe(1);
+  });
+
+  // agents#1597: events --type drops waited behind a webhook in flight, counted toward MAX_BEHIND and kept: an app's
+  // frames filled the bound behind a bridge that was down, and the feed paused with the one wanted event pending.
+  it("drops an event --type does not take as it comes: not behind a hook at work, not counted, and the cursor passes it after", async () => {
+    const lines: string[] = [];
+    let drain = () => {}, stuck = true;
+    const cursor = join(mkdtempSync(join(tmpdir(), "ghostly-listen-skip-")), "cursor");
+    const handle = eventHandler({ types: ["message.received"], print: true, cursor, write: (line) => { lines.push(line); return !stuck; }, drained: () => new Promise<void>((resolve) => { drain = resolve; }) });
+    const pause = vi.fn(), resume = vi.fn();
+    const feed = new Feed(handle, 3, pause, resume);
+    const wanted = received("c1", "one", "hi");
+    feed.take(wanted);
+    // 3,000 app frames of 32 KiB while the wanted text waits on its output.
+    const frames = Array.from({ length: 3_000 }, () => other("app.message", { chat: "c1", data: "x".repeat(32_000) }));
+    for (const frame of frames) feed.take(frame);
+    expect(handle.behind()).toBe(1);
+    expect(pause).not.toHaveBeenCalled();
+    // Nothing before the wanted text moved the cursor; once it is handled, the cursor passes the frames dropped after it.
+    expect(existsSync(cursor)).toBe(false);
+    stuck = false;
+    drain();
+    await handle.idle();
+    await vi.waitFor(() => expect(Number(readFileSync(cursor, "utf8").trim())).toBe(frames.at(-1)!.seq));
+    expect(lines.map((line) => (JSON.parse(line) as { seq: number }).seq)).toEqual([wanted.seq]);
+    // With nothing at work, a dropped event moves the cursor at once.
+    const late = other("app.message", { chat: "c1", data: "y" });
+    feed.take(late);
+    expect(Number(readFileSync(cursor, "utf8").trim())).toBe(late.seq);
   });
 
   it("--turns takes the place of --type", async () => {

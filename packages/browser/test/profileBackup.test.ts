@@ -5,6 +5,7 @@ import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { listProfiles } from "../../../apps/ui/src/lib/profiles";
 import { createProfileBackup, restoreHandoffBundle, restoreProfileBackup, writeProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
 import { memorySink } from "../src/backup/stream";
+import { forgetRatchets } from "../src/shared/restoredRows";
 // covers: backup.profile.file, backup.passphrase-rules, backup.envelope, profiles.delete, profiles.lock, devices.push
 
 class FakeStorage {
@@ -90,6 +91,35 @@ it("the push subscription moves in a handoff (it names its device), and stays ou
   expect((await settingsIn("stagedhandoff"))?.wake).toEqual(wake);
   const restored = await restoreProfileBackup(await createProfileBackup("a long backup passphrase"), "a long backup passphrase");
   expect((await settingsIn(restored.id))?.wake).toBeUndefined();
+});
+
+it("a chat's ratchet (WISP 4xx) is in neither a backup nor a handoff; the rest of the chat is", async () => {
+  await openDb();
+  const ratchetState = { v: 1, others: [], skipped: [{ s: "sid", d: "dh", n: 3, k: "a kept key", at: 1 }], retired: [], heard: { floor: true } };
+  await transact([STORES.links], (s) => { s[STORES.links].put({ id: "link1", seedB64: "seed", peerPubKeyZ32: "peer", ratchetState }); });
+  const linkIn = async (ns: string) => ((await readAll(`ghostly_${ns}`, STORES.links)) as { id: string; ratchetState?: unknown }[]).find((row) => row.id === "link1");
+  const sink = memorySink();
+  await writeProfileBackup(sink, { passphrase: null, handoff: true });
+  expect(textOf(sink.bytes())).not.toContain("a kept key");
+  await restoreHandoffBundle(sink.bytes(), "stagedratchet");
+  expect(await linkIn("stagedratchet")).toMatchObject({ id: "link1", seedB64: "seed" });
+  expect((await linkIn("stagedratchet"))?.ratchetState).toBeUndefined();
+  const restored = await restoreProfileBackup(await createProfileBackup(null), undefined);
+  expect((await linkIn(restored.id))?.ratchetState).toBeUndefined();
+});
+
+it("a restored headless profile drops every chat's ratchet, from a backup made before backups left it out", async () => {
+  await openDb();
+  await transact([STORES.links], (s) => {
+    s[STORES.links].put({ id: "kept", seedB64: "seed", peerPubKeyZ32: "peer", ratchetState: { v: 1 } });
+    s[STORES.links].put({ id: "plain", seedB64: "seed2", peerPubKeyZ32: "peer2" });
+  });
+  await forgetRatchets();
+  await forgetRatchets();
+  const db = await openDb();
+  const rows = await wrap(db.transaction(STORES.links, "readonly").objectStore(STORES.links).getAll()) as { id: string; ratchetState?: unknown }[];
+  expect(rows.filter((r) => r.id === "kept" || r.id === "plain").map((r) => [r.id, r.ratchetState])).toEqual([["kept", undefined], ["plain", undefined]]);
+  expect(rows.find((r) => r.id === "kept")).toMatchObject({ seedB64: "seed" });
 });
 
 it("a new profile's question for a name stays with it: neither a backup nor a handoff carries it", async () => {

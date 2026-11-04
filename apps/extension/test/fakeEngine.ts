@@ -48,8 +48,12 @@ export function okResponse(body: string, status = 200, headers: [string, string]
 
 export class FakeEngineServer {
   readonly attached: EngineClientSink[] = [];
+  /** What each attach asked for besides the client (`read`, `scope`), in order. */
+  readonly attachedWith: unknown[][] = [];
   readonly detached: EngineClientSink[] = [];
   readonly handled: { client: EngineClientSink; request: RpcRequest }[] = [];
+  /** The whole histories asked for (`history`), by whom. */
+  readonly histories: { client: EngineClientSink; linkId: unknown }[] = [];
   readonly requests: { peer: string; service: string; init: EngineRequestInit }[] = [];
   shutdowns = 0;
   /** The whole engine, as `EngineServer` says of itself: device-link-only mode is the other kind of peer (WISP 06). */
@@ -78,8 +82,13 @@ export class FakeEngineServer {
     engineControl().log.push(`start ${this.database}`);
   }
 
-  attach(client: EngineClientSink): void {
+  attach(client: EngineClientSink, ...rest: unknown[]): void {
     this.attached.push(client);
+    this.attachedWith.push(rest);
+  }
+
+  async history(client: EngineClientSink, linkId: unknown): Promise<void> {
+    this.histories.push({ client, linkId });
   }
 
   detach(client: EngineClientSink): void {

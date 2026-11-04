@@ -73,27 +73,37 @@ test("every row of the chat, group and New menus is one line and whole, in every
       const at = `${language} at ${viewport.width}px`;
       const sheet = viewport === PHONE ? "sheet" : "popover";
 
-      // The chat's ⋮: Pin, Mute notifications, Move to folder…, Search, Hold messages, Refresh, Tech Info, Delete.
+      // The chat's ⋮: Search, Mute notifications, Pin, then Move to folder…, Hold messages, Refresh, Tech Info, and Delete.
       // Not in it: the connection (the header's connection control has it), Payments (the composer's + → Payment),
       // Identities (the contact's marks in the header, e2e/web/contact-identities.spec.ts) and Services (the
       // composer's + → Shared services). On a phone the header keeps the name, the connection, a call and ⋮, so two of
-      // the header's own controls are its first rows: Video call and Identities (chat-header-phone.spec.ts).
+      // the header's own controls are rows: Video call and Identities (chat-header-phone.spec.ts); the four rarer rows
+      // are in its More… sheet.
       await go(chatHash);
       await page.getByTestId("chat-options").click();
       const chatMenu = page.getByTestId("chat-options-menu");
       await expect(chatMenu).toHaveAttribute("data-menu", sheet);
-      await expect(chatMenu.getByTestId("chat-folder-open")).toBeVisible();
       await expect(chatMenu.getByTestId("chat-search-open")).toBeVisible();
-      await expect(chatMenu.getByTestId("chat-hold-open")).toBeVisible();
+      for (const id of ["chat-folder-open", "chat-hold-open"]) await expect(chatMenu.getByTestId(id), `${id}, ${at}`).toHaveCount(viewport === PHONE ? 0 : 1);
+      await expect(chatMenu.getByTestId("chat-more-open")).toHaveCount(viewport === PHONE ? 1 : 0);
       await expect(chatMenu.getByTestId("chat-connection-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-payments-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-identities-open")).toHaveCount(0);
       await expect(chatMenu.getByTestId("chat-services-open")).toHaveCount(0);
       for (const id of ["call-video", "chat-identity-badges"]) await expect(chatMenu.getByTestId(id), `${id}, ${at}`).toHaveCount(viewport === PHONE ? 1 : 0);
       await expect(chatMenu.getByTestId("connection-options")).toHaveCount(0);
-      await oneLineEach(chatMenu, viewport === PHONE ? 10 : 8, `chat menu, ${at}`);
+      await oneLineEach(chatMenu, viewport === PHONE ? 7 : 8, `chat menu, ${at}`);
       if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-menu-${language}-${viewport.width}.png`) });
-      await close(page, chatMenu);
+      if (viewport === PHONE) {
+        await chatMenu.getByTestId("chat-more-open").click();
+        const moreMenu = page.getByTestId("chat-more-menu");
+        await expect(moreMenu).toHaveAttribute("data-menu", "sheet");
+        await expect(moreMenu.getByTestId("chat-folder-open")).toBeVisible();
+        await expect(moreMenu.getByTestId("chat-hold-open")).toBeVisible();
+        await oneLineEach(moreMenu, 4, `chat menu's More…, ${at}`);
+        if (language !== "ar") await page.screenshot({ path: testInfo.outputPath(`chat-more-${language}-${viewport.width}.png`) });
+        await close(page, moreMenu);
+      } else await close(page, chatMenu);
 
       // The group's ⋮: Members, Mute notifications, Move to folder…, Search, Rotate keys, Leave group, Delete from this device.
       await go(groupHash);
@@ -115,4 +125,23 @@ test("every row of the chat, group and New menus is one line and whole, in every
       await close(page, newMenu);
     }
   }
+});
+
+test("a phone on its side: a chat's ⋮ menu stays on the screen and scrolls to its last row", { tag: ["@feature:app.menus", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // 874 × 402, two panes: no room above the header's ⋮ nor below it for the whole menu. It ran off the screen's bottom
+  // edge, its last row (Delete chat) half cut, with nothing to scroll to it.
+  const SIDE = { width: 874, height: 402 };
+  const { page } = await peer("side-menu", { mobile: true, viewport: SIDE });
+  await page.getByTitle("New Chat").first().click();
+  await page.getByTestId("chat-options").filter({ visible: true }).click();
+  const menu = page.getByTestId("chat-options-menu");
+  await expect(menu).toHaveAttribute("data-menu", "popover");
+  expect((await menu.boundingBox())!.y + (await menu.boundingBox())!.height).toBeLessThanOrEqual(SIDE.height);
+  const last = menu.locator("[data-menu-item]").last();
+  await last.scrollIntoViewIfNeeded();
+  const box = (await last.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(SIDE.height);
+  // The keys reach it too.
+  await page.keyboard.press("End");
+  await expect(last).toBeFocused();
 });

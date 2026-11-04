@@ -5,6 +5,21 @@ import { extensionSigner, withNostrSigner } from "../nostr";
 import { nostr, nostrProofTemplate, type NostrEvent } from "./nostr";
 
 /**
+ * A long domain as a card shows it: its end, the part that names who owns it (`…ghostly.tools`), never its start, which
+ * is whatever the owner chose (`github.com.account-…` under any domain they own). Whole labels from the end, as many as
+ * fit in `room` characters; when they leave less than half of it (`…co.uk`, one long label before it), the end's
+ * characters instead.
+ */
+export function shortDomain(domain: string, room = 24): string {
+  if (domain.length <= room) return domain;
+  const labels = domain.split(".");
+  let end = labels.pop() ?? "";
+  while (labels.length && end.length + 1 + labels[labels.length - 1]!.length <= room - 1) end = `${labels.pop()}.${end}`;
+  if (end.length < room / 2) end = domain.slice(-(room - 1));
+  return `…${end}`;
+}
+
+/**
  * A domain the person controls (draft WISP 304, docs/wisps/304-domain.md).
  *
  * The statement ("I control domain:example.com and authorize the Ghostly key K …") is vouched for by
@@ -92,6 +107,7 @@ export const domain: IdentityProofProvider<DomainEvidence> = {
     label: "Domain", placeholder: "example.com",
     help: "A domain or subdomain you control. A proof for alice.example.com is published under alice.example.com.",
     normalize: normalizeDomain,
+    short: domain => shortDomain(domain),
   },
   publicUri: domain => `https://${domain}`,
   validity: { defaultDays: 90, maxDays: 365 },

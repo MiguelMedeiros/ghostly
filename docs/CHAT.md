@@ -123,7 +123,7 @@ One mark beside the time, as in WhatsApp (#360, `apps/ui/src/components/chat/Del
 - A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468). A chat kept loaded in the background (on a call, with a mini-app running) is where it was when it shows again: WebKit starts a list that comes back on screen at its top, and that move is not taken for a hand's.
 - A long chat has a window of its messages in the page, never its whole history (`apps/ui/src/hooks/useRowWindow.ts`): it opens on its last 100, and as you scroll near the top 100 older ones come in above without moving the view. Past 300, the ones at the far end leave the page, so a chat of 20,000 messages opens and scrolls like a short one. A chat left open at its bottom while messages keep coming does the same: past 300, it goes back to its last 100 (all above the view), so a bot posting all day does not grow the page; scrolled up, nothing is taken away. A jump to a message not in the page (a quote, a search match, a Tasks row, the pinned message) brings in the messages around it first. A long group reads its newest 50 from the store first (#494). A chat left scrolled up opens around the message you left it on.
 - 1:1 chats, groups and communities alike.
-- A 1:1 chat's history lives in the engine (IndexedDB). The page keeps a copy of each chat's last 200 messages in localStorage, for the chat list and a chat's first moment, plus the lines only the page keeps (a call's). The rest it reads from the engine's copy (`STORED_MESSAGES`, `apps/ui/src/lib/storage.ts`, `packages/browser/src/platform/sync.ts`). A chat of thousands of messages used to fill that storage (5 MB in WebKit, the Desktop app's), and then stopped showing new messages.
+- A 1:1 chat's history lives in the engine (IndexedDB). The page keeps a copy of each chat's last 200 messages (at most 100,000 characters of them: a link's thumbnail or an edit history weighs as much as a hundred plain messages, `STORED_CHARS`) in localStorage, for the chat list and a chat's first moment, plus the lines only the page keeps (a call's). The rest it reads from the engine's copy (`STORED_MESSAGES`, `apps/ui/src/lib/storage.ts`, `packages/browser/src/platform/sync.ts`). A chat of thousands of messages used to fill that storage (5 MB in WebKit, the Desktop app's), and then stopped showing new messages.
 
 ## How messages render
 
@@ -148,13 +148,13 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 
 ## Message details
 
-Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
+Ctrl+double click (⌘+double click on a Mac), or the message's ⋮ → **Details**; a plain double or triple click selects the words (#240, `apps/ui/src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
 
 ## Files
 
 `files/3` ([WISP 501 Chat Files](wisps/501-paired-files.md), #228, #233, `packages/core/src/chatFiles.ts`):
 
-- Any size. Offered first, then sent in 16 KiB chunks with 1 MiB in flight, resumed from the last confirmed byte, checked against the sender's SHA-256.
+- Any size. Offered first, then sent in 16 KiB chunks with up to 1 MiB in flight (sized by the connection, so a slow upload does not hold up the sender's messages and calls), resumed from the last confirmed byte, checked against the sender's SHA-256.
 - The bytes as they are (`files/4`, `encodeFileData`): with a contact whose app has it, on a session that carries binary messages (WebRTC; HyperDHT from the Desktop, the CLI and a browser), each chunk is one binary message, not base64 text in a JSON frame. A 200 MiB file is 200.4 MiB on the wire instead of 267.6 MiB. In a group's file sessions too. Older apps and Iroh keep `files/3` frames.
 - Taken without asking up to 25 MiB per file and 500 MiB per contact; past that, the receiver is asked. Offers expire after 7 days.
 - Bytes stream to storage, never whole in memory: OPFS on web and extension, files on Desktop, IndexedDB as fallback.
@@ -215,7 +215,7 @@ From 1.2, in private groups and communities ([WISP 503 Group Files](wisps/503-gr
 - The composer takes files, pictures, videos and voice messages as a chat's does (+ → Document, Media, Camera, paste, drop, the microphone), a reply included. Up to 100 MiB a file, a voice message up to 15 minutes.
 - Everyone sees the bubble at once, under the sender's name. The bytes do not go through the group: each member's app fetches them from a member who has the file, over a link between the two, and checks them against the sender's digest. Whoever stored the file serves it, so a member who was away gets it from anyone who is there, not only from the sender.
 - Voice messages, and files up to 8 MiB, download by themselves until what came that way from a group adds up to 256 MiB on the device. Larger ones show their size and **Download**. Settings → Data & storage → **Download automatically in groups** is Off, Wi-Fi only (where the browser can tell) or Always (the default), per device; nothing about it is sent to the group.
-- A file that cannot come yet says why: "Asking a member who has it…", "Nobody you are connected to has this file yet" (it comes by itself when one is online), "Busy, trying again soon", or "Arrived damaged" with **Ask again**. One that stops mid-way goes on from what already came.
+- A file that cannot come yet says why: "Asking a member who has it…", "Nobody you are connected to has this file yet" (it comes by itself when one is online), "Not with your connections yet" (a group of more than 16 on hubs, where none of your connections has it and the sender is not one of them: it comes once one of them downloads it), "Busy, trying again soon", or "Arrived damaged" with **Ask again**. One that stops mid-way goes on from what already came.
 - Forward and Share to list groups for files too.
 - An app from before 1.2 shows a line that names the file and says to update. Hubs carry the announcement, never the bytes.
 - No calls in groups.

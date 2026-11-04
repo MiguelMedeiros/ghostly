@@ -16,12 +16,12 @@ describe("extra words", { timeout: 60_000 }, () => {
       [["profile", "set", "extra", "--name", "x"], "profile set [--name <name>] [--share-profile | --no-share-profile]"],
       [["profile", "backup", "extra", "--out", "f", "--no-passphrase"], "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]"],
       [["profile", "restore","file", "new", "extra"], "profile restore <file> <new profile> [--passphrase-file f] [--use]"],
-      [["daemon", "status", "extra"], "daemon status"],
+      [["daemon", "status", "extra"], "daemon status [--timeout s]"],
       [["daemon", "stop", "extra"], "daemon stop [--timeout s]"],
       [["daemon", "restart", "extra"], "daemon restart [--timeout s]"],
       [["daemon", "--detach", "extra"], "daemon [--detach] [--timeout s]"],
       [["settings", "get", "extra"], "settings get [--show-secret]"],
-      [["engine", "--list", "extra"], "engine --list"],
+      [["engine", "--list", "extra"], "engine --list [--verbose]"],
     ];
     for (const [args, usage] of cases) {
       expect(error(await ghostly(["--home", dir, ...args]), "usage", 2).message, args.join(" ")).toBe(`Too many arguments: ghostly ${usage}`);
@@ -36,7 +36,7 @@ describe("extra words", { timeout: 60_000 }, () => {
       const listen = new Running(["--home", dir, "listen", ...words]);
       try {
         expect(await listen.exited(30_000), words.join(" ")).toBe(2);
-        expect(listen.lines).toEqual([{ error: { code: "usage", message: "Too many arguments: ghostly listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]" } }]);
+        expect(listen.lines).toEqual([{ error: { code: "usage", message: "Too many arguments: ghostly listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print] [--translate lang]" } }]);
       } finally { await listen.stop(); }
     }
   });

@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { CommunityMessageFrame, DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -7,9 +7,10 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "../engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
+import type { Removal } from "../engine/removals";
 import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
-import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
+import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind, RatchetState } from "@ghostly/core";
 import type { S3Config } from "../backup/s3";
 import type { BackupReminders } from "./backupReminder";
 import type { TransportCause, TransportEntry, TransportEvent } from "../engine/transportLog";
@@ -19,6 +20,9 @@ import type { ProofLedger, ProofAdapter } from "@ghostly/core";
 import type { IdentityDisplay, IdentityLedger, IdentityStatus, IdentityTimelineEntry, SharedIdentity, VerifiedIdentity } from "@ghostly/core";
 import type { DataLinkState, LinkStatus, LiveAttempt, ServiceAd, PairingState, NativeTransport, PairedTransport, TransportDescriptors, TransportWait } from "@ghostly/core";
 import type { CommunityState, GroupByeFrame, GroupCommit, GroupRole, GroupState, GroupStatus } from "@ghostly/core";
+
+/** A reaction to a message not here yet (WISP 401 § Reactions), from `by`, waiting for it until `until`. */
+export interface WaitingReaction { by: string; reaction: WireReaction; until: number }
 
 /** A link as stored in IndexedDB. Same fields Desktop keeps in its ChatSession. */
 export interface StoredLink {
@@ -33,6 +37,11 @@ export interface StoredLink {
   wakeMuted?: boolean;
   deliveryMode?: DeliveryMode;
   dhtDeliveryState?: DhtDeliveryState;
+  /**
+   * Paired 1:1 chats: the ratchet of the DHT floor and held items (WISP 4xx). State of this device only: never in a
+   * backup or a handoff (`profileBackup.ts`), and dropped by a forced takeover (`raisedLink`).
+   */
+  ratchetState?: RatchetState;
   /** This side's layer-0 capability record and the contact's last good one (WISP 03). */
   capsState?: CapsState;
   publicProfiles?: PublicProfile[];
@@ -76,8 +85,25 @@ export interface StoredLink {
   peerAvatar?: string;
   /** Present on the side that created the link, until the peer shows up. */
   inviteCode?: string;
-  /** Messages deleted on this device, by id, so a republished one is not stored again. */
+  /**
+   * Messages deleted on this device, by id, so a republished one is not stored again: 500 at most, my deletions never
+   * pushing out the contact's ids nor theirs mine (`withDeletedId`).
+   */
   deletedIds?: string[];
+  /**
+   * 1:1 chats: the contact has had a row here in the words of the chat's joined line (a contact request's note aside),
+   * so no later row of theirs is that line (`StoredMessage.joinLine`). Absent on a chat stored before it was kept: set
+   * as the engine starts.
+   */
+  peerSpoke?: true;
+  /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
+  removals?: Removal[];
+  /**
+   * The ids both sides know (`replyRef`) of the messages deleted for everyone, mine or the contact's, here or not, the
+   * newest 500: a pin naming one shows as unpinned, the pin kept as it came and marked (`StoredPin.removed`), so no
+   * later trimming brings it back (WISP 400 § Delete for everyone).
+   */
+  removedRefs?: string[];
   /**
    * Files of mine whose offer went on the DHT floor (WISP 403 § Files) and that were deleted here before they went live,
    * by wire id: the next session that carries files/3 says each is cancelled (`pf-abort`), so the contact's bubble does too.
@@ -85,6 +111,8 @@ export interface StoredLink {
   withdrawnFiles?: string[];
   /** This side's reactions the contact has not confirmed yet (WISP 401 § Reactions), in the order of their numbers. */
   reactionsOut?: WireReaction[];
+  /** The contact's reactions to messages not here yet, confirmed to them: kept here until their message lands or their wait ends. */
+  reactionsWaiting?: WaitingReaction[];
   /** The chat's pinned message (WISP 400 § Pinned message): the latest pin, either side's; `id` "" once unpinned. */
   pin?: StoredPin;
   /** This side's pin the contact has not confirmed yet (WISP 401 § Pinned message): said on each live session until it does. */
@@ -153,6 +181,13 @@ export interface StoredGroup {
    * started again still lets them in.
    */
   invited?: Record<string, number>;
+  /**
+   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, `MAX_REMOVED_IDS` at
+   * most, each author's newest (`withRemovedId`): a copy that comes again (a catch-up, a member handing it on) is not stored again.
+   */
+  removedIds?: string[];
+  /** My messages I deleted for everyone, their removal said to the members and again to an edge that opens (`engine/removals.ts`). */
+  removals?: Removal[];
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
@@ -188,14 +223,22 @@ export interface StoredGroup {
   /**
    * I left: the group is gone from the list and its history from the device. What is kept is the
    * edge to the admin, until the admin's commit removing me arrives or `at` is a week old, so
-   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, and my
-   * signed leave (`bye`) that they carry to the admin.
+   * a leave said while the admin was away still reaches it. With hubs, the edges to my hubs too, which carry my
+   * signed leave (`bye`) to the admin. `bye` is kept without hubs too: opening the group's link again takes it along
+   * (`owedBye`).
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
   /**
+   * Left while the admin was away, then back by the group's link before it heard the leave: the signed leave of my old
+   * key, said to the admin on my new key's edge, so it takes the old key out (it was in every roster twice for good,
+   * agents#1652). Dropped once the old key is out of the roster, or a week after the leave.
+   */
+  owedBye?: GroupByeFrame;
+  /**
    * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
    * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
-   * was to a group I was removed from, which stays.
+   * was to a group I was removed from, which stays; beside a join by the group's link opened after the decline (its
+   * `invitation`, then its `state`), which stays too.
    */
   declined?: { at: number; linkId: string };
   /**
@@ -219,7 +262,7 @@ export interface StoredGroup {
    * Joining a community group through its link (`group2/…`), or again after my admission lost a
    * race: my member seed, the entry session, and what arrived of the welcome.
    */
-  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean };
+  joining?: { g: string; host: string; seedB64: string; linkId: string; name: string; inviter: string; invitedAt?: number; pieces: unknown[]; since: number; check?: boolean; replaced?: boolean };
 }
 
 export interface GroupMemberView {
@@ -255,7 +298,11 @@ export interface GroupEdgeView {
    * device's native listeners held by chats and other group links): it is tried again as one frees up.
    */
   noSlot?: true;
-  /** When this device last heard from the member on this edge, in ms (0: never). */
+  /**
+   * When this device last heard from the member on this edge, in ms (0: never). While the edge is open, as of when it
+   * opened (or of the member's latest packet read): the member is heard all along, and it stays the same from one state
+   * to the next.
+   */
   lastSeenAt: number;
   /** The engine's own words for why the last attempt failed (English, for logs and details); `cause` sums it up. */
   error?: string;
@@ -265,6 +312,15 @@ export interface GroupEdgeView {
    * again); `other`, anything else (a refused key, no common transport...).
    */
   cause?: GroupEdgeCause;
+  /**
+   * Down after it was live (in this run, or when the app last ran), for nothing the app can't get past: the app dials it
+   * again by itself, at WISP 100's background pace, while the member is seen.
+   */
+  reconnecting?: true;
+  /** When this side dials again by itself, in ms: set while it is the side that dials and its wait between attempts runs. */
+  retryAt?: number;
+  /** Automatic dials since the edge was last live or its wait started over, the one under way included. */
+  attempt?: number;
 }
 
 export type GroupEdgeCause = "relays" | "session" | "other";
@@ -273,9 +329,10 @@ export type GroupEdgeCause = "relays" | "session" | "other";
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,
  * it is there for the admin's app to read, that app opened the entry session, it let me in. Or a member's app
  * answered that there is no room yet (`group-full`, WISP 902 § A full group): `full`, or `blocked` while the group
- * waits for every member's app to take more than eight; the joiner goes on knocking.
+ * waits for every member's app to take more than eight; the joiner goes on knocking. Or the welcome said the link was
+ * replaced or turned off since it was shared (`replaced`): the knocking stops, and only the current link gets in.
  */
-export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked";
+export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked" | "replaced";
 
 export interface GroupView {
   id: string;
@@ -298,14 +355,19 @@ export interface GroupView {
   /** On the invitee's side, until the welcome arrives. */
   /**
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `othersKnocked`: joining a private group through its link, others knocked in its record lately (`KNOCK_REFRESH_MS`):
+   * the admin's app may be busy letting them in, its relay budget spent, so the wait is not a sign it is closed.
    * `since`: joining a community through its link, when the knock started (a group kept here, knocking to get back in,
    * was created long before).
+   * `admittedAt`: joining a community through its link, at stage `admitted`, when a member's app let me in. A welcome
+   * lost there, and the link replaced before I knock again, is never said again: nobody reads the old link's knocks.
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
    * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
-   * while that chat was up: the answer is offered again.
+   * while that chat was up: the answer is offered again. Through a link (`viaLink`): nobody answered it for an hour of
+   * this run (`JOIN_GIVE_UP_MS`), so the knocks stopped; accepting knocks again.
    * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; othersKnocked?: boolean; since?: number; admittedAt?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -364,6 +426,11 @@ export interface HeldEntry {
   expires: number;
   state: "queued" | "held" | "failed";
   error?: string;
+  /**
+   * The chat's ratchet session it was last sealed in (WISP 4xx), when ratcheted: once the ratchet seals in another one (the
+   * contact moved to another device or restored), it is sealed again there. Absent: plain, or sealed by an older build.
+   */
+  sid?: string;
 }
 
 /** Everything store-and-forward keeps per chat: the switch, what the contact said, sequences and the outbox. */
@@ -433,10 +500,11 @@ export interface FileTransferView {
    */
   stalled?: boolean;
   /**
-   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
-   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `author`: only
+   * its author holds it, a member this device has no edge with (a private group on hubs: it comes once a hub holds it);
+   * `busy`: its holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
    */
-  wait?: "nobody" | "busy" | "damaged";
+  wait?: "nobody" | "author" | "busy" | "day" | "damaged";
   /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
@@ -596,6 +664,12 @@ export interface StoredPayment {
   /** Requests we pay: this device paid it over Lightning (the payee's wallet cannot say who paid an invoice). */
   paidHere?: boolean;
   /**
+   * Requests we pay: the payee said it is paid (its `pay-res` ok), so its wallet has seen the money and our receipts
+   * for it (on-chain, Ark, Bark, Spark, USDT) are not said again when the chat reconnects. Absent: not heard yet, or a
+   * record from before this was kept (see `PaymentDesk.receiptOwed`).
+   */
+  payeeConfirmed?: boolean;
+  /**
    * A request to a whole group (WISP 902 § Payments): the group's id. Its `linkId` is `group:<id>`, it went to
    * every member over their edges, and the first member whose payment settles it pays it; later ones are refused.
    */
@@ -658,6 +732,8 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
+  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  quote?: string;
 }
 
 /** The kinds of wallet a profile can have: each is one card of the deck, on one network. */
@@ -883,6 +959,8 @@ export interface StoredMessage {
   member?: string;
   /** Group history lines that are not messages. */
   event?: GroupEvent;
+  /** A private group's removal line (`gone`): the member key of the admin who removed `member`. */
+  by?: string;
   /** Group history: a payment between members, as the group knows it (WISP 902 § Payments). */
   groupPay?: GroupPayNote;
   /** Group messages: the places of the text that name members, by member key (WISP 902 § Mentions). */
@@ -890,11 +968,11 @@ export interface StoredMessage {
   /** A group message someone else sent that names me (or everyone). */
   mentioned?: true;
   /**
-   * A private group's message from another member: the frame it came in (sealed, signed by its author), kept on the
-   * group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`, WISP 902 § Catch-up). The engine's
-   * own: a row goes to a page without it (`withoutFrame`).
+   * A private group's message from another member, or a community's from anyone: the frame it came in (sealed, signed
+   * by its author), kept on the group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`,
+   * `COMMUNITY_LIMITS.store`). The engine's own: a row goes to a page without it (`withoutFrame`).
    */
-  frame?: GroupMessageFrame;
+  frame?: GroupMessageFrame | CommunityMessageFrame;
   /** How this message travelled, as the engine saw it go or come (the message's details view). */
   details?: MessageDetails;
   /** A link preview that came with the text (WISP 401 § Link previews): made by the sender's app, never fetched here. */
@@ -918,6 +996,8 @@ export interface StoredMessage {
    * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
    */
   card?: StatusCard;
+  /** Only on the row a removal of mine reads as to the edit queues (`engine/removals.ts`): never stored, never shown. */
+  removed?: true;
   /**
    * A reply that presses a button of this side's own message (WISP 406 · Message Buttons), as the author's engine took
    * it: set only when the button was open for this person. What `button.pressed` reports.
@@ -931,7 +1011,34 @@ export interface StoredMessage {
   cardRestore?: "due" | "sent";
   /** What `cardRestore` was named before it covered every kind of card (buttons only): read for rows kept since. */
   buttonsRestore?: "due" | "sent";
+  /**
+   * A line this app wrote in the chat itself, never the contact's words: the app says it in its own language from these
+   * values (`paymentRefusal` in `shared/refusals.ts`), and `text` keeps its English for the CLI and older apps.
+   */
+  notice?: ChatNotice;
+  /**
+   * A 1:1 chat's "👋 <name> joined" line, drawn as the app's own line: set only on the contact's first row of the chat
+   * in those words (`peerSpoke` on its link), whatever they wrote before it. Decided once, as the row is stored, so it never moves to
+   * another row as history loads or rows go. Any other row in those words is an ordinary message.
+   */
+  joinLine?: true;
 }
+
+/**
+ * A payment of the contact's this app refused, or could not take in: how much they said they sent, on which
+ * network when it is known (`testnet`: test sats), `fedimint` for Fedimint notes (Cashu otherwise), and the reason in
+ * the English the contact was told, which the app reads back into its own language.
+ */
+export interface PaymentRefusedNotice {
+  type: "paymentRefused";
+  amount?: number;
+  network?: WalletNetwork;
+  method?: "fedimint";
+  reason: string;
+}
+
+/** The lines an app writes in a chat on its own (`StoredMessage.notice`). */
+export type ChatNotice = PaymentRefusedNotice;
 
 /**
  * A message that carries a task, a routine or a usage card, as the Tasks board and the chat list read it across every
@@ -948,15 +1055,22 @@ export interface CardIndexRow {
   editedAt?: number;
 }
 
+/**
+ * A message saved on this device (`savedMessages`): when it was saved and its row as it is now (an edit shows its latest
+ * version). Kept for the profile here only, never sent.
+ */
+export interface SavedMessage { savedAt: number; message: StoredMessage }
+
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
 export interface MessagePage { messages: StoredMessage[]; more: boolean }
 
 /**
  * A chat's pin as kept (WISP 400 § Pinned message): the message's id both sides know (`id`, "" unpinned), the pinner's
  * number (the highest wins), who pinned (`me`, `peer`, or a member's key) and when it came here. `messageId`: the row
- * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on.
+ * here, when it was here then. A private group's keeps the pinner's signature (`k`, `sig`), to pass it on. `removed`: a
+ * 1:1 chat's, its message deleted for everyone: shown as unpinned for good, the pin kept as it came.
  */
-export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string }
+export interface StoredPin extends WirePin { by: string; at: number; messageId?: string; k?: string; sig?: string; removed?: true }
 
 /** A chat's pin, as the pages and the CLI see it. `id`: the id both sides know the message by ("" once unpinned); `messageId`: the row here. */
 export interface PinView { id: string; by: string; at: number; messageId?: string }
@@ -1173,6 +1287,12 @@ export interface GroupPayNote {
   claims?: string[];
   /** The last note this device said about it, sent again when an edge opens. */
   mine?: GroupPayFrame;
+  /**
+   * Known only from another member's word (a payer's claim, a payee's "paid"): the member it is about (the payee of a
+   * request, the payer of a payment) has not described it. Kept on this device only, never in the group's history,
+   * until that member's own note arrives: nothing is shown as a member's that the member never said.
+   */
+  undescribed?: true;
 }
 
 /** `group-pay` on an edge (WISP 902 § Payments). Old apps drop it. */
@@ -1238,6 +1358,13 @@ export interface Settings {
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
   /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
+   * group edges) goes through the TURN server in `iceServers` alone, with no STUN server. On only with a TURN server
+   * (`relayOnlyProblem`). The Desktop offers contacts neither its own Iroh nor its own HyperDHT (HyperDHT goes through
+   * `hyperdhtRelay`, as in a browser); its own devices keep them. Absent means off.
+   */
+  relayOnly?: boolean;
+  /**
    * The Iroh relays a browser build homes on (WISP 102, relay only): a page cannot send UDP, so every Iroh
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
    */
@@ -1245,7 +1372,7 @@ export interface Settings {
   /**
    * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
    * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
-   * runs HyperDHT itself and ignores it.
+   * runs HyperDHT itself and ignores it, except toward contacts while `relayOnly` is on.
    */
   hyperdhtRelay?: string;
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */
@@ -1298,6 +1425,11 @@ export interface Settings {
    * subscription, as a muted chat's contact is. Only through `setWakeMuted` with the group's `group:<id>`.
    */
   wakeMutedGroups?: string[];
+  /**
+   * Groups whose links this device put on one transport (WISP 902 § Transports), by group id; a group not here is on
+   * Automatic. This device's own: nothing of it goes to the members but each edge's `_tr`. Only through `setGroupTransport`.
+   */
+  groupTransports?: Record<string, PairedTransport>;
   /**
    * Private groups → members that were given a token on an edge a group on hubs later dropped: they still hold the
    * subscription with no edge to close, so their leaving the group (or this profile leaving it, or muting it) replaces
@@ -1469,6 +1601,47 @@ export interface PublicGraphView {
 export interface PublicPostImageView { src?: string; miss?: string; hosts: string[]; width?: number; height?: number }
 
 /** The profile's did:dht (WISP 310-did-dht): its own key, public to everyone, never tied to a chat. */
+/** A request in Requests (WISP 8xx): what the asker said. The name is what it typed, unverified. */
+export interface ContactRequestView {
+  /** The asker key. */
+  id: string;
+  name: string;
+  text: string;
+  receivedAt: number;
+  /** When it ends unanswered. */
+  expires: number;
+}
+
+/** A request this profile sent through someone's contact link (WISP 8xx), shown on the chat made for it. */
+export interface ContactAskView {
+  chatId: string;
+  /**
+   * `sending`, `knocking`: on its way. `seen`: it arrived; the owner accepts it or nothing is said. `off`: the link was
+   * turned off. `ended`: no answer in seven days.
+   */
+  state: "sending" | "knocking" | "seen" | "off" | "ended";
+  expires: number;
+}
+
+/** The profile's contact link (WISP 8xx): what the owner shows and shares. */
+export interface ContactLinkView {
+  /** `ghostly1r…` */
+  code: string;
+  /** `https://ghostly.tools/#ghostly1r…` */
+  link: string;
+  createdAt: number;
+  /** `busy`: too many requests wait; new ones are counted, not read. */
+  state: "open" | "busy";
+  /** Requests waiting in Requests. */
+  waiting: number;
+  /** How many people tried while the link was busy, since the owner last looked; never their names. */
+  missed: number;
+  /** When the link record last went out. */
+  publishedAt?: number;
+  /** Why the last publish failed. */
+  error?: string;
+}
+
 export interface ProfileDidView {
   /** `did:dht:…` */
   id: string;
@@ -1671,6 +1844,11 @@ export interface EngineState {
    */
   restoreCheck?: "checking" | "removed";
   /**
+   * Limited mode only while the active device's read at start is out (WISP 06 § When a device checks): the profile shows
+   * as it is, nothing goes out, and nobody is asked anything until the read answers. Absent otherwise.
+   */
+  startCheck?: true;
+  /**
    * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
    * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page
    * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
@@ -1723,6 +1901,12 @@ export interface EngineState {
   identityProofs: IdentityProofView[];
   /** This profile's public DID. Absent until the engine has loaded it. */
   did?: ProfileDidView;
+  /** This profile's contact link, when it has one. */
+  contactLink?: ContactLinkView;
+  /** The requests its contact link took, newest first. */
+  contactRequests?: ContactRequestView[];
+  /** The requests this profile sent through others' contact links. */
+  contactAsks?: ContactAskView[];
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */

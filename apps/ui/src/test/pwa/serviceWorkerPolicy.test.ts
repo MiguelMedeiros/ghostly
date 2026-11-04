@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
+import { MAX_PAST_LIMIT_NAMES, MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, desktopOnlyFiles, installList, optionalFiles, precacheList, serviceWorkerFiles, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
@@ -25,6 +25,8 @@ describe("what the worker answers from its cache", () => {
     expect(route("/assets/main-abc.js")).toBe("precache");
     expect(route("/manifest.json")).toBe("precache");
     expect(route("/assets/bark_ffi_wasm_bg-xyz.wasm")).toBe("asset");
+    // A source map is the devtools', never the app's: not kept, and its 404 after a deploy is not the build gone.
+    expect(route("/assets/main-abc.js.map")).toBe("pass");
   });
 });
 
@@ -83,6 +85,99 @@ describe("what the build precaches", () => {
       "assets/main-abc.js", "assets/main-abc.css", "assets/fedimint_bg-1.wasm", "assets/main-abc.js.map", "assets/main-abc.js"];
     expect(precacheList(files)).toEqual(["/", "/assets/main-abc.css", "/assets/main-abc.js", "/icon-192.png", "/manifest.json"]);
   });
+
+  it("not the language detector, which only Desktop's translation loads: a chunk made of nothing else", () => {
+    const root = "/home/me/ghostly/node_modules";
+    const chunk = (fileName: string, ...moduleIds: string[]) => ({ type: "chunk", fileName, moduleIds });
+    const bundle = [
+      chunk("assets/main-abc.js", "/home/me/ghostly/apps/ui/src/main.tsx", `${root}/react/index.js`),
+      chunk("assets/langdetect-text-abc.js", `${root}/tinyld/dist/tinyld.heavy.node.js`, `${root}/@qvac/langdetect-text/index.js`),
+      chunk("assets/windows-abc.js", "C:\\ghostly\\node_modules\\@qvac\\langdetect-text\\index.js"),
+      // The app's own code bundled with it, or a package that only starts with the same name: kept.
+      chunk("assets/translate-abc.js", `${root}/@qvac/langdetect-text/index.js`, "/home/me/ghostly/apps/ui/src/lib/translateDetector.ts"),
+      chunk("assets/other-abc.js", `${root}/tinyld-other/index.js`),
+      chunk("assets/pubky-abc.js", `${root}/@synonymdev/pubky/index.js`),
+      { type: "asset", fileName: "assets/main-abc.css" },
+    ];
+    const leaveOut = desktopOnlyFiles(bundle);
+    expect(leaveOut).toEqual(["assets/langdetect-text-abc.js", "assets/windows-abc.js"]);
+    expect(precacheList(["index.html", ...bundle.map((file) => file.fileName)], leaveOut))
+      .toEqual(["/", "/assets/main-abc.css", "/assets/main-abc.js", "/assets/other-abc.js", "/assets/pubky-abc.js", "/assets/translate-abc.js"]);
+  });
+
+  it("not the language detector's worker either: an asset, so not one of those chunks", () => {
+    expect(precacheList(["assets/main-abc.js", "assets/translateDetector.worker-abc.js"])).toEqual(["/", "/assets/main-abc.js"]);
+  });
+
+  // What a build of the web app is made of, in the shape Rollup hands the plugin: the online-only flows and the languages
+  // are dynamic imports, each a chunk (or two) of its own.
+  const app = "/home/me/ghostly/apps/ui/src";
+  const lib = "/home/me/ghostly/node_modules";
+  const adapters = "/home/me/ghostly/packages/browser/src/engine/paymentAdapters";
+  const chunk = (fileName: string, facade: string | null, imports: string[] = [], dynamicImports: string[] = [], isEntry = false) =>
+    ({ type: "chunk", fileName, facadeModuleId: facade, moduleIds: facade ? [facade] : [], imports, dynamicImports, isEntry });
+  const BUNDLE = [
+    chunk("assets/index-abc.js", `${app}/main.tsx`, ["assets/vendor-abc.js"],
+      ["assets/Wallet-abc.js", "assets/Chat-abc.js", "assets/pubky-abc.js", "assets/handoff-abc.js", "assets/keet-identity-key-abc.js", "assets/fr-abc.js", "assets/ja-abc.js"], true),
+    chunk("assets/vendor-abc.js", null),
+    chunk("assets/Chat-abc.js", `${app}/pages/Chat.tsx`, ["assets/vendor-abc.js"], ["assets/sodium-abc.js"]),
+    chunk("assets/Wallet-abc.js", `${app}/pages/Wallet.tsx`, ["assets/cashu-ts-abc.js"], ["assets/usdt-abc.js", "assets/arkade-abc.js", "assets/dist-abc.js"]),
+    chunk("assets/cashu-ts-abc.js", `${lib}/@cashu/cashu-ts/lib/index.js`),
+    chunk("assets/usdt-abc.js", `${adapters}/usdt.ts`, ["assets/ethers-abc.js", "assets/vendor-abc.js"]),
+    chunk("assets/ethers-abc.js", null),
+    chunk("assets/arkade-abc.js", `${adapters}/arkade.ts`, ["assets/dist-abc.js"]),
+    chunk("assets/dist-abc.js", `${lib}/@arkade-os/sdk/dist/esm/index.js`, ["assets/zod-abc.js"]),
+    chunk("assets/zod-abc.js", null),
+    chunk("assets/pubky-abc.js", `${lib}/@synonymdev/pubky/index.js`),
+    chunk("assets/handoff-abc.js", `${app}/components/DeviceHandoff.tsx`, ["assets/vendor-abc.js"], ["assets/esm-abc.js"]),
+    chunk("assets/esm-abc.js", `${lib}/@serenity-kit/opaque/esm/index.js`),
+    chunk("assets/keet-identity-key-abc.js", `${lib}/keet-identity-key/index.js`, ["assets/sodium-abc.js"]),
+    // The sodium build Keet's key needs, which the chat also loads: kept, since the chat is needed offline.
+    chunk("assets/sodium-abc.js", null),
+    chunk("assets/fr-abc.js", `${app}/locales/fr/index.ts`),
+    chunk("assets/ja-abc.js", `${app}/locales/ja/index.ts`),
+    { type: "asset", fileName: "assets/index-abc.css" },
+  ];
+
+  // covers: app.pwa.offline
+  it("not what only an online flow loads (Pubky, a Keet proof, a device handoff, the USDT and Ark wallets), nor the languages", () => {
+    const { precache, languages } = serviceWorkerFiles(["manifest.json", "version.json"], BUNDLE);
+    expect(precache).toEqual(["/", "/assets/cashu-ts-abc.js", "/assets/Chat-abc.js", "/assets/handoff-abc.js", "/assets/index-abc.css", "/assets/index-abc.js",
+      "/assets/sodium-abc.js", "/assets/vendor-abc.js", "/assets/Wallet-abc.js", "/manifest.json"]);
+    expect(languages).toEqual({ fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js"] });
+  });
+
+  it("an online-only module another screen imports as it loads stays: the path to it is not the online flow's", () => {
+    const bundle = BUNDLE.map((file) => file.fileName === "assets/Chat-abc.js" ? { ...file, imports: ["assets/vendor-abc.js", "assets/pubky-abc.js"] } : file);
+    expect(optionalFiles(bundle).onlineOnly).not.toContain("assets/pubky-abc.js");
+    expect(serviceWorkerFiles([], bundle).precache).toContain("/assets/pubky-abc.js");
+  });
+
+  const LANGUAGES = { fr: ["/assets/fr-abc.js"], ja: ["/assets/ja-abc.js", "/assets/ja-extra-abc.js"], pt: ["/assets/pt-abc.js"] };
+  const PRECACHE = ["/", "/assets/index-abc.js"];
+
+  it("the install takes the browser's language, the first of its languages the app speaks", () => {
+    expect(installList(PRECACHE, LANGUAGES, ["ja-JP", "fr"])).toEqual([...PRECACHE, "/assets/ja-abc.js", "/assets/ja-extra-abc.js"]);
+    expect(installList(PRECACHE, LANGUAGES, ["de-DE", "pt-BR"])).toEqual([...PRECACHE, "/assets/pt-abc.js"]);
+    // English is in the entry: a browser in English, or in nothing the app speaks, takes no language file.
+    expect(installList(PRECACHE, LANGUAGES, ["en-US", "fr"])).toEqual(PRECACHE);
+    expect(installList(PRECACHE, LANGUAGES, ["de", "constructor"])).toEqual(PRECACHE);
+    expect(installList(PRECACHE, LANGUAGES, [])).toEqual(PRECACHE);
+  });
+
+  it("and after a deploy, the languages a page fetched into the previous build's cache, whatever the browser's", () => {
+    const held = ["/", "/assets/index-old.js", "/assets/fr-old.js"];
+    expect(installList(PRECACHE, LANGUAGES, ["en-US"], held)).toEqual([...PRECACHE, "/assets/fr-abc.js"]);
+  });
+
+  it("a cache with every language (a build's that precached them all) gives every language: the person's may be any of them", () => {
+    // An English browser, the app in Portuguese, updating from a build that precached every language: Portuguese is
+    // in the new cache, so the first start after the update opens in it offline too.
+    const everyLanguage = ["/", "/assets/index-old.js", "/assets/fr-old.js", "/assets/ja-old.js", "/assets/pt-old.js"];
+    const every = [...PRECACHE, "/assets/fr-abc.js", "/assets/ja-abc.js", "/assets/ja-extra-abc.js", "/assets/pt-abc.js"];
+    expect(installList(PRECACHE, LANGUAGES, ["en-US"], everyLanguage)).toEqual(every);
+    expect(installList(PRECACHE, LANGUAGES, ["pt"], everyLanguage)).toEqual([...PRECACHE, "/assets/pt-abc.js", "/assets/fr-abc.js", "/assets/ja-abc.js", "/assets/ja-extra-abc.js"]);
+  });
 });
 
 describe("a share target's form", () => {
@@ -95,10 +190,47 @@ describe("a share target's form", () => {
     for (let i = 0; i < MAX_SHARED_FILES + 3; i++) form.append("files", new File([String(i)], `f${i}.txt`));
     const item = readShare(form);
     expect(item.title).toBe("T");
-    expect(item.text).toHaveLength(64 * 1024);
+    expect(item.text.length).toBe(70_000);
     expect(item.url).toBe("https://example.com");
     expect(item.files).toHaveLength(MAX_SHARED_FILES);
     expect(item.files[0]!.name).toBe("f0.txt");
+  });
+
+  it("keeps a text longer than 64 KiB whole, the character astride 64 KiB and all", () => {
+    // The body is already bounded (`MAX_SHARE_BYTES`): a cut of its text would only lose the rest without a word.
+    const text = `${"a".repeat(65_535)}👻${"b".repeat(40_000)}`;
+    const form = new FormData();
+    form.set("text", text);
+    form.set("title", text);
+    form.set("url", text);
+    const item = readShare(form);
+    // Lengths and ends, not the texts: a failure prints 100k characters otherwise.
+    for (const field of [item.text, item.title, item.url]) expect([field.length, field.slice(65_533, 65_538), field === text]).toEqual([105_537, "aa👻b", true]);
+  });
+
+  it("names the files past the count cap, for the picker to say they did not come in", () => {
+    const form = new FormData();
+    for (let i = 1; i <= 40; i++) form.append("files", new File(["x"], `IMG_${i}.jpg`, { type: "image/jpeg" }));
+    const item = readShare(form);
+    expect(item.files).toHaveLength(MAX_SHARED_FILES);
+    expect(item.pastLimit).toEqual(["IMG_33.jpg", "IMG_34.jpg", "IMG_35.jpg", "IMG_36.jpg", "IMG_37.jpg", "IMG_38.jpg", "IMG_39.jpg", "IMG_40.jpg"]);
+  });
+
+  it("keeps the names a website posts as a chat would show them, and only a few of those past the cap", async () => {
+    // Any website can post here: names of any length, with invisible and direction marks, as many files as it likes.
+    const form = new FormData();
+    form.append("files", new File(["boo"], "a‮" + "x".repeat(8 * 1024 * 1024) + ".txt", { type: "text/plain", lastModified: 7 }));
+    for (let i = 1; i < MAX_SHARED_FILES; i++) form.append("files", new File(["x"], `f${i}.txt`));
+    for (let i = 0; i < 2000; i++) form.append("files", new File(["x"], "y".repeat(4096) + `\u200b${i}.jpg`));
+    const item = readShare(form);
+    const first = item.files[0]!;
+    expect(first.name).toHaveLength(200);
+    expect(first.name).toMatch(/^ax+$/);
+    expect([first.type, first.lastModified, await first.text()]).toEqual(["text/plain", 7, "boo"]);
+    expect(item.files[1]!.name).toBe("f1.txt");
+    expect(item.pastLimit).toHaveLength(MAX_PAST_LIMIT_NAMES + 1);
+    expect(item.pastLimit!.slice(0, -1).every((name) => name.length <= 200 && !name.includes("​"))).toBe(true);
+    expect(item.pastLimit![MAX_PAST_LIMIT_NAMES]).toBe(`+${2000 - MAX_PAST_LIMIT_NAMES}`);
   });
 
   it("an empty form is an empty share", () => {
@@ -207,5 +339,20 @@ describe("what a wake-up shows", () => {
     expect(show({ path: "/chat/abc" }, true)).toBeNull();
     expect(show({ path: "https://evil.example/" })).toBeNull();
     expect(show({ path: "/settings" })).toBeNull();
+  });
+});
+
+describe("the worker's verdict on a build file the server answered", () => {
+  it("keeps a whole file of this origin", () => {
+    expect(assetAnswer({ status: 200, type: "basic" })).toBe("store");
+  });
+  it("reads a 404 of this origin as the build being gone", () => {
+    expect(assetAnswer({ status: 404, type: "basic" })).toBe("gone");
+  });
+  it("leaves a server error, a partial answer and a cross-origin answer alone", () => {
+    expect(assetAnswer({ status: 503, type: "basic" })).toBe("pass");
+    expect(assetAnswer({ status: 206, type: "basic" })).toBe("pass");
+    // An opaque answer says nothing, not even its status (always 0): whatever the other origin did.
+    expect(assetAnswer({ status: 0, type: "opaque" })).toBe("pass");
   });
 });

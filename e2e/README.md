@@ -14,7 +14,16 @@ E2E_WEB_URL=https://app.ghostly.tools npx playwright test -c e2e/playwright.conf
 npm run tauri -- build --debug --no-bundle && npm run test:e2e:desktop   # the Desktop app (Linux, Windows)
 ```
 
+A deployed app is a release build: it ignores the suite's `ghostly-test-*` storage switches. There each peer's Iroh is
+pointed at a closed port in Settings → Network (it stays off n0's public relays), and the specs that need a switch
+skip (`deployedBuild` in support/fixtures.ts; a URL on this machine is the suite's own build).
+
 Locally Playwright runs `E2E_WORKERS` workers (default 2, so parallel sessions on one machine leave each other room); CI runs 2.
+
+Chromium runs with its sandbox on (`chromiumSandbox: true`, support/chromiumSandbox.ts; Playwright's default is off). A spec
+that sets its own `launchOptions` replaces the config's, so it carries `chromiumSandbox: CHROMIUM_SANDBOX` too. Where the
+machine has no sandbox to give (a container running as root, a kernel without unprivileged user namespaces), Chromium
+won't start: run with `E2E_CHROMIUM_SANDBOX=0`.
 
 ## Everything, gated suites included
 
@@ -71,6 +80,7 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47090 | Cashu test mint (`cashubtc/mintd`, fake Lightning) | `E2E_MINT_URL` |
 | 47095 / 47096 | Fedimint guardian API (websocket, as the invite code names it) / its gateway's API | `GHOSTLY_FEDIMINT_API_URL` / `_GATEWAY_URL` |
 | 47097 | HyperDHT relay for browsers (`infra/services/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
+| 47098 | Cashu mint on a real LND node (`cashubtc/mintd`, with a peer: `support/mint-lnd-regtest`) | `GHOSTLY_MINT_LND_URL` (gate `GHOSTLY_MINT_LND_REGTEST`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
 
@@ -209,6 +219,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `web/nostr-social.spec.ts` | the Nostr social layer on a shared proof: a contact's profile (with picture), follows (with direction hints against your own list) and notes (one hidden by your mute list) load only when asked, from the relays in your profile, with source and time; a contact without the proof sees nothing and asks no relay; publication off by default, then a note, a profile update and an unfollow/follow signed by a NIP-07 signer injected in the page, against a Nostr relay inside the test process (`support/nostrRelay.ts`, the WebSocket routed by Playwright), no network |
 | `web/wallet-nwc.spec.ts` | Lightning through Nostr Wallet Connect: a wallet connected by its URI receives and pays over its relay, and a bad URI or a Mainnet wallet in Testnet is refused, against a fake NWC wallet service on a relay in the test process, no network; gated (`GHOSTLY_NWC_REGTEST=1`, see below): two people on their own Alby Hub, a chat request paid over a regtest channel |
 | `web/wallet-cln.spec.ts` | Core Lightning as the Lightning source (gated, `GHOSTLY_CLN_REGTEST=1`): the form with a restricted rune (never back in the page), an invoice of the node paid by the other node, an invoice of the other node paid from the card, a chat request paid from one person's node to the other's, balances on both nodes and both cards |
+| `web/wallet-no-amount-invoice.spec.ts` | gated (`GHOSTLY_MINT_LND_REGTEST=1`): an invoice with no amount through Send: a real mint on LND pays the amount typed, the peer's node shows it arrive; a mint on fake Lightning is refused before anything is spent |
 | `web/wallet-lnd.spec.ts` | gated (`GHOSTLY_LND_REGTEST=1`): the LND provider against two real regtest nodes, over REST from the page: the form, invoices in and out through the Lightning card, a chat request paid, both nodes' balances |
 | `web/payment-extras.spec.ts` | with `E2E_MINT_URL`: memo and "test sats" in both bubbles, a refused payment is taken back, ecash nobody picks up can be taken back, invoice cards |
 | `web/external-wallet.spec.ts` | a request paid with another wallet (QR, `lightning:` link, Copy, "I paid"; the payer pays from its own wallet page and both bubbles turn Paid by themselves), and a Lightning address served by `support/lnurl.ts` (a server in the test process on `E2E_LNURL_PORT`, 47110 by default, handing out the test mint's invoices) paid through the Cashu source, in the wallet and from a chat card |
@@ -228,11 +239,12 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop/call-devices.spec.ts` | Linux: the microphone, camera and speaker chosen in Settings (PulseAudio null sources and sinks stand in for named devices) are the ones a call uses, the call's menu switches them live, an unplugged microphone falls back and is offered back, and Settings meters the microphone and plays the test tone through Rust. Skips without PulseAudio |
 | `desktop/video-stream.spec.ts` | a 100 MB video plays and seeks from the stored file in WebKitGTK (HTTP on 127.0.0.1) and WebView2 (`http://ghostly-file.localhost/<token>`), each answer a range of at most 4 MiB; video full screen. Run by `desktop-media.yml` |
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
-| `desktop/compat-v115.spec.ts` | the current Desktop with a real v1.1.5 Desktop (the release's own Linux package): a chat from either side's invite, texts both ways over the DHT, then live on Iroh or HyperDHT with texts both ways, each shown once. See [Compatibility with older releases](#compatibility-with-older-releases) |
+| `desktop/compat.spec.ts` | the current Desktop with a real v1.1.5 Desktop and one of the newest release with a published package (each the release's own Linux package): a chat from either side's invite, texts both ways over the DHT, then live on Iroh or HyperDHT with texts both ways, each shown once. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v11.spec.ts` | the current app (mini-apps on) with a real v1.1.4, which has no apps/1: an app card reaches it as its text with the bundle URL a link, the chat goes on both ways, and + → Apps says the contact's app can't run apps. See [Compatibility with older releases](#compatibility-with-older-releases) |
-| `compat/v115.spec.ts` | the current app with a real v1.1.5: a chat from either side's invite, texts delivered both ways; in a private group the 1.1.5 member back after its app was closed catches up from a current member, and a current member from the 1.1.5 one. See [Compatibility with older releases](#compatibility-with-older-releases) |
+| `compat/chat-and-group.spec.ts` | the current app with a real v1.1.5 and the newest release: a chat from either side's invite, texts delivered both ways; in a private group the old member back after its app was closed catches up from a current member, and a current member from the old one. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `desktop-macos/calls-services.spec.ts` | macOS only: two Desktop apps in the system WKWebView pair (ghostly1 invite), place a video call with media both ways, open a local app one of them shares, and show why calls are off on the DHT. See [Desktop on macOS](#desktop-on-macos) |
+| `desktop-macos/services-forget.spec.ts` | macOS only: a bot's shared app opened in the Desktop app keeps localStorage, IndexedDB and Cache Storage; Delete chat and Clear all data empty its folder under `~/Library/WebKit/<bundle id>` at once, and after the next launch no file there names its origin (WebKit's tracking prevention database included) |
 | `desktop-macos/external-links.spec.ts` | macOS only: a link in a message and Settings → About → GitHub go to the system browser (`open_web_link`), not to a dropped new window |
 | `desktop-macos/headless-call.spec.ts` | macOS only: the Desktop app and a headless bot (`packages/cli`) call each other both ways, tones checked on the bot's audio socket and in the app's stats |
 | `desktop-macos/video-stream.spec.ts` | macOS only: a 100 MB video plays and seeks from the `ghostly-file` scheme, read in ranges of at most 4 MiB |
@@ -262,7 +274,7 @@ Two things to know:
 - Build with `tauri build`, not `cargo build`. A plain cargo debug build points the WebView at `devUrl`, and with no dev server running the window only says "Connection refused". `--debug --no-bundle` keeps the compile short and skips the installers; the test runs the binary from `target/`, newest of `debug` and `release`.
 - The app runs under `GHOSTLY_PROFILE=e2e`, so a test never opens your own chats.
 
-The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network names Mainline DHT (BEP44) over direct UDP (`data-testid="network-protocol"`: Rust reaching the DHT, where a browser names Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
+The test needs no network either. It asserts what only the Desktop wiring can produce: Settings → Advanced → Network says it reaches Mainline DHT (BEP44) directly over UDP (`data-testid="network-protocol"` with `data-kind="direct"`: Rust reaching the DHT, where a browser has `relays`, Pkarr relays over HTTP), and sharing a local web app is offered. If `ghostlyPlatformModules()` ever swaps `apps/ui/src/desktop/host.ts` for a browser stand-in, this goes red.
 
 ### On macOS
 
@@ -339,7 +351,9 @@ In CI it is a required check: `ci.yml` calls `desktop-macos.yml` (`macos-15`, ab
 every pull request and push (a pull request that changes only `apps/website/` or `docs/` skips it), and CI Success needs
 it. Pushes to `dev` save its compiled dependencies, which pull requests restore. It became one after 20 runs in a row passed on GitHub's
 runners. It also runs nightly on `dev`, and by hand with `repeat` (Actions → Desktop on macOS → Run workflow) to run
-the test that many times on one build, which is how to measure a suspected flake.
+the test that many times on one build, which is how to measure a suspected flake. A hung run stops after 15 minutes
+per repeat and still attaches its report. If the job fails with its steps left unfinished and no report, read the job's
+annotations: "The hosted runner lost communication" means GitHub lost the machine and no limit of ours applies.
 
 ## The combination matrix
 
@@ -400,16 +414,22 @@ A contact still on v0.4.0 can only make the old kind of chat, with a prefix-less
 one (WISP 402). `compat/v04.spec.ts` checks that against v0.4.0 itself rather than a stand-in
 (`web/compat-chat.spec.ts` plays the 0.4 side with a prefix-less session in the current app). A contact on v1.1.4, the
 last release with no mini-apps, gets an app card as its text and never offers `apps/1` (WISP 1200, WISP 405 § An app):
-`compat/v11.spec.ts` checks that, and what + → Apps says about such a contact. A contact on v1.1.5, the last release,
-pairs from either side's invite with texts delivered both ways, and in a private group each side catches the other up
-(WISP 902): `compat/v115.spec.ts`. `compat/release.ts` opens a peer on a v1.1.x build.
-The Desktop side, the Rust host and its native transports, which no web build runs: `desktop/compat-v115.spec.ts`
-pairs the current Desktop with a real v1.1.5 Desktop from either side's invite, over the DHT and then live on Iroh or
-HyperDHT. It runs with the other Desktop specs (`npm run test:e2e:desktop`, Linux x64).
+`compat/v11.spec.ts` checks that, and what + → Apps says about such a contact. A contact on v1.1.5 or on the newest
+release pairs from either side's invite with texts delivered both ways, and in a private group each side catches the
+other up (WISP 902): `compat/chat-and-group.spec.ts`. `tools/scripts/compat-latest-release.mjs` reads the newest release
+from the tags, leaving out the commit under test, so a release's gate tests it against the one before.
+`compat/release.ts` opens a peer on a release's build.
+The Desktop side, the Rust host and its native transports, which no web build runs: `desktop/compat.spec.ts`
+pairs the current Desktop with a real v1.1.5 Desktop, and with one of the newest release, from either side's invite,
+over the DHT and then live on Iroh or HyperDHT. The newest release is read from the tags as for the web suite, but it
+must have published its package: a tag whose release is still a draft (or still building) has none in public, so the
+release before it is taken. It runs with the other Desktop specs (`npm run test:e2e:desktop`, Linux x64);
+`E2E_COMPAT_LATEST=v1.7.2` names the newest release there too.
 
 ```bash
-npm run test:e2e:compat                                        # builds v0.4.0, v1.1.4 and v1.1.5 the first time (a few minutes)
-E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115_PORT=50313 npm run test:e2e:compat  # other ports (defaults 4183-4186)
+npm run test:e2e:compat                                        # builds v0.4.0, v1.1.4, v1.1.5 and the newest release the first time (a few minutes)
+E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115_PORT=50313 E2E_COMPAT_LATEST_PORT=50314 npm run test:e2e:compat  # other ports (defaults 4183-4187)
+E2E_COMPAT_LATEST=v1.7.2 npm run test:e2e:compat               # that release as the newest, without asking the remote
 ```
 
 - **The old builds.** A release attaches no web build, so `tools/scripts/build-compat-web.mjs` exports the tag with
@@ -420,13 +440,15 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115
 - **The old Desktop.** A release attaches its Desktop build, so nothing is built: `tools/scripts/fetch-compat-desktop.mjs`
   downloads the release's `Ghostly_<version>_amd64.deb`, checks it against the release's `SHA256SUMS.txt`, unpacks it
   with `dpkg-deb -x` (or, where there is none, as on Arch, with `tar` on the package's `data.tar.*`) into
-  `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints `usr/bin/ghostly`; the spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
+  `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints `usr/bin/ghostly`. `--tag newest`
+  takes the newest release tag, leaving out the commit under test, whose `SHA256SUMS.txt` is public and lists the
+  package (a draft's answers 404). The spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
   system libraries as the current Desktop (WebKitGTK 4.1, GStreamer). A machine where no tool unpacks the package skips
   the spec with the reason.
-- **The config.** `playwright.compat.config.ts` starts four servers (the current build, with mini-apps on as in the
-  main suite, v0.4.0, v1.1.4 and v1.1.5) and hands the old ones' addresses to the specs as `config.metadata.compatURL`
+- **The config.** `playwright.compat.config.ts` starts five servers (the current build, with mini-apps on as in the
+  main suite, v0.4.0, v1.1.4, v1.1.5 and the newest release) and hands the old ones' addresses to the specs as `config.metadata.compatURL`
   and `releases` (by version). The apps meet on the test's Pkarr relay, as everywhere.
-- **In CI** `e2e-compat.yml` (both old builds cached by tag) runs nightly on `dev`, as a job of the E2E workflow (so
+- **In CI** `e2e-compat.yml` (the old builds cached by tag, so a new release builds them once) runs nightly on `dev`, as a job of the E2E workflow (so
   before every release), and by hand. Not on pull requests, like the rest of the app's e2e: the old releases never
   change, only `dev` can break them, and a night is soon enough to hear about it.
 
@@ -463,7 +485,7 @@ The app's e2e suites do not run on pull requests: they would hold up every merge
 | Web and extension (`E2E`, `e2e.yml`) | before every release (`release.yml` runs it first; no draft release and no web image unless it passes), and by hand (Actions → E2E → Run workflow, optionally with the URL of a deployed web app) |
 | Desktop specs on Linux (`e2e/desktop/`) | a job of its own in `E2E` (a Rust build never holds up the browser tests), and nightly after the Desktop scenarios of E2E (full) |
 | Everything, gated suites included (`E2E (full)`, `npm run e2e:full`) | nightly on `dev`, and by hand |
-| Compatibility with v0.4.0, v1.1.4 and v1.1.5 | nightly, before every release, and by hand ([Compatibility with older releases](#compatibility-with-older-releases)) |
+| Compatibility with v0.4.0, v1.1.4, v1.1.5 and the newest release | nightly, before every release, and by hand ([Compatibility with older releases](#compatibility-with-older-releases)) |
 | Desktop on macOS | on every pull request and push, as part of CI (required), nightly, and by hand ([Desktop on macOS](#desktop-on-macos)) |
 
 `npm run check:desktop-bundle` also runs on every pull request (Frontend builds): it takes seconds.
@@ -494,7 +516,7 @@ RustFS in `e2e/infra` (MinIO no longer publishes images anyone can pull; any S3 
 npx playwright test -c e2e/playwright.config.ts --project=web e2e/web/store-forward.spec.ts
 ```
 
-Each run makes a bucket of its own. `localStorage["ghostly-test-hold-ttl"]` (milliseconds) shortens how long an item is held, so the test can watch one expire; nothing else reads it and it never lengthens the lifetime.
+Each run makes a bucket of its own. `localStorage["ghostly-test-hold-ttl"]` (milliseconds) shortens how long an item is held, so the test can watch one expire; only a development or e2e build reads it (a release build ignores it) and it never lengthens the lifetime.
 
 ### Ark payments
 
@@ -528,7 +550,9 @@ fixture then fails the test.
 
 `useFakeProviders(peer)` sets `localStorage["ghostly-test-providers"] = "1"` and reloads: the fake Lightning
 and Bitcoin providers (regtest, in memory) then show up in the source pickers, in Testnet only. That is
-how `wallet-sources.spec.ts` drives a source with nothing running.
+how `wallet-sources.spec.ts` drives a source with nothing running. The key is read only by a development build
+or one made with `VITE_APPS_TEST=1` (every e2e build is; `testBuild` in `packages/browser/src/shared/features.ts`):
+a release build ignores it.
 
 A real provider (NWC, WebLN, LND, Core Lightning, Breez, BDK, Bitcoin Core…) gets a gated test of its
 own: `GHOSTLY_<NAME>_REGTEST=1` with its services in `e2e/infra`, `test.skip` otherwise. A new one adds its

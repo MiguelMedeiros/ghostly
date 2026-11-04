@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
@@ -42,7 +42,7 @@ describe("a Lightning invoice in a message", () => {
     await user.click(within(card).getByTestId("invoice-confirm"));
     await user.click(screen.getByTestId("review-confirm-send"));
     expect(await within(card).findByTestId("invoice-paid")).toBeInTheDocument();
-    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, confirmedReal: true }]);
+    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, confirmedReal: true, linkId: "link-1", invoice }]);
   });
 
   it("paid with test sats (only a Testnet wallet): Pay pays at once, with no second step", async () => {
@@ -52,7 +52,7 @@ describe("a Lightning invoice in a message", () => {
     await user.click(await within(card).findByTestId("invoice-confirm"));
     expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();
     expect(await within(card).findByTestId("invoice-paid")).toBeInTheDocument();
-    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT }]);
+    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, linkId: "link-1", invoice }]);
   });
 });
 
@@ -79,6 +79,15 @@ describe("the Cashu card's Send: a pasted invoice", () => {
     await user.click(screen.getByTestId("review-confirm-send"));
     expect(await screen.findByText("Paid.")).toBeInTheDocument();
     expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, confirmedReal: true }]);
+  });
+
+  it("Back from the keyboard puts the keys back on Pay, not on the page", async () => {
+    const { user, engine } = show("mainnet");
+    await quoteIt(user);
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("wallet-pay-confirm")).toHaveFocus());
+    expect(engine.callsTo("walletPayQuote")).toEqual([]);
   });
 
   it("on Testnet, Pay pays at once", async () => {
@@ -114,6 +123,16 @@ describe("a Lightning address", () => {
     await user.click(screen.getByTestId("review-confirm-send"));
     expect(await screen.findByTestId("lnurl-paid")).toBeInTheDocument();
     expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, note: "Paid alice@example.com", confirmedReal: true }]);
+  });
+
+  it("Back from the keyboard puts the keys back on Pay, not on the page", async () => {
+    const { user, engine } = show("mainnet");
+    await toPay(user);
+    expect(screen.getByTestId("review-confirm-back")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("lnurl-pay")).toHaveFocus());
+    expect(engine.callsTo("walletPayQuote")).toEqual([]);
   });
 
   it("on Testnet, Pay pays at once", async () => {

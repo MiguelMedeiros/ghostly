@@ -71,3 +71,30 @@ it("a file stored again, or deleted, keeps nothing of what changed about the one
   await fileStore.put({ id: "again", linkId: "fixture-again", blob: new Blob(["d"]), createdAt: 4 });
   expect((await fileStore.get("again"))?.transfer).toBeUndefined();
 });
+
+it("a link's files are read in a constant number of requests, each with what changed about it and nothing of another link's", async () => {
+  // Every start lists every chat's and group's files: one fileState read per file was 16,000 requests with 200 per chat
+  // and 300 per group (50 chats, 20 groups).
+  const linkId = "group:files-many";
+  for (let i = 0; i < 300; i++) {
+    const id = `group-files-many-in-${String(i).padStart(3, "0")}`;
+    await fileStore.put({ id, linkId, createdAt: i, bytes: "opfs" });
+    if (i % 2) await fileStore.updateTransfer(id, { state: "done", transferred: i, size: i });
+  }
+  // Another link's file sorted among them, with a state of its own.
+  await fileStore.put({ id: "group-files-many-in-150x", linkId: "group:other", createdAt: 1, bytes: "opfs" });
+  await fileStore.updateTransfer("group-files-many-in-150x", { state: "failed", transferred: 0, size: 1 });
+
+  const requests = { count: 0 };
+  const spies = [IDBObjectStore.prototype, IDBIndex.prototype].flatMap(proto => (["get", "getAll", "openCursor"] as const).map(name => {
+    const orig = proto[name] as (...args: unknown[]) => IDBRequest;
+    return vi.spyOn(proto, name).mockImplementation(function (this: unknown, ...args: unknown[]) { requests.count++; return orig.apply(this, args); });
+  }));
+  const files = await fileStore.listForLink(linkId);
+  for (const spy of spies) spy.mockRestore();
+
+  expect(requests.count).toBeLessThanOrEqual(2);
+  expect(files).toHaveLength(300);
+  expect(files.filter(file => file.transfer?.state === "done").map(file => file.createdAt)).toEqual(Array.from({ length: 150 }, (_, i) => 2 * i + 1));
+  expect(files.filter(file => file.transfer && file.transfer.state !== "done")).toEqual([]);
+});

@@ -21,7 +21,7 @@ function useWeblnPresent() {
  * The browser wallet (WebLN) has nothing to type and no secret to keep: one button, and the wallet asks
  * the person to approve the connection in its own window.
  */
-export function WeblnForm({ descriptor, busy, onSubmit }: ProviderFormProps) {
+export function WeblnForm({ descriptor, busy, saving = false, onSubmit }: ProviderFormProps) {
   const { t } = useI18n();
   const found = useWeblnPresent();
   return (
@@ -31,7 +31,7 @@ export function WeblnForm({ descriptor, busy, onSubmit }: ProviderFormProps) {
       ) : (
         <Notice tone="warning" testId="webln-missing">{t("wallet.source.webln.missing")}</Notice>
       )}
-      <Button variant="primary" className="w-full" disabled={busy} onClick={() => onSubmit({})} data-testid="provider-save">{busy ? t("wallet.source.webln.waiting") : t("wallet.source.webln.connect")}</Button>
+      <Button variant="primary" className="w-full" disabled={busy} loading={saving} onClick={() => onSubmit({})} data-testid="provider-save">{saving ?t("wallet.source.webln.waiting") : t("wallet.source.webln.connect")}</Button>
       <Notice>{t("wallet.source.webln.note")}</Notice>
     </div>
   );

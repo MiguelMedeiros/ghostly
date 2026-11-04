@@ -7,7 +7,8 @@ import { Settings } from "../../pages/Settings";
 import { AddDeviceDialog } from "../../components/devices/AddDeviceDialog";
 import { JoinProfileDialog } from "../../components/devices/JoinProfileDialog";
 import { JoinHost } from "../../components/devices/JoinHost";
-import { defaultDeviceName, lockPasswordMin, lockPasswordProblem } from "../../lib/devices";
+import { defaultDeviceName, fitsDeviceName, lockPasswordMin, lockPasswordProblem } from "../../lib/devices";
+import { loadLocale, translatorFor } from "../../locales";
 import { hashPassword } from "../../lib/settings";
 import { Home } from "../../pages/Home";
 import { renderApp } from "../render";
@@ -142,6 +143,22 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(screen.getByTestId("device-add-refused")).toHaveTextContent("Another device tried to use this code. It got nothing.");
     await user.click(screen.getByTestId("device-add-match"));
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
+  }, 20_000);
+
+  it("the focus stays in the dialog when Next and They match go away with their step", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" }));
+    engine.on("deviceEnrollConfirm", () => ({ role: "inviter", step: "adding", device: "Phone" }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-digits", {}, { timeout: 3_000 });
+    expect(screen.getByTestId("device-add")).toContainElement(document.activeElement as HTMLElement);
+    await user.click(screen.getByTestId("device-add-match"));
+    await screen.findByTestId("device-add-adding");
+    expect(screen.getByTestId("device-add")).toContainElement(document.activeElement as HTMLElement);
   }, 20_000);
 
   it("a double click on They match is one answer: both buttons are off until the engine has answered", async () => {
@@ -284,5 +301,30 @@ describe("I already use Ghostly", () => {
     expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0" })).toBe("Firefox, Windows");
     expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36 Edg/131.0" })).toBe("Edge on Windows");
     expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36" })).toBe("Chrome on Linux");
+  });
+
+  it("suggests the name in the app's language, in its 16 bytes, the system's and browser's names as they are", async () => {
+    const android = "Mozilla/5.0 (Linux; Android 14; Pixel 8) Mobile Safari/537.36 Chrome/131.0";
+    const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
+    const windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
+    await Promise.all([loadLocale("ar"), loadLocale("ja"), loadLocale("pt")]);
+    const [ar, ja, pt] = [translatorFor("ar"), translatorFor("ja"), translatorFor("pt")];
+    expect(defaultDeviceName({ userAgent: android }, ar)).toBe("هاتف");
+    expect(defaultDeviceName({ userAgent: windows }, ar)).toBe("Chrome، Windows");
+    expect(defaultDeviceName({ userAgent: mac }, ja)).toBe("Mac の Chrome");
+    expect(defaultDeviceName({ userAgent: mac }, pt)).toBe("Chrome no Mac");
+    expect(defaultDeviceName({ userAgent: mac, desktop: true }, pt)).toBe("App para Mac");
+    expect(defaultDeviceName({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)" }, ar)).toBe("iPhone");
+    for (const language of ["ar", "es", "fr", "it", "ja", "pt", "zh"] as const) {
+      await loadLocale(language);
+      const t = translatorFor(language);
+      for (const ua of [android, mac, windows, "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/131.0"]) {
+        for (const desktop of [false, true]) {
+          const name = defaultDeviceName({ userAgent: ua, desktop }, t);
+          expect([language, fitsDeviceName(name)]).toEqual([language, true]);
+          expect(name).not.toMatch(/ on |^Phone$|^Browser$| app$/);
+        }
+      }
+    }
   });
 });

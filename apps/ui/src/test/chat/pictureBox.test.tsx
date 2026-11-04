@@ -7,18 +7,10 @@ import { pictureBox } from "../../lib/pictureBox";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { everythingOnScreen } from "../onScreen";
+import { pngHead } from "../pngHead";
 import { renderApp } from "../render";
 
 // covers: files.image.box
-
-/** The first bytes of a PNG of this size: all the bubble reads of a picture its sender said nothing about. */
-function pngHead(width: number, height: number): Blob {
-  const bytes = new Uint8Array(33);
-  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
-  new DataView(bytes.buffer).setUint32(16, width);
-  new DataView(bytes.buffer).setUint32(20, height);
-  return new Blob([bytes], { type: "image/png" });
-}
 
 let n = 0;
 /** A picture with an id of its own: sizes found on this device are remembered by id for the run. */
@@ -122,11 +114,77 @@ describe("FileBubble: a picture's box is there before the picture", () => {
     expect(box()).toBeNull();
   });
 
+  // agents#1682: the box went once the read found no bytes, each time the bubble mounted: flinging up a long chat on a
+  // phone, the row shrank by its height above the view and the glide jerked back.
+  it("one whose bytes are no longer here keeps the box its sender's size gave it, and says so", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(null as never);
+    for (const held of ["gone", "left-out"] as const) {
+      const fileHeld = vi.fn(async () => held);
+      Object.assign(servicesPlatform!, { fileHeld });
+      try {
+        const view = show(picture({ image: { width: 800, height: 600 } }));
+        const before = box()!.style.width;
+        await vi.waitFor(() => expect(screen.getByTestId("file-status")).toHaveTextContent(held === "gone" ? "No longer available" : "Not in this backup"));
+        expect(box(), held).toHaveAttribute("data-box", "sized");
+        expect(box()).toHaveAttribute("data-gone");
+        expect(box()!.style.width).toBe(before);
+        expect(box()!.style.aspectRatio).toBe("800 / 600");
+        expect(screen.queryByRole("img")).toBeNull();
+        view.unmount();
+      } finally { delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+    }
+    // One whose sender said no size has no box to keep: nothing is reserved for it.
+    Object.assign(servicesPlatform!, { fileHeld: vi.fn(async () => "gone") });
+    try {
+      show(picture());
+      await vi.waitFor(() => expect(screen.getByTestId("file-status")).toHaveTextContent("No longer available"));
+      expect(box()).toBeNull();
+    } finally { delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+  });
+
   it("a picture that cannot be shown gives its box back", async () => {
     vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(40, 30));
     show(picture({ mime: "image/png", image: { width: 40, height: 30 } }));
     fireEvent.error(await screen.findByRole("img", { name: "photo.jpg" }));
     expect(box()).toBeNull();
+  });
+});
+
+describe("FileBubble: a picture is drawn only when its own bytes say a size a chat can draw", () => {
+  const notDrawn = async () => {
+    await screen.findByTestId("file-save");
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(box()).toBeNull();
+  };
+
+  it("one whose bytes say 23000 × 23000 offers Save only, whatever its sender said", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(23_000, 23_000));
+    for (const image of [{ width: 1920, height: 1080 }, undefined, { width: 23_000, height: 23_000 }]) {
+      const view = show(picture({ mime: "image/png", image }));
+      await notDrawn();
+      view.unmount();
+    }
+  });
+
+  it("past 50 megapixels or 16384 a side it is not drawn; up to them it is", async () => {
+    for (const [width, height] of [[8_200, 6_200], [16_385, 100]]) {
+      vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(width!, height!));
+      const view = show(picture({ mime: "image/png" }));
+      await notDrawn();
+      view.unmount();
+    }
+    for (const [width, height] of [[8_160, 6_120], [16_384, 3_000]]) {
+      vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(width!, height!));
+      const view = show(picture({ mime: "image/png" }));
+      await screen.findByRole("img", { name: "photo.jpg" });
+      view.unmount();
+    }
+  });
+
+  it("one whose bytes say no size is not drawn: what draws it would find its size only by decoding it", async () => {
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["BM not a header this reads"], { type: "image/png" }));
+    show(picture({ mime: "image/png", image: { width: 640, height: 480 } }));
+    await notDrawn();
   });
 });
 

@@ -37,6 +37,7 @@ export const shell = {
         catalog: "Protocol",
         cli: "CLI",
         roadmap: "Roadmap",
+        llms: "llms.txt",
         github: "GitHub",
         releases: "Releases",
         security: "Security",

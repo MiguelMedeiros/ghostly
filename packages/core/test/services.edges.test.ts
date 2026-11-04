@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
-import { MAX_SERVICES, decodeServices, encodeServices, isValidServiceId, serviceIdFromName, servicesFromWire, servicesToWire, type ServiceAd } from "../src/services";
+import { MAX_SERVICES, decodeServices, encodeServices, isValidServiceId, isViewerTag, serviceIdFromName, servicesFromWire, servicesToWire, viewerTag, type ServiceAd } from "../src/services";
 
 // covers: services.share
 
@@ -79,6 +79,13 @@ describe("service ids from names", () => {
     expect(serviceIdFromName("!!!")).toBe("service");
     expect(serviceIdFromName("  Hello, World!  ")).toBe("hello-world");
     expect(serviceIdFromName("x".repeat(40))).toBe("x".repeat(24));
+    expect(serviceIdFromName("--a--b--")).toBe("a-b");
+  });
+
+  it("answers a long name of dashes at once", () => {
+    const start = performance.now();
+    expect(serviceIdFromName("-".repeat(100_000) + "a" + "-".repeat(100_000) + "!")).toBe("a");
+    expect(performance.now() - start).toBeLessThan(100);
   });
 
   it("always yields a valid id", () => {
@@ -87,5 +94,21 @@ describe("service ids from names", () => {
       expect(isValidServiceId(id)).toBe(true);
       expect(taken).not.toContain(id);
     }), { numRuns: 200 });
+  });
+});
+
+describe("the tag of a chat in a contact's app's origin", () => {
+  // covers: services.open
+  it("is one DNS label of z-base-32, the same for one key and another for every other key", () => {
+    fc.assert(fc.property(fc.string({ minLength: 1, maxLength: 64 }), fc.string({ minLength: 1, maxLength: 64 }), (a, b) => {
+      expect(isViewerTag(viewerTag(a))).toBe(true);
+      expect(viewerTag(a)).toBe(viewerTag(a));
+      if (a !== b) expect(viewerTag(a)).not.toBe(viewerTag(b));
+    }));
+    expect(viewerTag("ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u")).toMatch(/^[ybndrfg8ejkmcpqxot1uwisza345h769]{16}$/);
+  });
+
+  it("refuses anything else as a tag", () => {
+    for (const tag of ["", "ybndrfg8ejkmcpq", "ybndrfg8ejkmcpqxo", "ybndrfg8ejkmcpq2", "YBNDRFG8EJKMCPQX", "ybndrfg8.jkmcpqx"]) expect(isViewerTag(tag)).toBe(false);
   });
 });

@@ -1,0 +1,1 @@
+A Key encoding section: a participation key is written in the one z-base-32 spelling whose four padding bits are zero, so each key is one string and keys may be compared as strings; any other spelling of the same 32 bytes is invalid wherever a key is read and is rejected there, never normalised, as WISP 302 and 310 already require of the identifiers they carry.

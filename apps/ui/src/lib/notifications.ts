@@ -4,13 +4,16 @@ import {getPrefix} from "./storage";
 /** "misplaced": the Desktop app runs from a temporary folder, where macOS gives it no notifications. */
 export type NoticePermission = NotificationPermission | "unavailable" | "misplaced";
 interface ExtensionNotifications {
-  runtime: {id?:string;getURL(path:string):string};
+  runtime: {
+    id?:string;getURL(path:string):string;
+    onMessage?:{addListener(listener:(message:{target?:string;type?:string;id?:unknown}|undefined,sender:{id?:string},answer:(response:unknown)=>void)=>boolean):void};
+  };
+  storage?: {session?:{set(items:Record<string,string>):Promise<void>;remove(key:string):Promise<void>}};
   permissions: {contains(options:{permissions:string[]}):Promise<boolean>;request(options:{permissions:string[]}):Promise<boolean>};
   /** Absent until the user grants the optional "notifications" permission. */
   notifications?: {
     create(id:string,options:{type:"basic";iconUrl:string;title:string;message:string;silent:boolean}):Promise<string>;
     clear?(id:string):Promise<boolean>;
-    onClicked?:{addListener(listener:(id:string)=>void):void};
   };
   /** Present in extension pages (no permission needed for the page's own tab). */
   tabs?: {getCurrent():Promise<{id?:number;windowId?:number}|undefined>;update(id:number,props:{active:boolean}):Promise<unknown>};
@@ -71,8 +74,19 @@ export function clearNotification(event:string):void{
   if(!id) return;
   notices.delete(event);
   chats.delete(id);
+  keepNotice(id);
   if(native()) void invoke("native_clear_notification",{id}).catch(()=>{/* gone already, or an older app */});
   else void extension()?.notifications?.clear?.(id)?.catch(()=>{/* gone already */});
+}
+/**
+ * The extension's notification outlives its page (a closed or reloaded tab): the chat it opens is kept where the
+ * worker reads it, which opens the app there once no page knows it (apps/extension/src/background.ts). Without `chat`,
+ * that goes.
+ */
+function keepNotice(id:string,chat?:string){
+  const session=extension()?.storage?.session;
+  const key=`notice:${id}`;
+  void (chat===undefined?session?.remove(key):session?.set({[key]:chat}))?.catch(()=>{/* the app opens, only not on the chat */});
 }
 const openers=new Set<(chat:string)=>void>();
 let listening=false;
@@ -85,12 +99,12 @@ function opened(id:string):boolean{
   for(const open of openers) open(chat);
   return true;
 }
-/** Latched only once something listens: the extension has no notifications API until that permission is granted. */
 function listen(){
   if(listening) return;
   if(native()){
     listening=true;
     if(!androidApp()){
+      void sweepLeftOver();
       void import("@tauri-apps/api/event").then(({listen})=>listen<string>("notification-open",({payload})=>opened(payload))).catch(()=>{listening=false;});
       return;
     }
@@ -104,13 +118,16 @@ function listen(){
       .catch(()=>{listening=false;});
     return;
   }
-  const clicks=extension()?.notifications?.onClicked;
-  if(!clicks) return;
+  // The extension's worker hears the click, takes the notification away and asks the pages: the one that showed it
+  // opens its chat and answers, else the worker shows the app (apps/extension/src/background.ts).
+  const chrome=extension();
+  if(!chrome?.runtime.onMessage) return;
   listening=true;
-  clicks.addListener(id=>{
-    if(!opened(id)) return;
-    void extension()?.notifications?.clear?.(id);
+  chrome.runtime.onMessage.addListener((message,sender,answer)=>{
+    if(sender.id!==chrome.runtime.id || message?.target!=="app" || message.type!=="notification-open" || typeof message.id!=="string" || !opened(message.id)) return false;
     void showExtensionTab();
+    answer(true);
+    return false;
   });
 }
 /**
@@ -170,13 +187,15 @@ const oneNoticePerChat=()=>androidApp() || (native() && /Linux/i.test(platform()
  * opens, in the profile's storage (with its chats, never in a notification): the next page reads them, replaces, takes
  * away and opens those as its own. The ones it cannot map (a call's, another profile's) go as it first uses
  * notifications, once the profile is open, before it posts its own.
+ * The Linux app keeps them so too: its page loads again (a reload) while the app's process, which shows them, runs on.
+ * An app that exits takes its own back (apps/desktop notifications.rs `exit`).
  */
 const chatTags=new Map<string,string>();
 const tagsKey=()=>`${getPrefix()}notification_tags`;
 let restored=false;
 /** This profile's chat tags, as the earlier page left them. */
 function restore(){
-  if(restored || !androidApp()) return;
+  if(restored || !oneNoticePerChat()) return;
   restored=true;
   try{
     const kept=JSON.parse(localStorage.getItem(tagsKey())??"[]") as unknown;
@@ -189,7 +208,7 @@ function restore(){
   }catch{/* unreadable: they go as any unknown one */}
 }
 function keepTags(){
-  if(!androidApp()) return;
+  if(!oneNoticePerChat()) return;
   try{
     if(chatTags.size) localStorage.setItem(tagsKey(),JSON.stringify([...chatTags]));
     else localStorage.removeItem(tagsKey());
@@ -198,7 +217,7 @@ function keepTags(){
 let leftOver:Promise<void>|undefined;
 function sweepLeftOver():Promise<void>{
   restore();
-  leftOver??=androidApp()?invoke<void>("native_clear_notifications",{keep:[...chatTags.values()]}).catch(()=>{/* an older app */}):Promise.resolve();
+  leftOver??=oneNoticePerChat()?invoke<void>("native_clear_notifications",{keep:[...chatTags.values()]}).catch(()=>{/* an older app */}):Promise.resolve();
   return leftOver;
 }
 function chatTag(chat:string):string{
@@ -233,10 +252,13 @@ export async function showPrivateNotification(event:string,body:string,chat?:str
     // Newest last, so a chat's notification, posted again, is not the first to be forgotten.
     chats.delete(id);
     chats.set(id,chat);
+    keepNotice(id,chat);
     // The newest few: an old notification still opens the app, only not a chat.
-    if(chats.size>64) chats.delete(chats.keys().next().value as string);
-    // The permission may have been granted after the page started listening.
-    if(openers.size) listen();
+    if(chats.size>64){
+      const oldest=chats.keys().next().value as string;
+      chats.delete(oldest);
+      keepNotice(oldest);
+    }
   }
   try {
     if(native()){

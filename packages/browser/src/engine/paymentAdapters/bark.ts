@@ -4,6 +4,8 @@ import { loadBarkSdk, type BarkBalance, type BarkMovement, type BarkNetwork, typ
 export interface BarkConfig { network: BarkNetwork; provider: string; explorer: string; serverKey: string; walletId: string }
 /** What a review approved: nothing is signed before approval, and the send itself is one call to the SDK. */
 export interface BarkPrepared { address: string; amount: number; fee: number; after: number }
+/** The receive that pays one request (`BarkAdapter.received`), against a history read once. */
+export type BarkReceipts = (address: string, amount: number, since: number, claimed?: ReadonlySet<string>) => string | undefined;
 export const BARK_NETWORKS: BarkNetwork[] = ["bitcoin", "signet", "regtest"];
 const SDK_NETWORK: Record<BarkNetwork, string> = { bitcoin: "Bitcoin", signet: "Signet", regtest: "Regtest" };
 /** Bark addresses are bech32m with `ark` on Bitcoin and `tark` on the test networks: real and test money never share one. */
@@ -90,7 +92,16 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
   onchainBalance() { return this.outside(async () => { await this.onchain.sync().catch(() => {}); return this.onchain.balance(); }); }
   /** On-chain coins of this wallet into Ark. They show as pending until the board confirms. */
   board() { return this.serial(() => this.wallet.boardAll()); }
-  sync() { return this.outside(() => this.wallet.sync()); }
+  /**
+   * Asks the Ark server what changed. One made in the last 3 s is not made again and one under way is shared, as
+   * BdkOnchain.sync: the wallet's refresh and the look at the chat requests it starts right after need one.
+   */
+  sync(): Promise<void> {
+    if (Date.now() - this.syncedAt < 3_000) return Promise.resolve();
+    return this.syncing ??= this.outside(() => this.wallet.sync()).then(() => { this.syncedAt = Date.now(); }).finally(() => { this.syncing = undefined; });
+  }
+  private syncedAt = 0;
+  private syncing?: Promise<void>;
   /**
    * How long until the first coin expires. A coin left past its expiry can be swept by the server, so the wallet
    * renews coins near it (maintenance); this is what the page shows so the person knows to open Ghostly in time.
@@ -167,13 +178,20 @@ export class BarkAdapter implements PaymentAdapter<BarkPrepared> {
    * the amount asked, made after the request. Nothing the payer says is trusted.
    */
   async received(address: string, amount: number, since: number, claimed: ReadonlySet<string> = new Set()): Promise<string | undefined> {
-    for (const m of await this.outside(() => this.wallet.history())) {
-      if (m.subsystemKind !== "receive" || m.status !== "successful" || m.effectiveBalanceSats < amount || Date.parse(m.createdAt) < since - 60_000) continue;
-      if (!m.receivedOnAddresses.map(addressOf).includes(address)) continue;
-      const id = outputTxid(m) ?? `movement-${m.id}`;
-      if (!claimed.has(id)) return id;
-    }
-    return undefined;
+    return (await this.receipts())(address, amount, since, claimed);
+  }
+  /** `received` for every open request of one look: the history is read once, not once per request. */
+  async receipts(): Promise<BarkReceipts> {
+    const history = await this.outside(() => this.wallet.history());
+    return (address, amount, since, claimed = new Set()) => {
+      for (const m of history) {
+        if (m.subsystemKind !== "receive" || m.status !== "successful" || m.effectiveBalanceSats < amount || Date.parse(m.createdAt) < since - 60_000) continue;
+        if (!m.receivedOnAddresses.map(addressOf).includes(address)) continue;
+        const id = outputTxid(m) ?? `movement-${m.id}`;
+        if (!claimed.has(id)) return id;
+      }
+      return undefined;
+    };
   }
 
   private outcome(m: BarkMovement): PaymentExecution {

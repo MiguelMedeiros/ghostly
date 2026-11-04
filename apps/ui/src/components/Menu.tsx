@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useOutsideDismiss } from "../hooks/useDismiss";
+import { useOutsideDismiss, useTabTrap } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
+import type { MenuPoint } from "../lib/contextMenu";
 
 /** Space kept between a menu and the edges of the window. */
 const MARGIN = 8;
@@ -48,31 +49,65 @@ type MenuProps = {
    * window: it moves over, and flips, within the part of the window that ancestor covers.
    */
   within?: string;
+  /**
+   * Opened by a right-click (lib/contextMenu.ts): with `portal`, on a wide screen, it opens at this point instead of
+   * its opener's edge, down and towards the line's end as the webview's menu would, and follows the opener on scroll.
+   */
+  at?: MenuPoint;
   className?: string;
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, portal, within, className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, className = "", children }: MenuProps) {
+  const pointed = !!at && !!portal;
+  const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
-  const [place, setPlace] = useState<{ shift: number; up: boolean }>({ shift: 0, up: prefer === "up" });
-  const [fixed, setFixed] = useState<{ left: number; top: number }>();
+  // A phone's sheet covers the page with its backdrop, as a dialog does: Tab and Shift+Tab go round its rows. They went
+  // on to the page behind it, the sheet still open (the composer's + there opened a second sheet over it).
+  useTabTrap(ref, open && phone);
+  const [place, setPlace] = useState<{ shift: number; up: boolean; room?: number }>({ shift: 0, up: prefer === "up" });
+  const [fixed, setFixed] = useState<{ left: number; top: number; room?: number }>();
 
   useLayoutEffect(() => {
     if (!open || phone) return;
+    /**
+     * Up or down, and how tall it may be: on the side with room for it (the preferred one when both have), else on the
+     * roomier side, as tall as that room, scrolling. A phone on its side has no room either way for a chat's ⋮ menu,
+     * which ran off the screen's bottom edge with nothing to scroll to its last rows.
+     */
+    const side = (opener: Rect, height: number, box: Rect) => {
+      const roomBelow = box.bottom - opener.bottom - GAP - MARGIN, roomAbove = opener.top - box.top - GAP - MARGIN;
+      const below = height <= roomBelow, above = height <= roomAbove;
+      if (below || above) return { up: prefer === "up" ? above : !below };
+      const up = roomAbove > roomBelow;
+      return { up, room: Math.max(0, up ? roomAbove : roomBelow) };
+    };
+    // A right-click's point, kept where it was on its opener as the page scrolls under it.
+    const start = at && anchorRef.current?.getBoundingClientRect();
+    const opening = (anchor: HTMLElement): Rect => {
+      const rect = anchor.getBoundingClientRect();
+      if (!at || !start) return rect;
+      const x = at.x + rect.left - start.left, y = at.y + rect.top - start.top;
+      return { left: x, right: x, top: y, bottom: y };
+    };
     const fit = () => {
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
       const box = bounds(anchor, within);
+      // Measured at its own height, without a cap from an earlier fit.
+      const cap = menu.style.maxHeight;
+      menu.style.maxHeight = "";
       if (portal) {
-        const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
-        const below = opener.bottom + rect.height + MARGIN <= box.bottom, above = opener.top - rect.height - MARGIN >= box.top;
-        const up = prefer === "up" ? above || !below : !below && above;
+        const rect = menu.getBoundingClientRect(), opener = opening(anchor);
+        menu.style.maxHeight = cap;
+        const { up, room } = side(opener, rect.height, box);
+        const height = room ?? rect.height;
         // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the bounds.
         const left = (align === "start") === (getComputedStyle(anchor).direction !== "rtl") ? opener.left : opener.right - rect.width;
-        const next = { left: Math.max(box.left + MARGIN, Math.min(left, box.right - MARGIN - rect.width)), top: up ? opener.top - GAP - rect.height : opener.bottom + GAP };
-        setFixed(was => was?.left === next.left && was.top === next.top ? was : next);
+        const next = { left: Math.max(box.left + MARGIN, Math.min(left, box.right - MARGIN - rect.width)), top: up ? opener.top - GAP - height : opener.bottom + GAP, room };
+        setFixed(was => was?.left === next.left && was.top === next.top && was.room === next.room ? was : next);
         return;
       }
       // Measured where it would open without any correction.
@@ -81,10 +116,10 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
       const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
       const left = box.left + MARGIN, right = box.right - MARGIN;
       const shift = rect.left < left ? left - rect.left : rect.right > right ? Math.max(left - rect.left, right - rect.right) : 0;
-      const below = opener.bottom + rect.height + MARGIN <= box.bottom, above = opener.top - rect.height - MARGIN >= box.top;
-      const up = prefer === "up" ? above || !below : !below && above;
+      const { up, room } = side(opener, rect.height, box);
       menu.style.translate = before;
-      setPlace(was => was.shift === shift && was.up === up ? was : { shift, up });
+      menu.style.maxHeight = cap;
+      setPlace(was => was.shift === shift && was.up === up && was.room === room ? was : { shift, up, room });
     };
     fit();
     window.addEventListener("resize", fit);
@@ -93,7 +128,7 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
       window.removeEventListener("resize", fit);
       window.removeEventListener("scroll", fit, true);
     };
-  }, [open, phone, anchorRef, prefer, portal, align, within]);
+  }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 
   // A sheet opened while typing (a long press on a message, the composer's +): the keyboard goes down, as in a native
   // app. iOS keeps it up otherwise, over the sheet's bottom rows, and the keys went on into the field behind the sheet:
@@ -143,22 +178,24 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
 
   if (portal) return createPortal(
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
-      style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0 }}
-      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
+      style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
+      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
     </div>, document.body);
 
   return (
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
-      style={{ translate: place.shift ? `${place.shift}px 0` : undefined } as CSSProperties}
-      className={`absolute ${align === "start" ? "start-0" : "end-0"} z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${place.up ? "bottom-full mb-1" : "top-full mt-1"} ${className}`}>
+      style={{ translate: place.shift ? `${place.shift}px 0` : undefined, maxHeight: place.room } as CSSProperties}
+      className={`absolute ${align === "start" ? "start-0" : "end-0"} z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${place.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${place.up ? "bottom-full mb-1" : "top-full mt-1"} ${className}`}>
       {children}
     </div>
   );
 }
 
+type Rect = { left: number; right: number; top: number; bottom: number };
+
 /** The window, or the part of it the opener's `within` ancestor covers. */
-function bounds(anchor: HTMLElement, within?: string) {
+function bounds(anchor: HTMLElement, within?: string): Rect {
   const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
   const box = { left: 0, top: 0, right: width, bottom: height };
   const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;
@@ -192,15 +229,20 @@ export function MenuItem({ icon, children, hint, onClick, danger, disabled, titl
   className?: string;
   /** `data-*` attributes for the row. */
   data?: Record<`data-${string}`, string | number | undefined>;
-  /** A row that turns something on or off (a menu checkbox): whether it is on. */
+  /**
+   * A row that turns something on or off: whether it is on. A checkbox (`role="checkbox"`, `aria-checked`), not a
+   * `menuitemcheckbox`: that role is only valid inside a `role="menu"`, and these menus are groups of buttons (no
+   * `menuitem` rows, a note or a field among them), so a screen reader heard a menu item checkbox with no menu around
+   * it (axe's aria-required-parent). The keys stay the menu's: arrows, Home and End move to it; Space or Enter toggle.
+   */
   checked?: boolean;
 }) {
   const fitTitle = (row: HTMLElement) => { if (!title) titleIfCut(row); };
   return (
     <button type="button" data-testid={testId} data-menu-item onClick={onClick} disabled={disabled} title={title} {...data}
-      {...(checked === undefined ? {} : { role: "menuitemcheckbox", "aria-checked": checked })}
+      {...(checked === undefined ? {} : { role: "checkbox", "aria-checked": checked })}
       onPointerEnter={e => fitTitle(e.currentTarget)} onFocus={e => fitTitle(e.currentTarget)}
-      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
+      className={`flex w-full min-w-0 items-center whitespace-nowrap px-3 py-2 text-start text-sm transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-not-allowed max-md:min-h-12 max-md:rounded-lg ${hint ? "gap-3" : "gap-2"} ${danger ? "text-danger-ink" : hint ? "text-text-primary" : "text-text-secondary hover:text-text-primary"} ${className}`}>
       {icon && <span aria-hidden="true" data-menu-icon className={`flex shrink-0 ${hint ? "text-accent" : ""}`}>{icon}</span>}
       {hint
         ? <span className="min-w-0"><span data-menu-text className="block truncate">{children}</span><span data-menu-text className="block truncate text-xs text-text-muted">{hint}</span></span>

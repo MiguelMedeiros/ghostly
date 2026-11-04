@@ -46,35 +46,42 @@ describe("the Desktop's native channels and binary messages", () => {
     expect(heard).toEqual([new Uint8Array([0x04, 0, 255, 10]), "hello"]);
   });
 
-  it("HyperDHT's keeps several frames in flight: each counts against the budget until the runtime says it went", async () => {
-    // Rust answers a send once it queued it for the runtime; the runtime says `sent` later, once its socket has room.
-    const sends: { seq: number }[] = [];
-    tauri.invoke.mockImplementation(async (command: string, args: { seq: number }) => {
-      if (command.endsWith("_start")) return { id: 1, descriptor: { publicKey: "ab".repeat(32) } };
-      if (command === "paired_hyperdht_send") sends.push(args);
-      return null;
+  it("HyperDHT's counts a frame until Rust queued it, and holds a file back only while the runtime says its socket is full", async () => {
+    // Rust answers a send once it queued it for the runtime; here, when the test lets it.
+    const answers: (() => void)[] = [];
+    tauri.invoke.mockImplementation((command: string) => {
+      if (command.endsWith("_start")) return Promise.resolve({ id: 1, descriptor: { publicKey: "ab".repeat(32) } });
+      if (command === "paired_hyperdht_send") return new Promise<null>((resolve) => answers.push(() => resolve(null)));
+      return Promise.resolve(null);
     });
     const { channel } = await incoming(createHyperEndpoint);
     const frame = new Uint8Array(16 * 1024);
     for (let i = 0; i < 6; i++) channel.send(frame);
-    await vi.waitFor(() => expect(sends).toHaveLength(6));
-    // All six reached Rust before the runtime said anything: no round trip to the runtime per frame.
+    await vi.waitFor(() => expect(answers).toHaveLength(1));
     expect(channel.bufferedAmount).toBe(6 * frame.length);
+    // Each answer frees its frame: the runtime says nothing for a frame that found room, as a word back for each
+    // cost a file about a fifth of its speed.
+    while (channel.bufferedAmount > 0) { answers.shift()?.(); await new Promise((resolve) => setTimeout(resolve, 0)); }
+    await channel.drained();
+    // The runtime's socket is full: a file's quarter of the budget counts until it has room, and a message still fits.
+    const event = tauri.channels[0].onmessage!;
+    event({ type: "full", id: 7 });
+    expect(channel.bufferedAmount).toBe(channel.sendBudget! / 4);
     let room = false;
     void channel.drained().then(() => { room = true; });
-    const sent = (seq: number) => tauri.channels[0].onmessage!({ type: "sent", id: 7, seq });
-    for (const { seq } of sends.slice(0, 4)) sent(seq);
-    await Promise.resolve();
-    expect(channel.bufferedAmount).toBe(2 * frame.length);
+    channel.send("{\"t\":\"ping\"}");
+    await vi.waitFor(() => expect(answers).toHaveLength(1));
+    answers.shift()!();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(room).toBe(false);
-    // Room again once under a quarter of the budget (what a file may hold in it).
-    sent(sends[4].seq);
+    event({ type: "room", id: 7 });
     await vi.waitFor(() => expect(room).toBe(true));
-    expect(channel.bufferedAmount).toBe(frame.length);
+    expect(channel.bufferedAmount).toBe(0);
     // A frame the runtime could not send closes the channel, as a refused send did.
     let closed = false;
     channel.onClose = () => { closed = true; };
-    tauri.channels[0].onmessage!({ type: "unsent", id: 7, seq: sends[5].seq, message: "Native channel is closed" });
+    event({ type: "full", id: 7 });
+    event({ type: "unsent", id: 7, seq: 7, message: "Native channel is closed" });
     expect(closed).toBe(true);
     expect(channel.bufferedAmount).toBe(0);
   });

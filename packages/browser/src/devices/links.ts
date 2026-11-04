@@ -10,7 +10,7 @@ import { viewOf } from "./gate";
 import { DEVICE_GATED_ERROR, type DeviceLinkEngine, type DeviceLinkHost } from "./linkOnly";
 import { DeviceSetError, deviceIdentity, openTurnKeeper } from "./setup";
 import { loadDeviceSigningKey, type DeviceSigningKey } from "./signingKey";
-import type { DevicePatch, DeviceRecord, DeviceState } from "./state";
+import { forkTimes, type DevicePatch, type DeviceRecord, type DeviceState } from "./state";
 import { amendDevice, forgetDevice, moveDevice, readDeviceRecord } from "./store";
 import { acknowledged, pendingFrames } from "./remove";
 import { checkSetUpdate } from "./setUpdate";
@@ -100,6 +100,8 @@ export interface DeviceSetView {
   reenroll?: true;
   /** Forks kept here ("Only on this device", WISP 06 § Installing the staged state), by peer database name: Discard removes one. */
   forks?: string[];
+  /** When each of `forks` was kept (ms), by name; a fork an older build kept has none. */
+  forkKeptAt?: Record<string, number>;
 }
 
 /** The view of a device record and the links this device holds. A profile with no record is `single`, with no devices. */
@@ -124,7 +126,7 @@ export function deviceSetView(record: DeviceRecord | null, links: DeviceLinkView
     ...(record.state === "active" && record.earlierSets.some((set) => set.foreign) ? { foreignSet: true as const } : {}),
     ...(record.setNotice && !record.setNotice.seen ? { notice: record.setNotice.names } : {}),
     ...(record.reenroll ? { reenroll: true as const } : {}),
-    ...(record.state === "active" && record.forks?.length ? { forks: [...record.forks] } : {}) };
+    ...(record.state === "active" && record.forks?.length ? { forks: [...record.forks], forkKeptAt: forkTimes(record) } : {}) };
 }
 
 export interface DeviceLinksOptions {
@@ -154,8 +156,8 @@ export interface DeviceLinksOptions {
   /** Makes who runs the handoff here (device-link-only mode), once the links started. */
   handoff?: (links: DeviceLinks, host: DeviceLinkHost | null) => Promise<DeviceHandoffHandler | null>;
   /**
-   * A standby reads the turn record when its screen opens and every 10 minutes while it shows (WISP 06 § When a device
-   * checks), and tells the pages when its state changed (a tombstone makes it `moving` or `removed`). Device-link-only mode.
+   * A standby reads the turn record when its screen opens, every 10 minutes while it shows and when a live link is
+   * closed from the other end (WISP 06 § When a device checks, `linkLost`), and tells the pages when its state changed (a tombstone makes it `moving` or `removed`). Device-link-only mode.
    */
   watchTurn?: boolean;
   /**
@@ -187,6 +189,11 @@ export function handoffNotices(was: { handoff?: boolean; session?: string }, han
   return [];
 }
 
+/** The record lists the device on this link, under the link's own secret (the current set's). */
+function listedOn(record: DeviceRecord | null, running: Pick<Running, "d" | "key">): boolean {
+  return !!record && record.d === running.d && record.deviceSet.some((slot) => slot?.key === running.key);
+}
+
 interface Running {
   id: string;
   /** The device-set secret the link is derived from, base64url: an earlier set's, or the current one. */
@@ -208,10 +215,19 @@ interface Running {
   native: boolean;
   /** The native transports whose endpoint is being made now. */
   starting: Set<NativeTransport>;
+  /** Native endpoints on a relay the person changed or removed, kept while a session runs on them (`moveNative`). */
+  moved: Set<NativeTransport>;
   /** A start of the native transports still missing, after one failed or went away. */
   nativeRetry?: ReturnType<typeof setTimeout>;
   /** Starts that left a transport missing since the last one that left none: the wait before the next doubles. */
   nativeMisses: number;
+  /**
+   * This link runs without WebRTC, which connected nothing between the two devices (`withoutRtc`). For this run only,
+   * unless none of its native transports starts (`withRtc`).
+   */
+  rtcOff: boolean;
+  /** The other device is there and no session is open: `withoutRtc` once `DEVICE_RTC_MS` passed so. */
+  rtcWait?: ReturnType<typeof setTimeout>;
   waiting: Map<string, { resolve(ms: number): void; reject(error: Error): void; sentAt: number; timer: ReturnType<typeof setTimeout> }>;
 }
 
@@ -228,6 +244,10 @@ export type NativeFactories = Partial<Record<NativeTransport, (seedB64: string) 
  */
 export const NATIVE_RETRY_MS = 10_000;
 export const NATIVE_RETRY_MAX_MS = 120_000;
+/** The other device is there and no session opened over WebRTC in this long: the link goes on without it (`withoutRtc`). */
+export const DEVICE_RTC_MS = 20_000;
+/** The longest that wait grows to, for a link that went back to WebRTC again and again (`withRtc`). */
+export const DEVICE_RTC_MAX_MS = 5 * 60_000;
 
 /** How often a standby reads the turn while its screen shows (WISP 06 § When a device checks), and the jitter on it. */
 export const STANDBY_TURN_EVERY_MS = 10 * 60_000;
@@ -248,6 +268,8 @@ const defaultPeerConnection = (): (() => RTCPeerConnection) | undefined =>
 
 export class DeviceLinks implements DeviceLinkEngine {
   private readonly running = new Map<string, Running>();
+  /** By link: the times it went back to WebRTC (`withRtc`) since a session last opened. Each doubles the wait before it goes without again. */
+  private readonly rtcBacks = new Map<string, number>();
   private readonly createPeerConnection?: () => RTCPeerConnection;
   private key: DeviceSigningKey | null = null;
   private keeper: Promise<TurnKeeper | null> | null = null;
@@ -261,6 +283,10 @@ export class DeviceLinks implements DeviceLinkEngine {
   private turnQueue: Promise<unknown> = Promise.resolve();
   private turnTimer: ReturnType<typeof setTimeout> | null = null;
   private lastHintRead = 0;
+  /** When a link closing by the other side's doing last made this standby read the turn (`linkLost`). */
+  private lastLossRead = 0;
+  /** A hint came inside `TURN_HINT_EVERY_MS` of the last read, and a read is due at its end. */
+  private hintDeferred = false;
   private readonly timers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(private readonly options: DeviceLinksOptions) {
@@ -295,12 +321,17 @@ export class DeviceLinks implements DeviceLinkEngine {
     }, after);
   }
 
-  /** Reads the turn and, when the device's state or the device it believes changed, tells the pages. */
+  /** Reads the turn and, when the device's state, the device it believes or a name in the set changed, tells the pages. */
   private async checkAndShow(): Promise<TurnOutcome | null> {
     const before = await this.record().catch(() => null);
     const outcome = await this.checkTurn();
     const now = await this.record().catch(() => null);
-    if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll)) this.host?.show(viewOf(now));
+    // A name is news too: the active device renamed a device (`rename.ts`), and the screen names the active device.
+    const names = (record: DeviceRecord) => record.deviceSet.map((slot) => slot?.name ?? "").join("\n");
+    if (now && before && (now.state !== before.state || now.activeSlot !== before.activeSlot || now.d !== before.d || now.reenroll !== before.reenroll || names(now) !== names(before))) {
+      this.host?.show(viewOf(now));
+      if (names(now) !== names(before)) this.changed();
+    }
     return outcome;
   }
 
@@ -418,10 +449,10 @@ export class DeviceLinks implements DeviceLinkEngine {
     return wanted;
   }
 
-  private open(want: Wanted): void {
+  private open(want: Wanted, rtcOff = false): void {
     const signer = this.key!;
-    const rtc = !!this.createPeerConnection;
-    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, starting: new Set(), nativeMisses: 0, waiting: new Map() };
+    const rtc = !!this.createPeerConnection && !rtcOff;
+    const running: Running = { id: want.id, d: want.id.slice(0, want.id.indexOf("|")), key: want.key, name: want.name, slot: want.slot, earlier: want.earlier, link: null as unknown as GhostLink, agreed: false, native: false, starting: new Set(), moved: new Set(), nativeMisses: 0, rtcOff, waiting: new Map() };
     running.link = new GhostLink({
       ...deviceLinkPairing(want.d, signer, fromBase64Url(want.key)),
       deviceCapabilities: [DEVICES_CAPABILITY, HANDOFF_CAPABILITY],
@@ -432,6 +463,9 @@ export class DeviceLinks implements DeviceLinkEngine {
       packetTransports: true,
       transport: this.options.transport,
       pollIntervals: this.options.pollIntervals,
+      // Never an invite just sent: the other device is there (its packet is read at once) or away. As one, a link to a
+      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each.
+      madeAt: 0,
       autoConnect: true,
       createPeerConnection: () => {
         if (!this.createPeerConnection) throw new ReferenceError("RTCPeerConnection is not defined");
@@ -454,13 +488,25 @@ export class DeviceLinks implements DeviceLinkEngine {
           this.changed();
         },
         onDataLinkState: (state) => {
+          if (state === "open") this.rtcBacks.delete(running.id);
+          if (state === "open" && running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
           if (state !== "open") {
+            // A live link of the set closed, and not by this device (`close` forgets it first): a removal does this.
+            if (running.agreed && !running.earlier && this.running.get(running.id) === running) void this.linkLost().catch(() => {});
             running.agreed = false; this.failPings(running, "The device link closed");
             if (running.handoff) { running.handoff = false; if (!running.earlier) this.handoffLink(running.key, false); }
+            if (running.moved.size) void this.moveNative(running);
           }
           this.changed();
         },
         onDeviceFrame: (frame) => this.receive(running, frame),
+        // What a WebRTC attempt said: no direct path between the two devices (`withoutRtc`).
+        onRtcStalled: () => this.withoutRtc(running),
+        onDirectEvidence: (evidence) => { if (evidence !== "open" && evidence !== "closed") this.withoutRtc(running); },
+        onAnswersRefused: () => this.withoutRtc(running),
+        // The other device is there and no session opens by `DEVICE_RTC_MS`: the side that answers may hear nothing of
+        // an attempt that failed (it waits out its 90 s).
+        onPresence: (presence) => { if (presence.online) this.waitForRtc(running); },
         // The other device has no WebRTC: this one starts its native endpoints for it.
         onPacketTransports: (transports) => { if (!running.native && !transports.includes("webrtc/1")) this.startNative(running); },
         // An endpoint went away (its relay closed the connection): it is started again in a while.
@@ -502,6 +548,8 @@ export class DeviceLinks implements DeviceLinkEngine {
       }, () => {
         // Not available now; the others, and WebRTC, still are. Tried again in a while.
         running.starting.delete(transport);
+        // A link that went on without WebRTC and has nothing else up: back to WebRTC rather than wait on these.
+        if (running.rtcOff && !running.starting.size && !running.link.availableTransports.length) { this.withRtc(running); return; }
         this.retryNative(running);
       });
     }
@@ -519,14 +567,32 @@ export class DeviceLinks implements DeviceLinkEngine {
 
   /**
    * The native transports this app runs changed (the person set a HyperDHT relay, or other Iroh relays): every link
-   * that runs native endpoints starts the ones it lacks now.
+   * that runs native endpoints starts the ones it lacks now. Its endpoints of the `moved` transports, on the relay the
+   * person changed or removed, go first, as a chat's do: each once no session runs on it.
    */
-  nativeChanged(): void {
+  nativeChanged(moved: NativeTransport[] = []): void {
     for (const running of this.running.values()) {
       if (!running.native) continue;
       running.nativeMisses = 0;
-      this.startNative(running);
+      for (const transport of moved) if (running.link.availableTransports.includes(transport)) running.moved.add(transport);
+      void this.moveNative(running);
     }
+  }
+
+  /**
+   * Lets go of the link's endpoints on an old relay that no session runs on, and starts the native transports it lacks
+   * then: the new relay's, or none where the relay was removed. One carrying the session goes when the session ends.
+   */
+  private async moveNative(running: Running): Promise<void> {
+    for (const transport of [...running.moved]) {
+      if (!running.link.availableTransports.includes(transport)) { running.moved.delete(transport); continue; }
+      if (!running.link.canReleaseEndpoint(transport)) continue;
+      running.moved.delete(transport);
+      // Not missing while it goes: nothing starts it again on the old relay meanwhile.
+      running.starting.add(transport);
+      try { await running.link.releaseEndpoint(transport); } finally { running.starting.delete(transport); }
+    }
+    if (!this.stopped && this.running.get(running.id) === running) this.startNative(running);
   }
 
   private async receive(running: Running, frame: DeviceFrame): Promise<void> {
@@ -565,17 +631,37 @@ export class DeviceLinks implements DeviceLinkEngine {
   }
 
   /** Asks the device with this signing key to make a new subscription. False when its link is not live (ask again later). */
-  askRenew(key: string): boolean {
-    const running = this.find(key);
-    if (!running || running.earlier || !this.isLive(running)) return false;
-    try { running.link.sendDeviceFrame({ t: DEVICE_RENEW_FRAME }); return true; } catch { return false; }
+  askRenew(key: string): Promise<boolean> {
+    return this.sendListed(key, { t: DEVICE_RENEW_FRAME });
   }
 
   /** Tells the device with this signing key which chats' tokens are handed out under the profile's subscription. */
-  sendTokens(key: string, tokens: string[]): boolean {
+  sendTokens(key: string, tokens: string[]): Promise<boolean> {
+    return this.sendListed(key, { t: DEVICE_TOKENS_FRAME, k: tokens });
+  }
+
+  /**
+   * A push frame for the device on its current link, only while the record lists it under that link's secret: a
+   * removal stores the record before the links follow it, and a removed device is told nothing meanwhile.
+   */
+  private async sendListed(key: string, frame: DeviceFrame): Promise<boolean> {
     const running = this.find(key);
     if (!running || running.earlier || !this.isLive(running)) return false;
-    try { running.link.sendDeviceFrame({ t: DEVICE_TOKENS_FRAME, k: tokens }); return true; } catch { return false; }
+    if (!listedOn(await this.record().catch(() => null), running)) return false;
+    try { running.link.sendDeviceFrame(frame); return true; } catch { return false; }
+  }
+
+  /**
+   * The active device wrote a record the other devices should read now (a rename, `rename.ts`): the turn hint goes
+   * over each live link under the current secret, as at the start of every session. The number of devices told.
+   */
+  hintTurn(): number {
+    let told = 0;
+    for (const running of this.running.values()) {
+      if (running.earlier || !this.isLive(running)) continue;
+      try { running.link.sendDeviceFrame({ t: DEVICE_TURN_HINT }); told++; } catch { /* it reads at its next session or its own timer */ }
+    }
+    return told;
   }
 
   // ---------- push between the devices (WISP 06 § Push and the phone, `push.ts`) ----------
@@ -588,16 +674,21 @@ export class DeviceLinks implements DeviceLinkEngine {
     return run;
   }
 
-  /** Another device shared its push target, or said it has none: kept here, and the engine told. A malformed frame says nothing. */
+  /**
+   * Another device shared its push target, or said it has none: kept here, and the engine told. A malformed frame says
+   * nothing, and neither does a device the set does not list (one removed, whose link runs until the links follow).
+   */
   private async deviceWake(from: string, frame: DeviceFrame): Promise<void> {
     const target = readDeviceWake(frame);
     if (target === undefined) return;
-    await this.pushExclusive(async () => {
+    const listed = await this.pushExclusive(async () => {
       const record = await this.record();
-      if (!record || !record.deviceSet.some((slot) => slot?.key === from)) return;
+      if (!record || !record.deviceSet.some((slot) => slot?.key === from)) return false;
       const patch = withOtherPush(record, from, target);
       if (patch) await amendDevice(this.options.profile, patch);
+      return true;
     });
+    if (!listed) return;
     try { await this.options.onDeviceWake?.(from, target); } catch { /* the engine's own trouble */ }
   }
 
@@ -605,7 +696,8 @@ export class DeviceLinks implements DeviceLinkEngine {
   private async shareOwnPush(running: Running): Promise<void> {
     const target = await this.pushExclusive(async () => {
       const record = await this.record();
-      if (!record) return undefined;
+      // A device the record no longer lists under this link's secret gets no token, and nothing goes to it.
+      if (!record || !listedOn(record, running)) return undefined;
       const { target, patch } = ownTargetFor(record, running.key);
       if (patch) await amendDevice(this.options.profile, patch);
       return target;
@@ -682,11 +774,17 @@ export class DeviceLinks implements DeviceLinkEngine {
   }
 
   /**
-   * A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. On the active
-   * device the engine reads it (`onActiveHint`): it stops itself when another device took over.
+   * A hint from another device that it holds the turn: read it, at most once in `TURN_HINT_EVERY_MS`. A hint inside
+   * that time is not dropped: one read follows at its end (the active device renamed a device just after this session
+   * opened, and its record is news). On the active device the engine reads it (`onActiveHint`): it stops itself when
+   * another device took over.
    */
   private async hinted(): Promise<void> {
-    if (Date.now() - this.lastHintRead < TURN_HINT_EVERY_MS) return;
+    const wait = this.lastHintRead + TURN_HINT_EVERY_MS - Date.now();
+    if (wait > 0) {
+      if (!this.hintDeferred) { this.hintDeferred = true; this.later(wait, () => { this.hintDeferred = false; void this.hinted().catch(() => {}); }); }
+      return;
+    }
     const record = await this.record();
     if (record?.state === "active") { this.lastHintRead = Date.now(); this.options.onActiveHint?.(); return; }
     if (!record || record.state === "removed") return;
@@ -694,11 +792,25 @@ export class DeviceLinks implements DeviceLinkEngine {
     await this.checkAndShow().catch(() => null);
   }
 
+  /**
+   * A standby's live link to another device of its set closed by that device's doing. A removal does this right after
+   * it puts the tombstone, and nothing else tells a screen left in front (no focus, no visibility change) before its
+   * next read, up to 10 minutes away: it would go on offering Use here, which must fail. Read once, as a hint is, at
+   * most once in `TURN_HINT_EVERY_MS`: a network that drops every link at once costs one read.
+   */
+  private async linkLost(): Promise<void> {
+    if (!this.options.watchTurn || this.stopped || Date.now() - this.lastLossRead < TURN_HINT_EVERY_MS) return;
+    this.lastLossRead = Date.now();
+    const record = await this.record();
+    if (!record || record.state === "active" || record.state === "removed") return;
+    await this.checkAndShow();
+  }
+
   /** `key` holds the set under `d` (or the current one): its pending frame is done, and the old link goes. */
   private async acked(key: string, d?: string): Promise<void> {
-    const patch = acknowledged(await this.record(), key, d);
-    if (!patch) return;
-    await amendDevice(this.options.profile, patch);
+    if (!acknowledged(await this.record(), key, d)) return;
+    // Made again inside the write: a move stored since that read keeps the earlier set it added.
+    await amendDevice(this.options.profile, (current) => acknowledged(current, key, d));
     await this.refresh();
     this.changed();
   }
@@ -758,11 +870,66 @@ export class DeviceLinks implements DeviceLinkEngine {
     for (const [nonce, waiter] of running.waiting) { running.waiting.delete(nonce); clearTimeout(waiter.timer); waiter.reject(new Error(why)); }
   }
 
-  private async close(running: Running): Promise<void> {
+  /** `announce`: the link says goodbye (false where another link on the same keys takes its place at once). */
+  private async close(running: Running, announce = true): Promise<void> {
     if (running.nativeRetry) { clearTimeout(running.nativeRetry); running.nativeRetry = undefined; }
+    if (running.rtcWait) { clearTimeout(running.rtcWait); running.rtcWait = undefined; }
     this.failPings(running, "The device link closed");
     running.agreed = false;
-    await running.link.stop().catch(() => {});
+    await running.link.stop(announce).catch(() => {});
+  }
+
+  /**
+   * WebRTC on both devices that connects nothing (two browsers whose host candidates the other does not resolve, a
+   * router that does not hairpin, no TURN): neither packet says it has no WebRTC, so neither device starts a native
+   * endpoint, and the link never went live. It starts again as on an app with no WebRTC, for this run (`withRtc` aside), as a group's edge
+   * does (node.ts `edgeWithoutRtc`): its native endpoints run and its packet lists no `webrtc/1`, the other device starts
+   * its own for it as for a Linux Desktop, and the two meet over Iroh's relay. Only with no session open, and only
+   * where this app has a native transport to go on with.
+   */
+  private withoutRtc(running: Running, waited = false): void {
+    // A link that runs its native endpoints already (the other device has no WebRTC) has nothing more to go on with.
+    if (this.stopped || running.rtcOff || running.native || !this.createPeerConnection || running.link.isDataLinkOpen) return;
+    if (!Object.values(this.nativeFactories()).some(Boolean)) return;
+    // Back from a round without WebRTC that started nothing (`withRtc`): a stalled attempt does not end this one at once,
+    // the wait does, which doubles each time. Else the two would take turns every few seconds.
+    if (!waited && this.rtcBacks.get(running.id)) { this.waitForRtc(running); return; }
+    const run = this.queue.catch(() => {}).then(async () => {
+      if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
+      this.running.delete(running.id);
+      // Nothing said: the new link on the same keys is there at once, and a goodbye would tell the other device it went.
+      await this.close(running, false);
+      if (this.stopped) return;
+      this.open({ id: running.id, d: fromBase64Url(running.d), key: running.key, name: running.name, slot: running.slot, earlier: running.earlier }, true);
+      this.changed();
+    });
+    this.queue = run;
+  }
+
+  /** `withoutRtc` once `DEVICE_RTC_MS` passed with no session open, twice as long for each time it went back (`rtcBacks`). */
+  private waitForRtc(running: Running): void {
+    if (running.rtcOff || running.rtcWait || running.link.isDataLinkOpen) return;
+    running.rtcWait = setTimeout(() => { running.rtcWait = undefined; if (!running.link.isDataLinkOpen) this.withoutRtc(running, true); }, Math.min(DEVICE_RTC_MS * 2 ** (this.rtcBacks.get(running.id) ?? 0), DEVICE_RTC_MAX_MS));
+  }
+
+  /**
+   * The link that went on without WebRTC (`withoutRtc`) started none of its native transports: an Iroh relay neither
+   * device reaches, and no HyperDHT relay. With nothing to go through it starts again with WebRTC, which may connect
+   * now, or only after `DEVICE_RTC_MS` (a device that just reloaded dials at its own pace). The wait before it goes
+   * without WebRTC again doubles each time (`rtcBacks`), so a native transport that comes back is still tried.
+   */
+  private withRtc(running: Running): void {
+    if (this.stopped || !running.rtcOff || running.link.isDataLinkOpen || this.running.get(running.id) !== running) return;
+    this.rtcBacks.set(running.id, (this.rtcBacks.get(running.id) ?? 0) + 1);
+    const run = this.queue.catch(() => {}).then(async () => {
+      if (this.stopped || this.running.get(running.id) !== running || running.link.isDataLinkOpen) return;
+      this.running.delete(running.id);
+      await this.close(running, false);
+      if (this.stopped) return;
+      this.open({ id: running.id, d: fromBase64Url(running.d), key: running.key, name: running.name, slot: running.slot, earlier: running.earlier });
+      this.changed();
+    });
+    this.queue = run;
   }
 
   private find(key: string): Running | undefined {

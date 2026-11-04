@@ -46,6 +46,44 @@ test("on an iPhone: a dialog and a sheet stand above the keyboard, and back wher
   await expect.poll(async () => { const box = (await sheet.boundingBox())!; return Math.round(box.y + box.height); }).toBe(PHONE.height);
 });
 
+for (const screen of [{ name: "an iPhone on its side", width: 874, height: 402, keyboard: 200 }, { name: "an iPad mini on its side", width: 1133, height: 744, keyboard: 360 }]) {
+  test(`${screen.name}: a dialog stands above the keyboard, its button in reach`, { tag: ["@feature:app.mobile-layout", "@feature:groups.create", "@feature:chat.forward"] }, async ({ peer }) => {
+    // From 768px two panes take what the keyboard leaves, and dialogs stayed centred on the whole screen: New group's
+    // Create and Forward's Send sat under the keyboard, out of reach until it was put away.
+    const visible = screen.height - screen.keyboard;
+    const { page } = await peer("side", { mobile: true, viewport: { width: screen.width, height: screen.height } });
+    await iosKeyboard(page);
+    await expect(page.getByTitle("New Chat").first()).toBeVisible();
+
+    await page.getByTestId("sidebar-new-more").first().click();
+    await page.getByTestId("new-group").click();
+    await expect(page.getByTestId("new-group-name")).toBeFocused();
+    await keyboard(page, screen.keyboard);
+    await within(page.getByTestId("new-group-dialog"), visible);
+    await within(page.getByTestId("new-group-name"), visible);
+    await page.getByTestId("new-group-create").scrollIntoViewIfNeeded();
+    await within(page.getByTestId("new-group-create"), visible);
+    await keyboard(page, 0);
+    await page.keyboard.press("Escape");
+
+    await page.getByTitle("New Chat").first().click();
+    const input = page.getByPlaceholder("Message…");
+    await input.fill("to pass on");
+    await input.press("Enter");
+    await input.blur();
+    await page.getByTestId("message-options").first().click();
+    await page.getByTestId("message-forward").click();
+    await expect(page.getByTestId("forward-search")).toBeFocused();
+    await keyboard(page, screen.keyboard);
+    await within(page.getByTestId("forward-dialog"), visible);
+    await page.getByTestId("forward-send").scrollIntoViewIfNeeded();
+    await within(page.getByTestId("forward-send"), visible);
+    // Back in the middle of the screen once the keyboard goes.
+    await keyboard(page, 0);
+    await expect.poll(async () => { const box = (await page.getByTestId("forward-dialog").boundingBox())!; return box.y + box.height > visible; }).toBe(true);
+  });
+}
+
 for (const phone of [{ width: 402, height: 874, keyboard: 336 }, { width: 375, height: 667, keyboard: 260 }]) {
   test(`on an iPhone ${phone.width}×${phone.height}: the lock screen's password and Unlock stand above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:settings.lock.startup"] }, async ({ peer }) => {
     // Centred in the whole screen, the field and Unlock sat under the keyboard (an iPhone 17's Unlock 4px into it, a
@@ -102,6 +140,45 @@ for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 7
   });
 }
 
+for (const screen of [{ name: "an iPhone on its side", width: 874, height: 402, keyboard: 200 }, { name: "an iPad mini on its side", width: 1133, height: 744, keyboard: 360 }]) {
+  test(`${screen.name}: a dialog that is not a <dialog> keeps its field and button above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:apps.page", "@feature:proofs.ssh.github"] }, async ({ peer }) => {
+    // From 768px no sheet rule moves these panels: centred in a layer over the whole screen, which iOS keeps under the
+    // keyboard, the URL field and Check (Apps → Add), the account field and Start (Add identity) were under it.
+    const visible = screen.height - screen.keyboard;
+    const { page } = await peer("side-dialogs", { mobile: true, viewport: { width: screen.width, height: screen.height } });
+    await iosKeyboard(page);
+    await page.goto("/#/apps");
+    await page.getByTestId("apps-add").click();
+    const url = page.getByTestId("apps-add-url");
+    await expect(url).toBeFocused();
+    await keyboard(page, screen.keyboard);
+    await within(url, visible);
+    await page.getByTestId("apps-add-check").scrollIntoViewIfNeeded();
+    await within(page.getByTestId("apps-add-check"), visible);
+    await keyboard(page, 0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("apps-add-dialog")).toHaveCount(0);
+
+    await page.goto("/#/identities");
+    await page.getByTestId("identities-new").click();
+    const add = page.getByTestId("add-identity");
+    await add.getByTestId("add-identity-ssh-github").click();
+    const subject = add.getByTestId("add-identity-subject");
+    await subject.focus();
+    await keyboard(page, screen.keyboard);
+    await within(add, visible);
+    await subject.scrollIntoViewIfNeeded();
+    await within(subject, visible);
+    await subject.fill("octo-cat");
+    await add.getByTestId("add-identity-start").scrollIntoViewIfNeeded();
+    await within(add.getByTestId("add-identity-start"), visible);
+
+    // Keyboard down: centred in the whole screen again.
+    await keyboard(page, 0);
+    await expect.poll(async () => { const box = (await add.boundingBox())!; return box.y + box.height > visible; }).toBe(true);
+  });
+}
+
 test("an iPhone with a hardware keyboard: the message field stays above the shortcut bar when the phone turns", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
   // Turned with the bar up, iOS reports the whole screen again a moment later and keeps it while the bar stays over
   // the field (iOS 26 Simulator, installed app: 402 of 402 on its side with the bar showing; r6c saw "68px short").
@@ -140,10 +217,14 @@ test("on an iPhone: a message's quick bar opened while typing puts the keyboard 
   await keyboard(page, KEYBOARD);
 
   const row = page.locator(".chat-wallpaper [data-message-row]").filter({ hasText: "hold me while typing" }).last();
+  // The text shows at once in a row of its own (useChat's sending row), which takes no reaction; the engine's row takes
+  // its place once it has stored it. A press on the first is lost with it: pressed once the row that takes one is there.
+  await expect(row.getByTestId("message-react-action")).toBeAttached();
   const box = (await row.boundingBox())!;
   const at = { pointerType: "touch", button: 0, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2, bubbles: true };
   await row.dispatchEvent("pointerdown", at);
-  await page.waitForTimeout(700);
+  // Held until the bar is up, as a finger is.
+  await expect(page.getByTestId("reaction-bar")).toBeVisible();
   await row.dispatchEvent("pointerup", at);
   await expect(page.getByTestId("reaction-bar")).toBeVisible();
   await expect(input).not.toBeFocused();
@@ -186,3 +267,22 @@ test("an iPhone on its side with the keyboard up: the floating card is never ove
   await expect(field).toBeFocused();
   await expect.poll(() => clear(SIDE.height), { timeout: 4_000 }).toBe("clear");
 });
+
+for (const phone of [{ width: 390, height: 844, keyboard: 336 }, { width: 375, height: 667, keyboard: 260 }]) {
+  test(`on an iPhone ${phone.width}×${phone.height}: Apps → Add stands on the keyboard, its link field and Check in view`, { tag: ["@feature:app.mobile-layout", "@feature:apps.page"] }, async ({ peer }) => {
+    // It stood on the page's bottom edge, which iOS keeps under the keyboard: the field typed into and Check were under it.
+    const visible = phone.height - phone.keyboard;
+    const { page } = await peer("add-app", { mobile: true, viewport: { width: phone.width, height: phone.height } });
+    await iosKeyboard(page);
+    await page.goto("/#/apps");
+    await page.getByTestId("apps-add").click();
+    await expect(page.getByTestId("apps-add-url")).toBeFocused();
+    await keyboard(page, phone.keyboard);
+    await within(page.getByTestId("apps-add-dialog"), visible);
+    await within(page.getByTestId("apps-add-url"), visible);
+    await within(page.getByTestId("apps-add-check"), visible);
+    // On the bottom edge again once the keyboard goes.
+    await keyboard(page, 0);
+    await expect.poll(async () => { const box = (await page.getByTestId("apps-add-dialog").boundingBox())!; return Math.round(box.y + box.height); }).toBe(phone.height);
+  });
+}

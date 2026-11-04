@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { NostrContactView, NostrDraftRequest } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/engineState";
+import type { NostrContactView, NostrDraftRequest, NostrNoteView } from "@ghostly/browser/nostr/types";
+import { useEngineValue } from "../../lib/engineState";
 import { agoIn } from "../../lib/relativeTime";
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice } from "../wallet/ui";
@@ -15,20 +15,25 @@ import { initial } from "../../lib/initial";
  * What a contact's proven Nostr key lets the person see, each part on request: the profile (kind 0),
  * whom they follow (kind 3) with direction hints against the person's own list, and their recent notes
  * (kind 1), moderated by the person's own mute list. Every part shows where it came from and when. `compact` (on the
- * Nostr ID card's back) says what loading reveals in one short line.
+ * Nostr ID card's back) says what loading reveals in one short line. `turning`: that back is still swinging round,
+ * and its buttons wait, as the rest of the back's do (ContactIdentitiesPanel.tsx). The engine state carries only how
+ * many posts were loaded: the posts themselves are asked (`nostrContactNotes`) while this card is on screen.
  */
-export function NostrContactCard({ linkId, view, name, compact = false }: { linkId: string; view: NostrContactView; name: string; compact?: boolean }) {
+export function NostrContactCard({ linkId, view, name, compact = false, turning = false }: { linkId: string; view: NostrContactView; name: string; compact?: boolean; turning?: boolean }) {
   const { t, language } = useI18n();
   const ago = agoIn(language);
-  const state = useEngineState();
-  const settings = state?.nostr.settings;
-  const own = state?.nostr.own ?? [];
+  // Only the Nostr part of the engine's state (the relays asked, the person's own keys): not every state.
+  const nostr = useEngineValue(state => state?.nostr);
+  const settings = nostr?.settings;
+  const own = nostr?.own ?? [];
   const [error, setError] = useState("");
   const [publish, setPublish] = useState<NostrDraftRequest | null>(null);
   const busy = view.loading;
+  const wait = !!busy || turning;
   const load = (what: "profile" | "follows" | "notes", more = false) => { setError(""); void engine.call("nostrLoadContact", { linkId, subject: view.subject, what, more }).catch(e => setError(problemLine(e, t))); };
   const loadOwn = (subject: string) => { setError(""); void engine.call("nostrLoadOwn", { subject }).catch(e => setError(problemLine(e, t))); };
   const p = view.profile, f = view.follows, n = view.notes;
+  const notes = useShownNotes(linkId, view, own.map(o => o.mute?.fetchedAt ?? 0).join(" "));
   const profile = p?.profile;
   const myKey = f?.hints?.myKey ?? own[0]?.subject;
   const relays = settings?.relays ?? [];
@@ -59,7 +64,7 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
           </div>
         ) : p && !p.found ? <p data-testid="nostr-profile-none">{t("identities.nostr.profileNone")}</p> : null}
         {p && <p className="text-[11px]" data-testid="nostr-profile-source">{profile ? t("identities.nostr.profileSourceChanged", { when: when(p), time: ago(profile.eventAt) }) : t("identities.nostr.profileSource", { when: when(p) })}</p>}
-        <Button data-testid="nostr-load-profile" disabled={!!busy} onClick={() => load("profile")}>{busy === "profile" ? t("identities.activity.loading") : p ? t("identities.nostr.refreshProfile") : t("identities.nostr.loadProfile")}</Button>
+        <Button data-testid="nostr-load-profile" disabled={wait} onClick={() => load("profile")}>{busy === "profile" ? t("identities.activity.loading") : p ? t("identities.nostr.refreshProfile") : t("identities.nostr.loadProfile")}</Button>
       </div>
 
       {/* Social graph */}
@@ -72,24 +77,26 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
               <li data-testid="nostr-hint-you-follow">{f.hints.youFollow ? t("identities.nostr.youFollowThem") : t("identities.nostr.notYouFollowThem")} <span className="text-[11px]">{t("identities.nostr.yourListLoaded", { time: ago(f.hints.myFollowsAt) })}</span></li>
               <li data-testid="nostr-hint-mutual">{f.hints.mutual === 1 ? t("identities.nostr.mutualOne") : t("identities.nostr.mutual", { count: f.hints.mutual })}</li>
             </ul>
-          ) : myKey ? <p>{t("identities.nostr.loadOwnHint")} <Button data-testid="nostr-load-own" disabled={!!busy || own.find(o => o.subject === myKey)?.loading} onClick={() => loadOwn(myKey)}>{t("identities.nostr.loadMineShort")}</Button></p>
+          ) : myKey ? <p>{t("identities.nostr.loadOwnHint")} <Button data-testid="nostr-load-own" disabled={wait || own.find(o => o.subject === myKey)?.loading} onClick={() => loadOwn(myKey)}>{t("identities.nostr.loadMineShort")}</Button></p>
             : <p className="text-[11px]">{t("identities.nostr.addToCompare")}</p>}
           <p className="text-[11px]">{t("identities.nostr.followsSource", { when: when(f), time: ago(f.eventAt) })}</p>
         </>}
         <div className="flex flex-wrap gap-2">
-          <Button data-testid="nostr-load-follows" disabled={!!busy} onClick={() => load("follows")}>{busy === "follows" ? t("identities.activity.loading") : f ? t("identities.nostr.refreshFollows") : t("identities.nostr.loadFollows")}</Button>
+          <Button data-testid="nostr-load-follows" disabled={wait} onClick={() => load("follows")}>{busy === "follows" ? t("identities.activity.loading") : f ? t("identities.nostr.refreshFollows") : t("identities.nostr.loadFollows")}</Button>
           {settings?.publish && myKey && f?.hints && (f.hints.youFollow
-            ? <Button data-testid="nostr-unfollow" disabled={!!busy} onClick={() => setPublish({ subject: myKey, action: "unfollow", target: view.subject })}>{t("identities.nostr.unfollow")}</Button>
-            : <Button data-testid="nostr-follow" disabled={!!busy} onClick={() => setPublish({ subject: myKey, action: "follow", target: view.subject })}>{t("identities.nostr.follow")}</Button>)}
+            ? <Button data-testid="nostr-unfollow" disabled={wait} onClick={() => setPublish({ subject: myKey, action: "unfollow", target: view.subject })}>{t("identities.nostr.unfollow")}</Button>
+            : <Button data-testid="nostr-follow" disabled={wait} onClick={() => setPublish({ subject: myKey, action: "follow", target: view.subject })}>{t("identities.nostr.follow")}</Button>)}
         </div>
       </div>
 
       {/* Content */}
       <div className="space-y-1.5">
         {n && <>
-          {n.authorMuted ? <Notice testId="nostr-notes-muted">{t("identities.nostr.muted")}</Notice> : n.notes.length === 0 ? <p data-testid="nostr-notes-none">{t("identities.nostr.notesNone")}</p> : (
+          {n.authorMuted ? <Notice testId="nostr-notes-muted">{t("identities.nostr.muted")}</Notice> : n.count === 0 ? <p data-testid="nostr-notes-none">{t("identities.nostr.notesNone")}</p>
+            : notes.error ? <Notice tone="error" testId="nostr-notes-error">{problemLine(notes.error, t)}</Notice>
+            : !notes.list ? <p data-testid="nostr-notes-loading">{t("identities.activity.loading")}</p> : (
             <ul className="space-y-2" data-testid="nostr-notes">
-              {n.notes.map(note => (
+              {notes.list.map(note => (
                 <li key={note.id} data-testid="nostr-note" className="rounded-lg border border-border p-2 space-y-0.5">
                   <p className="text-text-primary whitespace-pre-wrap break-words">{note.content}</p>
                   <p className="text-[11px]">{ago(note.createdAt)}{note.reply ? ` · ${t("identities.nostr.aReply")}` : ""}</p>
@@ -101,14 +108,35 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
           <p className="text-[11px]">{t("identities.nostr.notesSource", { when: when(n) })}</p>
         </>}
         <div className="flex flex-wrap gap-2">
-          <Button data-testid="nostr-load-notes" disabled={!!busy} onClick={() => load("notes")}>{busy === "notes" ? t("identities.activity.loading") : n ? t("identities.nostr.refreshNotes") : t("identities.nostr.loadNotes")}</Button>
-          {n?.more && !n.authorMuted && <Button data-testid="nostr-notes-more" disabled={!!busy} onClick={() => load("notes", true)}>{t("identities.nostr.olderNotes")}</Button>}
+          <Button data-testid="nostr-load-notes" disabled={wait} onClick={() => load("notes")}>{busy === "notes" ? t("identities.activity.loading") : n ? t("identities.nostr.refreshNotes") : t("identities.nostr.loadNotes")}</Button>
+          {n?.more && !n.authorMuted && <Button data-testid="nostr-notes-more" disabled={wait} onClick={() => load("notes", true)}>{t("identities.nostr.olderNotes")}</Button>}
         </div>
       </div>
 
-      {(p || f || n) && <Button data-testid="nostr-forget" disabled={!!busy} onClick={() => void engine.call("nostrForgetContact", { linkId, subject: view.subject }).catch(e => setError(problemLine(e, t)))}>{t("identities.nostr.forget")}</Button>}
+      {(p || f || n) && <Button data-testid="nostr-forget" disabled={wait} onClick={() => void engine.call("nostrForgetContact", { linkId, subject: view.subject }).catch(e => setError(problemLine(e, t)))}>{t("identities.nostr.forget")}</Button>}
       {(error || view.error) && <Notice tone="error" testId="nostr-contact-error">{error || view.error}</Notice>}
       {publish && <NostrPublishDialog request={publish} onClose={() => setPublish(null)} onDone={() => load("follows")} />}
     </div>
   );
+}
+
+/**
+ * The posts the card shows, asked once per load: again when the posts are loaded anew (their time or counts change) or
+ * the person's mute lists are (`mutes`), never at each engine state. The last list stays up while the next comes.
+ */
+function useShownNotes(linkId: string, view: NostrContactView, mutes: string): { list?: NostrNoteView[]; error?: unknown } {
+  const n = view.notes;
+  const who = `${linkId}\n${view.subject}`;
+  const ask = n && !n.authorMuted && n.count > 0 ? `${who}\n${n.fetchedAt}\n${n.count}\n${n.hidden}\n${mutes}` : "";
+  const [got, setGot] = useState<{ who: string; ask: string; list?: NostrNoteView[]; error?: unknown }>();
+  useEffect(() => {
+    if (!ask) return;
+    let live = true;
+    void engine.call("nostrContactNotes", { linkId, subject: view.subject })
+      .then(list => { if (live) setGot({ who, ask, list }); }, error => { if (live) setGot({ who, ask, error }); });
+    return () => { live = false; };
+  }, [ask, who, linkId, view.subject]);
+  if (!ask || got?.who !== who) return {};
+  if (got.ask !== ask) return got.list ? { list: got.list } : {};
+  return got.error !== undefined ? { error: got.error } : { list: got.list };
 }

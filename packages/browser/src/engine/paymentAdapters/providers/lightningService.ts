@@ -5,6 +5,7 @@ import { CASHU_MINT_SOURCE, CashuMintLightning } from "./cashuMint";
 import type { LightningInvoice, LightningProvider, LightningProviderDescriptor } from "./lightning";
 import { ProviderSources, type SourceView } from "./sources";
 import { isNothingSpentError, redact, type ProviderHost } from "./types";
+import { INVOICE_PACE, nextInvoiceAsk } from "../../invoicePace";
 
 /**
  * One Lightning operation, journaled under `lightningOp-<direction>-<payment hash>` in the settings store
@@ -75,8 +76,8 @@ export interface LnurlView {
   /** How long a comment may be (LUD-12); 0 when none is taken. */
   commentAllowed: number;
 }
-/** Who an event is about. `mint`: the Cashu mint it went through, when it did. */
-export interface LightningEventOp { paymentId?: string; providerId: string; mint?: string }
+/** Who an event is about. `mint`: the Cashu mint it went through, when it did. `invoice`: what it paid or was paid. */
+export interface LightningEventOp { paymentId?: string; providerId: string; mint?: string; invoice?: string }
 
 export interface LightningEvents {
   changed(): void;
@@ -84,6 +85,11 @@ export interface LightningEvents {
   received(op: LightningEventOp): void;
   /** A payment left pending or unknown ended, one way or the other. */
   resolved(op: LightningEventOp, paid: boolean): void;
+  /**
+   * Whether the chat request an invoice of ours belongs to was closed (withdrawn, closed, or paid some other way): the
+   * source is then asked about it only once more, after it expired (`nextInvoiceAsk`).
+   */
+  requestClosed?(paymentId: string): boolean;
 }
 
 const PREFIX = "lightningOp-";
@@ -94,8 +100,41 @@ const RANGE = () => IDBKeyRange.bound(PREFIX, `${PREFIX}\uffff`);
 let paying = 0;
 export const lightningPaying = (): number => paying;
 
-export async function readLightningJournal(): Promise<LightningOp[]> { return wrap<LightningOp[]>((await store(STORES.settings, "readonly")).getAll(RANGE())); }
-const IN_POLL_MS = 4_000;
+/**
+ * The journal as last read, for the database it was read from, while nothing wrote it since (`journalVersion`, moved
+ * by `LightningService.put`, its one writer). A start read the whole journal 38 times, 8 of them one after another
+ * before the chat list could show: with 5,000 past payments the list showed 0.25 s later (0.5-0.75 s at 4x CPU), and
+ * a CLI daemon took 0.5 s and 125 MB more to start (agents#1687). Reads in flight together share one.
+ */
+let journal: { db: IDBDatabase; version: number; ops: Promise<LightningOp[]> } | undefined;
+let journalVersion = 0;
+const journalWritten = () => { journalVersion++; journal = undefined; };
+/** The journal was written outside `LightningService.put` (a test seeding or clearing the store): read it again. */
+export const lightningJournalWritten = (): void => journalWritten();
+
+/** Every Lightning operation journaled, as copies: a caller may change what it got. */
+export async function readLightningJournal(): Promise<LightningOp[]> {
+  const settings = await store(STORES.settings, "readonly"), db = settings.transaction.db;
+  let read = journal;
+  if (!read || read.db !== db || read.version !== journalVersion) {
+    const ops = wrap<LightningOp[]>(settings.getAll(RANGE()));
+    const made = read = { db, version: journalVersion, ops };
+    journal = made;
+    ops.catch(() => { if (journal === made) journal = undefined; });
+  }
+  return (await read.ops).map((op) => ({ ...op }));
+}
+
+/**
+ * What the journal says of the payments of one chat request (`DeskLightning.interrupted`): "pending" while one has not
+ * ended (sending, pending, unknown: its card settles it and says so), "paid" once one went through, undefined when
+ * none left the wallet (none journaled, or only failed ones).
+ */
+export async function journaledPayment(paymentId: string): Promise<"pending" | "paid" | undefined> {
+  const ops = (await readLightningJournal()).filter((op) => op.direction === "out" && op.paymentId === paymentId);
+  if (ops.some((op) => op.state === "sending" || op.state === "pending" || op.state === "unknown")) return "pending";
+  return ops.some((op) => op.state === "paid") ? "paid" : undefined;
+}
 const OUT_POLL_MS = 15_000;
 const RECENT = 20;
 /** Resolved Lightning addresses are kept this long for the amount to be chosen; this many at most. */
@@ -113,6 +152,12 @@ export class LightningService {
   private readonly quotes = new Map<string, { providerId: string; provider: LightningProvider; invoice: string; amount: number; maxFee: number; paymentHash: string }>();
   private readonly mode: WalletMode;
   private timer?: ReturnType<typeof setTimeout>;
+  /** When `timer` fires: a pass that would fire later leaves it as it is. */
+  private timerAt = 0;
+  /** Per open invoice of ours (payment hash): when the source was last asked about it, in this run. */
+  private readonly asked = new Map<string, number>();
+  /** Per invoice the screen shows (payment hash): until when (`watch`). */
+  private readonly watched = new Map<string, number>();
   private passes: Promise<void> = Promise.resolve();
   private stopped = false;
   private recent: LightningOpView[] = [];
@@ -145,7 +190,7 @@ export class LightningService {
 
   async start() { await this.sources.start(); await this.loadRecent(); }
   ensureReady() { return this.sources.ensureReady(); }
-  async stop() { this.stopped = true; clearTimeout(this.timer); await this.sources.stop(); }
+  async stop() { this.stopped = true; clearTimeout(this.timer); this.timer = undefined; await this.sources.stop(); }
   refreshOffered() { this.sources.refreshOffered(); }
 
   // -- receiving -----------------------------------------------------------------
@@ -159,8 +204,36 @@ export class LightningService {
     if (!decoded || decoded.amountSat !== amount || (decoded.paymentHash && decoded.paymentHash !== created.paymentHash) || created.amount !== amount) throw new Error(`${descriptor.label} returned an invoice that does not match the request`);
     this.checkNetwork(decoded.network);
     await this.put({ direction: "in", providerId: descriptor.id, mode: this.mode, ...this.cardField(), paymentHash: created.paymentHash, invoice: created.invoice, amount, paymentId: context.paymentId, ref: created.ref, expiresAt: created.expiresAt, createdAt: Date.now(), selfSettled: !!provider.settlesItself, state: "open" });
-    this.schedule(IN_POLL_MS);
+    // Nobody paid it yet: it is first asked about after the fast pace's gap.
+    this.asked.set(created.paymentHash, Date.now());
+    this.schedule(INVOICE_PACE.fastMs);
     return { ...created, source: descriptor.id };
+  }
+
+  /**
+   * The screen shows this invoice of ours (Receive): the source is asked about it at the fast pace for
+   * `INVOICE_PACE.watchMs`, and now if it was not just asked. Returns whether it is an open invoice of this card's.
+   */
+  async watch(invoice: string): Promise<boolean> {
+    const hash = decodeBolt11(invoice)?.paymentHash;
+    const op = hash ? await this.get("in", hash) : undefined;
+    if (!op || !this.owns(op) || op.state !== "open") return false;
+    this.watched.set(op.paymentHash, Date.now() + INVOICE_PACE.watchMs);
+    this.schedule(0);
+    return true;
+  }
+
+  /**
+   * A payer says it paid this invoice of ours: the source is asked about it now, and at the fast pace for
+   * `INVOICE_PACE.watchMs`. The other open invoices keep their pace. Returns whether it is an open invoice of this card's.
+   */
+  async check(invoice: string): Promise<boolean> {
+    const hash = decodeBolt11(invoice)?.paymentHash;
+    const op = hash ? await this.get("in", hash) : undefined;
+    if (!op || !this.owns(op) || op.state !== "open") return false;
+    this.watched.set(op.paymentHash, Date.now() + INVOICE_PACE.watchMs);
+    await this.reconcile(false, op.paymentHash);
+    return true;
   }
 
   /** The Cashu wallet minted the ecash of one of its invoices (it polls its own quotes). */
@@ -263,27 +336,37 @@ export class LightningService {
     const hash = decodeBolt11(invoice)?.paymentHash;
     const op = hash ? await this.get("out", hash) : undefined;
     if (op) await this.put({ ...op, state: paid ? "paid" : "failed", settledAt: Date.now() });
-    this.events.resolved({ paymentId: op?.paymentId ?? context.paymentId, providerId: op?.providerId ?? CASHU_MINT_SOURCE, mint: context.mint }, paid);
+    this.events.resolved({ paymentId: op?.paymentId ?? context.paymentId, providerId: op?.providerId ?? CASHU_MINT_SOURCE, mint: context.mint, invoice }, paid);
     await this.loadRecent(); this.events.changed();
   }
 
   // -- reconciling ---------------------------------------------------------------
 
-  /** Asks the active source about everything of its that is open, pending or unknown. One pass at a time. */
-  reconcile(): Promise<void> {
-    const pass = this.passes.then(() => this.reconcileOnce());
+  /**
+   * Asks the active source about everything of its that is open, pending or unknown. One pass at a time. `paced`: an
+   * open invoice only when its pace says so (`nextInvoiceAsk`); otherwise every one now. `only`: the open invoice with
+   * this payment hash alone (a payer says it paid it, `check`).
+   */
+  reconcile(paced = false, only?: string): Promise<void> {
+    const pass = this.passes.then(() => this.reconcileOnce(paced, only));
     this.passes = pass.catch(() => {});
     return pass;
   }
 
-  private async reconcileOnce(): Promise<void> {
+  private async reconcileOnce(paced: boolean, only?: string): Promise<void> {
     if (this.stopped) return;
     let again = 0;
+    /** When the next open invoice is due. */
+    let invoiceDue = Infinity;
     const writes = this.writes;
     try {
       const provider = this.sources.active, providerId = this.sources.activeId;
-      for (const op of await this.list()) {
-        if (!this.owns(op)) continue;
+      const ops = await this.list();
+      // What this run knows of invoices that are no longer open goes with them.
+      const open = new Set(ops.filter((op) => op.direction === "in" && op.state === "open").map((op) => op.paymentHash));
+      for (const pace of [this.asked, this.watched]) for (const hash of pace.keys()) if (!open.has(hash)) pace.delete(hash);
+      for (const op of ops) {
+        if (!this.owns(op) || (only !== undefined && (op.direction !== "in" || op.paymentHash !== only))) continue;
         if (op.selfSettled) {
           // The source settles and reports its own. One cut off before its answer was written (`recover`) it may
           // never have heard of, and would never report: the source is asked what became of it.
@@ -308,14 +391,19 @@ export class LightningService {
         if (!waiting) continue;
         // Another source's operation waits until that source is active again: only it can answer.
         if (!provider || op.providerId !== providerId || !provider.capabilities.lookup) continue;
+        if (op.direction === "in") {
+          const due = this.nextAsk(op, Date.now());
+          if (paced && due > Date.now() + INVOICE_PACE.dueSlackMs) { invoiceDue = Math.min(invoiceDue, due); continue; }
+          this.asked.set(op.paymentHash, Date.now());
+        }
         try {
           const unchanged = async () => (await this.get(op.direction, op.paymentHash))?.state === op.state;
           if (op.direction === "in") {
             const status = await provider.invoiceStatus({ invoice: op.invoice, paymentHash: op.paymentHash, amount: op.amount, expiresAt: op.expiresAt, ref: op.ref });
             if (!(await unchanged())) continue;
             if (status.state === "paid") { await this.put({ ...op, state: "paid", settledAt: Date.now() }); this.events.received(op); }
-            else if (status.state === "expired" || op.expiresAt + 60_000 < Date.now()) await this.put({ ...op, state: "expired" });
-            else again = again ? Math.min(again, IN_POLL_MS) : IN_POLL_MS;
+            else if (status.state === "expired" || op.expiresAt + INVOICE_PACE.expiryGraceMs < Date.now()) await this.put({ ...op, state: "expired" });
+            else invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
           } else {
             const status = await provider.paymentStatus({ invoice: op.invoice, paymentHash: op.paymentHash, ref: op.ref });
             if (status.state === "pending") { again = again || OUT_POLL_MS; continue; }
@@ -326,20 +414,36 @@ export class LightningService {
           }
         } catch {
           // The source cannot be asked right now: ask again later, nothing changes.
-          again = again ? Math.min(again, op.direction === "in" ? IN_POLL_MS : OUT_POLL_MS) : op.direction === "in" ? IN_POLL_MS : OUT_POLL_MS;
+          if (op.direction === "in") invoiceDue = Math.min(invoiceDue, this.nextAsk(op, Date.now()));
+          else again = again ? Math.min(again, OUT_POLL_MS) : OUT_POLL_MS;
         }
       }
     } finally {
       // Only a pass that settled something, or whose recent list reads otherwise, is news to the wallet view.
       if (await this.loadRecent() || this.writes !== writes) this.events.changed();
-      if (again) this.schedule(again);
+      const wait = Math.min(again || Infinity, invoiceDue - Date.now());
+      if (wait < Infinity) this.schedule(Math.max(0, wait));
     }
   }
 
+  /** When the source is next asked about this open invoice of ours. */
+  private nextAsk(op: LightningOp, now: number): number {
+    return nextInvoiceAsk({
+      createdAt: op.createdAt,
+      expiresAt: op.expiresAt,
+      watchedUntil: this.watched.get(op.paymentHash),
+      closed: !!op.paymentId && !!this.events.requestClosed?.(op.paymentId),
+    }, this.asked.get(op.paymentHash), now);
+  }
+
+  /** The next pass in `ms`, unless one is due sooner. It asks only what is due (`reconcile(true)`). */
   private schedule(ms: number) {
     if (this.stopped) return;
+    const at = Date.now() + ms;
+    if (this.timer && this.timerAt <= at) return;
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.reconcile(), ms);
+    this.timerAt = at;
+    this.timer = setTimeout(() => { this.timer = undefined; void this.reconcile(true); }, ms);
   }
 
   /** Changing the source is refused while a payment through it has not ended: only it can say how. */
@@ -356,7 +460,13 @@ export class LightningService {
   }
 
   private async get(direction: LightningOp["direction"], hash: string) { return wrap<LightningOp | undefined>((await store(STORES.settings, "readonly")).get(opKey(direction, hash))); }
-  private async put(op: LightningOp) { this.writes++; await transact([STORES.settings], (s) => { s[STORES.settings].put(op, opKey(op.direction, op.paymentHash)); }); }
+  private async put(op: LightningOp) {
+    this.writes++;
+    // Before and after: a read started while this writes may or may not see it, so it is not kept.
+    journalWritten();
+    try { await transact([STORES.settings], (s) => { s[STORES.settings].put(op, opKey(op.direction, op.paymentHash)); }); }
+    finally { journalWritten(); }
+  }
   list(): Promise<LightningOp[]> { return readLightningJournal(); }
 
   /** Crash recovery: a spend journaled as `sending` never got its answer written, so its outcome is unknown. */

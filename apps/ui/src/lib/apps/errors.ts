@@ -8,9 +8,11 @@ import { problemLine } from "../problemText";
 const KEYS: Record<string, TranslationKey> = {
   host: "apps.errors.host",
   "github-link": "apps.errors.githubLink",
+  "private-link": "apps.errors.privateLink",
   offline: "apps.errors.offline",
   status: "apps.errors.status",
   network: "apps.errors.network",
+  slow: "apps.errors.slow",
   "too-large": "apps.errors.tooLarge",
   "other-app": "apps.errors.otherApp",
   rollback: "apps.errors.rollback",
@@ -20,6 +22,7 @@ const KEYS: Record<string, TranslationKey> = {
   removed: "apps.errors.removed",
   "not-listed": "apps.errors.notListed",
   unlisted: "apps.errors.unlistedVersion",
+  "permissions-changed": "apps.errors.permissionsChanged",
   "store-key": "apps.errors.storeKey",
   "bad-signature": "apps.errors.notSigned",
   "signature-key": "apps.errors.notSigned",
@@ -50,8 +53,21 @@ export function appErrorView(error: unknown, t: Translate): AppErrorView {
   return { text: appErrorText(error, t), ...(info ? { info: t(info) } : refused ? { info: refused } : {}) };
 }
 
+/**
+ * An error of reading or adding a store (Add): a store refused (not JSON, a bad field, a bad signature) says the link holds
+ * no valid store, its refusal as it came behind the ⓘ, rather than an app Ghostly won't install.
+ */
+export function appStoreErrorView(error: unknown, t: Translate): AppErrorView {
+  const code = appErrorCode(error);
+  if (!code || (KEYS[code] && KEYS[code] !== "apps.errors.notSigned")) return appErrorView(error, t);
+  return { text: t("apps.errors.notStore"), info: error instanceof Error ? error.message : String(error) };
+}
+
 export function appErrorText(error: unknown, t: Translate): string {
   const code = appErrorCode(error);
+  // The host's own trouble (an outage, a rate limit) is not a wrong link: trying again later may work.
+  const status = code === "status" ? Number(/\b(\d{3})\b/.exec(error instanceof Error ? error.message : String(error))?.[1]) : 0;
+  if (status >= 500 || status === 429) return t("apps.errors.hostProblem", { status });
   const key = code ? KEYS[code] : undefined;
   if (key) return t(key);
   // A refusal of the bundle or the index (a bound, a hash, the format): said in a few words, its reason in the ⓘ

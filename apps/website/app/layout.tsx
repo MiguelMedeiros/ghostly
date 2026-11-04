@@ -148,6 +148,8 @@ export default function RootLayout({
           id="invite-intake"
           dangerouslySetInnerHTML={{ __html: "try{var t=function(){var h=location.hash;if(!/^#ghostly1/i.test(h))return;var v=h.slice(1);try{v=decodeURIComponent(v)}catch(e){}window.__ghostlyInvite=v;history.replaceState(history.state,'',location.pathname+location.search);dispatchEvent(new Event('ghostly-invite'))};t();addEventListener('popstate',t);addEventListener('hashchange',t)}catch(e){}" }}
         />
+        {/* For AI readers: what Ghostly is and how a connected agent stays safe (scripts/llms.mjs, llmstxt.org). */}
+        <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

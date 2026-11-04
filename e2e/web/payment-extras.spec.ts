@@ -149,8 +149,8 @@ test("a payment the contact refuses comes back, and is never shown as paid", { t
   const review = await prepareSend(alice, 21);
   await review.getByRole("button", { name: "Approve payment" }).click();
 
-  // Bob's side says why, once, and has no payment.
-  await expect(chat(bob).getByText(/Could not receive 21 sats: Ecash from 127\.0\.0\.1 is not accepted/)).toBeVisible();
+  // Bob's side says why, once, as the app's own line (test sats: the mint is on this machine), and has no payment.
+  await expect(chat(bob).getByTestId("refused-line").getByText(/Could not receive 21 test sats: Ecash from 127\.0\.0\.1 is not accepted/)).toBeVisible();
   await expect(chat(bob).getByTestId("payment-bubble")).toHaveCount(0);
   // Alice's payment comes back to her: taken back, with the reason, and the review closed as failed.
   const sent = bubble(alice, "You sent");
@@ -387,7 +387,8 @@ test("a payment from ecash spent somewhere else ends with that reason, and the b
 
   // "Copy backup", and the tokens redeemed outside Ghostly, straight at the mint.
   await alice.page.getByRole("button", { name: "Copy backup" }).click();
-  await expect(alice.page.getByText(/Backup copied/)).toBeVisible();
+  // The visible notice, below the button; a screen-reader status in the same section says the same words.
+  await expect(alice.page.getByTestId("wallet-backup").getByTestId("wallet-notice")).toContainText("Backup copied");
   const tokens = (await alice.page.evaluate(() => navigator.clipboard.readText())).split("\n").filter(Boolean);
   const { Wallet } = await import("@cashu/cashu-ts");
   const elsewhere = new Wallet(mintEndpoint(), { unit: "sat" });

@@ -1,6 +1,6 @@
 import { newX401HolderKey, readX401SdJwtVc, sameX401HolderJwk, toBase64Url, type X401ClaimPath, type X401HolderJwk, type X401SdJwtVc } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
-import { newDeviceKey, sealSeed } from "./paymentAdapters/persistence";
+import { sealSecret } from "./dataKey";
 import type { SealedProofKey } from "./identities";
 
 /** A holder key: its public JWK, and its secret sealed as an identity proof's seed is. */
@@ -100,8 +100,8 @@ export class X401Credentials {
    */
   async newKey(): Promise<{ id: string; jwk: X401HolderJwk; dropped?: string }> {
     const { secret, jwk } = newX401HolderKey();
-    const deviceKey = newDeviceKey();
-    const key: StoredHolderKey = { id: newId(), jwk, secret: { sealed: await sealSeed(toBase64Url(secret), deviceKey), deviceKey }, createdAt: Date.now() };
+    const id = newId();
+    const key: StoredHolderKey = { id, jwk, secret: await sealSecret(toBase64Url(secret), { store: STORES.settings, key: id, field: "x401.holderKey" }), createdAt: Date.now() };
     secret.fill(0);
     return this.serial(async () => {
       const stored = await this.load();

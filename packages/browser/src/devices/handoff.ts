@@ -1,7 +1,7 @@
 import {
   HANDOFF_ACK, HANDOFF_BUSY, HANDOFF_CANCEL, HANDOFF_DATA, HANDOFF_DONE, HANDOFF_HAVE, HANDOFF_HELLO, HANDOFF_MANIFEST, HANDOFF_OFFER, HANDOFF_PAKE,
   HANDOFF_PIECE_BYTES, HANDOFF_RELEASE, HANDOFF_REQUEST, HANDOFF_TIMINGS, HANDOFF_VERIFIED, HANDOFF_WINDOW,
-  filePartDigest, filePartName, fromBase64Url, handoffAckFrame, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffBusyFrame,
+  filePartDigest, filePartName, fromBase64Url, handoffAckFrame, handoffAttemptAllowed, handoffAttemptFailed, handoffBusyFrame,
   handoffCancelFrame, handoffContext, handoffDataFrame, handoffDigest, handoffDoneFrame, handoffEphemeral, handoffHaveFrames, handoffHelloFrame,
   handoffManifestFrames, handoffOfferFrame, handoffPakeFrame, handoffReleaseFrame, handoffRequestFrame, handoffRetryAfter, handoffStreamKey,
   handoffVerifiedFrame, handoffVersions, newHandoffId, openHandoffPiece, readHandoffAck, readHandoffBusy, readHandoffCancel, readHandoffData,
@@ -12,7 +12,7 @@ import {
 } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { HandoffPasswordError, startPakeGiver, startPakeTaker, type HandoffVerifier, type PakeGiver, type PakeTaker } from "./handoffPake";
-import type { DeviceAttempts, DevicePatch, DeviceRecord, HeldFile, LeftFile, StoredDeviceState } from "./state";
+import { MAX_EARLIER_SETS, forkTimes, isEarlierSet, type DeviceAttempts, type DevicePatch, type DeviceRecord, type EarlierDeviceSet, type HeldFile, type LeftFile, type StoredDeviceState } from "./state";
 import type { TurnOutcome } from "./turn";
 import type { HandoffTakerFacts } from "./handoffWallets";
 
@@ -240,22 +240,30 @@ export interface TakerPorts extends Common {
 
 const name = (record: DeviceRecord, key: string): string => record.deviceSet.find((slot) => slot?.key === key)?.name ?? "";
 const slotOf = (record: DeviceRecord, key: string): number => record.deviceSet.findIndex((slot) => slot?.key === key);
+/**
+ * The counts of the devices still in the set: a removed device cannot pull (`onRequest` refuses it), and one added again
+ * has a new key, so the list stays within the set's size instead of growing to the record's cap of 16 and refusing every
+ * write after it.
+ */
+const setAttempts = (record: DeviceRecord, attempts: Record<string, DeviceAttempts> | undefined): Record<string, DeviceAttempts> =>
+  Object.fromEntries(Object.entries(attempts ?? {}).filter(([key]) => slotOf(record, key) >= 0));
 
 /**
- * The wrong passwords the giver counted, carried with its release (`a`), kept with this device's own: for each device,
- * the higher count and the later lock-out. A value that is no count is left out.
+ * The wrong passwords the giver counted, carried with its release (`a`): they replace this device's own. The giver was
+ * the active device, so its list is the current one: each release carried the counts to it, and a count it started
+ * again ("Let <device> try again", a right password) is gone from it, where this device's own copy still had it. A
+ * release with no list (none counted there) leaves this device's own. A value that is no count is left out.
  */
 function mergedAttempts(record: DeviceRecord, carried: unknown): DevicePatch {
   if (!carried || typeof carried !== "object" || Array.isArray(carried)) return {};
-  const merged: Record<string, DeviceAttempts> = { ...record.handoffAttempts };
+  const given: Record<string, DeviceAttempts> = {};
   for (const [key, value] of Object.entries(carried as Record<string, unknown>).slice(0, 16)) {
     const a = value as Partial<DeviceAttempts> | null;
-    if (!/^[A-Za-z0-9_-]{43}$/.test(key) || !a || !Number.isSafeInteger(a.total) || (a.total as number) < 0 || !Array.isArray(a.recent) || !a.recent.every((at) => Number.isSafeInteger(at) && at >= 0)) continue;
-    const mine = merged[key];
-    const until = Math.max(mine?.until ?? 0, Number.isSafeInteger(a.until) ? a.until as number : 0);
-    merged[key] = { recent: [...new Set([...(mine?.recent ?? []), ...a.recent])].sort((x, y) => x - y).slice(-16), total: Math.min(1_000_000, Math.max(mine?.total ?? 0, a.total as number)), ...(until ? { until } : {}) };
+    if (!/^[A-Za-z0-9_-]{43}$/.test(key) || slotOf(record, key) < 0 || !a || !Number.isSafeInteger(a.total) || (a.total as number) < 0 || !Array.isArray(a.recent) || !a.recent.every((at) => Number.isSafeInteger(at) && at >= 0)) continue;
+    const until = Number.isSafeInteger(a.until) ? a.until as number : 0;
+    given[key] = { recent: [...new Set(a.recent)].sort((x, y) => x - y).slice(-16), total: Math.min(1_000_000, a.total as number), ...(until ? { until } : {}) };
   }
-  return Object.keys(merged).length ? { handoffAttempts: Object.fromEntries(Object.entries(merged).slice(0, 16)) } : {};
+  return { handoffAttempts: given };
 }
 
 /** One session of a handoff with the other device: its own X25519 key, the other's hello, and the stream key. */
@@ -274,12 +282,49 @@ function fileParts(files: readonly HandoffFile[]): HandoffPart[] {
   return [...byDigest.values()];
 }
 
+/**
+ * The most files a standby's record lists as held (`heldFiles`). The list goes into the device record, which Desktop
+ * also keeps in a file of at most 4 MiB (`device_state.rs`) and which every read parses: one entry per file made a
+ * profile of some 35,000 files unable to write `standby`, so its move failed at the very end. A file not listed is
+ * only sent again by a later pull.
+ */
+export const MAX_HELD_FILES = 10_000;
+
+/** What the frozen copy holds, for the record: one file per digest (one copy is enough to copy from), the largest first. */
+function heldFilesOf(files: readonly HandoffFile[]): HeldFile[] {
+  const byDigest = new Map<string, HeldFile>();
+  for (const file of files) if (!byDigest.has(file.sha256)) byDigest.set(file.sha256, { sha256: file.sha256, size: file.size, id: file.id });
+  return [...byDigest.values()].sort((a, b) => b.size - a.size).slice(0, MAX_HELD_FILES);
+}
+
 /** Which file ids each digest is. */
 function idsOf(files: readonly HandoffFile[]): Record<string, string[]> {
   const ids: Record<string, string[]> = {};
   for (const file of files) (ids[file.sha256] ??= []).push(file.id);
   for (const list of Object.values(ids)) list.sort();
   return ids;
+}
+
+/**
+ * The part `devices` (WISP 06 § What moves): the earlier device sets of the giver's record, so the device that takes
+ * the turn puts their tombstones and delivers their frames. None when the record holds none: a profile that never
+ * removed a device moves as it did before the part.
+ */
+const DEVICES_PART = "devices";
+function devicesBytes(record: DeviceRecord | null): Uint8Array | null {
+  return record?.earlierSets.length ? new TextEncoder().encode(JSON.stringify({ earlierSets: record.earlierSets })) : null;
+}
+
+/**
+ * The taker's earlier sets with the giver's, the oldest dropped: a set both hold is the giver's, as only the active
+ * device's list of devices still waiting is current. Null for a part that is not one.
+ */
+function withEarlierSets(own: readonly EarlierDeviceSet[], bytes: Uint8Array): EarlierDeviceSet[] | null {
+  let sets: unknown;
+  try { sets = (JSON.parse(new TextDecoder().decode(bytes)) as { earlierSets?: unknown } | null)?.earlierSets; } catch { return null; }
+  if (!Array.isArray(sets) || sets.length > MAX_EARLIER_SETS || !sets.every(isEarlierSet)) return null;
+  const given = new Set(sets.map((set) => set.d));
+  return [...own.filter((set) => !given.has(set.d)), ...sets].slice(-MAX_EARLIER_SETS);
 }
 
 /** Files over the taker's limit stay behind for later (WISP 06 § User experience, "Bring large files later"). */
@@ -706,7 +751,7 @@ export class HandoffGiver {
       if (allowed !== "ok") return busy(allowed, allowed === "refused" ? 0 : handoffRetryAfter(record.handoffAttempts?.[from], this.now()));
       // A pull is counted as a try when it is asked for, before anything is answered, and taken back only when its
       // proof holds: a device that asks and never proves (holding this device in `authorizing`) spends its tries.
-      await this.ports.records.amend({ handoffAttempts: { ...record.handoffAttempts, [from]: handoffAttemptFailed(record.handoffAttempts?.[from], this.now()) } });
+      await this.ports.records.amend({ handoffAttempts: { ...setAttempts(record, record.handoffAttempts), [from]: handoffAttemptFailed(record.handoffAttempts?.[from], this.now()) } });
       this.begin(from, request.id, record);
       this.stays = await this.ports.staying?.(this.takerFacts(from)).catch(() => []) ?? [];
       this.newer = versions.newerTaker;
@@ -742,8 +787,11 @@ export class HandoffGiver {
     let key: Uint8Array;
     try { key = await giver.finish(pake.m!, pake.c!, handoffContext(this.ports.turnAddress, this.ports.ownKey, fromBase64Url(from), session.transcript)); }
     catch (error) { if (error instanceof HandoffPasswordError) { this.wrongPassword(from); return; } throw error; }
+    // The proof held: this device's count goes (no count is a fresh start).
     const record = await this.ports.records.read();
-    await this.ports.records.amend({ handoffAttempts: { ...record?.handoffAttempts, [from]: handoffAttemptSucceeded() } });
+    const attempts = record ? setAttempts(record, record.handoffAttempts) : {};
+    delete attempts[from];
+    await this.ports.records.amend({ handoffAttempts: attempts });
     this.authorized(session, key);
   }
 
@@ -799,11 +847,18 @@ export class HandoffGiver {
     });
     const parts = [...send];
     if (pass === 2) {
-      const bundle = await this.ports.source.bundle();
-      const digest = toBase64Url(sha256(bundle));
+      // This device is frozen: every run of pass 2 sends the same bundle, and a link back from a blink goes on where it was.
+      this.bundleMade ??= Promise.all([this.ports.source.bundle(), this.ports.records.read()]).then(([bytes, record]) => ({ bytes, digest: toBase64Url(sha256(bytes)), devices: devicesBytes(record) }));
+      const made = this.bundleMade;
+      const { bytes: bundle, digest, devices } = await made.catch((error: unknown) => { if (this.bundleMade === made) this.bundleMade = null; throw error; });
       parts.push(["db/peer", bundle.length, digest]);
       out.push({ name: "db/peer", size: bundle.length, read: async (offset, length) => bundle.subarray(offset, offset + length) });
       this.bundlePart = ["db/peer", bundle.length, digest];
+      this.devicesPart = devices && [DEVICES_PART, devices.length, toBase64Url(sha256(devices))];
+      if (this.devicesPart) {
+        parts.push(this.devicesPart);
+        out.push({ name: DEVICES_PART, size: devices!.length, read: async (offset, length) => devices!.subarray(offset, offset + length) });
+      }
     }
     this.planned = { total: parts.reduce((sum, part) => sum + part[1], 0), later: behind.reduce((sum, part) => sum + part[1], 0), parts };
     this.laterParts = behind;
@@ -828,6 +883,8 @@ export class HandoffGiver {
     else this.arm(HANDOFF_TIMINGS.verifiedMs, () => this.backToActive());
   }
   private bundlePart: HandoffPart | null = null;
+  private devicesPart: HandoffPart | null = null;
+  private bundleMade: Promise<{ bytes: Uint8Array; digest: string; devices: Uint8Array | null }> | null = null;
   private paused = false;
   private stallTimer: ReturnType<typeof setInterval> | undefined;
   private laterParts: HandoffPart[] = [];
@@ -857,7 +914,7 @@ export class HandoffGiver {
     const h = readHandoffVerified(frame, this.ports.turnAddress, this.turn + 1, fromBase64Url(from));
     if (!h) return;
     const later = new Set(this.laterParts.map((part) => part[2]));
-    const parts = [...fileParts(this.allFiles.filter((file) => !later.has(file.sha256))), this.bundlePart];
+    const parts = [...fileParts(this.allFiles.filter((file) => !later.has(file.sha256))), this.bundlePart, ...(this.devicesPart ? [this.devicesPart] : [])];
     const expected = handoffDigest(this.turn + 1, this.ports.ownKey, fromBase64Url(from), parts);
     if (toBase64Url(expected) !== toBase64Url(h)) { this.out(handoffCancelFrame("damaged")); await this.backToActive(); return; }
     const record = await this.ports.records.read();
@@ -866,7 +923,7 @@ export class HandoffGiver {
     if (toSlot < 0) return;
     const signed = await signTurnRelease(this.ports.turnAddress, this.turn + 1, fromSlot, toSlot, fromBase64Url(from), h, (bytes) => this.ports.sign(bytes));
     const release = { turn: this.turn + 1, to: from, h: toBase64Url(h), s: toBase64Url(signed.signature) };
-    const heldFiles: HeldFile[] = this.allFiles.map((file) => ({ sha256: file.sha256, size: file.size, id: file.id }));
+    const heldFiles = heldFilesOf(this.allFiles);
     const leftFiles: LeftFile[] = this.allFiles.filter((file) => later.has(file.sha256)).map((file) => ({ sha256: file.sha256, size: file.size, where: file.id }));
     // Standby first, durably: from this write on this device is on standby, whether the frame below arrives or not.
     await this.ports.records.move("standby", {
@@ -878,6 +935,7 @@ export class HandoffGiver {
       handoff: { ...record.handoff!, step: "released", release, at: this.now(), secret: undefined },
     });
     if (this.timer) clearTimeout(this.timer);
+    this.bundleMade = null;
     this.phase = "released";
     // The wrong passwords counted here go with the profile: a device does not get fresh tries on each new active one.
     this.out({ ...handoffReleaseFrame(release), ...(record.handoffAttempts ? { a: record.handoffAttempts } : {}) });
@@ -891,6 +949,7 @@ export class HandoffGiver {
     // Once: the wait for the taker and the wait for a copy that stopped can both end here.
     if (this.phase === "released" || this.phase === "failed") return;
     this.sender.stop();
+    this.bundleMade = null;
     clearInterval(this.stuckTimer);
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     this.phase = "failed";
@@ -901,7 +960,7 @@ export class HandoffGiver {
 
   private begin(key: string, id: string, record: DeviceRecord): void {
     this.peer = key; this.id = id; this.turn = record.turn; this.deviceName = name(record, key);
-    this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null;
+    this.failure = undefined; this.failed = {}; this.stays = []; this.retry = undefined; this.have = null; this.planned = null; this.pake = null; this.secret = null; this.bundleMade = null;
     this.offerHellos.clear();
     this.sender = new PartSender(this.now);
   }
@@ -914,7 +973,7 @@ export class HandoffGiver {
     if (this.timer) clearTimeout(this.timer);
     this.phase = "idle";
     this.failure = failure;
-    this.pake = null; this.have = null; this.planned = null; this.secret = null;
+    this.pake = null; this.have = null; this.planned = null; this.secret = null; this.bundleMade = null;
     this.changed();
   }
 
@@ -1023,11 +1082,15 @@ export class HandoffTaker {
   private incoming = new Map<string, InPart>();
   /** Every file id of the giver, by digest, as the manifests said. */
   private ids: Record<string, string[]> = {};
+  /** Digests the record lists as held that the frozen copy could not give: not said to be here again, so they are sent. */
+  private notHeld = new Set<string>();
   private behind = new Map<string, HandoffPart>();
   private failure: HandoffFailure | undefined;
   private retry: number | undefined;
   private deviceName = "";
   private bundle: { part: HandoffPart; bytes: Uint8Array } | null = null;
+  /** The part `devices`, when the giver sent one. */
+  private devices: { part: HandoffPart; bytes: Uint8Array } | null = null;
   private h: Uint8Array | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private self: HandoffSelf | null = null;
@@ -1088,10 +1151,13 @@ export class HandoffTaker {
     });
   }
 
-  /** "Not now" on an offer, or Cancel before the release. After the release there is nothing to cancel here. */
+  /**
+   * "Not now" on an offer, or Cancel before the release. Verified ("Checking"), the giver may have released already: this
+   * device leaves only on the giver's cancel or its turn read, and asks for the release meanwhile (WISP 06).
+   */
   cancel(): Promise<void> {
     return this.exclusive(async () => {
-      if (this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
+      if (this.phase === "verified" || this.phase === "installing" || this.phase === "settling" || this.phase === "unsettled" || this.phase === "done") return;
       if (this.peer && this.ports.links.live(this.peer)) this.out(handoffCancelFrame("cancelled"));
       await this.giveUp("cancelled");
     });
@@ -1209,7 +1275,7 @@ export class HandoffTaker {
 
   private async start(record: DeviceRecord, peer: string, id: string, later: number): Promise<void> {
     this.peer = peer; this.id = id; this.turn = takerTurn(record); this.later = later; this.deviceName = name(record, peer);
-    this.failure = undefined; this.retry = undefined; this.secret = null; this.incoming.clear(); this.behind.clear(); this.ids = {}; this.bundle = null; this.h = null; this.copyStarted = false; this.requested.clear();
+    this.failure = undefined; this.retry = undefined; this.secret = null; this.incoming.clear(); this.behind.clear(); this.ids = {}; this.bundle = null; this.devices = null; this.h = null; this.copyStarted = false; this.requested.clear();
     // A new handoff says hello anew, with a key of its own, even on a session that carried another one.
     this.sessions.delete(peer);
     this.totals = { bytes: 0, total: 0 };
@@ -1370,9 +1436,10 @@ export class HandoffTaker {
   private async sendHave(): Promise<void> {
     const record = await this.ports.records.read();
     const staged = await this.staging!.held();
-    const digests = [...staged.map((file) => file.sha256), ...(record?.heldFiles ?? []).map((file) => file.sha256)];
+    const held = (record?.heldFiles ?? []).filter((file) => !this.notHeld.has(file.sha256));
+    const digests = [...staged.map((file) => file.sha256), ...held.map((file) => file.sha256)];
     const partial: Record<string, number> = {};
-    for (const part of this.incoming.values()) if (!part.done && part.got > 0 && part.id) partial[part.name] = part.got;
+    for (const part of this.incoming.values()) if (!part.done && part.got > 0) partial[part.name] = part.got;
     for (const frame of handoffHaveFrames(digests, partial)) this.out(frame);
   }
 
@@ -1389,21 +1456,33 @@ export class HandoffTaker {
     this.pass = manifest.pass;
     this.ids = ids;
     for (const part of later) this.behind.set(part[2], part);
-    // Room for what is to come, against what this device says it has.
     const total = parts.reduce((sum, part) => sum + part[1], 0);
-    const room = await this.staging!.room();
-    if (room !== null && room < total) { this.out(handoffCancelFrame("room")); await this.giveUp("room"); return; }
-    // What the frozen copy holds is copied in here, not sent.
     const record = await this.ports.records.read();
     const staged = new Map((await this.staging!.held()).map((file) => [file.id, file]));
+    // Room for what this device writes, against what it says it has: more than what is sent. A file in several chats
+    // is sent once and written once per id (`copyStaged`), and what the frozen copy holds is copied in, not sent.
+    const room = await this.staging!.room();
+    if (room !== null && room < this.toWrite(parts, ids, record?.heldFiles ?? [], staged)) { this.out(handoffCancelFrame("room")); await this.giveUp("room"); return; }
+    // What the frozen copy holds is copied in here, not sent.
     const copies: { fromId: string; file: HandoffFile }[] = [];
     for (const held of record?.heldFiles ?? []) {
+      if (this.notHeld.has(held.sha256)) continue;
       for (const id of ids[held.sha256] ?? []) if (!staged.has(id)) copies.push({ fromId: held.id, file: { id, size: held.size, sha256: held.sha256 } });
     }
-    if (copies.length) try { await this.staging!.copyHeld(copies); } catch { /* sent again below on a later pass */ }
+    // A file it said it has and could not copy (gone from the frozen copy): the giver counted it and did not send it.
+    // It is asked for, with what is here said again, and the giver sends the pass again with it.
+    let missing = false;
+    if (copies.length) {
+      try { await this.staging!.copyHeld(copies); } catch { /* each one not copied is asked for below */ }
+      const copied = new Set((await this.staging!.held()).map((file) => file.id));
+      for (const { file } of copies) if (!copied.has(file.id) && !this.notHeld.has(file.sha256)) { this.notHeld.add(file.sha256); missing = true; }
+    }
+    // This device said it held part of a bundle, and the giver made another: it is sending that one from the wrong byte.
+    let saidOtherBundle = false;
     for (const [partName, size, digest] of parts) {
       const known = this.incoming.get(partName);
       if (known && known.size === size && known.sha256 === digest && !known.done) continue;
+      if (known && !known.id && !known.done && known.got > 0) saidOtherBundle = true;
       const fileDigest = filePartDigest(partName);
       const id = fileDigest ? ids[fileDigest]?.[0] : undefined;
       if (fileDigest && !id) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
@@ -1414,7 +1493,9 @@ export class HandoffTaker {
     }
     this.totals = { bytes: 0, total };
     this.changed();
-    await this.maybeVerified();
+    if (saidOtherBundle || missing) await this.sendHave();
+    // The pass comes again with the missing files: H is not checked on this one.
+    if (!missing) await this.maybeVerified();
   }
 
   private async onData(from: string, frame: DeviceFrame): Promise<void> {
@@ -1446,6 +1527,23 @@ export class HandoffTaker {
     if (done) this.out(handoffAckFrame(part.name, part.size));
   }
 
+  /**
+   * The bytes a pass writes here: its parts that are no file (the rest, the device sets), and each file's size once per
+   * id of it not staged yet, whether its bytes are sent, copied from the frozen copy or from another id. What stays
+   * behind is not written.
+   */
+  private toWrite(parts: readonly HandoffPart[], ids: Record<string, string[]>, held: readonly HeldFile[], staged: ReadonlyMap<string, HandoffFile>): number {
+    const sizes = new Map<string, number>();
+    for (const file of [...held, ...staged.values()]) sizes.set(file.sha256, file.size);
+    let bytes = 0;
+    for (const [name, size] of parts) { const digest = filePartDigest(name); if (digest) sizes.set(digest, size); else bytes += size; }
+    for (const [digest, list] of Object.entries(ids)) {
+      if (this.behind.has(digest)) continue;
+      bytes += (sizes.get(digest) ?? 0) * list.filter((id) => !staged.has(id)).length;
+    }
+    return bytes;
+  }
+
   /** Storage refused a write: no room. Nothing changed on either device. */
   private async noRoom(): Promise<void> {
     this.out(handoffCancelFrame("room"));
@@ -1460,7 +1558,10 @@ export class HandoffTaker {
       const bytes = new Uint8Array(part.size);
       let at = 0;
       for (const chunk of part.chunks!) { bytes.set(chunk, at); at += chunk.length; }
-      this.bundle = { part: [part.name, part.size, part.sha256], bytes };
+      // The pieces go once copied: the bundle is not held twice while it is restored.
+      part.chunks = [];
+      if (part.name === DEVICES_PART) this.devices = { part: [part.name, part.size, part.sha256], bytes };
+      else this.bundle = { part: [part.name, part.size, part.sha256], bytes };
     }
     await this.maybeVerified();
     return true;
@@ -1497,13 +1598,20 @@ export class HandoffTaker {
       for (const id of list) if (!byId.has(id)) { const copy = { id, size: first.size, sha256: digest }; await this.staging!.copyStaged(first.id, copy); byId.set(id, copy); }
     }
     const files = [...byId.values()].filter((file) => this.ids[file.sha256]?.includes(file.id));
-    const parts = [...fileParts(files), this.bundle.part];
+    const parts = [...fileParts(files), this.bundle.part, ...(this.devices ? [this.devices.part] : [])];
     const h = handoffDigest(this.turn + 1, fromBase64Url(this.peer!), this.ports.ownKey, parts);
+    const devices = this.devices;
     // Written into the staging namespace before anything is said: a crash after `handoff-verified` loses nothing.
     await this.staging!.restore(this.bundle.bytes, files);
-    this.h = h;
+    // Restored: its bytes are in the staging namespace, not needed here again.
+    this.bundle = null; this.devices = null;
     const record = await this.ports.records.read();
-    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() } });
+    const earlierSets = devices ? withEarlierSets(record!.earlierSets, devices.bytes) : undefined;
+    if (earlierSets === null) { this.out(handoffCancelFrame("damaged")); await this.giveUp("damaged"); return; }
+    this.h = h;
+    // The earlier sets go into this device's record with the same write, so the install carries them under the staged
+    // name; kept should the handoff stop, as a staying device keeps its own (it delivers their frames all the same).
+    await this.ports.records.amend({ handoff: { ...record!.handoff!, step: "verified", h: toBase64Url(h), at: this.now() }, ...(earlierSets ? { earlierSets } : {}) });
     this.phase = "verified";
     this.out(await handoffVerifiedFrame(this.ports.turnAddress, this.turn + 1, h, { publicKey: this.ports.ownKey, sign: (bytes) => this.ports.sign(bytes) }));
     this.arm(HANDOFF_TIMINGS.releaseMs, () => this.askAgain());
@@ -1596,7 +1704,11 @@ export class HandoffTaker {
       await this.ports.forget(handoff.old!).catch(() => {});
       // A replaced device's old namespace is the fork: what only it held stays, as "Only on this device", until the
       // person discards it (WISP 06 § Installing the staged state). Any other old namespace goes.
-      if (handoff.fork) await this.ports.records.amend({ handoff: undefined, forks: [...new Set([...(record.forks ?? []), handoff.old!])] }).catch(() => {});
+      // The time it was kept goes beside it (`forkKeptAt`): two of them are told apart by it.
+      if (handoff.fork) {
+        const forks = [...new Set([...(record.forks ?? []), handoff.old!])];
+        await this.ports.records.amend({ handoff: undefined, forks, forkKeptAt: { ...forkTimes({ ...record, forks }), [handoff.old!]: this.now() } }).catch(() => {});
+      }
       else {
         await this.ports.staging.drop(handoff.old!).catch(() => {});
         await this.ports.records.amend({ handoff: undefined }).catch(() => {});
@@ -1657,7 +1769,7 @@ export class HandoffTaker {
     if (this.timer) clearTimeout(this.timer);
     clearInterval(this.idleTimer);
     this.phase = "idle";
-    this.pake = null; this.bundle = null; this.incoming.clear(); this.manifestBuffer = { parts: [], later: [], ids: {} };
+    this.pake = null; this.bundle = null; this.devices = null; this.incoming.clear(); this.manifestBuffer = { parts: [], later: [], ids: {} };
     await this.staging?.dropRest().catch(() => {});
     const record = await this.ports.records.read().catch(() => null);
     if (record?.handoff?.role === "taking" && takes(record.state)) await this.ports.records.amend({ handoff: { ...record.handoff, step: "stopped", secret: undefined } }).catch(() => {});

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppListedBy, AppPreview, AppRunStatus, AppSource, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -61,7 +61,7 @@ function runLine(run: AppRunStatus, t: Translate): string | null {
 }
 
 function Line({ children, tone = "muted", testId }: { children: ReactNode; tone?: "muted" | "danger" | "warning"; testId?: string }) {
-  const color = { muted: "text-text-secondary", danger: "text-danger", warning: "text-test-money-ink" }[tone];
+  const color = { muted: "text-text-secondary", danger: "text-danger-ink", warning: "text-test-money-ink" }[tone];
   return <p data-testid={testId} className={`text-xs whitespace-pre-line ${color}`}>{children}</p>;
 }
 
@@ -161,9 +161,10 @@ function Privacy({ from, internet, carried }: { from?: string; internet: boolean
   );
 }
 
-function Shell({ titleId, onClose, children, testId }: { titleId: string; onClose: () => void; children: ReactNode; testId: string }) {
+function Shell({ titleId, onClose, children, testId, box }: { titleId: string; onClose: () => void; children: ReactNode; testId: string; box?: RefObject<HTMLDivElement | null> }) {
   const backdrop = useBackdropDismiss(onClose);
-  const ref = useRef<HTMLDivElement>(null);
+  const own = useRef<HTMLDivElement>(null);
+  const ref = box ?? own;
   useDialogFocus(ref, onClose);
   // Over the whole window: opened from a card in the chat's timeline, whose scrolling box would hold a fixed layer.
   return createPortal(
@@ -185,7 +186,8 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
       <div className="min-w-0">
         <h2 id={titleId} dir="auto" className="text-lg font-medium text-text-primary break-words">{title}</h2>
         {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
-        {tagline && <p dir="auto" className="text-sm text-text-secondary">{tagline}</p>}
+        {/* A link or a long word breaks anywhere: unbroken, it pushed the screen sideways on a phone, and cut it off in Arabic. */}
+        {tagline && <p dir="auto" className="text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
       </div>
     </div>
   );
@@ -251,14 +253,16 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {preview && (
         <>
           <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} builtIn={preview.carried && "carried"} />
-          {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{preview.manifest.description}</p>}
+          {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} carried={preview.carried} />
         </>
       )}
       {error && <ErrorLine error={error} testId="app-install-error" />}
-      <div className="flex justify-end gap-2">
+      {/* Too wide for one line (a phone at a large text size), the buttons wrap: unwrapped, "Install and open" pushed
+          Cancel off the screen's start, where nothing scrolls to it. */}
+      <div className="flex flex-wrap justify-end gap-2">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
           <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
@@ -293,22 +297,48 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   // Which button started the work in progress: that one shows it is going.
   const [pending, setPending] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  // The question takes the place of the button that asked it, and the focus went with that button: it goes to the
+  // question's Cancel (Enter again does not uninstall), and Cancel gives it back to Uninstall, never to the page.
+  const keep = useRef<HTMLButtonElement>(null), uninstall = useRef<HTMLButtonElement>(null), asked = useRef(false);
+  useEffect(() => {
+    if (!removing && !asked.current) return;
+    asked.current = true;
+    (removing ? keep : uninstall).current?.focus({ preventScroll: true });
+  }, [removing]);
+  // The waiting update's section goes once the update lands, and the focus its Update had with it: the screen takes it,
+  // so the next Tab starts in the screen, not on the page.
+  const box = useRef<HTMLDivElement>(null), waits = !!app.pending, waited = useRef(waits);
+  useEffect(() => {
+    const was = waited.current;
+    waited.current = waits;
+    const active = document.activeElement;
+    if (was && !waits && (!active || active === document.body)) box.current?.focus({ preventScroll: true });
+  }, [waits]);
+  // Fetch files goes once the files are back, and the focus it had with it: Open takes its place and the focus, or the
+  // screen when the app still cannot run.
+  const open = useRef<HTMLButtonElement>(null), lacks = app.run.status === "needs-files", lacked = useRef(lacks);
+  useEffect(() => {
+    const was = lacked.current;
+    lacked.current = lacks;
+    const active = document.activeElement;
+    if (was && !lacks && (!active || active === document.body)) (open.current ?? box.current)?.focus({ preventScroll: true });
+  }, [lacks]);
   const focusBack = useFocusBack(busy);
   const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
     focusBack();
     setBusy(true); setPending(which); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); setPending(null); }
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); void refreshInstalledApps(); } finally { setBusy(false); setPending(null); }
   };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
   if (removing) {
     return (
       <Shell titleId={titleId} onClose={onClose} testId="app-uninstall">
-        <h2 id={titleId} className="text-lg font-medium text-text-primary">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
+        <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
+          <Button ref={keep} onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
           <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })), false, "export")}>{t("apps.app.export")}</Button>
           <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); await forgetLinkedFiles(app.ref); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
         </div>
@@ -316,10 +346,10 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     );
   }
   return (
-    <Shell titleId={titleId} onClose={onClose} testId="app-details">
+    <Shell titleId={titleId} onClose={onClose} testId="app-details" box={box}>
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
-      {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{app.description}</p>}
+      {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation", { sequence: String(app.equivocation.sequence) })}</Line>}
       {app.pending && (
@@ -335,11 +365,11 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       <Privacy internet={(app.permissions as readonly string[]).includes("internet")} />
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
-        <Button variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
+        <Button ref={uninstall} variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
         {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
-        {canRun && <Button variant="primary" data-testid="app-open" onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
+        {canRun && <Button ref={open} variant="primary" data-testid="app-open" onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
       </div>
     </Shell>
   );

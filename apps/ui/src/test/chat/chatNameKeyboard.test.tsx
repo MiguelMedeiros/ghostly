@@ -13,7 +13,7 @@ import { renderApp } from "../render";
  * reached it, a screen reader read it as text, and after Enter or Escape the focus fell to the page.
  */
 
-vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
+vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {}, warmSound: () => {} }));
 
 const PEER = "peer".padEnd(52, "p");
 

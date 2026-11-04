@@ -26,6 +26,8 @@
       "tagsLabel": "Etichette:",
       "updatedLabel": "Aggiornata:"
     },
+    "clearFinished": "Cancella concluse",
+    "clearFinishedHint": "Nasconde su questo dispositivo le attività completate, fallite e annullate. Il prossimo aggiornamento di un bot ne riporta una.",
     "column": {
       "blocked": "Bloccate",
       "closed": "Fermate",

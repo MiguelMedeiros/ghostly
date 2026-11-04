@@ -10,16 +10,52 @@ services (Google, Apple, Mozilla, Microsoft) on their default port, only forward
 (a VAPID `Authorization`) with the Web Push headers, and limits each address (an IPv6 one by its /64) to 30
 requests a minute. When its table of addresses is full it forgets the one seen longest ago. A client has 15 seconds
 to send its whole request; a request is weighed in bytes and one too large is refused before it is read, and so is
-a header named twice. It learns that a push to an endpoint happened, when, and the sender's address; it never
-sees what the push says (only "wake up"), since that is encrypted to the contact's browser.
+a header named twice, or a Web Push header whose value `fetch` would not send (a NUL, a line break, another control
+character, a character above U+00FF), with a 400 that names the header (`{"error":"Bad TTL value"}`). It learns
+that a push to an endpoint happened, when, and the sender's address; it never sees what the push says
+(only "wake up"), since that is encrypted to the contact's browser.
+
+It needs Node 18 or later (22 is what the HyperDHT relay's image runs): it posts with Node's own `fetch`, and on an
+older Node it would start and then fail every push.
 
 ```bash
 node server.mjs                                   # port 49480
 PORT=8443 GHOSTLY_RELAY_ORIGINS=https://app.ghostly.tools node server.mjs
+curl -s http://127.0.0.1:49480/healthz           # {"ok":true,"forwarded":12,"failed":0,"refused":3,"tracked":4}
 ```
+
+`GET /healthz` answers 200 while the relay runs, with counts since the start: pushes forwarded, forwards the push
+service did not answer, requests refused, and addresses in the rate table. Point a monitor at it; any other `GET` is
+refused (405).
+
+A port another program holds or one below 1024 this user may not take (`PORT`), and a `HOST` that is no address of
+this machine or no name at all, stop the start with one line that names the setting instead of a stack trace.
 
 Put it behind HTTPS (a tunnel or a reverse proxy) and enter its address in Settings. Behind a proxy, set
 `GHOSTLY_RELAY_PROXIES` to the number of proxies in front of it (`1` for one tunnel), so the limit counts each
-client's address from `X-Forwarded-For` rather than the proxy's; without it the header is ignored. With proxies set,
+client's address from `X-Forwarded-For` rather than the proxy's; without it the header is ignored, and the first request
+that carries one logs `requests carry X-Forwarded-For but GHOSTLY_RELAY_PROXIES is not set`. With proxies set,
 the relay listens on 127.0.0.1 unless `HOST` says otherwise: only the proxy should reach it, since anyone else could
 write that header. Ghostly runs none for you: no relay is set by default.
+
+`GHOSTLY_RELAY_ORIGINS` lists the pages allowed to use it, comma-separated, each an origin as a browser sends it:
+scheme, host and a port only (`https://app.ghostly.tools`, `http://localhost:5173`). Case, a default port (`:443`)
+and a trailing `/` do not matter; an entry with a path, a query or no scheme (`https://app.ghostly.tools/chat`,
+`app.ghostly.tools`) stops the start. Left out, any page may use it. A page it refuses gets a 403 it can read
+(`{"error":"Origin not allowed"}`), and the log names the origin on the refusal's first line (`refused origin
+"<origin>"`, below). It keeps other websites from using the relay; it is no defence against other programs.
+
+A forward the push service did not answer is logged as `failed` with its cause, never the endpoint: `timeout` (10
+seconds), `ENOTFOUND` (no DNS), `ECONNREFUSED` or `ETIMEDOUT` (no way out to port 443), a TLS code such as
+`CERT_HAS_EXPIRED`, or `redirect`.
+
+A setting that is there but empty or not of its kind (`PORT=`, `GHOSTLY_RELAY_PROXIES=one`) stops the start with one
+line that names it; leave a setting out for its default. The start line says how many proxies it counts, where it
+listens and which origins it serves (`any origin` when none is set).
+
+The log holds counts and reasons only, never an endpoint or an address: `forwarded <status>`, `failed`, and each
+refusal by kind (`refused origin`, `refused method`, `refused rate`, `refused size`, or what was wrong with the
+request, such as `refused Not a push service` or `refused Bad TTL value`). The first refusal of a kind is logged at
+once and the rest as one count a minute (`refused rate 41 more`), so a flood stays a line a minute. A refused origin's first line names it, quoted
+(`refused origin "https://app.ghostly.tools.example"`, `refused origin (none)` without one), so a misspelt
+`GHOSTLY_RELAY_ORIGINS` shows; the count after it covers every origin refused that minute.

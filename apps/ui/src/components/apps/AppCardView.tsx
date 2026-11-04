@@ -1,12 +1,14 @@
 import { useState, type ReactNode } from "react";
 import { appFingerprint, appRefPublisher, type AppCard } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
-import { useServicesPlatform } from "../../hooks/useServicesPlatform";
+import { usePlatformValue } from "../../hooks/useServicesPlatform";
+import { servicesPlatform } from "../../lib/platform";
 import { Button } from "../wallet/ui";
 import { AppIcon, Fingerprint } from "./AppIcon";
 import { AppInstallDialog } from "./AppInstallDialog";
+import { NAME, aroundName } from "./aroundName";
 import { useInstalledApp } from "../../lib/apps/installed";
-import { appsUnavailable } from "../../lib/apps/availability";
+import { appsBlock, appsUnavailable } from "../../lib/apps/availability";
 import { openApp } from "../../lib/apps/open";
 import { appErrorCode, appErrorText } from "../../lib/apps/errors";
 
@@ -14,7 +16,8 @@ import { appErrorCode, appErrorText } from "../../lib/apps/errors";
  * An app card in a 1:1 chat (WISP 405 § An app, WISP 1200 § Apps sent in a chat): "Ana opened Chess", drawn from its
  * own data and nothing else. Every field is the sender's claim: the title and version as the sender's, a generic icon,
  * the publisher's fingerprint from `ref`, "Not checked yet". Nothing is fetched to show it: the bundle is fetched,
- * checked and shown on the install screen only when the person presses "Install and open", and installing opens it in
+ * checked and shown on the install screen only when the person presses Join (not "Install": the card invites the person
+ * into the app their contact opened), and installing opens it in
  * this chat. Once the app is installed here, the card says Open and names the installed app (its checked title, version
  * and icon), whatever the card calls it. While the contact is not live it says the app needs
  * you both online. A version a store of the person's removed does not open; the warning offers "Run anyway" (WISP 1200
@@ -32,7 +35,9 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   marks?: ReactNode;
 }) {
   const { t } = useI18n();
-  const platform = useServicesPlatform();
+  // Only whether the app can talk to the contact's now: a card is not drawn again on every engine state, up to 20 a
+  // second while a file moves, which the bubble's memo exists to spare a long chat.
+  const block = usePlatformValue(() => appsBlock(servicesPlatform?.getPeer(peerKey)));
   const [installing, setInstalling] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [removed, setRemoved] = useState(false);
@@ -40,10 +45,10 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // Installed here: the app's own checked title and version, the one Open starts, never the sender's words for it.
   const title = app ? app.title : card.title;
   const version = app ? app.version : card.version;
-  const named = version ? `${title} ${version}` : title;
+  // A long name is cut alone, never "opened it here" after it: a 20-letter nickname on a 320 px phone lost the words.
   const who = mine ? (card.opened ? t("apps.card.youOpened") : t("apps.card.youShared"))
-    : card.opened ? t("apps.card.opened", { name: contact }) : t("apps.card.shared", { name: contact });
-  const waiting = appsUnavailable(platform?.getPeer(peerKey), title, contact, t);
+    : aroundName(t(card.opened ? "apps.card.opened" : "apps.card.shared", { name: NAME }), contact, "app-card-name");
+  const waiting = appsUnavailable(block, title, contact, t);
   const open = (runAnyway = false) => {
     setError(null); setRemoved(false);
     void openApp(card.ref, linkId, { runAnyway }).catch((e: unknown) => { setError(appErrorText(e, t)); setRemoved(appErrorCode(e) === "removed"); });
@@ -53,8 +58,12 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       <div className="flex items-start gap-3">
         <AppIcon size={40} installed={app} />
         <div className="min-w-0 flex-1">
-          <p dir="auto" className="text-sm font-medium text-text-primary truncate" data-testid="app-card-title">{named}</p>
-          <p className="text-xs text-text-secondary truncate">{who}</p>
+          {/* A long title is cut alone: the version stays whole after it, the one a contact opened or this app has. */}
+          <p dir="auto" className="flex items-baseline gap-1 text-sm font-medium text-text-primary" data-testid="app-card-title">
+            <span dir="auto" className="truncate min-w-0">{title}</span>
+            {version && <>{" "}<span className="shrink-0 whitespace-nowrap">{version}</span></>}
+          </p>
+          <p data-testid="app-card-who" className={`text-xs text-text-secondary ${mine ? "truncate" : "flex min-w-0 overflow-hidden whitespace-nowrap"}`}>{who}</p>
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} />
             <span data-testid="app-card-check">{app ? t("apps.card.installed") : t("apps.card.notChecked")}</span>
@@ -65,7 +74,7 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       {error && <p role="alert" className="text-xs text-danger" data-testid="app-card-error">{error}</p>}
       <div className="flex items-center gap-2">
         {app ? <Button variant="primary" data-testid="app-card-open" onClick={() => open()}>{t("apps.page.open")}</Button>
-          : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.install.installOpen")}</Button>
+          : card.url ? <Button variant="primary" data-testid="app-card-install" onClick={() => setInstalling(true)}>{t("apps.card.join")}</Button>
             : <span className="text-xs text-text-muted" data-testid="app-card-ask">{mine ? t("apps.card.noLink") : t("apps.card.ask", { name: contact })}</span>}
         {app && removed && <Button data-testid="app-card-run-anyway" onClick={() => open(true)}>{t("apps.app.runAnyway")}</Button>}
         <span className="ms-auto flex items-center gap-1 text-[11px] text-text-muted">{time}{marks}</span>

@@ -101,7 +101,7 @@ describe("an edge's packets, carried by members beside the relays", () => {
     await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS * 2);
     expect(relays.publishes).toEqual([records("settled")]);
     // Nobody waits for it: a background write.
-    expect(relays.options).toEqual([{ background: true, signedAt: expect.any(BigInt) }]);
+    expect(relays.options).toEqual([{ background: true, signedAt: expect.any(BigInt), redate: expect.any(Function) }]);
     expect(state.carried).toHaveLength(1);
     expect(transport.latest()).toBeNull();
   });

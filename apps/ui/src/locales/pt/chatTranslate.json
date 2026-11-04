@@ -1,0 +1,10 @@
+{
+  "choice": {
+    "off": "Desativada",
+    "on": "Ativada",
+    "settings": "Como nos Ajustes ({{state}})"
+  },
+  "note": "Mensagens que você recebe aqui. Só neste dispositivo.",
+  "open": "Tradução…",
+  "title": "Tradução"
+}

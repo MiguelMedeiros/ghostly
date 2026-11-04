@@ -23,13 +23,14 @@ const params: ChatParams = { sessionId: "c", profile: "paired-chat/1", seedB64: 
 const callLine: ChatMessage = { id: "call_ended_1", text: "Audio call ended", sender: "system", timestamp: NOW, callEvent: { type: "call_ended", hasVideo: false, duration: 65_000 } };
 
 let add: ((m: ChatMessage) => void) | undefined;
+let addMissed: ((m: ChatMessage, options: { rang?: string; seen?: boolean }) => string | undefined) | undefined;
 function ChatPage() {
-  const { addSystemMessage } = useChat(params);
-  useEffect(() => { add = addSystemMessage; }, [addSystemMessage]);
+  const { addSystemMessage, addMissedCallMessage } = useChat(params);
+  useEffect(() => { add = addSystemMessage; addMissed = addMissedCallMessage; }, [addSystemMessage, addMissedCallMessage]);
   return null;
 }
 
-afterEach(() => { vi.useRealTimers(); add = undefined; });
+afterEach(() => { vi.useRealTimers(); add = undefined; addMissed = undefined; });
 
 describe("a call line in the chat list", () => {
   it("shows as the chat's last message as soon as the chat page writes it, with one list render and no extra chat render", async () => {
@@ -54,5 +55,20 @@ describe("a call line in the chat list", () => {
     console.info(`call line: shown at once ${at.shown}; commits at once list ${at.list} chat ${at.chat}; after 3 s list ${commits.list - before.list} chat ${commits.chat - before.chat}`);
     // No timer had run: the list moved with the line itself, in one render of each.
     expect(at).toEqual({ list: 1, chat: 1, shown: true });
+  });
+
+  // agents#992: a burst of missed calls is one line, and the list says how many.
+  it("a burst of missed calls is one line in the list, saying how many", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout"] });
+    saveSession(session);
+    const { engine } = renderApp(<UpdateProvider><Sidebar /><ChatPage /></UpdateProvider>);
+    engine.on("ensureLink", () => ({ linkId: "c" }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    const row = () => screen.getAllByTestId("chat-row").find(r => within(r).getByTestId("chat-row-name").textContent === "Cleo")!;
+    for (let i = 0; i < 12; i++) {
+      const missed: ChatMessage = { id: `system_call_call_missed_${NOW + i}`, text: "Missed audio call", sender: "system", timestamp: NOW + i * 1_000, callEvent: { type: "call_missed", hasVideo: false } };
+      act(() => { addMissed!(missed, {}); });
+    }
+    expect(row()).toHaveTextContent("12 missed audio calls");
   });
 });

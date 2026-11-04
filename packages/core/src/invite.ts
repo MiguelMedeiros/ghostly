@@ -1,8 +1,8 @@
 import { bech32, bech32m } from "@scure/base";
 import { generateEncryptionKey } from "./crypto";
 import { createIdentity, identityFromSeedB64 } from "./identity";
-import { fromBase64Url, fromZ32, toBase64Url, toZ32 } from "./bytes";
-import { trimEndOf } from "./text";
+import { fromBase64Url, fromZ32, isZ32Key, toBase64Url, toZ32 } from "./bytes";
+import { trimEndOf, unwrapPasted } from "./text";
 
 /**
  * A link between two peers: my identity, the peer's public key and the shared
@@ -136,7 +136,6 @@ function readGhostly(code: string): InviteReading {
 }
 
 const B64_KEY = /^[A-Za-z0-9_-]{43}$/;
-const Z32_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 
 function readSlashForm(code: string): InviteReading {
   const dht = code.startsWith("pair2d/");
@@ -147,7 +146,7 @@ function readSlashForm(code: string): InviteReading {
     return profile ? { ok: false, reason: "damaged", detail: "Three fields expected" } : { ok: false, reason: "not-ghostly" };
   }
   const [seedB64, peerPubKeyZ32, encKeyB64] = parts;
-  const bad = !B64_KEY.test(seedB64) ? "The seed" : !Z32_KEY.test(peerPubKeyZ32) ? "The contact's key" : !B64_KEY.test(encKeyB64) ? "The shared key" : null;
+  const bad = !B64_KEY.test(seedB64) ? "The seed" : !isZ32Key(peerPubKeyZ32) ? "The contact's key" : !B64_KEY.test(encKeyB64) ? "The shared key" : null;
   if (bad) return { ok: false, reason: "damaged", detail: `${bad} is malformed` };
   return {
     ok: true,
@@ -164,13 +163,18 @@ function readSlashForm(code: string): InviteReading {
 export function readInviteCode(input: string): InviteReading {
   const reading = readInviteForm(input);
   if (reading.ok) return reading;
-  // Copied from the end of a sentence ("…#ghostly1…).", "…!"): read once more without that punctuation, taken only
-  // when what is left reads. Otherwise the first refusal stands, so a typo is still a typo.
-  const bare = trimEndOf(input.trim(), ".,)!");
-  if (bare !== input.trim()) {
-    const again = readInviteForm(bare);
-    if (again.ok) return again;
-  }
+  // Copied with the words around it ("Here: <…#ghostly1…>.", "« ghostly1… »", "…?"): read once more as the token in
+  // it (`unwrapPasted`), taken when it reads. A refusal of that token is said over "not an invite" when the paste
+  // as a whole was not one: a code with a typo in a sentence is a code with a typo.
+  return pastedAgain(input, reading, readInviteForm);
+}
+
+/** `reading` of `input`, or the reading of the token in it (`unwrapPasted`) when that reads or says more. */
+export function pastedAgain<T extends { ok: true } | { ok: false; reason: string }>(input: string, reading: T, read: (input: string) => T): T {
+  const bare = unwrapPasted(input);
+  if (bare === input.trim() || !bare) return reading;
+  const again = read(bare);
+  if (again.ok || (!reading.ok && reading.reason === "not-ghostly")) return again;
   return reading;
 }
 

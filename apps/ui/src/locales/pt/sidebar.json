@@ -30,6 +30,7 @@
     "inviterAway": "{{contact}} ainda não está conectado. Tente de novo em instantes.",
     "inviterAwayUnknown": "O contato que convidou você ainda não está conectado. Tente de novo em instantes.",
     "letting": "Um membro está deixando você entrar…",
+    "linkUnanswered": "O link não respondeu",
     "takenBack": "Convite retirado",
     "unanswered": "O app de quem convidou não respondeu. Aceite de novo, ou recuse.",
     "waitingAdmin": "Aguardando o app do admin…",
@@ -39,6 +40,7 @@
   "joinChat": "Entrar numa conversa",
   "new": "Nova",
   "newChat": "Nova conversa",
+  "newChatShort": "Nova",
   "newMenu": {
     "chat": "Conversa",
     "chatHint": "Uma pessoa, com um convite",
@@ -53,6 +55,26 @@
   "pinned": "Fixada",
   "quiet": "Está quieto por aqui...",
   "quietHint": "Hora de assombrar alguém! 👻",
+  "rail": {
+    "collapse": "Recolher lista de conversas",
+    "expand": "Expandir lista de conversas",
+    "invitation": "{{name}}, {{status}}",
+    "mention": "{{name}}, você foi mencionado",
+    "title": "{{action}} ({{keys}})",
+    "unread": "{{name}}, mensagens não lidas",
+    "unreadCount": "{{name}}, {{count}} mensagens não lidas",
+    "unreadOne": "{{name}}, 1 mensagem não lida"
+  },
+  "row": {
+    "mention": "você foi mencionado",
+    "muted": "notificações silenciadas",
+    "pinned": "fixada",
+    "separator": ", ",
+    "unread": "{{count}} mensagens não lidas",
+    "unreadSome": "mensagens não lidas",
+    "unread_one": "{{count}} mensagem não lida",
+    "unread_other": "{{count}} mensagens não lidas"
+  },
   "searchPlaceholder": "Buscar conversas...",
   "settings": "Ajustes",
   "sharedIdentity": "Compartilhou uma identidade",

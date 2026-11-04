@@ -83,6 +83,18 @@ describe("a device set of its own, from moving", () => {
     expect(phone.store.record.ownSet).toBeUndefined();
   });
 
+  it("wrong passwords sent at once are each counted, whoever calls it: no more than five are checked in the hour", async () => {
+    const network = await world();
+    const phone = device(network, 1);
+    let checks = 0;
+    phone.ports.proves = async (_verifier, password) => { checks++; await new Promise((resolve) => setTimeout(resolve, 5)); return password === PASSWORD; };
+    const refusals = await Promise.all(Array.from({ length: 20 }, () => startOwnSet(phone.ports, { password: "wrong", name: "Desktop" }).catch((e: unknown) => e as Error)));
+    expect(checks).toBe(5);
+    expect(refusals.filter((r) => r.message.startsWith("takeover-locked-out:"))).toHaveLength(15);
+    expect(phone.store.record.takeoverAttempts?.total).toBe(5);
+    expect(network.puts()).toEqual([]);
+  });
+
   it("puts a tombstone that lists only itself, waits the settle time, and is the active device of a set of its own", async () => {
     const network = await world();
     const phone = device(network, 1);

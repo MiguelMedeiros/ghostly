@@ -26,9 +26,17 @@ export const PUBLIC_APP_ORIGIN = "https://app.ghostly.tools";
 
 /** The web app that opens this app's links: the web app's own address, or the public one from the desktop app and the extension. */
 export function appLinkOrigin(): string {
-  // The desktop app on Windows is served from http://tauri.localhost, which no other device opens.
+  // The desktop app on Windows, and Android, are served from http://tauri.localhost, which no other device opens.
   const desktop = "__TAURI_INTERNALS__" in window;
   return !desktop && /^https?:$/.test(window.location.protocol) ? window.location.origin : PUBLIC_APP_ORIGIN;
+}
+
+/**
+ * A part of the app's address, unescaped; null when a `%` in it is not an escape (`#/chat/%`). Anyone can make such
+ * a link, and `decodeURIComponent` throws on it: thrown in an intake, it took the whole app to its error screen.
+ */
+export function decodePart(part: string): string | null {
+  try { return decodeURIComponent(part); } catch { return null; }
 }
 
 /** A `web+ghostly:` link, as the browser hands it over (escaped) or as it was written. */
@@ -42,7 +50,7 @@ const PROTOCOL_LINK = /^\/?web(?:\+|%2B)ghostly(?::|%3A)(?:\/\/|%2F%2F)?/i;
 export function protocolLinkCode(pathname: string): string | null {
   if (!PROTOCOL_LINK.test(pathname)) return null;
   const rest = pathname.replace(PROTOCOL_LINK, "");
-  try { return decodeURIComponent(rest); } catch { return rest; }
+  return decodePart(rest) ?? rest;
 }
 
 /**
@@ -128,7 +136,7 @@ export function buildInviteUrl(
 export function chatRouteSession(pathname: string): string | null {
   const match = pathname.match(/^\/chat\/([^/]+)\/?$/);
   // A `ghostly1` code is one segment too, but it is keys, never a session id.
-  return match && !/^ghostly1/i.test(match[1]) ? decodeURIComponent(match[1]) : null;
+  return match && !/^ghostly1/i.test(match[1]) ? decodePart(match[1]) : null;
 }
 
 /** What Copy and Share hand over: a `ghostly1` code as its link on ghostly.tools, an older code as it is. */

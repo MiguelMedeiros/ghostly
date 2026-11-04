@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChatFiles, GhostLink, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
+import { ChatFiles, GhostLink, NO_PICTURE_METADATA, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
@@ -25,6 +25,20 @@ function pattern(offset: number, length: number): Uint8Array {
 }
 const digestOf = (size: number) => createHash("sha256").update(pattern(0, size)).digest("base64url");
 
+const SECRET = "GHOSTLY-SECRET-GPS 52.37N 4.89E";
+const ascii = (value: string) => [...value].map((c) => c.charCodeAt(0));
+const segment = (marker: number, body: number[]) => [0xff, marker, (body.length + 2) >> 8, (body.length + 2) & 0xff, ...body];
+/** A 300 × 200 JPEG, with an Exif holding `secret` when given; its scan `scan` bytes long. */
+function jpegWith(secret?: string, scan = 16): Uint8Array {
+  const exif = secret ? segment(0xe1, [...ascii("Exif\0\0"), 0x4d, 0x4d, 0, 42, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, ...ascii(secret)]) : [];
+  const head = [0xff, 0xd8, ...exif, ...segment(0xdb, [0, ...new Array(64).fill(1)]), ...segment(0xc0, [8, 0, 200, 1, 44, 1, 1, 0x11, 0]),
+    ...segment(0xc4, [0, ...new Array(16).fill(0)]), ...segment(0xda, [1, 1, 0, 0, 63, 0])];
+  const bytes = new Uint8Array(head.length + scan + 2);
+  bytes.set(head);
+  bytes.set([0xff, 0xd9], bytes.length - 2);
+  return bytes;
+}
+
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 
@@ -46,6 +60,7 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
   const received = new Map<string, { hash: ReturnType<typeof createHash>; length: number }>();
   const records = new Map<string, FileTransferRecord>();
   const sizes = new Map<string, number>();
+  const contents = new Map<string, Uint8Array>();
   const peer: { link?: GhostLink } = {};
   const chatFiles = new ChatFiles({
     send: frame => peer.link?.sendFilesFrame(frame) ?? false,
@@ -57,6 +72,8 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
         verify: async digest => disk.hash.copy().digest("base64url") === digest, discard: async () => { received.delete(record.id); } };
     },
     openSource: async record => {
+      const bytes = contents.get(record.id);
+      if (bytes) return { read: async (offset, length) => bytes.slice(offset, offset + length), digest: async () => createHash("sha256").update(bytes).digest("base64url") };
       const size = sizes.get(record.id)!;
       return { read: async (offset, length) => pattern(offset, Math.min(length, size - offset)), digest: async () => digestOf(size) };
     },
@@ -83,7 +100,12 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
     id, name, transportSeed, link, files: chatFiles, takesFiles: files, got, frames, received, records,
     offer(wireId: string, size: number, extra: { forwarded?: number } = {}) {
       sizes.set(wireId, size);
-      chatFiles.offer({ id: wireId, name: `${wireId}.png`, mime: "image/png", size, timestamp: Date.now(), ...extra });
+      chatFiles.offer({ id: wireId, name: `${wireId}.bin`, mime: "application/octet-stream", size, timestamp: Date.now(), ...extra });
+    },
+    /** Offers these bytes, under this name and type. */
+    offerBytes(wireId: string, name: string, mime: string, bytes: Uint8Array) {
+      contents.set(wireId, bytes);
+      chatFiles.offer({ id: wireId, name, mime, size: bytes.length, timestamp: Date.now() });
     },
   };
 }
@@ -198,7 +220,7 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
     expect(results[0]).toMatchObject({ error: null, messageIds: [expect.stringMatching(/^me_/)] });
     const sent = await t.row(t.b, m => m.id === results[0]!.messageIds[0]);
-    expect(sent).toMatchObject({ sender: "me", forwarded: 1, file: { name: "pic-000001.png", size, mime: "image/png" } });
+    expect(sent).toMatchObject({ sender: "me", forwarded: 1, file: { name: "pic-000001.bin", size, mime: "application/octet-stream" } });
     // A copy of its own under the new chat, the original left as it was.
     expect(sent.file!.id.startsWith(`${t.b.id}-out-`)).toBe(true);
     expect((await fileStore.get(received.file!.id))?.metadata?.size).toBe(size);
@@ -208,6 +230,36 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(t.b.received.get(record.id)!.hash.digest("base64url")).toBe(digestOf(size));
     // Nothing about that file went to Alice after it arrived: no request, no second transfer.
     expect(t.a.frames.slice(heardFromA)).toEqual([]);
+  });
+
+  // covers: files.image.metadata
+  it("sends a received photo on without the metadata its author's app left in it: the size and digest are the stripped copy's", async () => {
+    const t = await setup();
+    t.a.offerBytes("photo-0001", "IMG_0001.jpg", "image/jpeg", jpegWith(SECRET, 300 * 1024));
+    const received = await t.row(t.a, m => m.id === "peer_photo-0001");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const clean = jpegWith(undefined, 300 * 1024);
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
+    expect(results[0]).toMatchObject({ error: null, messageIds: [expect.stringMatching(/^me_/)] });
+    const sent = await t.row(t.b, m => m.id === results[0]!.messageIds[0]);
+    expect(sent.file).toMatchObject({ name: "IMG_0001.jpg", size: clean.length, mime: "image/jpeg" });
+    expect(await fileStore.get(sent.file!.id)).toMatchObject({ digest: createHash("sha256").update(clean).digest("base64url"), metadata: { size: clean.length } });
+    await vi.waitFor(() => expect([...t.b.records.values()].find(r => r.direction === "in")).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const record = [...t.b.records.values()].find(r => r.direction === "in")!;
+    expect(record.file).toMatchObject({ size: clean.length });
+    expect(t.b.received.get(record.id)!.hash.digest("base64url")).toBe(createHash("sha256").update(clean).digest("base64url"));
+    // The one received here is kept as it came.
+    expect((await fileStore.get(received.file!.id))?.metadata?.size).toBe(jpegWith(SECRET, 300 * 1024).length);
+  });
+
+  it("refuses to forward a received picture whose metadata cannot be removed, and keeps no copy", async () => {
+    const t = await setup();
+    t.a.offerBytes("photo-cut", "cut.jpg", "image/jpeg", jpegWith(SECRET).slice(0, -2));
+    const received = await t.row(t.a, m => m.id === "peer_photo-cut");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
+    expect(results[0]).toMatchObject({ error: NO_PICTURE_METADATA, messageIds: [], sent: [] });
+    expect(await fileStore.listForLink(t.b.id)).toEqual([]);
   });
 
   it("refuses a file still arriving, and what cannot be forwarded at all; one refused chat does not stop another", async () => {
@@ -295,6 +347,25 @@ describe("a forward a group took part of", { timeout: 60_000 }, () => {
     // No copy made for the two the pace refused.
     expect(copied.mock.calls.filter(([file]) => file.linkId === "group:g1")).toHaveLength(8);
     expect(results).toEqual([{ to: "group:g1", messageIds: Array.from({ length: 8 }, (_, i) => `g-${i + 1}`), sent: ids.slice(0, 8), error: "You sent many files to this group just now. Wait a minute." }]);
+  });
+});
+
+describe("a group I was removed from", { timeout: 60_000 }, () => {
+  // Its page keeps the history and offers Forward on it: the engine refused it whole with "Chat not found", which the
+  // dialog pinned on the chosen chat's name. The messages are read from this device; membership is for sending to one.
+  it.each(["mesh", "community"] as const)("its kept %s history is forwarded, while sending to it is still refused", async (profile) => {
+    const t = await setup();
+    const { groupId } = await t.node.createGroup({ name: "Plaza", profile });
+    await db.addMessage({ linkId: `group:${groupId}`, id: "peer_old", text: "the address is Rua 7", sender: "peer", member: "m", timestamp: Date.now(), via: "datalink" });
+    const groups = (t.node as unknown as { groups: { session(id: string): unknown; communities: { session(id: string): unknown } } }).groups;
+    const session = (profile === "mesh" ? groups.session(groupId) : groups.communities.session(groupId)) as { out(reason: string, text: string): void };
+    session.out("removed", "You were removed from this group");
+    expect(t.node.getState().groups.find(g => g.id === groupId)?.status).toBe("removed");
+    const { results } = await t.node.forwardMessages({ linkId: `group:${groupId}`, messageIds: ["peer_old"], to: [`group:${groupId}`, t.b.id] });
+    expect(results[0]).toEqual({ to: `group:${groupId}`, messageIds: [], sent: [], error: "You are not in this group" });
+    expect(results[1]).toMatchObject({ to: t.b.id, error: null, sent: ["peer_old"] });
+    await vi.waitFor(() => expect(t.b.got).toMatchObject([{ text: "the address is Rua 7", forwarded: 1 }]));
+    await expect(t.node.forwardMessages({ linkId: "group:not-here", messageIds: ["peer_old"], to: [t.b.id] })).rejects.toThrow("Chat not found");
   });
 });
 

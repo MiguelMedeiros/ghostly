@@ -1,6 +1,7 @@
 import { createIdentity, identityFromSeedB64 } from "../../src/identity";
 import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame, type GroupState } from "../../src/groupSession";
 import type { GroupIncomingEdit } from "../../src/groupEdits";
+import type { CatchUpHandled } from "../../src/catchUp";
 
 export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 
@@ -27,6 +28,8 @@ export class Mesh {
   readonly frames = new Map<string, Map<string, GroupMessageFrame>>();
   /** Member key → the name its app says in its messages (`hooks.nick`); none for a member not in it. */
   readonly names = new Map<string, string>();
+  /** Set before a member is added: its app's `hooks.handled`, so a catch-up answer goes a slice at a time. */
+  handled: ((from: string, to: string) => Promise<CatchUpHandled>) | null = null;
   add(state: GroupState, name?: string): GroupSession {
     const key = identityFromSeedB64(state.seedB64).pubKeyZ32;
     if (!this.frames.has(key)) this.frames.set(key, new Map());
@@ -46,7 +49,8 @@ export class Mesh {
       message: m => { if (this.rows && m.frame && !rows.has(m.id)) rows.set(m.id, m.frame); this.inbox.get(session.myKey)!.push(m); },
       edit: e => { this.edits.get(session.myKey)!.push(e); },
       changed: () => this.changes.set(session.myKey, (this.changes.get(session.myKey) ?? 0) + 1),
-    }, this.rows ? [...rows.values()] : undefined);
+      ...(this.handled && { handled: (to: string) => this.handled!(session.myKey, to) }),
+    },this.rows ? [...rows.values()] : undefined);
     this.sessions.set(session.myKey, session);
     this.inbox.set(session.myKey, []);
     this.edits.set(session.myKey, []);

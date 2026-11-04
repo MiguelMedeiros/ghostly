@@ -58,8 +58,9 @@ describe("IdentityShareLine", () => {
     expect(status()).toBe("Verified");
     // It wears the profile this app already has and never asks for one: only an opened card reaches the identity's network.
     expect(view.engine.calls.filter(c => c.method === "loadPublicProfile")).toEqual([]);
-    // A button with the whole of it in its name: the hover is never the only way to what the card says.
-    expect(button()).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · Verified$/);
+    // A button with the whole of it in its name, and who shared it as its description: the hover is never the only way to what the card says.
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Nostr\s*Pat\s*npub1/);
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity");
     button().focus();
     await user.keyboard("{Enter}");
     expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ proof: "n1", side: "theirs" }));
@@ -78,7 +79,8 @@ describe("IdentityShareLine", () => {
     expect(card()).toHaveAttribute("data-state", "verifying");
     expect(face()).toHaveAttribute("data-status", "checking");
     expect(status()).toBe("Checking");
-    expect(button()).toHaveAccessibleName("You shared Domain · example.com · Checking");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Checking\s*Domain\s*example\.com/);
+    expect(button()).toHaveAccessibleDescription("You shared this identity");
     first.unmount();
     // Shared while the contact is away: waiting, not checking.
     const second = line(mine, shared("queued"));
@@ -93,7 +95,8 @@ describe("IdentityShareLine", () => {
     expect(card()).toHaveAttribute("data-state", "failed");
     expect(face()).toHaveAttribute("data-status", "failed");
     expect(status()).toBe("Not verified");
-    expect(button()).toHaveAccessibleName("You shared Domain · example.com · Not verified: The record is gone");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain\s*example\.com/);
+    expect(button()).toHaveAccessibleDescription("You shared this identity The record is gone");
     // Why, under the card, not only in its name.
     expect(screen.getByTestId("identity-share-reason")).toHaveTextContent("The record is gone");
   });
@@ -106,7 +109,7 @@ describe("IdentityShareLine", () => {
     // Before it is presented, the kind is all this app knows.
     expect(within(face()).getByText("Domain")).toBeInTheDocument();
     expect(within(face()).getByTestId("identity-proof-subject")).toHaveTextContent("…");
-    expect(button()).toHaveAccessibleName("Alice shared Domain · Checking");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Checking\s*Domain\s*…/);
     checking.unmount();
     const failed = line(entry({ state: "failed", error: "No such record" }));
     expect(face()).toHaveAttribute("data-status", "failed");
@@ -131,7 +134,7 @@ describe("IdentityShareLine", () => {
     // A stopped share wears nothing the account says about itself.
     expect(within(face()).queryByTestId("id-card-name")).not.toBeInTheDocument();
     expect(within(face()).queryByTestId("id-card-photo")).not.toBeInTheDocument();
-    expect(button()).toHaveAccessibleName(/^Alice shared Nostr · npub1.* · No longer shared$/);
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*No longer shared\s*Nostr\s*npub1/);
     withdrawn.unmount();
     // Found revoked by its owner.
     const revoked = line(theirs, { links: [paired({ identities: identitiesView({ received: [{ ...received, status: "revoked" }] }), identityTimeline: [theirs, stop(theirs, "revoked")] })] });
@@ -145,7 +148,7 @@ describe("IdentityShareLine", () => {
     const mineStopped = line(mine, { identityProofs: [proofView()], links: [paired({ identities: identitiesView({ shared: [sharedView({ id: "proof-1", status: "withdrawn" })] }), identityTimeline: [mine, stop(mine, "withdrawn")] })] });
     expect(face()).toHaveAttribute("data-status", "withdrawn");
     expect(status()).toBe("No longer shared");
-    expect(button()).toHaveAccessibleName("You shared Domain · example.com · No longer shared");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*No longer shared\s*Domain\s*example\.com/);
     mineStopped.unmount();
     // Shared again after the stop: the old card stays stopped, the new one is the live share.
     const timeline = [mine, stop(mine, "withdrawn"), again];
@@ -182,6 +185,19 @@ describe("IdentityShareLine", () => {
     } finally {
       if (original) Object.defineProperty(HTMLElement.prototype, "animate", original); else delete (HTMLElement.prototype as { animate?: unknown }).animate;
     }
+  });
+
+  it("is named by the words the card shows, in their order, and described by who shared it and why it failed", () => {
+    const verified = line(entry());
+    // Label in Name (WCAG 2.5.3): a voice-control user says what they see, from "Ghostly · Identity" on. No label of its
+    // own that could leave those words out: the card's face is its name.
+    expect(button()).not.toHaveAttribute("aria-label");
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Verified\s*Domain\s*example\.org/);
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity");
+    verified.unmount();
+    line(entry({ state: "failed", error: "No such record" }));
+    expect(button()).toHaveAccessibleName(/^Ghostly · Identity\s*Not verified\s*Domain/);
+    expect(button()).toHaveAccessibleDescription("Alice shared this identity No such record");
   });
 
   it("keeps the card left to right in a right-to-left language, with the caption in the page's direction", () => {

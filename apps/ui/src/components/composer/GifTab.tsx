@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { busyUntil, earlierGifs, keptGifs, searchGifs, type GifAnswer, type PickerGif } from "../../lib/gifSearch";
 import { GIF_CATEGORY_ICONS } from "./icons";
@@ -77,9 +77,10 @@ export function GifTab({ onSelect, onEmojiTab, autoFocus }: { onSelect: (url: st
   }, [search, typed, attempt]);
 
   const current = results?.query === search ? results : null;
-  // The wait, counted down each second while it is on.
+  // The wait, counted down each second while it is on: from the commit that shows it (a layout effect), as an effect
+  // React runs a moment later would start the count late.
   const until = current?.kind === "limited" ? busyUntil() : null;
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!until) return;
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(tick);

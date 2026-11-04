@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { liftGlobals, parseArgs } from "../src/args";
+import { liftGlobals, nearest, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
-import { GhostlyHttpError, engineError } from "@ghostly/core";
+import { GhostlyHttpError, TYPING_KINDS, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
@@ -27,6 +27,11 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["alice", "--stdn"], send.options, idSlot(send))).toThrow(/Unknown option --stdn/);
     expect(() => parseArgs(["abc", "-oops"], COMMANDS["chat rename"].options ?? {}, idSlot(COMMANDS["chat rename"]))).toThrow(/Unknown option -oops/);
     expect(() => parseArgs(["-oops"], COMMANDS["group create"].options!, idSlot(COMMANDS["group create"]))).toThrow(/Unknown option -oops/);
+    // A path is not an id: a mistyped flag in its place is refused with the one meant, not taken as the file.
+    const credential = COMMANDS["x401 credential add"];
+    for (const argv of [["--lable", "work"], ["--lable"]]) {
+      expect(() => parseArgs(argv, credential.options!, idSlot(credential)), argv.join(" ")).toThrow(/Unknown option --lable \(did you mean --label\?\)/);
+    }
   });
 
   it("takes a draft that starts with a dash (identity complete, the #357 failure)", () => {
@@ -82,6 +87,53 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["group", "--nope"], {}, (i) => i === 0)).toThrow(/Unknown option --nope/);
   });
 
+  it("says to put -- before a two-character word that starts with a dash, as it does for a longer one", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const word of ["-1", "-5", "-ph"]) {
+      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send), { command: "send", text: true }), word)
+        .toThrow(new CliError("usage", `Unknown option ${word} for ghostly send (put -- before text that starts with a dash; ghostly help send)`));
+    }
+    expect(parseArgs(["bob", "--", "-1"], send.options, idSlot(send)).positionals).toEqual(["bob", "-1"]);
+    // Only where text comes, and only for a word with one dash: there is no text to put after `--` in these.
+    expect(() => parseArgs(["-x"], {}, undefined, { command: "version" })).toThrow(new CliError("usage", "Unknown option -x for ghostly version (ghostly help version)"));
+    expect(() => parseArgs(["bob", "--nope"], send.options, idSlot(send), { command: "send", text: true })).toThrow(new CliError("usage", "Unknown option --nope for ghostly send (ghostly help send)"));
+  });
+
+  it("names the nearest option of the command for a typo, and none for a word near nothing", () => {
+    const send = TEXT_COMMANDS.send, history = COMMANDS["chat history"];
+    expect(() => parseArgs(["bob", "--wiat", "sent"], send.options, idSlot(send), { command: "send", text: true }))
+      .toThrow(new CliError("usage", "Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)"));
+    // `--wiat=sent` too, a single-dash `-wait`, a negated boolean, and a global option.
+    expect(() => parseArgs(["bob", "--wiat=sent"], send.options, idSlot(send))).toThrow(new CliError("usage", "Unknown option --wiat (did you mean --wait?)"));
+    expect(() => parseArgs(["bob", "-wait"], send.options, idSlot(send), { command: "send", text: true }))
+      .toThrow(new CliError("usage", "Unknown option -wait for ghostly send (did you mean --wait? put -- before text that starts with a dash; ghostly help send)"));
+    expect(() => parseArgs(["bob", "--no-forse"], send.options, idSlot(send))).toThrow(new CliError("usage", "Unknown option --no-forse (did you mean --no-force?)"));
+    expect(() => parseArgs(["bob", "--prety"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --prety (did you mean --pretty?)"));
+    expect(() => parseArgs(["bob", "--frobnicate"], history.options!, idSlot(history))).toThrow(new CliError("usage", "Unknown option --frobnicate"));
+    // Two edits in a short word are another word: `--nope` is not `--home`.
+    expect(() => parseArgs(["--nope"], {})).toThrow(new CliError("usage", "Unknown option --nope"));
+  });
+
+  // Before, `--no-pretty=true` was "Unknown option --no-pretty (did you mean --no-pretty?)": the word typed itself.
+  it("answers a boolean's --no- form with a value as --pretty=maybe is answered", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const [arg, name] of [["--no-pretty=true", "no-pretty"], ["--no-pretty=", "no-pretty"], ["--no-force=false", "no-force"]]) {
+      expect(() => parseArgs(["bob", "hi", arg], send.options, idSlot(send), { command: "send", text: true }), arg).toThrow(new CliError("usage", `--${name} takes no value`));
+    }
+    expect(() => parseArgs(["--pretty=maybe"], {})).toThrow(new CliError("usage", "--pretty takes no value"));
+  });
+
+  // A word whose length is more than 2 away from a name's is more than 2 edits away from it: no distance is worked out.
+  // Before, a 100,000-character text that starts with a dash took over a second to be refused (a table per name).
+  it("refuses a long word that starts with a dash as fast as a short one", () => {
+    const send = TEXT_COMMANDS.send, long = `-${"a".repeat(100_000)}`;
+    const started = performance.now();
+    expect(() => parseArgs(["bob", long], send.options, idSlot(send), { command: "send", text: true })).toThrow(/^Unknown option -a+ for ghostly send/);
+    expect(nearest(long.slice(1), Object.keys(COMMANDS))).toBeUndefined();
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(nearest(`wait${"x".repeat(2)}`, ["wait", "wai"])).toBe("wait");
+  });
+
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
     const spec = { force: { type: "boolean" as const, description: "" }, mention: { type: "list" as const, description: "" } };
     expect(parseArgs(["-p", "bot", "g", "--mention", "a", "--no-force", "--mention", "b", "--pretty"], spec).options).toEqual({ profile: "bot", mention: ["a", "b"], force: false, pretty: true });
@@ -102,6 +154,30 @@ describe("the argument parser", () => {
     // `listen` parses with its own spec in main.ts, through the same parser.
     expect(() => parseArgs(["--since", ""], { since: { type: "number", description: "" } })).toThrow(/^--since takes a number, not ""$/);
     expect(parseArgs(["--left", "0"], COMMANDS["usage send"].options!).options).toEqual({ left: 0 });
+  });
+
+  it("refuses a word a flag does not take as a usage error that names the flag and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "network must be one of mainnet, testnet".
+    const refused = (name: string, argv: string[], message: string) => {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", message));
+    };
+    for (const name of ["wallet list", "wallet history", "wallet create", "wallet remove", "wallet address", "wallet receive", "pay", "chat pay", "chat request", "lightning default"])
+      refused(name, ["--network", "weird"], "--network takes mainnet or testnet, not \"weird\"");
+    refused("wallet list", ["--network=Testnet"], "--network takes mainnet or testnet, not \"Testnet\"");
+    refused("wallet list", ["--network", ""], "--network takes mainnet or testnet, not \"\"");
+    refused("send", ["--wait", "weird"], "--wait takes none, sent or delivered, not \"weird\"");
+    refused("group send", ["--wait", "delivered"], "--wait takes none or sent, not \"delivered\"");
+    refused("edit", ["--wait", "sent"], "--wait takes none or confirmed, not \"sent\"");
+    refused("task update", ["t", "--wait", "delivered"], "--wait takes none, confirmed or sent, not \"delivered\"");
+    refused("chat wait", ["--until", "weird"], "--until takes live, text or paired, not \"weird\"");
+    refused("chat request", ["1", "--rail", "onchain"], "--rail takes cashu or lightning, not \"onchain\"");
+    refused("chat request", ["1", "--method", "weird"], "--method takes cashu, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat pay-request", ["p", "--via", "cashu"], "--via takes lightning, not \"cashu\"");
+    // The words each takes still go through as given.
+    expect(parseArgs(["--network", "mainnet"], COMMANDS["wallet list"].options!).options).toEqual({ network: "mainnet" });
+    expect(parseArgs(["--wait=delivered"], TEXT_COMMANDS.send.options!).options).toEqual({ wait: "delivered" });
+    expect(parseArgs(["--until", "paired"], COMMANDS["chat wait"].options!).options).toEqual({ until: "paired" });
   });
 
   it("moves global options given before the command after it", () => {
@@ -154,6 +230,32 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["file accept"], [])).toThrow(/Missing <file>/);
     expect(() => positionals(COMMANDS["file accept"], ["a", "b", "c"])).toThrow(/Too many/);
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
+  });
+
+  it("refuses a word an argument does not take as a usage error that names the argument and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "type must be one of cashu, lightning, …".
+    const refused = (name: string, values: string[], message: string) =>
+      expect(() => positionals(COMMANDS[name], values), `${name} ${values.join(" ")}`).toThrow(new CliError("usage", message));
+    const types = "cashu, lightning, arkade, bark, spark, bitcoin, fedimint or usdt";
+    for (const name of ["wallet create", "wallet remove", "wallet faucet"]) refused(name, ["weird"], `<type> takes ${types}, not "weird"`);
+    refused("wallet create", ["Cashu"], `<type> takes ${types}, not "Cashu"`);
+    refused("wallet address", ["cashu"], "<type> takes bitcoin, arkade, spark or usdt, not \"cashu\"");
+    refused("chat accept", ["bob", "weird"], "<method> takes cashu, lightning, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat transport", ["bob", "weird"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"weird\"");
+    refused("chat transport", ["bob", "constructor"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"constructor\"");
+    // A missing or "" one is still the missing argument, and the words each takes go through as given.
+    expect(() => positionals(COMMANDS["wallet create"], [""])).toThrow(/^Missing <type>/);
+    expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
+    expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
+    expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat accept"], ["bob"])).toEqual({ chat: "bob" });
+    const accept = (...argv: string[]) => { const c = COMMANDS["chat accept"], parsed = parseArgs(argv, c.options ?? {}); return c.params!(parsed, positionals(c, parsed.positionals)); };
+    // With no method it asks what the chat takes; --off or --networks there would change nothing without a word.
+    expect(accept("bob")).toEqual({ chat: "bob" });
+    expect(() => accept("bob", "--off")).toThrow(new CliError("usage", "--off and --networks change one method: ghostly chat accept <chat> <method> [--off] [--networks mainnet,testnet]"));
+    expect(() => accept("bob", "--networks", "testnet")).toThrow(/^--off and --networks change one method/);
+    expect(accept("bob", "cashu", "--off")).toEqual({ chat: "bob", method: "cashu", on: false, networks: undefined });
+    expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
@@ -234,6 +336,8 @@ describe("the argument parser", () => {
     usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
     expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
     expect(params("call auto", ["off"])).toEqual({ on: false });
+    // The help names what --from takes: a name the contact chose is refused there.
+    expect(COMMANDS["call auto"].options?.from.description).toMatch(/id.*key.*label.*chat rename/);
     // "" (an unset variable in a script) names no chat: before, it was a prefix of every id and took the only chat.
     usage("forward", ["bob", "m1", "--to", ""], "--to \"\" names no chat or group");
     usage("forward", ["bob", "m1", "--to", "alice", "--to", "group:"], "--to \"group:\" names no chat or group");
@@ -274,7 +378,62 @@ describe("the argument parser", () => {
       usage(name, [target, "--stop", "--for", "30"], "--for keeps it on: not with --stop");
       expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
+      // A kind no typing takes: before, the API answered after the profile opened ("kind must be one of …", exit 1).
+      usage(name, [target, "--kind", "foo"], "--kind takes typing, recording or thinking, not \"foo\"");
+      usage(name, [target, "--kind", ""], "--kind takes typing, recording or thinking, not \"\"");
+      expect(COMMANDS[name].options!.kind.choices).toEqual(TYPING_KINDS);
+      expect(params(name, [target, "--kind", "recording"])).toMatchObject({ kind: "recording" });
     }
+    // A rate no call takes: before, the API's own check answered after the profile opened ("rate must be …", exit 1),
+    // and `call answer` only once a call rang.
+    for (const [name, argv] of [["call start", ["alice"]], ["call answer", []], ["call answer", ["alice"]], ["call auto", ["on"]]] as const) {
+      usage(name, [...argv, "--rate", "44100"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 44100");
+      usage(name, [...argv, "--rate", "0"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 0");
+      expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
+      expect(params(name, [...argv])).toMatchObject({ rate: undefined });
+    }
+    // A hold, a page or a wait out of the API's range: before, the API's own check answered once the profile had opened
+    // (a one-shot went online first), exit 1 in its parameter's words ("hold must be a number from 0 to 10080").
+    for (const hold of ["-5", "999999"]) usage("chat disconnect", ["bob", "--hold", hold], `--hold takes a number of minutes from 0 to 10080, not ${hold}`);
+    expect(params("chat disconnect", ["bob", "--hold", "0"])).toEqual({ chat: "bob", hold: 0 });
+    expect(params("chat disconnect", ["bob", "--hold", "10080"])).toEqual({ chat: "bob", hold: 10080 });
+    for (const [name, argv] of [["chat history", ["bob"]], ["group history", ["g1"]], ["wallet history", []]] as const) {
+      for (const limit of ["0", "-3", "2.5", "10001"]) usage(name, [...argv, "--limit", limit], `--limit takes a whole number from 1 to 10000, not ${limit}`);
+      expect(params(name, [...argv, "--limit", "10000"])).toMatchObject({ limit: 10000 });
+    }
+    for (const [name, argv] of [["chat wait", ["bob"]], ["file wait", ["f1"]], ["file save", ["f1", "--wait"]]] as const) {
+      for (const timeout of ["0", "999999"]) usage(name, [...argv, "--timeout", timeout], `--timeout takes a number of seconds from 1 to 86400, not ${timeout}`);
+      expect(params(name, [...argv, "--timeout", "86400"])).toMatchObject({ timeout: 86400 });
+    }
+    for (const [name, argv] of [
+      ["button press", ["bob", "m1", "yes"]], ["button update", ["bob", "m1", "--close"]], ["forward", ["bob", "m1", "--to", "alice"]],
+      ["routine send", ["bob", "--name", "Backup", "--schedule", "daily"]], ["routine update", ["bob", "r1"]],
+      ["task send", ["bob", "--title", "Build"]], ["task update", ["bob", "t1"]], ["usage send", ["bob", "--left", "40"]],
+    ] as const) {
+      for (const timeout of ["0", "3601"]) usage(name, [...argv, "--wait", "sent", "--timeout", timeout], `--timeout takes a number of seconds from 1 to 3600, not ${timeout}`);
+      expect(params(name, [...argv, "--timeout", "3600"])).toMatchObject({ timeout: 3600 });
+    }
+    usage("events", ["--since", "-1"], "--since takes a seq from 0 up, not -1");
+    usage("events", ["--since", "1.5"], "--since takes a seq from 0 up, not 1.5");
+    expect(params("events", [])).toEqual({ since: 0 });
+    expect(params("events", ["--since", "7"])).toEqual({ since: 7 });
+    // A voice note's length or waveform out of range: before, the API answered after the profile opened (exit 1,
+    // "voice must be a number from 1 to 9007199254740991" or one sentence for every case), and --peaks alone was dropped.
+    const voice = "--voice takes a length in milliseconds from 1 to 900000 (15 minutes), not";
+    usage("file send", ["alice", "a.wav", "--voice", "0"], `${voice} 0`);
+    usage("file send", ["alice", "a.wav", "--voice", "-5"], `${voice} -5`);
+    usage("file send", ["alice", "a.wav", "--voice", "2.5"], `${voice} 2.5`);
+    usage("file send", ["alice", "a.wav", "--voice", "1000000"], `${voice} 1000000`);
+    const peaks = "--peaks takes up to 128 numbers from 0 to 255, comma-separated, not";
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,2,999"], `${peaks} "1,2,999"`);
+    usage("file send", ["alice", "a.wav", "--voice", "2000", "--peaks", "a,b"], `${peaks} "a,b"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,,2"], `${peaks} "1,,2"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
+    usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
+    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
@@ -348,7 +507,12 @@ describe("errors", () => {
     for (const code of ["hostTimedOut", "networkTimedOut"] as const) expect(asCliError(engineError(code, host)).code, code).toBe("timeout");
     for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
     for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
+    // A mint that refused a Lightning payment at once: nothing left the wallet, its own words kept at the end (agents#2253).
+    expect(asCliError(engineError("lightningRefused", { reason: "Lightning payment failed: no route" })).toJSON()).toEqual({ code: "refused", message: "The mint refused this Lightning payment, and no sats left your wallet: it is safe to try again. The mint said: Lightning payment failed: no route" });
     expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
+    // A contact with no wallet was `engine`, telling both sides to update the same release: what to do, and a reason to branch on.
+    expect(asCliError(engineError("contactNoWallet")).toJSON()).toEqual({ code: "refused", message: "Your contact has no wallet yet: they need one to pay or be paid (on a CLI: ghostly wallet create cashu)", details: { reason: "contact_no_wallet" } });
+    expect(asCliError(engineError("contactNoPayments")).toJSON()).toEqual({ code: "refused", message: "Your contact has payments off in this chat, or needs an updated Ghostly", details: { reason: "contact_payments_off" } });
     // One the table does not name stays the engine's, in its words.
     expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });
@@ -364,9 +528,34 @@ describe("errors", () => {
     expect(asCliError(new Error("The file is gone")).code).toBe("engine");
   });
 
+  it("say a change the full disk could not take as unavailable, in the store's words", () => {
+    // A daemon on a full disk answered done for a settings change, a chat's label, that a restart then lost.
+    const store = Object.assign(new DOMException("No room left on the disk of /home/x/store: free some space, then try again", "QuotaExceededError"), { cause: new Error("ENOSPC") });
+    expect(asCliError(store).toJSON()).toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    // As the engine's `committed` hands it on: its own words, the store's as the cause.
+    expect(asCliError(Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError", cause: store })).toJSON())
+      .toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    expect(asCliError(new DOMException("", "QuotaExceededError")).code).toBe("unavailable");
+  });
+
   it("say a contact that could not be reached as unavailable, not as the engine failing", () => {
     // `chat pay` / `chat connect` to a contact that never answers: the link's GhostlyHttpError "unreachable".
     expect(asCliError(new GhostlyHttpError("unreachable", "Could not connect to the peer")).toJSON()).toEqual({ code: "unavailable", message: "Could not connect to the peer" });
     expect(asCliError(new GhostlyHttpError("closed", "Connection closed")).code).toBe("engine");
+  });
+
+  // A member's admin-only group commands and an invitation already answered were `engine` (exit 1), the code for the
+  // engine failing: a bot could not tell "you are not allowed" from a crash. The engine's own words, as thrown.
+  it("say a group refusal as refused, and an invite into a community as a wrong request", () => {
+    for (const message of [
+      "Only the admin can rename the group", "Only the admin can change the members of this group", "Only the admin can renew the group's secret",
+      "Only the admin can hand the admin role over", "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
+      "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
+      "No invitation to accept", "No invitation to decline",
+      // A removed member's (or a former admin's) group rename, rotate, remove, admin, hub or picture.
+      "You are no longer in this group",
+    ]) expect(asCliError(new Error(message)).toJSON(), message).toEqual({ code: "refused", message });
+    const community = "Share the group's link with them: anyone who opens it joins";
+    expect(asCliError(new Error(community)).toJSON()).toEqual({ code: "bad_request", message: community });
   });
 });

@@ -1,6 +1,7 @@
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
+import { choose } from "../support/select";
 import { STORE_URL, serveStore, testStore, type TestStore } from "../support/appStore";
 import type { AppViewMode } from "@ghostly/core";
 
@@ -61,6 +62,15 @@ function chessFrame(ana: Peer) {
   return frame;
 }
 
+/**
+ * The app's heading, for `expect.poll`: null until its frame is there. The panel shows before its iframe loads, and a
+ * poll whose callback throws fails at once ("no app frame"), with no second try.
+ */
+function appHeading(ana: Peer): Promise<string | null | undefined> {
+  const frame = ana.page.frames().find((f) => f.url().includes("app-frame"));
+  return frame ? frame.evaluate(() => document.querySelector("h1")?.textContent).catch(() => null) : Promise.resolve(null);
+}
+
 test("on a wide screen the app sits beside the chat, which stays usable", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
   const [ana, bob] = await setUp(peer);
   await ana.page.setViewportSize({ width: 1280, height: 800 });
@@ -75,7 +85,7 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await expect(app.getByTestId("app-connection-options")).toHaveAccessibleName(/Connected · /);
   await expect(app.getByTestId("mini-app-back")).toHaveCount(0);
   await expect(app.locator("iframe")).toBeVisible();
-  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Chess");
+  await expect.poll(() => appHeading(ana)).toBe("Chess");
   await chessFrame(ana).evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
 
   // The chat is still there, beside it, and works: Ana writes, Bob reads.
@@ -107,6 +117,9 @@ test("on a wide screen the app sits beside the chat, which stays usable", { tag:
   await expect(app).toBeVisible();
   await expect(app).toBeFocused();
   await expect(app).not.toHaveAttribute("aria-modal");
+  // The dialog stays until the contact was told (the app card): an Escape before that gives the focus back to its Open
+  // button, and the dialog hands it to the message field as it goes (the unit test covers that wait).
+  await expect(ana.page.getByTestId("chat-apps")).toHaveCount(0);
   await ana.page.keyboard.press("Escape");
   await expect(app).toBeHidden();
   await expect(input).toBeFocused();
@@ -126,7 +139,7 @@ test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@
   await expect(app.getByTestId("mini-app-with")).toHaveText("with Bob");
   await expect(app.getByTestId("app-connection-options")).toHaveAccessibleName(/Connected · /);
   await expect(app.getByTestId("mini-app-wide")).toHaveCount(0);
-  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Chess");
+  await expect.poll(() => appHeading(ana)).toBe("Chess");
   const frame = chessFrame(ana);
   await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
 
@@ -160,6 +173,48 @@ test("on a phone the app covers the chat, and Back keeps it running", { tag: ["@
   await expect(app).toBeHidden();
   await expect(resume).toBeFocused();
   expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
+});
+
+test("on a phone the browser's Back with the app over the chat goes back to the chat, as the app's own Back does", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
+  // A phone (touch, 375 × 667 once Chess is installed and Bob paired): the browser's Back, Android's back gesture,
+  // went to the chat list, and the app was still over the chat when it was opened again (agents#2449).
+  const [ana] = await setUp((name) => peer(name, name === "ana" ? { mobile: true, viewport: { width: 1280, height: 800 } } : undefined));
+  await ana.page.setViewportSize({ width: 375, height: 667 });
+  await ana.page.goto("/#/");
+  const chatList = ana.page.getByPlaceholder("Search chats...");
+  await ana.page.getByTestId("chat-row").first().click();
+  await expect(ana.page.getByPlaceholder("Message…")).toBeVisible();
+  const inChat = ana.page.url();
+  expect(inChat).toMatch(/#\/chat\//);
+  await openChess(ana);
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toBeVisible();
+  await expect(app).toHaveAttribute("data-place", "phone");
+  await expect.poll(() => appHeading(ana)).toBe("Chess");
+  const frame = chessFrame(ana);
+  await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
+
+  // The browser's Back: still the chat, the app hidden and one tap away, still running.
+  await ana.page.goBack();
+  await expect(ana.page).toHaveURL(inChat);
+  await expect(app).toBeHidden();
+  await expect(ana.page.getByPlaceholder("Message…")).toBeVisible();
+  const resume = ana.page.getByTestId("mini-app-resume");
+  await expect(resume).toHaveText("Back to Chess");
+  expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
+
+  // "Back to Chess": the same game. The app's own Back still goes back to the chat, and the browser's Back from the chat
+  // is the chat list at once (the entry the app leaves is passed over, lib/layerHistory.ts).
+  await resume.click();
+  await expect(app).toBeVisible();
+  expect(await frame.evaluate(() => (window as unknown as { mark?: number }).mark)).toBe(7);
+  await app.getByTestId("mini-app-back").click();
+  await expect(app).toBeHidden();
+  await expect(resume).toBeVisible();
+  await expect(ana.page).toHaveURL(inChat);
+  await ana.page.goBack();
+  await expect(chatList).toBeVisible();
+  await expect(ana.page).not.toHaveURL(/#\/chat\//);
 });
 
 test("a chat app's Open on the Apps page asks which chat, and opens it there, never alone", { tag: ["@feature:apps.view"] }, async ({ peer }) => {
@@ -226,7 +281,7 @@ test("a full-screen app opened from a chat covers the whole chat on a wide scree
   const pane = (await ana.page.locator(".chat-pane").filter({ has: app }).boundingBox())!, box = (await app.boundingBox())!;
   expect(Math.round(box.width)).toBe(Math.round(pane.width));
   await expect(app.getByTestId("mini-app-back")).toBeFocused();
-  await expect.poll(() => chessFrame(ana).evaluate(() => document.querySelector("h1")?.textContent)).toBe("Browser");
+  await expect.poll(() => appHeading(ana)).toBe("Browser");
   const frame = chessFrame(ana);
   await frame.evaluate(() => { (window as unknown as { mark: number }).mark = 7; });
 
@@ -270,4 +325,80 @@ test("a full-screen app opened from a chat on a phone covers the screen, with Ba
   await app.getByTestId("mini-app-back").click();
   await expect(app).toBeHidden();
   await expect(ana.page.getByTestId("mini-app-resume")).toHaveText("Back to Browser");
+});
+
+/**
+ * Ana with Lock after 1 minute, in a full-screen app opened alone; with `clock`, on a clock the test drives (the page's
+ * and the app's frame's).
+ */
+async function inAppWithLock(peer: (name: string) => Promise<Peer>, entry: string, clock = true) {
+  const store = await testStore({ view: "full", title: "Notes", tagline: "A page to write on", entry });
+  const ana = await peer("ana");
+  await serveStore(ana.context, store);
+  await install(ana, store);
+  // From here the test drives the clock of the page and of the app's frame: the person plays longer than the lock time.
+  if (clock) {
+    await ana.page.clock.install();
+    await ana.page.reload();
+  }
+  // Lock after 1 minute.
+  await ana.page.goto("/#/settings");
+  await ana.page.getByRole("switch", { name: "Lock Screen" }).click();
+  const passwords = ana.page.getByTestId("settings-password-form").locator("input[type=password]");
+  await passwords.nth(0).fill("spooky");
+  await passwords.nth(1).fill("spooky");
+  await ana.page.getByRole("button", { name: "Set password" }).click();
+  await expect(ana.page.getByText("Password set successfully")).toBeVisible();
+  await choose(ana.page.getByTestId("settings-timeout"), "1");
+
+  await ana.page.getByTestId("account-apps").click();
+  await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+  const app = ana.page.getByTestId("mini-app");
+  await expect(app).toHaveAttribute("data-place", "alone");
+  const notes = app.frameLocator("iframe").getByTestId("notes");
+  // The runner's start waits on timers of its own.
+  await expect.poll(async () => { if (clock) await ana.page.clock.runFor(100); return notes.isVisible(); }).toBe(true);
+  return { ana, app, notes };
+}
+
+const NOTES = "<!doctype html><meta charset=utf-8><title>Notes</title><body><textarea data-testid=notes></textarea>";
+
+test("taps and keys in an app keep the lock away while the person plays it; left alone, it locks", { tag: ["@feature:apps.view", "@feature:settings.lock.idle"] }, async ({ peer }) => {
+  const { ana, app, notes } = await inAppWithLock(peer, NOTES);
+
+  // Two minutes of play, twice the lock time, in the app alone: the Ghostly page around it hears none of it.
+  for (const move of ["e4", "Nf3", "Bc4"]) {
+    await notes.click();
+    await notes.pressSequentially(move);
+    await ana.page.clock.runFor(40_000);
+    await expect(ana.page.getByText("Ghostly is locked")).toHaveCount(0);
+  }
+  await expect(notes).toHaveValue("e4Nf3Bc4");
+
+  // Left alone, the lock comes, and the app stops with it.
+  await ana.page.clock.runFor(65_000);
+  await expect(ana.page.getByText("Ghostly is locked")).toBeVisible();
+  await expect(app).toHaveCount(0);
+});
+
+test("an app that says `activity` by itself does not keep the lock away once the person has left it", { tag: ["@feature:apps.view", "@feature:settings.lock.idle"] }, async ({ peer }) => {
+  // On the real clock, a minute of it: the test's own calls into the page (the clock's runFor included) count as the
+  // person's activation of it, so nothing is asked of the page while the person is away.
+  test.setTimeout(240_000);
+  // The app takes the runner's port from its first call (it runs in the runner's realm) and says `activity` on it every
+  // 3 seconds, input or not.
+  const { ana, app, notes } = await inAppWithLock(peer, `${NOTES}<script>
+    const post = MessagePort.prototype.postMessage;
+    let port = null;
+    MessagePort.prototype.postMessage = function (...args) { port = this; return post.apply(this, args); };
+    void ghostly.context().catch(() => {});
+    let id = 1e6;
+    setInterval(() => { if (port) post.call(port, { id: id++, type: "activity", args: [] }); }, 3000);
+  </script>`, false);
+  await notes.click();
+  await notes.pressSequentially("e4");
+  // The person walks away with the app in front, past the lock time.
+  await ana.page.waitForTimeout(75_000);
+  await expect(ana.page.getByText("Ghostly is locked")).toBeVisible({ timeout: 1000 });
+  await expect(app).toHaveCount(0);
 });

@@ -1,5 +1,5 @@
 import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
-import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
+import type { ClientMessage, EngineEvent, RpcResponse } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
@@ -11,7 +11,8 @@ import type { CallMedia } from "@ghostly/core";
  * the web app runs it in the page. Everything else is shared.
  */
 export interface EngineConnection {
-  send(request: RpcRequest): void;
+  /** An engine call, or an ask for a chat's whole history (`HistoryRequest`). */
+  send(request: ClientMessage): void;
 }
 
 /**
@@ -27,6 +28,11 @@ export interface UpdateSource {
   check(): Promise<FoundUpdate | null>;
   /** Never called for `apply: "manual"`. `onProgress` is used where the platform reports it. */
   install(update: FoundUpdate, onProgress?: (fraction: number) => void): Promise<void>;
+  /**
+   * Calls `listener` when a file of this build is gone from the server (the web app's worker got a 404 for one), so
+   * the app checks at once. Returns what stops listening. Left out where the host cannot tell.
+   */
+  onBuildGone?(listener: () => void): () => void;
 }
 
 export interface BrowserHost {
@@ -69,9 +75,25 @@ export interface BrowserHost {
    * which the desktop app has Rust ask about in a native dialog.
    */
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
-  /** The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach). */
+  /**
+   * The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach; the extension
+   * gives Chrome back `localAccessPattern(origin)` once no profile shares an app at that host, on any port).
+   */
   forgetLocalAccess?(origin: string): Promise<void>;
-  openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
+  /**
+   * A profile's shared apps all went at once ("Clear all data", a profile deleted): the host gives back the local
+   * access no profile on this device still needs. The extension's host permissions are every profile's at once.
+   */
+  releaseUnusedLocalAccess?(): Promise<void>;
+  /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
+  openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
+  /**
+   * Erases what the contacts' apps opened from one chat (`tag`, as `openService` was given it) or by one profile
+   * (`profile`, its id) kept on this device: their origins' storage, caches and worker. The web app clears its own
+   * origins, Desktop has Rust clear its viewers' (`forget_service_origins`); left out by the extension, which names
+   * theirs apart.
+   */
+  forgetServices?(which: { tag: string } | { profile: string }): Promise<void>;
   /**
    * Opens a `lightning:` or `bitcoin:` link in a wallet on this device. Left out where a plain link
    * already does it (a web page); the desktop app and the extension have to hand it to the system.
@@ -123,9 +145,17 @@ export interface BrowserHost {
   /**
    * Keeps the computer from sleeping while idle, or lets it sleep again ("Keep this computer awake", WISP 06 § User
    * experience): the desktop app, so a phone can take the profile over while the person is out. Resolves to whether
-   * it is held now. Left out where the platform cannot (a web page, the extension).
+   * it is held now. Left out where the platform cannot (a web page, the extension). `files`: a file on its way is
+   * (one of) the reasons; the Android app holds only for that, a foreground service with its notification, as Android
+   * freezes an app out of sight otherwise.
    */
-  keepAwake?(on: boolean): Promise<boolean>;
+  keepAwake?(on: boolean, files: boolean): Promise<boolean>;
+  /**
+   * Keeps the app out of the system's app switcher picture while the app lock is on (`on`), or lets it be taken again:
+   * the Android app, whose switcher takes its picture before the page hears it is going, so the lock's cover comes too
+   * late for it. Left out where the page's cover is enough.
+   */
+  hideFromSwitcher?(on: boolean): Promise<void>;
 }
 
 /** One approval's cookie session, outside the page: its cookies never reach the page, and `close` forgets them. */
@@ -157,6 +187,25 @@ export function setBrowserHost(host: BrowserHost): void {
 export function getBrowserHost(): BrowserHost {
   if (!current) throw new Error("No browser host configured");
   return current;
+}
+
+/**
+ * The extension's host permission for a local origin (`http://127.0.0.1:3400` is `http://127.0.0.1/*`): one host on
+ * every port, as Chrome takes it. What `requestLocalAccess` asks for, and what the extension later gives back.
+ */
+export function localAccessPattern(origin: string): string {
+  const url = new URL(origin);
+  return `${url.protocol}//${url.hostname}/*`;
+}
+
+/** `releaseUnusedLocalAccess` of the host, where it has one: never throws. */
+export async function releaseUnusedLocalAccessOf(): Promise<void> {
+  await current?.releaseUnusedLocalAccess?.().catch(() => {});
+}
+
+/** `forgetServices` of the host, where it has one: never throws (no host, or one that failed, holds nothing up). */
+export async function forgetServicesOf(which: { tag: string } | { profile: string }): Promise<void> {
+  await current?.forgetServices?.(which).catch(() => {});
 }
 
 /**

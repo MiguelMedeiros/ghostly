@@ -1,4 +1,4 @@
-import { INVITE_TAKEN } from "@ghostly/core";
+import { INVITE_TAKEN, isZ32Key, type PairedTransport } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
@@ -20,6 +20,8 @@ export interface ApiContext {
   version: string;
   /** The daemon asks to stop (answered first). */
   stop?: () => void;
+  /** The daemon is a `listen` that found none and runs the profile itself: a stop ends that listen too. */
+  listen?: true;
 }
 
 export type Params = Record<string, unknown>;
@@ -82,8 +84,19 @@ export function oneOf<T extends string>(params: Params, name: string, values: re
 
 // ---------- finding things ----------
 
-/** A contact key as chats show it (`peer`): 52 characters of z-base-32. */
-export const CONTACT_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+const KEY_SHAPED = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+/**
+ * A contact key as chats show it (`peer`): 52 characters of z-base-32, in its one canonical spelling. The same 52
+ * characters with the last one respelled decode to the same bytes but are no key (WISP 02): refused here, so that
+ * they never fall through to a chat's name, which its contact chooses.
+ */
+export const CONTACT_KEY = {
+  test(ref: string): boolean {
+    if (isZ32Key(ref)) return true;
+    if (KEY_SHAPED.test(ref)) throw new CliError("bad_request", `${JSON.stringify(ref)} is not a contact key: a key has one spelling, and its last character is not this one`);
+    return false;
+  },
+};
 
 /**
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
@@ -105,7 +118,7 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
     const byKey = links.filter((link) => link.peerPubKeyZ32 === ref);
     if (byKey.length === 1) return { link: byKey[0], theirName: false };
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
-    throw new CliError("not_found", `No chat with ${JSON.stringify(ref)}`);
+    throw new CliError("not_found", `No chat with ${JSON.stringify(ref)} (ghostly chat list)`);
   }
   const lower = ref.toLowerCase();
   const named = (name: string | null | undefined) => name?.trim().toLowerCase() === lower;
@@ -113,7 +126,23 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
   const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
   if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
   if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
-  throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);
+  throw new CliError("not_found", `No chat ${JSON.stringify(ref)} (ghostly chat list)`);
+}
+
+/**
+ * `findChat` for a grant the daemon keeps acting on (`call auto on --from`): only the chat's id, its contact's key or the
+ * label this side gave it name the chat. A prefix of its id or the name its contact gave itself is refused, with the
+ * chat it found: the contact chose those, so another contact could take the grant by calling itself that name.
+ */
+export function findOwnNamedChat(links: readonly LinkView[], ref: string): LinkView {
+  const chat = chatBy(links, ref);
+  if (chat.theirName) throw namedByThem(ref, { chat: chat.link.id, name: chat.link.peerNick ?? null, contact: chat.link.peerPubKeyZ32 });
+  return chat.link;
+}
+
+/** `findOwnNamedChat`'s refusal: `ref` found `chat` only by what its contact chose. */
+export function namedByThem(ref: string, chat: { chat: string; name: string | null; contact: string | undefined }): CliError {
+  return new CliError("bad_request", `${JSON.stringify(ref)} names a chat only by what its contact chose (a prefix of its id, its own name): use the chat's id, its contact's key or a label given here (ghostly chat rename <chat> <name>)`, chat);
 }
 
 /** Only an invitation so far: this profile is not in the group (yet), and whoever invited chose its name. */
@@ -136,7 +165,7 @@ export function findGroup(groups: readonly GroupView[], ref: string): GroupView 
     if (found.length === 1) return found[0];
     if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
   }
-  throw new CliError("not_found", `No group ${JSON.stringify(ref)}`);
+  throw new CliError("not_found", `No group ${JSON.stringify(ref)} (ghostly group list)`);
 }
 
 /**
@@ -182,13 +211,52 @@ export function inviteTaken(link: LinkView): void {
   if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 
+/**
+ * A chat on DHT only opens no live session: the engine refused `chat connect` as `engine`, "Both peers must choose a
+ * live method first", which read as if this side had to change something. Refused instead, naming whose choice it is
+ * (`details.reason`): the contact's (`peer-dht-only`, nothing to do here but wait), or this side's (`dht-only`).
+ */
+export function dhtOnly(link: LinkView): void {
+  if (link.deliveryMode === "dht") throw new CliError("refused", "This chat is on DHT only on this side: choose a live method first (chat transport auto)", { reason: "dht-only" });
+  if (link.dhtDelivery?.peerMode === "dht") throw new CliError("refused", "Your contact keeps this chat on DHT only: it goes live once they choose a live method. Short texts still go on the DHT", { reason: "peer-dht-only" });
+}
+
+const TRANSPORT_TITLES: Record<PairedTransport, string> = { "webrtc/1": "WebRTC", "iroh/1": "Iroh", "hyperdht/1": "HyperDHT" };
+
+/**
+ * A transport the chat's Connection menu offers: one this app runs (on DHT only, one it can start), and the contact's
+ * app too, by its last word. `chat transport` took any: toward a contact with no WebRTC (`GHOSTLY_WEBRTC=0`) the choice
+ * was kept and the chat stayed where it was, saying nothing; for one this app lacks, the engine answered `engine`,
+ * "Transport unavailable". Refused instead, saying whose app lacks it (`details.reason`, as a chat's wait says it).
+ */
+export function transportOffered(link: LinkView, transport: PairedTransport): void {
+  const mine = (link.deliveryMode === "dht" ? link.runnableTransports : undefined) ?? link.availableTransports;
+  const title = TRANSPORT_TITLES[transport], error = link.transportErrors?.[transport];
+  if (mine && !mine.includes(transport)) throw new CliError("refused", `This app has no ${title} running${error ? `: ${error}` : ""}`, { reason: "app-lacks", transport });
+  if (link.peerTransports?.length && !link.peerTransports.includes(transport)) throw new CliError("refused", `Your contact's app doesn't have ${title}: choose another, or auto`, { reason: "contact-lacks", transport });
+}
+
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
 export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
   const found = findChatOrGroup(state(ctx).links, state(ctx).groups, ref);
   return "group" in found ? { id: found.group.id, linkId: `group:${found.group.id}`, group: true } : { id: found.link.id, linkId: found.link.id, group: false };
 }
 
-export const groupOf = (ctx: ApiContext, params: Params) => findGroup(state(ctx).groups, str(params, "group", true));
+/**
+ * The group a group command names. A chat's id, key or name says it is a chat, with `twin`, the chat command that takes
+ * it (`group send` on a chat, where `send` is meant; `<chat>` stands for the ref), else where the groups are listed.
+ * It read "No group" before. A name nothing has stays that error.
+ */
+export function groupOf(ctx: ApiContext, params: Params, twin?: string): GroupView {
+  const ref = str(params, "group", true);
+  try { return findGroup(state(ctx).groups, ref); } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    let chat: LinkView;
+    try { chat = findChat(state(ctx).links, ref); } catch { throw error; }
+    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a chat, not a group${twin ? `: ghostly ${twin.replace("<chat>", shown)}` : " (ghostly group list)"}`, { chat: chat.id });
+  }
+}
 
 /**
  * A message of a chat or a group (`group:<id>`) named by its id here, read as one row; only a name that is no such
@@ -204,14 +272,19 @@ export async function messageOf(ctx: ApiContext, linkId: string, ref: string, ke
 
 // ---------- waiting ----------
 
-/** Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. */
+/**
+ * Resolves with `check`'s first defined answer: now, or on a later state; `timeout` error after `ms`. A check that
+ * throws on a later state (`chat wait`'s chat removed) ends the wait with its error: the hub swallows what its
+ * listeners throw, and the wait went on to its timeout.
+ */
 export function waitForState<T>(ctx: ApiContext, check: (state: EngineState) => T | undefined, ms: number, what: string): Promise<T> {
   const now = check(state(ctx));
   if (now !== undefined) return Promise.resolve(now);
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => { off(); reject(new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s waiting for ${what}`)); }, ms);
     const off = ctx.hub.onState((next) => {
-      const value = check(next);
+      let value: T | undefined;
+      try { value = check(next); } catch (error) { clearTimeout(timer); off(); reject(error); return; }
       if (value === undefined) return;
       clearTimeout(timer);
       off();

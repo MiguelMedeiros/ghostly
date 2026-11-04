@@ -1,5 +1,5 @@
 import { expect, vi } from "vitest";
-import { GhostLink, chatAppId, createIdentity, createLink, identityFromSeedB64, toZ32, type AppFrameEvent, type PairingState } from "@ghostly/core";
+import { GhostLink, chatAppId, createIdentity, createLink, identityFromSeedB64, toZ32, type AppFrameEvent, type GhostLinkOptions, type PairingState } from "@ghostly/core";
 import { EngineServer, type EngineClientSink } from "../../src/engine/server";
 import { db } from "../../src/engine/db";
 import type { EngineEvent, RpcResponse } from "../../src/shared/rpc";
@@ -15,7 +15,7 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 
 export type Call = (method: string, params?: unknown) => Promise<unknown>;
 
-export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contactApps = true, beforeLive, appFetch, ref: appRef }: { apps?: boolean | "wire"; contactApps?: boolean; beforeLive?: (call: Call, linkId: string, ref: string) => Promise<void>; appFetch?: typeof fetch; ref?: string } = {}) {
+export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contactApps = true, contact: contactOptions = {}, beforeLive, appFetch, ref: appRef }: { apps?: boolean | "wire"; contactApps?: boolean; contact?: Partial<GhostLinkOptions>; beforeLive?: (call: Call, linkId: string, ref: string) => Promise<void>; appFetch?: typeof fetch; ref?: string } = {}) {
   const net = new FakeNativeNet();
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
@@ -49,7 +49,8 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     appsSupport: contactApps,
-    events: { onPairingState: state => { contactState = state; }, onAppFrame: event => { contactGot.push(event); } },
+    ...contactOptions,
+    events: { onPairingState: state => { contactState = state; }, onAppFrame: event => { contactGot.push(event); }, ...contactOptions.events },
   });
   cleanup.push(async () => { await contact.stop(false); await server.stop(); await db.deleteLink(id); });
   await server.ready;
@@ -66,5 +67,5 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
   // The id as the contact computes it, from its own side of the two pinned keys.
   const app = chatAppId(identityFromSeedB64(theirs).publicKey, identityFromSeedB64(mine).publicKey, ref);
   const appEvents = () => events.filter((e): e is Extract<EngineEvent, { kind: "app-frame" }> => e.kind === "app-frame");
-  return { server, page, call, contact, contactGot, id, ref, app, appEvents, seed: mine };
+  return { server, page, call, contact, contactGot, id, ref, app, appEvents, events, seed: mine };
 }

@@ -26,8 +26,10 @@ let env: NodeJS.ProcessEnv;
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
 
 type AppEvent = { type: string; chat: string; app: string; version?: string; data?: unknown; offline?: boolean };
+/** Each profile's `listen --type app`: the app events are live only, never in the journal. */
+const listeners = new Map<string, Running>();
 /** `dir`'s app events so far, in order. */
-const appEvents = async (dir: string) => (ok(await as(dir, "events")).events as AppEvent[]).filter((e) => e.type.startsWith("app."))
+const appEvents = async (dir: string) => (listeners.get(dir)!.lines as unknown as AppEvent[]).filter((e) => e.type.startsWith("app."))
   .map(({ type, app, version, data }) => ({ type, app, ...(version !== undefined && { version }), ...(data !== undefined && { data }) }));
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, ms = 30_000): Promise<T> {
   const end = Date.now() + ms;
@@ -65,6 +67,9 @@ describe("two bots that serve the same app", { timeout: 180_000 }, () => {
       running.push(daemon);
       await daemon.waitFor((l) => l.daemon === "ready");
       expect(ok(await as(dir, "app", "served"))).toMatchObject({ apps: [{ ref: REF }], offered: true });
+      const listener = new Running(["--home", dir, "listen", "--type", "app"], env);
+      running.push(listener);
+      listeners.set(dir, listener);
     }
     const invite = ok(await as(alice, "invite", "create", "--label", "bob"));
     chatA = invite.chat as string;
@@ -98,5 +103,7 @@ describe("two bots that serve the same app", { timeout: 180_000 }, () => {
     expect(ok(await as(alice, "app", "close", "bob", "chess"))).toMatchObject({ closed: true });
     expect((await until(() => appEvents(bob), (e) => e.length >= 3)).at(-1)).toEqual({ type: "app.closed", app: REF });
     expect(error(await as(bob, "app", "send", "alice", "chess", "1"), "unavailable", 1)).toMatchObject({ details: { reason: "peer-closed" } });
+    // Live only: the journal a replay reads holds none of them.
+    for (const dir of [alice, bob]) expect((ok(await as(dir, "events")).events as AppEvent[]).filter((e) => e.type.startsWith("app."))).toEqual([]);
   });
 });

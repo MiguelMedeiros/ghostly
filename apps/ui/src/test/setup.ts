@@ -56,8 +56,11 @@ beforeEach(() => {
   fakeEngine.reset();
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // A voice message left playing as its bubble went is held by the app, and each message keeps where it stopped: not
+  // into the next test. Imported here, after the test file's mocks are in place.
+  (await import("../lib/nowPlaying")).resetNowPlaying();
   const asked = archiveAsked.splice(0);
   expect(asked, "requests that would have reached the Internet Archive").toEqual([]);
 });

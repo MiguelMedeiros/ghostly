@@ -45,6 +45,14 @@ export function handOut(value: unknown): unknown {
   return value && typeof value === "object" && fresh.delete(value) ? value : structuredClone(value);
 }
 
+/**
+ * Ends a SQLite transaction that failed. SQLite rolls one back itself on some errors (a full disk): the ROLLBACK then
+ * throws "cannot rollback - no transaction is active", which hid the error that mattered (ENOSPC) from the log.
+ */
+export function rollback(db: DatabaseSync): void {
+  try { db.exec("ROLLBACK"); } catch { /* rolled back already */ }
+}
+
 /** rows.db's trees: the stores kept on disk and their indexes, each a tree id in `entries`. */
 export class TreeFile {
   /** The transaction whose writes come now (its rollback log), set by `storage.ts` around each; null for one without. */
@@ -113,7 +121,7 @@ export class TreeFile {
       for (const tree of due) top = Math.max(top, tree.write(upTo));
       this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('applied', max(?, coalesce((SELECT value FROM meta WHERE name = 'applied'), 0)))").run(top);
       this.db.exec("COMMIT");
-    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    } catch (error) { rollback(this.db); throw error; }
     // Only once SQLite has them: a write that failed leaves the layers where reads still find them, for the next try.
     for (const tree of due) tree.settle(upTo);
   }
@@ -136,7 +144,7 @@ export class TreeFile {
     try {
       for (const id of ids) { this.empty.run(id); this.db.prepare("DELETE FROM trees WHERE id = ?").run(id); }
       this.db.exec("COMMIT");
-    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    } catch (error) { rollback(this.db); throw error; }
     for (const tree of this.live) if (!keep.has(tree.id)) this.live.delete(tree);
   }
 

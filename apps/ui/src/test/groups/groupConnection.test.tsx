@@ -6,8 +6,9 @@ import { edgeLabel } from "../../lib/groups";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { groupView, type StatePatch } from "../fakeEngine";
 import { renderApp } from "../render";
+import { everythingOnScreen } from "../onScreen";
 
-// covers: groups.connection, transport.indicator
+// covers: groups.connection, groups.connection.auto-reconnect, transport.indicator
 
 const ME = "me".padEnd(52, "y"), ALICE = "alice".padEnd(52, "y"), BOB = "bob".padEnd(52, "y"), CAROL = "carol".padEnd(52, "y");
 const NOW = Date.now();
@@ -84,6 +85,12 @@ describe("GroupConnection: the header sums up the mesh", () => {
     ["a member reached through a hub", [me, alice(), member({ key: BOB, nick: "Bob", online: true, viaHub: true, edge: edge({ linkId: "edge-b", state: "waiting", lastSeenAt: 0 }) })], {}, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],
     ["only members reached through a hub", [me, member({ key: ALICE, online: true, viaHub: true }), member({ key: BOB, online: true, viaHub: true })], {}, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],
     ["an app with no WebRTC, a member live over Iroh", [me, alice({ transport: "iroh/1" }), bob({ transport: "iroh/1" })], { transport: { protocol: "webrtc/1", relays: [], webrtc: false } }, { kind: "connected", label: "2 of 2 reachable", dot: "bg-accent" }],
+    // Edges that dropped and that the app dials again by itself say so, rather than "Nobody reachable" and a button.
+    ["one member dropped, the app reconnecting by itself", [me, alice({ state: "waiting", reconnecting: true }), bob({ state: "waiting" })], {}, { kind: "waiting", label: "Reconnecting…", dot: "bg-text-muted" }],
+    ["two members dropped, reconnecting", [me, alice({ state: "waiting", reconnecting: true, attempt: 2 }), bob({ state: "connecting", reconnecting: true })], {}, { kind: "waiting", label: "Reconnecting to 2 members…", dot: "bg-text-muted" }],
+    ["a session dropped, reconnecting", [me, alice({ state: "error", error: "Session receive queue full", cause: "session", reconnecting: true }), bob({ state: "waiting" })], {}, { kind: "waiting", label: "Reconnecting…", dot: "bg-text-muted" }],
+    ["some reachable, one reconnecting", [me, alice(), bob({ state: "waiting", transport: undefined, reconnecting: true })], {}, { kind: "partial", label: "1 of 2 reachable · Reconnecting…", dot: "bg-amber-500" }],
+    ["this device offline, a member reconnecting", [me, alice({ state: "waiting", reconnecting: true })], { settings: { online: false } }, { kind: "offline", label: "Offline", dot: null }],
   ])("%s", async (_, members, state, want) => {
     await open(active(members), state);
     expect(header()).toEqual({ kind: want.kind, name: want.label, popover: want.label, tooltip: want.label, dot: want.dot });
@@ -114,6 +121,17 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(screen.queryByText("The member's key did not match")).toBeNull();
     // Honest about transports: WebRTC, and Iroh or HyperDHT with a member that has no WebRTC; no DHT-only delivery.
     expect(screen.getByTestId("group-connection-note")).toHaveTextContent("DHT-only delivery is not offered in groups yet");
+  });
+
+  it("keeps since when a member is away current while it stays open, with no state from the engine", async () => {
+    everythingOnScreen();
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
+    try {
+      await open(active([me, alice(), bob({ state: "waiting", transport: undefined, lastSeenAt: NOW - 5 * 60_000 })]));
+      expect(rows()[1].status).toBe("Not reachable · last seen 5 min ago");
+      await act(() => vi.advanceTimersByTimeAsync(2 * 60_000));
+      expect(rows()[1].status).toBe("Not reachable · last seen 7 min ago");
+    } finally { vi.useRealTimers(); }
   });
 
   it("gives a member's name its own direction, so in a right-to-left app a long English name is cut at its end", async () => {
@@ -190,9 +208,38 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     engine.on("connect", () => { throw new Error("You are offline. Go online before reconnecting."); });
     // Only the member who is down can be reconnected.
     expect(screen.getAllByTestId("group-connection-reconnect")).toHaveLength(1);
+    // Thumb-sized on a phone; the desktop keeps its 32 px.
+    expect(screen.getByTestId("group-connection-reconnect")).toHaveClass("min-h-8", "max-md:min-h-11");
     await user.click(screen.getByTestId("group-connection-reconnect"));
     expect(engine.callsTo("connect")).toEqual([{ linkId: "edge-b" }]);
     expect(await screen.findByRole("alert")).toHaveTextContent("Go online before reconnecting");
+  });
+
+  it("says a dropped member is being reconnected by itself, with its attempt; the icon breathes, and the button only skips the wait", async () => {
+    await open(active([me, alice(), bob({ state: "waiting", transport: undefined, reconnecting: true, attempt: 3, retryAt: NOW + 60_000 }),
+      member({ key: CAROL, nick: "Carol", edge: edge({ linkId: "edge-c", state: "connecting", transport: undefined, reconnecting: true, attempt: 1 }) })]));
+    expect(rows()).toEqual([
+      { key: ALICE, state: "open", status: "Connected · WebRTC" },
+      { key: BOB, state: "waiting", status: "Reconnecting… · attempt 3" },
+      // A first attempt is no count worth saying.
+      { key: CAROL, state: "connecting", status: "Reconnecting…" },
+    ]);
+    expect(header().name).toBe("1 of 3 reachable · Reconnecting to 2 members…");
+    const trigger = screen.getByTestId("group-connection-options");
+    expect(trigger).toHaveAttribute("data-reconnecting", "2");
+    expect(within(trigger).getByTestId("group-connection-icon")).toHaveClass("motion-safe:animate-pulse");
+    // "Retry now", secondary: not the accent of a main action.
+    const retry = screen.getAllByTestId("group-connection-reconnect");
+    expect(retry.map(b => b.textContent)).toEqual(["Retry now", "Retry now"]);
+    expect(retry[0]).not.toHaveClass("text-accent");
+  });
+
+  it("a group at rest does not breathe", async () => {
+    await open(active([me, alice(), bob({ state: "waiting", lastSeenAt: 0 })]));
+    const trigger = screen.getByTestId("group-connection-options");
+    expect(trigger).not.toHaveAttribute("data-reconnecting");
+    expect(within(trigger).getByTestId("group-connection-icon")).not.toHaveClass("motion-safe:animate-pulse");
+    expect(rows()[1].status).toBe("Not reachable · not seen yet");
   });
 
   it("offers no Reconnect for a member reached through a hub", async () => {
@@ -201,6 +248,14 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     // Only Alice, who is really down, can be reconnected.
     expect(screen.getAllByTestId("group-connection-reconnect")).toHaveLength(1);
     expect(within(screen.getAllByTestId("group-connection-member")[0]).getByTestId("group-connection-reconnect")).toBeInTheDocument();
+  });
+
+  it("a private group on hubs says the app links to the admin and the hubs, never that each member is a direct link", async () => {
+    await open({ ...active([me, alice(), bob(), member({ key: CAROL, nick: "Carol", online: true, viaHub: true })]), hubs: { hub: false } });
+    const note = screen.getByTestId("group-connection-note");
+    expect(note).toHaveTextContent("your app links to a few members only: the admin and the group's hubs");
+    expect(note).toHaveTextContent("A hub sees who talks when, not what is said.");
+    expect(note).not.toHaveTextContent("direct");
   });
 
   it("a member this device has no free native connection for says it waits for one", async () => {

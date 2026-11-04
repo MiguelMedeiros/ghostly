@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import type { ReceivedIdentityView } from "@ghostly/browser/shared/types";
-import { chatsByPeer } from "../../lib/identities";
 import { Select } from "../ui/Select";
 import { BadgeMark } from "./BadgeMark";
 import { contactBadges } from "./contactBadges";
 import { contactFace, faceCandidates, setFaceChoice, suggestedFace, useFaceChoice, type ContactFace } from "./contactFace";
 import { loadShownProfiles } from "./markTip";
+import { chatNamesForPeer } from "../../lib/storage";
 import { useI18n } from "../../contexts/I18nContext";
 
 const GHOSTLY_VALUE = "ghostly";
@@ -25,7 +25,7 @@ export function ContactFacePicker({ peerKey, received }: { peerKey: string; rece
   const choice = useFaceChoice(peerKey);
   const candidates = faceCandidates(received);
   const face = contactFace(received, choice);
-  const nickname = chatsByPeer().get(peerKey)?.label?.trim() || undefined;
+  const nickname = chatNamesForPeer(peerKey)?.label?.trim() || undefined;
   const offer = suggestedFace(received, choice, nickname);
   // The profiles the choice is between are read like cards on screen (the engine caches them).
   const good = contactBadges(received, { good: true });

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { NotFoundScene } from "@/components/site/NotFoundScene";
+import { NotFoundLazy } from "@/components/site/NotFoundLazy";
 
 // A title of its own, so a missing page never reads as the home page in a tab or a share.
 export const metadata: Metadata = {
@@ -9,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function NotFound() {
-  return <NotFoundScene />;
+  return <NotFoundLazy />;
 }

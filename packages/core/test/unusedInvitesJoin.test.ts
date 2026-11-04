@@ -15,8 +15,9 @@ afterEach(() => closeWorld());
 it("15 unused invites read a few times a minute between them, and a join on one still goes live", async () => {
   const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
   const made = Array.from({ length: 15 }, () => invitation());
-  // Nothing on screen: each reads at its own pace.
-  const inviters = made.map((m) => open(m.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS }));
+  // One app, nothing on screen: each reads at its own pace.
+  const app = pkarr.transport();
+  const inviters = made.map((m) => open(m.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
   for (const inviter of inviters) inviter.link.setChatActive(false);
   await vi.advanceTimersByTimeAsync(11 * 60_000);
   const before = pkarr.reads;
@@ -26,6 +27,38 @@ it("15 unused invites read a few times a minute between them, and a join on one 
   // A join on the seventh: noticed within the longest wait, and live.
   const joiner = open(made[6].joiner, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
   expect(await untilLive(inviters[6], joiner, UNUSED_INVITE_WAIT_MAX_MS + 30_000)).toBeLessThan(UNUSED_INVITE_WAIT_MAX_MS + 30_000);
+});
+
+/**
+ * Their writes kept the pace the reads left (bug hunt, 2026-10-30): a key and a mailbox every 4 minutes each, for as long as the
+ * app ran. Past its awaiting window an unused invite writes both half as often, and a join on one still goes live.
+ */
+it("15 unused invites write about half as often, and a join 40 minutes later still goes live", async () => {
+  const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+  const made = Array.from({ length: 15 }, () => invitation());
+  const app = pkarr.transport();
+  const inviters = made.map((m) => open(m.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
+  for (const inviter of inviters) inviter.link.setChatActive(false);
+  await vi.advanceTimersByTimeAsync(10 * 60_000);
+  const before = pkarr.publishes;
+  await vi.advanceTimersByTimeAsync(30 * 60_000);
+  // At the heartbeat's pace: 30 keys and mailboxes every 4 minutes, 7.5 writes a minute. Every 8 minutes: 3.75.
+  const perMinute = (pkarr.publishes - before) / 30;
+  expect(perMinute).toBeLessThan(5);
+  expect(perMinute).toBeGreaterThanOrEqual(3);
+  const joiner = open(made[6].joiner, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+  expect(await untilLive(inviters[6], joiner, 210_000)).toBeLessThan(210_000);
+}, 60_000);
+
+it("a joined chat whose inviter never came keeps its 4-minute writes: the inviter, back, looks for them", async () => {
+  const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+  const made = invitation();
+  const joiner = open({ ...made.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+  joiner.link.setChatActive(false); joiner.link.session.setActive(false);
+  await vi.advanceTimersByTimeAsync(15 * 60_000);
+  const before = pkarr.publishes;
+  await vi.advanceTimersByTimeAsync(20 * 60_000);
+  expect(pkarr.publishes - before).toBeGreaterThanOrEqual(8);
 });
 
 /**
@@ -48,7 +81,9 @@ it.each([
     await vi.advanceTimersByTimeAsync(10_000);
     await stopping;
   }
-  const joiners = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS }));
+  // One app holds the 15 joined chats.
+  const app = pkarr.transport();
+  const joiners = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
   // Off screen once joined.
   for (const joiner of joiners) { joiner.link.setChatActive(false); joiner.link.session.setActive(false); }
   await vi.advanceTimersByTimeAsync(11 * 60_000);
@@ -98,14 +133,16 @@ it("15 joined chats whose inviter never answered still read a few times a minute
   const stopping = Promise.all(gone.map((inviter) => inviter.link.stop()));
   await vi.advanceTimersByTimeAsync(10_000);
   await stopping;
-  const joined = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS }));
+  // One app holds the 15 joined chats, before and after its restart.
+  const app = pkarr.transport();
+  const joined = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
   await vi.advanceTimersByTimeAsync(60_000);
   // The inviter's first envelope pinned it: the chat is saved as paired, and opened so again (no pairing progress).
   expect(joined.every((j) => j.pinned.length === 1 && j.dhtState.unanswered === j.dhtState.peerSequence)).toBe(true);
   const closing = Promise.all(joined.map((j) => j.link.stop()));
   await vi.advanceTimersByTimeAsync(10_000);
   await closing;
-  for (const [i, m] of made.entries()) open({ ...m.joiner, old: true }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, credentials: joined[i].credentials, dhtState: joined[i].dhtState });
+  for (const [i, m] of made.entries()) open({ ...m.joiner, old: true }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, credentials: joined[i].credentials, dhtState: joined[i].dhtState, transport: app });
   await vi.advanceTimersByTimeAsync(11 * 60_000);
   const before = pkarr.reads;
   await vi.advanceTimersByTimeAsync(6 * 60_000);

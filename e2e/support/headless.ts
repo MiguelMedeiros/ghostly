@@ -93,6 +93,11 @@ export class HeadlessBot {
     if (existsSync(this.linkTrace)) await info.attach("bot-link-trace.jsonl", { body: readFileSync(this.linkTrace), contentType: "text/plain" });
   }
 
+  /** How many times the daemon offered `call` again on a new connection (packages/cli/src/calls/manager.ts `redial`), as its stderr says. */
+  redials(call: string): number {
+    return this.stderr.split("\n").filter((line) => line.startsWith(`ghostly: call ${call}: `) && line.endsWith(": offering again on a new connection")).length;
+  }
+
   /** The first event that matches, waiting for it. */
   async event(match: (event: Record<string, unknown>) => boolean, ms = 90_000): Promise<Record<string, unknown>> {
     const until = Date.now() + ms;

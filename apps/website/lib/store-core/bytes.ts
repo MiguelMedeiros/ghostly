@@ -122,6 +122,16 @@ export function fromZ32(str: string): Uint8Array {
   return out;
 }
 
+/**
+ * A 32-byte key written as the one z-base-32 spelling `toZ32` produces: 52 characters that decode to 32 bytes and
+ * encode back to the same string. The last character carries four zero padding bits, so each key has exactly one
+ * spelling and keys may be compared as strings (WISP 02). Any other spelling is not a key here.
+ */
+export function isZ32Key(value: unknown): value is string {
+  if (typeof value !== "string" || value.length !== 52) return false;
+  try { return toZ32(fromZ32(value)) === value; } catch { return false; }
+}
+
 export function randomBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);

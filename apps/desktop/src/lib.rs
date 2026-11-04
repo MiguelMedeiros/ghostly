@@ -5,6 +5,12 @@
 // plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
 #[cfg(target_os = "android")]
 mod android;
+// Which of Android's reports have the app look at its network again (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_network;
+// The share another app made on Android, until the page takes it (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_share;
 #[cfg(desktop)]
 mod app_sandbox;
 #[cfg(desktop)]
@@ -20,12 +26,15 @@ mod crypto;
 mod device_state;
 mod diagnostics;
 mod downloads;
+mod dropped_files;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
 mod e2e_driver;
 mod file_store;
 mod file_stream;
+#[cfg(desktop)]
+mod forget_origins;
 #[cfg(desktop)]
 mod fullscreen;
 #[cfg(desktop)]
@@ -59,6 +68,10 @@ mod share;
 mod single_instance;
 #[cfg(test)]
 mod test_support;
+#[cfg(desktop)]
+mod translate;
+#[cfg(desktop)]
+mod translate_models;
 mod turn_network;
 #[cfg(test)]
 mod turn_record;
@@ -69,7 +82,9 @@ mod viewer;
 
 use commands::AppState;
 #[cfg(mobile)]
-use mobile::{app_sandbox, hyperdht, keep_awake, share, viewer};
+use mobile::{
+    app_sandbox, forget_origins, hyperdht, keep_awake, share, translate, translate_models, viewer,
+};
 use pkarr_network::Pkarr;
 use tauri::Manager;
 #[cfg(desktop)]
@@ -110,14 +125,18 @@ macro_rules! commands {
         tauri::generate_handler![
             app_sandbox::app_broker,
             app_sandbox::app_close,
+            app_sandbox::app_focus,
+            app_sandbox::app_focused,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            app_sandbox::app_title,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
             commands::bitcoind_rpc,
+            commands::close_service_windows,
             commands::create_keypair,
             commands::decrypt_text,
             commands::diagnostic_log,
@@ -125,6 +144,7 @@ macro_rules! commands {
             commands::generate_enc_key,
             commands::get_profile,
             commands::get_public_key,
+            commands::hide_from_switcher,
             commands::link_preview_fetch,
             commands::lnd_request,
             commands::local_fetch,
@@ -157,6 +177,7 @@ macro_rules! commands {
             commands::webkit_version,
             device_state::device_state_read,
             device_state::device_state_write,
+            dropped_files::read_dropped_files,
             file_store::file_bytes_append,
             file_store::file_bytes_close,
             file_store::file_bytes_digest,
@@ -171,13 +192,16 @@ macro_rules! commands {
             file_store::file_bytes_usage,
             file_stream::file_bytes_stream_close,
             file_stream::file_bytes_stream_open,
+            forget_origins::forget_service_origins,
             hyperdht::paired_hyperdht_address,
             hyperdht::paired_hyperdht_close,
             hyperdht::paired_hyperdht_connect,
+            hyperdht::paired_hyperdht_parting,
             hyperdht::paired_hyperdht_send,
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
             keep_awake::keep_awake,
+            linked_files::linked_files_entry,
             linked_files::linked_files_forget,
             linked_files::linked_files_list,
             linked_files::linked_files_pick,
@@ -215,8 +239,13 @@ macro_rules! commands {
             paired_transport::paired_iroh_start,
             paired_transport::paired_iroh_stop,
             paired_transport::paired_native_close,
+            paired_transport::paired_native_parting,
             paired_transport::paired_native_send,
             share::share_text,
+            translate::translate_texts,
+            translate_models::translation_download,
+            translate_models::translation_remove,
+            translate_models::translation_status,
             unread_count::native_unread_count,
         ]
     };
@@ -277,6 +306,10 @@ pub fn run() {
         .manage(ViewerState::default())
         .manage(app_sandbox::AppSandboxState::default())
         .manage(hyperdht::HyperState::default())
+        // Translation on this computer, by the runtime downloaded with the first language model (none: not installed).
+        .manage(translate::TranslateState::default())
+        // Its models and the runtime, downloaded only when the person says yes, each file checked against its pin.
+        .manage(translate_models::ModelsState::default())
         .register_asynchronous_uri_scheme_protocol(viewer::SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let label = ctx.webview_label().to_string();
@@ -302,6 +335,9 @@ pub fn run() {
             app_window::on_menu_event(app, event.id().as_ref());
         })
         .on_page_load(on_page_load);
+    // What a contact's app kept, cleared in a hidden window of its origin when the page forgets it.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let builder = builder.manage(forget_origins::ForgetState::default());
 
     // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
     #[cfg(target_os = "android")]
@@ -310,7 +346,7 @@ pub fn run() {
         .manage(android::Incoming::default())
         .manage(android::NotificationTap::default());
 
-    builder
+    let app = builder
         // The Ghostly window stays on the app's own pages, whatever is dropped on it.
         .plugin(navigation::guard())
         .plugin(tauri_plugin_process::init())
@@ -322,12 +358,18 @@ pub fn run() {
         .manage(clipboard_source())
         .manage(paste_source())
         .manage(clipboard::PasteShelf::default())
+        .manage(dropped_files::DroppedFiles::default())
         .setup(|app| {
             // The app's log, where the peer and the Pkarr client say how a link is doing.
             if let Ok(dir) = app.path().app_log_dir() {
                 diagnostics::init(&dir);
             }
             notifications::install(app.handle());
+            #[cfg(target_os = "linux")]
+            {
+                let app = app.handle().clone();
+                exit_on_signals(move || app.exit(0));
+            }
             // Files sent and received in chats, one folder per profile.
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
             app.manage(local_access::LocalAccess::load(
@@ -350,6 +392,8 @@ pub fn run() {
                 microphone::install(&main);
                 // A file is saved through the app's own Save only, never by the WebView's own menu.
                 downloads::install(&main);
+                // A file dragged in from a file manager reaches the chat (WebKitGTK hands the page its address only).
+                dropped_files::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {
@@ -387,8 +431,12 @@ pub fn run() {
         )
         .invoke_handler(only_main(commands!()))
         .build(context)
-        .expect("error while running tauri application")
-        .run(on_run_event);
+        .expect("error while running tauri application");
+    // Before any window (they are made when the app runs): the files a contact's app forgotten last time left behind,
+    // which WebKit no longer holds open now.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    forget_origins::clean_at_launch(app.handle());
+    app.run(on_run_event);
 }
 
 /// Android: rustls-platform-verifier checks every HTTPS certificate with Android's own verifier, through the JVM, and
@@ -425,15 +473,31 @@ fn on_page_load<R: tauri::Runtime>(
     }
 }
 
-/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`).
+/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`);
+/// its apps' file dialogs: let go. The app windows it opened close (`app_sandbox::page_started`), and so do the
+/// windows of its contacts' apps (`viewer::close_all`): the page there now would answer them for another profile.
+/// The tokens it got to play stored files stop serving them (`StreamGrants::close_all`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app_sandbox::page_started(app);
+    viewer::close_all(app);
+    if let Some(grants) = app.try_state::<file_stream::StreamGrants>() {
+        grants.close_all();
+    }
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
         transports.page_started();
     }
     if let Some(hyperdht) = app.try_state::<hyperdht::HyperState>() {
         hyperdht.page_started();
     }
+    // Its apps' file dialogs, still on screen: they keep nothing (`LinkedFiles::page_started`).
+    if let Some(links) = app.try_state::<linked_files::LinkedFiles>() {
+        links.page_started();
+    }
+    // The cookie jars of its Pubky approvals, which it can no longer close (`pubky_session::page_started`).
+    pubky_session::page_started();
+    // Its cameras, microphone meters and calls (Linux): stopped, and its device watch no longer told.
+    native_call::page_started();
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
@@ -454,12 +518,37 @@ fn depart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
         return false;
     }
     let _ = page.eval("window.dispatchEvent(new Event('ghostly-departing'))");
+    part(app);
     true
+}
+
+/// What the page left to be said for it on its sessions as the app goes (a call's hang-up), said now by the
+/// transports themselves: a logout or a shutdown signals WebKit's processes with the app, and the page's own goodbye
+/// then never runs. Said again by the page, it is one the contact already heard (`PairedCalls.parting`, in core).
+fn part<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    let Some(transports) = app.try_state::<paired_transport::TransportState>() else {
+        return;
+    };
+    let transports = transports.inner().clone();
+    #[cfg(desktop)]
+    let hyperdht = app
+        .try_state::<hyperdht::HyperState>()
+        .map(|state| state.inner().clone());
+    tauri::async_runtime::spawn(async move {
+        #[cfg(desktop)]
+        if let Some(hyperdht) = hyperdht {
+            hyperdht.part().await;
+        }
+        transports.part().await;
+    });
 }
 
 /// A window asked to close. The Ghostly window on a Mac hides (`app_window`). On Linux and Windows its close ends the
 /// app, and the exit that follows comes after Tauri has dropped the window and its page: the close itself is held for
-/// `DEPART_MS` while the page says goodbye, then made again.
+/// `DEPART_MS` while the page says goodbye, then made again, and the app exits with it. Tauri ends the app only after
+/// its last window, and an installed app's window or a viewer (`app-*`, `svc-*`) whose broker was the Ghostly page
+/// kept it running with no Ghostly window: their calls got no answer, and a new launch was held until they closed
+/// (agents#1069).
 #[cfg(desktop)]
 fn on_close_requested<R: tauri::Runtime>(window: &tauri::Window<R>, api: &tauri::CloseRequestApi) {
     if app_window::hides_on_close(window.label()) {
@@ -478,6 +567,8 @@ fn on_close_requested<R: tauri::Runtime>(window: &tauri::Window<R>, api: &tauri:
 trait Closing: Send + 'static {
     fn hide(&self);
     fn close(&self);
+    /// The app goes with the Ghostly window: every other window too (`app.exit`, its goodbye said already).
+    fn exit(&self);
 }
 
 #[cfg(desktop)]
@@ -488,16 +579,60 @@ impl<R: tauri::Runtime> Closing for tauri::Window<R> {
     fn close(&self) {
         let _ = tauri::Window::close(self);
     }
+    fn exit(&self) {
+        self.app_handle().exit(0);
+    }
 }
 
 #[cfg(desktop)]
 /// The held close: the window leaves the screen at once, as a close does (its page, hidden, still says goodbye),
-/// and closes for good `DEPART_MS` later.
+/// and closes for good `DEPART_MS` later, the app with it, whatever other windows are open.
 fn hold_close(window: impl Closing) {
     window.hide();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
         window.close();
+        window.exit();
+    });
+}
+
+/// A request to quit from outside the app (a logout or a shutdown sends SIGTERM, a terminal Ctrl+C SIGINT, a closed
+/// terminal SIGHUP): the first one runs `quit`, the app's `app.exit`, so it leaves as its window's close makes it
+/// leave: the page says goodbye (`on_run_event`), the native connections close and the app's notifications leave the
+/// desktop's list. A second SIGTERM or SIGINT ends the process at once; a SIGHUP after the first does not: a logout
+/// sends one right behind its SIGTERM (logind's SendSIGHUP), and it ended the exit just begun with the call it was
+/// hanging up. The handlers are in place when this returns.
+#[cfg(target_os = "linux")]
+fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let signals = tauri::async_runtime::block_on(async {
+        Ok::<_, std::io::Error>((
+            signal(SignalKind::terminate())?,
+            signal(SignalKind::interrupt())?,
+            signal(SignalKind::hangup())?,
+        ))
+    });
+    let (mut term, mut int, mut hup) = match signals {
+        Ok(signals) => signals,
+        Err(error) => {
+            eprintln!("signals: a SIGTERM will end the app without its goodbye: {error}");
+            return;
+        }
+    };
+    tauri::async_runtime::spawn(async move {
+        let mut quit = Some(quit);
+        loop {
+            let kind = tokio::select! {
+                _ = term.recv() => SignalKind::terminate(),
+                _ = int.recv() => SignalKind::interrupt(),
+                _ = hup.recv() => SignalKind::hangup(),
+            };
+            match quit.take() {
+                Some(quit) => quit(),
+                None if kind == SignalKind::hangup() => {}
+                None => std::process::exit(128 + kind.as_raw_value()),
+            }
+        }
     });
 }
 
@@ -507,7 +642,8 @@ fn hold_close(window: impl Closing) {
 /// - Any other exit the loop is asked for (`app.exit`): held for `DEPART_MS` while the page says goodbye, then let
 ///   through.
 /// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
-///   from `applicationWillTerminate`): the native connections close, so each contact sees its close.
+///   from `applicationWillTerminate`): the native connections close, so each contact sees its close, and on Linux
+///   the app's notifications go from the desktop's list (`notifications::exit`).
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -532,6 +668,7 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             tauri::async_runtime::block_on(
                 transports.shutdown(std::time::Duration::from_millis(CLOSE_MS)),
             );
+            notifications::exit();
             // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.
             #[cfg(target_os = "linux")]
             single_instance::relaunch(app);
@@ -612,6 +749,8 @@ mod tests {
             .manage(app_sandbox::AppSandboxState::default())
             .manage(paired_transport::TransportState::default())
             .manage(hyperdht::HyperState::default())
+            .manage(translate::TranslateState::default())
+            .manage(translate_models::ModelsState::default())
             .manage(oidc::OidcState::default())
             .manage(local_access::LocalAccess::default())
             .invoke_handler(only_main(commands!()))
@@ -677,6 +816,9 @@ mod tests {
         arguments["profile"] = serde_json::json!("x");
         arguments["record"] = serde_json::json!(null);
         arguments["count"] = serde_json::json!(0);
+        arguments["tag"] = serde_json::json!("x");
+        arguments["pair"] = serde_json::json!("pt-en");
+        arguments["texts"] = serde_json::json!([]);
         arguments
     }
 
@@ -766,9 +908,16 @@ mod tests {
             assert!(!may_call("app-1", command), "{command}");
             assert!(may_call("main", command), "{command}");
         }
-        // The Ghostly window's side of the broker: it opens app windows, answers them and closes them; an app
-        // window does none of that.
-        for command in ["app_open", "app_post", "app_close"] {
+        // The Ghostly window's side of the broker: it opens app windows, answers them, brings them to the front, names
+        // them and closes them; an app window does none of that.
+        for command in [
+            "app_open",
+            "app_post",
+            "app_focus",
+            "app_focused",
+            "app_title",
+            "app_close",
+        ] {
             assert!(registered().iter().any(|c| c == command), "{command}");
             assert!(may_call("main", command), "{command}");
             for label in ["app-1", "app-0123456789abcdef", "svc-1"] {
@@ -796,7 +945,8 @@ mod tests {
             serde_json::json!({"request": {"type": "start"}}),
         )
         .unwrap();
-        assert_eq!(entry, "<p>chess</p>");
+        // As its JSON text, which the runner parses (`app_sandbox::json_response`).
+        assert_eq!(entry, "\"<p>chess</p>\"");
         // Any other request goes to the Ghostly window's broker, under this window's label: here nobody
         // answers it.
         let error = invoke(
@@ -983,6 +1133,82 @@ mod tests {
         assert_eq!(key.as_str().unwrap().len(), 43);
     }
 
+    /// A contact's app window opened by the page before this one (another profile, or the same one before a reload)
+    /// is served nothing more: the page there now would carry its requests over its own chat with that contact.
+    #[test]
+    fn a_new_page_closes_the_contacts_app_windows_the_page_before_opened() {
+        let app = app();
+        let peer = "a".repeat(52);
+        viewer::open(
+            app.handle(),
+            peer.clone(),
+            "atlas".into(),
+            "ybndrfg8ejkmcpqx".into(),
+            "Atlas".into(),
+            None,
+        )
+        .unwrap();
+        let url = format!("{}://atlas.{peer}.ybndrfg8ejkmcpqx/", viewer::SCHEME);
+        let serve = || {
+            let request = tauri::http::Request::builder()
+                .uri(url.as_str())
+                .body(Vec::new())
+                .unwrap();
+            tauri::async_runtime::block_on(viewer::handle(
+                app.handle().clone(),
+                "svc-0".into(),
+                request,
+            ))
+            .status()
+        };
+        // Bound: the request goes to the page, which nobody here answers.
+        assert_eq!(serve(), tauri::http::StatusCode::GATEWAY_TIMEOUT);
+        page_started(app.handle());
+        assert_eq!(serve(), tauri::http::StatusCode::FORBIDDEN);
+    }
+
+    /// A stored file the page before this one played (another profile's, or the same one before a reload) is served
+    /// no more under its token: that page never closed it, and the page there now did not ask for it.
+    #[test]
+    fn a_new_page_closes_the_file_stream_tokens_the_page_before_got() {
+        let app = app();
+        let dir = std::env::temp_dir().join(format!("ghostly-page-stream-{}", std::process::id()));
+        let files = file_store::FileStore::new(dir.clone());
+        files.append("a", "f", 0, &[1, 2, 3]).unwrap();
+        app.manage(file_stream::StreamGrants::default());
+        let grants = app.state::<file_stream::StreamGrants>();
+        let token = grants.open(&files, "a", "f", "video/mp4").unwrap();
+        let serve = || {
+            let request = tauri::http::Request::builder()
+                .uri(format!("{}://localhost/{token}", file_stream::SCHEME))
+                .body(Vec::new())
+                .unwrap();
+            file_stream::respond(&files, &grants, "main", &request).status()
+        };
+        assert_eq!(serve(), tauri::http::StatusCode::OK);
+        page_started(app.handle());
+        assert_eq!(serve(), tauri::http::StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// The Pubky sessions of the page before this one, which it never closed, are forgotten: their ids were its own.
+    #[test]
+    fn a_new_page_forgets_the_pubky_sessions_the_page_before_left_open() {
+        let app = app();
+        // A session is open once its first request is in; a bad address is refused before that.
+        tauri::async_runtime::block_on(pubky_session::fetch(
+            "session-000000000001".into(),
+            "http://127.0.0.1:9/session".into(),
+            "GET".into(),
+            vec![],
+            None,
+        ))
+        .ok();
+        assert_eq!(pubky_session::open_sessions(), 1);
+        page_started(app.handle());
+        assert_eq!(pubky_session::open_sessions(), 0);
+    }
+
     /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its
     /// page, so the close itself waits while the page is told to say goodbye. (A Mac hides the window instead.)
     #[cfg(not(target_os = "macos"))]
@@ -1032,6 +1258,58 @@ mod tests {
         );
     }
 
+    /// A logout, a shutdown or `kill <pid>` sends SIGTERM: the app is asked to exit (`app.exit`, where the page says
+    /// goodbye as on the window's close), not ended on the spot with all of that skipped.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_sigterm_asks_the_app_to_exit_as_its_window_s_close_does() {
+        let (asked, quit) = std::sync::mpsc::channel();
+        exit_on_signals(move || asked.send(()).unwrap());
+        let sent = std::process::Command::new("kill")
+            .args(["-TERM", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        quit.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the app was asked to exit");
+    }
+
+    /// A logout sends SIGTERM and, right behind it, SIGHUP (logind's SendSIGHUP): the exit the first began goes on, as
+    /// it did not when the SIGHUP counted as a second request and ended the process there and then. A second SIGTERM
+    /// still does. Run in a process of its own (this test binary again), which those signals end.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_logout_s_sighup_behind_its_sigterm_leaves_the_exit_to_go_on() {
+        const CHILD: &str = "GHOSTLY_TEST_SIGNALS_CHILD";
+        let name = "tests::a_logout_s_sighup_behind_its_sigterm_leaves_the_exit_to_go_on";
+        let send = |signal: &str| {
+            std::process::Command::new("kill")
+                .args([signal, &std::process::id().to_string()])
+                .status()
+                .unwrap();
+        };
+        if std::env::var_os(CHILD).is_some() {
+            let (asked, quit) = std::sync::mpsc::channel();
+            exit_on_signals(move || asked.send(()).unwrap());
+            send("-TERM");
+            quit.recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the app was asked to exit");
+            send("-HUP");
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            send("-TERM");
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name, "--exact", "--test-threads=1"])
+            .env(CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        // 128 + SIGTERM: the second SIGTERM ended it. 128 + SIGHUP (129) was the SIGHUP.
+        assert_eq!(status.code(), Some(143), "{status:?}");
+    }
+
     #[test]
     fn a_held_close_takes_the_window_off_the_screen_at_once_and_closes_it_after_the_goodbye() {
         use std::sync::{Arc, Mutex};
@@ -1045,6 +1323,9 @@ mod tests {
             fn close(&self) {
                 self.0.lock().unwrap().push(("close", self.1.elapsed()));
             }
+            fn exit(&self) {
+                self.0.lock().unwrap().push(("exit", self.1.elapsed()));
+            }
         }
         let seen = Seen(Arc::default(), Instant::now());
         let what =
@@ -1053,7 +1334,9 @@ mod tests {
         // Before the goodbye's wait: the window is already gone from the screen, and not yet closed.
         assert_eq!(what(&seen), ["hide"]);
         std::thread::sleep(Duration::from_millis(DEPART_MS + 300));
-        assert_eq!(what(&seen), ["hide", "close"]);
+        // The app goes with it, whatever other windows are open (agents#1069: an app's window kept it running). Only
+        // this order is checked: the mock runtime's `request_exit` is unimplemented, so `app.exit` can't run in a test.
+        assert_eq!(what(&seen), ["hide", "close", "exit"]);
         let all = seen.0.lock().unwrap().clone();
         assert!(all[1].1 >= Duration::from_millis(DEPART_MS), "{all:?}");
     }

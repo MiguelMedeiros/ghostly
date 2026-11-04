@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { holdScripts } from "./hold-scripts";
 
 /**
  * A phone reader who scrolls into the story before the page runs keeps what they were looking at. The server draws
@@ -6,28 +7,6 @@ import { expect, test, type Page } from "@playwright/test";
  * and the phone chapters only replace them once React hydrates: a different height above the reader, so the story
  * jumped under them. The page's scripts are held here until the reader has scrolled.
  */
-
-async function holdScripts(page: Page) {
-  let release = () => {};
-  const scripts = new Promise<void>((r) => (release = r));
-  await page.route(/\/_next\/static\/chunks\/.*\.js$/, async (route) => {
-    await scripts;
-    await route.continue();
-  });
-  // The head's layout flags run before the first paint (inline). Where the build still queues them for Next's
-  // runtime, inline them here, so the only change left at hydration is the chapters' shape.
-  await page.route(
-    (url) => url.pathname === "/",
-    async (route) => {
-      const res = await route.fetch();
-      let html = await res.text();
-      const queued = html.match(/\(self\.__next_s=self\.__next_s\|\|\[\]\)\.push\(\[0,\{"children":"(var d=document\.documentElement;.*?)","id":"js-flag"\}\]\)/);
-      if (queued) html = html.replace("<head>", `<head><script>${JSON.parse(`"${queued[1]}"`)}</script>`);
-      await route.fulfill({ response: res, body: html });
-    },
-  );
-  return () => release();
-}
 
 /** What is at the middle of the screen: its chapter, and the part of it (the picture, a step, the eyebrow). */
 const middle = (page: Page) =>
@@ -68,5 +47,51 @@ for (const c of CASES) {
     expect(await middle(page)).toBe(c.part);
     // The step's title the reader was on stays where it was (the phone draws it a little larger).
     expect(Math.abs((await titleTop()) - before)).toBeLessThanOrEqual(24);
+  });
+}
+
+// The wallet's and the identities' decks: the server draws a place for each (a mouse's stack is shorter than a
+// finger's track), and each deck measures its width as it mounts, a render after the chapters change shape.
+for (const panel of ["#wallet-panel", "#identity-panel"]) {
+  test(`a reader who scrolled to ${panel} before hydration finds it where it was after`, async ({ page }) => {
+    const release = await holdScripts(page);
+    await page.goto("/", { waitUntil: "commit" });
+    await page.waitForFunction(() => performance.getEntriesByName("first-contentful-paint").length > 0 && !!document.getElementById("open"));
+    await expect(page.locator(".sp-deck-placeholder")).toHaveCount(2);
+
+    await page.evaluate((sel) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect();
+      scrollTo({ top: scrollY + r.top + r.height / 2 - innerHeight / 2, behavior: "instant" });
+    }, panel);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const top = () => page.evaluate((sel) => Math.round(document.querySelector(sel)!.getBoundingClientRect().top), panel);
+    const before = await top();
+
+    // From the release on, where the panel is in every frame, read once it is painted, and at the end of every task
+    // that changes the page (the browser may paint after any of them): after the microtasks the change queued.
+    await page.evaluate((sel) => {
+      const w = window as unknown as { tops: number[] };
+      w.tops = [];
+      const read = () => {
+        const el = document.querySelector(sel);
+        if (el) w.tops.push(Math.round(el.getBoundingClientRect().top));
+      };
+      let frames = 0;
+      const frame = () =>
+        setTimeout(() => {
+          read();
+          if (++frames < 240) requestAnimationFrame(frame);
+        });
+      requestAnimationFrame(frame);
+      new MutationObserver(() => queueMicrotask(() => queueMicrotask(read))).observe(document.body, { subtree: true, childList: true, attributes: true });
+    }, panel);
+    release();
+    await expect(page.locator(".sp-deck .deck")).toHaveCount(2);
+    await page.waitForLoadState("load");
+    await page.waitForTimeout(1000);
+
+    const tops = await page.evaluate(() => (window as unknown as { tops: number[] }).tops);
+    const moved = Math.max(...tops.map((t) => Math.abs(t - before)));
+    expect(moved, `panel tops: ${[...new Set(tops)].join(" ")}`).toBeLessThanOrEqual(4);
   });
 }

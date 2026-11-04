@@ -112,6 +112,35 @@ describe("a first pairing with no WebRTC on either side", () => {
 });
 
 /**
+ * agents#1657: each side's first stream dial fails in milliseconds (a hole punch that aborts, as on a lossy network).
+ * The contact was pinned over the DHT already, so the failure turned the pairing `on-dht`, and its dials fell to a
+ * saved contact's: the lower key alone, 20 s × 2^n later. Live after 40 s (8 of 8 in the lab), or not in 180 s at 15%
+ * loss. A first pairing keeps its pace (`PAIRING_RETRY_MS` × 2^n) and both sides dial, until it is live.
+ */
+describe("a first pairing whose first stream dial fails on each side", () => {
+  it.each(["inviter", "joiner"] as const)("goes live in seconds, both sides dialling again at a pairing's pace (the %s's key is lower)", async dialer => {
+    const { inviter, joiner } = await pair(dialer);
+    for (const desk of [inviter, joiner]) {
+      const connect = desk.endpoint.connect;
+      let failed = false;
+      desk.endpoint.connect = async descriptor => {
+        if (!failed) { failed = true; desk.dials.push(Date.now()); await new Promise(resolve => setTimeout(resolve, 5)); throw new Error("HOLEPUNCH_ABORTED: Holepunch aborted"); }
+        return connect(descriptor);
+      };
+    }
+    const learnt = Date.now();
+    joiner.side.link.learnPeerTransports(...record(inviter), true);
+    inviter.side.link.learnPeerTransports(...record(joiner), true);
+    const took = await until(() => live(inviter) && live(joiner), 120_000);
+    const dials = [...inviter.dials.map(at => `inviter ${((at - learnt) / 1000).toFixed(1)}s`), ...joiner.dials.map(at => `joiner ${((at - learnt) / 1000).toFixed(1)}s`)];
+    console.log(`FAILED FIRST DIALS (${dialer} lower): live after ${(took / 1000).toFixed(1)} s; dials ${dials.join(", ")}`);
+    expect(took, "live within a pairing's retries, not a saved contact's 40 s").toBeLessThan(10_000);
+    expect(inviter.dials.length, "the inviter dialled again").toBeGreaterThanOrEqual(2);
+    expect(joiner.dials.length, "the joiner dialled again").toBeGreaterThanOrEqual(2);
+  }, 180_000);
+});
+
+/**
  * A slow DHT (a busy public one, or a testnet with dead nodes: puts 5-12 s, reads 2.5-7.5 s): for 20 s neither Desktop
  * has read the other's capability record, so a dial has nothing to try ("No transport both apps allow is available
  * yet"). Each such dial used to count as a failed one: the pairing turned `on-dht` with a transport reason at 12-15 s,

@@ -1,0 +1,182 @@
+import { describe, expect, it } from "vitest";
+import { ChatFiles, FILE_LIMITS, type ChatFilesHost, type FileTransferRecord } from "../src/chatFiles";
+import type { FileInfo } from "../src/files";
+// covers: files.large.limits
+
+/**
+ * A file sent over a link with a bottleneck, on a clock of its own: the sender's frames leave one after another at
+ * `upBytesPerMs` (a queue with no end, as netem's), and each way takes `delayMs`. Every `sayEveryMs` the sender says
+ * something else in the chat (a text, a ring) on the same channel; how long that takes to arrive is what is measured.
+ * `delayMs` may change with the clock (the path moves), and `confirmed` is when each confirm reached the sender.
+ * `jitterMs`: each frame, each way, takes up to this much longer, drawn at random; a frame never passes the one before
+ * it (the session is a stream), so one held back holds back those behind it.
+ * Timers (`setTimeout`) run on the same clock. `said` is every confirm the receiver sent, and when; `lastDataAt` when
+ * the file's last bytes reached it.
+ */
+async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs: number | ((now: number) => number); sayEveryMs: number; jitterMs?: number }) {
+  let now = 0, upFree = 0, toB = 0, toA = 0, seed = 1, lastDataAt = -1;
+  const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+  const delay = () => (typeof options.delayMs === "number" ? options.delayMs : options.delayMs(now)) + (options.jitterMs ? random() * options.jitterMs : 0);
+  const confirmed: { at: number; offset: number }[] = [];
+  const said: { at: number; offset: number }[] = [];
+  type Event = { at: number; to: "a" | "b"; frame: Record<string, unknown>; said?: number; fire?: () => void };
+  const events: Event[] = [];
+  const schedule = (event: Event) => {
+    let i = events.length;
+    while (i && events[i - 1].at > event.at) i--;
+    events.splice(i, 0, event);
+  };
+  const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = ((fire: () => void, ms = 0) => { const event: Event = { at: now + ms, to: "a", frame: { t: "timer" }, fire }; schedule(event); return event; }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((event?: Event) => { const i = event ? events.indexOf(event) : -1; if (i >= 0) events.splice(i, 1); }) as typeof clearTimeout;
+  const uplink = (frame: Record<string, unknown>, bytes: number, said?: number) => {
+    upFree = Math.max(now, upFree) + bytes / options.upBytesPerMs;
+    toB = Math.max(toB, upFree + delay());
+    schedule({ at: toB, to: "b", frame, said });
+  };
+  const records = new Map<string, FileTransferRecord>();
+  const host = (name: "a" | "b"): ChatFilesHost => ({
+    send: (frame) => {
+      if (name === "b" && frame.t === "pf-got") said.push({ at: now, offset: frame.offset as number });
+      if (name === "a") uplink(JSON.parse(JSON.stringify(frame)) as Record<string, unknown>, JSON.stringify(frame).length);
+      else { toA = Math.max(toA, now + delay()); schedule({ at: toA, to: "a", frame: JSON.parse(JSON.stringify(frame)) as Record<string, unknown> }); }
+      return true;
+    },
+    sendData: (id, offset, data) => { uplink({ t: "pf-data", id, offset, data: Buffer.from(data).toString("base64url") }, data.length + 32); return true; },
+    decide: async () => "accept",
+    openTarget: async () => ({ offset: 0, append: async () => {}, flush: async () => {}, verify: async () => true, discard: async () => {} }),
+    openSource: async () => ({ read: async (offset, length) => new Uint8Array(Math.min(length, options.size - offset)), digest: async () => "A".repeat(43) }),
+    changed: (record) => { records.set(`${record.direction}:${record.id}`, record); },
+    now: () => now,
+    batchConfirms: true,
+  });
+  const a = new ChatFiles(host("a")), b = new ChatFiles(host("b"));
+  a.attach(); b.attach();
+  const info: FileInfo = { id: "slow-up-1", name: "big.bin", mime: "application/octet-stream", size: options.size, timestamp: 1 };
+  a.offer(info);
+  const settle = async () => { for (let i = 0; i < 4; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  const latencies: { at: number; ms: number }[] = [];
+  let nextSay = options.sayEveryMs, started = -1, finished = -1;
+  try {
+    for (;;) {
+      await settle();
+      if (records.get("out:slow-up-1")?.state === "done") break;
+      if (!events.length) throw new Error("nothing on the wire");
+      if (nextSay <= events[0].at) {
+        now = nextSay;
+        nextSay += options.sayEveryMs;
+        if (records.get("out:slow-up-1")?.state === "active") uplink({ t: "text" }, 200, now);
+        continue;
+      }
+      const event = events.shift()!;
+      now = event.at;
+      if (event.fire) { event.fire(); continue; }
+      if (event.frame.t === "text") { latencies.push({ at: event.said!, ms: now - event.said! }); continue; }
+      if (event.frame.t === "pf-accept" && started < 0) started = now;
+      if (event.frame.t === "pf-sum") finished = now;
+      if (event.frame.t === "pf-got" && event.to === "a") confirmed.push({ at: now, offset: event.frame.offset as number });
+      if (event.frame.t === "pf-data" && event.to === "b" && (event.frame.offset as number) + FILE_LIMITS.chunkBytes >= options.size) lastDataAt = now;
+      await (event.to === "a" ? a : b).handle(event.frame);
+    }
+  } finally {
+    a.detach(); b.detach();
+    globalThis.setTimeout = realSetTimeout; globalThis.clearTimeout = realClearTimeout;
+  }
+  return { latencies, seconds: (finished - started) / 1000, confirmed, said, lastDataAt };
+}
+
+/** Bytes per second confirmed between `from` and `to` (ms on the test's clock). */
+function rate(confirmed: { at: number; offset: number }[], from: number, to: number): number {
+  const inside = confirmed.filter((c) => c.at >= from && c.at <= to);
+  if (inside.length < 2) return 0;
+  return ((inside[inside.length - 1].offset - inside[0].offset) / (inside[inside.length - 1].at - inside[0].at)) * 1000;
+}
+
+describe("a file sent over a slow uplink", () => {
+  it("leaves room for what else its sender says in the chat, and still takes the bandwidth", async () => {
+    // 5 Mbit/s up, 20 ms each way. With a fixed 1 MiB in flight, every text, ring or hang-up from the sender queued
+    // behind it: 1.8 s each, for as long as the upload went.
+    const size = 8 * 1024 * 1024, upBytesPerMs = 5_000_000 / 8 / 1000;
+    const { latencies, seconds } = await slowUplink({ size, upBytesPerMs, delayMs: 20, sayEveryMs: 1_000 });
+    expect(latencies.length).toBeGreaterThan(8);
+    const worst = Math.max(...latencies.filter((l) => l.at > 2_000).map((l) => l.ms));
+    expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(250);
+    // The link stays full: the file takes about as long as the link needs for it.
+    expect(seconds).toBeLessThan((size / upBytesPerMs / 1000) * 1.1);
+  }, 60_000);
+
+  it("keeps its texts quick over many re-measures of the path, the link still full", async () => {
+    // 40 s of upload at 5 Mbit/s: the path's round trip is measured again several times, never with the files' own queue.
+    const size = 24 * 1024 * 1024, upBytesPerMs = 5_000_000 / 8 / 1000;
+    const { latencies, seconds } = await slowUplink({ size, upBytesPerMs, delayMs: 20, sayEveryMs: 1_000 });
+    const late = latencies.filter((l) => l.at > 20_000);
+    expect(late.length).toBeGreaterThan(8);
+    const worst = Math.max(...late.map((l) => l.ms));
+    expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(250);
+    expect(seconds).toBeLessThan((size / upBytesPerMs / 1000) * 1.1);
+  }, 60_000);
+
+  it("gets its rate back when the path gets longer mid-transfer", async () => {
+    // 1 Gbit/s, 10 ms each way, then 60 ms from the first second on (another route, a relay). The longer round trip read
+    // as 100 ms of queue for good: the window stayed at its floor, 0.5 MiB/s where the same path from the start gives 8.
+    const size = 120 * 1024 * 1024;
+    const { confirmed } = await slowUplink({ size, upBytesPerMs: 125_000, delayMs: (now) => (now > 1_000 ? 60 : 10), sayEveryMs: 60_000 });
+    // From a few seconds after the path is measured again (`FILE_LIMITS.baseProbeMs`) to the end.
+    const after = rate(confirmed, 13_000, Infinity);
+    expect(after, `${(after / 2 ** 20).toFixed(2)} MiB/s`).toBeGreaterThan((FILE_LIMITS.windowBytes / 0.12) * 0.8);
+  }, 60_000);
+
+  it("keeps its rate on a long path whose round trip wavers, as a relay's over a phone's link does", async () => {
+    // 30 Mbit/s, 300 ms each way and up to 200 ms more, at random. The waver read as the files' own queue: the window
+    // stayed at its floor, 64 KiB per round trip, about 0.1 MiB/s (what a phone saw sending to a contact on 5G).
+    const size = 8 * 1024 * 1024;
+    const { seconds, latencies } = await slowUplink({ size, upBytesPerMs: 30_000_000 / 8 / 1000, delayMs: 300, jitterMs: 200, sayEveryMs: 1_000 });
+    expect(size / seconds, `${(size / seconds / 2 ** 20).toFixed(2)} MiB/s`).toBeGreaterThan(0.5 * 2 ** 20);
+    // What the sender says meanwhile still takes about the path's own time: 300 to 500 ms, and half a round trip of queue at most.
+    const worst = Math.max(...latencies.map((l) => l.ms));
+    expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(500 + 400);
+  }, 60_000);
+
+  it("takes the bandwidth on a short path whose round trip wavers on its own, as 5G's does", async () => {
+    // 50 Mbit/s, 15 ms each way and up to 100 ms more. The waver read as the files' own queue: the window stayed at its
+    // floor, 64 KiB per round trip, about 0.5 MiB/s, where a larger one carried several times as much in the same time.
+    const size = 16 * 1024 * 1024;
+    const { seconds, latencies } = await slowUplink({ size, upBytesPerMs: 50_000_000 / 8 / 1000, delayMs: 15, jitterMs: 100, sayEveryMs: 1_000 });
+    expect(size / seconds, `${(size / seconds / 2 ** 20).toFixed(2)} MiB/s`).toBeGreaterThan(1.5 * 2 ** 20);
+    // What the sender says meanwhile still takes about the path's own time (30 to 230 ms), and a trial's queue at most.
+    const worst = Math.max(...latencies.map((l) => l.ms));
+    expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(230 + FILE_LIMITS.trialQueueMs);
+  }, 60_000);
+
+  it("keeps a full window on a fast link with a long round trip", async () => {
+    // 1 Gbit/s, 50 ms each way: 1 MiB per round trip is about 10 MiB/s, and a small fixed window would cut it to a tenth.
+    const size = 40 * 1024 * 1024;
+    const { seconds } = await slowUplink({ size, upBytesPerMs: 125_000, delayMs: 50, sayEveryMs: 60_000 });
+    const perRoundTrip = FILE_LIMITS.windowBytes / 0.1;
+    expect(size / seconds, `${(size / seconds / 2 ** 20).toFixed(1)} MiB/s`).toBeGreaterThan(perRoundTrip * 0.8);
+  }, 60_000);
+});
+
+describe("a receiver's confirms", () => {
+  it("come every ackEveryBytes on a fast path, not after nearly every chunk", async () => {
+    // 1 Gbit/s, 1 ms each way. Its writes done at once, the receiver confirmed every chunk it stored: 6,400 confirms
+    // for 100 MiB, each a native call and a progress update on both sides, where 128 KiB apiece would be 800.
+    const size = 32 * 1024 * 1024;
+    const { said, seconds } = await slowUplink({ size, upBytesPerMs: 125_000, delayMs: 1, sayEveryMs: 60_000 });
+    const chunks = size / FILE_LIMITS.chunkBytes, every = size / FILE_LIMITS.ackEveryBytes;
+    expect(said.length, `${said.length} confirms for ${chunks} chunks`).toBeLessThan(every * 1.25);
+    expect(said.at(-1)?.offset).toBe(size);
+    // The window still fills the link: 32 MiB at 1 Gbit/s are 0.27 s.
+    expect(seconds).toBeLessThan(0.6);
+  }, 60_000);
+
+  it("come for the file's last bytes as they are stored, and for a window smaller than ackEveryBytes after a short wait", async () => {
+    // 10 Mbit/s, 10 ms each way: the first window (`minWindowBytes`) is less than `ackEveryBytes`, and is confirmed all the
+    // same; the file's end is confirmed with no wait.
+    const size = 1024 * 1024 + 5_000;
+    const { said, lastDataAt, seconds } = await slowUplink({ size, upBytesPerMs: 10_000_000 / 8 / 1000, delayMs: 10, sayEveryMs: 60_000 });
+    expect(said[0].offset).toBeLessThanOrEqual(FILE_LIMITS.minWindowBytes);
+    expect(said.at(-1)).toEqual({ at: lastDataAt, offset: size });
+    expect(seconds).toBeLessThan(2);
+  }, 60_000);
+});

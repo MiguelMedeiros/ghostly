@@ -138,6 +138,12 @@ impl StreamGrants {
             .retain(|_, grant| grant.space != space);
     }
 
+    /// Every token goes when the page that asked for them does (a reload, a profile switch): the page there now may
+    /// be another profile's, and the one before never got to close its own.
+    pub fn close_all(&self) {
+        self.grants.lock().unwrap().clear();
+    }
+
     fn lookup(&self, token: &str) -> Option<(String, String, &'static str)> {
         self.grants
             .lock()

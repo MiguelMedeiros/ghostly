@@ -134,8 +134,9 @@ describe("a community member back while 30 chats start", () => {
       expect(read.filter((at) => at !== null && at <= 60_000), result).toHaveLength(0);
       expect(asked.filter((at) => at !== null), result).toHaveLength(0);
     } else if (how.startsWith("as an edge's")) {
-      // Before: the edges took the groups' allowance, and the beacons were read once the minute freed.
-      expect(read.filter((at) => at !== null && at <= 30_000), result).toHaveLength(0);
+      // Before: the edges took the groups' allowance, and no lobby was asked before the minute freed. A beacon may be
+      // read early: a chat's offer goes to one relay while the chats need the relays, which can leave the other a request.
+      expect(asked.filter((at) => at !== null && at <= 30_000), result).toHaveLength(0);
     } else {
       // Every beacon read, and every lobby asked, within seconds.
       expect(read.filter((at) => at !== null && at <= 5_000), result).toHaveLength(COMMUNITIES);

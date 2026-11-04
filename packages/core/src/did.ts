@@ -143,6 +143,12 @@ function parseWeb(id: string): WebDid {
   return { id: [`${host}${port ? `%3A${port}` : ""}`, ...path].join(":"), host, port, path };
 }
 
+/**
+ * A did:web (or one of its URLs) with the port's `%3a` written `%3A`, as `parseDid` writes it: percent-encoding is
+ * case-insensitive (RFC 3986), so a document may write either. The fragment is left as it is.
+ */
+const webPortForm = (value: string) => value.startsWith("did:web:") ? value.replace(/^[^#]*/, part => part.replace(/%3a/g, "%3A")) : value;
+
 const web = (did: string): WebDid => {
   const parsed = parseDid(did);
   if (parsed.method !== "web") throw new DidError("Not a did:web");
@@ -173,7 +179,7 @@ export function didWebFileNames(text: string, did: string, statement: string): b
   if (typeof text !== "string" || utf8Encode(text).length > DID_FILE_MAX_BYTES) return false;
   let body: unknown;
   try { body = JSON.parse(text); } catch { return false; }
-  return isObject(body) && body.ghostly === 1 && body.did === did && body.statement === statement;
+  return isObject(body) && body.ghostly === 1 && typeof body.did === "string" && webPortForm(body.did) === did && body.statement === statement;
 }
 
 /** The service entry a did.json can carry instead of the file. */
@@ -194,11 +200,15 @@ const MULTICODEC: { prefix: [number, number]; curve: DidCurve | "X25519"; length
 
 /** A public key on its curve, validated; ECDSA keys compressed. */
 function curveKey(curve: DidCurve, bytes: Uint8Array): Uint8Array {
+  let smallOrder: boolean;
   try {
-    if (curve === "Ed25519") { if (bytes.length !== 32) throw new Error(); ed25519.Point.fromBytes(bytes); return bytes; }
-    const point = (curve === "secp256k1" ? secp256k1 : p256).Point.fromBytes(bytes);
-    return point.toBytes(true);
+    if (curve !== "Ed25519") return (curve === "secp256k1" ? secp256k1 : p256).Point.fromBytes(bytes).toBytes(true);
+    if (bytes.length !== 32) throw new Error();
+    smallOrder = ed25519.Point.fromBytes(bytes).isSmallOrder();
   } catch { throw new DidError(`That ${curve} key is not a valid point`); }
+  // No secret key goes with a point of small order, and one "verifies" a constant signature of any text.
+  if (smallOrder) throw new DidError("That Ed25519 key is a point of small order, which no secret key goes with");
+  return bytes;
 }
 
 /** A `z…` multibase (base58btc) multicodec key. X25519 and unknown codecs are `undefined`. */
@@ -265,7 +275,7 @@ export function staticDidDocument(did: string): DidDocumentView {
 /** An id as absolute `<did>#<fragment>`, from `#frag` or the absolute form; undefined for another DID's. */
 function methodId(did: string, id: unknown): string | undefined {
   if (typeof id !== "string" || id.length > DID_MAX_LENGTH + 128) return undefined;
-  const absolute = id.startsWith("#") ? `${did}${id}` : id;
+  const absolute = id.startsWith("#") ? `${did}${id}` : webPortForm(id);
   return absolute.startsWith(`${did}#`) && absolute.length > did.length + 1 && /^[\x21-\x7e]+$/.test(absolute) ? absolute : undefined;
 }
 
@@ -303,7 +313,7 @@ const list = (value: unknown, name: string): unknown[] => {
  */
 export function parseDidDocument(did: string, raw: unknown): DidDocumentView {
   if (!isObject(raw)) throw new DidError("The DID document is not a JSON object");
-  if (raw.id !== did) throw new DidError(typeof raw.id === "string" ? `The DID document is for another DID (${raw.id.slice(0, 80)})` : "The DID document has no id");
+  if (typeof raw.id !== "string" || webPortForm(raw.id) !== did) throw new DidError(typeof raw.id === "string" ? `The DID document is for another DID (${raw.id.slice(0, 80)})` : "The DID document has no id");
   const keys = new Map<string, DidKey>();
   const unusable = new Set<string>();
   let skipped = 0;
@@ -397,7 +407,7 @@ function signingInput(jws: DidJws, message: Uint8Array): Uint8Array | undefined 
 
 function verifyWith(key: DidKey, signature: Uint8Array, message: Uint8Array, format: "compact" | "der" = "compact"): boolean {
   try {
-    if (key.curve === "Ed25519") return format === "compact" && ed25519.verify(signature, message, key.publicKey);
+    if (key.curve === "Ed25519") return format === "compact" && ed25519.verify(signature, message, key.publicKey, { zip215: false });
     // ECDSA over SHA-256 of the message, either half of s (JOSE does not require low S).
     return (key.curve === "secp256k1" ? secp256k1 : p256).verify(signature, message, key.publicKey, { prehash: true, lowS: false, format });
   } catch { return false; }
@@ -425,11 +435,14 @@ export function checkDidJws(input: string, messages: Uint8Array[], doc: DidDocum
   let inputs: Uint8Array[];
   try { inputs = messages.map(m => signingInput(jws, m)).filter((m): m is Uint8Array => !!m); } catch { inputs = []; }
   if (!inputs.length) throw new DidError("The JWS carries another text: sign exactly the statement shown");
+  // The same key may be listed under several ids: one that may not sign does not end the search.
+  let refused: DidKey | undefined;
   for (const key of candidates) {
     if (!inputs.some(m => verifyWith(key, jws.signature, m))) continue;
-    if (!key.relationships.length) throw refusedKey(key);
+    if (!key.relationships.length) { refused ??= key; continue; }
     return { key, alg: jws.alg };
   }
+  if (refused) throw refusedKey(refused);
   throw new DidError("The JWS signature does not match: sign exactly the statement shown, with a key of this DID");
 }
 
@@ -448,13 +461,15 @@ export function checkDidSignature(signature: Uint8Array, messages: Uint8Array[],
   }
   const der = signature.length !== 64 && signature[0] === 0x30;
   if (signature.length !== 64 && !der) throw new DidError("A signature is 64 bytes (or DER, for ECDSA)");
+  let refused: DidKey | undefined;
   for (const key of candidates) {
     if (der && key.curve === "Ed25519") continue;
     if (!messages.some(m => verifyWith(key, signature, m, der ? "der" : "compact"))) continue;
-    if (!key.relationships.length) throw refusedKey(key);
+    if (!key.relationships.length) { refused ??= key; continue; }
     const canonical = der ? (key.curve === "secp256k1" ? secp256k1 : p256).Signature.fromBytes(signature, "der").toBytes("compact") : signature;
     return { key, alg: key.curve === "Ed25519" ? "Ed25519" : `ECDSA ${key.curve}`, signature: canonical };
   }
+  if (refused) throw refusedKey(refused);
   throw new DidError("The signature does not match: sign exactly the statement shown, with a key of this DID");
 }
 

@@ -76,7 +76,7 @@ test("a message written before my reply that reaches me after it still counts as
 
   // Bob's app is closed, and Alice reaches no relay: what she writes now waits with her.
   await bob.page.goto("about:blank");
-  const relays = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//;
+  const relays = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org|pkarr\.miguelmedeiros\.dev)\//;
   const refuse = (route: Route) => route.abort("connectionrefused");
   await alice.context.route(relays, refuse);
   await say(alice, "written while you were away");
@@ -275,7 +275,7 @@ test("a picture address over plain http is not fetched", { tag: ["@feature:chat.
   expect(fetched).toEqual([]);
 });
 
-test("double-clicking a received message in a compatibility chat shows how it came, Escape hides it", { tag: ["@feature:chat.paired.message-details"] }, async ({ peer }) => {
+test("Ctrl+double-clicking a received message in a compatibility chat shows how it came, Escape hides it", { tag: ["@feature:chat.paired.message-details"] }, async ({ peer }) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await linkLegacy(alice, bob);
   await connect(alice, bob);
@@ -284,7 +284,7 @@ test("double-clicking a received message in a compatibility chat shows how it ca
   await expect(received).toBeVisible();
 
   // The message's details (message-details.spec.ts has the paired chat's): the compatibility chat's own wire.
-  await received.getByText("inspect me").dblclick();
+  await received.getByText("inspect me").dblclick({ modifiers: ["ControlOrMeta"] });
   const details = alice.page.getByTestId("message-details");
   const field = (label: string) => details.locator(`[data-testid="message-details-row"][data-label="${label}"]`);
   await expect(details).toHaveAttribute("data-loaded", "yes");

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, SWITCH_RETIRE_MS, type GhostLinkEvents, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink, type LinkParams } from "../src/invite";
 import { createIdentity } from "../src/identity";
@@ -11,6 +11,7 @@ import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedT
 import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
 import { SESSION_RECEIVE_PENDING } from "../src/pairedSession";
+import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS } from "../src/identityProofs";
 
 // covers: chat.paired.session, chat.paired.send, chat.paired.receipts, chat.paired.reconnect, chat.paired.nickname-sync, chat.legacy.send, core.liveness, core.capabilities, transport.switch, payments.chat.frames
 
@@ -460,6 +461,66 @@ describe("what a paired peer says about itself", () => {
     expect(peerB.onPeerAvatar).toHaveBeenLastCalledWith(jpegAvatar);
   });
 
+  it("a name or picture changing without end is read a handful of times a minute, and the newest still counts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    try {
+      const peer = { onPeerNick: vi.fn(), onPeerAvatar: vi.fn() };
+      const t = linkedPair([{}, { events: peer }]);
+      await t.ready();
+      peer.onPeerNick.mockClear(); peer.onPeerAvatar.mockClear();
+      for (let i = 0; i < 100; i++) {
+        t.toB({ t: "paired-nick", n: `Alice ${i}` });
+        t.toB({ t: "paired-avatar", a: i % 2 ? jpegAvatar : "" });
+      }
+      await t.settle("b");
+      // Each was said once as the session opened: five more get through, the rest wait as one.
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(5);
+      expect(peer.onPeerAvatar).toHaveBeenCalledTimes(5);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(6);
+      expect(peer.onPeerNick).toHaveBeenLastCalledWith("Alice 99");
+      expect(peer.onPeerAvatar).toHaveBeenCalledTimes(6);
+      expect(peer.onPeerAvatar).toHaveBeenLastCalledWith(jpegAvatar);
+      expect(t.b.presence.nick).toBe("Alice 99");
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(6);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("the contact's word on held items, ways of paying and adapters changing without end are read a handful of times a minute, and the newest still counts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    try {
+      const peer = { onHold: vi.fn(), onPairingState: vi.fn(), onTransportDiscovery: vi.fn(async () => {}) };
+      const t = linkedPair([{}, { holdSupport: true, events: peer }]);
+      await t.ready();
+      await t.settle("b");
+      peer.onHold.mockClear(); peer.onTransportDiscovery.mockClear();
+      const pairing = () => peer.onPairingState.mock.calls.length;
+      const before = pairing();
+      for (let i = 0; i < 200; i++) {
+        t.toB({ t: "paired-hold", on: i % 2 === 0 });
+        t.toB({ t: "paired-payments", m: [i % 2 ? "lightning" : "cashu"] });
+        t.toB({ t: "paired-adapters", descriptors: i % 2 ? { "iroh/1": IROH_N } : {} });
+      }
+      await t.settle("b");
+      // Six a minute each at most, the session's own included; the rest wait as one.
+      expect(peer.onHold.mock.calls.length).toBeLessThanOrEqual(6);
+      expect(peer.onTransportDiscovery.mock.calls.length).toBeLessThanOrEqual(6);
+      expect(pairing() - before).toBeLessThanOrEqual(12);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(peer.onHold.mock.calls.length).toBeLessThanOrEqual(7);
+      expect(peer.onHold).toHaveBeenLastCalledWith({ peerAllows: false, peerTop: undefined });
+      expect(t.b.peerAllowsHold).toBe(false);
+      expect(peer.onTransportDiscovery.mock.calls.length).toBeLessThanOrEqual(7);
+      expect((peer.onTransportDiscovery.mock.lastCall as unknown[] | undefined)?.[0]).toEqual({ "iroh/1": IROH_N });
+      expect([...(t.b as unknown as { peerPaymentMethods: Set<string> }).peerPaymentMethods]).toEqual(["lightning"]);
+      expect(pairing() - before).toBeLessThanOrEqual(14);
+      const settled = [peer.onHold.mock.calls.length, peer.onTransportDiscovery.mock.calls.length, pairing()];
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect([peer.onHold.mock.calls.length, peer.onTransportDiscovery.mock.calls.length, pairing()]).toEqual(settled);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("takes a small JPEG avatar or its removal and ignores anything else", async () => {
     const onPeerAvatar = vi.fn();
     const t = linkedPair([{}, { events: { onPeerAvatar } }]);
@@ -532,6 +593,16 @@ describe("what a paired peer says about itself", () => {
     await t.settle("b");
     expect(t.b.groupsSupport).toBe(true);
     expect(onGroupsSupport).toHaveBeenCalledWith(true);
+  });
+
+  it("turns groups on once a session: off again, a later announcement does not turn them back on", async () => {
+    const onGroupsSupport = vi.fn();
+    const t = linkedPair([{}, { groupsSupport: true, events: { onGroupsSupport } }]);
+    await t.ready();
+    for (let i = 0; i < 50; i++) t.toB({ t: "paired-groups", v: i % 2 ? [2] : [1, 2] });
+    await t.settle("b");
+    expect(onGroupsSupport.mock.calls).toEqual([[true], [false]]);
+    expect(t.b.groupsSupport).toBe(false);
   });
 
   it("answers a reconnect request and ignores an unexpected acknowledgement", async () => {
@@ -653,6 +724,8 @@ describe("paired payments", () => {
   });
 
   it("says the networks of its wallets per way of paying, and reads the contact's; an older contact's none means any", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    onTestFinished(() => { vi.useRealTimers(); });
     const t = linkedPair([{ events: payEvents(), paymentNetworks: { cashu: ["testnet"], arkade: ["mainnet", "testnet"] } }, { events: payEvents() }]);
     await t.ready();
     await t.settle("b");
@@ -672,6 +745,9 @@ describe("paired payments", () => {
     // A malformed map is ignored and the last good word stays; an unknown method is left out.
     for (const n of [["testnet"], { cashu: "testnet" }, { cashu: ["regtest"] }, Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`m${i}`, []]))]) t.toB({ t: "paired-payments", m: ["cashu"], n });
     await t.settle("b");
+    expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet", "mainnet"]);
+    // Ways of paying are read six times a minute: the burst above used this minute's.
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(t.b.peerPaymentNetworks("cashu")).toEqual(["testnet", "mainnet"]);
     t.toB({ t: "paired-payments", m: ["cashu", "future-coin"], n: { cashu: ["mainnet"], "future-coin": ["testnet"] } });
     await t.settle("b");
@@ -728,11 +804,31 @@ describe("paired payments", () => {
     const t = linkedPair([{ events: payEvents() }, { events: { onPaymentRequest } }], data => typeof data === "string" && data.includes('"paired-payments"'));
     await t.ready();
     expect(t.a.supportsPayments).toBe(false);
-    await expect(t.a.sendPaymentRequest(request)).rejects.toThrow(/does not support payments/);
+    await expect(t.a.sendPaymentRequest(request)).rejects.toThrow("Your contact has payments off in this chat, or needs an updated Ghostly");
     const send = vi.spyOn(t.ca, "send");
     t.a.sendPaymentResult({ id: "payment-1", ok: true });
     expect(send).not.toHaveBeenCalled();
     expect(onPaymentRequest).not.toHaveBeenCalled();
+  });
+
+  // The app's rule (Chat.tsx): a contact whose networks name no wallet offers no way until it makes one. Both ran the
+  // same release, and the refusal said they needed an updated Ghostly.
+  it("a contact with no wallet is refused as having no wallet yet; one with a wallet and nothing on, as off or older", async () => {
+    const t = linkedPair([{ events: payEvents(), paymentNetworks: {} }, { events: payEvents() }]);
+    await t.ready();
+    await t.settle("b");
+    const noWallet = await t.b.requirePaymentSupport().catch((e: unknown) => e);
+    expect(noWallet).toMatchObject({ engineCode: "contactNoWallet", message: "Your contact has no wallet yet: they need one to pay or be paid" });
+    expect(String(noWallet)).not.toMatch(/updated/);
+    // A wallet, and every way it has turned off in this chat: off here, or an app that cannot say more.
+    t.a.setPaymentNetworks({ cashu: ["testnet"] });
+    t.a.setPaymentMethods({ cashu: false });
+    await t.settle("b");
+    await expect(t.b.requirePaymentSupport()).rejects.toMatchObject({ engineCode: "contactNoPayments", message: "Your contact has payments off in this chat, or needs an updated Ghostly" });
+    // A wallet made and on: nothing refused.
+    t.a.setPaymentMethods({});
+    await t.settle("b");
+    await expect(t.b.requirePaymentSupport()).resolves.toBeUndefined();
   });
 
   it("a contact that turned all payments off is told apart from one that allows them", async () => {
@@ -787,6 +883,21 @@ describe("paired proofs", () => {
     await t.ready();
     expect(() => t.a.sendIdentityProof({ t: "idp-x", pad: "x".repeat(32 * 1024) })).toThrow("Identity proof too large");
     expect(() => t.a.sendPeerProof({ t: "proof-x", pad: "x".repeat(8192) })).toThrow("Proof too large");
+  });
+
+  it("reads a bounded number of identity frames from the contact per window, dropping the rest", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const onIdentityProof = vi.fn(async () => {});
+    const t = linkedPair([{ events: { onIdentityProof: vi.fn(async () => {}) } }, { events: { onIdentityProof } }]);
+    await t.ready();
+    for (let i = 0; i < IDENTITY_FRAME_LIMIT + 25; i++) t.a.sendIdentityProof({ t: "idp-request", i });
+    await t.settle("b");
+    expect(onIdentityProof).toHaveBeenCalledTimes(IDENTITY_FRAME_LIMIT);
+    vi.setSystemTime(Date.now() + IDENTITY_FRAME_WINDOW_MS);
+    t.a.sendIdentityProof({ t: "idp-request", i: -1 });
+    await t.settle("b");
+    expect(onIdentityProof).toHaveBeenLastCalledWith({ t: "idp-request", i: -1 });
+    vi.useRealTimers();
   });
 
   it("keeps proof frames away from an app that did not offer proofs, and refuses to send them", async () => {
@@ -1117,6 +1228,22 @@ describe("native transports", () => {
     kept.registerEndpoint(endpoint(dial));
     await expect(kept.connect()).rejects.toThrow(/Peer native address unavailable/);
     expect(dial).not.toHaveBeenCalled();
+  });
+
+  it("with no WebRTC between the two apps, a contact's unknown address is not left to a WebRTC session that cannot happen", async () => {
+    // The contact's app gave this chat's listener to another chat (or never said it): over WebRTC, a session tells it.
+    const NO_RTC = "Peer native address unavailable; the contact's app has not given it yet";
+    const both = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "webrtc/1"] } });
+    both.registerEndpoint(endpoint());
+    await expect(both.connect()).rejects.toThrow("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    // The contact's app runs no WebRTC (a Linux Desktop, the CLI): it says the address itself, once it uses the chat.
+    const theirs = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1"] } });
+    theirs.registerEndpoint(endpoint());
+    await expect(theirs.connect()).rejects.toThrow(NO_RTC);
+    // Nor does this app.
+    const mine = makeLink(createLink().mine, { rtcAvailable: false, native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1", "webrtc/1"] } });
+    mine.registerEndpoint(endpoint());
+    await expect(mine.connect()).rejects.toThrow(NO_RTC);
   });
 });
 

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ghostly, home } from "./support/cli";
+import { error, ghostly, home, ok } from "./support/cli";
 // covers: headless.cli
 
 /** Help per command and per group, as a person or a bot asks for it: `help <words>` or `<words> --help`. */
@@ -33,9 +33,9 @@ describe("help", () => {
     for (const args of [["help", "daemon"], ["daemon", "--help"]]) {
       const { stdout } = await ghostly(args);
       expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly daemon \[--detach\] \[--timeout s\]\n/);
-      expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds --detach waits for it to start/);
+      expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds it waits for a command that holds the profile, and --detach for it to start/);
       expect(stdout, args.join(" ")).toContain("ghostly daemon: 3 more commands (ghostly help daemon <command> for one)");
-      expect(stdout.indexOf("--detach waits"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
+      expect(stdout.indexOf("--detach for it to start"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
     }
     // One command in a group is "1 command".
     expect((await ghostly(["help", "store"])).stdout).not.toContain("1 commands");
@@ -54,6 +54,21 @@ describe("help", () => {
     expect((await ghostly(["frobnicate", "--help"])).code).toBe(2);
     const whole = await ghostly(["help"]);
     expect(whole.stdout).toContain("Usage: ghostly <command>");
+    // Its last line sends the reader somewhere an npm install has: the docs page and the README beside this CLI.
+    expect(whole.stdout.trimEnd().split("\n").pop()).toContain("https://ghostly.tools/cli");
+    expect(whole.stdout).not.toContain("packages/cli/");
+  });
+
+  // agents#1606: `group send`/`group edit`, `identity add` and `call pipe` sat after the whole table, far from their own.
+  it("keeps each word's commands together in the whole list", async () => {
+    const lines = (await ghostly(["help"], { env: { GHOSTLY_HOME: home("help-order") } })).stdout.split("\n");
+    const commands = lines.filter((line) => /^ {2}[a-z]/.test(line)).map((line) => line.trim().split(/\s+/).slice(0, 2));
+    for (const word of ["group", "identity", "call"]) {
+      const at = commands.flatMap(([first, second], i) => (first === word && /^[a-z]/.test(second ?? "") ? [i] : []));
+      expect(at.length, word).toBeGreaterThan(3);
+      expect(at.at(-1)! - at[0], `${word}: ${at.join(" ")}`).toBe(at.length - 1);
+    }
+    for (const usage of ["group send", "group edit", "identity add", "call pipe"]) expect(commands.some(([a, b]) => `${a} ${b}` === usage), usage).toBe(true);
   });
 
   it("a group's first word alone, or with a word it does not take, names the group's commands", async () => {
@@ -90,7 +105,35 @@ describe("help", () => {
     }
     const chat = await ghostly(["help", "chat", "histroy"]);
     expect(chat.code).toBe(2);
-    expect((chat.json.error as { message: string }).message).toMatch(/^Unknown command: chat histroy: ghostly chat takes .*\bhistory\b.* \(ghostly help chat\)$/);
+    expect((chat.json.error as { message: string }).message).toBe("Unknown command: chat histroy (did you mean chat history? ghostly help chat history)");
+  });
+
+  it("a typo in a command or an option names what was meant, the command and its help", async () => {
+    // Before: "Unknown command: sned hi (ghostly help)" (the text read as a command word), "Unknown option --wiat" (no
+    // command, no help), and "put -- before text" from commands that take no text.
+    const dir = home("typos");
+    for (const [args, message] of [
+      [["sned", "hi"], "Unknown command: sned (did you mean send? ghostly help send)"],
+      [["chta", "list"], "Unknown command: chta list (did you mean chat list? ghostly help chat list)"],
+      [["grup", "list"], "Unknown command: grup list (did you mean group list? ghostly help group list)"],
+      [["chat", "lst"], "Unknown command: chat lst (did you mean chat list? ghostly help chat list)"],
+      [["help", "sned"], "Unknown command: sned (did you mean send? ghostly help send)"],
+      [["send", "ecp", "hi", "--wiat", "sent"], "Unknown option --wiat for ghostly send (did you mean --wait? ghostly help send)"],
+      [["chat", "history", "ecp", "--limt", "5"], "Unknown option --limt for ghostly chat history (did you mean --limit? ghostly help chat history)"],
+      [["chat", "list", "--show-secrets"], "Unknown option --show-secrets for ghostly chat list (did you mean --show-secret? ghostly help chat list)"],
+      [["send", "bob", "-1", "degrees"], "Unknown option -1 for ghostly send (put -- before text that starts with a dash; ghostly help send)"],
+      [["chat", "rename", "bob", "-x"], "Unknown option -x for ghostly chat rename (put -- before text that starts with a dash; ghostly help chat rename)"],
+      [["version", "-x"], "Unknown option -x for ghostly version (ghostly help version)"],
+      [["status", "-x"], "Unknown option -x for ghostly status (ghostly help status)"],
+      [["chat", "list", "-x"], "Unknown option -x for ghostly chat list (ghostly help chat list)"],
+      [["profile", "list", "-x"], "Unknown option -x for ghostly profile list (ghostly help profile list)"],
+      [["daemon", "status", "-x"], "Unknown option -x for ghostly daemon status (ghostly help daemon status)"],
+    ] as const) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
   });
 
   it("--help=false is the command, and a global boolean's --no- form may come before the command", async () => {
@@ -103,6 +146,25 @@ describe("help", () => {
     }
   });
 
+  it("an option's value that reads -h or --help is the value, not a help request", async () => {
+    // `profile set --name --help` printed profile set's help with exit 0 and changed nothing; `edit … --text "$NEW"` with
+    // a text of "-h" did the same: a bot read exit 0 as done.
+    const dir = home("help-as-value");
+    expect(ok(await ghostly(["--home", dir, "profile", "create", "bot", "--name", "-h"]))).toMatchObject({ created: "bot", profile: { name: "-h" } });
+    expect(ok(await ghostly(["--home", dir, "-p", "bot", "profile", "set", "--name", "--help"]))).toMatchObject({ profile: "bot", name: "--help" });
+    // The parser's own reading of the line: `--reply -h` names a message, so the chat is looked for.
+    for (const args of [["send", "bob", "hi", "--reply", "-h"], ["edit", "bob", "m1", "--text", "--help"]]) {
+      const result = await ghostly(["--home", dir, "-p", "bot", ...args]);
+      expect(error(result, "not_found", 3).message, args.join(" ")).toContain('No chat "bob"');
+    }
+    // A boolean before it, or a value given with `=`, leaves a later --help a help request.
+    for (const args of [["send", "bob", "--force", "--help"], ["send", "bob", "--wait=sent", "-h"], ["daemon", "--timeout", "5", "--help"]]) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(0);
+      expect(result.stdout, args.join(" ")).toMatch(/^Usage: ghostly /);
+    }
+  });
+
   it("a word every object has (constructor, toString) is no command: unknown, and no profile is opened for it", async () => {
     // The commands are looked up in a table, where `constructor` was found too: `ghostly constructor` said
     // "ghostly undefined", and `ghostly constructor bob hi` opened the profile to answer "No method undefined" (exit 3).
@@ -110,7 +172,7 @@ describe("help", () => {
     for (const args of [["constructor"], ["constructor", "bob", "hi"], ["toString", "bob"], ["__proto__", "bob", "hi"]]) {
       const result = await ghostly(["--home", dir, ...args]);
       expect(result.code, args.join(" ")).toBe(2);
-      expect(result.json, args.join(" ")).toMatchObject({ error: { code: "usage", message: `Unknown command: ${args.slice(0, 2).join(" ")} (ghostly help)` } });
+      expect(result.json, args.join(" ")).toMatchObject({ error: { code: "usage", message: `Unknown command: ${args[0]} (ghostly help)` } });
     }
     expect(existsSync(join(dir, "profiles"))).toBe(false);
   });
@@ -145,8 +207,8 @@ describe("help", () => {
     for (const [args, message] of [
       [["version", "now", "foo"], "Too many arguments: ghostly version"],
       [["--version", "extra"], "Too many arguments: ghostly version"],
-      [["version", "--nope"], "Unknown option --nope"],
-      [["--version", "--json"], "Unknown option --json"],
+      [["version", "--nope"], "Unknown option --nope for ghostly version (ghostly help version)"],
+      [["--version", "--json"], "Unknown option --json for ghostly version (ghostly help version)"],
     ] as const) {
       const result = await ghostly([...args]);
       expect(result.code, args.join(" ")).toBe(2);
@@ -175,6 +237,43 @@ describe("help", () => {
     expect(one.stdout).toContain("Usage: ghostly version");
     expect((await ghostly(["version"])).json).toHaveProperty("version");
     expect(JSON.parse((await ghostly(["--pretty", "--version"])).stdout)).toHaveProperty("version");
+  });
+
+  // At a fixed 58-column usage, 170 of the 195 lines of `ghostly help` passed 80 columns: every summary broke mid-word.
+  it("is laid out to the terminal's width, and piped keeps each row on one line", async () => {
+    const at = (columns: number, args: string[]) => ghostly(args, { env: { COLUMNS: String(columns) } }).then((r) => r.stdout);
+    const flat = (text: string) => text.replace(/\s+/g, " ");
+    for (const args of [["help"], ["help", "chat"], ["send", "--help"], ["help", "identity", "add"], ["help", "help"]]) {
+      const text = await at(80, args);
+      expect(text.split("\n").filter((line) => line.length > 80), args.join(" ")).toEqual([]);
+    }
+    const narrow = await at(80, ["help"]);
+    // Under 100 columns or so, a summary goes under its usage, 4 in, and wraps between words there.
+    expect(narrow).toMatch(/^ {2}profile list\n {4}Profiles, and which one is current$/m);
+    expect(narrow).toMatch(/^ {2}chat history <chat> .*\n {6}\S.*\n {4}Messages, oldest first/m);
+    expect(flat(narrow)).toContain("Make a profile (its own keys, chats and wallets)");
+    expect(flat(narrow)).toContain("Exit codes: 0 done, 1 failed, 2 usage, 3 not found");
+    const options = await at(80, ["send", "--help"]);
+    expect(options).toMatch(/^ {2}--reply <value> +\S/m);
+    const wide = await at(160, ["help"]);
+    expect(wide.split("\n").filter((line) => line.length > 160)).toEqual([]);
+    expect(wide).toMatch(/^ {2}profile list {2,}Profiles, and which one is current$/m);
+    // Piped, as grep reads it: no wrapping.
+    const piped = (await ghostly(["help"], { env: { COLUMNS: "" } })).stdout;
+    expect(piped).toMatch(/^ {2}profile create <name> \[--use\] \[--name <shown name>\] {2,}Make a profile \(its own keys, chats and wallets\)$/m);
+    expect(piped).toMatch(/^ {2}identity add <provider> \[subject\] .* \[--timeout s\]$/m);
+  });
+
+  it("bare ghostly in a new Ghostly folder starts with the first steps", async () => {
+    const dir = home("first-steps");
+    const first = await ghostly(["--home", dir]);
+    expect(first.code).toBe(0);
+    expect(first.stdout).toMatch(/^First steps:\n {2}\$ ghostly invite create/m);
+    expect(first.stdout).toContain("$ ghostly daemon --detach");
+    expect(first.stdout).toContain("Usage: ghostly <command>");
+    expect((await ghostly(["help", "--home", dir])).stdout).not.toContain("First steps");
+    expect((await ghostly(["--home", dir, "profile", "create", "bot"])).code).toBe(0);
+    expect((await ghostly(["--home", dir])).stdout).not.toContain("First steps");
   });
 
   it("shows an option only in the form the command takes, its text apart from it however long it is", async () => {

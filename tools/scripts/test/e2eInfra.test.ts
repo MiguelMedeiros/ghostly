@@ -20,6 +20,28 @@ describe("the e2e stack (e2e/infra)", () => {
   });
 });
 
+describe("the HyperDHT relay (e2e/infra/env.mjs)", () => {
+  it("is ready once its own HyperDHT node is reachable, not merely when it answers", async () => {
+    const { hyperdhtRelayReady } = await import("../../../e2e/infra/env.mjs");
+    const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+    const { default: DHT } = await import("hyperdht");
+    const reachable = await startRelay({ testnet: 3 });
+    // A node made as any new one is: firewalled until dht-rpc's first network check, about 20 minutes in. Two browsers
+    // on such a relay never reach each other until then (a relay image from before it was made reachable on loopback).
+    const node = new DHT({ bootstrap: reachable.bootstrap, host: "127.0.0.1" });
+    const firewalled = await startRelay({ dht: node });
+    try {
+      expect(await hyperdhtRelayReady(reachable.url)).toBe(true);
+      expect(await hyperdhtRelayReady(firewalled.url)).toBe(false);
+      expect(await hyperdhtRelayReady("ws://127.0.0.1:1")).toBe(false);
+    } finally {
+      await firewalled.close();
+      await node.destroy();
+      await reachable.close();
+    }
+  }, 30_000);
+});
+
 describe("the regtest chain (e2e/infra/chain.mjs)", () => {
   it("mines one block when the shared chain's tip is old, so a Lightning node counts as synced; never when it is fresh", async () => {
     const { freshTip, TIP_MAX_AGE_S } = await import("../../../e2e/infra/chain.mjs");
@@ -76,5 +98,38 @@ describe("the Fedimint federation (e2e/support/fedimint-regtest/regtest.mjs)", (
     expect(of({ ...serving, peerChannels: [{ remote_pubkey: NODE, active: false }] }), "the channel is not active yet").toMatchObject({ channel: false, routes: false });
     expect(of({ ...serving, gatewayChannels: undefined }), "the gateway's node is not up").toMatchObject({ channel: false, routes: false });
     expect(of({ ...serving, balances: { ecash_balances: [] } }), "the gateway has no ecash to pay in with").toMatchObject({ channel: true, gatewayEcashMsats: 0, routes: false });
+  });
+});
+
+describe("the NWC hubs (e2e/support/nwc-regtest/regtest.mjs)", () => {
+  const RELAY = "ws://nwc-relay:7777";
+  const state = (online: boolean) => ({ running: true, network: "regtest", relays: [{ url: RELAY, online }] });
+
+  it("restarts a running hub whose relay stays offline, once, and goes on when it is back", async () => {
+    const { hubRunning } = await import("../../../e2e/support/nwc-regtest/regtest.mjs");
+    // A hub with no app yet never dials the relay again once it dropped: only a restart brings it back.
+    let restarts = 0;
+    const info = async () => state(restarts > 0);
+    const restart = () => { restarts++; };
+    await expect(hubRunning("bob", { info, restart, tries: 10, stuck: 3, every: 0 })).resolves.toMatchObject({ running: true });
+    expect(restarts).toBe(1);
+
+    // Booting, then running with no relay reported yet, then online on its own: nothing to restart.
+    const states = [Promise.reject(new Error("ECONNREFUSED")), { running: false, startupState: "Launching" }, { running: true, relays: null }, state(false), state(true)];
+    let n = 0;
+    const own = await hubRunning("alice", { info: async () => states[Math.min(n++, states.length - 1)], restart, tries: 10, stuck: 3, every: 0 });
+    expect(own.relays).toEqual([{ url: RELAY, online: true }]);
+    expect(restarts).toBe(1);
+  });
+
+  it("says which relay stayed offline, or why the hub is not running, when it gives up", async () => {
+    const { hubRunning } = await import("../../../e2e/support/nwc-regtest/regtest.mjs");
+    let restarts = 0;
+    const offline = hubRunning("bob", { info: async () => state(false), restart: () => { restarts++; }, tries: 6, stuck: 3, every: 0 });
+    await expect(offline).rejects.toThrow(`Timed out waiting for bob's hub to run: relay offline: ${RELAY}, even after a restart`);
+    expect(restarts).toBe(1);
+
+    const failed = hubRunning("bob", { info: async () => ({ running: false, startupError: "LND unreachable" }), restart: () => {}, tries: 3, every: 0 });
+    await expect(failed).rejects.toThrow("Timed out waiting for bob's hub to run: LND unreachable");
   });
 });
