@@ -122,6 +122,7 @@ impl FileStore {
         }
         let path = self.path(space, id)?;
         private_folder(path.parent().unwrap()).map_err(io_text)?;
+        own(&path, None).map_err(io_text)?;
         let mut options = OpenOptions::new();
         options.create(true).truncate(false).write(true);
         // A received file is the chat's plain bytes: the user's alone, whatever the umask.
@@ -156,12 +157,18 @@ impl FileStore {
 
     pub fn truncate(&self, space: &str, id: &str, size: u64) -> Result<(), String> {
         let path = self.path(space, id)?;
-        let file = match OpenOptions::new().write(true).open(&path) {
+        let mut file = match OpenOptions::new().write(true).open(&path) {
             Ok(file) => file,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && size == 0 => return Ok(()),
             Err(e) => return Err(e.to_string()),
         };
         if size < file.metadata().map_err(io_text)?.len() {
+            if own(&path, Some(size)).map_err(io_text)? {
+                file = OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .map_err(io_text)?;
+            }
             file.set_len(size).map_err(io_text)?;
         }
         file.sync_all().map_err(io_text)
@@ -182,6 +189,33 @@ impl FileStore {
     pub fn digest(&self, space: &str, id: &str) -> Result<String, String> {
         let mut file = File::open(self.path(space, id)?).map_err(io_text)?;
         Ok(URL_SAFE_NO_PAD.encode(digest_of(&mut file)?))
+    }
+
+    /// `from_space`'s file `from_id` under `id` in `space` as well, a second name of the same file (a hard link): nothing
+    /// is read or written. A move back to a device whose frozen copy holds a file gives the staged profile its own name
+    /// for it; the frozen copy keeps its own, for a revert. `append` and `truncate` give a name a file of its own
+    /// (`own`) before they write, so the other name keeps its bytes. Unix only (Linux, macOS, Android): Windows has no
+    /// stable way to count a file's names, so the page copies there.
+    pub fn link(
+        &self,
+        from_space: &str,
+        from_id: &str,
+        space: &str,
+        id: &str,
+    ) -> Result<(), String> {
+        let from = self.path(from_space, from_id)?;
+        let to = self.path(space, id)?;
+        #[cfg(unix)]
+        {
+            private_folder(to.parent().unwrap()).map_err(io_text)?;
+            self.remove(space, id)?;
+            fs::hard_link(&from, &to).map_err(io_text)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (from, to);
+            Err("Not supported on this platform".into())
+        }
     }
 
     pub fn remove(&self, space: &str, id: &str) -> Result<(), String> {
@@ -360,6 +394,46 @@ fn private_folder(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
     builder.create(path)
+}
+
+/// A file with another name too (`FileStore::link`) gets one of its own before it is written: its bytes (the first
+/// `keep` of them, when given) are copied to a hidden name beside it, which then takes its name. The other name keeps
+/// the file it had. Resolves to whether it was copied. A file with one name, or none, is left as it is.
+fn own(path: &Path, keep: Option<u64>) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match fs::metadata(path) {
+            Ok(meta) if meta.nlink() > 1 => {}
+            Ok(_) => return Ok(false),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        }
+        // A file id is never a hidden name (`check_id`), so no file of the page's is under this one.
+        let copy = path.with_file_name(format!(
+            ".{}.own",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        let result = (|| {
+            let mut options = OpenOptions::new();
+            options.create(true).truncate(true).write(true);
+            std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+            let mut to = options.open(&copy)?;
+            let from = File::open(path)?;
+            std::io::copy(&mut from.take(keep.unwrap_or(u64::MAX)), &mut to)?;
+            to.sync_all()?;
+            fs::rename(&copy, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&copy);
+        }
+        result.map(|()| true)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, keep);
+        Ok(false)
+    }
 }
 
 fn check_id(id: &str) -> Result<&str, String> {
@@ -580,6 +654,23 @@ pub async fn file_bytes_digest<R: tauri::Runtime>(
     tauri::async_runtime::spawn_blocking(move || FileStore::new(base).digest(&space, &id))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// `fromSpace`'s file `fromId` under `id` in `space` as well, nothing copied ([`FileStore::link`]).
+#[tauri::command]
+pub async fn file_bytes_link<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    from_space: String,
+    from_id: String,
+    space: String,
+    id: String,
+) -> Result<(), String> {
+    let base = store(&app)?.base.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        FileStore::new(base).link(&from_space, &from_id, &space, &id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -824,6 +915,80 @@ mod tests {
         files.truncate("p", "missing", 0).unwrap();
         assert!(files.truncate("p", "missing", 1).is_err());
         fs::remove_dir_all(dir).ok();
+    }
+
+    /// A move back to a device whose frozen copy holds a file over 16 MiB: the staged profile gets a second name of it,
+    /// nothing copied, and a write to either name leaves the other's bytes as they were.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_file_is_one_file_until_either_name_is_written() {
+        // covers: devices.handoff
+        use std::os::unix::fs::MetadataExt;
+        let (files, dir) = store();
+        files
+            .append("ghostly", "chat-in-v", 0, b"video bytes")
+            .unwrap();
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-v")
+            .unwrap();
+        let ino = |space: &str| {
+            fs::metadata(dir.join(space).join("chat-in-v"))
+                .unwrap()
+                .ino()
+        };
+        assert_eq!(ino("ghostly"), ino("ghostly_staged"), "one file, two names");
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        // The frozen copy goes once the move is over: the staged name keeps the file.
+        files.remove_where("ghostly", "").unwrap();
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+
+        // Linked again, then cut back and written under one name: the other keeps its bytes.
+        files
+            .link("ghostly_staged", "chat-in-v", "ghostly", "chat-in-v")
+            .unwrap();
+        files.truncate("ghostly_staged", "chat-in-v", 5).unwrap();
+        files
+            .append("ghostly_staged", "chat-in-v", 5, b"!")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-v", 0, 100).unwrap(),
+            b"video!"
+        );
+        assert_eq!(
+            files.read("ghostly", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        assert_ne!(ino("ghostly"), ino("ghostly_staged"));
+        files
+            .link("ghostly", "chat-in-v", "ghostly_staged", "chat-in-w")
+            .unwrap();
+        files
+            .append("ghostly_staged", "chat-in-w", 11, b" more")
+            .unwrap();
+        assert_eq!(
+            files.read("ghostly", "chat-in-v", 0, 100).unwrap(),
+            b"video bytes"
+        );
+        assert_eq!(
+            files.read("ghostly_staged", "chat-in-w", 0, 100).unwrap(),
+            b"video bytes more"
+        );
+        // No hidden copy is left beside them, and a name is never a path.
+        assert_eq!(fs::read_dir(dir.join("ghostly_staged")).unwrap().count(), 2);
+        assert!(files
+            .link("ghostly", "../x", "ghostly_staged", "y")
+            .is_err());
+        assert!(files.link("ghostly", "chat-in-v", "..", "y").is_err());
+        assert!(files
+            .link("ghostly", "missing", "ghostly_staged", "y")
+            .is_err());
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]
