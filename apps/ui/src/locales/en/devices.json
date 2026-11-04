@@ -18,6 +18,15 @@
     "tryAgain": "Try again",
     "waiting": "Waiting for your other device…"
   },
+  "defaultName": {
+    "app": "{{os}} app",
+    "browser": "Browser",
+    "desktop": "Desktop",
+    "on": "{{browser}} on {{os}}",
+    "phone": "Phone",
+    "short": "{{browser}}, {{os}}",
+    "tablet": "Tablet"
+  },
   "fail": {
     "cancelled": "Stopped. Nothing was added.",
     "chat": "This is a chat invite. Use Join in the chat list.",
@@ -48,8 +57,13 @@
   "fork": {
     "confirm": "Discard this copy for good? What is only in it is lost.",
     "discard": "Discard",
+    "discardWhich": "Discard: {{which}}",
     "hint": "A copy of this profile from before another device took over.",
     "info": "Use here kept what this device held then. Messages and payments only in that copy are not in your profile. Discard removes it for good.",
+    "kept": "Kept {{when}}",
+    "older": "Older copy",
+    "olderNumbered": "Older copy {{n}}",
+    "repeat": "{{which}} ({{n}})",
     "title": "Only on this device"
   },
   "handoff": {
@@ -246,6 +260,16 @@
     "removing": "Removing…",
     "text": "It can no longer take this profile.",
     "title": "Remove {{device}}?"
+  },
+  "rename": {
+    "button": "Rename",
+    "fail": {
+      "name": "This name can't be used. Try another one."
+    },
+    "label": "Device name",
+    "save": "Save",
+    "saving": "Saving…",
+    "title": "Rename {{device}}"
   },
   "restore": {
     "activeHint": "Starting this backup here would make a second copy.",

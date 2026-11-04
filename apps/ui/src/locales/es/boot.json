@@ -1,6 +1,9 @@
 {
   "copied": "Copiado",
   "copy": "Copiar detalles",
+  "linkHint": "Ciérrala y esta pestaña abre tu enlace.",
+  "linkTaken": "Tu enlace se abrió en Ghostly en tu otra pestaña.",
+  "linkTakenHint": "Sigue allí. Puedes cerrar esta.",
   "lockdown": "Parece que el Modo de Aislamiento está activado, y apaga lo que Ghostly necesita. Desactívalo para este sitio y recarga.",
   "lockdownHow": "Cómo desactivarlo para este sitio",
   "lockdownOtherBrowser": "Otros navegadores en iPhone o iPad: Ajustes › Privacidad y seguridad › Modo de Aislamiento › Configurar navegación web, y desactívalo para ese navegador.",
@@ -12,6 +15,7 @@
   "otherTab": "Ghostly ya está abierto en otra pestaña.",
   "otherTabHint": "Ciérrala y esta pestaña toma el relevo.",
   "reload": "Recargar",
+  "reloadUnreachable": "No se puede conectar con el servidor de Ghostly. Comprueba tu conexión y vuelve a cargar.",
   "shared": "Enviado a Ghostly en tu otra pestaña.",
   "sharedHint": "Elige el chat allí. Puedes cerrar esta.",
   "title": "Ghostly no puede ejecutarse en este navegador",

@@ -54,8 +54,8 @@ object CameraFiles {
 }
 
 /**
- * wry's WebChromeClient, with the camera's photo taken here, into [CameraFiles]: a cancelled or empty capture leaves
- * nothing. Everything else goes to wry's client: each method it overrides (wry 0.57's `RustWebChromeClient`) is passed
+ * wry's WebChromeClient, with the camera's photo taken here, into [CameraFiles] and through [CameraPhoto]: a
+ * cancelled or empty capture leaves nothing. Everything else goes to wry's client: each method it overrides (wry 0.57's `RustWebChromeClient`) is passed
  * on, so a wry update that overrides another needs it added here.
  */
 class CameraChromeClient(private val activity: WryActivity,private val wry: WebChromeClient) : WebChromeClient() {
@@ -91,7 +91,13 @@ class CameraChromeClient(private val activity: WryActivity,private val wry: WebC
     try {
       activity.launchActivityForResult(intent) { result ->
         if (result?.resultCode == Activity.RESULT_OK && file.length() > 0) {
-          callback.onReceiveValue(arrayOf(uri))
+          // The page sends the file as it is: without the camera's Exif (where, with what) first, off the main thread
+          // (a 50 MP photo is tens of MB). One that is no whole JPEG is not sent.
+          Thread {
+            val stripped = CameraPhoto.strip(file)
+            if (!stripped) file.delete()
+            activity.runOnUiThread { callback.onReceiveValue(if (stripped) arrayOf(uri) else null) }
+          }.start()
         } else {
           file.delete()
           callback.onReceiveValue(null)

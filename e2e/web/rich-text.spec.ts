@@ -120,3 +120,32 @@ test("a link in a received message opens in a new tab: bulleted lines, an encode
   // Bob is still in the chat.
   await expect(words).toBeVisible();
 });
+
+test("a web address that fits on the next line moves there whole; only one wider than the line breaks inside", {
+  tag: ["@feature:chat.paired.links", "@feature:chat.rich.mdlinks"],
+}, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { mobile: true, viewport: { width: 375, height: 667 } })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  // The same short address after more and more words, so it falls at every place on a phone's line; the last line is
+  // one address longer than any line, and a [url](url) link shows its address too.
+  const url = "https://example.com/a/b?c=d";
+  const long = `https://example.com/${"segment".repeat(12)}`;
+  const lines = Array.from({ length: 12 }, (_, n) => `${"wörd ".repeat(n + 1)}${url} end`);
+  await say(alice, [...lines, `[${url}](${url}) end`, long].join("\n"));
+  const words = bubble(bob, long).getByTestId("message-text");
+  await expect(words.getByRole("link")).toHaveCount(14);
+
+  const shapes = await words.getByRole("link").evaluateAll((anchors) => anchors.map((a) => {
+    const range = document.createRange();
+    range.selectNodeContents(a);
+    const rows = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top))).size;
+    const box = a.getBoundingClientRect(), text = a.closest("[data-testid=message-text]")!.getBoundingClientRect();
+    return { text: a.textContent, rows, inside: box.left >= text.left - 1 && box.right <= text.right + 1 };
+  }));
+  expect(shapes.slice(0, 13).filter((s) => s.rows !== 1), "a short address split over lines").toEqual([]);
+  // The long one still wraps inside the bubble instead of running out of it.
+  expect(shapes[13]).toMatchObject({ text: long, inside: true });
+  expect(shapes[13].rows).toBeGreaterThan(1);
+});

@@ -179,6 +179,27 @@ describe("accept and decline (WISP 8xx)", () => {
     expect(w.state.accepted).toEqual([]);
   });
 
+  it("a new link keeps the requests waiting: each stays answerable until it ends", async () => {
+    const w = world();
+    const linkKey = await linkOf(w);
+    // One poll each: two askers may share a knock slot.
+    const { asker: kevin, invite } = w.ask(linkKey, { name: "Kevin", text: "Hello!" });
+    await w.links.poll();
+    const { asker: ana } = w.ask(linkKey, { name: "Ana", expires: NOW + 60_000 });
+    await w.links.poll();
+    expect(w.links.requests()).toHaveLength(2);
+    await w.links.create();
+    await w.links.poll();
+    expect(w.links.requests().map(r => r.id)).toEqual([ana.pubKeyZ32, kevin.pubKeyZ32]);
+    expect(w.links.view()?.waiting).toBe(2);
+    vi.setSystemTime(NOW + 60_000);
+    await w.links.poll();
+    expect(w.links.requests().map(r => r.id)).toEqual([kevin.pubKeyZ32]);
+    expect(await w.links.accept(kevin.pubKeyZ32)).toEqual({ linkId: "chat-1" });
+    expect(w.state.accepted).toEqual([{ key: kevin.pubKeyZ32, invite, name: "Kevin", text: "Hello!" }]);
+    expect(w.links.view()?.waiting).toBe(0);
+  });
+
   it("an expired or unknown request cannot be accepted", async () => {
     const w = world();
     const linkKey = await linkOf(w);

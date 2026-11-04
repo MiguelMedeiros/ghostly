@@ -74,8 +74,13 @@ export interface NostrContactView {
     /** Hints against the person's own lists; absent when none of their own lists is loaded. */
     hints?: { followsYou: boolean; youFollow: boolean; mutual: number; /** The person's key the hints are against. */ myKey: string; myFollowsAt: number };
   };
+  /**
+   * The posts loaded, as counts: every engine state carries this view (the extension's port as JSON), so the posts
+   * themselves come from `nostrContactNotes` when the card shows them.
+   */
   notes?: Fetched & {
-    notes: NostrNoteView[];
+    /** Posts shown, past the person's mute lists. */
+    count: number;
     /** More can be loaded (the last page was full). */
     more: boolean;
     /** Notes hidden by the person's own mute list, and whether the whole author is muted. */
@@ -90,7 +95,8 @@ export interface NostrOwnView {
   subject: string;
   npub: string;
   profile?: Fetched & { stale: boolean; found: boolean; profile?: NostrProfileView };
-  follows?: Fetched & { stale: boolean; follows: string[]; eventAt: number };
+  /** How many keys the list names: the keys themselves come from `nostrOwnFollows`, out of every engine state. */
+  follows?: Fetched & { stale: boolean; count: number; eventAt: number };
   mute?: Fetched & { pubkeys: number; words: number; notes: number; hasPrivate: boolean };
   loading?: boolean;
   error?: string;

@@ -78,6 +78,8 @@ export interface CarriedHooks {
    * admin, which keeps an edge with everyone), so the relays can wait even before anything came back that way.
    */
   carry(payload: Uint8Array): { taken: number; sure: boolean };
+  /** Whether `carry` would hand a packet to any link now (none: every member that could pass it on is away). */
+  canCarry?(): boolean;
   /** The edge's own data link is open: it carries everything, and nothing is handed to anyone. */
   open(): boolean;
   /** A carried packet of the member's is here and no read is under way: look now. */
@@ -89,6 +91,12 @@ export interface CarriedHooks {
   direct?(payload: Uint8Array): boolean;
   /** `CARRIED_DEFER_MS`, for tests. */
   deferMs?: number;
+  /**
+   * The date of the last packet an earlier transport of this edge signed (`lastDated`), before the edge started again:
+   * mine are dated past it. Dated by the clock alone, the first packet of an edge started again in the same millisecond
+   * (its WebRTC gave up, `edgeWithoutRtc`) was no newer than the last one, and a relay refused it (409).
+   */
+  after?: bigint;
 }
 
 /**
@@ -110,6 +118,8 @@ export class CarriedTransport implements PkarrTransport {
   private seen = -1n;
   /** A read under way: resolved when a carried packet comes meanwhile. */
   private waiting: (() => void) | null = null;
+  /** The records of a publish refused before they were signed, while nobody could carry them: signed when one can (`latest`). */
+  private unsigned: { identity: Identity; records: GhostRecord[] } | null = null;
   /** The packet the relays have not got yet. */
   private pending: { identity: Identity; records: GhostRecord[]; payload: Uint8Array; options?: PkarrRequestOptions; timer: ReturnType<typeof setTimeout>; heardBefore: number; ended: Promise<"ended">; end: () => void } | null = null;
   /** How many carried packets of the member's came: a deferral that ends with none more says no member reaches it. */
@@ -126,11 +136,13 @@ export class CarriedTransport implements PkarrTransport {
   readonly configure?: PkarrTransport["configure"];
 
   constructor(private readonly inner: PkarrTransport, private readonly myKey: string, private readonly peerKey: string, private readonly hooks: CarriedHooks) {
+    this.lastTimestamp = hooks.after ?? 0n;
     if (inner.publishPayload) this.publishPayload = (key, payload, options) => inner.publishPayload!(key, payload, options);
     if (inner.discovery) this.discovery = () => inner.discovery!();
     if (inner.subscribe) this.subscribe = listener => inner.subscribe!(listener);
     if (inner.networkChanged) this.networkChanged = () => inner.networkChanged!();
     if (inner.configure) this.configure = options => inner.configure!(options);
+    // No `publishHeld` for the link above: down, its packet goes through members whatever the relays say (`publish`).
   }
 
   describe(): { protocol: string; relays: string[] } { return this.inner.describe(); }
@@ -138,15 +150,30 @@ export class CarriedTransport implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options?: PkarrRequestOptions): Promise<void> {
     if (this.stopped || identity.pubKeyZ32 !== this.myKey) return this.inner.publish(identity, records, options);
     this.drop();
-    const payload = this.newest = this.stamp(identity, records);
+    this.unsigned = null;
     // Up: the edge carries everything, and its packet on the relays (it is here, its offer is settled) is nothing
     // anyone waits for. It goes as a background write, behind the links that are signaling (a new offer of its own aside).
     if (this.hooks.open()) {
+      const relayOptions = options?.signal ? options : { ...options, background: true };
+      // No relay takes it now: refused before it is signed and dated, as a chat's (`RelayTransport.publishDated`); the
+      // link tries again when the wait says. A hub at its budget signed ~450-670 edge packets a minute that never went
+      // out, 8-10% of its busy CPU (agents#1573). Down, a packet is signed whatever the relays say: members carry it.
+      const held = this.inner.publishHeld?.(identity.pubKeyZ32, relayOptions);
+      if (held) throw held;
       this.mine = null;
-      const published = this.toRelays(identity, records, payload, options?.signal ? options : { ...options, background: true });
+      const payload = this.newest = this.stamp(identity, records);
+      const published = this.toRelays(identity, records, payload, relayOptions);
       if (this.hooks.direct && this.inner.publishPayload) void published.then(() => this.handDirect(payload), () => { /* the link publishes again, and hands it then */ });
       return published;
     }
+    // Down, and no member to hand it to: refused before it is signed when no relay takes it either, as when up. Its
+    // records wait for a member that can carry them (`latest`). With every member away, 10 groups' 30 edges signed ~80
+    // packets a minute that went nowhere.
+    if (this.hooks.canCarry && !this.hooks.canCarry()) {
+      const held = this.inner.publishHeld?.(identity.pubKeyZ32, options);
+      if (held) { this.unsigned = { identity, records }; throw held; }
+    }
+    const payload = this.newest = this.stamp(identity, records);
     this.mine = payload;
     let carried = { taken: 0, sure: false };
     try { carried = this.hooks.carry(payload); } catch { /* nobody took it */ }
@@ -160,14 +187,20 @@ export class CarriedTransport implements PkarrTransport {
     this.pending = { identity, records, payload, options, heardBefore: this.heard, ended, end, timer: setTimeout(() => this.flush(), this.hooks.deferMs ?? CARRIED_DEFER_MS) };
   }
 
-  /** My next packet for this edge, signed and dated: each newer than the last, as the relays' copy keeps them. */
-  private stamp(identity: Identity, records: GhostRecord[]): Uint8Array {
-    const now = BigInt(Date.now()) * 1000n;
-    this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1n;
+  /**
+   * My next packet for this edge, signed and dated: each newer than the last, as the relays' copy keeps them, and past
+   * `after` (what a relay that refused one holds).
+   */
+  private stamp(identity: Identity, records: GhostRecord[], after = 0n): Uint8Array {
+    const now = BigInt(Date.now()) * 1000n, floor = after > this.lastTimestamp ? after : this.lastTimestamp;
+    this.lastTimestamp = now > floor ? now : floor + 1n;
     const payload = createRelayPayload(identity, records, this.lastTimestamp);
     this.dated.set(payload, this.lastTimestamp);
     return payload;
   }
+
+  /** The date of the last packet this transport signed (0 for none): an edge started again dates its own past it. */
+  lastDated(): bigint { return this.lastTimestamp; }
 
   /**
    * The relays get the very packet members carried or the edge itself handed over, byte for byte, where the transport
@@ -179,10 +212,20 @@ export class CarriedTransport implements PkarrTransport {
   // `publishPayload` does not move `RelayTransport.nextTimestamp` for this key: a packet the relays' transport dates
   // later (the goodbye after `stop()`) is dated by its own clock, past this one unless both fall in one millisecond.
   // Signed here, it says its date (`signedAt`): about 200 ms a minute of a hub's CPU went to checking its own packets.
+  // A relay holding a copy dated at or after it (409) gets the same records signed again past that copy (`redate`),
+  // while this is still my newest packet.
   private toRelays(identity: Identity, records: GhostRecord[], payload: Uint8Array, options?: PkarrRequestOptions): Promise<void> {
     const signedAt = this.dated.get(payload);
+    let current = payload;
+    const redate = (after: bigint) => {
+      if (this.newest !== current) return null;
+      const again = this.stamp(identity, records, after);
+      if (this.mine === current) this.mine = again;
+      this.newest = current = again;
+      return { payload: again, signedAt: this.lastTimestamp };
+    };
     return this.inner.publishPayload
-      ? this.inner.publishPayload(identity.pubKeyZ32, payload, signedAt === undefined ? options : { ...options, signedAt })
+      ? this.inner.publishPayload(identity.pubKeyZ32, payload, signedAt === undefined ? options : { ...options, signedAt, redate })
       : this.inner.publish(identity, records, options);
   }
 
@@ -287,13 +330,22 @@ export class CarriedTransport implements PkarrTransport {
   }
 
   /** My newest packet for this edge while it is down, for a member that can pass it on now; null once it is up. */
-  latest(): Uint8Array | null { return this.stopped || this.hooks.open() ? null : this.mine; }
+  latest(): Uint8Array | null {
+    if (this.stopped || this.hooks.open()) return null;
+    if (this.unsigned) {
+      const { identity, records } = this.unsigned;
+      this.unsigned = null;
+      this.mine = this.newest = this.stamp(identity, records);
+    }
+    return this.mine;
+  }
 
   /** The edge is going: nothing more is deferred or carried, and a last packet goes straight to the relays. */
   stop(): void {
     this.stopped = true;
     this.drop();
     this.mine = null;
+    this.unsigned = null;
     const waiting = this.waiting;
     this.waiting = null;
     waiting?.();

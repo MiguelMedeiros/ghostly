@@ -5,7 +5,7 @@ import { concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Decode, utf8E
 import { edgeParams } from "./groupCrypto";
 import { GROUP_ID, MEMBER_KEY } from "./groupCommits";
 import { identityFromSeed, publicKeyFromZ32, type Identity } from "./identity";
-import { trimEndOf } from "./text";
+import { trimEndOf, unwrapPasted } from "./text";
 import type { LinkParams } from "./invite";
 import type { GhostRecord } from "./pkarr";
 
@@ -62,8 +62,15 @@ export function groupEntryUrl(origin: string, link: GroupEntryLink): string {
   return `${trimEndOf(origin, "/")}/#/join/${encodeGroupEntryLink(link)}`;
 }
 
-/** A pasted link, a `/join/…` path or the bare code; null when it is none of them. */
+/**
+ * A pasted link, a `/join/…` path or the bare code; null when it is none of them. Copied with the words around it
+ * ("Join our group: <https://…/join/group1/…>."), it is read as the token in it (`unwrapPasted`).
+ */
 export function decodeGroupEntryLink(input: string): GroupEntryLink | null {
+  return readGroupEntryLink(input) ?? readGroupEntryLink(unwrapPasted(input));
+}
+
+function readGroupEntryLink(input: string): GroupEntryLink | null {
   const clean = input.trim().replace(/^.*#/, "").replace(/^.*?\/join\//, "").replace(/^\/+/, "");
   const parts = clean.split("/");
   if (parts.length !== 3 || parts[0] !== PREFIX) return null;

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { removalRisksFunds, walletRemoval, type WalletRemoval } from "@ghostly/browser/shared/walletRemoval";
 import type { WalletNetwork, WalletPlatform, WalletState, WalletType } from "../../lib/platform";
-import { useBackdropDismiss } from "../../hooks/useDismiss";
+import { useBackdropDismiss, useBackCloses } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
 import { NetworkTag } from "../NetworkTag";
 import { networkState } from "../walletCardData";
@@ -81,6 +81,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const close = () => { if (!busy) onClose(); };
   const backdrop = useBackdropDismiss(close);
+  useBackCloses(close);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;
@@ -138,7 +139,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
           <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("wallet.remove.backupFirst")}</h3>
           {removal.backup === "phrase" ? (
             <div className="bg-surface rounded-xl divide-y divide-border">
-              <BackupRows name={WALLET_NAME[type]} busy={backup.busy || busy} run={backup.run} reveal={() => reveal(wallet, type)} exportBackup={(password) => exportBackup(wallet, type, password)} />
+              <BackupRows name={WALLET_NAME[type]} busy={backup.busy || busy} running={backup.running} run={backup.run} reveal={() => reveal(wallet, type)} exportBackup={(password) => exportBackup(wallet, type, password)} />
             </div>
           ) : removal.backup === "tokens" ? (
             <Block>

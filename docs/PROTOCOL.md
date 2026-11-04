@@ -203,7 +203,9 @@ as it did.
 
 v3 also leaves an IPv6 related address out of the candidates it sends (`raddr :: rport 0`, WebKit's IPv6 srflx),
 and accepts one: a v2 receiver checked `raddr` against the extension-token pattern, which has no colon, and
-refused the whole signal, so the call never rang. The related address is informational for ICE.
+refused the whole signal, so the call never rang. The related address is informational for ICE. A sender now
+leaves every related address out, IPv4 too: it names an interface of the sender's, and receivers of every version
+take a candidate without one.
 
 ### 4.3 Reconnecting (v4)
 

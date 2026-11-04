@@ -20,12 +20,16 @@ type Window = Json & {
 };
 
 /** The runner in a window of its own; `answer` is the JSON text of Rust's answer to a request. */
-function open(answer: (request: { type: string; id?: number }) => string) {
+function open(answer: (request: { type: string; id?: number }) => string, clock = { t: 1_000 }) {
   const written: string[] = [];
+  /** The window's listeners, by event: the runner's own are the only ones here. */
+  const listeners: Record<string, (event: { isTrusted: boolean }) => void> = {};
   const window = {
     origin: "null",
     atob,
     setTimeout,
+    Date: { now: () => clock.t },
+    addEventListener: (type: string, listener: (event: { isTrusted: boolean }) => void) => { listeners[type] = listener; },
     document: { documentElement: { setAttribute() {}, textContent: "" }, open() {}, write: (html: string) => written.push(html), close() {} },
     __TAURI_INTERNALS__: {
       metadata: { currentWindow: { label: "app-1" } },
@@ -38,7 +42,7 @@ function open(answer: (request: { type: string; id?: number }) => string) {
   window.window = window;
   window.self = window;
   runInNewContext(runner, window);
-  return { window, written };
+  return { window, written, listeners };
 }
 
 const settle = () => new Promise((done) => setTimeout(done, 0));
@@ -63,6 +67,27 @@ it("hands a peer message with a __proto__ member to the app as a key, not as the
   window.__ghostlyEvent({ event: "chat.message", data: 1 });
   window.__ghostlyEvent("{");
   expect(seen).toHaveLength(1);
+});
+
+it("says `activity` for the person's taps and keys, at most every 5 seconds, and never for an event the app made", async () => {
+  const clock = { t: 1_000 };
+  const asked: string[] = [];
+  const { listeners } = open((request) => {
+    asked.push(request.type);
+    return request.type === "start" ? `"<p>chess</p>"` : `{"id":${request.id},"ok":true}`;
+  }, clock);
+  await settle();
+  const said = () => asked.filter((type) => type === "activity").length;
+  listeners.pointerdown!({ isTrusted: true });
+  expect(said()).toBe(1);
+  clock.t += 4_000;
+  listeners.keydown!({ isTrusted: true });
+  expect(said()).toBe(1);
+  clock.t += 1_000;
+  listeners.keydown!({ isTrusted: false });
+  expect(said()).toBe(1);
+  listeners.keydown!({ isTrusted: true });
+  expect(said()).toBe(2);
 });
 
 it("gives the app an answer with a __proto__ member as a key", async () => {

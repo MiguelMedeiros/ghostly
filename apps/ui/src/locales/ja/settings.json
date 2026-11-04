@@ -7,6 +7,7 @@
     "compact": "コンパクト"
   },
   "chatListDensity": "チャット一覧",
+  "chatsDeleted": "すべてのチャットが削除されました",
   "clear": "消去",
   "clearAllData": "すべてのデータを消去",
   "clearAllDataConfirm": "次のものを完全に消去します：",
@@ -55,7 +56,9 @@
   "dataCleared": "すべてのデータが消去されました",
   "defaultNickname": "チャットでの名前",
   "defaultNicknameHint": "新しいチャットを始めるときに使われます",
+  "deleteAllChatsCallOn": "チャットで通話中です。先に通話を終了してから、すべてのチャットを削除してください。",
   "deleteAllChatsConfirm": "{{count}}件のチャットをすべて削除しますか?",
+  "deleteAllChatsConfirm_one": "{{count}}件のチャットを削除しますか?",
   "deleteAllChatsHint": "メッセージとファイルは削除されます。設定とウォレットは残ります。",
   "groupDownloads": {
     "always": "常に",
@@ -80,6 +83,8 @@
     "allow": "許可",
     "camera": "カメラ",
     "cameraInfo": "通話と写真に使います。このデバイスのこのプロフィールに保存されます。",
+    "denied": "ブロックされています。ブラウザかシステムの設定でマイクとカメラを許可してください。",
+    "deniedIos": "iOS にブロックされています。設定 → アプリ → Safari でマイク(とカメラ)を許可し、Ghostly を開き直してください。",
     "failed": "開けませんでした。Ghostly に許可があるか確認してください。",
     "level": "マイクのレベル",
     "microphone": "マイク",
@@ -220,6 +225,21 @@
     "60": "1時間"
   },
   "title": "設定",
+  "translate": {
+    "downloaded": "ダウンロードした言語",
+    "downloading": "ダウンロード中…",
+    "hint": "まだ選んでいないチャットの既定",
+    "info": "ほかの言語で届いたメッセージを、一度ダウンロードした言語モデルでこのデバイス上で翻訳します。テキストがデバイスの外に出ることはなく、連絡先に知られることもありません。",
+    "name": "メッセージを翻訳",
+    "none": "ダウンロードした言語はありません",
+    "pair": "{{from}} → {{to}}",
+    "remove": "削除",
+    "removeFailed": "削除できませんでした。もう一度お試しください。",
+    "removeLabel": "{{name}}を削除",
+    "searchWords": "翻訳, 自動翻訳, 言語, モデル",
+    "title": "メッセージを{{language}}に翻訳",
+    "unread": "ダウンロードした言語を読み込めませんでした。"
+  },
   "version": "バージョン",
   "website": "ウェブサイト"
 }

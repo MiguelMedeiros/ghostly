@@ -6,7 +6,7 @@ import { NowPlayingBar } from "../../components/NowPlayingBar";
 import { VoiceBubble } from "../../components/voice/VoiceBubble";
 import { JUMP_TO } from "../../hooks/useJumpTo";
 import { userState } from "../../lib/navigation";
-import { NowPlayingChat, pauseForCall, type PlayingChat } from "../../lib/nowPlaying";
+import { NowPlayingChat, pauseForCall, stopPlayingFrom, type PlayingChat } from "../../lib/nowPlaying";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -38,7 +38,7 @@ function Screen({ files, open = true, audioFiles = [], where = FAMILY }: { files
         <NowPlayingChat.Provider value={where}>
           {files.map((file) => (
             <div key={file.id} data-message-id={`m-${file.id}`}>
-              <VoiceBubble file={file as ChatFile & { voice: { duration: number; peaks: number[] } }} sender="peer" peerName="Ana" />
+              <VoiceBubble file={file as ChatFile & { voice: { duration: number; peaks: number[] } }} sender="peer" peerName="Ana" timestamp={1_700_000_000_000} />
             </div>
           ))}
           {audioFiles.map((file) => (
@@ -49,6 +49,8 @@ function Screen({ files, open = true, audioFiles = [], where = FAMILY }: { files
         </NowPlayingChat.Provider>
       )}
       <Where />
+      {/* What comes after the bar, as the tab bar does on a phone. */}
+      <button type="button">Chats</button>
     </>
   );
 }
@@ -115,6 +117,22 @@ describe("a voice message playing as its chat goes", () => {
     expect(screen.getByTestId("now-playing-from")).toHaveTextContent(/^Ana Lima$/);
   });
 
+  it("in the Arabic app a Latin name, chat or file name starts at its start and is cut at its end", async () => {
+    // A <bdi> inside the truncating box took the box's (the page's) direction for the cut: "…elease Agent Number One".
+    const where: PlayingChat = { path: "/group/team", name: "Weekly release planning team" };
+    const file = song();
+    const view = renderApp(<Screen files={[]} audioFiles={[file]} where={where} />, { language: "ar" });
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    view.rerender(<Screen files={[]} audioFiles={[file]} where={where} open={false} />);
+    for (const text of ["Ana", "Weekly release planning team", "Ghost Town.mp3"]) {
+      const shown = within(bar()!).getByText(text);
+      expect(shown).toHaveAttribute("dir", "auto");
+      expect(shown).toHaveClass("truncate");
+    }
+    expect(within(bar()!).getByTestId("now-playing-from")).toHaveTextContent("Ana · Weekly release planning team");
+  });
+
   it("the bar pauses and plays it, from the keyboard too, and says where it is in the app's language", async () => {
     const file = voiceFile();
     const view = renderApp(<Screen files={[file]} />, { route: "/group/family", language: "pt" });
@@ -163,6 +181,19 @@ describe("a voice message playing as its chat goes", () => {
     expect(audio.players[1]!.currentTime).toBe(6);
   });
 
+  it("closed from the keyboard, the focus goes on to what comes after the bar, not to the page's body", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />);
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    view.rerender(<Screen files={[file]} open={false} />);
+
+    screen.getByRole("button", { name: "Stop and close" }).focus();
+    await view.user.keyboard("{Enter}");
+    expect(bar()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chats" }));
+  });
+
   it("played to its end away from its chat: the bar goes, and it starts from the beginning next time", async () => {
     const file = voiceFile();
     const view = renderApp(<Screen files={[file]} />);
@@ -177,6 +208,20 @@ describe("a voice message playing as its chat goes", () => {
     view.rerender(<Screen files={[file]} />);
     expect(screen.getByTestId("voice-time")).toHaveTextContent("0:10");
     expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "idle");
+  });
+
+  it("played to its end with the focus on the bar, the focus goes on to what comes after it, not to the page's body", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />);
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const player = audio.players[0]!;
+    view.rerender(<Screen files={[file]} open={false} />);
+
+    screen.getByTestId("now-playing-play").focus();
+    act(() => endPlayback(player));
+    expect(bar()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chats" }));
   });
 
   it("starting another stops the one playing on, and the bar goes", async () => {
@@ -267,5 +312,26 @@ describe("an audio file playing as its chat goes", () => {
     expect(again.currentTime).toBe(90);
     expect(again.paused).toBe(false);
     expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-state", "playing");
+  });
+});
+
+describe("a voice message playing on as its chat goes from this device", () => {
+  it("stops, and the bar goes, when that chat is deleted; another chat going leaves it playing", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />, { route: "/group/family" });
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const player = audio.players[0]!;
+    playTo(player, 3);
+    view.rerender(<Screen files={[file]} open={false} />);
+    expect(bar()).not.toBeNull();
+
+    act(() => stopPlayingFrom("/group/other", false));
+    expect(player.paused).toBe(false);
+    expect(bar()).not.toBeNull();
+
+    act(() => stopPlayingFrom(FAMILY.path, false));
+    expect(player.paused).toBe(true);
+    expect(bar()).toBeNull();
   });
 });

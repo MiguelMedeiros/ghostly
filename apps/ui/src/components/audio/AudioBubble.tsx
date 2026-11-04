@@ -6,7 +6,7 @@ import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, sentWhole, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
@@ -69,8 +69,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const messageRef = useRef<string | undefined>(undefined);
   /** What the now-playing bar shows of it, should it play on away from here. */
   const chat = usePlayingChat();
-  const trackRef = useRef({ title: file.name, from: "", chat });
-  trackRef.current = { title: file.name, from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
+  const trackRef = useRef({ title: file.name, label: "", from: "", chat });
+  trackRef.current = { title: file.name, label: t("chat.audio.message"), from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
   /** On screen: a stream that opens after the bubble went is let go at once. */
   const mounted = useRef(false);
   /** What the system's media controls call (lock screen, media keys): set on every render, below. */
@@ -216,7 +216,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     resumeAt.current = clamped;
     if (audioRef.current && srcRef.current) audioRef.current.currentTime = clamped;
   };
-  mediaRef.current = { title: file.name, artist: sender === "me" ? t("chat.reply.you") : peerName, play: () => void play(), pause, seekTo: seek };
+  mediaRef.current = { title: t("chat.audio.message"), play: () => void play(), pause, seekTo: seek };
 
   const act = (action: FileAction) => {
     setActionError("");
@@ -241,7 +241,9 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const noRoom = offered && typeof transfer.room === "number" && transfer.room < file.size;
   const pausedHere = moving && transfer.stage === "paused" && transfer.pausedBy !== "peer";
-  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking";
+  // Sent whole: too late to pause or cancel, the contact keeps it.
+  const canPause = controls && !offered && !pausedHere && transfer.stage !== "verifying" && transfer.stage !== "preparing" && transfer.stage !== "asking" && !sentWhole(transfer);
+  const canCancel = controls && !sentWhole(transfer);
   const canRetry = canRetryFile(file, transfer, platform);
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
@@ -292,7 +294,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </span>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-[13.5px] leading-tight truncate m-0" title={file.name} data-testid="audio-name"><bdi><Highlight text={file.name} term={highlight} /></bdi></p>
+          <p dir="auto" className="text-[13.5px] leading-tight truncate m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
           <input
             type="range"
             data-testid="audio-seek"
@@ -306,12 +308,13 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             onChange={(event) => seek(Number(event.currentTarget.value))}
             className="block w-full h-3 my-0.5 accent-accent cursor-pointer disabled:cursor-default disabled:opacity-50"
           />
-          <div className="flex items-center gap-1.5 h-[18px] text-[11px] text-text-primary/65" data-testid="audio-meta">
+          {/* At least a line high; the status wraps (cut with …, it lost its end: how far the file is, its size). */}
+          <div className="flex items-center gap-1.5 min-h-[18px] text-[11px] text-text-primary/65" data-testid="audio-meta">
             {active && <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />}
-            <span className="tabular-nums" data-testid="audio-time">
+            <span className="tabular-nums shrink-0 whitespace-nowrap" data-testid="audio-time">
               {known ? `${formatVideoDuration(position * 1000)} / ${formatVideoDuration(duration * 1000)}` : formatFileSize(file.size)}
             </span>
-            {status && <span data-testid="audio-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
+            {status && <span data-testid="audio-status" className={`min-w-0 [overflow-wrap:anywhere] ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="audio-why" danger={!!reason} />}
           </div>
         </div>
@@ -340,11 +343,11 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           )}
         </div>
       )}
-      {controls && !offered && !group && (
+      {controls && !offered && !group && (canPause || pausedHere || canCancel) && (
         <div className="flex gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={pill} data-testid="audio-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={pill} data-testid="audio-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
-          <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
+          {canCancel && <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>}
         </div>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="audio-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
@@ -375,7 +378,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             messageRef.current = rootRef.current?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
             // The lock screen and media keys drive the one playing now.
             const shown = mediaRef.current!;
-            claimMediaSession(file.id, { title: shown.title, artist: shown.artist, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
+            claimMediaSession(file.id, { title: shown.title, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
           }}
           onPause={() => { releasePlayback(file.id); mediaSessionState(file.id, "paused"); setPlayState((was) => (was === "playing" ? "paused" : was)); }}
           onEnded={() => { resumeAt.current = 0; forgetPosition(file.id); setPosition(0); unload(); setPlayState("idle"); }}

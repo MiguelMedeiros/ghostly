@@ -5,9 +5,11 @@ import type { EnrollView } from "@ghostly/browser/devices/enroll";
 import { askPersistentStorage, isIosBrowserTab } from "@ghostly/browser/devices/install";
 import { readDeviceInvite } from "@ghostly/core";
 import { useI18n, type TranslationKey } from "../../contexts/I18nContext";
+import { useLockPassedNow } from "../../contexts/LockScreenContext";
 import {
-  defaultDeviceName, deviceNoun, enrollErrorKey, enrollInUse, enrollLoading, failureKey, joinInNewProfile, readDeviceLink, reloadIntoGate, type JoinRequest,
+  defaultDeviceName, deviceNoun, enrollErrorKey, enrollInUse, enrollLoading, failureKey, fitsDeviceName, joinInNewProfile, readDeviceLink, reloadIntoGate, type JoinRequest,
 } from "../../lib/devices";
+import { useFittedNameField } from "../../hooks/useGroupNameField";
 import { isDesktopApp } from "../../lib/externalLink";
 import { nameStepDone } from "../../lib/nameStep";
 import { servicesPlatform } from "../../lib/platform";
@@ -16,6 +18,7 @@ import { Notice } from "../wallet/ui";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
 import { problemText, type Problem } from "../../lib/problemText";
 import { said } from "../../lib/notices";
+import { fillNames } from "../../lib/fillNodes";
 import { keepFocusIn } from "../../lib/focus";
 
 /** How long a profile whose wallets are still loading is asked again before the join gives up and says why. */
@@ -46,6 +49,7 @@ type Place = "here" | "new" | "loading" | "nowhere";
  */
 export function JoinProfileDialog({ request = {}, standby = false, onClose, onRestore }: { request?: JoinRequest; standby?: boolean; onClose(): void; onRestore(): void }) {
   const { t } = useI18n();
+  const lockPassedNow = useLockPassedNow();
   const tab = isIosBrowserTab();
   const canMakeProfiles = !!servicesPlatform?.features.profiles;
   const [step, setStep] = useState<Step>(() => {
@@ -57,7 +61,9 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   // The code, and the profile its link names: from the request, or from the scanner.
   const [code, setCode] = useState(request.code);
   const [profile, setProfile] = useState(request.profile);
-  const [name, setName] = useState(() => request.name ?? defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined));
+  const [name, setName] = useState(() => request.name ?? defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined, t));
+  // What the set keeps of a name, 16 bytes, not 16 characters: the name typed is the name every device shows.
+  const nameField = useFittedNameField(name, setName, fitsDeviceName);
   const [place, setPlace] = useState<Place | null>(null);
   const [view, setView] = useState<EnrollView | null>(null);
   const [kept, setKept] = useState<boolean | null>(null);
@@ -105,12 +111,13 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
 
   // Done: the standby screen opens by itself, unless the browser may clear the data, which the person reads first.
   // The profile is now one added from another device: a first start's "What should people call you?" is not asked.
+  // The lock carries across the reload only if it stands passed then: this dialog runs on under a lock closed again.
   useEffect(() => {
     if (view?.step === "done") nameStepDone();
     if (view?.step !== "done" || kept === false) return;
-    const timer = setTimeout(() => void reloadIntoGate({ keepUnlocked: true }), DONE_PAUSE_MS);
+    const timer = setTimeout(() => void reloadIntoGate({ keepUnlocked: lockPassedNow() }), DONE_PAUSE_MS);
     return () => clearTimeout(timer);
-  }, [view?.step, kept]);
+  }, [view?.step, kept, lockPassedNow]);
 
   /** A new profile for the code, which goes on to the digits by itself; this profile stays as it is. */
   const goNew = (device: string) => {
@@ -178,7 +185,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
       onClose={() => { if (fromChoose.current) setStep("choose"); else onClose(); }} />;
   }
 
-  const close = () => { if (view?.step === "done" || view?.step === "unfinished") void reloadIntoGate({ keepUnlocked: true }); else onClose(); };
+  const close = () => { if (view?.step === "done" || view?.step === "unfinished") void reloadIntoGate({ keepUnlocked: lockPassedNow() }); else onClose(); };
   const titles = TITLES[noun];
   const title = step === "choose" ? t("devices.join.already")
     : step === "home" ? t("devices.join.homeTitle")
@@ -195,7 +202,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
         <form className="space-y-3" data-testid="device-join-confirm" data-place={place ?? undefined} data-profile={profile || undefined} onSubmit={(event) => { event.preventDefault(); add(); }}>
           <label className="block space-y-1">
             <span className="text-text-secondary">{t("devices.join.name")}</span>
-            <input data-testid="device-join-name" maxLength={16} value={name} onChange={(event) => setName(event.target.value)} className={field} />
+            <input data-testid="device-join-name" {...nameField} value={name} className={field} />
           </label>
           {place === "new" && <InfoLine testId="device-join-new-profile" info={t("devices.join.newProfileInfo")}>{t("devices.join.newProfile")}</InfoLine>}
           {error && <Notice problem={error} testId="device-join-error" />}
@@ -219,10 +226,10 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
           {view.step === "finishing" && <Status>{t("devices.join.finishing")}</Status>}
           {(view.step === "done" || view.step === "unfinished") && <>
             <p data-testid="device-join-done" data-step={view.step} className="text-text-primary">{view.step === "done" ? t("devices.join.done") : t("devices.join.unfinished")}</p>
-            {kept === false && <Notice tone="warning" testId="device-join-persist">{t("devices.join.persist", { device: view.device || t("devices.join.otherDevice") })}</Notice>}
+            {kept === false && <Notice tone="warning" testId="device-join-persist">{fillNames(t("devices.join.persist"), { device: view.device || t("devices.join.otherDevice") })}</Notice>}
             {view.step === "done" && kept !== false
               ? <Status>{t("devices.join.opening")}</Status>
-              : <button type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: true })} className={primaryButton}>{t("devices.join.continue")}</button>}
+              : <button type="button" data-testid="device-join-continue" onClick={() => void reloadIntoGate({ keepUnlocked: lockPassedNow() })} className={primaryButton}>{t("devices.join.continue")}</button>}
           </>}
           {view.step === "failed" && <>
             <div data-testid="device-join-failed" data-reason={view.reason}><Notice problem={said(failureKey(view.reason), t)} /></div>

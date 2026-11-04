@@ -1,0 +1,1 @@
+Relay only: with Hide my IP from contacts on, a desktop offers its contacts no Iroh endpoint of its own (its descriptor lists its direct addresses); the links to the profile's own devices keep it. No wire change.

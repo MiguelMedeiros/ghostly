@@ -3,13 +3,14 @@ import { isRecoveryPhrase, newRecoveryPhrase } from "@ghostly/browser/engine/pay
 import { Button, Notice, Segmented, input } from "../ui";
 import type { ProviderFormProps } from "./forms";
 import { useI18n } from "../../../contexts/I18nContext";
+import { exactText } from "../../../lib/exactText";
 
 /**
  * Breez's form: the wallet is Ghostly's to make, so a new one gets a recovery phrase made here, shown
  * once to be written down, and an existing one is restored from its phrase. The phrase and the API key
  * are the descriptor's secret fields: sealed on this device by the engine, never shown again.
  */
-export function BreezForm({ descriptor, mode, busy, onSubmit }: ProviderFormProps) {
+export function BreezForm({ descriptor, mode, busy, saving = false, onSubmit }: ProviderFormProps) {
   const { t } = useI18n();
   const [kind, setKind] = useState<"new" | "restore">("new");
   const [fresh] = useState(newRecoveryPhrase);
@@ -38,7 +39,7 @@ export function BreezForm({ descriptor, mode, busy, onSubmit }: ProviderFormProp
       ) : (
         <label className="block space-y-1">
           <span className="text-xs text-text-secondary">{t("wallet.source.breez.phrase")}</span>
-          <textarea aria-label={t("wallet.source.breez.phrase")} className={`${input} font-mono text-xs resize-none`} rows={3} spellCheck={false} placeholder={t("wallet.source.breez.phrasePlaceholder")} value={restored} onChange={(e) => setRestored(e.target.value)} />
+          <textarea aria-label={t("wallet.source.breez.phrase")} className={`${input} font-mono text-xs resize-none`} rows={3} {...exactText} placeholder={t("wallet.source.breez.phrasePlaceholder")} value={restored} onChange={(e) => setRestored(e.target.value)} />
           {invalid && <span className="block text-[11px] text-danger" data-testid="breez-phrase-invalid">{t("wallet.source.breez.invalid")}</span>}
         </label>
       )}
@@ -47,7 +48,7 @@ export function BreezForm({ descriptor, mode, busy, onSubmit }: ProviderFormProp
         <input aria-label={t("wallet.source.breez.apiKey")} className={`${input} font-mono text-xs`} type="password" autoComplete="new-password" spellCheck={false} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
         <span className="block text-[11px] text-text-muted">{needsKey ? t("wallet.source.breez.mainnetNeedsKey") : t("wallet.source.breez.regtestNoKey")}</span>
       </label>
-      <Button type="submit" variant="primary" className="w-full" disabled={busy || !ready || invalid} data-testid="provider-save">{busy ? t("wallet.source.connecting") : t("wallet.source.use", { name: descriptor.label })}</Button>
+      <Button type="submit" variant="primary" className="w-full" disabled={busy || !ready || invalid} loading={saving} data-testid="provider-save">{saving ?t("wallet.source.connecting") : t("wallet.source.use", { name: descriptor.label })}</Button>
       <Notice>{t("wallet.source.breez.sealed")}</Notice>
     </form>
   );

@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { voiceDownloadName } from "@ghostly/core";
 import { MessageBubble } from "../../components/MessageBubble";
 import { TransportLine } from "../../components/TransportTimeline";
 import type { MessageAuthor } from "../../components/chat/SenderAvatar";
@@ -324,6 +325,30 @@ describe("a voice message in the chat", () => {
     expect(audio.players[0]!.currentTime).toBeCloseTo(7.5);
   });
 
+  it("moves its waveform with the time while it plays, a few times a second rather than every frame", async () => {
+    // Frames and intervals on a fake clock; `flush` keeps the real setTimeout.
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "setInterval", "clearInterval"] });
+    try {
+      chat(voice({}, 10_000));
+      fireEvent.click(screen.getByTestId("voice-play"));
+      await flush();
+      const wave = screen.getByTestId("voice-waveform");
+      const player = audio.players[0]!;
+      const writes = vi.spyOn(wave.style, "setProperty");
+      for (let ms = 0; ms < 2_000; ms += 16) {
+        player.currentTime = 2 + ms / 1000;
+        vi.advanceTimersByTime(16);
+      }
+      const progress = writes.mock.calls.filter(([name]) => name === "--voice-progress");
+      // Each write is a style recalc and a layout of the page: 60 a second was 113 ms of main thread per second.
+      expect(progress.length).toBeLessThanOrEqual(10);
+      expect(progress.length).toBeGreaterThanOrEqual(6);
+      expect(Number(wave.style.getPropertyValue("--voice-progress"))).toBeCloseTo(0.4, 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("moves with the keyboard", () => {
     chat(voice({}, 20_000));
     const wave = screen.getByTestId("voice-waveform");
@@ -343,7 +368,7 @@ describe("a voice message in the chat", () => {
     fireEvent.click(screen.getByTestId("voice-play"));
     await flush();
     expect(screen.getByTestId("voice-problem")).toHaveTextContent("This device can't play M4A recordings");
-    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", "Voice message.m4a");
+    expect(screen.getByTestId("voice-save")).toHaveAttribute("download", voiceDownloadName("audio/mp4", aac.timestamp));
     expect(audio.players).toHaveLength(0);
   });
 

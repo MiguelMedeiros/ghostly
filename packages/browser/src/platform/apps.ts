@@ -43,5 +43,12 @@ export function engineApps(runnerUrl: string, netRunnerUrl?: string, runnerServe
       onFrame: (listener: (linkId: string, frame: AppFrameEvent) => void) => engine.onAppFrame(listener),
       peer: (linkId, app) => peers.get(peerKey(linkId, app)) ?? null,
     },
+    ranges: {
+      serve: (linkId, ref, file) => engine.call("appServe", { linkId, ref, file, ...runs }),
+      unserve: (linkId, serve) => engine.call("appUnserve", { linkId, serve }),
+      read: (linkId, ref, serve, offset, length) => engine.call("appRemoteRead", { linkId, ref, serve, offset, length, ...runs }),
+      onAsk: (listener) => engine.onAppRange(listener),
+      answer: (linkId, answer) => engine.call("appRangeAnswer", { linkId, ...answer }),
+    },
   };
 }

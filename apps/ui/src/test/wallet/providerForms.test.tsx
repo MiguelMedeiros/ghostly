@@ -15,9 +15,9 @@ import { choose } from "../select";
 /** A valid BIP39 phrase (the standard test vector), to restore from. */
 const RESTORE = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 
-function render(Form: ComponentType<ProviderFormProps>, id: string, mode: "mainnet" | "testnet", busy = false) {
+function render(Form: ComponentType<ProviderFormProps>, id: string, mode: "mainnet" | "testnet", busy = false, saving = false) {
   const onSubmit = vi.fn();
-  return { onSubmit, ...renderApp(<Form descriptor={descriptor(id)} mode={mode} busy={busy} onSubmit={onSubmit} />) };
+  return { onSubmit, ...renderApp(<Form descriptor={descriptor(id)} mode={mode} busy={busy} saving={saving} onSubmit={onSubmit} />) };
 }
 
 /** The words a form shows for a new wallet, without their numbers. */
@@ -143,9 +143,14 @@ describe("BreezForm", () => {
     expect(save()).toBeDisabled();
   });
 
-  it("says it is connecting while busy", () => {
-    render(BreezForm, "breez", "testnet", true);
+  it("says it is connecting while it saves, busy and still focusable; another run of the card only disables it", () => {
+    const { unmount } = render(BreezForm, "breez", "testnet", true, true);
     expect(save()).toHaveTextContent("Connecting…");
+    expect(save()).toHaveAttribute("aria-busy", "true");
+    expect(save()).toBeEnabled();
+    unmount();
+    render(BreezForm, "breez", "testnet", true);
+    expect(save()).not.toHaveTextContent("Connecting…");
     expect(save()).toBeDisabled();
   });
 });
@@ -183,9 +188,10 @@ describe("WeblnForm", () => {
     expect(screen.getByTestId("webln-missing")).toBeInTheDocument();
   });
 
-  it("waits for the wallet while busy", () => {
-    render(WeblnForm, "webln", "mainnet", true);
+  it("waits for the wallet while it saves, busy and still focusable", () => {
+    render(WeblnForm, "webln", "mainnet", true, true);
     expect(screen.getByTestId("provider-save")).toHaveTextContent("Waiting for the wallet…");
-    expect(screen.getByTestId("provider-save")).toBeDisabled();
+    expect(screen.getByTestId("provider-save")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByTestId("provider-save")).toBeEnabled();
   });
 });

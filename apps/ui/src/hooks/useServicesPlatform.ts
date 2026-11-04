@@ -10,6 +10,44 @@ export function useServicesPlatform() {
 }
 
 /**
+ * The wallets' platform, for money in a message: it re-renders only when the wallets' state changes, so a chat full of
+ * invoices and tokens does not redraw every card (and its QR code) on every change of the engine's state, up to 20 a
+ * second while a file moves. What a card reads of the wallets (`getState`, `forNetwork`) is read live as before.
+ */
+export function useWalletPlatform() {
+  useSyncExternalStore(subscribeState, walletSnapshot);
+  return servicesPlatform?.wallet;
+}
+
+const subscribeState = (listener: () => void) => servicesPlatform?.subscribe(listener) ?? (() => {});
+
+/**
+ * The wallets' state as last drawn: the engine sends its state anew each time, so a copy with the same content is the
+ * one already drawn. Compared once per state, whatever the number of cards that ask.
+ */
+let walletRead: unknown = null;
+let walletKept: unknown = null;
+function walletSnapshot(): unknown {
+  const now = servicesPlatform?.wallet?.getState() ?? null;
+  if (now !== walletRead) {
+    walletRead = now;
+    if (!sameValue(now, walletKept)) walletKept = now;
+  }
+  return walletKept;
+}
+
+/** What `select` reads of the platform, re-rendering only when it changes by content (a contact's ways of paying, say). */
+export function usePlatformValue<T>(select: () => T): T {
+  const last = useRef<T | undefined>(undefined);
+  const snapshot = () => {
+    const now = select();
+    if (!sameValue(now, last.current)) last.current = now;
+    return last.current as T;
+  };
+  return useSyncExternalStore(subscribeState, snapshot);
+}
+
+/**
  * A file's transfer where the message carries one: it re-renders only when that transfer changes, so a list of
  * messages does not redraw on every file's progress, nor its files on every change of the engine's state.
  */

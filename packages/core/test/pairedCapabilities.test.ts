@@ -128,29 +128,45 @@ describe("paired-call frames", () => {
     expect(calls.hangUp()).toBeNull();
   });
 
-  it("an app going away declines the contact's call still ringing here, and not one that rang out or was hung up", () => {
+  it("an app that quits declines the contact's call still ringing here, and not one that rang out or was hung up", () => {
     let now = 10_000;
     const calls = new PairedCalls(() => now);
+    const quit = { declineRinging: true };
     expect(calls.heard(JSON.stringify({ t: "o", ts: now + 50 }))).toBe(true);
     now += 1_500;
     // The hang-up comes after the offer in the caller's clock too, so the caller takes it (and ends its call "rejected").
-    expect(JSON.parse(calls.hangUp()!.s)).toEqual({ t: "h", ts: now });
-    expect(calls.hangUp(), "said once").toBeNull();
+    expect(JSON.parse(calls.hangUp(quit)!.s)).toEqual({ t: "h", ts: now });
+    expect(calls.hangUp(quit), "said once").toBeNull();
 
     // An offer whose ring ran out: nothing rings here any more.
     expect(calls.heard(JSON.stringify({ t: "o", ts: now + 10 }))).toBe(true);
     now += CALL_SIGNAL_MAX_AGE_MS + 1;
-    expect(calls.hangUp()).toBeNull();
+    expect(calls.hangUp(quit)).toBeNull();
 
     // The caller hung up before this app went: nothing to decline.
     expect(calls.heard(JSON.stringify({ t: "o", ts: now }))).toBe(true);
     expect(calls.heard(JSON.stringify({ t: "h", ts: now + 1 }))).toBe(true);
-    expect(calls.hangUp()).toBeNull();
+    expect(calls.hangUp(quit)).toBeNull();
 
     // An offer stamped ahead of this clock: the decline still comes after it.
     const ahead = now + 5_000;
     expect(calls.heard(JSON.stringify({ t: "o", ts: ahead }))).toBe(true);
     now += 1;
-    expect(JSON.parse(calls.hangUp()!.s)).toEqual({ t: "h", ts: ahead + 1 });
+    expect(JSON.parse(calls.hangUp(quit)!.s)).toEqual({ t: "h", ts: ahead + 1 });
+  });
+
+  it("a web page that goes (a reload looks the same as a close) leaves the contact's call ringing, so the reopened page rings again (#1239)", () => {
+    let now = 10_000;
+    const calls = new PairedCalls(() => now);
+    expect(calls.heard(JSON.stringify({ t: "o", ts: now + 50 }))).toBe(true);
+    now += 1_500;
+    expect(calls.hangUp(), "a page going says nothing about the contact's call").toBeNull();
+    expect(calls.hangUp({ declineRinging: false })).toBeNull();
+    // Still ringing for the app that quits afterwards.
+    expect(JSON.parse(calls.hangUp({ declineRinging: true })!.s)).toEqual({ t: "h", ts: now });
+
+    // A call of our own is hung up either way.
+    calls.set(JSON.stringify({ t: "a", ts: now + 10 }));
+    expect(JSON.parse(calls.hangUp()!.s)).toEqual({ t: "h", ts: now + 11 });
   });
 });

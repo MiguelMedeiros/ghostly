@@ -194,6 +194,17 @@ function load(name: SoundName): Promise<AudioBuffer> | undefined {
   return decoded.get(name);
 }
 
+/** The sounds the first gesture fetches ahead: a chat's own, which may come right after it. */
+const WARMED: readonly SoundName[] = ["message", "sent"];
+
+/**
+ * Fetches and decodes a sound that is about to be needed, so it starts the moment it is played: the first play of a
+ * sound waits for both (10 to 40 ms, and over 100 ms on a loaded machine). Nothing before a gesture has started audio.
+ */
+export function warmSound(name: SoundName): void {
+  void load(name)?.catch(()=>{});
+}
+
 /** Autoplay unlock is attempted only on an actual user gesture. */
 export function installAudioGestures(): () => void {
   if (listening) return () => {};
@@ -209,7 +220,9 @@ export function installAudioGestures(): () => void {
         if (ctx.state === "running") started();
         else void ctx.resume().then(started).catch(()=>{});
       }
-      for (const name of Object.keys(SOUNDS) as SoundName[]) void load(name)?.catch(()=>{});
+      // Only what a chat plays first is warmed: every other sound is fetched and decoded the first time it plays, not
+      // on a newcomer's first keystroke (all of them were 27 files and several MiB of decoded audio kept for the session).
+      for (const name of WARMED) void load(name)?.catch(()=>{});
     } catch { /* no audio device */ }
   };
   const mute = () => { if (!loadSettings().notifications.soundEnabled) for (const stop of [...playing]) stop(); };
@@ -280,10 +293,41 @@ export function playSound(name: SoundName, { kind }: { kind?: SoundKind } = {}):
   return stop;
 }
 
+/** How often a ringing call's sound starts again. */
+const RING_EVERY_MS = 3500;
+
+/**
+ * Pages that ring at once ring as one: the extension's tabs share one engine, and a call rang in each of them, out of
+ * step. The page holding this lock (one per sound) plays it; the others wait, and the next takes over if that page goes.
+ * Only a page that can sound asks for it (its audio started by a gesture, sounds on): one that cannot would hold the ring
+ * silent. Without Web Locks, each page rings, as before.
+ */
+const RING_LOCK = "ghostly-ring:";
+
 export function startRinging(kind: "ring" | "ringback"): () => void {
   ringing++;
-  let stop=playSound(kind);
-  const timer=setInterval(()=>{stop();stop=playSound(kind);},3500);
-  let done=false;
-  return ()=>{if(done)return;done=true;ringing--;clearInterval(timer);stop();idleLater();};
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  let mine = !locks, asked = false, done = false;
+  let stop = () => {}, letGo = () => {};
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const tick = () => {
+    stop();
+    stop = () => {};
+    if (mine) { stop = playSound(kind); return; }
+    // A page that could not sound yet asks again at its next ring: a gesture may have started its audio meanwhile.
+    if (asked || !locks || !context || !unlocked || !loadSettings().notifications.soundEnabled) return;
+    asked = true;
+    void locks.request(RING_LOCK + kind, () => {
+      if (done) return;
+      mine = true;
+      loop();
+      return new Promise<void>((resolve) => { letGo = resolve; });
+    }).catch(() => { if (!done) { mine = true; loop(); } });
+  };
+  // From the first ring on: a page that takes over mid-way starts its own, not one cut short by the next. The timer is
+  // set before the tick: a lock granted inside `request()` (Node's) loops again from it, and that loop's timer is the one
+  // the end clears, not one overwritten here and left ringing.
+  const loop = () => { clearInterval(timer); timer = setInterval(tick, RING_EVERY_MS); tick(); };
+  loop();
+  return ()=>{if(done)return;done=true;ringing--;clearInterval(timer);stop();letGo();idleLater();};
 }

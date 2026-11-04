@@ -69,6 +69,16 @@ describe.skipIf(process.platform === "win32" || (!hasJq && !process.env.CI))("th
     expect(send.argv).toEqual(["send", "chat1", "--reply", "peer_1", "--stdin"]);
   });
 
+  it("reacts 👀 at once and shows it is thinking before claude runs", () => {
+    const t = setup();
+    t.turn({ chat: "chat1" });
+    t.turn({ group: "team", member: "keyA" });
+    const order = (n: number) => t.calls("ghostly").slice(n * 3, n * 3 + 2).map((c) => c.argv.slice(0, 4));
+    expect(order(0)).toEqual([["react", "chat1", "peer_1", "👀"], ["typing", "chat1", "--kind", "thinking"]]);
+    expect(order(1)).toEqual([["group", "react", "team", "peer_1"], ["group", "typing", "team", "--kind"]]);
+    expect(t.calls("ghostly")[3].argv[4]).toBe("👀");
+  });
+
   it("keeps its conversations outside ~/.ghostly, one per chat", () => {
     const t = setup();
     t.turn({ chat: "chat1" });

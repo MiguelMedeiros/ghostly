@@ -108,6 +108,7 @@
     "backupFirst": "Descarga antes una copia",
     "backupPassphrase": "Frase de contraseña de la copia",
     "cashuSats": "{{amount}} sats en Cashu",
+    "cashuSats_one": "{{amount}} sat en Cashu",
     "confirmLabel": "Escribe el nombre del perfil para confirmar",
     "confirmPlaceholder": "Escribe {{name}}",
     "deleting": "Eliminando…",
@@ -129,6 +130,7 @@
   "name": "Nombre",
   "nameInChats": "Nombre en los chats",
   "nameLabel": "Nombre del perfil",
+  "nameSaved": "Nombre guardado",
   "nameStep": {
     "placeholder": "Tu nombre",
     "save": "Continuar",
@@ -144,5 +146,6 @@
   "restoredTag": "Restaurado",
   "restoredTagHint": "Recuperado de una copia de seguridad",
   "sats": "{{amount}} sats",
+  "sats_one": "{{amount}} sat",
   "switch": "Cambiar"
 }

@@ -1,10 +1,10 @@
 import {useEffect,useId,useRef,useState} from 'react';
-import { focusInPlace } from "../lib/focus";
+import { focusInPlace, focusLost, working } from "../lib/focus";
 import {walletNetworkOf,type PaymentReview as Review} from '@ghostly/core';
 import type {WalletPlatform} from '../lib/platform';
 import {useI18n} from '../contexts/I18nContext';
 import {formatAt} from '../lib/time';
-import {NetworkTag,satsIn} from './NetworkTag';
+import {NetworkTag,satsIn,unitFor} from './NetworkTag';
 import {ConfirmRealMoney} from './ConfirmRealMoney';
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { paymentStateLabel, railLine } from "./paymentWords";
@@ -22,35 +22,39 @@ import { Notice } from "./ui/Notice";
  */
 export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Review;wallet:WalletPlatform;onClose:()=>void;onSent?:()=>void}) {
  const {t}=useI18n();
- const [saved,setReview]=useState(initial),[busy,setBusy]=useState(false),[error,setError]=useState<Problem|null>(null),[confirming,setConfirming]=useState(false),[feeWhy,setFeeWhy]=useState(false);
+ // `running`: the button pressed (Approve, Cancel, Check), busy while it works; the others wait, disabled.
+ const [saved,setReview]=useState(initial),[running,setRunning]=useState<'approve'|'cancel'|'check'|null>(null),busy=running!==null,[error,setError]=useState<Problem|null>(null),[confirming,setConfirming]=useState(false),[feeWhy,setFeeWhy]=useState(false);
  const feeWhyId=useId();
  const review=wallet.getState()?.intents?.find(i=>i.id===saved.id)??saved;
  const token=review.method==='usdt';
  const network=walletNetworkOf(review.network),real=network==='mainnet',unit=token?review.asset:satsIn(t,network);
  const shown=token?formatTokenAmount(review.amount,review.decimals,t.language):formatAmount(review.amount, t.language);
- const run=async(action:()=>Promise<Review>):Promise<Review|null>=>{setBusy(true);setError(null);try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?problemText(e, t):{tone:'error',title:t('payments.review.error.update')});return null;}finally{setBusy(false);}};
+ const run=async(action:()=>Promise<Review>,key:NonNullable<typeof running>):Promise<Review|null>=>{if(busy)return null;setRunning(key);setError(null);try{const next=await action();setReview(next);return next;}catch(e){setError(e instanceof Error?problemText(e, t):{tone:'error',title:t('payments.review.error.update')});return null;}finally{setRunning(null);}};
  // Only the real-money step says so: the engine refuses a Mainnet approval without it.
- const approve=()=>void run(()=>wallet.approvePayment(review.id,real)).then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
- const button='rounded-lg px-3 py-2 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40';
+ const approve=()=>void run(()=>wallet.approvePayment(review.id,real),'approve').then(next=>{setConfirming(false);if(next&&(next.state==='submitted'||next.state==='settled'))onSent?.();});
+ // Busy, not disabled, while it works: a disabled button drops the keys to the page, and they stay there on a refusal.
+ const press=(key:NonNullable<typeof running>)=>running===key?working(true):{disabled:busy};
+ const button='rounded-lg px-3 py-2 max-md:min-h-11 text-xs font-semibold bg-surface-hover text-text-primary focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40 data-[loading]:opacity-80 data-[loading]:cursor-progress';
  const status=token&&review.state==='settled'?'confirmed':review.state;
  const blocks=review.evm?.confirmations??2;
  // It takes the place of the button that opened it (Review payment, Send, an open payment), and Approve's row takes
  // other buttons after it: the focus would fall to the page. Its title takes it then, in place, so the keys go on from
- // here and a screen reader says what it is. Not when the focus is somewhere else.
+ // here and a screen reader says what it is. Not when the focus is somewhere else. A button that opened it and stays,
+ // disabled now (a request's Review payment), has lost the focus as well.
  const title=useRef<HTMLHeadingElement>(null);
- useEffect(()=>{if(!document.activeElement||document.activeElement===document.body)focusInPlace(title.current);},[review.state]);
+ useEffect(()=>{if(focusLost())focusInPlace(title.current);},[review.state]);
  return <section aria-label={t('payments.review.label')} className="rounded-xl border border-border p-3 space-y-3" data-testid="payment-review" data-network={network}>
   <h3 ref={title} tabIndex={-1} className="text-text-primary text-sm font-semibold flex items-center gap-2 flex-wrap focus:outline-none">{review.state==='pending'?t('payments.review.title.pending'):t('payments.review.title.status')}<NetworkTag network={network} testId="review-network"/></h3>
-  <p className="text-xl font-semibold text-text-primary">{shown} <span className="text-xs font-normal">{unit}</span></p>
+  <p className="text-xl font-semibold text-text-primary">{shown} <span className="text-xs font-normal">{unitFor(t,unit,review.amount)}</span></p>
   <p className="text-xs text-text-secondary" data-testid="review-rail">{railLine(t,review.method,review.network)}</p>
   <p className="text-xs text-text-secondary" data-testid="review-money">{real?t('payments.review.money.mainnet'):t('payments.review.money.testnet')}</p>
   <dl className="text-xs text-text-secondary space-y-2 break-all">
    <div><dt className="text-text-muted">{t('payments.review.destination')}</dt><dd className="font-mono">{review.address}</dd></div>
-   <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatTokenAmount(review.fee,18,t.language)} / ${formatTokenAmount(review.feeCap,18,t.language)} ETH`:`${formatAmount(review.fee,t.language)} / ${formatAmount(review.feeCap,t.language)} ${unit}`}</dd></div>
-   {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{formatAmount(review.amount+review.fee, t.language)} {unit}</dd></div>}
+   <div><dt className="text-text-muted">{token?t('payments.review.gasLimit'):t('payments.review.fee')}</dt><dd>{token?`${formatTokenAmount(review.fee,18,t.language)} / ${formatTokenAmount(review.feeCap,18,t.language)} ETH`:`${formatAmount(review.fee,t.language)} / ${formatAmount(review.feeCap,t.language)} ${unitFor(t,unit,review.feeCap)}`}</dd></div>
+   {!token&&<div><dt className="text-text-muted">{t('payments.review.total')}</dt><dd>{formatAmount(review.amount+review.fee, t.language)} {unitFor(t,unit,review.amount+review.fee)}</dd></div>}
    <div><dt className="text-text-muted">{t('payments.review.status')}</dt><dd aria-live="polite" data-testid="review-status">{paymentStateLabel(t,status)}</dd></div>
   </dl>
-  <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted">{t('payments.review.details')}</summary><dl className="space-y-2 pt-2 break-all"><div><dt>{t('payments.review.payee')}</dt><dd>{review.payee}</dd></div><div><dt>{t('payments.review.provider')}</dt><dd>{review.provider}</dd></div><div><dt>{t('payments.review.expires')}</dt><dd>{formatAt(review.expiresAt, { dateStyle: "medium", timeStyle: "short" }, t.language)}</dd></div>{token&&<><div><dt>{t('payments.review.tokenChain')}</dt><dd>{t('payments.review.tokenChainValue',{token:review.token??'',chain:review.chainId??'',decimals:review.decimals??''})}</dd></div><div><dt>{t('payments.review.gasNonce')}</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>{t('payments.review.feePerGas')}</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>{t('payments.review.transaction')}</dt><dd>{review.txid}</dd></div>}</dl></details>
+  <details className="text-xs text-text-secondary"><summary className="cursor-pointer text-text-muted max-md:min-h-11 max-md:py-3.5">{t('payments.review.details')}</summary><dl className="space-y-2 pt-2 break-all"><div><dt>{t('payments.review.payee')}</dt><dd>{review.payee}</dd></div><div><dt>{t('payments.review.provider')}</dt><dd>{review.provider}</dd></div><div><dt>{t('payments.review.expires')}</dt><dd>{formatAt(review.expiresAt, { dateStyle: "medium", timeStyle: "short" }, t.language)}</dd></div>{token&&<><div><dt>{t('payments.review.tokenChain')}</dt><dd>{t('payments.review.tokenChainValue',{token:review.token??'',chain:review.chainId??'',decimals:review.decimals??''})}</dd></div><div><dt>{t('payments.review.gasNonce')}</dt><dd>{review.evm?.gasLimit} / {review.evm?.nonce}</dd></div><div><dt>{t('payments.review.feePerGas')}</dt><dd>{review.evm?.maxFeePerGas} / {review.evm?.maxPriorityFeePerGas}</dd></div></>}{review.txid&&<div><dt>{t('payments.review.transaction')}</dt><dd>{review.txid}</dd></div>}</dl></details>
   {token&&<p className="text-[11px] text-text-muted">{review.asset==='TEST-USDT'?t('payments.review.note.usdtTest',{blocks}):t('payments.review.note.usdt',{blocks})}</p>}
   {review.method==='arkade'&&<p className="text-[11px] text-text-muted">{real?t('payments.review.note.arkReal'):t('payments.review.note.arkTest')}</p>}
   {review.method==='bark'&&<p className="text-[11px] text-text-muted">{t('payments.review.note.bark')}</p>}
@@ -61,7 +65,7 @@ export function PaymentReview({review:initial,wallet,onClose,onSent}:{review:Rev
   {/* A refusal says what came back, short; why the mint kept some of it is behind the ⓘ. */}
   {review.error&&<div className="flex items-start gap-1.5"><Notice problem={problemText(review.error,t)} testId="review-error" className="text-xs min-w-0 flex-1 break-words"/>{!!review.returned?.fee&&<InfoButton open={feeWhy} onToggle={()=>setFeeWhy(!feeWhy)} controls={feeWhyId} testId="review-returned-info" className="-mt-0.5"/>}</div>}
   {feeWhy&&!!review.returned?.fee&&<p id={feeWhyId} className="text-xs text-text-secondary" data-testid="review-returned-text">{t('payments.review.returnedInfo',{fee:formatAmount(review.returned.fee,t.language),unit})}</p>}{error&&<Notice problem={error}/>}
-  {review.state==='pending'&&confirming&&<ConfirmRealMoney what={`${shown} ${unit}`} busy={busy} onSend={approve} onBack={()=>setConfirming(false)}/>}
-  <div className="flex gap-2 flex-wrap">{review.state==='pending'?<>{!confirming&&<button className={`${button} !bg-accent !text-on-accent`} data-testid="review-approve" disabled={busy} onClick={()=>real?setConfirming(true):approve()}>{t('payments.review.approve')}</button>}<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.cancelPayment(review.id))}>{t('common.cancel')}</button></>:<>{['submitted','unknown'].includes(review.state)&&<button className={button} disabled={busy} onClick={()=>void run(()=>wallet.reconcilePayment(review.id))}>{t('payments.review.check')}</button>}<button className={button} onClick={onClose}>{t('common.close')}</button></>}</div>
+  {review.state==='pending'&&confirming&&<ConfirmRealMoney what={`${shown} ${unitFor(t,unit,review.amount)}`} busy={busy} onSend={approve} onBack={()=>setConfirming(false)}/>}
+  <div className="flex gap-2 flex-wrap">{review.state==='pending'?<>{!confirming&&<button className={`${button} !bg-accent !text-on-accent`} data-testid="review-approve" {...press('approve')} onClick={()=>{if(busy)return;if(real)setConfirming(true);else approve();}}>{t('payments.review.approve')}</button>}<button className={button} {...press('cancel')} onClick={()=>void run(()=>wallet.cancelPayment(review.id),'cancel')}>{t('common.cancel')}</button></>:<>{['submitted','unknown'].includes(review.state)&&<button className={button} {...press('check')} onClick={()=>void run(()=>wallet.reconcilePayment(review.id),'check')}>{t('payments.review.check')}</button>}<button className={button} onClick={onClose}>{t('common.close')}</button></>}</div>
  </section>;
 }

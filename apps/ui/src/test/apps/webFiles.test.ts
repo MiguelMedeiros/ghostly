@@ -60,6 +60,16 @@ describe("picking", () => {
     await expect(cancelled).rejects.toThrow(/^cancelled: /);
   });
 
+  it("entry gives one link as the list does, null for an id the app does not keep", async () => {
+    const host = webLinkedFiles({ text: () => text, picker: async () => ({ files: [{ path: "Films/Up.mp4", file: file("abc", 7) }] }) });
+    const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    (await armed()).click();
+    const [picked] = await pick;
+    expect(await host.entry!(REF, picked!.id)).toEqual(picked);
+    expect(await host.entry!(REF, "b".repeat(22))).toBeNull();
+    expect(await host.entry!("pubkeyalpha/other", picked!.id)).toBeNull();
+  });
+
   it("a long app title with no space breaks inside the sheet, in its title and its note", async () => {
     const pick = webLinkedFiles({ text: () => text, picker: async () => null }).pick(REF, "ReaderForVeryLongFolderNamesAndFilesXYZ", { folder: true, accept: [] });
     const sheet = await shown("[data-testid=app-files-sheet]");
@@ -162,6 +172,23 @@ describe("picking", () => {
     const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: picked }) });
     expect((await host.pick(REF, "Cinema", { folder: true, accept: ["mp4", "srt"] })).map((e) => e.path)).toEqual(["Films/Up.mp4", "Films/Up.SRT"]);
     expect((await host.pick("other/app", "Other", { folder: true, accept: [] })).map((e) => e.path)).toEqual(["Films/Up.mp4", "Films/Up.SRT", "Films/notes.txt"]);
+  });
+
+  it("a picked folder whose own name starts with a dot links its files, as the Desktop's walk: hidden is what is under it", async () => {
+    const picked: PickedFile[] = [".Films/Up.mp4", ".Films/.DS_Store", ".Films/.trash/old.mp4", ".Films/S1/E01.mp4"].map((path) => ({ path, file: file("x") }));
+    const host = webLinkedFiles({ text: () => text, ask: async () => ({ files: picked }) });
+    expect((await host.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    // Through the handle picker's walk too.
+    vi.stubGlobal("showDirectoryPicker", async () => fakeDir(".Films", { "Up.mp4": "a", ".hidden.mp4": "b", S1: { "E01.mp4": "c" } }, { permission: "granted", asked: 0 }));
+    try {
+      const walked = webLinkedFiles({ text: () => text, ask: (_app, folder, accept) => handlePicker(folder, accept) });
+      expect((await walked.pick(REF, "Cinema", { folder: true, accept: [] })).map((e) => e.path)).toEqual([".Films/Up.mp4", ".Films/S1/E01.mp4"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    // A file picked on its own is still hidden by its own name, as the Desktop's `picked_files`.
+    const files = webLinkedFiles({ text: () => text, ask: async () => ({ files: [".bashrc", "Up.mp4"].map((path) => ({ path, file: file("x") })) }) });
+    expect((await files.pick(REF, "Cinema", { folder: false, accept: [] })).map((e) => e.path)).toEqual(["Up.mp4"]);
   });
 
   it("keeps links per app, and never more than the limit", async () => {
@@ -402,6 +429,41 @@ describe("a folder kept past the page (File System Access)", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("walks a picked folder for what accept names: other files and hidden ones are not read, nor counted toward the limit", async () => {
+    let reads = 0;
+    const entry = (name: string) => ({ kind: "file", name, getFile: async () => { reads++; return { size: 1, lastModified: 1 }; } });
+    const folder = (name: string, items: () => Iterable<object>) => ({ kind: "directory", name, async *values() { yield* items(); } });
+    function* numbered(n: number, name: (i: number) => string) { for (let i = 0; i < n; i++) yield entry(name(i)); }
+    // More photos than an app may link, then 50 films (some named in capitals), and hidden ones that are no film.
+    const library = (photos: number, films: number) => folder("Library", function* () {
+      yield folder("a-photos", () => numbered(photos, (i) => `${i}.jpg`));
+      yield folder("b-films", function* () {
+        yield* numbered(films, (i) => `${i}.${i % 10 ? "mp4" : "MP4"}`);
+        yield entry(".partial.mp4");
+        yield entry("mp4");
+        yield folder(".trash", () => numbered(3, (i) => `${i}.mp4`));
+      });
+    });
+    const pick = (photos: number, films: number) => {
+      reads = 0;
+      vi.stubGlobal("showDirectoryPicker", async () => library(photos, films));
+      return webLinkedFiles({ text: () => text, ask: (_app, folder, accept) => handlePicker(folder, accept) }).pick(REF, "Cinema", { folder: true, accept: ["mp4"] });
+    };
+    try {
+      const entries = await pick(120_000, 50);
+      // A photo or a hidden file is never got: a real disk pays for each.
+      expect(reads).toBe(50);
+      expect(entries.map((e) => e.path)).toEqual(Array.from({ length: 50 }, (_, i) => `Library/b-films/${i}.${i % 10 ? "mp4" : "MP4"}`));
+      // More films than an app may link: too large, never some of them, and the walk stops one past the limit.
+      await expect(pick(0, MINI_APP_LIMITS.filesEntries + 1)).rejects.toThrow(/^too-large: /);
+      expect(reads).toBe(MINI_APP_LIMITS.filesEntries + 1);
+      // At the limit, every one of them.
+      expect(await pick(10, MINI_APP_LIMITS.filesEntries)).toHaveLength(MINI_APP_LIMITS.filesEntries);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }, 30_000);
 
   it("the IndexedDB store keeps picks per app", async () => {
     const store = idbPickStore(() => "ghostly-test-files");

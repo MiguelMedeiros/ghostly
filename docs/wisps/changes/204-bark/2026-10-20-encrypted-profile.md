@@ -1,0 +1,1 @@
+On an encrypted profile both SDK databases stay as they are and open only after the passphrase: they keep no phrase or private key (a fingerprint checks it), only public keys, coins, movements and preimages of payments made and received.

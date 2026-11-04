@@ -1,7 +1,8 @@
 import { screen } from "@testing-library/react";
 import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { Page } from "../../components/layout";
+import { Page, PageHeader } from "../../components/layout";
+import { MobileTabBar } from "../../components/MobileTabBar";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import {
   HOME, NAV_KEY, conversationTarget, hasParent, homeTarget, navOnly, openTarget, openUnderTarget, placeTarget, plan, readNav, stackOf,
@@ -117,6 +118,8 @@ function Harness() {
       <button onClick={() => nav.place("/wallet")}>Wallets</button>
       <button onClick={() => nav.place("/identities")}>Identities</button>
       <button onClick={() => nav.place("/settings")}>Settings</button>
+      <button onClick={() => nav.place("/saved")}>/saved</button>
+      <button onClick={() => nav.place("/tasks")}>/tasks</button>
       <button onClick={() => nav.conversation("/chat/s1")}>Chat</button>
       <button onClick={() => void navigate(-1)}>Browser back</button>
       <Routes>
@@ -183,5 +186,30 @@ describe("useAppNavigation", () => {
     expect(where()).toBe("/wallet");
     await user.click(screen.getByRole("button", { name: "Browser back" }));
     expect(where()).toBe("/");
+  });
+});
+
+describe("the chat list's pages on a phone", () => {
+  // Saved messages and Tasks are opened from above the chat list, and no tab is theirs: a phone had no Back on them and
+  // no tab lit, so the only way out was a Chats tab nothing marked. A tab's own page keeps its Back hidden there.
+  for (const path of ["/saved", "/tasks"]) {
+    it(`${path} has a Back to the chat list, and lights the Chats tab`, async () => {
+      const { user } = renderApp(<><Harness /><PageHeader title="A page of the chat list" /><MobileTabBar /></>, { route: "/" });
+      await user.click(screen.getByRole("button", { name: path }));
+      expect(screen.getByTestId("where")).toHaveTextContent(path);
+      expect(screen.getByTestId("page-back")).toHaveAttribute("data-goes", "home");
+      expect(screen.getByTestId("page-back")).not.toHaveClass("max-md:hidden");
+      expect(screen.getByTestId("mobile-tab-chats")).toHaveAttribute("aria-current", "page");
+      await user.click(screen.getByTestId("page-back"));
+      expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
+    });
+  }
+
+  it("a tab's own page keeps its Back hidden on a phone, and lights its own tab", async () => {
+    const { user } = renderApp(<><Harness /><PageHeader title="Wallet" /><MobileTabBar /></>, { route: "/" });
+    await user.click(screen.getByTestId("mobile-tab-wallet"));
+    expect(screen.getAllByTestId("page-back").every(back => back.classList.contains("max-md:hidden"))).toBe(true);
+    expect(screen.getByTestId("mobile-tab-chats")).not.toHaveAttribute("aria-current");
+    expect(screen.getByTestId("mobile-tab-wallet")).toHaveAttribute("aria-current", "page");
   });
 });

@@ -293,9 +293,13 @@
     height: calc(min(100cqw, 960px) * 0.76 / 1.586 + 60px);
   }
 }
-/* No text under 12px on the site: the card's status and kind, a size up from the app's. */
+/* No text under 12px on the site: the card's status and kind, a size up from the app's. At that size a long status
+   ("Mainnet · experimental") no longer fits its corner of a phone's card: it takes a second line there, never "…",
+   whose cut word would be the warning. */
 .sp-deck .wallet-deck-card-status {
   font-size: 12px;
+  white-space: normal;
+  text-wrap: balance;
 }
 .sp-deck .wallet-deck-card-balance {
   font-size: max(12px, min(13px, calc(var(--card-w) * 0.036)));

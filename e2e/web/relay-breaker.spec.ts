@@ -28,7 +28,7 @@ test("a failing relay trips its breaker, and pairing goes on through the others"
   await expect(relay("pkarr.pubky.app")).toHaveAttribute("data-state", "failing");
   await expect(relay("pkarr.pubky.app")).toContainText(/failing until \d/);
   await expect(relay("pkarr.pubky.org")).toHaveAttribute("data-state", "ok");
-  await expect(alice.page.getByTestId("connection-discovery-path")).toHaveText(/^Relay: (pkarr\.pubky\.org|relay\.pkarr\.org)$/);
+  await expect(alice.page.getByTestId("connection-discovery-path")).toHaveText(/^Relay: (pkarr\.pubky\.org|pkarr\.miguelmedeiros\.dev|relay\.pkarr\.org)$/);
 
   // Tripped: nothing more goes to it while it waits, however the others are used meanwhile.
   const seen = asked.filter((a) => a.startsWith("breaker-alice")).length;

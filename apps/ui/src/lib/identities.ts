@@ -12,7 +12,7 @@ import type { Language } from "./settings";
 import { formatAt } from "./time";
 import type { ChatSession } from "./types";
 import { english } from "./english";
-import { useEngineState as usePlainEngineState } from "./engineState";
+import { useEngineState as usePlainEngineState, useEngineValue as usePlainEngineValue } from "./engineState";
 import type { Translate } from "../contexts/I18nContext";
 
 const subscribeProviders = (listener: () => void) => {
@@ -28,6 +28,16 @@ export const useEngineState = () => {
   return usePlainEngineState();
 };
 
+/**
+ * What `select` reads of the engine's state, for what draws identities, drawn again only when that changes by content
+ * (the engine sends its state anew on every change) or when the identity providers load. A chat list draws one per
+ * row (ContactMarks): on the whole state, every row's marks were drawn again on every engine state.
+ */
+export function useEngineValue<T>(select: (state: typeof engine.state) => T): T {
+  useSyncExternalStore(subscribeProviders, identityProvidersLoaded);
+  return usePlainEngineValue(select);
+}
+
 const identityProvider = (id: string) => loadedIdentityProviders().find(p => p.id === id);
 
 // The profile's own Ghostly did:dht is not an external identity: the DID provider refuses it by name.
@@ -37,7 +47,7 @@ setOwnDidSource(() => engine.state?.did?.id);
  * Calls `onNew` with a proof that was not there on the last render: one just added comes up in a deck of ID cards, so
  * the person sees what they made. Nothing on the first state (what the profile already had).
  */
-export function useNewProof(state: typeof engine.state | undefined, onNew: (id: string) => void) {
+export function useNewProof(state: { identityProofs?: readonly { id: string }[] } | null | undefined, onNew: (id: string) => void) {
   const ids = state ? (state.identityProofs ?? []).map(p => p.id).join(" ") : null;
   const known = useRef<string[] | null>(null);
   const callback = useRef(onNew); callback.current = onNew;
@@ -167,11 +177,14 @@ const subscribeSeen = (listener: () => void) => {
   return () => { window.removeEventListener("identities-seen", listener); window.removeEventListener("storage", listener); };
 };
 
-/** Whether the Identities item carries its dot. */
+/**
+ * Whether the Identities item carries its dot. The account bar and a phone's tab bar ask, always on screen: they draw
+ * again when the items change, not on every engine state.
+ */
 export function useIdentityAttention(): boolean {
-  const state = usePlainEngineState();
+  const items = usePlainEngineValue(state => identityAttention(state));
   const seen = useSyncExternalStore(subscribeSeen, rawSeen);
-  return unseenAttention(identityAttention(state), parseSeen(seen)).length > 0;
+  return unseenAttention(items, parseSeen(seen)).length > 0;
 }
 
 /**

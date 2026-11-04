@@ -7,6 +7,7 @@ import type { IceServerSetting } from "./types";
 export function iceServerProblem(server: IceServerSetting): string | null {
   // A setting from outside the form (the CLI, `ghostly engine`, an import) may have no urls at all: before, a TypeError.
   if (typeof server?.urls !== "string") return "Each ICE server needs urls: one address, or several comma-separated (turn:host:port)";
+  if ([server.username, server.credential].some((value) => value !== undefined && typeof value !== "string")) return "A TURN server's username and credential are texts";
   const urls = server.urls.split(/[\s,]+/).filter(Boolean);
   if (!urls.length) return "Enter the TURN server address";
   for (const url of urls) {
@@ -14,6 +15,16 @@ export function iceServerProblem(server: IceServerSetting): string | null {
     if (/^turns?:/i.test(url) && (!server.username?.trim() || !server.credential?.trim())) return "A TURN server needs its username and credential";
   }
   return null;
+}
+
+/**
+ * Why "Hide my IP from contacts" (`relayOnly`) cannot be on with these ICE servers, or null: it needs a TURN server
+ * with its username and credential, which every connection to a contact then goes through. Without one there is no
+ * way to reach a contact that hides this device's address, and the mode never falls back to a direct path.
+ */
+export function relayOnlyProblem(servers: readonly IceServerSetting[] | undefined): string | null {
+  const turn = (servers ?? []).some((server) => !iceServerProblem(server) && server.urls.split(/[\s,]+/).some((url) => /^turns?:/i.test(url)));
+  return turn ? null : "Add a TURN server first";
 }
 
 /**

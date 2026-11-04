@@ -70,4 +70,16 @@ describe("a payment of mine in a 1:1 chat", () => {
     history.mockRestore();
     expect(await t.delivery("me_2")).toBe("delivered");
   });
+
+  it("reads no history for a contact's request the contact says is paid, as it says again at each reconnect", async () => {
+    const t = await setup();
+    await db.addMessage({ linkId: t.id, id: "peer_2", text: "Requested 5 sats", sender: "peer", timestamp: 2, via: "datalink", paymentId: "req-1" });
+    // The contact's request, kept with the contact's time: its row is `peer_<that time>`, never a message of mine.
+    vi.spyOn(t.node["desk"], "payment").mockImplementation(id => (id === "req-1" ? { kind: "request", direction: "in", linkId: t.id, createdAt: 2 } : undefined) as never);
+    const history = vi.spyOn(db, "getMessages");
+    await t.answered("req-1");
+    expect(history).not.toHaveBeenCalled();
+    history.mockRestore();
+    expect(await t.delivery("peer_2")).toBeUndefined();
+  });
 });

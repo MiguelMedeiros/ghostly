@@ -10,6 +10,8 @@ export interface ProviderFormProps {
   descriptor: ProviderDescriptorView;
   mode: "mainnet" | "testnet";
   busy: boolean;
+  /** Its own save is under way: the save button shows it and keeps the keys (`loading`), where `busy` alone disables it. */
+  saving?: boolean;
   onSubmit(values: Record<string, string>): void;
 }
 

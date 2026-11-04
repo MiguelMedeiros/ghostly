@@ -13,12 +13,19 @@
     "turnBack": "カード"
   },
   "delete": "削除",
+  "deleteChatCallOn": "このチャットで通話中です。先に通話を終了してから、チャットを削除してください。",
   "deleteChatLocal": "この端末のチャットと履歴を削除します。相手側のコピーは削除されません。",
   "deleteChatTitle": "チャットを削除しますか？",
   "error": "エラー",
   "goHome": "ホームへ",
   "loading": "読み込み中...",
   "moreInfo": "詳細",
+  "needsYou": {
+    "mark": "確認が必要",
+    "show": "表示",
+    "title": "確認待ち"
+  },
+  "notCopied": "コピーできませんでした",
   "save": "保存",
   "size": {
     "b": "{{n}} B",

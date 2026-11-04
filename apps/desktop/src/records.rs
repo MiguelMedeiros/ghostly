@@ -35,7 +35,17 @@ pub async fn publish(
     keypair: &Keypair,
     records: &[RecordInput],
 ) -> Result<(), String> {
-    let mut builder = SignedPacket::builder();
+    pkarr
+        .publish_dated(&keypair.public_key(), |at| sign(keypair, records, at))
+        .await
+}
+
+fn sign(
+    keypair: &Keypair,
+    records: &[RecordInput],
+    at: pkarr::Timestamp,
+) -> Result<SignedPacket, String> {
+    let mut builder = SignedPacket::builder().timestamp(at);
     for record in records {
         builder = builder.txt(
             record
@@ -51,11 +61,9 @@ pub async fn publish(
             record.ttl.unwrap_or(300),
         );
     }
-    let signed_packet = builder
+    builder
         .sign(keypair)
-        .map_err(|e| format!("Sign error: {}", e))?;
-
-    pkarr.publish(&signed_packet).await
+        .map_err(|e| format!("Sign error: {}", e))
 }
 
 /// Publishes a packet the peer signed itself, byte for byte: a did:dht document has record names of

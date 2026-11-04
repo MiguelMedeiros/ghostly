@@ -69,3 +69,37 @@ describe("a community near the end of its membership history", () => {
     expect(admin.roster.length).toBe(5);
   });
 });
+
+describe("a community member whose app does not keep that room", () => {
+  it("has its additions past the room refused by the others, who can still let everyone out", async () => {
+    limits.chain = 22;
+    const admin = new CommunitySession(CommunitySession.create("Town"), hooks);
+    const seedB64 = createIdentity().seedB64;
+    const frames = await admin.admit(identityFromSeedB64(seedB64).pubKeyZ32);
+    const joined = CommunitySession.join({ g: admin.id, host: admin.entryKey }, frames.slice(0, -1), frames[frames.length - 1], seedB64);
+    if ("error" in joined) throw new Error(joined.error);
+    const sent: { t?: string }[] = [];
+    const member = new CommunitySession(joined.state, { ...hooks, broadcast: (frame: { t?: string }) => { sent.push(frame); return 1; } });
+    // Its app lets people in as if the history were far longer.
+    limits.chain = 4096;
+    for (let i = 0; i < 12; i++) await member.admit(createIdentity().pubKeyZ32);
+    limits.chain = 22;
+    for (const frame of sent.filter(f => f.t === "group-commit")) await admin.handle(member.myKey, frame);
+    expect(limits.chain - admin.state.chain.length).toBeGreaterThanOrEqual(2 * (admin.roster.length - 1));
+    expect(admin.state.chain.length).toBeLessThan(member.state.chain.length);
+    await admin.remove(member.myKey);
+    expect(admin.roster.length).toBeLessThan(member.roster.length);
+  });
+
+  it("has a commit past the history's length refused however it was made", async () => {
+    limits.chain = 8;
+    const admin = new CommunitySession(CommunitySession.create("Town"), hooks);
+    const sent: { t?: string }[] = [];
+    const twin = new CommunitySession(structuredClone(admin.state), { ...hooks, broadcast: (frame: { t?: string }) => { sent.push(frame); return 1; } });
+    limits.chain = 64;
+    for (let i = 0; i < 9; i++) await twin.rotate();
+    limits.chain = 8;
+    for (const frame of sent.filter(f => f.t === "group-commit")) await admin.handle(twin.myKey, frame);
+    expect(admin.state.chain.length).toBe(8);
+  });
+});

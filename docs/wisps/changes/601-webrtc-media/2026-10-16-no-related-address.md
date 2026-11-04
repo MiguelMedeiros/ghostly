@@ -1,0 +1,1 @@
+Candidates: a `_call` record's server reflexive candidate goes without its related address (`raddr`/`rport`), IPv4 too, as a signal on the session already did; before, only an IPv6 one was left out, so the Linux Desktop's calls told a contact the sender's LAN address.

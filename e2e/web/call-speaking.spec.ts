@@ -74,7 +74,12 @@ test("with motion reduced the ring is steady: there while the contact speaks, ne
   // The app's own switch does the same as the system's.
   await bob.page.emulateMedia({ reducedMotion: "no-preference" });
   await expect.poll(async () => (await rings(bob, 1500)).widest).toBeGreaterThan(3);
-  await bob.page.evaluate(() => { document.documentElement.dataset.reduceMotion = "true"; });
+  // Reduced motion gives everything a 0.01 ms transition (index.css), the switch's own step of the ring too: sampled
+  // in the frame of the switch, the ring is still at its last width. Sampled once that transition is over.
+  await avatar(bob).evaluate(async (el) => {
+    document.documentElement.dataset.reduceMotion = "true";
+    await Promise.all(el.getAnimations().map((step) => step.finished.catch(() => {})));
+  });
   const switched = await rings(bob, 2500);
   expect(switched.marked).toBeGreaterThan(0);
   expect([switched.narrowest, switched.widest]).toEqual([3, 3]);

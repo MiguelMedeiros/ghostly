@@ -1,6 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { expect, test, type Peer } from "../support/fixtures";
+import { deployedBuild, expect, test, type Peer } from "../support/fixtures";
 import { copyInvite, pasteInvite } from "../support/clipboard";
 import { LocalRelay } from "../support/relay";
 
@@ -69,7 +69,7 @@ const at = (steps: Step[], t0: number, who: string, match: (s: Step) => boolean)
 };
 const percentile = (values: number[], p: number) => values.length ? values[Math.min(values.length - 1, Math.floor(p * values.length))] : NaN;
 
-interface Row { run: number; joinerPublished?: number; inviterSawJoiner?: number; joinerSawInviter?: number; offerSent?: number; offerSeen?: number; answerSent?: number; answerSeen?: number; open?: number; ready?: number; uiLive?: number; attempts: number; dialer: string; stagesOk: boolean }
+interface Row { run: number; joinerPublished?: number; inviterSawJoiner?: number; joinerSawInviter?: number; offerSent?: number; offerSeen?: number; answerSent?: number; answerSeen?: number; open?: number; ready?: number; uiLive?: number; attempts: number; dialer: string; stagesOk: boolean; stages: string }
 
 async function pairOnce(run: number, peer: (name: string, options?: { realRelays?: boolean }) => Promise<Peer>): Promise<{ row: Row; steps: Step[] }> {
   const [inviter, joiner] = await Promise.all([peer(`inviter${run}`, { realRelays: REAL || !!BRIDGES }), peer(`joiner${run}`, { realRelays: REAL || !!BRIDGES })]);
@@ -113,6 +113,9 @@ async function pairOnce(run: number, peer: (name: string, options?: { realRelays
     dialer: knockerIsInviter ? "inviter" : "joiner",
     stagesOk: JSON.stringify(progress(K).filter(s => s !== "waiting" && s !== "resolving")) === JSON.stringify(["knocking", "connecting", "live"])
       && JSON.stringify(progress(A).filter(s => s !== "waiting" && s !== "resolving")) === JSON.stringify(["answering", "connecting", "live"]),
+    // What each side went through, so a run whose stages are out of order says how.
+    stages: [I, J].map(who => `${who}: ${steps.filter(s => s.who === who && s.step === "progress" && s.t >= t0 - 50)
+      .map(s => `${String(s.stage)}${s.reason ? `(${String(s.reason)})` : ""}@${s.t - t0}`).join(" ")}`).join(" / "),
   };
   // Requests still in flight through the bridge must not fail the run as the contexts go. Only then: without a bridge
   // this would take the test's relay away too, and the pages would poll the public relays until they close.
@@ -124,6 +127,7 @@ async function pairOnce(run: number, peer: (name: string, options?: { realRelays
 test.describe.configure({ mode: "serial" });
 
 test("a first pairing is live in seconds, step by step", { tag: ["@feature:chat.paired.pair-timing", "@feature:chat.paired.progress", "@feature:chat.paired.pair"] }, async ({ peer }) => {
+  test.skip(deployedBuild, "a deployed build is a release build: it ignores ghostly-test-pace");
   const runs = RUNS || CHECK_RUNS;
   test.setTimeout(runs * 3 * 60_000);
   const file = process.env.E2E_PAIR_OUT ?? join(process.cwd(), "test-results", "pairing-timing.jsonl");
@@ -147,6 +151,6 @@ test("a first pairing is live in seconds, step by step", { tag: ["@feature:chat.
   for (const row of rows) {
     expect(row.ready, `run ${row.run} ready (${JSON.stringify(row)})`).toBeLessThanOrEqual(BOUND_MS);
     expect(row.attempts, `run ${row.run} attempts`).toBe(1);
-    expect(row.stagesOk, `run ${row.run} stages`).toBe(true);
+    expect(row.stagesOk, `run ${row.run} stages (${row.stages})`).toBe(true);
   }
 });

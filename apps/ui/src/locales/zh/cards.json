@@ -26,6 +26,8 @@
       "tagsLabel": "标签：",
       "updatedLabel": "更新："
     },
+    "clearFinished": "清除已结束",
+    "clearFinishedHint": "在此设备上隐藏已完成、失败和已取消的任务。机器人的下一次更新会让它重新出现。",
     "column": {
       "blocked": "受阻",
       "closed": "已停止",

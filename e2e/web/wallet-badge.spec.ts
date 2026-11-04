@@ -2,12 +2,12 @@ import { chat, connect, expect, getTestCoins, link, openChat, test, useTestnet }
 import { composerRow } from "../support/composer";
 import { paymentCard } from "../support/payments";
 
-// Sats that come in while the wallet is closed show as a dot on the wallet icon, until it is opened. How many is in
-// the button's name and tooltip, never on the bar.
+// Sats that come in while the wallet is closed show as a dot on the wallet icon, and on the Wallets page where they
+// are, until that page was seen and left. How many is in the button's name and tooltip, never on the bar.
 test.describe("wallet badge", () => {
   test.describe.configure({ retries: 2 });
 
-  test("what came in while the wallet was closed shows on its icon, and goes once it is opened", { tag: ["@feature:wallet.badge", "@feature:payments.cashu.send"] }, async ({ peer }, testInfo) => {
+  test("what came in while the wallet was closed shows on its icon and leads to its card, and goes once seen", { tag: ["@feature:wallet.badge", "@feature:payments.cashu.send"] }, async ({ peer }, testInfo) => {
     const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
     // Test sats only: each makes a Testnet Cashu wallet with New before they meet.
     for (const p of [alice, bob]) await useTestnet(p);
@@ -46,9 +46,18 @@ test.describe("wallet badge", () => {
     expect(box.x + box.width).toBeLessThanOrEqual(button.x + button.width);
     await bob.page.getByTestId("account-bar").screenshot({ path: testInfo.outputPath("wallet-badge.png") });
 
+    // The dot leads somewhere: the Wallets page says what came in and where, on its Testnet tab and Cashu card too, and
+    // the dot stays while the page shows them.
     await bob.page.getByTestId("wallet-chip").click();
-    await expect(badge).toHaveCount(0);
+    await expect(bob.page.getByTestId("needs-you-item")).toHaveText(/21 new test sats in Cashu/);
+    await expect(bob.page.getByTestId("wallet-network-testnet").getByTestId("needs-you-dot")).toBeVisible();
+    await expect(bob.page.getByTestId("wallet-card-cashu-testnet").getByTestId("needs-you-dot")).toBeVisible();
+    await expect(badge).toBeVisible();
+    await bob.page.screenshot({ path: testInfo.outputPath("wallet-badge-trail.png") });
+    // Seen: gone once the page is left, and not back on the next visit.
     await bob.page.goBack();
     await expect(badge).toHaveCount(0);
+    await bob.page.getByTestId("wallet-chip").click();
+    await expect(bob.page.getByTestId("needs-you")).toHaveCount(0);
   });
 });

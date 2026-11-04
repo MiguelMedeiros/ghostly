@@ -46,6 +46,38 @@ test("Settings → Audio & video lists the devices, keeps the chosen one and tri
   await expect(page.getByTestId("settings-microphone-missing")).toHaveCount(0);
 });
 
+test("Allow refused says where to allow the microphone, on an iPhone in the Settings app", { tag: ["@feature:settings.media"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const { page } = alice;
+  // A browser that names no device yet, and refuses at once with no prompt, as iOS does once Safari's Microphone is Deny.
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.mediaDevices, "enumerateDevices", {
+      configurable: true,
+      value: async () => [{ deviceId: "", groupId: "", kind: "audioinput", label: "", toJSON() { return this; } }],
+    });
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => { throw new DOMException("Permission denied", "NotAllowedError"); },
+    });
+  });
+  await page.reload();
+  await page.goto("/#/settings");
+
+  const allow = page.getByTestId("settings-media-allow");
+  await allow.click();
+  const denied = page.getByTestId("settings-media-denied");
+  await expect(denied).toHaveText("Blocked. Allow the microphone and camera in your browser or system settings.");
+
+  // On an iPhone, only the Settings app turns it back on: the line says where. Allow stays, to try again after.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "userAgent", { configurable: true, get: () => "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1" });
+    Object.defineProperty(navigator, "maxTouchPoints", { configurable: true, get: () => 5 });
+  });
+  await allow.click();
+  await expect(denied).toHaveText("Blocked by iOS. In Settings → Apps → Safari, allow Microphone (and Camera), then reopen Ghostly.");
+  await expect(allow).toBeVisible();
+});
+
 test("a call switches the microphone and the speaker without dropping", { tag: ["@feature:calls.devices"] }, async ({ peer }, testInfo) => {
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await linkLegacy(alice, bob);

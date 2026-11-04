@@ -333,6 +333,32 @@ describe("coming back after a restart, the edges", () => {
     expect(liveMs, "from the contact's start to live on both sides").toBeLessThanOrEqual(5_000);
   }, 240_000);
 
+  /**
+   * The chat is live over Iroh, chosen in its Connection menu, and one app crashes. It is back with no Iroh of its own
+   * (its relay out of reach, its listener not up yet) and dials WebRTC, the fallback. The staying side, its dead Iroh
+   * session still held, closed that WebRTC connection as soon as it opened: the restarted app counted a failed dial and
+   * waited its backoff, live again 52.8 s after its start (CLI daemons, local Iroh relay stopped, bug hunt 2026-10-17).
+   */
+  it.each(["lower", "higher"] as const)("back with no Iroh after a crash over chosen Iroh, the %s key's WebRTC dial carries the chat", async restarted => {
+    const kind = "webrtc+iroh";
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [goesSide, staysSide] = restarted === "lower" ? [made.inviter, made.joiner] : [made.joiner, made.inviter];
+    let goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, emptyDhtDeliveryState(), false, undefined, true);
+    const stays = startApp(world, "stays", staysSide, { side: goesSide, name: "goes" }, kind, emptyDhtDeliveryState(), false, undefined, true);
+    expect(await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== null, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    expect((stays.link as unknown as { paired?: { state: { transport?: string } } }).paired?.state.transport).toBe("iroh/1");
+    const held = channelOf(stays);
+    await quit(world, goes, "crash");
+    await run(2_000);
+    // Its Iroh endpoint does not come up in this test's time.
+    goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, goes.dhtState, true, 10 * 60_000, true);
+    const liveMs = await until(() => goes.link.isDataLinkOpen && stays.link.isDataLinkOpen && channelOf(stays) !== held, 120_000);
+    // Before: the dead session's idle timeout (30 s), then the restarted app's backoff. After: its WebRTC dial and a ping's wait.
+    expect(liveMs, "from the restart to live on both sides").toBeLessThanOrEqual(20_000);
+  }, 240_000);
+
   it("a dial in from another key than the pinned one leaves the held session as it was", async () => {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");
@@ -639,8 +665,13 @@ describe("back from the background (a phone that slept), the contact's chat not 
    * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
    * The numbers are the last return's.
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number }) {
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1, relayBackMs, dialFailMs }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number;
+    /** The app's Iroh is off its relay at the wake, and back on it this long after (`NativeWorld.offRelay`). */
+    relayBackMs?: number;
+    /** A dial that reaches nobody fails this long after it began (Iroh's: 20 s). */
+    dialFailMs?: number }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    if (dialFailMs) world.native.dialFailMs = dialFailMs;
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
     const up = { mine: true, contact: true };
@@ -675,6 +706,7 @@ describe("back from the background (a phone that slept), the contact's chat not 
         rtc.srflxAfterMs = 450;
       }
       phone.offline = false; world.native.asleep.delete("phone"); world.native.dialsLost.delete("phone");
+      if (relayBackMs !== undefined) { world.native.offRelay.add("phone"); setTimeout(() => world.native.relayBack("phone"), relayBackMs); }
       if (frozen) for (const channel of dead) channel.dispatchEvent(new Event("close"));
       const requests = () => phone.requests.length + cli.requests.length, before = requests();
       phone.link.wake();
@@ -706,6 +738,23 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
     // A knock costs the relays nothing: the reads and publishes of a return, no more (4 to 8 here).
     expect(requestsToLive).toBeLessThanOrEqual(10);
+  }, 240_000);
+
+  /**
+   * An Android phone back from Doze (the emulator, 2026-11-01): its Iroh lost its relay while the network was cut, and
+   * finds it again only seconds after the return, once its own reconnect backoff (up to 16 s) runs out. The knock went at
+   * once and went nowhere; QUIC sends it again only seconds later, and Iroh gives a dial 20 s. Live again 4.4 s and
+   * 9.8 s after the return (away 5 and 15 minutes), once never over Iroh.
+   */
+  it.each([false, true])("back from Doze with its Iroh off its relay, it knocks again once the relay is back (higher key: %s)", async higher => {
+    const relayBackMs = 4_000, knocks: string[] = [];
+    setLinkTraceSink(line => { const step = JSON.parse(line) as { step: string }; if (step.step.startsWith("knock")) knocks.push(step.step); });
+    const { liveMs, firstOn } = await sleepAndWake({ higher, awayMs: 5 * 60_000 + 3_700, relayBackMs, dialFailMs: 20_000 });
+    setLinkTraceSink(null);
+    // Before: the knock's 20 s, or the CLI's background read of the offer. After: the relay's 4 s and a dial.
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(relayBackMs + 2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(knocks.filter(step => step === "knock-again")).toHaveLength(1);
   }, 240_000);
 
   it.each([

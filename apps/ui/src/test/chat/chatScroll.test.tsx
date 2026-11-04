@@ -2,7 +2,7 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { JumpToLatest } from "../../components/chat/JumpToLatest";
 import { memo, useMemo } from "react";
-import { forgetChatScroll, leftOn, useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
+import { forgetChatScroll, leftOn, NEW_ROW_TOP_PX, useChatScroll, type ScrollRow } from "../../hooks/useChatScroll";
 import { MAX_ROWS, OPEN_ROWS, PAGE_ROWS, revealMessage, useRowWindow } from "../../hooks/useRowWindow";
 import { jumpToMessage } from "../../lib/replies";
 import { renderApp } from "../render";
@@ -175,7 +175,7 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toHaveAttribute("data-count", "21");
     // The pill still goes to the first new message, not to a late old one.
     await user.click(pill()!);
-    expect(topOf("peer_10")).toBe(8);
+    expect(topOf("peer_10")).toBe(NEW_ROW_TOP_PX);
   });
 
   it("one new message is said in the singular", () => {
@@ -258,9 +258,9 @@ describe("the chat timeline's scrolling", () => {
     rerender(<Timeline rows={[...rows, ...theirs(10, 20)]} />);
     expect(pill()).toHaveAttribute("data-count", "20");
     await user.click(pill()!);
-    // peer_10 starts at 500, a little below the top of the view.
-    expect(list().scrollTop).toBe(492);
-    expect(topOf("peer_10")).toBe(8);
+    // peer_10 starts at 500: it goes a little below the top of the view, under the date stuck there.
+    expect(list().scrollTop).toBe(500 - NEW_ROW_TOP_PX);
+    expect(topOf("peer_10")).toBe(NEW_ROW_TOP_PX);
     // Nothing counted any more; still far from the bottom, so the plain ↓ stays.
     expect(pill()).toHaveAttribute("data-count", "0");
     expect(pill()).toHaveAccessibleName("Scroll to bottom");
@@ -275,8 +275,8 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toHaveAttribute("data-count", "23");
     await user.click(pill()!);
     // The folded row starts at 500: it went up to the list's top, and the count was cleared.
-    expect(list().scrollTop).toBe(492);
-    expect(screen.getByTestId("fold").getBoundingClientRect().top).toBe(8);
+    expect(list().scrollTop).toBe(500 - NEW_ROW_TOP_PX);
+    expect(screen.getByTestId("fold").getBoundingClientRect().top).toBe(NEW_ROW_TOP_PX);
     expect(pill()).toHaveAttribute("data-count", "0");
   });
 
@@ -459,6 +459,21 @@ describe("the chat timeline's scrolling", () => {
     act(() => { list().scrollTop = 134; });
     expect(list().scrollTop).toBe(200);
     expect(pill()).toBeNull();
+  });
+
+  it("at the bottom, the browser moving the view far up as rows lay out, with no hand on it, goes back to the bottom", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    expect(list().scrollTop).toBe(700);
+    // WebKit, laying out a chat just opened (link pictures taking their placeholders' place, the pairing scene coming in
+    // above the rows), moves the view 600 px up by itself, and says so before the ResizeObserver says the list grew.
+    act(() => { above = 300; list().scrollTop = 100; });
+    resized();
+    expect(list().scrollHeight - list().scrollTop - list().clientHeight).toBe(0);
+    expect(pill()).toBeNull();
+    // With nothing laid out meanwhile, a move with no wheel or touch (a screen reader, find in page) stays where it went.
+    scrollTo(300);
+    resized();
+    expect(list().scrollTop).toBe(300);
   });
 
   it("at the bottom, a hand's small scroll up stays where the hand put it", () => {

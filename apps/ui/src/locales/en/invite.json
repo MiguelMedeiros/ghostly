@@ -1,6 +1,7 @@
 {
   "copy": "Copy invite",
-  "copyFailed": "Could not copy. Try again or share the invite.",
+  "copyFailed": "Could not copy. Select the link below and copy it.",
+  "copyFailedShare": "Could not copy. Select the link below or share it.",
   "qrTitle": "Invite QR code",
   "shareFailed": "Could not share. Copy the invite instead.",
   "title": "Invite your contact"

@@ -47,6 +47,12 @@ export class NativeWorld {
    * app back after both restarted, through a relay path that died with the handshake: Omarchy, 2026-10-01).
    */
   deadPaths = new Set<string>();
+  /**
+   * Apps whose endpoints lost their relay (a phone back from Doze, its Iroh waiting out its relay reconnect backoff): a dial
+   * from or to one fails after `dialFailMs`, even when the relay comes back meanwhile (what the dial sent went nowhere,
+   * and QUIC sends it again only seconds on). `relayBack` ends it, and tells the app's endpoints (`onRelayBack`).
+   */
+  offRelay = new Set<string>();
   /** Every dial that reached an endpoint, and every one that did not. */
   dials = 0;
   /** The dials that reached an endpoint, by the name of the app that dialled. */
@@ -75,7 +81,8 @@ export class NativeWorld {
       connect: async (to: unknown): Promise<BoundChannel> => {
         const d = to as { id?: string; publicKey?: string };
         const remote = this.find(d.id ?? d.publicKey ?? "");
-        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name) || this.asleep.has(remote.name)) {
+        if (!remote || remote.closed || entry.closed || !remote.endpoint.onConnection || this.dialsLost.has(name) || this.asleep.has(remote.name)
+          || this.offRelay.has(name) || this.offRelay.has(remote.name)) {
           this.dialFailures++;
           await after(this.dialFailMs);
           throw new Error(`${transport}: the contact's endpoint did not answer`);
@@ -113,6 +120,12 @@ export class NativeWorld {
         setTimeout(() => far.hear(), this.idleMs);
       }
     }
+  }
+
+  /** The endpoints of the app named `name` are on their relay again (`offRelay`), and say so. */
+  relayBack(name: string): void {
+    this.offRelay.delete(name);
+    for (const entry of this.entries.values()) if (entry.name === name && !entry.closed) entry.endpoint.onRelayBack?.();
   }
 
   /** Nothing crosses between these two ends any more; each hears its idle timeout. */

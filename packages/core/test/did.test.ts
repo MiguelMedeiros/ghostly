@@ -175,10 +175,52 @@ describe("DID documents", () => {
     expect(view.services).toEqual([{ id: `${did}#ghostly-cccccccccccc`, key: "y".repeat(52), proof: "c".repeat(64) }]);
   });
 
+  it("reads a did:web port written %3a or %3A as the same DID", () => {
+    const ported = normalizeDid("did:web:example.com%3a8443:u");
+    for (const written of ["did:web:example.com%3a8443:u", "did:web:example.com%3A8443:u"]) {
+      const view = parseDidDocument(ported, {
+        id: written,
+        verificationMethod: [{ id: `${written}#key-1`, type: "JsonWebKey2020", publicKeyJwk: { kty: "OKP", crv: "Ed25519", x: b64u(ed) } }],
+        authentication: [`${written}#key-1`],
+      });
+      expect(view.keys.map(k => [k.id, k.relationships.join("+")]), written).toEqual([[`${ported}#key-1`, "authentication"]]);
+    }
+    expect(didWebFileNames(JSON.stringify({ ghostly: 1, did: "did:web:example.com%3a8443:u", statement: STATEMENT }), ported, STATEMENT)).toBe(true);
+    expect(() => parseDidDocument(ported, { id: "did:web:example.com%3a8444:u" })).toThrow(/another DID/);
+  });
+
   it("refuses a document for another DID, or not an object", () => {
     expect(() => parseDidDocument(did, { ...doc, id: "did:web:evil.example" })).toThrow(/another DID/);
     expect(() => parseDidDocument(did, [])).toThrow(/not a JSON object/);
     expect(() => parseDidDocument(did, { ...doc, verificationMethod: {} })).toThrow(/not a list/);
+  });
+});
+
+describe("small-order Ed25519 keys", () => {
+  // No secret key goes with a point of small order. The neutral point is one: with it, R = the neutral point and S = 0
+  // (bytes 01 00…00) is an Ed25519 signature of any text under ZIP-215, so nothing it "signs" proves anything.
+  const neutral = Uint8Array.from({ length: 32 }, (_, i) => (i === 0 ? 1 : 0));
+  const constant = Uint8Array.from({ length: 64 }, (_, i) => (i === 0 ? 1 : 0));
+  const multibase = `z${base58.encode(Uint8Array.from([0xed, 0x01, ...neutral]))}`;
+
+  it("is refused as a did:key or a did:jwk", () => {
+    expect(multibase).toBe("z6MkeXATEjyXENzBXBxgC5EHk2JE5aqd7qMGGtDpLUH1e2Sj");
+    expect(() => staticDidDocument(`did:key:${multibase}`)).toThrow(/small order/);
+    expect(() => staticDidDocument(`did:jwk:${json64({ kty: "OKP", crv: "Ed25519", x: b64u(neutral) })}`)).toThrow(/small order/);
+  });
+
+  it("is skipped in a document, and its constant signature checks nothing", () => {
+    const did = "did:web:example.com";
+    const view = parseDidDocument(did, {
+      id: did,
+      verificationMethod: [{ id: `${did}#k`, type: "Multikey", controller: did, publicKeyMultibase: multibase }],
+      authentication: [`${did}#k`, { id: `${did}#e`, type: "Ed25519VerificationKey2018", publicKeyBase58: base58.encode(neutral) }],
+    });
+    expect(view.keys).toEqual([]);
+    expect(view.skipped).toBe(2);
+    const header = json64({ alg: "EdDSA" });
+    expect(() => checkDidJws(`${header}..${b64u(constant)}`, messages, view)).toThrow(DidError);
+    expect(() => checkDidSignature(constant, messages, view)).toThrow(DidError);
   });
 });
 
@@ -231,6 +273,21 @@ describe("DID signatures", () => {
     const view = parseDidDocument(did, { id: did, verificationMethod: [{ id: "#delegate", type: "Multikey", publicKeyMultibase: k.did.slice(8) }], capabilityDelegation: ["#delegate"] });
     expect(() => checkDidJws(k.jws({}), messages, view)).toThrow(/not list under authentication or assertionMethod/);
     expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view)).toThrow(/not list under authentication or assertionMethod/);
+  });
+
+  it("takes a key listed under two ids when one of them may sign", () => {
+    const k = keyOn("Ed25519");
+    const did = "did:web:example.com";
+    const vm = (id: string) => ({ id, type: "Multikey", publicKeyMultibase: k.did.slice(8) });
+    for (const order of [["#enc", "#sig"], ["#sig", "#enc"]]) {
+      const view = parseDidDocument(did, { id: did, verificationMethod: order.map(vm), authentication: ["#sig"] });
+      expect(checkDidJws(k.jws({}), messages, view).key.id, order.join()).toBe(`${did}#sig`);
+      expect(checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view).key.id, order.join()).toBe(`${did}#sig`);
+    }
+    // Named by its id that may not sign, it is still refused.
+    const view = parseDidDocument(did, { id: did, verificationMethod: [vm("#enc"), vm("#sig")], authentication: ["#sig"] });
+    expect(() => checkDidJws(k.jws({ kid: "#enc" }), messages, view)).toThrow(/#enc, which the DID document does not list/);
+    expect(() => checkDidSignature(k.raw(utf8Encode(STATEMENT)), messages, view, "#enc")).toThrow(/#enc, which the DID document does not list/);
   });
 
   it("parses only JWS it can check", () => {

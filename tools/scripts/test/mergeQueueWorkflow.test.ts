@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { missedWakes } from "../merge-train.mjs";
+import { MAX_WAIT, missedWakes, wakeIn } from "../merge-train.mjs";
 
 /**
  * Which events wake the merge train: merge-queue.yml's `bases` job condition, evaluated for each. A green batch lands
@@ -91,5 +91,29 @@ describe("merge-queue.yml waits in line", () => {
     expect(name({ event_name: "push", ref_name: "dev", event: {} })).toBe("Merge queue: push to dev");
     expect(name({ event_name: "schedule", event: {} })).toBe("Merge queue");
     expect(text).toMatch(/--list-bases --woken "\$WOKEN" --run-id "\$RUN_ID"/);
+  });
+});
+
+// GitHub runs the `*/5` schedule only every 10 to 30 minutes: a batch held for company, with no other event, left up to
+// ~45 minutes after the oldest could board instead of 15.
+describe("merge-queue.yml wakes the train when a held batch leaves", () => {
+  const job = (name: string) => text.match(new RegExp(`^ {2}${name}:\n((?: {4}.*\n|\n)+)`, "m"))?.[1] ?? "";
+
+  it("from the train job's wake time, in a group of its own where the newest wake replaces the one sleeping", () => {
+    expect(job("train")).toMatch(/^ {4}outputs:\n {6}wake_in: \$\{\{ steps\.train\.outputs\.wake_in \}\}$/m);
+    expect(job("train")).toMatch(/^ {6}- name: Run the train\n {8}id: train$/m);
+    const wake = job("wake");
+    expect(wake).toMatch(/^ {4}needs: train$/m);
+    // A matrix leg that failed on another base does not skip the wake.
+    expect(wake).toMatch(/^ {4}if: \$\{\{ !cancelled\(\) && needs\.train\.outputs\.wake_in != '' \}\}$/m);
+    expect(wake).toMatch(/^ {4}concurrency:\n {6}group: merge-queue-wake\n {6}cancel-in-progress: true$/m);
+    // The workflow's own token may start a run with workflow_dispatch, and needs nothing else.
+    expect(wake).toMatch(/^ {4}permissions:\n {6}actions: write$/m);
+    expect(wake).toMatch(/sleep "\$WAKE_IN"\n {10}gh workflow run merge-queue\.yml --repo "\$GITHUB_REPOSITORY"$/m);
+  });
+
+  it("with time to sleep through the longest hold", () => {
+    const minutes = Number(job("wake").match(/^ {4}timeout-minutes: (\d+)$/m)?.[1]);
+    expect(minutes * 60).toBeGreaterThan(wakeIn(MAX_WAIT, 0)!);
   });
 });

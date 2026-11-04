@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useTabTrap } from "../hooks/useDismiss";
 import { initial } from "../lib/initial";
+import { callWindowShown } from "../lib/serviceWindows";
 
 interface IncomingCallNotificationProps {
   peerName: string;
@@ -54,6 +55,8 @@ export function IncomingCallNotification({
   const { t } = useI18n();
   const box = useRef<HTMLDivElement>(null);
   const nameId = useId(), kindId = useId(), hintId = useId();
+  // Over a contact's app too (the web draws it over everything): it closes first, so the call is seen and can take the keys.
+  useEffect(callWindowShown, []);
   // A call over everything: said at once, and the keys stay in it. The focus goes to the box, not to Accept, so an
   // Enter typed into the message a moment later does not answer; it goes back where it was once the ringing stops.
   useTabTrap(box);

@@ -9,7 +9,11 @@ import { DEVICE_SET_PASSWORD } from "../support/devices";
 test("Add a device from the keyboard: the password field has the focus, and the password typed with its spaces shows the code", { tag: ["@feature:devices.enroll"] }, async ({ peer }) => {
   const { page } = await peer("desktop");
   await page.goto("/#/profile");
-  await page.getByTestId("device-add-open").press("Enter");
+  // Add stays off until the device set is read. press() does not wait for that (click() does), and Enter on a button
+  // still off went nowhere, so the dialog never opened.
+  const open = page.getByTestId("device-add-open");
+  await expect(open).toBeEnabled();
+  await open.press("Enter");
   const add = page.getByTestId("device-add");
   await expect(add).toBeVisible();
   await expect(add.getByTestId("device-add-password")).toBeFocused();
@@ -22,5 +26,5 @@ test("Add a device from the keyboard: the password field has the focus, and the 
   // Closed, the focus goes back to what opened it.
   await page.keyboard.press("Escape");
   await expect(add).toBeHidden();
-  await expect(page.getByTestId("device-add-open")).toBeFocused();
+  await expect(open).toBeFocused();
 });

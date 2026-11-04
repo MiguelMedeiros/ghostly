@@ -87,3 +87,28 @@ export async function markLeftOutFiles(ids: readonly string[]): Promise<void> {
   }
   return done;
 }
+
+/**
+ * A chat's ratchet (WISP 4xx), for a restore that brought the database back whole (the headless CLI's): dropped from
+ * every chat, so the restored copy starts a new session with each contact and never seals with keys the profile it
+ * came from used. A backup made before backups left it out carries it. Doing it twice changes nothing more.
+ */
+export async function forgetRatchets(): Promise<void> {
+  const db = await openDb();
+  if (!db.objectStoreNames.contains(STORES.links)) return;
+  const tx = db.transaction([STORES.links], "readwrite");
+  const done = new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error ?? new Error("The restored chats could not be read"));
+    tx.onerror = () => reject(tx.error ?? new Error("The restored chats could not be read"));
+  });
+  const walk = tx.objectStore(STORES.links).openCursor();
+  walk.onsuccess = () => {
+    const cursor = walk.result;
+    if (!cursor) return;
+    const { ratchetState, ...link } = cursor.value as { ratchetState?: unknown };
+    if (ratchetState !== undefined) cursor.update(link);
+    cursor.continue();
+  };
+  return done;
+}
