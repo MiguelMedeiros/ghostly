@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -5,6 +6,8 @@ import DHT from 'hyperdht'
 import { relay } from '@hyperswarm/dht-relay'
 import WsStream from '@hyperswarm/dht-relay/ws'
 import { WebSocketServer } from 'ws'
+
+const require = createRequire(import.meta.url)
 
 /**
  * What one relay accepts. A Ghostly browser holds one WebSocket, listens once per saved chat or group link (at most
@@ -80,6 +83,40 @@ const fixSign = (sign, onLeave) => sign && ((target, token, id, ann, keyPair) =>
 const fixOptions = (options = {}, onLeave) => ({ ...options, signAnnounce: fixSign(options.signAnnounce, onLeave), signUnannounce: fixSign(options.signUnannounce, onLeave) })
 
 /**
+ * Whether the client holds the secret key of the key it asks to listen on. HyperDHT's own node does not check it: its
+ * announcer sends every signature it is given and goes on when the nodes it announces to turn them all down, so a
+ * listen on a key whose secret the client does not hold would still resolve, and hold the key on this relay's node.
+ * Before that, the client signs an announcement over a token and a node id the relay draws at random (dht-relay's own
+ * `signAnnounce`, no message of its own), checked as a HyperDHT node checks one. No node issued that token, so the
+ * signature announces nothing anywhere; no node needs to answer, and the key is not held while the client signs.
+ * A custodial client hands the relay its secret key, which signs the same way.
+ */
+const hyperdht = createRequire(require.resolve('hyperdht'))
+const sodium = hyperdht('sodium-universal')
+const { encode } = hyperdht('compact-encoding')
+const { NS } = hyperdht('./lib/constants.js')
+const { peer: peerEncoding } = hyperdht('./lib/messages.js')
+const Persistent = hyperdht('./lib/persistent.js')
+async function holdsKey(keyPair, options, onLeave) {
+  const publicKey = keyPair?.publicKey
+  if (!publicKey || publicKey.byteLength !== 32) return false
+  const target = Buffer.alloc(32)
+  sodium.crypto_generichash(target, publicKey)
+  const token = randomBytes(32)
+  const id = randomBytes(32)
+  const ann = { peer: { publicKey, relayAddresses: [] }, refresh: null, signature: null }
+  const sign = fixSign(options?.signAnnounce, onLeave) ?? Persistent.signAnnounce
+  let signature
+  try { signature = await sign(target, token, id, ann, keyPair) } catch { return false }
+  if (!signature || signature.byteLength !== 64) return false
+  const signable = Buffer.alloc(64)
+  signable.set(NS.ANNOUNCE, 0)
+  sodium.crypto_generichash_batch(signable.subarray(32), [target, id, token, encode(peerEncoding, ann.peer)])
+  return sodium.crypto_sign_verify_detached(signature, signable, publicKey)
+}
+const listensOn = (dht, keyPair) => [...dht.listening].some(server => server._keyPair && keyPair?.publicKey && Buffer.compare(server._keyPair.publicKey, keyPair.publicKey) === 0)
+
+/**
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
  * and announcements are refused (Ghostly never uses them), so the relay is no open crawler. Past a limit
  * the client is dropped, and so is one that holds its slot with no listen open and no dial for `idleMs`.
@@ -89,7 +126,8 @@ const fixOptions = (options = {}, onLeave) => ({ ...options, signAnnounce: fixSi
  * the process and every client with it. A listen the node refuses closes that server only: the client that holds
  * the key, and the asking client's other listens, go on. The asking client is told: dht-relay has no message for a
  * refusal and its client drops a `closed` for a server that has had no `listening`, so the server says `listening` at
- * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`.
+ * no address (0.0.0.0:0, the browser's sign of a refusal), then `closed`. A listen by a client that does not sign for
+ * the key (holdsKey) is refused the same way, before the node holds the key.
  */
 function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
@@ -139,12 +177,21 @@ function clientDht(dht, limits, drop, gone, log) {
         watchIdle()
         const server = target.createServer({ ...options, createHandshake: untracked(options?.createHandshake) }, onconnection)
         const listen = server.listen.bind(server)
-        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, onLeave)).catch(error => {
-          log('refused listen', error?.code ?? 'error')
-          server.address = () => ({ publicKey: keyPair?.publicKey, host: '0.0.0.0', port: 0 })
-          server.emit('listening')
-          void server.close().catch(() => {})
-        })
+        server.listen = async (keyPair, listenOptions) => {
+          try {
+            // A key the node already listens on is refused by the node itself (KEYPAIR_ALREADY_USED), at once: no signature asked.
+            const held = listensOn(target, keyPair) || await holdsKey(keyPair, listenOptions, onLeave)
+            // Closed while it signed (the client let go of it, or left): a listen now would stay in the node's list.
+            if (server._closing || left) return
+            if (!held) throw Object.assign(new Error('The client did not sign for this key'), { code: 'unsigned' })
+            return await listen(keyPair, fixOptions(listenOptions, onLeave))
+          } catch (error) {
+            log('refused listen', error?.code ?? 'error')
+            server.address = () => ({ publicKey: keyPair?.publicKey, host: '0.0.0.0', port: 0 })
+            server.emit('listening')
+            void server.close().catch(() => {})
+          }
+        }
         server.once('close', () => { listening--; watchIdle() })
         server.on('connection', hold)
         return server
@@ -184,7 +231,6 @@ function guardProtocol(protocol, drop) {
   }
 }
 
-const require = createRequire(import.meta.url)
 // Not in the package's exports: loaded by path, the same module dht-relay itself uses (0.4.3 is pinned).
 const { HandshakeProxy } = require(join(dirname(require.resolve('@hyperswarm/dht-relay')), 'lib', 'handshake-proxy.js'))
 
